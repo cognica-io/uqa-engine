@@ -7,8 +7,8 @@
 //! Auxiliary schema, field analysis, and skip-pointer rebuilds.
 
 use super::{
-    decode_index_u64, encode_index_u64, encode_index_usize, params, positions_to_blob, quote_ident,
-    usize_to_index_u64, validate_position_count, BTreeMap, DocId, FieldName, OptionalExtension,
+    encode_index_u64, encode_index_usize, params, quote_ident, usize_to_index_u64,
+    validate_position_count, BTreeMap, DocId, FieldName, InvertedIndex, OptionalExtension,
     SQLiteError, SQLiteInvertedIndex, SQLiteResult, StagedField, StorageBackendResult,
 };
 
@@ -30,7 +30,7 @@ impl SQLiteInvertedIndex {
     pub(super) fn terms_for_field(&self, field: &str) -> StorageBackendResult<Vec<String>> {
         Ok(self.conn.with(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT DISTINCT term FROM _postings
+                "SELECT DISTINCT term FROM _posting_clusters
                      WHERE table_name = ?1 AND field = ?2
                      ORDER BY term",
             )?;
@@ -144,7 +144,7 @@ impl SQLiteInvertedIndex {
             for (term, mut positions) in term_positions {
                 positions.sort_unstable();
                 positions.dedup();
-                postings.push((term, positions_to_blob(&positions)?));
+                postings.push((term, positions));
             }
             staged.insert(field, StagedField { length, postings });
         }
@@ -157,23 +157,20 @@ impl SQLiteInvertedIndex {
         }
         self.ensure_aux_tables(field)?;
         let table = self.skip_table_name(field);
-        let persisted_postings: Vec<(String, i64)> = self.conn.with(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT term, doc_id FROM _postings
-                 WHERE table_name = ?1 AND field = ?2
-                 ORDER BY term, doc_id",
-            )?;
-            let rows = stmt
-                .query_map(params![self.table, field], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(rows)
-        })?;
         let mut by_term: BTreeMap<String, Vec<DocId>> = BTreeMap::new();
-        for (term, doc_id) in persisted_postings {
-            let doc_id = decode_index_u64("document id", doc_id)?;
-            by_term.entry(term).or_default().push(doc_id);
+        for term in self
+            .terms_for_field(field)
+            .map_err(|error| SQLiteError::StorageBackend(error.to_string()))?
+        {
+            let mut cursor = self
+                .posting_cursor(field, &term)
+                .map_err(|error| SQLiteError::StorageBackend(error.to_string()))?;
+            while let Some(entry) = cursor.current() {
+                by_term.entry(term.clone()).or_default().push(entry.doc_id);
+                cursor
+                    .advance()
+                    .map_err(|error| SQLiteError::StorageBackend(error.to_string()))?;
+            }
         }
         self.conn.with_mut(|conn| {
             let tx = conn.savepoint()?;

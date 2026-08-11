@@ -513,18 +513,142 @@ fn graph_ids_beyond_sqlite_integer_range_are_rejected_before_write() {
     assert!(cat.load_vertices().unwrap().is_empty());
 }
 
-#[test]
-fn migration_drops_redundant_postings_term_index() {
-    let mc = ManagedConnection::open_in_memory().unwrap();
-    let _current = Catalog::open(mc.clone()).unwrap();
+fn prepare_legacy_v21_postings(mc: &ManagedConnection, include_length: bool) {
     mc.with(|conn| {
+        conn.execute_batch(
+            "DROP TABLE _posting_clusters;
+             DROP TABLE _posting_documents;
+             CREATE TABLE _postings (
+                 table_name TEXT NOT NULL,
+                 field      TEXT NOT NULL,
+                 term       TEXT NOT NULL,
+                 doc_id     INTEGER NOT NULL,
+                 positions  BLOB NOT NULL,
+                 PRIMARY KEY (table_name, field, term, doc_id)
+             );
+             CREATE INDEX _postings_doc_idx
+                 ON _postings (table_name, doc_id);
+             DELETE FROM _doc_lengths;
+             DELETE FROM _field_stats;
+             UPDATE _metadata SET value = '21' WHERE key = 'schema_version';",
+        )?;
+        if include_length {
+            conn.execute(
+                "INSERT INTO _doc_lengths(table_name, doc_id, field, length)
+                 VALUES ('articles', 1, 'title', 3), ('articles', 2, 'title', 2)",
+                [],
+            )?;
+            conn.execute(
+                "INSERT INTO _field_stats(table_name, field, total_length)
+                 VALUES ('articles', 'title', 5)",
+                [],
+            )?;
+        }
         conn.execute(
-            "CREATE INDEX _postings_term_idx
-             ON _postings (table_name, field, term)",
+            "INSERT INTO _postings(table_name, field, term, doc_id, positions)
+             VALUES
+                ('articles', 'title', 'rust', 1, X'0000000002000000'),
+                ('articles', 'title', 'rust', 2, X'01000000'),
+                ('articles', 'title', 'search', 2, X'00000000')",
             [],
         )?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn v22_migration_preserves_legacy_postings_in_clustered_rows() {
+    let mc = ManagedConnection::open_in_memory().unwrap();
+    let _current = Catalog::open(mc.clone()).unwrap();
+    prepare_legacy_v21_postings(&mc, true);
+
+    let _migrated = Catalog::open(mc.clone()).unwrap();
+    mc.with(|conn| {
+        let legacy_table_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = '_postings'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(legacy_table_count, 0);
+        let (cluster_id, posting_count, score_blob, positions_blob): (i64, i64, Vec<u8>, Vec<u8>) =
+            conn.query_row(
+                "SELECT cluster_id, posting_count, score_blob, positions_blob
+               FROM _posting_clusters
+              WHERE table_name = 'articles' AND field = 'title' AND term = 'rust'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?;
+        assert_eq!(cluster_id, 0);
+        assert_eq!(posting_count, 2);
+        let postings = crate::clustered_postings::decode_cluster(
+            u64::try_from(cluster_id).unwrap(),
+            &score_blob,
+            &positions_blob,
+        )
+        .unwrap();
+        assert_eq!(
+            postings
+                .iter()
+                .map(|posting| (
+                    posting.doc_id,
+                    posting.term_freq,
+                    posting.doc_length,
+                    posting.positions.clone()
+                ))
+                .collect::<Vec<_>>(),
+            vec![(1, 2, 3, vec![0, 2]), (2, 1, 2, vec![1])]
+        );
+        let terms_blob: Vec<u8> = conn.query_row(
+            "SELECT terms_blob FROM _posting_documents
+              WHERE table_name = 'articles' AND doc_id = 2 AND field = 'title'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(
+            crate::clustered_postings::decode_terms(&terms_blob).unwrap(),
+            vec!["rust".to_string(), "search".to_string()]
+        );
+        let version: String = conn.query_row(
+            "SELECT value FROM _metadata WHERE key = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(version, "22");
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn v22_migration_is_idempotent_when_clustered_tables_precede_the_version_marker() {
+    let mc = ManagedConnection::open_in_memory().unwrap();
+    let _current = Catalog::open(mc.clone()).unwrap();
+    let postings = vec![crate::clustered_postings::ClusterPosting {
+        doc_id: 7,
+        term_freq: 1,
+        doc_length: 2,
+        positions: vec![1],
+    }];
+    let (score_blob, positions_blob) =
+        crate::clustered_postings::encode_cluster(&postings).unwrap();
+    let terms_blob = crate::clustered_postings::encode_terms(&["rust".to_string()]).unwrap();
+    mc.with(|conn| {
         conn.execute(
-            "UPDATE _metadata SET value = '11' WHERE key = 'schema_version'",
+            "INSERT INTO _posting_clusters
+                (table_name, field, term, cluster_id, posting_count,
+                 score_blob, positions_blob)
+             VALUES ('articles', 'title', 'rust', 0, 1, ?1, ?2)",
+            params![score_blob, positions_blob],
+        )?;
+        conn.execute(
+            "INSERT INTO _posting_documents(table_name, doc_id, field, terms_blob)
+             VALUES ('articles', 7, 'title', ?1)",
+            params![terms_blob],
+        )?;
+        conn.execute(
+            "UPDATE _metadata SET value = '21' WHERE key = 'schema_version'",
             [],
         )?;
         Ok(())
@@ -533,26 +657,60 @@ fn migration_drops_redundant_postings_term_index() {
 
     let _migrated = Catalog::open(mc.clone()).unwrap();
     mc.with(|conn| {
-        let term_index_count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master
-             WHERE type = 'index' AND name = '_postings_term_idx'",
+        let stored: (i64, Vec<u8>) = conn.query_row(
+            "SELECT posting_count, score_blob FROM _posting_clusters
+              WHERE table_name = 'articles' AND field = 'title' AND term = 'rust'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(stored.0, 1);
+        assert_eq!(
+            crate::clustered_postings::decode_all_scores(0, &stored.1)
+                .unwrap()
+                .into_iter()
+                .map(|posting| (posting.doc_id, posting.term_freq, posting.doc_length))
+                .collect::<Vec<_>>(),
+            vec![(7, 1, 2)]
+        );
+        let version: String = conn.query_row(
+            "SELECT value FROM _metadata WHERE key = 'schema_version'",
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(term_index_count, 0);
+        assert_eq!(version, "22");
+        Ok(())
+    })
+    .unwrap();
+}
 
-        let plan: String = conn.query_row(
-            "EXPLAIN QUERY PLAN
-             SELECT doc_id, positions FROM _postings
-             WHERE table_name = 'docs' AND field = 'body' AND term = 'rust'
-             ORDER BY doc_id",
+#[test]
+fn v22_migration_rolls_back_when_legacy_posting_has_no_length() {
+    let mc = ManagedConnection::open_in_memory().unwrap();
+    let _current = Catalog::open(mc.clone()).unwrap();
+    prepare_legacy_v21_postings(&mc, false);
+
+    let Err(error) = Catalog::open(mc.clone()) else {
+        panic!("migration unexpectedly succeeded");
+    };
+    assert!(error.to_string().contains("missing document length"));
+    mc.with(|conn| {
+        let version: String = conn.query_row(
+            "SELECT value FROM _metadata WHERE key = 'schema_version'",
             [],
-            |row| row.get(3),
+            |row| row.get(0),
         )?;
-        assert!(
-            plan.contains("sqlite_autoindex__postings_1"),
-            "term lookup must use the composite primary-key index: {plan}"
-        );
+        assert_eq!(version, "21");
+        let legacy_rows: i64 =
+            conn.query_row("SELECT COUNT(*) FROM _postings", [], |row| row.get(0))?;
+        assert_eq!(legacy_rows, 3);
+        let temporary_tables: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+              WHERE type = 'table'
+                AND name IN ('_posting_clusters_v22', '_posting_documents_v22')",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(temporary_tables, 0);
         Ok(())
     })
     .unwrap();

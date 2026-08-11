@@ -28,30 +28,6 @@ pub(super) fn invalidate_block_max_tables(
     Ok(())
 }
 
-pub(super) fn positions_to_blob(positions: &[u32]) -> SQLiteResult<Vec<u8>> {
-    let capacity = positions
-        .len()
-        .checked_mul(std::mem::size_of::<u32>())
-        .ok_or_else(|| corrupt_counter("posting-position payload size overflow"))?;
-    let mut buf = Vec::with_capacity(capacity);
-    for p in positions {
-        buf.extend_from_slice(&p.to_le_bytes());
-    }
-    Ok(buf)
-}
-
-pub(super) fn blob_to_positions(blob: &[u8]) -> SQLiteResult<Vec<u32>> {
-    if !blob.len().is_multiple_of(4) {
-        return Err(SQLiteError::StorageBackend(
-            "invalid posting positions payload".to_string(),
-        ));
-    }
-    Ok(blob
-        .chunks_exact(4)
-        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect())
-}
-
 pub(super) fn quote_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }

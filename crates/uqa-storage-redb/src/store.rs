@@ -130,6 +130,18 @@ impl KeyValueStore for RedbKeyValueStore {
         self.scan(prefix, None, None)
     }
 
+    fn scan_prefix_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+    ) -> StorageBackendResult<Vec<(Vec<u8>, Vec<u8>)>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        self.scan(prefix, after, Some(limit))
+    }
+
     fn scan_prefix_keys_after(
         &self,
         prefix: &[u8],

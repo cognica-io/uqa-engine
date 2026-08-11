@@ -153,6 +153,8 @@ let engine = Engine::from_persistent_provider(provider)?;
 
 The redb path supports the catalog, documents, full-text search, graphs, durable B-tree indexes, exact brute-force vectors, physical IVF and HNSW indexes, transactions, and savepoints. It uses the same SQL DDL and query API as SQLite; the main capability difference is that redb does not provide encryption at rest. See the [Key/Value storage design](docs/design/kv-storage-backends.md) for storage and transaction details.
 
+Persistent full-text indexes use clustered postings rather than one physical row or key per `(term, doc_id)`: one `(table, field, term, doc_id / 65,536)` value stores delta-encoded document IDs, term frequencies, and document lengths, while positions live in a separate value. Ranking opens score-only cursors, reuses one decode buffer for at most 128 postings per block, and leaves positional payloads unread unless a positional consumer asks for them. SQLite schema v22 and the shared Key/Value backend automatically migrate the previous per-document posting format on open; each SQLite or redb rewrite is atomic, idempotent, and rolls back without changing the old data when validation fails.
+
 Security-sensitive deployments should use the SQLCipher path exposed by `Engine::open_encrypted`. Compressed encrypted containers are also available when compression is required, but they have a narrower, explicitly documented threat model and require an external trusted anchor for whole-file rollback detection.
 
 Read the [compressed VFS security contract](docs/design/compressed-vfs-security.md) before selecting that format.
@@ -180,6 +182,12 @@ Run the test suite:
 
 ```sh
 cargo test --workspace --locked
+```
+
+Run the optimized persistent text top-k engine benchmark; `cargo bench` builds and executes the release benchmark profile, this target uses a real SQLite file rather than the in-memory engine, and it invokes `Engine::search_profiled` directly so cursor and ranking costs remain isolated from SQL planning and row projection:
+
+```sh
+cargo bench -p uqa-engine --bench text_top_k --locked -- --warm-up-time 2 --measurement-time 5 --sample-size 30 --noplot
 ```
 
 Run the optimized persistent SQL vector-search performance and exact-ground-truth quality benchmark. The default profile loads 100,000 128-dimensional vectors into a real SQLite file, reopens it for each exact, IVF, and HNSW phase, and drives every query through `Engine::sql`:
@@ -221,7 +229,7 @@ target/release/examples/tpch_runner --iterations 201
 
 In the 2026-08-09 local arm64 development snapshot, UQA matched all 22 results and had a lower median latency than PostgreSQL 17 on 14 of 22 queries. This is a small developer-machine compatibility workload, not a compliant or audited TPC-H result. The complete fixture provenance, per-query measurements, and reproduction rules are in the [TPC-H compatibility benchmark](benchmarks/tpch/README.md); the broader benchmark methodology is in the [performance design document](docs/design/performance.md).
 
-The same 2026-08-09 workstation pass measured release-profile search hot paths with 30 Criterion samples: persisted Block-Max WAND improved from 4.7080 ms to 3.8584 ms, trained IVF top-10 over 10,000 32-dimensional vectors improved from 333.46 us to 188.80 us, and HNSW top-10 improved from 212.63 us to 148.31 us. These are same-machine regression baselines with deterministic fixtures, not portable latency claims; commands, CPU state, full tables, correctness gates, and limitations are recorded in the [performance design document](docs/design/performance.md#search-hot-path-pass-2026-08-09).
+The 2026-08-11 clustered-posting pass measured release-profile persisted Block-Max WAND at 1.0142 ms and WAND at 0.9337 ms on the direct 5,000-document reopened-SQLite probe, down 73.7% and 76.5% from the preceding 3.8584 ms and 3.9801 ms baselines. The separate end-to-end BEIR SQL run kept every relevance metric unchanged while reducing BM25 `text_match` from 20.13 ms to 14.16 ms per query and SQL GIN construction from 4.012 s to 2.312 s. These are same-machine regression baselines, not portable latency claims; commands, measured boundaries, full tables, correctness gates, and limitations are recorded in the [performance design document](docs/design/performance.md#clustered-posting-pass-2026-08-11).
 
 Contributor checks, benchmark build gates, and repository conventions are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 

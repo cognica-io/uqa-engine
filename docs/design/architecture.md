@@ -225,6 +225,10 @@ For a score-ordered `LIMIT` over one field-bound text leaf, the planner creates 
 
 Duplicate query terms remain separate cursors, document lengths and statistics stay field-scoped, and Bayesian BM25 finalizes the complete raw term sum once. A write invalidates persisted block bounds atomically, and execution falls back to exact WAND if validity changes after planning.
 
+Persistent SQLite and Key/Value indexes store each `(table, field, term)` posting stream in document-ID clusters of 65,536 documents. Score columns and positions are encoded separately; a score cursor reads the cluster directory immediately and reuses one buffer while decoding only the current 128-entry block, so exhaustive ranking and WAND/BMW carry `(doc_id, term_frequency, document_length)` without allocating positional payloads or issuing per-document length lookups. SQLite stores these values in `_posting_clusters` and `_posting_documents`; redb and `SQLiteKeyValueStore` use the same codec under independent score, position, and document-term namespaces.
+
+Opening a SQLite catalog at schema v21 migrates `_postings` into the clustered tables in one schema transaction before table restoration. Opening an older Key/Value database performs the equivalent bounded, atomic rewrite before index handles are restored and persists a format marker after validation. Migration failures retain the legacy representation and leave no partial clustered values.
+
 Boolean or fusion parents do not receive text top-K pushdown because truncating a child can change the parent carrier and result. `Engine::search_profiled` reports the algorithm, candidate and scored counts, skip rate, cursor advances, and latency for engine-level benchmarks.
 
 ## Fusion and vector calibration

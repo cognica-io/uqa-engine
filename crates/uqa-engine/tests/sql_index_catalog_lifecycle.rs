@@ -174,7 +174,7 @@ fn assert_unnamed_index_storage(db: &Path) {
     assert_eq!(catalog_index_count(db, "items"), 4);
     assert_eq!(storage_count(db, "_btree_indexes", "items", "qty"), 1);
     assert_eq!(storage_count(db, "_btree_index_entries", "items", "qty"), 3);
-    assert!(storage_count(db, "_postings", "items", "body") > 0);
+    assert!(storage_count(db, "_posting_clusters", "items", "body") > 0);
     assert_eq!(storage_count(db, "_ivf_indexes", "items", "embedding"), 1);
 }
 
@@ -213,7 +213,7 @@ fn unsupported_access_methods_have_no_current_or_reopen_side_effects() {
         assert_no_text_index(&engine, "docs", "body");
         assert_eq!(catalog_index_count(&db, "docs"), 0);
         assert!(persisted_fts_fields(&db, "docs").is_empty());
-        assert_eq!(storage_count(&db, "_postings", "docs", "body"), 0);
+        assert_eq!(storage_count(&db, "_posting_clusters", "docs", "body"), 0);
     }
 
     let reopened = Engine::open(&db).unwrap();
@@ -266,7 +266,7 @@ fn dropping_shared_gin_cleans_physical_state_only_after_the_last_reference() {
             vec!["docs_body_gin_b"]
         );
         assert_shared_gin_is_live(&engine);
-        assert!(storage_count(&db, "_postings", "docs", "body") > 0);
+        assert!(storage_count(&db, "_posting_clusters", "docs", "body") > 0);
         assert!(storage_count(&db, "_doc_lengths", "docs", "body") > 0);
         assert!(storage_count(&db, "_field_stats", "docs", "body") > 0);
         assert_eq!(
@@ -289,7 +289,12 @@ fn dropping_shared_gin_cleans_physical_state_only_after_the_last_reference() {
             .is_empty());
         assert_eq!(engine.table_field_analyzer("docs", "body").unwrap(), None);
         assert_no_text_index(&engine, "docs", "body");
-        for storage_table in ["_postings", "_doc_lengths", "_field_stats"] {
+        for storage_table in [
+            "_posting_clusters",
+            "_posting_documents",
+            "_doc_lengths",
+            "_field_stats",
+        ] {
             assert_eq!(storage_count(&db, storage_table, "docs", "body"), 0);
         }
         assert_eq!(

@@ -169,7 +169,7 @@ impl Catalog {
     }
 
     /// Wipe the rows owned by `table` from the per-table data tables
-    /// (`_documents`, `_postings`, `_doc_lengths`, `_field_stats`,
+    /// (`_documents`, clustered postings, `_doc_lengths`, `_field_stats`,
     /// `_vectors`, IVF/HNSW metadata). Run after [`Catalog::drop_table`]
     /// when the engine drops the table from its in-memory registry as
     /// well.
@@ -182,7 +182,8 @@ impl Catalog {
                 for table in [
                     "_documents",
                     "_document_blobs",
-                    "_postings",
+                    "_posting_clusters",
+                    "_posting_documents",
                     "_doc_lengths",
                     "_field_stats",
                     "_vectors",
@@ -218,7 +219,8 @@ impl Catalog {
                 for table in [
                     "_documents",
                     "_document_blobs",
-                    "_postings",
+                    "_posting_clusters",
+                    "_posting_documents",
                     "_doc_lengths",
                     "_field_stats",
                     "_vectors",
@@ -278,7 +280,8 @@ impl Catalog {
             for table in [
                 "_documents",
                 "_document_blobs",
-                "_postings",
+                "_posting_clusters",
+                "_posting_documents",
                 "_doc_lengths",
                 "_field_stats",
                 "_vectors",
@@ -313,7 +316,8 @@ impl Catalog {
                 )?;
             }
             for table in [
-                "_postings",
+                "_posting_clusters",
+                "_posting_documents",
                 "_doc_lengths",
                 "_field_stats",
                 "_vectors",
@@ -364,7 +368,8 @@ impl Catalog {
                 to,
             )?;
             for table in [
-                "_postings",
+                "_posting_clusters",
+                "_posting_documents",
                 "_doc_lengths",
                 "_field_stats",
                 "_vectors",

@@ -169,7 +169,7 @@ Time Profiler attributed 69.19% of Q1 samples to projected-expression evaluation
 2. `MemoryDocumentStore` interns document key layouts and resolves projection ordinals once per layout, eliminating per-row field-name comparisons without assuming every document has the same shape.
 3. `PostingList::merge_intersection_owned` adaptively retains the allocating path for small inputs and reuses the left buffer for large owned inputs. Engine filters, Boolean operators, staged retrieval, and text/vector intersections use this same API.
 4. Persistent text scoring can stream `(doc_id, term_frequency)` without decoding position blobs and fetch document lengths plus term frequencies in bulk. Hybrid search constructs statistics only for the analyzed query terms rather than copying vocabulary-wide field statistics.
-5. The persistent postings primary key already covers `(table_name, field, term)`, so schema version 12 removes the redundant `_postings_term_idx`. GIN backfill projects only indexed text fields instead of cloning whole documents.
+5. The legacy persistent-postings primary key already covered `(table_name, field, term)`, so schema version 12 removed the redundant `_postings_term_idx`. GIN backfill projects only indexed text fields instead of cloning whole documents.
 6. Vector top-k selection partitions candidates in linear expected time before sorting only the retained `k`. Graph label matching reads vertex IDs directly from the label index instead of cloning complete vertices.
 
 All measurements below ran with `CARGO_BUILD_JOBS=10` and `RAYON_NUM_THREADS=10` on the same workstation.
@@ -313,6 +313,17 @@ This pass measured the public persisted text path and the in-memory physical vec
 | Block-Max WAND | 4,674 | 208 | 95.55% | 4.7080 ms | 3.8584 ms | -18.0% |
 | WAND | 4,674 | 272 | 94.18% | 4.9115 ms | 3.9801 ms | -19.0% |
 
+### Clustered posting pass (2026-08-11)
+
+The follow-up replaced one persisted row or key per `(term, doc_id)` with 65,536-document term clusters, separated score columns from positional payloads, and moved exhaustive, WAND, and BMW scoring onto a shared cursor that decodes one 128-entry score block at a time. The direct probe still uses a real reopened SQLite file but deliberately calls `Engine::search_profiled` rather than SQL; the BEIR suite below supplies the end-to-end `Engine::sql` measurement.
+
+| Direct persistent text path | Candidate upper bound | Fully scored | Skip rate | Previous | Clustered | Change |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Block-Max WAND | 6,287 | 208 | 96.69% | 3.8584 ms | 1.0142 ms | -73.7% |
+| WAND | 6,287 | 272 | 95.67% | 3.9801 ms | 0.9337 ms | -76.5% |
+
+Candidate accounting now reports the sum of per-term document frequencies as a zero-prescan upper bound instead of materializing the unique posting union, so the 6,287 count and derived skip rates are not directly comparable with the earlier 4,674 count. Fully scored counts and exact top-10 results remain unchanged. The final run closed the writer, reopened the SQLite file, and used 30 Criterion samples, a two-second warmup, a five-second measurement window, and the optimized bench profile; the 95% intervals were 1.0085-1.0217 ms for BMW and 0.9259-0.9423 ms for WAND.
+
 The vector cases use 10,000 deterministic 32-dimensional vectors and report `k = 10` and `k = 50` from the single `uqa-storage` `storage` benchmark executable. IVF and HNSW now cache each raw vector norm, compute the query norm once, and retain raw cosine score bits while removing per-candidate norm reductions and square roots; tensor-score collapse compacts one vector in place. HNSW also borrows adjacency slices instead of cloning them and uses a hash set for visited nodes.
 
 | Vector path | k | Before | Current | Change |
@@ -365,21 +376,21 @@ The checked [BEIR benchmark](../../benchmarks/beir/README.md) is another opt-in 
 bash scripts/run-beir-benchmark.sh
 ```
 
-The 2026-08-11 implementation run used rustc 1.90.0 on the local macOS arm64 workstation. The force-preparation pass downloaded the pinned model into the benchmark-owned cache and measured 67.508 seconds for corpus embedding plus 0.591 seconds for query embedding on CPU; the already-downloaded SciFact archive was revalidated as a SHA-256 cache hit. The final combined report identified a dirty implementation worktree, so these numbers establish the first functional local baseline and are not a release or independent reproduction.
+The 2026-08-11 clustered-posting rerun used rustc 1.90.0 on the local macOS arm64 workstation and reused hash-validated prepared artifacts. The combined report identified a dirty implementation worktree, so these numbers are same-machine directional evidence rather than a release artifact or independent reproduction. Relative to the documented pre-cluster absolute baseline, the final point estimates changed by -29.7% for text, -5.7% for vector, and -13.4% for hybrid; a repeat against the immediately preceding clustered artifacts found no statistically significant text or vector change and a further 2.9% hybrid improvement. The unchanged vector path also moved, so only the text and GIN results are attributed directly to clustered postings.
 
-| Persistent SQL system, SciFact 5,183 documents and 300 queries | NDCG@10 | MAP@10 | Recall@10 | Mean/query | Queries/s |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| BM25 `text_match` | 0.6860 | 0.6375 | 0.8193 | 20.13 ms | 49.7 |
-| HNSW `knn_match` | 0.6451 | 0.5959 | 0.7833 | 2.87 ms | 348.0 |
-| Positive-evidence hybrid | 0.7259 | 0.6829 | 0.8422 | 56.49 ms | 17.7 |
+| Persistent SQL system, SciFact 5,183 documents and 300 queries | NDCG@10 | MAP@10 | Recall@10 | Previous | Clustered | Queries/s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| BM25 `text_match` | 0.6860 | 0.6375 | 0.8193 | 20.13 ms | 14.16 ms | 70.6 |
+| HNSW `knn_match` | 0.6451 | 0.5959 | 0.7833 | 2.87 ms | 2.71 ms | 369.3 |
+| Positive-evidence hybrid | 0.7259 | 0.6829 | 0.8422 | 56.49 ms | 48.91 ms | 20.4 |
 
-| Persistent SQL construction stage | Elapsed | Rows/s |
-| --- | ---: | ---: |
-| SQL table creation and parameterized load | 0.574 s | 9,037 |
-| SQL GIN creation | 4.012 s | 1,292 |
-| SQL HNSW creation | 12.042 s | 430 |
+| Persistent SQL construction stage | Previous | Clustered | Change | Rows/s |
+| --- | ---: | ---: | ---: | ---: |
+| SQL table creation and parameterized load | 0.574 s | 0.617 s | +7.4% | 8,406 |
+| SQL GIN creation | 4.012 s | 2.312 s | -42.4% | 2,242 |
+| SQL HNSW creation | 12.042 s | 12.242 s | +1.7% | 423 |
 
-Hybrid exceeded the better single signal by 0.0399 NDCG@10, 0.0454 MAP@10, and 0.0229 Recall@10. The checked comparative floors require improvements of at least 0.02, 0.02, and 0.01 respectively, in addition to per-system absolute floors; this prevents a future result from retaining the hybrid label while silently collapsing to one signal. The quality pass uses all 300 qrels-backed queries, while Criterion measures a fixed 25-query warm batch and reports its mean divided by 25. The much higher hybrid latency reflects two calibrated candidate signals and positive-evidence fusion and is inside the measured SQL query boundary. An immediately preceding same-workload run measured 19.81 ms, 2.55 ms, and 54.73 ms per query; because no timed-path logic changed between those runs, their spread is retained as evidence that the local absolute values include load, thermal, frequency, and code-layout variation rather than serving as a standalone regression oracle.
+Hybrid exceeded the better single signal by 0.0399 NDCG@10, 0.0454 MAP@10, and 0.0229 Recall@10. The checked comparative floors require improvements of at least 0.02, 0.02, and 0.01 respectively, in addition to per-system absolute floors; this prevents a future result from retaining the hybrid label while silently collapsing to one signal. The quality pass uses all 300 qrels-backed queries, while Criterion measures a fixed 25-query warm batch and reports its mean divided by 25. The much higher hybrid latency reflects two calibrated candidate signals and positive-evidence fusion and is inside the measured SQL query boundary. Construction timings are one-shot observations rather than distribution comparisons; the GIN reduction is large and mechanistically aligned with writing clustered values, while the smaller load and HNSW differences should be treated as local variation.
 
 ## Reference numbers (post-optimization)
 

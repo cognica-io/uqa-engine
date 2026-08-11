@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use uqa_core::Value;
 
+use crate::clustered_postings::decode_terms;
 use crate::document_store::DocumentStore;
 use crate::inverted_index::{AnalyzerPhase, InvertedIndex};
 use crate::vector_index::{
@@ -18,7 +19,7 @@ use crate::vector_index::{
 use super::codec::*;
 use super::{
     KeyValueCatalog, KeyValueDocumentStore, KeyValueInvertedIndex, KeyValueStore,
-    KeyValueVectorIndex, MemoryKeyValueStore, DOCUMENT_VALUE_V1_PREFIX,
+    KeyValueVectorIndex, MemoryKeyValueStore, DOCUMENT_VALUE_V1_PREFIX, TAG_METADATA,
 };
 use crate::{PersistentStorageBackend, StorageBackendError};
 
@@ -434,6 +435,308 @@ fn key_value_inverted_index_replaces_and_removes_documents() {
     assert_eq!(index.doc_count().unwrap(), 1);
     assert_eq!(index.doc_freq("title", "rust").unwrap(), 0);
     assert_eq!(index.total_field_length("title").unwrap(), 1);
+}
+
+fn seed_paged_legacy_postings(store: &dyn KeyValueStore) -> Vec<u64> {
+    let mut document_ids = (1_u64..=1_030).collect::<Vec<_>>();
+    document_ids.push(65_536);
+    for doc_id in &document_ids {
+        store
+            .put(
+                &doc_length_key("articles", *doc_id, "title").unwrap(),
+                &u64_value(4),
+            )
+            .unwrap();
+        store
+            .put(
+                &posting_key("articles", "title", "rust", *doc_id).unwrap(),
+                &positions_to_blob(&[0]).unwrap(),
+            )
+            .unwrap();
+        store
+            .put(
+                &reverse_posting_key("articles", *doc_id, "title", "rust").unwrap(),
+                &[],
+            )
+            .unwrap();
+    }
+    store
+        .put(
+            &posting_key("articles", "title", "search", 1).unwrap(),
+            &positions_to_blob(&[1, 3]).unwrap(),
+        )
+        .unwrap();
+    store
+        .put(
+            &reverse_posting_key("articles", 1, "title", "search").unwrap(),
+            &[],
+        )
+        .unwrap();
+    for term in ["z", "aa"] {
+        store
+            .put(
+                &posting_key("articles", "title", term, 1).unwrap(),
+                &positions_to_blob(&[2]).unwrap(),
+            )
+            .unwrap();
+        store
+            .put(
+                &reverse_posting_key("articles", 1, "title", term).unwrap(),
+                &[],
+            )
+            .unwrap();
+    }
+    store
+        .put(
+            &field_stats_key("articles", "title").unwrap(),
+            &u64_value(document_ids.len() as u64 * 4),
+        )
+        .unwrap();
+    document_ids
+}
+
+#[test]
+fn key_value_legacy_postings_migrate_atomically_across_scan_pages() {
+    let store = store();
+    let document_ids = seed_paged_legacy_postings(store.as_ref());
+
+    KeyValueInvertedIndex::migrate_legacy_storage(store.as_ref()).unwrap();
+
+    assert!(store
+        .scan_prefix(&posting_key_prefix("articles").unwrap())
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .scan_prefix(&reverse_posting_key_prefix("articles").unwrap())
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        store
+            .scan_prefix(&posting_cluster_score_key_prefix("articles").unwrap())
+            .unwrap()
+            .len(),
+        5
+    );
+    assert_eq!(
+        store
+            .scan_prefix(&posting_cluster_positions_key_prefix("articles").unwrap())
+            .unwrap()
+            .len(),
+        5
+    );
+    assert_eq!(
+        store
+            .scan_prefix(&posting_document_key_prefix("articles").unwrap())
+            .unwrap()
+            .len(),
+        document_ids.len()
+    );
+    let terms = decode_terms(
+        &store
+            .get(&posting_document_key("articles", 1, "title").unwrap())
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        terms,
+        vec![
+            "aa".to_string(),
+            "rust".to_string(),
+            "search".to_string(),
+            "z".to_string()
+        ]
+    );
+
+    let index =
+        KeyValueInvertedIndex::new(Arc::clone(&store), "articles", standard_analyzer("english"));
+    assert_eq!(index.doc_freq("title", "rust").unwrap(), 1_031);
+    assert_eq!(index.get_term_freq(1, "title", "search").unwrap(), 2);
+    assert_eq!(
+        index
+            .get_posting_list("title", "rust")
+            .unwrap()
+            .doc_ids()
+            .collect::<Vec<_>>(),
+        document_ids
+    );
+
+    let version_before = store.change_version().unwrap();
+    KeyValueInvertedIndex::migrate_legacy_storage(store.as_ref()).unwrap();
+    assert_eq!(store.change_version().unwrap(), version_before);
+    assert_eq!(
+        decode_string(
+            store
+                .get(&single_str_key(TAG_METADATA, "inverted_index_format").unwrap())
+                .unwrap()
+                .unwrap()
+        )
+        .unwrap(),
+        "clustered-v1"
+    );
+}
+
+#[test]
+fn key_value_legacy_posting_migration_rolls_back_on_missing_reverse_key() {
+    let store = store();
+    let legacy_key = posting_key("articles", "title", "rust", 7).unwrap();
+    let legacy_value = positions_to_blob(&[0, 2]).unwrap();
+    store
+        .put(
+            &doc_length_key("articles", 7, "title").unwrap(),
+            &u64_value(3),
+        )
+        .unwrap();
+    store.put(&legacy_key, &legacy_value).unwrap();
+
+    let error = KeyValueInvertedIndex::migrate_legacy_storage(store.as_ref()).unwrap_err();
+    assert!(error.to_string().contains("missing reverse posting"));
+    assert_eq!(store.get(&legacy_key).unwrap(), Some(legacy_value));
+    assert!(store
+        .scan_prefix(&posting_cluster_score_key_prefix("articles").unwrap())
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .scan_prefix(&posting_cluster_positions_key_prefix("articles").unwrap())
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .get(&single_str_key(TAG_METADATA, "inverted_index_format").unwrap())
+        .unwrap()
+        .is_none());
+    assert!(!store.in_transaction());
+}
+
+#[test]
+fn key_value_posting_migration_rejects_an_unknown_format_marker() {
+    let store = store();
+    let marker = single_str_key(TAG_METADATA, "inverted_index_format").unwrap();
+    store.put(&marker, b"clustered-v2").unwrap();
+
+    let error = KeyValueInvertedIndex::migrate_legacy_storage(store.as_ref()).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("unsupported KeyValue inverted-index format `clustered-v2`"));
+    assert_eq!(store.get(&marker).unwrap(), Some(b"clustered-v2".to_vec()));
+    assert!(!store.in_transaction());
+}
+
+#[test]
+fn clustered_postings_follow_key_value_column_lifecycle() {
+    let store = store();
+    let mut index =
+        KeyValueInvertedIndex::new(Arc::clone(&store), "articles", standard_analyzer("english"));
+    index
+        .add_document(
+            1,
+            BTreeMap::from([
+                ("title".into(), "rust search".into()),
+                ("body".into(), "sqlite storage".into()),
+            ]),
+        )
+        .unwrap();
+    index
+        .add_document(2, BTreeMap::from([("title".into(), "rust".into())]))
+        .unwrap();
+
+    let catalog = KeyValueCatalog::new(Arc::clone(&store));
+    catalog
+        .rename_column_data("articles", "title", "headline")
+        .unwrap();
+    catalog.drop_column_data("articles", "body").unwrap();
+
+    let mut renamed =
+        KeyValueInvertedIndex::new(Arc::clone(&store), "articles", standard_analyzer("english"));
+    assert_eq!(renamed.doc_freq("title", "rust").unwrap(), 0);
+    assert_eq!(renamed.doc_freq("headline", "rust").unwrap(), 2);
+    assert_eq!(renamed.doc_freq("body", "sqlite").unwrap(), 0);
+    assert_eq!(renamed.get_doc_length(1, "headline").unwrap(), 2);
+    assert_eq!(renamed.get_doc_length(1, "body").unwrap(), 0);
+    renamed.remove_document(1).unwrap();
+    assert_eq!(renamed.doc_freq("headline", "rust").unwrap(), 1);
+    assert_eq!(renamed.doc_freq("headline", "search").unwrap(), 0);
+    assert!(store
+        .scan_prefix(&posting_cluster_score_field_prefix("articles", "title").unwrap())
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .scan_prefix(&posting_cluster_positions_field_prefix("articles", "body").unwrap())
+        .unwrap()
+        .is_empty());
+
+    catalog.purge_table_data("articles").unwrap();
+    assert!(store
+        .scan_prefix(&posting_cluster_score_key_prefix("articles").unwrap())
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .scan_prefix(&posting_cluster_positions_key_prefix("articles").unwrap())
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .scan_prefix(&posting_document_key_prefix("articles").unwrap())
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn clustered_postings_follow_key_value_table_rename_and_drop() {
+    let store = store();
+    let catalog = KeyValueCatalog::new(Arc::clone(&store));
+    catalog.save_schema("public").unwrap();
+    catalog
+        .save_table(&TableSchema {
+            relation: crate::catalog::RelationIdentity::new("public", "articles"),
+            analyzer_json: "{}".into(),
+            fts_fields: vec!["title".into()],
+            vector_fields: Vec::new(),
+            columns_json: "[]".into(),
+            constraints_json: String::new(),
+        })
+        .unwrap();
+    let mut index = KeyValueInvertedIndex::new(
+        Arc::clone(&store),
+        "public.articles",
+        standard_analyzer("english"),
+    );
+    index
+        .add_document(1, BTreeMap::from([("title".into(), "rust search".into())]))
+        .unwrap();
+
+    catalog
+        .rename_table_data("public.articles", "public.docs")
+        .unwrap();
+    let renamed = KeyValueInvertedIndex::new(
+        Arc::clone(&store),
+        "public.docs",
+        standard_analyzer("english"),
+    );
+    assert_eq!(renamed.doc_freq("title", "rust").unwrap(), 1);
+    assert!(store
+        .scan_prefix(&posting_cluster_score_key_prefix("public.articles").unwrap())
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        store
+            .scan_prefix(&posting_document_key_prefix("public.docs").unwrap())
+            .unwrap()
+            .len(),
+        1
+    );
+
+    catalog.drop_table_and_data("public.docs").unwrap();
+    assert!(store
+        .scan_prefix(&posting_cluster_score_key_prefix("public.docs").unwrap())
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .scan_prefix(&posting_cluster_positions_key_prefix("public.docs").unwrap())
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .scan_prefix(&posting_document_key_prefix("public.docs").unwrap())
+        .unwrap()
+        .is_empty());
 }
 
 #[test]

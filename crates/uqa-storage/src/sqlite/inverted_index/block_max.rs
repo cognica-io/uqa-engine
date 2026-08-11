@@ -8,8 +8,8 @@
 
 use super::{
     decode_index_u64, decode_index_usize, encode_index_u64, encode_index_usize, params,
-    quote_ident, table_exists, usize_to_index_u64, BlockMaxIndex, BlockMaxScorer, DocId,
-    InvertedIndex, OptionalExtension, SQLiteError, SQLiteInvertedIndex, StorageBackendResult,
+    quote_ident, table_exists, BlockMaxIndex, BlockMaxScorer, DocId, InvertedIndex,
+    OptionalExtension, SQLiteError, SQLiteInvertedIndex, StorageBackendResult,
 };
 
 impl SQLiteInvertedIndex {
@@ -68,15 +68,17 @@ impl SQLiteInvertedIndex {
         scorer: &S,
         scorer_fingerprint: &str,
     ) -> StorageBackendResult<()> {
-        let posting_list = self.get_posting_list(field, term)?;
-        if posting_list.is_empty() && !self.has_field(field)? {
+        let mut cursor = self.posting_cursor(field, term)?;
+        if cursor.doc_freq() == 0 && !self.has_field(field)? {
             return Ok(());
         }
-        let mut scored_entries = Vec::with_capacity(posting_list.len());
-        for entry in posting_list.entries() {
-            let tf = usize_to_index_u64("term frequency", entry.payload.positions.len().max(1))?;
-            let doc_length = self.get_doc_length(entry.doc_id, field)?.max(tf);
-            scored_entries.push((tf, doc_length));
+        let df = cursor.doc_freq();
+        let scored_capacity = usize::try_from(df)
+            .map_err(|_| SQLiteError::StorageBackend("document frequency exceeds usize".into()))?;
+        let mut scored_entries = Vec::with_capacity(scored_capacity);
+        while let Some(entry) = cursor.current() {
+            scored_entries.push((entry.term_freq, entry.doc_length.max(entry.term_freq)));
+            cursor.advance()?;
         }
         self.ensure_aux_tables(field)?;
         let table = self.blockmax_table_name(field);
@@ -86,7 +88,6 @@ impl SQLiteInvertedIndex {
                 &format!("DELETE FROM {} WHERE term = ?1", quote_ident(&table)),
                 [term],
             )?;
-            let df = usize_to_index_u64("document frequency", posting_list.len())?;
             for (block_idx, chunk) in scored_entries.chunks(Self::BLOCK_SIZE).enumerate() {
                 let mut max_score = 0.0_f64;
                 for &(tf, doc_length) in chunk {

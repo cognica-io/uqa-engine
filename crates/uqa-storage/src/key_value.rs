@@ -51,6 +51,9 @@ const TAG_RELATION: u8 = b'R';
 const TAG_VIEW: u8 = b'w';
 const TAG_DOCUMENT: u8 = b'd';
 const TAG_POSTING: u8 = b'p';
+const TAG_POSTING_CLUSTER_SCORE: u8 = b'k';
+const TAG_POSTING_CLUSTER_POSITIONS: u8 = b'o';
+const TAG_POSTING_DOCUMENT: u8 = b'x';
 const TAG_DOC_LENGTH: u8 = b'l';
 const TAG_FIELD_STATS: u8 = b'f';
 const TAG_REVERSE_POSTING: u8 = b'r';
@@ -93,6 +96,25 @@ pub trait KeyValueStore: Send + Sync {
     fn put(&self, key: &[u8], value: &[u8]) -> StorageBackendResult<()>;
     fn delete(&self, key: &[u8]) -> StorageBackendResult<()>;
     fn scan_prefix(&self, prefix: &[u8]) -> StorageBackendResult<Vec<(Vec<u8>, Vec<u8>)>>;
+    /// Return at most `limit` key/value pairs in key order, strictly after
+    /// `after` when supplied. This is the bounded value cursor used by large
+    /// format migrations and other paged consumers.
+    fn scan_prefix_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+    ) -> StorageBackendResult<Vec<(Vec<u8>, Vec<u8>)>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .scan_prefix(prefix)?
+            .into_iter()
+            .filter(|(key, _)| after.is_none_or(|after| key.as_slice() > after))
+            .take(limit)
+            .collect())
+    }
     /// Return at most `limit` keys in key order, strictly after `after` when
     /// it is present. Backends should override this method with a key-only,
     /// bounded range scan so cursor consumers neither materialize the entire

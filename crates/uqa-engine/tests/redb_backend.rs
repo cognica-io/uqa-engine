@@ -10,7 +10,7 @@ use tempfile::tempdir;
 use uqa_core::Value;
 use uqa_engine::{Engine, ScoringMode};
 use uqa_storage::{
-    HNSWIndexParams, IVFIndexParams, PersistentStorageProvider, VectorIndexOpenMode,
+    HNSWIndexParams, IVFIndexParams, KeyValueStore, PersistentStorageProvider, VectorIndexOpenMode,
     VectorIndexSpec,
 };
 use uqa_storage_redb::RedbStorage;
@@ -19,6 +19,35 @@ fn open_engine(path: &std::path::Path) -> Engine {
     let storage: Arc<dyn PersistentStorageProvider> =
         Arc::new(RedbStorage::open(path).expect("open redb storage"));
     Engine::from_persistent_provider(storage).expect("open engine over redb")
+}
+
+fn push_key_string(key: &mut Vec<u8>, value: &str) {
+    key.extend_from_slice(&u32::try_from(value.len()).unwrap().to_be_bytes());
+    key.extend_from_slice(value.as_bytes());
+}
+
+fn legacy_posting_key(table: &str, field: &str, term: &str, doc_id: u64) -> Vec<u8> {
+    let mut key = vec![b'p'];
+    push_key_string(&mut key, table);
+    push_key_string(&mut key, field);
+    push_key_string(&mut key, term);
+    key.extend_from_slice(&doc_id.to_be_bytes());
+    key
+}
+
+fn legacy_reverse_posting_key(table: &str, doc_id: u64, field: &str, term: &str) -> Vec<u8> {
+    let mut key = vec![b'r'];
+    push_key_string(&mut key, table);
+    key.extend_from_slice(&doc_id.to_be_bytes());
+    push_key_string(&mut key, field);
+    push_key_string(&mut key, term);
+    key
+}
+
+fn inverted_index_format_key() -> Vec<u8> {
+    let mut key = vec![b'm'];
+    push_key_string(&mut key, "inverted_index_format");
+    key
 }
 
 #[test]
@@ -79,6 +108,71 @@ fn engine_runs_text_vector_and_relational_queries_after_reopen() {
             .map(|hit| hit.doc_id),
         Some(1)
     );
+}
+
+#[test]
+fn engine_open_automatically_migrates_legacy_redb_postings() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("legacy-postings.redb");
+    {
+        let engine = open_engine(&path);
+        engine
+            .sql(
+                "CREATE TABLE messages (id INTEGER PRIMARY KEY, content TEXT NOT NULL)",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "CREATE INDEX messages_content_gin ON messages USING gin (content)",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "INSERT INTO messages (id, content) VALUES (1, 'alpha token')",
+                &[],
+            )
+            .unwrap();
+    }
+
+    let storage = RedbStorage::open(&path).unwrap();
+    let store = storage.store();
+    for tag in [b'k', b'o', b'x'] {
+        store.delete_prefix(&[tag]).unwrap();
+    }
+    store.delete(&inverted_index_format_key()).unwrap();
+    for (term, position) in [("alpha", 0_u32), ("token", 1_u32)] {
+        store
+            .put(
+                &legacy_posting_key("public.messages", "content", term, 1),
+                &position.to_le_bytes(),
+            )
+            .unwrap();
+        store
+            .put(
+                &legacy_reverse_posting_key("public.messages", 1, "content", term),
+                &[],
+            )
+            .unwrap();
+    }
+    drop(store);
+    drop(storage);
+
+    let reopened = open_engine(&path);
+    let hits = reopened
+        .search("messages", "content", "alpha", &ScoringMode::default(), 10)
+        .unwrap();
+    assert_eq!(hits.first().map(|entry| entry.doc_id), Some(1));
+    drop(reopened);
+
+    let storage = RedbStorage::open(&path).unwrap();
+    let store = storage.store();
+    assert!(store.scan_prefix(b"p").unwrap().is_empty());
+    assert!(store.scan_prefix(b"r").unwrap().is_empty());
+    assert_eq!(store.scan_prefix(b"k").unwrap().len(), 2);
+    assert_eq!(store.scan_prefix(b"o").unwrap().len(), 2);
+    assert_eq!(store.scan_prefix(b"x").unwrap().len(), 1);
 }
 
 #[test]

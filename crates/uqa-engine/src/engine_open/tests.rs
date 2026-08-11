@@ -181,7 +181,8 @@ fn legacy_fts_repair_is_one_time_and_reload_remains_read_only() {
     rusqlite::Connection::open(&path)
         .unwrap()
         .execute_batch(
-            "DROP TABLE _postings; \
+            "DROP TABLE _posting_clusters; \
+             DROP TABLE _posting_documents; \
              DROP TABLE _doc_lengths; \
              DROP TABLE _field_stats;",
         )

@@ -216,6 +216,7 @@ impl Engine {
             runtime: super::QueryRuntime::new(super::SQL_FUNCTION_DEPTH_LIMIT),
         };
         Self::prepare_catalog_for_initial_restore(restore_catalog.as_ref())?;
+        restore_backend.migrate_inverted_index_storage()?;
         engine.restore_from_catalog(restore_catalog.as_ref(), restore_backend.as_ref())?;
         engine.repair_reset_fts_storage(restore_catalog.as_ref())?;
         engine.repair_persistent_value_indexes_on_open()?;

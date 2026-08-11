@@ -14,12 +14,13 @@ use super::records::{
 use super::{
     batch_rekey_prefix, column_stats_prefix, decode_catalog_relation_key, decode_relation_key,
     decode_value, doc_length_key_prefix, document_key_prefix, encode_value, ensure_prefix_absent,
-    field_stats_key_prefix, key_with_tag, posting_key_prefix, register_migration_relation,
-    relation_key, reverse_posting_key_prefix, single_str_key, string_value,
-    table_field_analyzer_prefix, vector_key_prefix, CatalogFacade, KeyValueBatch, KeyValueCatalog,
-    KeyValueStore, RelationIdentity, RelationKind, SequenceRow, StorageBackendError,
-    StorageBackendResult, TableSchema, ViewRow, TAG_CATALOG_INDEX, TAG_FOREIGN_TABLE, TAG_METADATA,
-    TAG_RELATION, TAG_SCHEMA, TAG_SEQUENCE, TAG_TABLE, TAG_VIEW,
+    field_stats_key_prefix, key_with_tag, posting_cluster_positions_key_prefix,
+    posting_cluster_score_key_prefix, posting_document_key_prefix, posting_key_prefix,
+    register_migration_relation, relation_key, reverse_posting_key_prefix, single_str_key,
+    string_value, table_field_analyzer_prefix, vector_key_prefix, CatalogFacade, KeyValueBatch,
+    KeyValueCatalog, KeyValueStore, RelationIdentity, RelationKind, SequenceRow,
+    StorageBackendError, StorageBackendResult, TableSchema, ViewRow, TAG_CATALOG_INDEX,
+    TAG_FOREIGN_TABLE, TAG_METADATA, TAG_RELATION, TAG_SCHEMA, TAG_SEQUENCE, TAG_TABLE, TAG_VIEW,
 };
 
 pub(super) type SeenRelations =
@@ -288,6 +289,9 @@ pub(super) fn table_data_prefixes(table_name: &str) -> StorageBackendResult<Vec<
     let mut prefixes = vec![
         document_key_prefix(table_name)?,
         posting_key_prefix(table_name)?,
+        posting_cluster_score_key_prefix(table_name)?,
+        posting_cluster_positions_key_prefix(table_name)?,
+        posting_document_key_prefix(table_name)?,
         doc_length_key_prefix(table_name)?,
         field_stats_key_prefix(table_name)?,
         reverse_posting_key_prefix(table_name)?,

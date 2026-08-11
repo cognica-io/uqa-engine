@@ -3248,6 +3248,7 @@ dependencies = [
  "parking_lot",
  "redb",
  "tempfile",
+ "uqa-analysis",
  "uqa-storage",
 ]
 

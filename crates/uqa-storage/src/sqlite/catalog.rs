@@ -9,8 +9,9 @@
 //! The catalog owns a single `_metadata` table that records the schema version
 //! plus a `_tables` table holding per-table analyzer config and the lists
 //! of FTS / vector fields registered on each table. Concrete data tables
-//! (`_documents`, `_document_blobs`, `_postings`, `_vectors`, ...) are created
-//! by catalog migrations before their respective stores are exposed.
+//! (`_documents`, `_document_blobs`, `_posting_clusters`,
+//! `_posting_documents`, `_vectors`, ...) are created by catalog migrations
+//! before their respective stores are exposed.
 
 use rusqlite::{params, OptionalExtension};
 
@@ -30,7 +31,7 @@ use super::catalog_lifecycle::{
 };
 
 /// Bump this every time a migration is added.
-pub const CURRENT_SCHEMA_VERSION: u32 = 21;
+pub const CURRENT_SCHEMA_VERSION: u32 = 22;
 
 const LEGACY_VIEWS_METADATA_KEY: &str = "sql_views_json";
 const LEGACY_SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";

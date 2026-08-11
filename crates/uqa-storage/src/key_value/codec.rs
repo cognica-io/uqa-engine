@@ -9,6 +9,7 @@
 use super::{
     BTreeMap, Deserialize, DocId, Document, Serialize, StorageBackendError, StorageBackendResult,
     Value, DOCUMENT_VALUE_V1_PREFIX, TAG_DOCUMENT, TAG_DOC_LENGTH, TAG_FIELD_STATS, TAG_POSTING,
+    TAG_POSTING_CLUSTER_POSITIONS, TAG_POSTING_CLUSTER_SCORE, TAG_POSTING_DOCUMENT,
     TAG_REVERSE_POSTING, TAG_VECTOR,
 };
 
@@ -236,6 +237,7 @@ pub(super) fn decode_u64_value(bytes: &[u8]) -> StorageBackendResult<u64> {
     Ok(u64::from_be_bytes(array))
 }
 
+#[cfg(test)]
 pub(super) fn positions_to_blob(positions: &[u32]) -> StorageBackendResult<Vec<u8>> {
     let capacity = positions
         .len()
@@ -311,6 +313,7 @@ pub(super) fn posting_field_prefix(table: &str, field: &str) -> StorageBackendRe
     Ok(key)
 }
 
+#[cfg(test)]
 pub(super) fn posting_term_prefix(
     table: &str,
     field: &str,
@@ -321,6 +324,7 @@ pub(super) fn posting_term_prefix(
     Ok(key)
 }
 
+#[cfg(test)]
 pub(super) fn posting_key(
     table: &str,
     field: &str,
@@ -329,6 +333,97 @@ pub(super) fn posting_key(
 ) -> StorageBackendResult<Vec<u8>> {
     let mut key = posting_term_prefix(table, field, term)?;
     push_u64(&mut key, doc_id);
+    Ok(key)
+}
+
+pub(super) fn posting_cluster_score_key_prefix(table: &str) -> StorageBackendResult<Vec<u8>> {
+    table_prefixed_key(TAG_POSTING_CLUSTER_SCORE, table)
+}
+
+pub(super) fn posting_cluster_score_field_prefix(
+    table: &str,
+    field: &str,
+) -> StorageBackendResult<Vec<u8>> {
+    let mut key = posting_cluster_score_key_prefix(table)?;
+    push_str(&mut key, field)?;
+    Ok(key)
+}
+
+pub(super) fn posting_cluster_score_term_prefix(
+    table: &str,
+    field: &str,
+    term: &str,
+) -> StorageBackendResult<Vec<u8>> {
+    let mut key = posting_cluster_score_field_prefix(table, field)?;
+    push_str(&mut key, term)?;
+    Ok(key)
+}
+
+pub(super) fn posting_cluster_score_key(
+    table: &str,
+    field: &str,
+    term: &str,
+    cluster_id: u64,
+) -> StorageBackendResult<Vec<u8>> {
+    let mut key = posting_cluster_score_term_prefix(table, field, term)?;
+    push_u64(&mut key, cluster_id);
+    Ok(key)
+}
+
+pub(super) fn posting_cluster_positions_key_prefix(table: &str) -> StorageBackendResult<Vec<u8>> {
+    table_prefixed_key(TAG_POSTING_CLUSTER_POSITIONS, table)
+}
+
+pub(super) fn posting_cluster_positions_field_prefix(
+    table: &str,
+    field: &str,
+) -> StorageBackendResult<Vec<u8>> {
+    let mut key = posting_cluster_positions_key_prefix(table)?;
+    push_str(&mut key, field)?;
+    Ok(key)
+}
+
+pub(super) fn posting_cluster_positions_term_prefix(
+    table: &str,
+    field: &str,
+    term: &str,
+) -> StorageBackendResult<Vec<u8>> {
+    let mut key = posting_cluster_positions_field_prefix(table, field)?;
+    push_str(&mut key, term)?;
+    Ok(key)
+}
+
+pub(super) fn posting_cluster_positions_key(
+    table: &str,
+    field: &str,
+    term: &str,
+    cluster_id: u64,
+) -> StorageBackendResult<Vec<u8>> {
+    let mut key = posting_cluster_positions_term_prefix(table, field, term)?;
+    push_u64(&mut key, cluster_id);
+    Ok(key)
+}
+
+pub(super) fn posting_document_key_prefix(table: &str) -> StorageBackendResult<Vec<u8>> {
+    table_prefixed_key(TAG_POSTING_DOCUMENT, table)
+}
+
+pub(super) fn posting_document_doc_prefix(
+    table: &str,
+    doc_id: DocId,
+) -> StorageBackendResult<Vec<u8>> {
+    let mut key = posting_document_key_prefix(table)?;
+    push_u64(&mut key, doc_id);
+    Ok(key)
+}
+
+pub(super) fn posting_document_key(
+    table: &str,
+    doc_id: DocId,
+    field: &str,
+) -> StorageBackendResult<Vec<u8>> {
+    let mut key = posting_document_doc_prefix(table, doc_id)?;
+    push_str(&mut key, field)?;
     Ok(key)
 }
 

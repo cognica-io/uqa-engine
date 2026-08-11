@@ -12,6 +12,7 @@ pub mod backend;
 pub mod block_max_index;
 pub mod btree_index;
 pub mod catalog;
+pub mod clustered_postings;
 pub mod document_store;
 pub mod hnsw_index;
 pub mod index_abc;
@@ -35,6 +36,9 @@ pub use catalog::{
     CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
     GraphSnapshot, GraphVertexRow, RelationIdentity, RelationKind, SequenceRow, TableSchema,
     VectorFieldSchema, ViewRow,
+};
+pub use clustered_postings::{
+    MaterializedPostingCursor, PostingCursor, PostingScore, POSTING_CLUSTER_DOCS,
 };
 pub use document_store::{DocumentStore, MemoryDocumentStore, SharedDocumentRow};
 pub use hnsw_index::HNSWIndex;

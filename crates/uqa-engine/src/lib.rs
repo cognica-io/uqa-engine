@@ -180,6 +180,9 @@ pub struct TextSearchProfile {
     pub entries: Vec<ScoredEntry>,
     pub algorithm: TextSearchAlgorithm,
     pub scored_candidates: u64,
+    /// Exact distinct candidates for exhaustive/materialized execution; for
+    /// score-cursor WAND/BMW this is the sum of term document frequencies, a
+    /// no-prescan upper bound on the distinct candidate count.
     pub total_candidates: u64,
     pub cursor_advances: u64,
     pub skip_rate: f64,

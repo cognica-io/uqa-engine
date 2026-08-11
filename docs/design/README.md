@@ -12,7 +12,7 @@ The research-level foundation is developed separately in [A Typed Carrier Algebr
 | [Vector indexes](vector-indexes.md) | Brute-force, IVF, and HNSW selection, parameters, mutation, persistence, cache revisions, and search guarantees | Storage and retrieval contributors |
 | [Engine state ownership](engine-state-ownership.md) | Session isolation, mutable state domains, lock ownership, epochs, transactions, and publication order | Engine and concurrency contributors |
 | [Compressed VFS security](compressed-vfs-security.md) | Authenticated format, threat boundary, rollback protection, trusted anchors, and deployment choice | Security reviewers and operators |
-| [Key/Value storage backends](kv-storage-backends.md) | Provider/session ownership, logical key layout, redb transactions, compatibility limits, and third-party conformance | Storage contributors and integrators |
+| [Key/Value storage backends](kv-storage-backends.md) | Provider/session ownership, clustered posting layout and migration, redb transactions, compatibility limits, and third-party conformance | Storage contributors and integrators |
 | [Parity fixtures](parity.md) | SQL golden data, relevance fixtures, vector calibration gates, versioning, and CI use | Test and compatibility contributors |
 | [Performance](performance.md) | Benchmark provenance, regression gates, measured bottlenecks, PostgreSQL 17 TPC-H-derived evidence, optimizations, and limitations | Performance contributors and evaluators |
 

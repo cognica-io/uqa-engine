@@ -8,10 +8,10 @@
 
 use super::{
     block_max_scorer_fingerprint, raw_bm25_params, search_stats_for_terms, storage_sql_error, Arc,
-    BM25Scorer, BTreeSet, BlockMaxIndex, BlockMaxWANDScorer, Engine, Instant, InvertedIndex,
-    OperatorTree, PostingList, SQLError, ScoredEntry, ScoringMode, TextScoringMode,
-    TextSearchAlgorithm, TextSearchProfile, TextTopKPlan, TextTopKStrategy, WANDQuery, WANDScorer,
-    WANDStats, DEFAULT_BLOCK_SIZE,
+    BM25Scorer, BTreeSet, BlockMaxIndex, CursorBlockMaxWANDScorer, CursorWANDQuery,
+    CursorWANDScorer, Engine, Instant, InvertedIndex, OperatorTree, SQLError, ScoredEntry,
+    ScoringMode, TextScoringMode, TextSearchAlgorithm, TextSearchProfile, TextTopKPlan,
+    TextTopKStrategy, WANDStats, DEFAULT_BLOCK_SIZE,
 };
 
 impl Engine {
@@ -77,14 +77,14 @@ impl Engine {
         table: &str,
         field: &str,
         analyzed_terms: &[String],
-        posting_lists: &[PostingList],
+        doc_freqs: &[u64],
         fingerprint: &str,
     ) -> Result<Option<BlockMaxIndex>, SQLError> {
         let mut block_max = BlockMaxIndex::new(DEFAULT_BLOCK_SIZE)
             .map_err(|error| storage_sql_error("create block-max index", error))?;
         let mut checked = BTreeSet::new();
-        for (term, posting) in analyzed_terms.iter().zip(posting_lists) {
-            if posting.is_empty() || !checked.insert(term) {
+        for (term, doc_freq) in analyzed_terms.iter().zip(doc_freqs) {
+            if *doc_freq == 0 || !checked.insert(term) {
                 continue;
             }
             let Some(scores) = index
@@ -93,7 +93,10 @@ impl Engine {
             else {
                 return Ok(None);
             };
-            if scores.len() != posting.len().div_ceil(DEFAULT_BLOCK_SIZE) {
+            let expected_blocks = usize::try_from(*doc_freq)
+                .map_err(|_| SQLError::Internal("text document frequency exceeds usize".into()))?
+                .div_ceil(DEFAULT_BLOCK_SIZE);
+            if scores.len() != expected_blocks {
                 return Ok(None);
             }
             block_max
@@ -111,24 +114,20 @@ impl Engine {
         mode: &ScoringMode,
         plan: TextTopKPlan,
     ) -> Result<(Vec<ScoredEntry>, WANDStats, TextSearchAlgorithm), SQLError> {
-        let posting_lists = index
-            .get_posting_lists_bulk(field, analyzed_terms)
-            .map_err(|error| storage_sql_error("read text postings", error))?;
-        let doc_freqs = posting_lists
+        let posting_cursors = index
+            .posting_cursors_bulk(field, analyzed_terms)
+            .map_err(|error| storage_sql_error("open text posting cursors", error))?;
+        let doc_freqs = posting_cursors
             .iter()
-            .map(|posting| {
-                u64::try_from(posting.len()).map_err(|_| {
-                    SQLError::Internal("text-search document frequency exceeds u64".into())
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|cursor| cursor.doc_freq())
+            .collect::<Vec<_>>();
         let stats = Arc::new(
             search_stats_for_terms(index, field, analyzed_terms, &doc_freqs)
                 .map_err(|error| storage_sql_error("read field statistics", error))?,
         );
         let scorer = Self::build_text_scorer(mode, stats.clone(), analyzed_terms.len())?;
-        let wand_query = WANDQuery::new(
-            posting_lists.clone(),
+        let wand_query = CursorWANDQuery::new(
+            posting_cursors,
             vec![scorer; analyzed_terms.len()],
             vec![field.to_string(); analyzed_terms.len()],
             analyzed_terms.to_vec(),
@@ -138,7 +137,7 @@ impl Engine {
 
         let (result, algorithm) = match plan.strategy {
             TextTopKStrategy::Wand => (
-                WANDScorer::new(&wand_query, Some(index))
+                CursorWANDScorer::new(&wand_query)
                     .score_top_k()
                     .map_err(|error| storage_sql_error("execute WAND", error))?,
                 TextSearchAlgorithm::Wand,
@@ -151,11 +150,11 @@ impl Engine {
                     table,
                     field,
                     analyzed_terms,
-                    &posting_lists,
+                    &doc_freqs,
                     &fingerprint,
                 )? {
                     (
-                        BlockMaxWANDScorer::new(&wand_query, Some(index), &block_max, table)
+                        CursorBlockMaxWANDScorer::new(&wand_query, &block_max, table)
                             .score_top_k()
                             .map_err(|error| storage_sql_error("execute Block-Max WAND", error))?,
                         TextSearchAlgorithm::BlockMaxWand,
@@ -165,7 +164,7 @@ impl Engine {
                     // invalidate blocks after planning. Exact WAND is the safe
                     // physical fallback; stale bounds are never consumed.
                     (
-                        WANDScorer::new(&wand_query, Some(index))
+                        CursorWANDScorer::new(&wand_query)
                             .score_top_k()
                             .map_err(|error| storage_sql_error("execute WAND fallback", error))?,
                         TextSearchAlgorithm::Wand,

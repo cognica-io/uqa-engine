@@ -55,6 +55,6 @@ pub use vector_calibration::{
 };
 pub use vector_score::VectorScorer;
 pub use wand::{
-    AdaptiveWANDScorer, BlockMaxWANDScorer, BoundTightnessAnalyzer, WANDQuery, WANDResult,
-    WANDScorer, WANDStats,
+    AdaptiveWANDScorer, BlockMaxWANDScorer, BoundTightnessAnalyzer, CursorBlockMaxWANDScorer,
+    CursorWANDQuery, CursorWANDScorer, WANDQuery, WANDResult, WANDScorer, WANDStats,
 };

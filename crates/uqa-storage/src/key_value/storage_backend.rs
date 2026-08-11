@@ -42,6 +42,10 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         ))
     }
 
+    fn migrate_inverted_index_storage(&self) -> StorageBackendResult<()> {
+        KeyValueInvertedIndex::migrate_legacy_storage(self.store.as_ref())
+    }
+
     fn vector_index(
         &self,
         table: &str,

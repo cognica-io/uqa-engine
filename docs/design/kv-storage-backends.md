@@ -21,7 +21,7 @@ flowchart TD
 
 ## Physical store contract
 
-`KeyValueStore` provides byte-exact point reads and writes, lexicographically ordered prefix scans, bounded key cursors, atomic batches, prefix deletion, read/write and read-first transaction boundaries, savepoints, and transaction-state observation. `KeyValueStorageBackend` and `KeyValueCatalog` implement UQA documents, text postings, B-tree postings, brute-force vectors, IVF centroid assignments, HNSW graph generations, graph data, and durable registries once above this byte-key boundary.
+`KeyValueStore` provides byte-exact point reads and writes, lexicographically ordered prefix scans, bounded key and key/value cursors, atomic batches, prefix deletion, read/write and read-first transaction boundaries, savepoints, and transaction-state observation. `KeyValueStorageBackend` and `KeyValueCatalog` implement UQA documents, text postings, B-tree postings, brute-force vectors, IVF centroid assignments, HNSW graph generations, graph data, and durable registries once above this byte-key boundary.
 
 Every physical implementation must provide independent transaction state per session even when sessions share one database. `in_transaction` and `transaction_has_written` are correctness hooks used by the engine to preserve pinned snapshots and reject unclassified writes in read-only statements. `change_version` is an optional committed generation used to notice writes made by separately opened engines or processes; implementations that return `None` still receive in-process epoch synchronization for sessions derived from the same engine.
 
@@ -48,7 +48,19 @@ The engine stores savepoints in creation order rather than a name set. Duplicate
 
 Logical keys begin with a one-byte namespace tag, encode user-controlled string segments with explicit lengths, and encode numeric identifiers in big-endian order. This makes prefix boundaries unambiguous and preserves document ordering under bytewise iteration. Values use versioned JSON or compact binary encodings owned by the logical catalog, document, posting, and vector adapters rather than by redb or SQLite.
 
-Representative namespaces include metadata, schemas, relations, tables, views, analyzers, foreign definitions, catalog indexes, graph vertices and edges, graph membership, path indexes, documents, text postings, reverse postings, B-tree definitions and entries, document lengths, field statistics, canonical vectors, IVF metadata/centroids/assignments, HNSW metadata/nodes, models, scoring parameters, and sequences. The exact tag and codec definitions in `uqa-storage::key_value` are the storage-format source of truth.
+Representative namespaces include metadata, schemas, relations, tables, views, analyzers, foreign definitions, catalog indexes, graph vertices and edges, graph membership, path indexes, documents, clustered posting scores, clustered posting positions, per-document term dictionaries, B-tree definitions and entries, document lengths, field statistics, canonical vectors, IVF metadata/centroids/assignments, HNSW metadata/nodes, models, scoring parameters, and sequences. The exact tag and codec definitions in `uqa-storage::key_value` are the storage-format source of truth.
+
+## Clustered full-text postings
+
+The shared logical format partitions each term by `cluster_id = doc_id / 65,536`, matching the bounded clustered-search layout used by Cognica Server. A score value contains a small directory followed by independent delta-doc, term-frequency, and document-length streams in 128-entry blocks; a parallel positions value contains offsets plus delta-encoded token positions. WAND, Block-Max WAND, exhaustive ranking, and block-max maintenance read score values through the same backend-neutral cursor, which reuses its block decode buffer, while statistics use stored counts or score headers. Ranking therefore neither materializes `PostingList` payloads nor fetches a document-length row for every candidate, while `get_posting_list` retains the full positional representation for payload-consuming operators.
+
+| Logical data | Key shape | Purpose |
+| --- | --- | --- |
+| Score cluster | `(table, field, term, cluster_id)` | Ordered document offsets, term frequencies, document lengths, and lazy 128-entry block directory |
+| Position cluster | `(table, field, term, cluster_id)` | Positional payload loaded only by consumers that need positions |
+| Document terms | `(table, doc_id, field)` | Sorted term dictionary used to replace or remove one document without scanning the vocabulary |
+
+On the first open of an older Key/Value database, the backend scans legacy forward and reverse posting namespaces in bounded 1,024-row pages, validates every document length and forward/reverse pair, writes clustered values, removes legacy keys, and records the `clustered-v1` format marker in one physical transaction. The rewrite is idempotent; any malformed value, missing reverse key, count mismatch, or codec failure rolls back both new values and legacy-key deletions. This applies equally to redb and `SQLiteKeyValueStore` because migration lives above `KeyValueStore`.
 
 ## Capability boundary
 

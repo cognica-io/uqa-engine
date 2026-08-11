@@ -8,6 +8,7 @@ use super::{
     counter_error, usize_to_u64, Analyzer, Arc, BTreeMap, BlockMaxScorer, DocId, FieldName,
     IndexStats, PostingEntry, PostingList, StorageBackendError, StorageBackendResult,
 };
+use crate::clustered_postings::{MaterializedPostingCursor, PostingCursor, PostingScore};
 
 /// Which side of the index/search pipeline a field analyzer applies to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +92,41 @@ pub trait InvertedIndex: Send + Sync {
         terms
             .iter()
             .map(|term| self.get_posting_list(field, term))
+            .collect()
+    }
+
+    /// Open a doc-id ordered score cursor for one term.
+    ///
+    /// The cursor carries term frequency and document length directly so
+    /// ranking does not need positional payloads or per-document length
+    /// lookups. Persistent backends override this with lazy clustered
+    /// cursors; the default preserves compatibility for custom backends.
+    fn posting_cursor(
+        &self,
+        field: &str,
+        term: &str,
+    ) -> StorageBackendResult<Box<dyn PostingCursor>> {
+        let posting_list = self.get_posting_list(field, term)?;
+        let mut entries = Vec::with_capacity(posting_list.len());
+        for posting in posting_list {
+            let term_freq = usize_to_u64(posting.payload.positions.len().max(1), "term frequency")?;
+            entries.push(PostingScore {
+                doc_id: posting.doc_id,
+                term_freq,
+                doc_length: self.get_doc_length(posting.doc_id, field)?.max(term_freq),
+            });
+        }
+        Ok(Box::new(MaterializedPostingCursor::new(entries)?))
+    }
+
+    fn posting_cursors_bulk(
+        &self,
+        field: &str,
+        terms: &[String],
+    ) -> StorageBackendResult<Vec<Box<dyn PostingCursor>>> {
+        terms
+            .iter()
+            .map(|term| self.posting_cursor(field, term))
             .collect()
     }
 

@@ -71,7 +71,8 @@ fn create_notes_gin_fixture(db: &Path) {
 fn rewrite_fts_tables_to_legacy_shape(db: &Path) {
     let conn = ManagedConnection::open(db).unwrap();
     conn.with(|c| {
-        c.execute("DROP TABLE _postings", [])?;
+        c.execute("DROP TABLE _posting_clusters", [])?;
+        c.execute("DROP TABLE _posting_documents", [])?;
         c.execute("DROP TABLE _doc_lengths", [])?;
         c.execute("DROP TABLE _field_stats", [])?;
         c.execute(
@@ -102,6 +103,36 @@ fn rewrite_fts_tables_to_legacy_shape(db: &Path) {
                 PRIMARY KEY (table_name, field)
             )",
             [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+fn rewrite_fts_tables_to_valid_v21_postings(db: &Path, table: &str) {
+    let table = physical_relation_name(table);
+    let conn = ManagedConnection::open(db).unwrap();
+    conn.with(|c| {
+        c.execute_batch(
+            "DROP TABLE _posting_clusters;
+             DROP TABLE _posting_documents;
+             CREATE TABLE _postings (
+                 table_name TEXT NOT NULL,
+                 field      TEXT NOT NULL,
+                 term       TEXT NOT NULL,
+                 doc_id     INTEGER NOT NULL,
+                 positions  BLOB NOT NULL,
+                 PRIMARY KEY (table_name, field, term, doc_id)
+             );
+             CREATE INDEX _postings_doc_idx
+                 ON _postings (table_name, doc_id);
+             UPDATE _metadata SET value = '21' WHERE key = 'schema_version';",
+        )?;
+        c.execute(
+            "INSERT INTO _postings(table_name, field, term, doc_id, positions)
+             VALUES (?1, 'content', 'alpha', 1, X'00000000'),
+                    (?1, 'content', 'token', 1, X'01000000')",
+            [&table],
         )?;
         Ok(())
     })
@@ -294,6 +325,88 @@ fn gin_index_backfills_existing_rows_and_does_not_auto_index_other_text_columns(
 }
 
 #[test]
+fn sql_fts_mutations_store_one_cluster_row_for_a_common_term() {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("clustered-postings.db");
+    let engine = Engine::open(&db).unwrap();
+    engine
+        .sql(
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY, content TEXT NOT NULL)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE INDEX messages_content_gin ON messages USING gin (content)",
+            &[],
+        )
+        .unwrap();
+    let values = (1..=300)
+        .map(|id| format!("({id}, 'common token {id}')"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    engine
+        .sql(
+            &format!("INSERT INTO messages (id, content) VALUES {values}"),
+            &[],
+        )
+        .unwrap();
+
+    let hits = engine
+        .sql(
+            "SELECT id FROM messages
+              WHERE text_match(content, 'common')
+              ORDER BY id LIMIT 5",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(ids(&hits), vec![1, 2, 3, 4, 5]);
+    let table = physical_relation_name("messages");
+    let assert_common = |expected: i64| {
+        let connection = rusqlite::Connection::open(&db).unwrap();
+        let (rows, postings): (i64, i64) = connection
+            .query_row(
+                "SELECT COUNT(*), COALESCE(SUM(posting_count), 0)
+                   FROM _posting_clusters
+                  WHERE table_name = ?1 AND field = 'content' AND term = 'common'",
+                [&table],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(rows, 1);
+        assert_eq!(postings, expected);
+        let legacy_table: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                  WHERE type = 'table' AND name = '_postings'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_table, 0);
+    };
+    assert_common(300);
+
+    engine
+        .sql(
+            "UPDATE messages SET content = 'rare token' WHERE id = 1",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql("DELETE FROM messages WHERE id = 2", &[])
+        .unwrap();
+    assert_common(298);
+    let rare = engine
+        .sql(
+            "SELECT id FROM messages WHERE text_match(content, 'rare')",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(ids(&rare), vec![1]);
+}
+
+#[test]
 fn gin_index_backfills_existing_rows_with_text_primary_key() {
     let dir = TempDir::new().unwrap();
     let db = dir.path().join("uqa.db");
@@ -462,6 +575,70 @@ fn reopen_reuses_persisted_gin_postings_without_rebuilding() {
         .unwrap();
     assert_eq!(int_col(&alpha.rows[0], "n"), 1);
     assert_eq!(int_col(&beta.rows[0], "n"), 0);
+}
+
+#[test]
+fn reopen_migrates_valid_v21_postings_without_rebuilding_from_documents() {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("uqa-v21.db");
+    {
+        let eng = Engine::open(&db).unwrap();
+        eng.sql(
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY, content TEXT)",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "INSERT INTO messages (id, content) VALUES (1, 'alpha token')",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "CREATE INDEX idx_messages_content_gin ON messages USING gin (content)",
+            &[],
+        )
+        .unwrap();
+    }
+
+    rewrite_fts_tables_to_valid_v21_postings(&db, "messages");
+    let mut replacement = Document::new();
+    replacement.insert("content".into(), Value::Str("beta token".into()));
+    overwrite_document_body(&db, "messages", 1, &replacement);
+
+    let eng = Engine::open(&db).unwrap();
+    let alpha = eng
+        .sql(
+            "SELECT COUNT(*) AS n FROM messages WHERE text_match(content, 'alpha')",
+            &[],
+        )
+        .unwrap();
+    let beta = eng
+        .sql(
+            "SELECT COUNT(*) AS n FROM messages WHERE text_match(content, 'beta')",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(int_col(&alpha.rows[0], "n"), 1);
+    assert_eq!(int_col(&beta.rows[0], "n"), 0);
+
+    let connection = rusqlite::Connection::open(&db).unwrap();
+    let version: String = connection
+        .query_row(
+            "SELECT value FROM _metadata WHERE key = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, "22");
+    let migrated_rows: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM _posting_clusters
+              WHERE table_name = ?1 AND field = 'content'",
+            [physical_relation_name("messages")],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(migrated_rows, 2);
 }
 
 #[test]

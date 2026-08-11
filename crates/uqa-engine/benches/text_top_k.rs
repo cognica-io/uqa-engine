@@ -36,16 +36,19 @@ fn populate(engine: &Engine, count: u64) {
 fn bench_text_top_k(c: &mut Criterion) {
     let directory = tempdir().unwrap();
     let database_path = directory.path().join("text-top-k.sqlite3");
-    let engine = Engine::open(&database_path).unwrap();
-    populate(&engine, 5_000);
     let bmw_mode = ScoringMode::BM25(BM25Params::default());
-    engine
-        .rebuild_text_block_max("docs", "body", &bmw_mode)
-        .unwrap();
     let wand_mode = ScoringMode::BM25(BM25Params {
         k1: 1.6,
         ..BM25Params::default()
     });
+    {
+        let writer = Engine::open(&database_path).unwrap();
+        populate(&writer, 5_000);
+        writer
+            .rebuild_text_block_max("docs", "body", &bmw_mode)
+            .unwrap();
+    }
+    let engine = Engine::open(&database_path).unwrap();
 
     let query = "plan rust crate";
     let k = 10;

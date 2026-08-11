@@ -54,21 +54,21 @@ The runner writes `beir-observations.json`, Criterion artifacts below `target/cr
 
 ## Local reference run
 
-The 2026-08-11 implementation run used the complete pinned SciFact test workload on a local macOS arm64 host with rustc 1.90.0. The generated report identified a dirty implementation worktree and is therefore a functional local baseline rather than a release artifact or independent reproduction.
+The 2026-08-11 clustered-posting rerun used the complete pinned SciFact test workload on a local macOS arm64 host with rustc 1.90.0 and reused hash-validated prepared artifacts. The generated report identified a dirty implementation worktree and is therefore same-machine directional evidence rather than a release artifact or independent reproduction. Relative to the documented pre-cluster absolute baseline, the final point estimates changed by -29.7% for text, -5.7% for vector, and -13.4% for hybrid; a repeat against the immediately preceding clustered artifacts found no statistically significant text or vector change and a further 2.9% hybrid improvement.
 
-| Persistent SQL system | NDCG@10 | MAP@10 | Recall@10 | Mean/query | Queries/s |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `text_bm25` | 0.6860 | 0.6375 | 0.8193 | 20.13 ms | 49.7 |
-| `vector_hnsw` | 0.6451 | 0.5959 | 0.7833 | 2.87 ms | 348.0 |
-| `hybrid_positive_evidence` | 0.7259 | 0.6829 | 0.8422 | 56.49 ms | 17.7 |
+| Persistent SQL system | NDCG@10 | MAP@10 | Recall@10 | Previous | Clustered | Queries/s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `text_bm25` | 0.6860 | 0.6375 | 0.8193 | 20.13 ms | 14.16 ms | 70.6 |
+| `vector_hnsw` | 0.6451 | 0.5959 | 0.7833 | 2.87 ms | 2.71 ms | 369.3 |
+| `hybrid_positive_evidence` | 0.7259 | 0.6829 | 0.8422 | 56.49 ms | 48.91 ms | 20.4 |
 
-| Persistent SQL construction | Elapsed | Rows/s |
-| --- | ---: | ---: |
-| Table creation and parameterized load | 0.574 s | 9,037 |
-| GIN index | 4.012 s | 1,292 |
-| HNSW index | 12.042 s | 430 |
+| Persistent SQL construction | Previous | Clustered | Change | Rows/s |
+| --- | ---: | ---: | ---: | ---: |
+| Table creation and parameterized load | 0.574 s | 0.617 s | +7.4% | 8,406 |
+| GIN index | 4.012 s | 2.312 s | -42.4% | 2,242 |
+| HNSW index | 12.042 s | 12.242 s | +1.7% | 423 |
 
-The forced preparation used the benchmark-owned model cache and recorded 67.508 seconds for corpus embedding and 0.591 seconds for query embedding on CPU. The SciFact archive was already present and was SHA-256 validated as a cache hit during that final preparation, after an earlier same-session download established the cached input. An immediately preceding identical query run measured 19.81 ms, 2.55 ms, and 54.73 ms respectively, so the final absolute values include local load and frequency variation and are not a base/head regression gate.
+The report retains the original forced-preparation observations of 67.508 seconds for corpus embedding and 0.591 seconds for query embedding on CPU; the clustered rerun skipped both because every prepared identity and hash matched. Quality metrics remained bit-for-bit unchanged and every absolute and hybrid-relative gate passed. Construction timings are one-shot observations rather than distribution comparisons; only the text query and GIN paths are directly changed by the clustered posting implementation.
 
 ## Interpretation
 

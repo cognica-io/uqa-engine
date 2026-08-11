@@ -91,6 +91,12 @@ pub trait PersistentStorageBackend: Send + Sync {
 
     fn inverted_index(&self, table: &str, analyzer: Analyzer) -> Box<dyn InvertedIndex>;
 
+    /// Upgrade backend-owned inverted-index values before table handles are
+    /// restored. Implementations must make the rewrite atomic and idempotent.
+    fn migrate_inverted_index_storage(&self) -> StorageBackendResult<()> {
+        Ok(())
+    }
+
     fn vector_index(
         &self,
         table: &str,

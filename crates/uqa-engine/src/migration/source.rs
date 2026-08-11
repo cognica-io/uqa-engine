@@ -110,6 +110,8 @@ pub(super) fn ensure_destination_empty(destination: &Path) -> Result<(), PythonM
         "_tables",
         "_documents",
         "_postings",
+        "_posting_clusters",
+        "_posting_documents",
         "_vectors",
         "_named_graphs",
         "_graph_vertices",

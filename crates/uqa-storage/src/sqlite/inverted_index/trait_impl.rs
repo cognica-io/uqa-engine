@@ -7,12 +7,13 @@
 //! `InvertedIndex` trait implementation and read/statistics surface.
 
 use super::{
-    blob_to_positions, decode_index_u64, encode_index_u64, invalidate_block_max_tables, params,
-    params_from_iter, quote_ident, usize_to_index_u64, Analyzer, AnalyzerPhase, Arc, BTreeMap,
-    BTreeSet, BlockMaxScorer, DocId, FieldName, IndexStats, InvertedIndex, OptionalExtension,
-    Payload, PostingEntry, PostingList, SQLiteError, SQLiteInvertedIndex, SqlValue,
-    StorageBackendResult,
+    clustered_result, decode_index_u64, encode_index_u64, invalidate_block_max_tables, params,
+    params_from_iter, posting_cursor_from_rows, quote_ident, Analyzer, AnalyzerPhase, Arc,
+    BTreeMap, BTreeSet, BlockMaxScorer, DocId, FieldName, IndexStats, InvertedIndex,
+    OptionalExtension, Payload, PostingCursor, PostingEntry, PostingList, SQLiteError,
+    SQLiteInvertedIndex, SqlValue, StorageBackendResult,
 };
+use crate::clustered_postings::{cluster_id, decode_all_scores, decode_cluster};
 
 impl InvertedIndex for SQLiteInvertedIndex {
     fn analyzer(&self) -> &Analyzer {
@@ -36,7 +37,11 @@ impl InvertedIndex for SQLiteInvertedIndex {
             let tx = conn.savepoint()?;
             invalidate_block_max_tables(&tx, &self.table)?;
             tx.execute(
-                "DELETE FROM _postings WHERE table_name = ?1",
+                "DELETE FROM _posting_clusters WHERE table_name = ?1",
+                params![self.table],
+            )?;
+            tx.execute(
+                "DELETE FROM _posting_documents WHERE table_name = ?1",
                 params![self.table],
             )?;
             tx.execute(
@@ -63,25 +68,44 @@ impl InvertedIndex for SQLiteInvertedIndex {
     fn get_posting_list(&self, field: &str, term: &str) -> StorageBackendResult<PostingList> {
         Ok(self.conn.with(|c| {
             let mut stmt = c.prepare(
-                "SELECT doc_id, positions FROM _postings
+                "SELECT cluster_id, posting_count, score_blob, positions_blob
+                   FROM _posting_clusters
                      WHERE table_name = ?1 AND field = ?2 AND term = ?3
-                     ORDER BY doc_id",
+                     ORDER BY cluster_id",
             )?;
             let rows = stmt.query_map(params![self.table, field, term], |r| {
-                Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?))
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, Vec<u8>>(2)?,
+                    r.get::<_, Vec<u8>>(3)?,
+                ))
             })?;
             let mut entries = Vec::new();
             for row in rows {
-                let (doc_id, blob) = row?;
-                let positions = blob_to_positions(&blob)?;
-                entries.push(PostingEntry::new(
-                    decode_index_u64("document id", doc_id)?,
-                    Payload {
-                        positions,
-                        score: 0.0,
-                        fields: BTreeMap::new(),
-                    },
-                ));
+                let (stored_cluster, stored_count, score_blob, positions_blob) = row?;
+                let posting_cluster = decode_index_u64("posting cluster", stored_cluster)?;
+                let stored_count = decode_index_u64("posting count", stored_count)?;
+                let decoded = clustered_result(decode_cluster(
+                    posting_cluster,
+                    &score_blob,
+                    &positions_blob,
+                ))?;
+                if stored_count != decoded.len() as u64 {
+                    return Err(SQLiteError::StorageBackend(
+                        "corrupt clustered posting: stored posting count mismatch".into(),
+                    ));
+                }
+                entries.extend(decoded.into_iter().map(|entry| {
+                    PostingEntry::new(
+                        entry.doc_id,
+                        Payload {
+                            positions: entry.positions,
+                            score: 0.0,
+                            fields: BTreeMap::new(),
+                        },
+                    )
+                }));
             }
             Ok(PostingList::from_sorted_unchecked(entries))
         })?)
@@ -108,9 +132,10 @@ impl InvertedIndex for SQLiteInvertedIndex {
                     .collect::<Vec<_>>()
                     .join(", ");
                 let sql = format!(
-                    "SELECT term, doc_id, positions FROM _postings
+                    "SELECT term, cluster_id, posting_count, score_blob, positions_blob
+                       FROM _posting_clusters
                          WHERE table_name = ? AND field = ? AND term IN ({placeholders})
-                         ORDER BY term, doc_id"
+                         ORDER BY term, cluster_id"
                 );
                 let mut values = Vec::with_capacity(chunk.len() + 2);
                 values.push(SqlValue::Text(self.table.clone()));
@@ -118,22 +143,41 @@ impl InvertedIndex for SQLiteInvertedIndex {
                 values.extend(chunk.iter().cloned().map(SqlValue::Text));
                 let mut stmt = c.prepare(&sql)?;
                 let rows = stmt.query_map(params_from_iter(values), |r| {
-                    let term = r.get::<_, String>(0)?;
-                    let doc_id = r.get::<_, i64>(1)?;
-                    let blob = r.get::<_, Vec<u8>>(2)?;
-                    Ok((term, doc_id, blob))
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, i64>(2)?,
+                        r.get::<_, Vec<u8>>(3)?,
+                        r.get::<_, Vec<u8>>(4)?,
+                    ))
                 })?;
                 for row in rows {
-                    let (term, doc_id, blob) = row?;
-                    let entry = PostingEntry::new(
-                        decode_index_u64("document id", doc_id)?,
-                        Payload {
-                            positions: blob_to_positions(&blob)?,
-                            score: 0.0,
-                            fields: BTreeMap::new(),
-                        },
-                    );
-                    by_term.entry(term).or_default().push(entry);
+                    let (term, stored_cluster, stored_count, score_blob, positions_blob) = row?;
+                    let posting_cluster = decode_index_u64("posting cluster", stored_cluster)?;
+                    let stored_count = decode_index_u64("posting count", stored_count)?;
+                    let decoded = clustered_result(decode_cluster(
+                        posting_cluster,
+                        &score_blob,
+                        &positions_blob,
+                    ))?;
+                    if stored_count != decoded.len() as u64 {
+                        return Err(SQLiteError::StorageBackend(
+                            "corrupt clustered posting: stored posting count mismatch".into(),
+                        ));
+                    }
+                    by_term
+                        .entry(term)
+                        .or_default()
+                        .extend(decoded.into_iter().map(|entry| {
+                            PostingEntry::new(
+                                entry.doc_id,
+                                Payload {
+                                    positions: entry.positions,
+                                    score: 0.0,
+                                    fields: BTreeMap::new(),
+                                },
+                            )
+                        }));
                 }
             }
             Ok(by_term)
@@ -147,6 +191,84 @@ impl InvertedIndex for SQLiteInvertedIndex {
                 )
             })
             .collect())
+    }
+
+    fn posting_cursor(
+        &self,
+        field: &str,
+        term: &str,
+    ) -> StorageBackendResult<Box<dyn PostingCursor>> {
+        Ok(self.conn.with(|connection| {
+            let mut statement = connection.prepare_cached(
+                "SELECT cluster_id, posting_count, score_blob FROM _posting_clusters
+                  WHERE table_name = ?1 AND field = ?2 AND term = ?3
+                  ORDER BY cluster_id",
+            )?;
+            let rows = statement
+                .query_map(params![self.table, field, term], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Vec<u8>>(2)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            posting_cursor_from_rows(rows)
+        })?)
+    }
+
+    fn posting_cursors_bulk(
+        &self,
+        field: &str,
+        terms: &[String],
+    ) -> StorageBackendResult<Vec<Box<dyn PostingCursor>>> {
+        if terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        let unique_terms = terms.iter().cloned().collect::<BTreeSet<_>>();
+        let cursors = self.conn.with(|connection| {
+            let mut by_term = BTreeMap::<String, Vec<(i64, i64, Vec<u8>)>>::new();
+            let unique_terms = unique_terms.into_iter().collect::<Vec<_>>();
+            for chunk in unique_terms.chunks(900) {
+                let placeholders = std::iter::repeat_n("?", chunk.len())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sql = format!(
+                    "SELECT term, cluster_id, posting_count, score_blob FROM _posting_clusters
+                      WHERE table_name = ? AND field = ? AND term IN ({placeholders})
+                      ORDER BY term, cluster_id"
+                );
+                let mut values = Vec::with_capacity(chunk.len() + 2);
+                values.push(SqlValue::Text(self.table.clone()));
+                values.push(SqlValue::Text(field.to_string()));
+                values.extend(chunk.iter().cloned().map(SqlValue::Text));
+                let mut statement = connection.prepare(&sql)?;
+                let rows = statement.query_map(params_from_iter(values), |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, Vec<u8>>(3)?,
+                    ))
+                })?;
+                for row in rows {
+                    let (term, cluster_id, posting_count, score_blob) = row?;
+                    by_term
+                        .entry(term)
+                        .or_default()
+                        .push((cluster_id, posting_count, score_blob));
+                }
+            }
+            let mut cursors = BTreeMap::new();
+            for term in unique_terms {
+                cursors.insert(
+                    term.clone(),
+                    posting_cursor_from_rows(by_term.remove(&term).unwrap_or_default())?,
+                );
+            }
+            Ok(cursors)
+        })?;
+        Ok(terms.iter().map(|term| cursors[term].clone()).collect())
     }
 
     fn rebuild_persisted_block_max(
@@ -192,30 +314,18 @@ impl InvertedIndex for SQLiteInvertedIndex {
         term: &str,
         visit: &mut dyn FnMut(DocId, u64),
     ) -> StorageBackendResult<()> {
-        self.conn.with(|c| {
-            let mut stmt = c.prepare_cached(
-                "SELECT doc_id, positions FROM _postings
-                 WHERE table_name = ?1 AND field = ?2 AND term = ?3
-                 ORDER BY doc_id",
-            )?;
-            let mut rows = stmt.query(params![self.table, field, term])?;
-            while let Some(row) = rows.next()? {
-                let doc_id = decode_index_u64("document id", row.get::<_, i64>(0)?)?;
-                let positions = blob_to_positions(&row.get::<_, Vec<u8>>(1)?)?;
-                visit(
-                    doc_id,
-                    usize_to_index_u64("term frequency", positions.len())?,
-                );
-            }
-            Ok(())
-        })?;
+        let mut cursor = self.posting_cursor(field, term)?;
+        while let Some(entry) = cursor.current() {
+            visit(entry.doc_id, entry.term_freq);
+            cursor.advance()?;
+        }
         Ok(())
     }
 
     fn doc_freq(&self, field: &str, term: &str) -> StorageBackendResult<u64> {
         Ok(self.conn.with(|c| {
             let n: i64 = c.query_row(
-                "SELECT COUNT(*) FROM _postings
+                "SELECT COALESCE(SUM(posting_count), 0) FROM _posting_clusters
                      WHERE table_name = ?1 AND field = ?2 AND term = ?3",
                 params![self.table, field, term],
                 |r| r.get(0),
@@ -306,47 +416,44 @@ impl InvertedIndex for SQLiteInvertedIndex {
         for (position, doc_id) in doc_ids.iter().copied().enumerate() {
             output_positions.entry(doc_id).or_default().push(position);
         }
-        self.conn.with(|c| {
-            let mut stmt = c.prepare_cached(
-                "SELECT doc_id, positions
-                 FROM _postings
-                 WHERE table_name = ?1 AND field = ?2 AND term = ?3
-                 ORDER BY doc_id",
-            )?;
-            for (term_index, term) in terms.iter().enumerate() {
-                let mut rows = stmt.query(params![self.table, field, term])?;
-                while let Some(row) = rows.next()? {
-                    let doc_id = decode_index_u64("document id", row.get::<_, i64>(0)?)?;
-                    let term_freq = usize_to_index_u64(
-                        "term frequency",
-                        blob_to_positions(&row.get::<_, Vec<u8>>(1)?)?.len(),
-                    )?;
-                    if let Some(positions) = output_positions.get(&doc_id) {
-                        for position in positions {
-                            inputs[*position].1[term_index] = term_freq;
-                        }
+        for (term_index, mut cursor) in self
+            .posting_cursors_bulk(field, terms)?
+            .into_iter()
+            .enumerate()
+        {
+            while let Some(entry) = cursor.current() {
+                if let Some(positions) = output_positions.get(&entry.doc_id) {
+                    for position in positions {
+                        inputs[*position].1[term_index] = entry.term_freq;
+                        inputs[*position].0 = entry.doc_length;
                     }
                 }
+                cursor.advance()?;
             }
-            Ok(())
-        })?;
+        }
         Ok(inputs)
     }
 
     fn get_term_freq(&self, doc_id: DocId, field: &str, term: &str) -> StorageBackendResult<u64> {
-        let doc_id = encode_index_u64("document", doc_id)?;
+        let posting_cluster = encode_index_u64("posting cluster", cluster_id(doc_id))?;
         Ok(self.conn.with(|c| {
             let blob: Option<Vec<u8>> = c
                 .query_row(
-                    "SELECT positions FROM _postings
+                    "SELECT score_blob FROM _posting_clusters
                          WHERE table_name = ?1 AND field = ?2
-                            AND term = ?3 AND doc_id = ?4",
-                    params![self.table, field, term, doc_id],
+                            AND term = ?3 AND cluster_id = ?4",
+                    params![self.table, field, term, posting_cluster],
                     |r| r.get(0),
                 )
                 .optional()?;
             match blob {
-                Some(blob) => usize_to_index_u64("term frequency", blob_to_positions(&blob)?.len()),
+                Some(blob) => {
+                    let scores = clustered_result(decode_all_scores(cluster_id(doc_id), &blob))?;
+                    Ok(scores
+                        .binary_search_by_key(&doc_id, |entry| entry.doc_id)
+                        .ok()
+                        .map_or(0, |position| scores[position].term_freq))
+                }
                 None => Ok(0),
             }
         })?)
@@ -403,7 +510,7 @@ impl InvertedIndex for SQLiteInvertedIndex {
         // Pull all (field, term) doc-frequencies in one query.
         let pairs: Vec<(String, String, u64)> = self.conn.with(|c| {
             let mut stmt = c.prepare(
-                "SELECT field, term, COUNT(*) FROM _postings
+                "SELECT field, term, SUM(posting_count) FROM _posting_clusters
                      WHERE table_name = ?1
                      GROUP BY field, term",
             )?;
@@ -435,14 +542,15 @@ impl InvertedIndex for SQLiteInvertedIndex {
         Ok(self.conn.with(|c| {
             let n: i64 = if let Some(field) = field {
                 c.query_row(
-                    "SELECT COUNT(*) FROM _postings
+                    "SELECT COALESCE(SUM(posting_count), 0) FROM _posting_clusters
                          WHERE table_name = ?1 AND field = ?2",
                     params![self.table, field],
                     |r| r.get(0),
                 )?
             } else {
                 c.query_row(
-                    "SELECT COUNT(*) FROM _postings WHERE table_name = ?1",
+                    "SELECT COALESCE(SUM(posting_count), 0) FROM _posting_clusters
+                     WHERE table_name = ?1",
                     params![self.table],
                     |r| r.get(0),
                 )?
@@ -475,14 +583,14 @@ impl InvertedIndex for SQLiteInvertedIndex {
         Ok(self.conn.with(|c| {
             let n: i64 = if let Some(field) = field {
                 c.query_row(
-                    "SELECT COUNT(DISTINCT term) FROM _postings
+                    "SELECT COUNT(DISTINCT term) FROM _posting_clusters
                          WHERE table_name = ?1 AND field = ?2",
                     params![self.table, field],
                     |r| r.get(0),
                 )?
             } else {
                 c.query_row(
-                    "SELECT COUNT(DISTINCT term) FROM _postings WHERE table_name = ?1",
+                    "SELECT COUNT(DISTINCT term) FROM _posting_clusters WHERE table_name = ?1",
                     params![self.table],
                     |r| r.get(0),
                 )?

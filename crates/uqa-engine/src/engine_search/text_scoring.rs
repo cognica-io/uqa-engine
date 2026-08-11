@@ -65,14 +65,10 @@ impl Engine {
         mode: &ScoringMode,
     ) -> Result<Vec<ScoredEntry>, SQLError> {
         let term = &analyzed_terms[0];
-        let mut term_freqs: Vec<(DocId, u64)> = Vec::new();
-        index
-            .for_each_term_freq(field, term, &mut |doc_id, term_freq| {
-                term_freqs.push((doc_id, term_freq));
-            })
-            .map_err(|error| storage_sql_error("read term frequencies", error))?;
-        let document_frequency = u64::try_from(term_freqs.len())
-            .map_err(|_| SQLError::Internal("text-search document frequency exceeds u64".into()))?;
+        let mut cursor = index
+            .posting_cursor(field, term)
+            .map_err(|error| storage_sql_error("open term score cursor", error))?;
+        let document_frequency = cursor.doc_freq();
         let term_doc_freqs = [document_frequency];
         let stats = Arc::new(
             search_stats_for_terms(index, field, analyzed_terms, &term_doc_freqs)
@@ -80,21 +76,23 @@ impl Engine {
         );
         let scorer = Self::build_text_scorer(mode, stats, 1)?;
         let idf = scorer.idf(document_frequency);
-        let doc_ids: Vec<DocId> = term_freqs.iter().map(|(doc_id, _)| *doc_id).collect();
-        let doc_lengths = index
-            .get_doc_lengths_bulk(&doc_ids, field)
-            .map_err(|error| storage_sql_error("read document lengths", error))?;
-        Ok(term_freqs
-            .into_iter()
-            .map(|(doc_id, term_freq)| {
-                let doc_length = doc_lengths.get(&doc_id).copied().unwrap_or(0);
-                ScoredEntry {
-                    doc_id,
-                    score: scorer
-                        .finalize_score(&[scorer.term_score_with_idf(term_freq, doc_length, idf)]),
-                }
-            })
-            .collect())
+        let scored_capacity = usize::try_from(document_frequency)
+            .map_err(|_| SQLError::Internal("text document frequency exceeds usize".into()))?;
+        let mut entries = Vec::with_capacity(scored_capacity);
+        while let Some(entry) = cursor.current() {
+            entries.push(ScoredEntry {
+                doc_id: entry.doc_id,
+                score: scorer.finalize_score(&[scorer.term_score_with_idf(
+                    entry.term_freq,
+                    entry.doc_length.max(entry.term_freq),
+                    idf,
+                )]),
+            });
+            cursor
+                .advance()
+                .map_err(|error| storage_sql_error("advance term score cursor", error))?;
+        }
+        Ok(entries)
     }
 
     pub(super) fn score_multiple_text_terms(
@@ -103,32 +101,32 @@ impl Engine {
         analyzed_terms: &[String],
         mode: &ScoringMode,
     ) -> Result<Vec<ScoredEntry>, SQLError> {
-        let mut candidate_ids = BTreeSet::<DocId>::new();
         let mut present_terms = BTreeMap::<DocId, Vec<(usize, u64)>>::new();
-        let mut term_doc_freqs: Vec<u64> = Vec::with_capacity(analyzed_terms.len());
-        for (term_index, term) in analyzed_terms.iter().enumerate() {
-            let mut doc_freq = 0_u64;
-            let mut frequency_overflow = false;
-            index
-                .for_each_term_freq(field, term, &mut |doc_id, term_freq| {
-                    if let Some(next) = doc_freq.checked_add(1) {
-                        doc_freq = next;
-                    } else {
-                        frequency_overflow = true;
+        let mut candidate_lengths = BTreeMap::<DocId, u64>::new();
+        let mut term_doc_freqs = Vec::with_capacity(analyzed_terms.len());
+        let cursors = index
+            .posting_cursors_bulk(field, analyzed_terms)
+            .map_err(|error| storage_sql_error("open term score cursors", error))?;
+        for (term_index, mut cursor) in cursors.into_iter().enumerate() {
+            term_doc_freqs.push(cursor.doc_freq());
+            while let Some(entry) = cursor.current() {
+                let doc_length = entry.doc_length.max(entry.term_freq);
+                if let Some(previous) = candidate_lengths.insert(entry.doc_id, doc_length) {
+                    if previous != doc_length {
+                        return Err(SQLError::Internal(format!(
+                            "inconsistent indexed document length for document {}: {previous} and {doc_length}",
+                            entry.doc_id
+                        )));
                     }
-                    candidate_ids.insert(doc_id);
-                    present_terms
-                        .entry(doc_id)
-                        .or_default()
-                        .push((term_index, term_freq));
-                })
-                .map_err(|error| storage_sql_error("read term frequencies", error))?;
-            if frequency_overflow {
-                return Err(SQLError::Internal(
-                    "text-search document frequency exceeds u64".into(),
-                ));
+                }
+                present_terms
+                    .entry(entry.doc_id)
+                    .or_default()
+                    .push((term_index, entry.term_freq));
+                cursor
+                    .advance()
+                    .map_err(|error| storage_sql_error("advance term score cursor", error))?;
             }
-            term_doc_freqs.push(doc_freq);
         }
         let stats = Arc::new(
             search_stats_for_terms(index, field, analyzed_terms, &term_doc_freqs)
@@ -139,15 +137,10 @@ impl Engine {
             .iter()
             .map(|doc_freq| scorer.idf(*doc_freq))
             .collect();
-        let candidate_ids: Vec<DocId> = candidate_ids.into_iter().collect();
-        let doc_lengths = index
-            .get_doc_lengths_bulk(&candidate_ids, field)
-            .map_err(|error| storage_sql_error("read document lengths", error))?;
         let mut per_term = Vec::with_capacity(analyzed_terms.len());
-        Ok(candidate_ids
+        Ok(candidate_lengths
             .into_iter()
-            .map(|doc_id| {
-                let doc_length = doc_lengths.get(&doc_id).copied().unwrap_or(0);
+            .map(|(doc_id, doc_length)| {
                 per_term.clear();
                 for idf in &term_idfs {
                     per_term.push(scorer.term_score_with_idf(0, doc_length, *idf));

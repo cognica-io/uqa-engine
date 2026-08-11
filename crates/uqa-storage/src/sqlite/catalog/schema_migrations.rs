@@ -569,4 +569,9 @@ pub(super) const MIGRATIONS: &[(u32, &str)] = &[
     DROP TABLE _btree_v21_invalid;
     ",
     ),
+    // Replace one-row-per-document postings with bounded clustered values.
+    // The data-dependent rewrite is implemented in Rust so it can encode the
+    // shared binary format used by SQLite and redb without a temporary SQL
+    // scalar function.
+    (22, ""),
 ];

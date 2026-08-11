@@ -12,6 +12,7 @@ use super::{
     ManagedConnection, OptionalExtension, RelationIdentity, RelationKind, Result, SQLiteError,
     CURRENT_SCHEMA_VERSION, LEGACY_SEQUENCES_METADATA_KEY, LEGACY_VIEWS_METADATA_KEY, MIGRATIONS,
 };
+use crate::clustered_postings::{cluster_id, encode_cluster, encode_terms, ClusterPosting};
 
 pub(super) fn encode_catalog_id(kind: &str, id: u64) -> Result<i64> {
     i64::try_from(id).map_err(|_| {
@@ -23,6 +24,155 @@ pub(super) fn decode_catalog_id(kind: &str, id: i64) -> Result<u64> {
     u64::try_from(id).map_err(|_| {
         SQLiteError::StorageBackend(format!("corrupt catalog: negative {kind} id {id}"))
     })
+}
+
+fn decode_legacy_positions(blob: &[u8]) -> Result<Vec<u32>> {
+    if !blob.len().is_multiple_of(std::mem::size_of::<u32>()) {
+        return Err(SQLiteError::StorageBackend(
+            "cannot migrate malformed legacy posting positions".into(),
+        ));
+    }
+    Ok(blob
+        .chunks_exact(4)
+        .map(|chunk| u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect())
+}
+
+fn insert_migrated_cluster(
+    tx: &rusqlite::Transaction<'_>,
+    cluster: (String, String, String, u64, Vec<ClusterPosting>),
+) -> Result<()> {
+    let (table, field, term, cluster_id, postings) = cluster;
+    let (score_blob, positions_blob) = encode_cluster(&postings)
+        .map_err(|error| SQLiteError::StorageBackend(error.to_string()))?;
+    tx.execute(
+        "INSERT INTO _posting_clusters_v22
+            (table_name, field, term, cluster_id, posting_count,
+             score_blob, positions_blob)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            table,
+            field,
+            term,
+            encode_catalog_id("posting cluster", cluster_id)?,
+            encode_catalog_id("posting count", postings.len() as u64)?,
+            score_blob,
+            positions_blob
+        ],
+    )?;
+    Ok(())
+}
+
+fn insert_migrated_document_terms(
+    tx: &rusqlite::Transaction<'_>,
+    document: (String, i64, String, Vec<String>),
+) -> Result<()> {
+    let (table, doc_id, field, terms) = document;
+    let terms_blob =
+        encode_terms(&terms).map_err(|error| SQLiteError::StorageBackend(error.to_string()))?;
+    tx.execute(
+        "INSERT INTO _posting_documents_v22 (table_name, doc_id, field, terms_blob)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![table, doc_id, field, terms_blob],
+    )?;
+    Ok(())
+}
+
+fn migrate_legacy_clusters_v22(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    let mut statement = tx.prepare(
+        "SELECT posting.table_name, posting.field, posting.term,
+                posting.doc_id, posting.positions, lengths.length
+           FROM _postings AS posting
+           LEFT JOIN _doc_lengths AS lengths
+             ON lengths.table_name = posting.table_name
+            AND lengths.doc_id = posting.doc_id
+            AND lengths.field = posting.field
+          ORDER BY posting.table_name, posting.field, posting.term,
+                   posting.doc_id",
+    )?;
+    let mut rows = statement.query([])?;
+    let mut group: Option<(String, String, String, u64, Vec<ClusterPosting>)> = None;
+    while let Some(row) = rows.next()? {
+        let table = row.get::<_, String>(0)?;
+        let field = row.get::<_, String>(1)?;
+        let term = row.get::<_, String>(2)?;
+        let stored_doc_id = row.get::<_, i64>(3)?;
+        let doc_id = decode_catalog_id("posting document", stored_doc_id)?;
+        let positions = decode_legacy_positions(&row.get::<_, Vec<u8>>(4)?)?;
+        let stored_length = row.get::<_, Option<i64>>(5)?.ok_or_else(|| {
+            SQLiteError::StorageBackend(format!(
+                "cannot migrate posting `{table}.{field}.{term}` for document {doc_id}: missing document length"
+            ))
+        })?;
+        let doc_length = decode_catalog_id("posting document length", stored_length)?;
+        let next_cluster = cluster_id(doc_id);
+        let same_group = group.as_ref().is_some_and(
+            |(group_table, group_field, group_term, group_cluster, _)| {
+                group_table == &table
+                    && group_field == &field
+                    && group_term == &term
+                    && *group_cluster == next_cluster
+            },
+        );
+        if !same_group {
+            if let Some(cluster) = group.take() {
+                insert_migrated_cluster(tx, cluster)?;
+            }
+            group = Some((table, field, term, next_cluster, Vec::new()));
+        }
+        group
+            .as_mut()
+            .expect("migration group exists")
+            .4
+            .push(ClusterPosting {
+                doc_id,
+                term_freq: positions.len() as u64,
+                doc_length,
+                positions,
+            });
+    }
+    if let Some(cluster) = group {
+        insert_migrated_cluster(tx, cluster)?;
+    }
+    Ok(())
+}
+
+fn migrate_legacy_document_terms_v22(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    let mut statement = tx.prepare(
+        "SELECT table_name, doc_id, field, term
+           FROM _postings
+          ORDER BY table_name, doc_id, field, term",
+    )?;
+    let mut rows = statement.query([])?;
+    let mut group: Option<(String, i64, String, Vec<String>)> = None;
+    while let Some(row) = rows.next()? {
+        let table = row.get::<_, String>(0)?;
+        let doc_id = row.get::<_, i64>(1)?;
+        decode_catalog_id("posting document", doc_id)?;
+        let field = row.get::<_, String>(2)?;
+        let term = row.get::<_, String>(3)?;
+        let same_group =
+            group
+                .as_ref()
+                .is_some_and(|(group_table, group_doc_id, group_field, _)| {
+                    group_table == &table && *group_doc_id == doc_id && group_field == &field
+                });
+        if !same_group {
+            if let Some(document) = group.take() {
+                insert_migrated_document_terms(tx, document)?;
+            }
+            group = Some((table, doc_id, field, Vec::new()));
+        }
+        group
+            .as_mut()
+            .expect("migration document group exists")
+            .3
+            .push(term);
+    }
+    if let Some(document) = group {
+        insert_migrated_document_terms(tx, document)?;
+    }
+    Ok(())
 }
 
 #[derive(serde::Deserialize)]
@@ -588,6 +738,8 @@ impl Catalog {
                         Self::migrate_relation_namespace_v17(&tx)?;
                     } else if *version == 20 {
                         Self::migrate_legacy_hnsw_aliases_v20(&tx)?;
+                    } else if *version == 22 {
+                        Self::migrate_clustered_postings_v22(&tx)?;
                     } else if !schema_change_already_present && !sequence_called_already_present {
                         tx.execute_batch(sql)?;
                     }
@@ -611,6 +763,90 @@ impl Catalog {
         insert_relation_parents(tx, &migrations.seen)?;
         insert_relation_children(tx, &migrations)?;
         finish_sqlite_relation_migration(tx)
+    }
+
+    fn clustered_posting_tables_have_current_shape(conn: &rusqlite::Connection) -> Result<bool> {
+        let posting_clusters = Self::table_columns(conn, "_posting_clusters")?;
+        let posting_documents = Self::table_columns(conn, "_posting_documents")?;
+        let posting_clusters_ok = posting_clusters.as_ref().is_some_and(|cols| {
+            [
+                ("table_name", "TEXT"),
+                ("field", "TEXT"),
+                ("term", "TEXT"),
+                ("cluster_id", "INTEGER"),
+                ("posting_count", "INTEGER"),
+                ("score_blob", "BLOB"),
+                ("positions_blob", "BLOB"),
+            ]
+            .into_iter()
+            .all(|(column, expected)| {
+                cols.get(column)
+                    .is_some_and(|actual| actual.eq_ignore_ascii_case(expected))
+            })
+        });
+        let posting_documents_ok = posting_documents.as_ref().is_some_and(|cols| {
+            [
+                ("table_name", "TEXT"),
+                ("doc_id", "INTEGER"),
+                ("field", "TEXT"),
+                ("terms_blob", "BLOB"),
+            ]
+            .into_iter()
+            .all(|(column, expected)| {
+                cols.get(column)
+                    .is_some_and(|actual| actual.eq_ignore_ascii_case(expected))
+            })
+        });
+        Ok(posting_clusters_ok && posting_documents_ok)
+    }
+
+    fn migrate_clustered_postings_v22(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+        let legacy_postings_exist = table_exists(tx, "_postings")?;
+        if !legacy_postings_exist && Self::clustered_posting_tables_have_current_shape(tx)? {
+            return Ok(());
+        }
+
+        tx.execute_batch(
+            "
+            DROP TABLE IF EXISTS _posting_clusters_v22;
+            DROP TABLE IF EXISTS _posting_documents_v22;
+
+            CREATE TABLE _posting_clusters_v22 (
+                table_name    TEXT NOT NULL,
+                field         TEXT NOT NULL,
+                term          TEXT NOT NULL,
+                cluster_id    INTEGER NOT NULL,
+                posting_count INTEGER NOT NULL CHECK (posting_count > 0),
+                score_blob    BLOB NOT NULL,
+                positions_blob BLOB NOT NULL,
+                PRIMARY KEY (table_name, field, term, cluster_id)
+            ) WITHOUT ROWID;
+
+            CREATE TABLE _posting_documents_v22 (
+                table_name TEXT NOT NULL,
+                doc_id     INTEGER NOT NULL,
+                field      TEXT NOT NULL,
+                terms_blob BLOB NOT NULL,
+                PRIMARY KEY (table_name, doc_id, field)
+            ) WITHOUT ROWID;
+            ",
+        )?;
+
+        if legacy_postings_exist {
+            migrate_legacy_clusters_v22(tx)?;
+            migrate_legacy_document_terms_v22(tx)?;
+        }
+
+        tx.execute_batch(
+            "
+            DROP TABLE IF EXISTS _postings;
+            DROP TABLE IF EXISTS _posting_clusters;
+            DROP TABLE IF EXISTS _posting_documents;
+            ALTER TABLE _posting_clusters_v22 RENAME TO _posting_clusters;
+            ALTER TABLE _posting_documents_v22 RENAME TO _posting_documents;
+            ",
+        )?;
+        Ok(())
     }
 
     /// Correct historical `hnsw` catalog rows whose durable implementation is
@@ -767,15 +1003,10 @@ impl Catalog {
 
     pub(super) fn ensure_fts_storage_shape(conn: &rusqlite::Connection) -> Result<bool> {
         let doc_lengths = Self::table_columns(conn, "_doc_lengths")?;
-        let postings = Self::table_columns(conn, "_postings")?;
         let doc_lengths_ok = doc_lengths
             .as_ref()
             .is_some_and(|cols| cols.contains_key("field") && cols.contains_key("length"));
-        let postings_ok = postings.as_ref().is_some_and(|cols| {
-            cols.get("positions")
-                .is_some_and(|ty| ty.eq_ignore_ascii_case("BLOB"))
-        });
-        if doc_lengths_ok && postings_ok {
+        if doc_lengths_ok && Self::clustered_posting_tables_have_current_shape(conn)? {
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS _field_stats (
                     table_name   TEXT NOT NULL,
@@ -790,19 +1021,29 @@ impl Catalog {
         conn.execute_batch(
             "
             DROP TABLE IF EXISTS _postings;
+            DROP TABLE IF EXISTS _posting_clusters;
+            DROP TABLE IF EXISTS _posting_documents;
             DROP TABLE IF EXISTS _doc_lengths;
             DROP TABLE IF EXISTS _field_stats;
 
-            CREATE TABLE IF NOT EXISTS _postings (
+            CREATE TABLE _posting_clusters (
+                table_name     TEXT NOT NULL,
+                field          TEXT NOT NULL,
+                term           TEXT NOT NULL,
+                cluster_id     INTEGER NOT NULL,
+                posting_count  INTEGER NOT NULL CHECK (posting_count > 0),
+                score_blob     BLOB NOT NULL,
+                positions_blob BLOB NOT NULL,
+                PRIMARY KEY (table_name, field, term, cluster_id)
+            ) WITHOUT ROWID;
+
+            CREATE TABLE _posting_documents (
                 table_name TEXT NOT NULL,
-                field      TEXT NOT NULL,
-                term       TEXT NOT NULL,
                 doc_id     INTEGER NOT NULL,
-                positions  BLOB NOT NULL,
-                PRIMARY KEY (table_name, field, term, doc_id)
-            );
-            CREATE INDEX IF NOT EXISTS _postings_doc_idx
-                ON _postings (table_name, doc_id);
+                field      TEXT NOT NULL,
+                terms_blob BLOB NOT NULL,
+                PRIMARY KEY (table_name, doc_id, field)
+            ) WITHOUT ROWID;
 
             CREATE TABLE IF NOT EXISTS _doc_lengths (
                 table_name TEXT NOT NULL,

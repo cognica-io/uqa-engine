@@ -179,6 +179,85 @@ impl KeyValueStore for SQLiteKeyValueStore {
             .map_err(StorageBackendError::from)
     }
 
+    fn scan_prefix_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+    ) -> StorageBackendResult<Vec<(Vec<u8>, Vec<u8>)>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        self.ensure_table()?;
+        let upper = prefix_upper_bound(prefix);
+        let after = after.filter(|after| *after >= prefix);
+        let limit = i64::try_from(limit).map_err(|_| {
+            StorageBackendError::Other(format!(
+                "key/value cursor limit {limit} is outside SQLite's integer range"
+            ))
+        })?;
+        self.conn
+            .with(|connection| {
+                let mut output = Vec::new();
+                match (after, upper) {
+                    (Some(after), Some(upper)) => {
+                        let mut statement = connection.prepare_cached(&format!(
+                            "SELECT key, value FROM {KEY_VALUE_TABLE}
+                             WHERE key > ?1 AND key < ?2
+                             ORDER BY key LIMIT ?3"
+                        ))?;
+                        let rows = statement.query_map(params![after, upper, limit], |row| {
+                            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
+                        })?;
+                        for row in rows {
+                            output.push(row?);
+                        }
+                    }
+                    (Some(after), None) => {
+                        let mut statement = connection.prepare_cached(&format!(
+                            "SELECT key, value FROM {KEY_VALUE_TABLE}
+                             WHERE key > ?1
+                             ORDER BY key LIMIT ?2"
+                        ))?;
+                        let rows = statement.query_map(params![after, limit], |row| {
+                            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
+                        })?;
+                        for row in rows {
+                            output.push(row?);
+                        }
+                    }
+                    (None, Some(upper)) => {
+                        let mut statement = connection.prepare_cached(&format!(
+                            "SELECT key, value FROM {KEY_VALUE_TABLE}
+                             WHERE key >= ?1 AND key < ?2
+                             ORDER BY key LIMIT ?3"
+                        ))?;
+                        let rows = statement.query_map(params![prefix, upper, limit], |row| {
+                            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
+                        })?;
+                        for row in rows {
+                            output.push(row?);
+                        }
+                    }
+                    (None, None) => {
+                        let mut statement = connection.prepare_cached(&format!(
+                            "SELECT key, value FROM {KEY_VALUE_TABLE}
+                             WHERE key >= ?1
+                             ORDER BY key LIMIT ?2"
+                        ))?;
+                        let rows = statement.query_map(params![prefix, limit], |row| {
+                            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
+                        })?;
+                        for row in rows {
+                            output.push(row?);
+                        }
+                    }
+                }
+                Ok(output)
+            })
+            .map_err(StorageBackendError::from)
+    }
+
     fn scan_prefix_keys_after(
         &self,
         prefix: &[u8],

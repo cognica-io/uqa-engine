@@ -120,26 +120,31 @@ fn bulk_scoring_inputs_match_point_lookups_in_requested_order() {
 }
 
 #[test]
-fn negative_persisted_document_ids_are_rejected_by_every_posting_reader() {
+fn negative_persisted_cluster_ids_are_rejected_by_every_posting_reader() {
     let idx = idx();
     idx.conn
         .with(|connection| {
             connection.execute(
-                "INSERT INTO _postings
-                    (table_name, field, term, doc_id, positions)
-                 VALUES ('articles', 'title', 'rust', -1, ?1)",
-                [positions_to_blob(&[0]).unwrap()],
+                "INSERT INTO _posting_clusters
+                    (table_name, field, term, cluster_id, posting_count,
+                     score_blob, positions_blob)
+                 VALUES ('articles', 'title', 'rust', -1, 1, X'00', X'00')",
+                [],
             )?;
             Ok(())
         })
         .unwrap();
 
     let point_error = idx.get_posting_list("title", "rust").unwrap_err();
-    assert!(point_error.to_string().contains("negative document id -1"));
+    assert!(point_error
+        .to_string()
+        .contains("negative posting cluster -1"));
 
     let terms = vec!["rust".to_string()];
     let bulk_error = idx.get_posting_lists_bulk("title", &terms).unwrap_err();
-    assert!(bulk_error.to_string().contains("negative document id -1"));
+    assert!(bulk_error
+        .to_string()
+        .contains("negative posting cluster -1"));
 
     let mut visited = Vec::new();
     let visit_error = idx
@@ -147,7 +152,9 @@ fn negative_persisted_document_ids_are_rejected_by_every_posting_reader() {
             visited.push((doc_id, frequency));
         })
         .unwrap_err();
-    assert!(visit_error.to_string().contains("negative document id -1"));
+    assert!(visit_error
+        .to_string()
+        .contains("negative posting cluster -1"));
     assert!(visited.is_empty());
 
     let scoring_error = idx
@@ -155,7 +162,39 @@ fn negative_persisted_document_ids_are_rejected_by_every_posting_reader() {
         .unwrap_err();
     assert!(scoring_error
         .to_string()
-        .contains("negative document id -1"));
+        .contains("negative posting cluster -1"));
+}
+
+#[test]
+fn score_cursors_reject_a_mismatched_persisted_posting_count() {
+    let mut idx = idx();
+    idx.add_document(1, fields([("title", "rust language")]))
+        .unwrap();
+    idx.conn
+        .with(|connection| {
+            connection.execute(
+                "UPDATE _posting_clusters SET posting_count = 2
+                  WHERE table_name = 'articles' AND field = 'title' AND term = 'rust'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+    let point_error = idx
+        .posting_cursor("title", "rust")
+        .err()
+        .expect("mismatched point cursor count must fail");
+    assert!(point_error
+        .to_string()
+        .contains("stored count 2 disagrees with score blob count 1"));
+    let bulk_error = idx
+        .posting_cursors_bulk("title", &["rust".to_string()])
+        .err()
+        .expect("mismatched bulk cursor count must fail");
+    assert!(bulk_error
+        .to_string()
+        .contains("stored count 2 disagrees with score blob count 1"));
 }
 
 #[test]

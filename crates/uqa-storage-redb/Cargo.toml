@@ -18,6 +18,7 @@ redb = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.13"
+uqa-analysis = { workspace = true }
 
 [lints]
 workspace = true

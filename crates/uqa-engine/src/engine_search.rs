@@ -19,7 +19,7 @@ use super::{
 };
 use uqa_core::IndexStats;
 use uqa_operators::{OperatorTree, TextScoringMode, TextTopKPlan, TextTopKStrategy};
-use uqa_scoring::{BlockMaxWANDScorer, WANDQuery, WANDScorer, WANDStats};
+use uqa_scoring::{CursorBlockMaxWANDScorer, CursorWANDQuery, CursorWANDScorer, WANDStats};
 use uqa_storage::{BlockMaxIndex, DEFAULT_BLOCK_SIZE};
 
 mod calibration;

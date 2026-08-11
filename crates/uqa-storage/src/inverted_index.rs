@@ -18,6 +18,7 @@ use uqa_core::{DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList}
 
 use crate::backend::{StorageBackendError, StorageBackendResult};
 use crate::block_max_index::BlockMaxScorer;
+use crate::clustered_postings::{MaterializedPostingCursor, PostingCursor, PostingScore};
 
 mod contract;
 
@@ -387,6 +388,36 @@ impl InvertedIndex for MemoryInvertedIndex {
         };
         let entries: Vec<PostingEntry> = inner.values().cloned().collect();
         Ok(PostingList::from_sorted_unchecked(entries))
+    }
+
+    fn posting_cursor(
+        &self,
+        field: &str,
+        term: &str,
+    ) -> StorageBackendResult<Box<dyn PostingCursor>> {
+        let key = (field.to_string(), term.to_string());
+        let entries = self
+            .index
+            .get(&key)
+            .into_iter()
+            .flat_map(|postings| postings.values())
+            .map(|posting| {
+                let term_freq = usize_to_u64(posting.payload.positions.len(), "term frequency")?;
+                let doc_length = self
+                    .doc_lengths
+                    .get(&posting.doc_id)
+                    .and_then(|lengths| lengths.get(field))
+                    .copied()
+                    .unwrap_or(0)
+                    .max(term_freq);
+                Ok(PostingScore {
+                    doc_id: posting.doc_id,
+                    term_freq,
+                    doc_length,
+                })
+            })
+            .collect::<StorageBackendResult<Vec<_>>>()?;
+        Ok(Box::new(MaterializedPostingCursor::new(entries)?))
     }
 
     fn for_each_posting(
