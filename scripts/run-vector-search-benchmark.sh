@@ -22,6 +22,7 @@ mkdir -p "$workspace_root/target/benchmark-runs"
 
 UQA_VECTOR_BENCH_PROFILE="$profile" \
 UQA_VECTOR_QUALITY_OBSERVATIONS="$observations" \
+UQA_RETRIEVAL_BENCH_SUITE="sql-vector-search" \
   cargo bench -p uqa-engine --bench retrieval_workloads --locked -- \
   "sql_vector_search_query_batch/$profile" --noplot
 

@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "description": "Persistent SQLite hybrid-search benchmark over the BEIR SciFact test split with pinned sentence-transformer embeddings and SQL-only retrieval.",
+  "dataset": {
+    "name": "scifact",
+    "url": "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/scifact.zip",
+    "archive_sha256": "536e14446a0ba56ed1398ab1055f39fe852686ecad24a6306c80c490fa8e0165",
+    "qrels_split": "test",
+    "expected_corpus_count": 5183,
+    "expected_query_count": 300
+  },
+  "embedding": {
+    "provider": "sentence-transformers",
+    "package_version": "5.2.2",
+    "model": "sentence-transformers/all-MiniLM-L6-v2",
+    "revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+    "dimensions": 384,
+    "normalize_embeddings": true,
+    "device": "cpu",
+    "batch_size": 128,
+    "max_sequence_length": 256
+  },
+  "storage": {
+    "backend": "sqlite",
+    "persistent": true,
+    "reopened_before_query_phase": true
+  },
+  "execution": {
+    "api": "Engine::sql",
+    "load": "CREATE TABLE + parameterized batched INSERT",
+    "index_lifecycle": "SQL CREATE INDEX",
+    "text_query": "SELECT id, _score FROM beir_documents WHERE text_match(body, $1) ORDER BY _score DESC, id ASC LIMIT 10",
+    "vector_query": "SELECT id, _score FROM beir_documents WHERE knn_match(embedding, $2, 10) ORDER BY _score DESC, id ASC LIMIT 10",
+    "hybrid_query": "SELECT id, _score FROM beir_documents WHERE pool_positive_evidence(bayesian_match(body, $1), calibrated_vector_match(embedding, $2, 100), alpha => 0.5) ORDER BY _score DESC, id ASC LIMIT 10"
+  },
+  "indexes": [
+    {
+      "name": "sql_create_gin",
+      "kind": "gin",
+      "statement": "CREATE INDEX beir_documents_body_gin ON beir_documents USING gin (body)"
+    },
+    {
+      "name": "sql_create_hnsw",
+      "kind": "hnsw",
+      "statement": "CREATE INDEX beir_documents_embedding_hnsw ON beir_documents USING hnsw (embedding) WITH (m = 16, ef_construction = 128, ef_search = 512, rebuild_threshold = 1024, seed = 7)"
+    }
+  ],
+  "workload": {
+    "top_k": 10,
+    "knn_pool": 100,
+    "alpha": 0.5,
+    "quality_query_count": 300,
+    "performance_query_count": 25,
+    "insert_batch_rows": 64
+  },
+  "systems": [
+    {
+      "name": "text_bm25",
+      "query": "text_query",
+      "score_domain": "nonnegative",
+      "require_top_k": false,
+      "criterion_benchmark": "beir_hybrid_query_batch/scifact/text_bm25",
+      "minimum_quality": {"ndcg_at_10": 0.66, "map_at_10": 0.61, "recall_at_10": 0.79}
+    },
+    {
+      "name": "vector_hnsw",
+      "query": "vector_query",
+      "score_domain": "cosine",
+      "require_top_k": true,
+      "criterion_benchmark": "beir_hybrid_query_batch/scifact/vector_hnsw",
+      "minimum_quality": {"ndcg_at_10": 0.62, "map_at_10": 0.57, "recall_at_10": 0.75}
+    },
+    {
+      "name": "hybrid_positive_evidence",
+      "query": "hybrid_query",
+      "score_domain": "probability",
+      "require_top_k": true,
+      "criterion_benchmark": "beir_hybrid_query_batch/scifact/hybrid_positive_evidence",
+      "minimum_quality": {"ndcg_at_10": 0.70, "map_at_10": 0.65, "recall_at_10": 0.81}
+    }
+  ],
+  "comparative_quality": [
+    {
+      "name": "hybrid_ndcg_vs_best_single_signal",
+      "system": "hybrid_positive_evidence",
+      "metric": "ndcg_at_10",
+      "baseline_systems": ["text_bm25", "vector_hnsw"],
+      "minimum_delta": 0.02
+    },
+    {
+      "name": "hybrid_map_vs_best_single_signal",
+      "system": "hybrid_positive_evidence",
+      "metric": "map_at_10",
+      "baseline_systems": ["text_bm25", "vector_hnsw"],
+      "minimum_delta": 0.02
+    },
+    {
+      "name": "hybrid_recall_vs_best_single_signal",
+      "system": "hybrid_positive_evidence",
+      "metric": "recall_at_10",
+      "baseline_systems": ["text_bm25", "vector_hnsw"],
+      "minimum_delta": 0.01
+    }
+  ],
+  "measurement": {
+    "criterion_point_estimator": "mean",
+    "sample_size": 10,
+    "warm_up_seconds": 1,
+    "measurement_seconds": 3,
+    "query_throughput_unit": "queries_per_second"
+  }
+}

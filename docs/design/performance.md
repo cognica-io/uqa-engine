@@ -357,6 +357,30 @@ The 2026-08-10 `standard` run below used rustc 1.90.0 on the local 20-CPU arm64 
 
 Release verification ran all 257 `uqa-storage` library tests and 129 storage integration tests, all 217 `uqa-scoring` unit and integration tests, and all 157 enabled tests in the consolidated `uqa-engine` `engine_search` harness; its two explicit profiling probes remained ignored because Criterion supplied the measurements. The vector suite includes graph invariants, recall floors, tensor collapse, persistence, SQLite and Key/Value restore, and transactional mutation; text exactness tests compare WAND and BMW with exhaustive scoring. These local measurements establish a same-machine regression baseline, not cross-machine or competitive performance claims.
 
+### BEIR real-embedding hybrid suite
+
+The checked [BEIR benchmark](../../benchmarks/beir/README.md) is another opt-in module of the existing `uqa-engine` `retrieval_workloads` executable rather than a standalone target. Its single runner verifies the pinned SciFact archive SHA-256, loads the pinned `sentence-transformers/all-MiniLM-L6-v2` commit with `trust_remote_code=False`, generates normalized 384-dimensional CPU embeddings for all 5,183 documents and 300 test queries, loads a real SQLite file through parameterized SQL, creates GIN and HNSW through SQL, closes and reopens the database, and executes every text, vector, and hybrid quality and timed query through `Engine::sql`.
+
+```sh
+bash scripts/run-beir-benchmark.sh
+```
+
+The 2026-08-11 implementation run used rustc 1.90.0 on the local macOS arm64 workstation. The force-preparation pass downloaded the pinned model into the benchmark-owned cache and measured 67.508 seconds for corpus embedding plus 0.591 seconds for query embedding on CPU; the already-downloaded SciFact archive was revalidated as a SHA-256 cache hit. The final combined report identified a dirty implementation worktree, so these numbers establish the first functional local baseline and are not a release or independent reproduction.
+
+| Persistent SQL system, SciFact 5,183 documents and 300 queries | NDCG@10 | MAP@10 | Recall@10 | Mean/query | Queries/s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| BM25 `text_match` | 0.6860 | 0.6375 | 0.8193 | 20.13 ms | 49.7 |
+| HNSW `knn_match` | 0.6451 | 0.5959 | 0.7833 | 2.87 ms | 348.0 |
+| Positive-evidence hybrid | 0.7259 | 0.6829 | 0.8422 | 56.49 ms | 17.7 |
+
+| Persistent SQL construction stage | Elapsed | Rows/s |
+| --- | ---: | ---: |
+| SQL table creation and parameterized load | 0.574 s | 9,037 |
+| SQL GIN creation | 4.012 s | 1,292 |
+| SQL HNSW creation | 12.042 s | 430 |
+
+Hybrid exceeded the better single signal by 0.0399 NDCG@10, 0.0454 MAP@10, and 0.0229 Recall@10. The checked comparative floors require improvements of at least 0.02, 0.02, and 0.01 respectively, in addition to per-system absolute floors; this prevents a future result from retaining the hybrid label while silently collapsing to one signal. The quality pass uses all 300 qrels-backed queries, while Criterion measures a fixed 25-query warm batch and reports its mean divided by 25. The much higher hybrid latency reflects two calibrated candidate signals and positive-evidence fusion and is inside the measured SQL query boundary. An immediately preceding same-workload run measured 19.81 ms, 2.55 ms, and 54.73 ms per query; because no timed-path logic changed between those runs, their spread is retained as evidence that the local absolute values include load, thermal, frequency, and code-layout variation rather than serving as a standalone regression oracle.
+
 ## Reference numbers (post-optimization)
 
 | Workload | Bench | Median time |

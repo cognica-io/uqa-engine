@@ -90,7 +90,13 @@ For vector-index performance or quality changes, run the consolidated persistent
 bash scripts/run-vector-search-benchmark.sh
 ```
 
-The vector reporter requires a persistent SQLite identity, database reopen before every phase, `Engine::sql` queries, and SQL index lifecycle statements; it then gates recall, top-1 accuracy, result completeness, and shared cosine-score accuracy before accepting Criterion latency, throughput, and one-shot SQL construction measurements. Update [`benchmarks/vector-search/manifest.json`](benchmarks/vector-search/manifest.json), its [methodology](benchmarks/vector-search/README.md), and [`docs/design/performance.md`](docs/design/performance.md) whenever the workload identity, index parameters, metric definitions, estimator, or measured boundary changes.
+For hybrid relevance, run the consolidated persistent-SQL BEIR suite. Install the pinned dependency from `benchmarks/beir/requirements.txt` once; the runner then verifies and caches the SciFact archive and pinned MiniLM model, regenerates embeddings only when their identity changes, and gates all 300 test queries:
+
+```sh
+bash scripts/run-beir-benchmark.sh
+```
+
+The vector reporter requires a persistent SQLite identity, database reopen before every phase, `Engine::sql` queries, and SQL index lifecycle statements; it then gates recall, top-1 accuracy, result completeness, and shared cosine-score accuracy before accepting Criterion latency, throughput, and one-shot SQL construction measurements. The BEIR reporter independently requires pinned real data and embeddings, persistent SQLite, SQL load and index DDL, reopen, SQL-only text/vector/hybrid queries, absolute NDCG/MAP/Recall floors, and hybrid improvement over the best single signal. Update the matching manifest, methodology README, and [`docs/design/performance.md`](docs/design/performance.md) whenever either workload identity, parameters, metric definitions, estimator, or measured boundary changes.
 
 Record the statistic, iteration count, hardware class, toolchain, fixture identity, and whether compared runs were interleaved. Do not present a debug build, a `--quick` estimate, a sum of medians, or a non-interleaved cross-engine ratio as a regression gate. Update [`benchmarks/tpch/README.md`](benchmarks/tpch/README.md) and [`docs/design/performance.md`](docs/design/performance.md) when a measured execution boundary changes.
 

@@ -92,6 +92,8 @@ cargo deny --workspace check
 
 The `relevance` bench under `crates/uqa-engine/benches/relevance.rs` replays the same BEIR fixture used by the relevance gate, prints the mean NDCG@K and MAP@K it observed, and asserts both stay at or above the floors in the fixture. Running it locally is the cheapest way to catch a ranking regression _before_ it reaches the test suite, since the bench output makes any drift visible numerically.
 
+The external-data [BEIR hybrid benchmark](../../benchmarks/beir/README.md) is separate from this small committed parity fixture. Its single runner downloads the pinned SciFact archive, generates real pinned MiniLM embeddings, loads a persistent SQLite database through SQL, creates GIN and HNSW through SQL, reopens the database, and evaluates every text, vector, and positive-evidence hybrid query through `Engine::sql`; its generated data remains under `target` rather than inflating the regression fixture or test executable set.
+
 `cargo deny check` reads `deny.toml` at the repo root and gates four dimensions: known security advisories, license allowlist drift, banned crates / wildcards, and unknown registries or git sources. Install it once with `cargo install cargo-deny --locked`. The first invocation will report any newly transitively pulled-in license that is not yet on the allowlist; either add the license to `deny.toml` after a human review, or replace the offending dep.
 
 ## libfuzzer / cargo fuzz (nightly cron)

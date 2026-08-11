@@ -6,6 +6,7 @@
 
 //! Unified index-build and warm-search benchmark for text, vector, graph, and hybrid retrieval, including persistent end-to-end SQL vector quality and performance cases.
 
+use std::env;
 use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion, Throughput};
@@ -15,8 +16,12 @@ use uqa_engine::{Engine, HybridSearchParams};
 use uqa_graph::{GraphStore, MemoryGraphStore, PathIndex, VertexMatch};
 use uqa_sql::SQLParam;
 
+#[path = "retrieval_workloads/beir_hybrid_search.rs"]
+mod beir_hybrid_search;
 #[path = "retrieval_workloads/sql_vector_search.rs"]
 mod sql_vector_search;
+
+const SUITE_ENV: &str = "UQA_RETRIEVAL_BENCH_SUITE";
 
 const INDEX_ROWS: usize = 2_000;
 const SEARCH_ROWS: usize = 4_000;
@@ -270,9 +275,26 @@ fn bench_search(c: &mut Criterion) {
 }
 
 fn benches(c: &mut Criterion) {
-    bench_index_build(c);
-    bench_search(c);
-    sql_vector_search::bench_sql_vector_search(c);
+    match env::var(SUITE_ENV).as_deref() {
+        Err(env::VarError::NotPresent) | Ok("all") => {
+            bench_index_build(c);
+            bench_search(c);
+            sql_vector_search::bench_sql_vector_search(c);
+            if env::var_os(beir_hybrid_search::DATA_DIR_ENV).is_some() {
+                beir_hybrid_search::bench_beir_hybrid_search(c);
+            }
+        }
+        Ok("core") => {
+            bench_index_build(c);
+            bench_search(c);
+        }
+        Ok("sql-vector-search") => sql_vector_search::bench_sql_vector_search(c),
+        Ok("beir") => beir_hybrid_search::bench_beir_hybrid_search(c),
+        Ok(other) => {
+            panic!("unknown {SUITE_ENV}={other:?}; expected all, core, sql-vector-search, or beir")
+        }
+        Err(error) => panic!("cannot read {SUITE_ENV}: {error}"),
+    }
 }
 
 criterion_group!(retrieval_benches, benches);

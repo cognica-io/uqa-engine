@@ -55,6 +55,7 @@ duckdb = { workspace = true }
 arrow-array = { workspace = true }
 arrow-ipc = { workspace = true }
 arrow-schema = { workspace = true }
+sha2 = { workspace = true }
 
 [[test]]
 name = "engine_catalog"

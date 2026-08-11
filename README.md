@@ -188,6 +188,13 @@ Run the optimized persistent SQL vector-search performance and exact-ground-trut
 bash scripts/run-vector-search-benchmark.sh
 ```
 
+Run the real-data BEIR hybrid-search benchmark after installing its pinned Python embedding dependency. The runner downloads and verifies SciFact, generates MiniLM embeddings, loads a persistent SQLite file through SQL, creates GIN and HNSW indexes through SQL, reopens it, and executes all BM25, vector, and hybrid queries through `Engine::sql`:
+
+```sh
+python3 -m pip install -r benchmarks/beir/requirements.txt
+bash scripts/run-beir-benchmark.sh
+```
+
 The combined report includes exact, IVF, and HNSW SQL query latency and throughput, SQL load and index-construction throughput, recall@10, top-1 accuracy, MRR@10, exact top-k set rate, and cosine-score error. Pass `smoke` or `large` to select the 10,000-row or 1,000,000-row profile; the deterministic workload, measured boundary, metric definitions, quality floors, output files, and limitations are documented in the [vector-search benchmark](benchmarks/vector-search/README.md).
 
 Integration tests are consolidated into a small set of domain harnesses so a workspace test does not pay one linker and process-startup cost per source file. Individual modules remain directly selectable during development:

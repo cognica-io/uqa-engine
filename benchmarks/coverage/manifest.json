@@ -80,6 +80,7 @@
     {
       "path": "crates/uqa-engine/benches/retrieval_workloads.rs",
       "tokens": [
+        "beir_hybrid_search::bench_beir_hybrid_search",
         "retrieval_index_build",
         "retrieval_search",
         "sql_vector_search::bench_sql_vector_search"
