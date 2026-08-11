@@ -10,7 +10,7 @@ use super::input::{runtime_error, scoring_mode};
 use super::results::{cypher_result, search_hits, CalibrationReport, SQLResult, SearchHit};
 use super::{
     Arc, BTreeMap, CoreCalibrationReport, CoreEngine, CoreSQLParam, CoreSQLResult, Env,
-    HybridSearchParams, Result, ScoredEntry, Task, Value,
+    HybridSearchParams, Result, RobustHybridSearchParams, ScoredEntry, Task, Value,
 };
 
 // ---------------------------------------------------------------------
@@ -146,7 +146,6 @@ pub struct HybridSearchTask {
     pub(super) query_vector: Vec<f32>,
     pub(super) top_k: usize,
     pub(super) knn_pool: usize,
-    pub(super) alpha: f64,
 }
 
 impl Task for HybridSearchTask {
@@ -161,10 +160,46 @@ impl Task for HybridSearchTask {
             vector_field: &self.vector_field,
             query_vector: self.query_vector.clone(),
             knn_pool: self.knn_pool,
-            alpha: self.alpha,
             top_k: self.top_k,
         };
         self.engine.hybrid_search(&params).map_err(runtime_error)
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        search_hits(output)
+    }
+}
+
+pub struct RobustHybridSearchTask {
+    pub(super) engine: Arc<CoreEngine>,
+    pub(super) table: String,
+    pub(super) text_field: String,
+    pub(super) text_query: String,
+    pub(super) vector_field: String,
+    pub(super) query_vector: Vec<f32>,
+    pub(super) top_k: usize,
+    pub(super) knn_pool: usize,
+    pub(super) alpha: f64,
+}
+
+impl Task for RobustHybridSearchTask {
+    type Output = Vec<ScoredEntry>;
+    type JsValue = Vec<SearchHit>;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let params = RobustHybridSearchParams {
+            table: &self.table,
+            text_field: &self.text_field,
+            text_query: &self.text_query,
+            vector_field: &self.vector_field,
+            query_vector: self.query_vector.clone(),
+            knn_pool: self.knn_pool,
+            alpha: self.alpha,
+            top_k: self.top_k,
+        };
+        self.engine
+            .robust_hybrid_search(&params)
+            .map_err(runtime_error)
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {

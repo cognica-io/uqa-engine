@@ -8,8 +8,9 @@
 
 use super::{
     choose_access_path, optimize_command, optimize_scalar_slot, prioritize_access_predicates,
-    AggregateClassifier, ComputePlan, OptimizerConfig, QueryBlockPlan, QueryPlan, RelationalPlan,
-    SourcePlan, UnifiedPlan,
+    rewrite_implicit_hybrid_fusion, source_allows_unqualified_signals, AggregateClassifier,
+    ComputePlan, OptimizerConfig, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan,
+    UnifiedPlan,
 };
 
 pub(super) fn optimize_unified_plan(
@@ -86,6 +87,8 @@ pub(super) fn optimize_query_block(
     }
     if let Some(predicate) = &mut block.r#where {
         optimize_scalar_slot(predicate, config);
+        let allow_unqualified_signals = source_allows_unqualified_signals(block.from.as_ref());
+        rewrite_implicit_hybrid_fusion(predicate, allow_unqualified_signals);
         if config.enable_filter_pushdown {
             prioritize_access_predicates(predicate);
         }

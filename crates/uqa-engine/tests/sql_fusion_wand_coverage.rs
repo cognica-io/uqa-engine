@@ -68,11 +68,11 @@ fn hybrid_engine() -> Engine {
 }
 
 #[test]
-fn test_log_odds_fusion_with_limit() {
+fn test_positive_evidence_pool_fusion_with_limit() {
     let result = engine()
         .sql(
             "SELECT * FROM docs WHERE \
-             fuse_log_odds(bayesian_match(content, 'learning'), \
+             pool_positive_evidence(bayesian_match(content, 'learning'), \
              bayesian_match(content, 'algorithms')) LIMIT 1",
             &[],
         )
@@ -85,7 +85,7 @@ fn test_fusion_result_scores() {
     let result = engine()
         .sql(
             "SELECT content, _score FROM docs WHERE \
-             fuse_log_odds(bayesian_match(content, 'learning'), \
+             pool_positive_evidence(bayesian_match(content, 'learning'), \
              bayesian_match(content, 'algorithms'))",
             &[],
         )
@@ -100,13 +100,13 @@ fn test_fusion_result_scores() {
 }
 
 #[test]
-fn test_log_odds_fusion_with_default_alpha_and_filter() {
+fn test_positive_evidence_pool_fusion_with_default_alpha_and_filter() {
     let engine = hybrid_engine();
 
     let result = engine
         .sql(
             "SELECT kind, _score FROM messages WHERE \
-             fuse_log_odds(\
+             pool_positive_evidence(\
                  bayesian_match(content, 'learning'), \
                  knn_match(embedding, ARRAY[0.9, 0.1], 3)\
              ) AND kind = 'chat' \
@@ -127,12 +127,12 @@ fn test_log_odds_fusion_with_default_alpha_and_filter() {
 }
 
 #[test]
-fn test_log_odds_fusion_inside_derived_table() {
+fn test_positive_evidence_pool_fusion_inside_derived_table() {
     let result = hybrid_engine()
         .sql(
             "SELECT id, _score FROM (\
                SELECT id, _score FROM messages WHERE \
-               fuse_log_odds(\
+               pool_positive_evidence(\
                    bayesian_match(content, 'learning'), \
                    knn_match(embedding, ARRAY[0.9, 0.1], 3)\
                ) AND kind = 'chat'\
@@ -153,18 +153,18 @@ fn test_log_odds_fusion_inside_derived_table() {
 }
 
 #[test]
-fn test_log_odds_fusion_inside_union_branch() {
+fn test_positive_evidence_pool_fusion_inside_union_branch() {
     let result = hybrid_engine()
         .sql(
             "SELECT source, id, _score FROM (\
                SELECT 'a' AS source, id, _score FROM messages WHERE \
-               fuse_log_odds(\
+               pool_positive_evidence(\
                    bayesian_match(content, 'learning'), \
                    knn_match(embedding, ARRAY[0.9, 0.1], 3)\
                ) AND kind = 'chat' \
                UNION ALL \
                SELECT 'b' AS source, id, _score FROM messages WHERE \
-               fuse_log_odds(\
+               pool_positive_evidence(\
                    bayesian_match(content, 'indexing'), \
                    knn_match(embedding, ARRAY[0.1, 0.9], 3)\
                ) AND kind = 'chat'\
@@ -186,18 +186,18 @@ fn test_log_odds_fusion_inside_union_branch() {
 }
 
 #[test]
-fn test_log_odds_fusion_preserves_parameter_projection_inside_union_branch() {
+fn test_positive_evidence_pool_fusion_preserves_parameter_projection_inside_union_branch() {
     let result = hybrid_engine()
         .sql(
             "SELECT source, id, _score FROM (\
                SELECT $1 AS source, id, _score FROM messages WHERE \
-               fuse_log_odds(\
+               pool_positive_evidence(\
                    bayesian_match(content, 'learning'), \
                    knn_match(embedding, ARRAY[0.9, 0.1], 3)\
                ) AND kind = 'chat' \
                UNION ALL \
                SELECT $2 AS source, id, _score FROM messages WHERE \
-               fuse_log_odds(\
+               pool_positive_evidence(\
                    bayesian_match(content, 'indexing'), \
                    knn_match(embedding, ARRAY[0.1, 0.9], 3)\
                ) AND kind = 'chat'\
@@ -222,12 +222,12 @@ fn test_log_odds_fusion_preserves_parameter_projection_inside_union_branch() {
 }
 
 #[test]
-fn test_log_odds_fusion_preserves_every_multi_union_batch_branch() {
+fn test_positive_evidence_pool_fusion_preserves_every_multi_union_batch_branch() {
     let result = hybrid_engine()
         .sql(
             "SELECT 0 AS query_index, id, _score FROM (\
                SELECT id, _score FROM messages WHERE \
-               fuse_log_odds(\
+               pool_positive_evidence(\
                    bayesian_match(content, $1), \
                    knn_match(embedding, $2, 3)\
                ) AND kind = 'chat' ORDER BY _score DESC LIMIT 1\
@@ -235,7 +235,7 @@ fn test_log_odds_fusion_preserves_every_multi_union_batch_branch() {
              UNION ALL \
              SELECT 1 AS query_index, id, _score FROM (\
                SELECT id, _score FROM messages WHERE \
-               fuse_log_odds(\
+               pool_positive_evidence(\
                    bayesian_match(content, $3), \
                    knn_match(embedding, $4, 3)\
                ) AND kind = 'chat' ORDER BY _score DESC LIMIT 1\
@@ -243,7 +243,7 @@ fn test_log_odds_fusion_preserves_every_multi_union_batch_branch() {
              UNION ALL \
              SELECT 2 AS query_index, id, _score FROM (\
                SELECT id, _score FROM messages WHERE \
-               fuse_log_odds(\
+               pool_positive_evidence(\
                    bayesian_match(content, $5), \
                    knn_match(embedding, $6, 3)\
                ) AND kind = 'chat' ORDER BY _score DESC LIMIT 1\
@@ -251,7 +251,7 @@ fn test_log_odds_fusion_preserves_every_multi_union_batch_branch() {
              UNION ALL \
              SELECT 3 AS query_index, id, _score FROM (\
                SELECT id, _score FROM messages WHERE \
-               fuse_log_odds(\
+               pool_positive_evidence(\
                    bayesian_match(content, $7), \
                    knn_match(embedding, $8, 3)\
                ) AND kind = 'chat' ORDER BY _score DESC LIMIT 1\
@@ -282,13 +282,13 @@ fn test_log_odds_fusion_preserves_every_multi_union_batch_branch() {
 }
 
 #[test]
-fn test_log_odds_fusion_inside_join_filter() {
-    let engine = setup_log_odds_join_filter_engine();
+fn test_positive_evidence_pool_fusion_inside_join_filter() {
+    let engine = setup_positive_evidence_pool_join_filter_engine();
 
     let single_table = engine
         .sql(
             "SELECT doc_id, _score FROM doc_chunks \
-             WHERE fuse_log_odds(\
+             WHERE pool_positive_evidence(\
                  bayesian_match(content, 'learning'), \
                  knn_match(embedding, ARRAY[0.9, 0.1], 3)\
              ) \
@@ -315,7 +315,7 @@ fn test_log_odds_fusion_inside_join_filter() {
             "SELECT hits.doc_id AS doc_id, d.public_id AS public_id, hits._score AS _score \
              FROM (\
                SELECT doc_id, _score FROM doc_chunks \
-               WHERE fuse_log_odds(\
+               WHERE pool_positive_evidence(\
                    bayesian_match(content, 'learning'), \
                    knn_match(embedding, ARRAY[0.9, 0.1], 3)\
                )\
@@ -333,7 +333,7 @@ fn test_log_odds_fusion_inside_join_filter() {
             "SELECT d.attached_message_id AS attached_message_id, _score \
              FROM doc_chunks c \
              JOIN docs d ON d.public_id = c.doc_id \
-             WHERE fuse_log_odds(\
+             WHERE pool_positive_evidence(\
                  bayesian_match(c.content, 'learning'), \
                  knn_match(c.embedding, ARRAY[0.9, 0.1], 3)\
              ) \
@@ -354,7 +354,7 @@ fn test_log_odds_fusion_inside_join_filter() {
     }
 }
 
-fn setup_log_odds_join_filter_engine() -> Engine {
+fn setup_positive_evidence_pool_join_filter_engine() -> Engine {
     let engine = Engine::new();
     engine
         .sql(
@@ -400,11 +400,11 @@ fn setup_log_odds_join_filter_engine() -> Engine {
 }
 
 #[test]
-fn test_log_odds_with_gating_relu() {
+fn test_positive_evidence_pool_with_gating_relu() {
     let result = engine()
         .sql(
             "SELECT * FROM docs WHERE \
-             fuse_log_odds(bayesian_match(content, 'learning'), \
+             pool_positive_evidence(bayesian_match(content, 'learning'), \
              bayesian_match(content, 'algorithms'), 0.5, 'relu')",
             &[],
         )
@@ -413,11 +413,11 @@ fn test_log_odds_with_gating_relu() {
 }
 
 #[test]
-fn test_log_odds_with_gating_swish() {
+fn test_positive_evidence_pool_with_gating_swish() {
     let result = engine()
         .sql(
             "SELECT * FROM docs WHERE \
-             fuse_log_odds(bayesian_match(content, 'learning'), \
+             pool_positive_evidence(bayesian_match(content, 'learning'), \
              bayesian_match(content, 'algorithms'), 'swish')",
             &[],
         )
@@ -464,12 +464,12 @@ fn evidence_calibration(
 }
 
 #[test]
-fn test_log_odds_fuses_prior_free_evidence_with_the_prior_once() {
+fn test_positive_evidence_pool_fuses_prior_free_evidence_with_the_prior_once() {
     let engine = engine();
     let result = engine
         .sql(
             "SELECT id, _score FROM docs WHERE \
-             fuse_log_odds(bayesian_match(content, 'learning'), \
+             pool_positive_evidence(bayesian_match(content, 'learning'), \
              bayesian_match(content, 'algorithms'))",
             &[],
         )
@@ -605,12 +605,12 @@ fn uninformative_vector_evidence_adds_no_membership_bonus() {
 }
 
 #[test]
-fn test_log_odds_weights_and_bounds_follow_signal_reordering() {
+fn test_positive_evidence_pool_weights_and_bounds_follow_signal_reordering() {
     let engine = engine();
     let result = engine
         .sql(
             "SELECT id, _score FROM docs WHERE \
-             fuse_log_odds(bayesian_match(content, 'learning'), \
+             pool_positive_evidence(bayesian_match(content, 'learning'), \
              bayesian_match(content, 'algorithms'), \
              weights => ARRAY[0.8, 0.2], \
              logit_min => ARRAY[-4.0, -1.0], \

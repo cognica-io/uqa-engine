@@ -62,13 +62,35 @@ The `k` argument defines the support delivered by the vector leaf. A later relat
 
 With no vector index, KNN is an exact brute-force cosine scan. IVF and HNSW are approximate physical paths. A `TENSOR(n)` row uses its best element score.
 
+## Automatic hybrid fusion
+
+A direct `AND` conjunction that contains at least one supported text signal and at least one supported vector signal from the same relation is a hybrid retrieval request. The planner replaces those retrieval leaves with one `fuse_bayesian_evidence` node, calibrates `text_match` as Bayesian BM25 at the fusion boundary, converts the KNN query pool to prior-free vector evidence, and leaves every ordinary relational conjunct as a strict filter over the fused support.
+
+```sql
+SELECT id, title, _score
+FROM documents
+WHERE text_match(body, 'rust database')
+  AND knn_match(embedding, $1, 200)
+  AND status = 'published'
+ORDER BY _score DESC, id ASC
+LIMIT 20;
+```
+
+The automatic policy treats text and vector modalities as conditionally independent evidence. It removes each signal-local prior, adds their signed evidence in log-odds space, and applies the resolved corpus relevance prior exactly once. Signals qualified by different relations are never fused, unqualified fields are eligible only in a single-source query block, a joined query must qualify all inferred signals with the same relation alias, and two text leaves or two vector leaves retain their ordinary Boolean behavior.
+
+The log-odds combination is exact under that contract; the KNN likelihood-ratio evidence remains an unsupervised estimate fitted from the selected query pool rather than a held-out probability calibration guarantee.
+
+The supported automatic text leaves are `text_match` and `bayesian_match`; the supported vector leaves are `knn_match` and `calibrated_vector_match`. A prior-bearing leaf such as `bayesian_match_with_prior` is not inferred as independent evidence because its document-level prior cannot be removed as one corpus constant.
+
+Write a fusion function explicitly to override the default policy, select robust positive-evidence pooling, use learned or attention fusion, or provide fusion options. An explicit fusion node is preserved and is never wrapped in another automatic fusion node.
+
 ## Fusion functions
 
 | Function | Contract |
 | --- | --- |
-| `fuse_bayesian_evidence(...)` | Exact prior plus prior-free evidence accumulation in log-odds space |
+| `fuse_bayesian_evidence(...)` | Exact prior plus prior-free evidence accumulation in log-odds space; conflicting inferred priors require an explicit `base_rate` |
 | `pool_positive_evidence(...)` | Robust positive-evidence heuristic with gating |
-| `fuse_log_odds(...)` | Compatibility ranking heuristic |
+| `fuse_log_odds(...)` | Exact alias for `fuse_bayesian_evidence(...)` |
 | `attention`, `fuse_attention`, `fuse_multihead` | Attention-based signal fusion |
 | `learned_fusion`, `fuse_learned` | Registered learned fusion model |
 

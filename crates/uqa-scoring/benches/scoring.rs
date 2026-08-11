@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use uqa_scoring::{
-    prob::log_odds_conjunction_weighted, BM25Params, BM25Scorer, BayesianBM25Params,
+    prob::confidence_scaled_log_odds_pool_weighted, BM25Params, BM25Scorer, BayesianBM25Params,
     BayesianBM25Scorer, RawBm25Score, VectorScorer,
 };
 
@@ -139,8 +139,8 @@ fn bench_vector_scoring(c: &mut Criterion) {
     });
 }
 
-fn bench_log_odds_fusion(c: &mut Criterion) {
-    let mut group = c.benchmark_group("log_odds_fusion");
+fn bench_confidence_scaled_log_odds_pool(c: &mut Criterion) {
+    let mut group = c.benchmark_group("confidence_scaled_log_odds_pool");
     for n_signals in [2_usize, 3, 5, 10] {
         let probs: Vec<f64> = (0..n_signals)
             .map(|i| 0.2 + (i as f64 + 1.0) / ((n_signals + 4) as f64))
@@ -152,7 +152,7 @@ fn bench_log_odds_fusion(c: &mut Criterion) {
             |bencher, _| {
                 bencher.iter(|| {
                     black_box(
-                        log_odds_conjunction_weighted(
+                        confidence_scaled_log_odds_pool_weighted(
                             black_box(&probs),
                             black_box(&weights),
                             black_box(0.5),
@@ -175,12 +175,12 @@ fn bench_log_odds_fusion(c: &mut Criterion) {
         })
         .collect();
     let weights = [0.4, 0.35, 0.25];
-    c.bench_function("log_odds_fuse_batch_10k", |bencher| {
+    c.bench_function("confidence_scaled_log_odds_pool_batch_10k", |bencher| {
         bencher.iter(|| {
             let total: f64 = samples
                 .iter()
                 .map(|probs| {
-                    log_odds_conjunction_weighted(probs, &weights, 0.5)
+                    confidence_scaled_log_odds_pool_weighted(probs, &weights, 0.5)
                         .expect("batch benchmark probabilities and weights are valid")
                 })
                 .sum();
@@ -194,6 +194,6 @@ criterion_group!(
     bench_bm25,
     bench_bayesian_bm25,
     bench_vector_scoring,
-    bench_log_odds_fusion
+    bench_confidence_scaled_log_odds_pool
 );
 criterion_main!(benches);

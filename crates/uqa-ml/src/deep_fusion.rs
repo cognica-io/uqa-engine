@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use uqa_core::{IndexStats, Payload, PostingEntry, PostingList, Value};
-use uqa_scoring::prob::{log_odds_conjunction_weighted, logit, sigmoid, PROB_EPSILON};
+use uqa_scoring::prob::{confidence_scaled_log_odds_pool_weighted, logit, sigmoid, PROB_EPSILON};
 
 use uqa_operators::{
     base::{Direction, OperatorResult},

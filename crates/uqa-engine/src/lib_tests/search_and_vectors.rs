@@ -652,7 +652,6 @@ fn hybrid_search_combines_text_and_vector_signals() {
             vector_field: "embedding",
             query_vector: vec![1.0, 0.0, 0.0],
             knn_pool: 10,
-            alpha: 0.5,
             top_k: 10,
         })
         .unwrap();

@@ -2,9 +2,9 @@
 
 UQA-RS keeps three kinds of golden fixtures under `tests/parity/`:
 
-- **SQL golden file** (`sql_golden_fixture.json`) — replayed by [`crates/uqa-engine/tests/sql_golden.rs`](../../crates/uqa-engine/tests/sql_golden.rs). Each case is a `(name, sql, expected: [{column: value, ...}])` triple. The harness applies `schema_sql` and `data_sql` once, then runs every case against a fresh in-memory `Engine` and compares the result rows column by column.
-- **BEIR-style relevance fixture** (`beir_fixture.json`) — replayed by [`crates/uqa-engine/tests/beir_fixture.rs`](../../crates/uqa-engine/tests/beir_fixture.rs). Encodes the corpus, a query set, graded judgments per query, and the floors for `NDCG@K` and `MAP@K` the harness must clear.
-- **Vector calibration fixture** (`vector_calibration_fixture.json`) — replayed by [`crates/uqa-scoring/tests/vector_calibration_contract.rs`](../../crates/uqa-scoring/tests/vector_calibration_contract.rs). Records complete model provenance, the evaluated target population, candidate-K drift probes/ceilings, disjoint validation and held-out labels, a deterministic bootstrap seed, confidence level, and regression gates.
+- **SQL golden file** (`sql_golden_fixture.json`) -- replayed by [`crates/uqa-engine/tests/sql_golden.rs`](../../crates/uqa-engine/tests/sql_golden.rs). Each case is a `(name, sql, expected: [{column: value, ...}])` triple. The harness applies `schema_sql` and `data_sql` once, then runs every case against a fresh in-memory `Engine` and compares the result rows column by column.
+- **BEIR-style relevance fixture** (`beir_fixture.json`) -- replayed by [`crates/uqa-engine/tests/beir_fixture.rs`](../../crates/uqa-engine/tests/beir_fixture.rs). Encodes the corpus, a query set, graded judgments per query, and the floors for `NDCG@K` and `MAP@K` the harness must clear.
+- **Vector calibration fixture** (`vector_calibration_fixture.json`) -- replayed by [`crates/uqa-scoring/tests/vector_calibration_contract.rs`](../../crates/uqa-scoring/tests/vector_calibration_contract.rs). Records complete model provenance, the evaluated target population, candidate-K drift probes/ceilings, disjoint validation and held-out labels, a deterministic bootstrap seed, confidence level, and regression gates.
 
 All three formats are versioned; bump `version` whenever a breaking schema change lands and update the loader to refuse older files.
 
@@ -57,7 +57,7 @@ The vector fixture is deliberately a manifest rather than an undocumented array 
 
 A v2 fixture lists every scorer it wants to gate on under `scorers`. Each entry has a `name` (`"bm25"` or `"bayesian_bm25"`) and per-scorer floors. The harness runs the whole query set under each declared scorer and asserts every per-query NDCG@K and the mean MAP@K clear that scorer's floors. `judgments` keys are JSON strings (the harness parses them back into `u64` doc ids); values are graded relevance scores. Documents not mentioned in the judgments map default to relevance `0.0` for `NDCG`.
 
-When you swap in a real BEIR run, calibrate the `min_ndcg` / `min_map` of each scorer a few points below the observed numbers — the gate should catch regressions without false-firing on query-set noise. If a scorer is intentionally a regression baseline (e.g. plain BM25 vs a calibrated Bayesian BM25), keep its entry in `scorers` so the harness documents the expected ordering between scorers as a side effect.
+When you swap in a real BEIR run, calibrate the `min_ndcg` / `min_map` of each scorer a few points below the observed numbers -- the gate should catch regressions without false-firing on query-set noise. If a scorer is intentionally a regression baseline (e.g. plain BM25 vs a calibrated Bayesian BM25), keep its entry in `scorers` so the harness documents the expected ordering between scorers as a side effect.
 
 ## Replacing the starter fixture with a real BEIR run
 
@@ -92,13 +92,13 @@ cargo deny --workspace check
 
 The `relevance` bench under `crates/uqa-engine/benches/relevance.rs` replays the same BEIR fixture used by the relevance gate, prints the mean NDCG@K and MAP@K it observed, and asserts both stay at or above the floors in the fixture. Running it locally is the cheapest way to catch a ranking regression _before_ it reaches the test suite, since the bench output makes any drift visible numerically.
 
-The external-data [BEIR hybrid benchmark](../../benchmarks/beir/README.md) is separate from this small committed parity fixture. Its single runner downloads the pinned SciFact archive, generates real pinned MiniLM embeddings, loads a persistent SQLite database through SQL, creates GIN and HNSW through SQL, reopens the database, and evaluates every text, vector, and positive-evidence hybrid query through `Engine::sql`; its generated data remains under `target` rather than inflating the regression fixture or test executable set.
+The external-data [BEIR hybrid benchmark](../../benchmarks/beir/README.md) is separate from this small committed parity fixture. Its single runner downloads the pinned SciFact archive, generates real pinned MiniLM embeddings, loads a persistent SQLite database through SQL, creates GIN and HNSW through SQL, reopens the database, and evaluates every text, vector, and exact signed single-prior hybrid query through `Engine::sql`; its generated data remains under `target` rather than inflating the regression fixture or test executable set.
 
 `cargo deny check` reads `deny.toml` at the repo root and gates four dimensions: known security advisories, license allowlist drift, banned crates / wildcards, and unknown registries or git sources. Install it once with `cargo install cargo-deny --locked`. The first invocation will report any newly transitively pulled-in license that is not yet on the allowlist; either add the license to `deny.toml` after a human review, or replace the offending dep.
 
 ## libfuzzer / cargo fuzz (nightly cron)
 
-The repo's `fuzz/` directory is a cargo-fuzz workspace with three targets — `sql_compile`, `cypher_parse`, and `posting_list_round_trip`. It is excluded from the regular workspace because it requires nightly Rust and `libfuzzer-sys`. Set it up once on a fuzz host:
+The repo's `fuzz/` directory is a cargo-fuzz workspace with three targets -- `sql_compile`, `cypher_parse`, and `posting_list_round_trip`. It is excluded from the regular workspace because it requires nightly Rust and `libfuzzer-sys`. Set it up once on a fuzz host:
 
 ```sh
 rustup install nightly

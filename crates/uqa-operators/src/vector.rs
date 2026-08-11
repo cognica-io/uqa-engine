@@ -89,12 +89,12 @@ impl Operator for KNNOperator {
     }
 }
 
-/// Wraps a vector operator (KNN, threshold, ...) and rewrites each score
-/// from cosine similarity in `[-1, 1]` to an evidence value in `[0, 1]` via
-/// `(1 + score) / 2` (Definition 7.1.2, Paper 3). This is the
-/// uncalibrated bridge between vector signals and evidence-combination
-/// pipeline; calibrated alternatives (Paper 5) live in
-/// `QueryPoolVectorScoreOperator`; reusable calibrated models live in
+/// Marks a vector operator (KNN, threshold, ...) for probability-domain
+/// evidence conversion. Direct operator execution applies the uncalibrated
+/// `(1 + score) / 2` bridge from cosine similarity in `[-1, 1]` to `[0, 1]`
+/// (Definition 7.1.2, Paper 3). At an engine fusion boundary the driver
+/// intercepts this marker and fits the Paper 5 query-pool likelihood-ratio
+/// transform instead; reusable calibrated models live in
 /// `uqa_scoring::VectorCalibrationModel`.
 pub struct CosineProbabilityOperator {
     pub source: Arc<dyn Operator>,

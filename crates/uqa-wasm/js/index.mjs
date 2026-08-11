@@ -312,8 +312,20 @@ export class Engine {
     });
   }
 
-  async hybridSearch(table, textField, textQuery, vectorField, queryVector, topK, knnPool, alpha) {
+  async hybridSearch(table, textField, textQuery, vectorField, queryVector, topK, knnPool) {
     return this.call("hybridSearch", {
+      table,
+      textField,
+      textQuery,
+      vectorField,
+      queryVector: Array.from(queryVector),
+      topK,
+      knnPool,
+    });
+  }
+
+  async robustHybridSearch(table, textField, textQuery, vectorField, queryVector, topK, knnPool, alpha) {
+    return this.call("robustHybridSearch", {
       table,
       textField,
       textQuery,

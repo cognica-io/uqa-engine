@@ -343,6 +343,39 @@ mod mutability_classifier_tests {
     }
 
     #[test]
+    fn implicit_hybrid_fusion_is_classified_as_a_writer_for_calibration() {
+        let engine = Engine::new();
+        assert!(!query_is_writer(
+            &engine,
+            "SELECT id FROM docs WHERE text_match(body, 'rust')"
+        ));
+        assert!(query_is_writer(
+            &engine,
+            "SELECT id FROM docs \
+             WHERE text_match(body, 'rust') \
+               AND knn_match(embedding, ARRAY[1.0, 0.0], 10)"
+        ));
+        assert!(query_is_writer(
+            &engine,
+            "SELECT id FROM docs \
+             WHERE text_match(body, 'rust') \
+               AND (knn_match(embedding, ARRAY[1.0, 0.0], 10) AND kind = 'article')"
+        ));
+        assert!(!query_is_writer(
+            &engine,
+            "SELECT d.id FROM docs d JOIN vectors v ON d.id = v.id \
+             WHERE text_match(body, 'rust') \
+               AND knn_match(embedding, ARRAY[1.0, 0.0], 10)"
+        ));
+        assert!(query_is_writer(
+            &engine,
+            "SELECT d.id FROM docs d JOIN metadata m ON d.id = m.id \
+             WHERE text_match(d.body, 'rust') \
+               AND knn_match(d.embedding, ARRAY[1.0, 0.0], 10)"
+        ));
+    }
+
+    #[test]
     fn reserved_catalog_aliases_resolve_only_existing_builtins() {
         assert_eq!(
             builtin_function_dispatch_name("ag_catalog.cypher"),

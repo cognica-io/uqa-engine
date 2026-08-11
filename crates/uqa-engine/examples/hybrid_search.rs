@@ -65,12 +65,11 @@ fn main() {
             vector_field: "embedding",
             query_vector: vec![1.0, 0.0, 0.0],
             knn_pool: 5,
-            alpha: 0.5,
             top_k: 3,
         })
         .unwrap();
 
-    println!("Hybrid (text + vector, positive-evidence pooled, alpha=0.5) top 3:");
+    println!("Hybrid (text + vector, exact single-prior log-odds) top 3:");
     for h in &hits {
         println!("  doc_id={} score={:.4}", h.doc_id, h.score);
     }

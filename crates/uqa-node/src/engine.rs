@@ -17,7 +17,8 @@ use super::results::{
 };
 use super::tasks::{
     CalibrationReportTask, EstimateScoringParamsTask, HybridSearchTask, KNNSearchTask,
-    LearnScoringParamsTask, RunCypherTask, SQLBatchTask, SQLTask, SearchTask, VectorSimilarityTask,
+    LearnScoringParamsTask, RobustHybridSearchTask, RunCypherTask, SQLBatchTask, SQLTask,
+    SearchTask, VectorSimilarityTask,
 };
 use super::value::{document_from_js, JSValue};
 use super::{
@@ -406,7 +407,6 @@ impl Engine {
         query_vector: Either<Float32Array, Vec<f64>>,
         top_k: Option<u32>,
         knn_pool: Option<u32>,
-        alpha: Option<f64>,
     ) -> Result<AsyncTask<HybridSearchTask>> {
         let top_k = usize_from_u32(top_k.unwrap_or(10), "topK")?;
         let knn_pool = match knn_pool {
@@ -415,10 +415,6 @@ impl Engine {
                 Error::from_reason("default knnPool overflows the platform usize range")
             })?,
         };
-        let alpha = alpha.unwrap_or(1.0);
-        if !alpha.is_finite() {
-            return Err(Error::from_reason("alpha must be finite"));
-        }
         Ok(AsyncTask::new(HybridSearchTask {
             engine: self.inner.clone(),
             table,
@@ -426,6 +422,42 @@ impl Engine {
             text_query,
             vector_field,
             query_vector: vector_from_input(query_vector, "hybrid query vector")?,
+            top_k,
+            knn_pool,
+        }))
+    }
+
+    #[napi(ts_return_type = "Promise<Array<SearchHit>>")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn robust_hybrid_search(
+        &self,
+        table: String,
+        text_field: String,
+        text_query: String,
+        vector_field: String,
+        query_vector: Either<Float32Array, Vec<f64>>,
+        top_k: Option<u32>,
+        knn_pool: Option<u32>,
+        alpha: Option<f64>,
+    ) -> Result<AsyncTask<RobustHybridSearchTask>> {
+        let top_k = usize_from_u32(top_k.unwrap_or(10), "topK")?;
+        let knn_pool = match knn_pool {
+            Some(pool) => usize_from_u32(pool, "knnPool")?,
+            None => top_k.checked_mul(4).ok_or_else(|| {
+                Error::from_reason("default knnPool overflows the platform usize range")
+            })?,
+        };
+        let alpha = alpha.unwrap_or(0.5);
+        if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+            return Err(Error::from_reason("alpha must be finite and in [0, 1]"));
+        }
+        Ok(AsyncTask::new(RobustHybridSearchTask {
+            engine: self.inner.clone(),
+            table,
+            text_field,
+            text_query,
+            vector_field,
+            query_vector: vector_from_input(query_vector, "robust hybrid query vector")?,
             top_k,
             knn_pool,
             alpha,

@@ -56,6 +56,26 @@ pub struct QueryBuilder<'a> {
     offset: Option<u64>,
 }
 
+fn render_exact_fusion(
+    function_name: &str,
+    signals: &[&str],
+    base_rate: Option<f64>,
+) -> Result<String, SQLError> {
+    validate_retrieval_signals(function_name, signals, 2)?;
+    if let Some(base_rate) = base_rate {
+        if !base_rate.is_finite() || base_rate <= 0.0 || base_rate >= 1.0 {
+            return Err(SQLError::TypeMismatch(format!(
+                "{function_name} base_rate must be finite and in (0, 1), got {base_rate}"
+            )));
+        }
+    }
+    let mut arguments = signals.join(", ");
+    if let Some(base_rate) = base_rate {
+        write!(arguments, ", base_rate => {base_rate}").expect("writing to String cannot fail");
+    }
+    Ok(format!("{function_name}({arguments})"))
+}
+
 impl<'a> QueryBuilder<'a> {
     pub fn new(engine: &'a Engine, table: impl Into<String>) -> Self {
         Self {
@@ -437,23 +457,18 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    /// Add the compatibility `fuse_log_odds(...)` spelling for robust
-    /// positive-evidence pooling. New callers should use
-    /// [`Self::pool_positive_evidence`] so the heuristic contract is explicit.
-    /// `signals` is a sequence of pre-rendered SQL expressions (e.g.
-    /// `bayesian_match(...)`, `calibrated_vector_match(...)`); the wrapper
-    /// adds the `alpha` argument verbatim. The predicate executes through the
-    /// shared posting-list IR and supplies `_score` to the selected rows.
+    /// Add exact signed-evidence log-odds fusion. This is an alias for
+    /// [`Self::fuse_bayesian_evidence`]: each signal must emit a prior-free
+    /// evidence probability, and the optional corpus prior enters once.
     ///
     /// # Errors
     ///
     /// Returns an error unless at least two non-empty signal expressions are
-    /// supplied, or when `alpha` is non-finite or outside `[0, 1]`.
-    pub fn fuse_log_odds(self, signals: &[&str], alpha: f64) -> Result<Self, SQLError> {
-        validate_retrieval_signals("fuse_log_odds", signals, 2)?;
-        validate_fusion_alpha("fuse_log_odds", alpha)?;
-        let inner = signals.join(", ");
-        Ok(self.r#where(format!("fuse_log_odds({inner}, {alpha})")))
+    /// supplied, or when `base_rate` is not finite and strictly between zero
+    /// and one.
+    pub fn fuse_log_odds(self, signals: &[&str], base_rate: Option<f64>) -> Result<Self, SQLError> {
+        let predicate = render_exact_fusion("fuse_log_odds", signals, base_rate)?;
+        Ok(self.r#where(predicate))
     }
 
     /// Add a gated, confidence-scaled positive-evidence retrieval pool.
@@ -483,19 +498,8 @@ impl<'a> QueryBuilder<'a> {
         signals: &[&str],
         base_rate: Option<f64>,
     ) -> Result<Self, SQLError> {
-        validate_retrieval_signals("fuse_bayesian_evidence", signals, 2)?;
-        if let Some(base_rate) = base_rate {
-            if !base_rate.is_finite() || base_rate <= 0.0 || base_rate >= 1.0 {
-                return Err(SQLError::TypeMismatch(format!(
-                    "fuse_bayesian_evidence base_rate must be finite and in (0, 1), got {base_rate}"
-                )));
-            }
-        }
-        let mut arguments = signals.join(", ");
-        if let Some(base_rate) = base_rate {
-            write!(arguments, ", base_rate => {base_rate}").expect("writing to String cannot fail");
-        }
-        Ok(self.r#where(format!("fuse_bayesian_evidence({arguments})")))
+        let predicate = render_exact_fusion("fuse_bayesian_evidence", signals, base_rate)?;
+        Ok(self.r#where(predicate))
     }
 
     /// Add a `staged_retrieval(...)` predicate from pre-rendered retrieval

@@ -509,8 +509,8 @@ pub(super) fn lower_staged_retrieval(
 /// - `fts_match` text trees --> [`OperatorTree::BayesianScore`] around the
 ///   complete raw BM25 Boolean query.
 /// - `knn_match` --> [`OperatorTree::CosineProbability`] wrapping a
-///   [`OperatorTree::KNN`] child, so cosine scores in `[-1, 1]` get
-///   rescaled to `(0, 1)` via `(1 + s) / 2`.
+///   [`OperatorTree::KNN`] child. At a fusion boundary the driver uses this
+///   marker to fit prior-free evidence from the selected cosine query pool.
 pub(super) fn lower_calibrated_signal(
     name: &str,
     args: &[ScalarExpr],

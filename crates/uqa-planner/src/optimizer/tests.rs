@@ -147,6 +147,208 @@ fn selects_operator_tree_access_and_pushes_relational_limit() {
 }
 
 #[test]
+fn implicitly_fuses_mixed_text_and_vector_retrieval() {
+    let plan = optimized(
+        "SELECT id, _score FROM docs \
+         WHERE text_match(body, 'rust') \
+           AND knn_match(embedding, ARRAY[1.0, 0.0], 10) \
+         ORDER BY _score DESC LIMIT 5",
+    );
+    let block = query_block(&plan);
+    let Some(ScalarExpr::Func { name, args, .. }) = block.r#where.as_ref() else {
+        panic!("implicit fusion function expected");
+    };
+    assert_eq!(name, "fuse_bayesian_evidence");
+    assert_eq!(args.len(), 2);
+    assert!(matches!(
+        &args[0],
+        ScalarExpr::Func { name, .. } if name == "bayesian_match"
+    ));
+    assert!(matches!(
+        &args[1],
+        ScalarExpr::Func { name, .. } if name == "knn_match"
+    ));
+    assert!(matches!(
+        block.access,
+        AccessPathPlan::OperatorTree {
+            score_limit_pushdown: false
+        }
+    ));
+}
+
+#[test]
+fn implicit_fusion_keeps_relational_conjuncts_as_filters() {
+    let plan = optimized(
+        "SELECT id FROM docs \
+         WHERE text_match(body, 'rust') \
+           AND kind = 'article' \
+           AND knn_match(embedding, ARRAY[1.0, 0.0], 10)",
+    );
+    let block = query_block(&plan);
+    let Some(ScalarExpr::And(parts)) = block.r#where.as_ref() else {
+        panic!("fusion plus relational filter expected");
+    };
+    assert_eq!(parts.len(), 2);
+    assert!(matches!(
+        &parts[0],
+        ScalarExpr::Func { name, .. } if name == "fuse_bayesian_evidence"
+    ));
+    assert!(matches!(&parts[1], ScalarExpr::Binary { .. }));
+}
+
+#[test]
+fn implicit_fusion_flattens_parenthesized_conjunctions() {
+    let plan = optimized(
+        "SELECT id FROM docs \
+         WHERE text_match(body, 'rust') \
+           AND (knn_match(embedding, ARRAY[1.0, 0.0], 10) AND kind = 'article')",
+    );
+    let block = query_block(&plan);
+    let Some(ScalarExpr::And(parts)) = block.r#where.as_ref() else {
+        panic!("fusion plus flattened filter expected");
+    };
+    assert_eq!(parts.len(), 2);
+    assert!(matches!(
+        &parts[0],
+        ScalarExpr::Func { name, .. } if name == "fuse_bayesian_evidence"
+    ));
+}
+
+#[test]
+fn explicit_fusion_is_not_wrapped_by_implicit_fusion() {
+    let plan = optimized(
+        "SELECT id FROM docs WHERE fuse_bayesian_evidence(\
+             bayesian_match(body, 'rust'), \
+             knn_match(embedding, ARRAY[1.0, 0.0], 10)\
+         )",
+    );
+    let block = query_block(&plan);
+    let Some(ScalarExpr::Func { name, args, .. }) = block.r#where.as_ref() else {
+        panic!("explicit fusion function expected");
+    };
+    assert_eq!(name, "fuse_bayesian_evidence");
+    assert_eq!(args.len(), 2);
+}
+
+#[test]
+fn explicit_fusion_suppresses_inference_for_its_complete_conjunction() {
+    let plan = optimized(
+        "SELECT id FROM docs \
+         WHERE pool_positive_evidence(\
+             bayesian_match(body, 'rust'), \
+             knn_match(embedding, ARRAY[1.0, 0.0], 10)\
+         ) \
+           AND text_match(title, 'database') \
+           AND knn_match(title_embedding, ARRAY[0.0, 1.0], 10)",
+    );
+    let block = query_block(&plan);
+    let Some(ScalarExpr::And(parts)) = block.r#where.as_ref() else {
+        panic!("explicit fusion conjunction expected");
+    };
+    assert_eq!(parts.len(), 3);
+    assert_eq!(
+        parts
+            .iter()
+            .filter(|part| matches!(
+                part,
+                ScalarExpr::Func { name, .. } if name == "pool_positive_evidence"
+            ))
+            .count(),
+        1
+    );
+    assert!(parts.iter().any(|part| matches!(
+        part,
+        ScalarExpr::Func { name, .. } if name == "text_match"
+    )));
+}
+
+#[test]
+fn retrieval_signals_from_different_relations_are_not_implicitly_fused() {
+    let plan = optimized(
+        "SELECT d.id FROM docs d JOIN vectors v ON d.id = v.id \
+         WHERE text_match(d.body, 'rust') \
+           AND knn_match(v.embedding, ARRAY[1.0, 0.0], 10)",
+    );
+    let block = query_block(&plan);
+    let Some(ScalarExpr::And(parts)) = block.r#where.as_ref() else {
+        panic!("independent retrieval predicates expected");
+    };
+    assert_eq!(parts.len(), 2);
+    assert!(parts.iter().all(|part| {
+        matches!(part, ScalarExpr::Func { name, .. } if name != "fuse_bayesian_evidence")
+    }));
+}
+
+#[test]
+fn unqualified_retrieval_signals_in_a_join_are_not_implicitly_fused() {
+    let plan = optimized(
+        "SELECT d.id FROM docs d JOIN vectors v ON d.id = v.id \
+         WHERE text_match(body, 'rust') \
+           AND knn_match(embedding, ARRAY[1.0, 0.0], 10)",
+    );
+    let block = query_block(&plan);
+    let Some(ScalarExpr::And(parts)) = block.r#where.as_ref() else {
+        panic!("independent unqualified retrieval predicates expected");
+    };
+    assert_eq!(parts.len(), 2);
+    assert!(parts.iter().all(|part| {
+        matches!(part, ScalarExpr::Func { name, .. } if name != "fuse_bayesian_evidence")
+    }));
+}
+
+#[test]
+fn qualified_retrieval_signals_from_one_join_relation_are_implicitly_fused() {
+    let plan = optimized(
+        "SELECT d.id FROM docs d JOIN metadata m ON d.id = m.id \
+         WHERE text_match(d.body, 'rust') \
+           AND knn_match(d.embedding, ARRAY[1.0, 0.0], 10)",
+    );
+    let block = query_block(&plan);
+    assert!(matches!(
+        block.r#where.as_ref(),
+        Some(ScalarExpr::Func { name, .. }) if name == "fuse_bayesian_evidence"
+    ));
+}
+
+#[test]
+fn prior_bearing_text_signal_is_not_implicitly_fused() {
+    let plan = optimized(
+        "SELECT id FROM docs \
+         WHERE bayesian_match_with_prior(body, 'rust', authority, 'authority') \
+           AND knn_match(embedding, ARRAY[1.0, 0.0], 10)",
+    );
+    let block = query_block(&plan);
+    let Some(ScalarExpr::And(parts)) = block.r#where.as_ref() else {
+        panic!("independent prior-bearing predicates expected");
+    };
+    assert_eq!(parts.len(), 2);
+    assert!(parts.iter().all(|part| {
+        matches!(part, ScalarExpr::Func { name, .. } if name != "fuse_bayesian_evidence")
+    }));
+}
+
+#[test]
+fn same_modality_conjunctions_are_not_implicitly_fused() {
+    for sql in [
+        "SELECT id FROM docs \
+         WHERE text_match(body, 'rust') AND text_match(title, 'database')",
+        "SELECT id FROM docs \
+         WHERE knn_match(embedding, ARRAY[1.0, 0.0], 10) \
+           AND knn_match(title_embedding, ARRAY[0.0, 1.0], 10)",
+    ] {
+        let plan = optimized(sql);
+        let block = query_block(&plan);
+        let Some(ScalarExpr::And(parts)) = block.r#where.as_ref() else {
+            panic!("same-modality predicates expected");
+        };
+        assert_eq!(parts.len(), 2);
+        assert!(parts.iter().all(|part| {
+            matches!(part, ScalarExpr::Func { name, .. } if name != "fuse_bayesian_evidence")
+        }));
+    }
+}
+
+#[test]
 fn optimizes_mutation_and_cte_children() {
     let UnifiedPlan::Command(command) = optimized(
         "WITH q AS (SELECT 1 AS x WHERE true) \

@@ -5,8 +5,9 @@
 //
 
 //! Numerically stable sigmoid / logit and probabilistic AND/OR/NOT in log
-//! space. The `log_odds_conjunction` here is the multi-signal fusion
-//! formula from Paper 4 (mean log-odds with `n^alpha` confidence scaling).
+//! space. The explicitly named `confidence_scaled_log_odds_pool` implements
+//! the robust `n^alpha` ranking heuristic; exact signed single-prior evidence
+//! fusion lives in `uqa-fusion::BayesianEvidenceFusion`.
 
 /// Probability clamp epsilon (Eq. 40, Paper 3).
 pub const PROB_EPSILON: f64 = 1e-10;
@@ -68,13 +69,14 @@ pub fn prob_or(probs: &[f64]) -> f64 {
     1.0 - s.exp()
 }
 
-/// Confidence-scaled log-odds conjunction (Paper 4 Section 4):
+/// Confidence-scaled log-odds ranking pool.
 ///
 /// `P_final = sigmoid((1 / n^(1-alpha)) * sum(logit(p_i)))`
 ///
 /// Rearranged in implementation form: `sigmoid(n^alpha * mean(logit p_i))`.
-/// Default `alpha = 0.5` yields the `sqrt(n)` law.
-pub fn log_odds_conjunction(probs: &[f64], alpha: f64) -> f64 {
+/// Default `alpha = 0.5` yields the `sqrt(n)` law. This confidence scaling is
+/// a ranking heuristic, not the exact single-prior Bayesian evidence theorem.
+pub fn confidence_scaled_log_odds_pool(probs: &[f64], alpha: f64) -> f64 {
     if probs.is_empty() {
         return 0.5;
     }
@@ -83,13 +85,12 @@ pub fn log_odds_conjunction(probs: &[f64], alpha: f64) -> f64 {
     sigmoid(mean_logit * n.powf(alpha))
 }
 
-/// Weighted log-odds conjunction (Log-OP, Theorem 8.3 / Remark 8.4 of
-/// Paper 4):
+/// Weighted confidence-scaled log-odds ranking pool.
 ///
 /// `sigmoid(n^alpha * sum(w_i * logit(p_i)))`
 ///
 /// `weights` must be non-negative and sum to ~1. Returns `Err` otherwise.
-pub fn log_odds_conjunction_weighted(
+pub fn confidence_scaled_log_odds_pool_weighted(
     probs: &[f64],
     weights: &[f64],
     alpha: f64,
@@ -154,62 +155,62 @@ mod tests {
     }
 
     #[test]
-    fn log_odds_conjunction_n1_identity() {
-        approx_eq(log_odds_conjunction(&[0.7], 0.5), 0.7);
+    fn confidence_scaled_log_odds_pool_n1_identity() {
+        approx_eq(confidence_scaled_log_odds_pool(&[0.7], 0.5), 0.7);
     }
 
     #[test]
-    fn log_odds_conjunction_scale_neutral_at_alpha_zero() {
+    fn confidence_scaled_log_odds_pool_scale_neutral_at_alpha_zero() {
         // alpha = 0 is the only setting that gives scale neutrality
         // (P_final = p when all P_i = p). The default alpha = 0.5
         // intentionally amplifies agreement away from the mean.
         for p in [0.2, 0.5, 0.8] {
             for n in 1..6 {
                 let probs = vec![p; n];
-                let got = log_odds_conjunction(&probs, 0.0);
+                let got = confidence_scaled_log_odds_pool(&probs, 0.0);
                 approx_eq(got, p);
             }
         }
     }
 
     #[test]
-    fn log_odds_conjunction_amplifies_agreement_at_alpha_half() {
+    fn confidence_scaled_log_odds_pool_amplifies_agreement_at_alpha_half() {
         // With alpha = 0.5 and all-equal P_i > 0.5, P_final pushes the
         // probability further away from 0.5 as n grows (Theorem 4.3.x in
         // Paper 4: agreement amplification). Symmetric on the
         // irrelevance side: P_i < 0.5 -> P_final < P_i.
         let p = 0.7;
-        let p1 = log_odds_conjunction(&[p], 0.5);
-        let p3 = log_odds_conjunction(&[p; 3], 0.5);
-        let p5 = log_odds_conjunction(&[p; 5], 0.5);
+        let p1 = confidence_scaled_log_odds_pool(&[p], 0.5);
+        let p3 = confidence_scaled_log_odds_pool(&[p; 3], 0.5);
+        let p5 = confidence_scaled_log_odds_pool(&[p; 5], 0.5);
         assert!(p1 < p3 && p3 < p5, "amplification: {p1} < {p3} < {p5}");
     }
 
     #[test]
-    fn log_odds_conjunction_irrelevance_preserving() {
+    fn confidence_scaled_log_odds_pool_irrelevance_preserving() {
         // All P_i < 0.5 implies P_final < 0.5.
         let probs = [0.2, 0.3, 0.4];
-        let got = log_odds_conjunction(&probs, 0.5);
+        let got = confidence_scaled_log_odds_pool(&probs, 0.5);
         assert!(got < 0.5, "got {got}");
     }
 
     #[test]
-    fn log_odds_conjunction_relevance_preserving() {
+    fn confidence_scaled_log_odds_pool_relevance_preserving() {
         let probs = [0.6, 0.7, 0.8];
-        let got = log_odds_conjunction(&probs, 0.5);
+        let got = confidence_scaled_log_odds_pool(&probs, 0.5);
         assert!(got > 0.5, "got {got}");
     }
 
     #[test]
-    fn log_odds_conjunction_symmetric_disagreement_collapses_to_half() {
+    fn confidence_scaled_log_odds_pool_symmetric_disagreement_collapses_to_half() {
         // logit(0.3) and logit(0.7) cancel.
-        let got = log_odds_conjunction(&[0.3, 0.7], 0.5);
+        let got = confidence_scaled_log_odds_pool(&[0.3, 0.7], 0.5);
         approx_eq(got, 0.5);
     }
 
     #[test]
     fn weighted_log_odds_rejects_bad_weights() {
-        assert!(log_odds_conjunction_weighted(&[0.5, 0.5], &[0.5, 0.6], 0.0).is_err());
-        assert!(log_odds_conjunction_weighted(&[0.5, 0.5], &[-0.1, 1.1], 0.0).is_err());
+        assert!(confidence_scaled_log_odds_pool_weighted(&[0.5, 0.5], &[0.5, 0.6], 0.0).is_err());
+        assert!(confidence_scaled_log_odds_pool_weighted(&[0.5, 0.5], &[-0.1, 1.1], 0.0).is_err());
     }
 }

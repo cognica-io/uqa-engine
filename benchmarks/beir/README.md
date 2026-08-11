@@ -40,7 +40,7 @@ The Rust module opens a temporary SQLite file with `Engine::open`, creates `beir
 | --- | --- |
 | `text_bm25` | `text_match(body, $1)` |
 | `vector_hnsw` | `knn_match(embedding, $2, 10)` |
-| `hybrid_positive_evidence` | `pool_positive_evidence(bayesian_match(body, $1), calibrated_vector_match(embedding, $2, 100), alpha => 0.5)` |
+| `hybrid_log_odds` | `text_match(body, $1) AND calibrated_vector_match(embedding, $2, 100)`; the optimizer lowers this to exact single-prior Bayesian evidence fusion |
 
 All systems order by `_score DESC, id ASC` and return at most 10 rows. Quality runs all 300 test queries; Criterion times a fixed batch of 25 queries after the complete quality pass has warmed the reopened engine.
 
@@ -48,29 +48,31 @@ All systems order by `_score DESC, id ASC` and return at most 10 rows. Quality r
 
 The reporter computes NDCG@10 against the true ideal ranking over each complete qrels set, MAP@10 with the denominator capped at 10, Recall@10 against every relevant document, and MRR@10. It validates unique query and document IDs, deterministic score ordering, each score domain, exact workload identity, persistent SQLite, database reopen, `Engine::sql`, SQL construction statements, and Criterion identities before applying absolute quality floors.
 
-Hybrid search must also exceed the better text or vector result by at least 0.02 NDCG@10, 0.02 MAP@10, and 0.01 Recall@10. These relative gates ensure a result labeled hybrid cannot pass by silently degrading to one input signal.
+Log-odds hybrid search must also exceed the better text or vector result by at least 0.02 NDCG@10, 0.02 MAP@10, and 0.01 Recall@10. These relative gates ensure a result labeled hybrid cannot pass by silently degrading to one input signal.
 
 The runner writes `beir-observations.json`, Criterion artifacts below `target/criterion/beir_hybrid_query_batch/scifact`, and the validated combined `beir-report.json` below `target/benchmark-runs`.
 
-## Local reference run
+## Result provenance
 
-The 2026-08-11 current reruns used the complete pinned SciFact test workload on a local macOS arm64 host with rustc 1.90.0 and reused hash-validated prepared artifacts. Each generated report identified a dirty implementation worktree and is therefore same-machine directional evidence rather than a release artifact or independent reproduction. The final configuration used 30 Criterion samples, a two-second warmup, and a ten-second target measurement, and it was run three times. The median point estimates changed by -95.9% for text, -10.3% for vector, and -93.6% for hybrid versus the documented pre-pass baseline; the three-run ranges were 0.77-0.82 ms, 2.38-2.61 ms, and 3.25-3.84 ms respectively, with shared vector-control drift showing why a single fastest run is not used.
+Only a generated report whose embedded manifest hash matches the checked `manifest.json` describes this benchmark. Measurements from the former positive-evidence predicate are a different system and must not be relabeled as `hybrid_log_odds`; changing the fusion contract invalidates those quality and latency rows even when the corpus, indexes, and machine are unchanged.
 
-| Persistent SQL system | NDCG@10 | MAP@10 | Recall@10 | Pre-pass | Current | Queries/s |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `text_bm25` | 0.6860 | 0.6375 | 0.8193 | 20.13 ms | 0.82 ms | 1,216.1 |
-| `vector_hnsw` | 0.6451 | 0.5959 | 0.7833 | 2.87 ms | 2.58 ms | 388.3 |
-| `hybrid_positive_evidence` | 0.7259 | 0.6829 | 0.8422 | 56.49 ms | 3.62 ms | 276.1 |
+## Exact-fusion reference run
 
-| Persistent SQL construction | Pre-pass | Current | Change | Rows/s |
-| --- | ---: | ---: | ---: | ---: |
-| Table creation and parameterized load | 0.574 s | 0.597 s | +4.0% | 8,683 |
-| GIN index | 4.012 s | 2.307 s | -42.5% | 2,246 |
-| HNSW index | 12.042 s | 12.638 s | +4.9% | 410 |
+The 2026-08-12 reference run used the complete pinned SciFact test workload on a local macOS 26.5.1 arm64 host with rustc 1.90.0. It regenerated every embedding with sentence-transformers 5.2.2 and model revision `1110a243fdf4706b3f48f1d95db1a4f5529b4d41`, then executed the persistent SQLite construction, reopen, quality, and Criterion phases from a dirty implementation worktree. The values below are same-machine evidence for this exact-fusion change, not a release artifact or a cross-machine performance claim.
 
-The reports retain the original forced-preparation observations of 67.508 seconds for corpus embedding and 0.591 seconds for query embedding on CPU; all three reruns skipped both because every prepared identity and hash matched. Quality metrics remained bit-for-bit unchanged in every run and every absolute and hybrid-relative gate passed. The benchmark SQL is unchanged, exact hybrid fusion still scores its complete carrier, and the executor removes search-only fields from the post-retrieval projection. For a score-first `LIMIT`, it then partitions the scored entries at `LIMIT + OFFSET`, retains the complete cutoff-score tie group, materializes only that exact prefix, and leaves `id ASC` or any other secondary ordering to the relational sort; filters, facets, distinctness, aggregation, and windows retain their full-input paths when they could change semantics.
+| Persistent SQL system | NDCG@10 | MAP@10 | Recall@10 | Mean latency/query | Queries/s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `text_bm25` | 0.6860 | 0.6375 | 0.8193 | 0.79 ms | 1,264.4 |
+| `vector_hnsw` | 0.6451 | 0.5959 | 0.7833 | 2.46 ms | 407.1 |
+| `hybrid_log_odds` | 0.7226 | 0.6820 | 0.8322 | 3.29 ms | 303.6 |
 
-The same pass merges exhaustive multi-term scores directly across sorted cursors instead of building two document maps, loads scorer-versioned block maxima for all terms in one storage query, caches validated Bayesian parameters by field after the first execution-epoch lookup, runs independent fusion branches on the shared parallel executor, avoids duplicate HNSW revision reads, and keeps query-pool vector calibration query-local. Construction timings are one-shot observations rather than distribution comparisons; clustered posting writes directly affect GIN construction, while the smaller load and HNSW differences should be treated as local variation.
+| Persistent SQL construction | Elapsed | Rows/s |
+| --- | ---: | ---: |
+| Table creation and parameterized load | 0.582 s | 8,903 |
+| GIN index | 2.298 s | 2,256 |
+| HNSW index | 12.284 s | 422 |
+
+Fresh CPU embedding took 69.369 seconds for the corpus and 0.579 seconds for the queries after a 3.356-second verified archive download. The exact hybrid system cleared every absolute gate and exceeded the better single signal by 0.0366 NDCG@10, 0.0445 MAP@10, and 0.0129 Recall@10. These deltas are empirical properties of this pinned workload; the exact Bayesian fusion theorem itself does not promise that an additional signal improves ranking quality.
 
 ## Interpretation
 

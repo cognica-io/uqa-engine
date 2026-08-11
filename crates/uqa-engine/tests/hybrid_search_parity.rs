@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Golden-fixture test: hybrid (text + KNN, positive-evidence pooled) output.
+//! Golden-fixture test: explicit robust text and KNN positive-evidence output.
 //! Refresh the fixtures with
 //! `cargo run -p uqa-engine --example build_parity_fixtures`.
 
@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 use uqa_core::{FieldName, Value};
-use uqa_engine::{Engine, HybridSearchParams};
+use uqa_engine::{Engine, RobustHybridSearchParams};
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
 
@@ -67,7 +67,7 @@ fn fixture_path() -> PathBuf {
 }
 
 #[test]
-fn hybrid_search_matches_fixture() {
+fn robust_hybrid_search_matches_fixture() {
     let bytes = std::fs::read(fixture_path()).expect("fixture present");
     let fx: Fixture = serde_json::from_slice(&bytes).expect("fixture parses");
 
@@ -87,7 +87,7 @@ fn hybrid_search_matches_fixture() {
 
     for case in &fx.queries {
         let hits = eng
-            .hybrid_search(&HybridSearchParams {
+            .robust_hybrid_search(&RobustHybridSearchParams {
                 table: "articles",
                 text_field: &case.text_field,
                 text_query: &case.text_query,
@@ -131,14 +131,14 @@ fn hybrid_search_matches_fixture() {
 }
 
 #[test]
-fn hybrid_search_rejects_missing_vector_field_even_without_text_tokens() {
+fn robust_hybrid_search_rejects_missing_vector_field_even_without_text_tokens() {
     let eng = Engine::new();
     eng.create_default_table("articles", vec!["title".into()])
         .unwrap();
 
     for text_query in ["rust", ""] {
         let error = eng
-            .hybrid_search(&HybridSearchParams {
+            .robust_hybrid_search(&RobustHybridSearchParams {
                 table: "articles",
                 text_field: "title",
                 text_query,
@@ -157,14 +157,14 @@ fn hybrid_search_rejects_missing_vector_field_even_without_text_tokens() {
 }
 
 #[test]
-fn hybrid_search_validates_vector_shape_before_returning_an_empty_pool() {
+fn robust_hybrid_search_validates_vector_shape_before_returning_an_empty_pool() {
     let eng = Engine::new();
     eng.create_default_table("articles", vec!["title".into()])
         .unwrap();
     eng.create_vector_field("articles", "embedding", 3).unwrap();
 
     let error = eng
-        .hybrid_search(&HybridSearchParams {
+        .robust_hybrid_search(&RobustHybridSearchParams {
             table: "articles",
             text_field: "title",
             text_query: "",

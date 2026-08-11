@@ -4,11 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `FusionWAND` scoring coverage.
+//! Confidence-scaled pool WAND scoring coverage.
 
 use std::collections::BTreeMap;
 
-use uqa_scoring::FusionWANDScorer;
+use uqa_scoring::ConfidenceScaledPoolWANDScorer;
 
 fn map(entries: &[(u64, f64)]) -> BTreeMap<u64, f64> {
     entries.iter().copied().collect()
@@ -16,7 +16,7 @@ fn map(entries: &[(u64, f64)]) -> BTreeMap<u64, f64> {
 
 #[test]
 fn test_basic_top_k() {
-    let scorer = FusionWANDScorer::new(
+    let scorer = ConfidenceScaledPoolWANDScorer::new(
         vec![
             map(&[(1, 0.9), (2, 0.7), (3, 0.5)]),
             map(&[(1, 0.8), (2, 0.6), (4, 0.4)]),
@@ -31,7 +31,7 @@ fn test_basic_top_k() {
 
 #[test]
 fn test_top_k_returns_highest() {
-    let scorer = FusionWANDScorer::new(
+    let scorer = ConfidenceScaledPoolWANDScorer::new(
         vec![
             map(&[(1, 0.9), (2, 0.3), (3, 0.1)]),
             map(&[(1, 0.8), (2, 0.2), (3, 0.1)]),
@@ -48,7 +48,7 @@ fn test_top_k_returns_highest() {
 
 #[test]
 fn test_top_k_larger_than_docs() {
-    let scorer = FusionWANDScorer::new(
+    let scorer = ConfidenceScaledPoolWANDScorer::new(
         vec![map(&[(1, 0.7)]), map(&[(1, 0.6)])],
         vec![0.7, 0.6],
         0.5,
@@ -60,14 +60,15 @@ fn test_top_k_larger_than_docs() {
 
 #[test]
 fn test_empty_signals() {
-    let scorer = FusionWANDScorer::new(Vec::new(), Vec::new(), 0.5, 5).unwrap();
+    let scorer = ConfidenceScaledPoolWANDScorer::new(Vec::new(), Vec::new(), 0.5, 5).unwrap();
     assert!(scorer.score_top_k().unwrap().is_empty());
 }
 
 #[test]
 fn test_single_signal() {
     let scorer =
-        FusionWANDScorer::new(vec![map(&[(1, 0.9), (2, 0.3)])], vec![0.9], 0.5, 1).unwrap();
+        ConfidenceScaledPoolWANDScorer::new(vec![map(&[(1, 0.9), (2, 0.3)])], vec![0.9], 0.5, 1)
+            .unwrap();
     let result = scorer.score_top_k().unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].0, 1);
@@ -75,7 +76,7 @@ fn test_single_signal() {
 
 #[test]
 fn test_fused_upper_bound_effectively_probability() {
-    let scorer = FusionWANDScorer::new(
+    let scorer = ConfidenceScaledPoolWANDScorer::new(
         vec![map(&[(1, 0.9)]), map(&[(1, 0.8)])],
         vec![0.9, 0.8],
         0.5,
@@ -88,7 +89,7 @@ fn test_fused_upper_bound_effectively_probability() {
 
 #[test]
 fn test_scores_are_probabilities() {
-    let scorer = FusionWANDScorer::new(
+    let scorer = ConfidenceScaledPoolWANDScorer::new(
         vec![map(&[(1, 0.7), (2, 0.6)]), map(&[(1, 0.8), (2, 0.5)])],
         vec![0.8, 0.8],
         0.5,
@@ -102,14 +103,14 @@ fn test_scores_are_probabilities() {
 
 #[test]
 fn test_alpha_parameter() {
-    let s1 = FusionWANDScorer::new(
+    let s1 = ConfidenceScaledPoolWANDScorer::new(
         vec![map(&[(1, 0.7)]), map(&[(1, 0.6)])],
         vec![0.7, 0.6],
         0.1,
         5,
     )
     .unwrap();
-    let s2 = FusionWANDScorer::new(
+    let s2 = ConfidenceScaledPoolWANDScorer::new(
         vec![map(&[(1, 0.7)]), map(&[(1, 0.6)])],
         vec![0.7, 0.6],
         0.9,
@@ -121,7 +122,7 @@ fn test_alpha_parameter() {
 
 #[test]
 fn test_wand_gating_relu() {
-    let scorer = FusionWANDScorer::new(
+    let scorer = ConfidenceScaledPoolWANDScorer::new(
         vec![map(&[(1, 0.7), (2, 0.6)]), map(&[(1, 0.8), (2, 0.5)])],
         vec![0.8, 0.8],
         0.5,
@@ -133,7 +134,7 @@ fn test_wand_gating_relu() {
 
 #[test]
 fn test_wand_gating_swish() {
-    let scorer = FusionWANDScorer::new(
+    let scorer = ConfidenceScaledPoolWANDScorer::new(
         vec![map(&[(1, 0.7), (2, 0.6)]), map(&[(1, 0.8), (2, 0.5)])],
         vec![0.8, 0.8],
         0.5,

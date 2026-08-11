@@ -80,6 +80,8 @@ The compatibility pool transform is explicitly query-local and unsupervised. It 
 
 ## Fusion
 
+Before access-path selection, the relational optimizer detects direct same-relation conjunctions containing both supported text and vector retrieval leaves. It rewrites those leaves into one `fuse_bayesian_evidence` expression, changes raw `text_match` to its Bayesian-calibrated form only inside that boundary, retains non-retrieval conjuncts as filters, and skips the rewrite when the user supplied any explicit fusion function. At execution, text calibration emits prior-free evidence plus its corpus prior, query-pool vector calibration emits prior-free evidence at a neutral prior, and the exact fusion node applies the resolved prior once. The pre-optimization transaction classifier applies the same detection so calibration receives a writable statement boundary when needed.
+
 Exact Bayesian evidence adds one prior and signed likelihood-ratio evidence:
 
 $$
@@ -87,6 +89,8 @@ L = \operatorname{logit}(\pi) + \sum_i \ell_i, \qquad P = \sigma(L).
 $$
 
 Robust positive-evidence pooling has a separate type and name. It applies gating, confidence scaling, and optional adaptive weights as a ranking heuristic. The code does not claim that its output is an exact posterior.
+
+The exact SQL names are `fuse_bayesian_evidence` and its alias `fuse_log_odds`; the exact typed API is `hybrid_search`. The heuristic names are `pool_positive_evidence` and `robust_hybrid_search`.
 
 Independent fusion inputs can execute concurrently on the shared parallel executor. Their outputs merge only at the typed fusion node, and any child error aborts the parent rather than disappearing as an empty signal.
 

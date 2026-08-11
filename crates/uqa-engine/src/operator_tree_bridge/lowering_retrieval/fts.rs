@@ -6,7 +6,7 @@
 
 //! Engine-owned lowering from the syntax-only FTS AST to retrieval operators.
 
-use uqa_operators::{GatingSpec, OperatorTree};
+use uqa_operators::OperatorTree;
 use uqa_sql::{FTSNode, SQLError};
 
 const VECTOR_K: usize = 10_000;
@@ -76,22 +76,58 @@ fn compile_and(
     default_field: Option<&str>,
     phrase_tokenizer: &dyn Fn(Option<&str>, &str) -> Vec<String>,
 ) -> OperatorTree {
-    let signals = vec![
+    let mut conjuncts = Vec::new();
+    collect_conjuncts(left, &mut conjuncts);
+    collect_conjuncts(right, &mut conjuncts);
+
+    let can_fuse = conjuncts
+        .iter()
+        .all(|conjunct| is_text_query_node(conjunct) || matches!(conjunct, FTSNode::Vector { .. }));
+    let has_text = conjuncts
+        .iter()
+        .any(|conjunct| is_text_query_node(conjunct));
+    let has_vector = conjuncts
+        .iter()
+        .any(|conjunct| matches!(conjunct, FTSNode::Vector { .. }));
+    if can_fuse && has_text && has_vector {
+        let text_trees = conjuncts
+            .iter()
+            .filter(|conjunct| is_text_query_node(conjunct))
+            .map(|conjunct| compile(conjunct, default_field, phrase_tokenizer))
+            .collect();
+        let mut signals = vec![intersect_or_single(text_trees)];
+        signals.extend(
+            conjuncts
+                .iter()
+                .filter(|conjunct| matches!(conjunct, FTSNode::Vector { .. }))
+                .map(|conjunct| compile(conjunct, default_field, phrase_tokenizer)),
+        );
+        return OperatorTree::BayesianEvidenceFusion {
+            signals,
+            base_rate: None,
+        };
+    }
+
+    OperatorTree::Intersect(vec![
         compile(left, default_field, phrase_tokenizer),
         compile(right, default_field, phrase_tokenizer),
-    ];
-    if has_vector_signal(left) ^ has_vector_signal(right) {
-        OperatorTree::RobustPositiveEvidencePool {
-            signals,
-            alpha: 0.5,
-            gating: GatingSpec::Softplus,
-            weights: None,
-            logit_min: None,
-            logit_max: None,
-            adaptive_weights: false,
-        }
+    ])
+}
+
+fn collect_conjuncts<'a>(node: &'a FTSNode, output: &mut Vec<&'a FTSNode>) {
+    if let FTSNode::And(left, right) = node {
+        collect_conjuncts(left, output);
+        collect_conjuncts(right, output);
     } else {
-        OperatorTree::Intersect(signals)
+        output.push(node);
+    }
+}
+
+fn intersect_or_single(mut trees: Vec<OperatorTree>) -> OperatorTree {
+    if trees.len() == 1 {
+        trees.pop().expect("one text tree exists")
+    } else {
+        OperatorTree::Intersect(trees)
     }
 }
 
@@ -111,14 +147,14 @@ fn resolve_field(node_field: Option<&str>, default_field: Option<&str>) -> Optio
     }
 }
 
-fn has_vector_signal(node: &FTSNode) -> bool {
+fn is_text_query_node(node: &FTSNode) -> bool {
     match node {
-        FTSNode::Vector { .. } => true,
-        FTSNode::Term { .. } | FTSNode::Phrase { .. } => false,
+        FTSNode::Vector { .. } => false,
+        FTSNode::Term { .. } | FTSNode::Phrase { .. } => true,
         FTSNode::And(left, right) | FTSNode::Or(left, right) => {
-            has_vector_signal(left) || has_vector_signal(right)
+            is_text_query_node(left) && is_text_query_node(right)
         }
-        FTSNode::Not(inner) => has_vector_signal(inner),
+        FTSNode::Not(inner) => is_text_query_node(inner),
     }
 }
 
@@ -144,17 +180,31 @@ mod tests {
     }
 
     #[test]
-    fn mixed_text_vector_and_uses_robust_pooling() {
+    fn mixed_text_vector_and_uses_exact_single_prior_fusion() {
         let tree =
             compile_query_string("body:search AND embedding:[0.1, 0.9]", Some("_all")).unwrap();
         assert!(matches!(
             tree,
-            OperatorTree::RobustPositiveEvidencePool {
-                alpha: 0.5,
-                gating: GatingSpec::Softplus,
+            OperatorTree::BayesianEvidenceFusion {
+                base_rate: None,
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn mixed_conjunction_calibrates_the_complete_text_query_once() {
+        let tree = compile_query_string(
+            "body:search AND body:database AND embedding:[0.1, 0.9]",
+            Some("_all"),
+        )
+        .unwrap();
+        let OperatorTree::BayesianEvidenceFusion { signals, .. } = tree else {
+            panic!("exact hybrid fusion expected");
+        };
+        assert_eq!(signals.len(), 2);
+        assert!(matches!(&signals[0], OperatorTree::Intersect(parts) if parts.len() == 2));
+        assert!(matches!(&signals[1], OperatorTree::KNN { .. }));
     }
 
     #[test]

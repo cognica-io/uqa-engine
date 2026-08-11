@@ -350,15 +350,14 @@ fn profile_vector_hybrid_paths(
     println!("knn_hits={}", knn.rows.len());
     assert!(!knn.rows.is_empty());
 
-    let fused = profile("fuse_sql", || {
+    let fused = profile("hybrid_sql", || {
         engine
             .sql(
                 &format!(
                     "SELECT id, kind, _score FROM messages \
-                     WHERE fuse_log_odds(\
-                         bayesian_match(content, $1), \
-                         knn_match(embedding, $2, {LIMIT})\
-                     ) AND kind = 'chat' \
+                     WHERE text_match(content, $1) \
+                       AND knn_match(embedding, $2, {LIMIT}) \
+                       AND kind = 'chat' \
                      ORDER BY _score DESC LIMIT {LIMIT}"
                 ),
                 &[query.clone(), embedding.clone()],
@@ -377,7 +376,6 @@ fn profile_vector_hybrid_paths(
                 vector_field: "embedding",
                 query_vector: query_vector.to_vec(),
                 knn_pool: LIMIT,
-                alpha: 0.5,
                 top_k: LIMIT,
             })
             .unwrap()
@@ -385,16 +383,15 @@ fn profile_vector_hybrid_paths(
     println!("hybrid_api_hits={}", hybrid.len());
     assert!(!hybrid.is_empty());
 
-    let derived = profile("derived_fuse_sql", || {
+    let derived = profile("derived_hybrid_sql", || {
         engine
             .sql(
                 &format!(
                     "SELECT hits.id, hits._score FROM (\
                          SELECT id, kind, _score FROM messages \
-                         WHERE fuse_log_odds(\
-                             bayesian_match(content, $1), \
-                             knn_match(embedding, $2, {LIMIT})\
-                         ) AND kind = 'chat' \
+                         WHERE text_match(content, $1) \
+                           AND knn_match(embedding, $2, {LIMIT}) \
+                           AND kind = 'chat' \
                          ORDER BY _score DESC LIMIT {LIMIT}\
                      ) hits \
                      ORDER BY hits._score DESC LIMIT {LIMIT}"

@@ -153,8 +153,14 @@ Tune approximate indexes with measured recall and latency on production-shaped q
 
 UQA-RS offers two distinct fusion contracts:
 
-1. `fuse_bayesian_evidence` combines calibrated, conditionally independent evidence exactly in log-odds space.
-2. `pool_positive_evidence` and `Engine::hybrid_search` implement a robust positive-evidence ranking heuristic with adaptive signal weighting.
+1. `fuse_bayesian_evidence`, its exact alias `fuse_log_odds`, automatic mixed-modality SQL, and `Engine::hybrid_search` combine calibrated, conditionally independent evidence exactly in signed log-odds space with one prior.
+2. `pool_positive_evidence` and `Engine::robust_hybrid_search` implement the separately named robust positive-evidence ranking heuristic.
+
+SQL automatically selects exact Bayesian evidence fusion when one `AND` conjunction contains supported text and vector retrieval leaves from the same relation. `text_match` is calibrated and stripped of its signal-local prior at that boundary, the KNN query pool is converted to prior-free vector evidence, the resolved corpus prior enters once, and ordinary conjuncts remain strict post-fusion filters. This policy makes conditional independence between the text and vector modalities the default hybrid contract. Relation-qualified signals from different sources are not combined, unqualified fields are inferred only in a single-source query block, and a joined query must qualify all inferred signals with the same relation alias.
+
+Automatic text leaves are `text_match` and `bayesian_match`, and automatic vector leaves are `knn_match` and `calibrated_vector_match`. `bayesian_match_with_prior` remains outside inference because its document-level prior is not one removable corpus prior.
+
+Exactness describes the prior and evidence algebra. The KNN evidence is still a query-pool likelihood-ratio estimate unless the application supplies a separately validated calibration contract.
 
 Exact Bayesian evidence fusion is
 
@@ -163,11 +169,22 @@ $$
  + \sum_i \ell_i,
 $$
 
-where $\pi$ is the prior and each $\ell_i$ is prior-free evidence. Do not feed independent posterior probabilities into this equation without removing their priors.
+where $\pi$ is the prior and each $\ell_i$ is prior-free evidence. Do not feed independent posterior probabilities into this equation without removing their priors. When exact signals report inferred corpus priors, those priors must agree numerically; otherwise the query must supply one explicit `base_rate` instead of inventing an averaging rule.
 
-The positive-evidence pool is useful when calibrated conditional independence is not justified. It gates weak or negative contributions and can reduce the weight of a signal that does not separate the current candidate pool. Its `alpha` value controls confidence scaling and must be in its documented valid range.
+The positive-evidence pool is useful when calibrated conditional independence is not justified. It gates weak or negative contributions and, when adaptive weighting is enabled, can reduce the weight of a signal that does not separate the current candidate pool. Its `alpha` value controls confidence scaling and must be in its documented valid range.
 
-SQL example:
+Automatic SQL example:
+
+```sql
+SELECT id, title, _score
+FROM articles
+WHERE text_match(body, 'embedded retrieval')
+  AND knn_match(embedding, ARRAY[0.8, 0.1, 0.1, 0.0], 100)
+ORDER BY _score DESC, id ASC
+LIMIT 20;
+```
+
+Explicit SQL example:
 
 ```sql
 SELECT id, title, _score
@@ -180,7 +197,9 @@ ORDER BY _score DESC, id ASC
 LIMIT 20;
 ```
 
-The compatibility function `fuse_log_odds` is a ranking heuristic. Use `fuse_bayesian_evidence` when the exact evidence contract is required.
+`fuse_log_odds` is an exact alias for `fuse_bayesian_evidence`; it accepts the same optional `base_rate` named argument. Robust gating, confidence scaling, bounds, and weights belong only to `pool_positive_evidence`.
+
+Any explicit fusion function overrides the automatic policy and is preserved without another fusion wrapper.
 
 ## Stable result handling
 

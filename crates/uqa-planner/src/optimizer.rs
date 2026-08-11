@@ -25,6 +25,7 @@ use crate::{
 mod access_path;
 mod api;
 mod command;
+mod implicit_fusion;
 mod join_reorder;
 mod scalar;
 mod traversal;
@@ -34,9 +35,11 @@ pub use api::{
     optimize, optimize_with_aggregates, optimize_with_aggregates_and_statistics,
     optimize_with_statistics, OptimizerConfig, SourceStatistics,
 };
+pub use implicit_fusion::query_contains_implicit_hybrid_fusion;
 
 use access_path::{choose_access_path, prioritize_access_predicates};
 use command::optimize_command;
+use implicit_fusion::{rewrite_implicit_hybrid_fusion, source_allows_unqualified_signals};
 use join_reorder::reorder_unified_plan_joins;
 use scalar::{optimize_assignments, optimize_projections, optimize_scalar_slot};
 use traversal::{optimize_query, optimize_source, optimize_unified_plan};

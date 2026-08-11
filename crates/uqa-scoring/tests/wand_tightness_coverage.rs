@@ -10,7 +10,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use uqa_core::{Payload, PostingEntry, PostingList};
-use uqa_scoring::{AdaptiveWANDScorer, BoundTightnessAnalyzer, Scorer, TightenedFusionWANDScorer};
+use uqa_scoring::{
+    AdaptiveWANDScorer, BoundTightnessAnalyzer, Scorer, TightenedConfidenceScaledPoolWANDScorer,
+};
 
 struct MockScorer {
     score: f64,
@@ -160,7 +162,7 @@ fn adaptive_wand_analyzer_populated() {
 
 #[test]
 fn tightened_fusion_wand() {
-    let mut scorer = TightenedFusionWANDScorer::new(
+    let mut scorer = TightenedConfidenceScaledPoolWANDScorer::new(
         vec![
             map(&[(1, 0.9), (2, 0.7), (3, 0.5)]),
             map(&[(1, 0.8), (2, 0.6), (4, 0.4)]),
@@ -178,7 +180,7 @@ fn tightened_fusion_wand() {
 
 #[test]
 fn tightened_fusion_analyzer() {
-    let mut scorer = TightenedFusionWANDScorer::new(
+    let mut scorer = TightenedConfidenceScaledPoolWANDScorer::new(
         vec![map(&[(1, 0.9), (2, 0.7)]), map(&[(1, 0.8), (3, 0.4)])],
         vec![1.0, 1.0],
         0.5,
@@ -192,8 +194,14 @@ fn tightened_fusion_analyzer() {
 
 #[test]
 fn tightened_fusion_preserves_original_bounds() {
-    let scorer =
-        TightenedFusionWANDScorer::new(vec![map(&[(1, 0.9)])], vec![1.0], 0.5, 1, 0.8).unwrap();
+    let scorer = TightenedConfidenceScaledPoolWANDScorer::new(
+        vec![map(&[(1, 0.9)])],
+        vec![1.0],
+        0.5,
+        1,
+        0.8,
+    )
+    .unwrap();
     assert_eq!(scorer.original_bounds, vec![1.0]);
     assert_eq!(scorer.signal_upper_bounds, vec![0.9]);
 }

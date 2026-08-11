@@ -280,7 +280,7 @@ fn bench_retrieval_queries(c: &mut Criterion) {
         },
         ReadCase {
             name: "hybrid_fusion",
-            sql: "SELECT id, _score FROM documents WHERE fuse_log_odds(bayesian_match(body, 'rust'), knn_match(embedding, ARRAY[0.9, 0.1, 0.5, 1.0], 100)) ORDER BY _score DESC LIMIT 100",
+            sql: "SELECT id, _score FROM documents WHERE text_match(body, 'rust') AND knn_match(embedding, ARRAY[0.9, 0.1, 0.5, 1.0], 100) ORDER BY _score DESC LIMIT 100",
         },
     ];
     validate_read_cases(&engine, &cases);

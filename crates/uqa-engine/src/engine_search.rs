@@ -13,9 +13,9 @@ use std::time::Instant;
 use super::{
     Arc, BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, CalibrationMetrics,
     CalibrationReport, DocId, Engine, ExecutionContext, HybridSearchParams, InvertedIndex,
-    ParameterLearner, PostingList, RawBm25Score, SQLError, ScoredEntry, Scorer, ScoringMode,
-    StorageBackendError, StorageBackendResult, TextSearchAlgorithm, TextSearchProfile,
-    UnsupervisedBm25ScoreEstimator,
+    ParameterLearner, PostingList, RawBm25Score, RobustHybridSearchParams, SQLError, ScoredEntry,
+    Scorer, ScoringMode, StorageBackendError, StorageBackendResult, TextSearchAlgorithm,
+    TextSearchProfile, UnsupervisedBm25ScoreEstimator,
 };
 use uqa_core::IndexStats;
 use uqa_operators::{OperatorTree, TextScoringMode, TextTopKPlan, TextTopKStrategy};

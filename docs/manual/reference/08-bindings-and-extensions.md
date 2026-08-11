@@ -18,6 +18,8 @@ UQA-RS exposes the same durable engine through Rust, Python, Node.js, and browse
 
 Check the type declaration files in the target package for the exact release surface.
 
+Across every binding, `hybrid_search` or `hybridSearch` uses exact signed single-prior log-odds fusion and has no `alpha` argument. The separately named `robust_hybrid_search` or `robustHybridSearch` accepts `alpha` and selects gated, confidence-scaled positive-evidence pooling. SQL follows the same split: mixed same-relation text and vector conjunctions are exact by default, `fuse_bayesian_evidence` and `fuse_log_odds` are exact explicit functions, and `pool_positive_evidence` is the explicit heuristic.
+
 ## Rust QueryBuilder
 
 `uqa_api::QueryBuilder` builds SQL-shaped plans fluently:

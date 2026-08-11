@@ -266,10 +266,11 @@ fn fuse_log_odds_executes_generated_shared_ir_query() {
                 "bayesian_match(title, 'rust')",
                 "bayesian_match(title, 'embedded')",
             ],
-            0.5,
+            Some(0.1),
         )
         .unwrap();
     assert!(query.to_sql().contains(" WHERE fuse_log_odds("));
+    assert!(query.to_sql().contains("base_rate => 0.1"));
     assert_probability_scores(&query.execute().unwrap());
 }
 
@@ -356,12 +357,6 @@ fn fusion_builders_reject_invalid_alpha_and_signal_arity() {
         "bayesian_match(title, 'embedded')",
     ];
     for alpha in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1, 1.1] {
-        let log_odds_error = QueryBuilder::new(&engine, "notes")
-            .fuse_log_odds(&signals, alpha)
-            .err()
-            .expect("invalid log-odds alpha must fail");
-        assert!(log_odds_error.to_string().contains("finite and in [0, 1]"));
-
         let robust_error = QueryBuilder::new(&engine, "notes")
             .pool_positive_evidence(&signals, alpha)
             .err()
@@ -378,7 +373,7 @@ fn fusion_builders_reject_invalid_alpha_and_signal_arity() {
     let one_signal = ["bayesian_match(title, 'rust')"];
     for error in [
         QueryBuilder::new(&engine, "notes")
-            .fuse_log_odds(&one_signal, 0.5)
+            .fuse_log_odds(&one_signal, None)
             .err()
             .expect("log odds requires two signals"),
         QueryBuilder::new(&engine, "notes")
@@ -401,11 +396,20 @@ fn fusion_builders_reject_invalid_alpha_and_signal_arity() {
         assert!(error.to_string().contains(">=2 signals"));
     }
 
-    let invalid_prior = QueryBuilder::new(&engine, "notes")
-        .fuse_bayesian_evidence(&signals, Some(1.0))
-        .err()
-        .expect("invalid Bayesian evidence prior must fail");
-    assert!(invalid_prior.to_string().contains("base_rate"));
+    for invalid_prior in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, 1.0] {
+        for error in [
+            QueryBuilder::new(&engine, "notes")
+                .fuse_log_odds(&signals, Some(invalid_prior))
+                .err()
+                .expect("invalid log-odds prior must fail"),
+            QueryBuilder::new(&engine, "notes")
+                .fuse_bayesian_evidence(&signals, Some(invalid_prior))
+                .err()
+                .expect("invalid Bayesian evidence prior must fail"),
+        ] {
+            assert!(error.to_string().contains("base_rate"));
+        }
+    }
 
     let no_signal_stages: [(&str, usize); 0] = [];
     let multi_stage_error = QueryBuilder::new(&engine, "notes")

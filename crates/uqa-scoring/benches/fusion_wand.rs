@@ -4,12 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Fusion WAND top-k benchmarks across document and signal counts.
+//! Confidence-scaled pool WAND top-k benchmarks across document and signal counts.
 
 use std::collections::BTreeMap;
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use uqa_scoring::{fusion_wand::SignalScoreMap, FusionWANDScorer};
+use uqa_scoring::{fusion_wand::SignalScoreMap, ConfidenceScaledPoolWANDScorer};
 
 fn signal(n_docs: u64, signal_idx: u64) -> SignalScoreMap {
     let mut map = BTreeMap::new();
@@ -29,9 +29,10 @@ fn signals(n_signals: usize, n_docs: u64) -> Vec<SignalScoreMap> {
 fn bench_top_k(c: &mut Criterion) {
     let sigs = signals(3, 10_000);
     let bounds = vec![0.95; sigs.len()];
-    let mut group = c.benchmark_group("fusion_wand_top_k");
+    let mut group = c.benchmark_group("confidence_scaled_pool_wand_top_k");
     for k in [10_usize, 50, 100] {
-        let scorer = FusionWANDScorer::new(sigs.clone(), bounds.clone(), 0.5, k).unwrap();
+        let scorer =
+            ConfidenceScaledPoolWANDScorer::new(sigs.clone(), bounds.clone(), 0.5, k).unwrap();
         group.bench_with_input(BenchmarkId::from_parameter(k), &k, |bencher, _| {
             bencher.iter(|| {
                 let result = black_box(&scorer).score_top_k().unwrap();
@@ -43,11 +44,11 @@ fn bench_top_k(c: &mut Criterion) {
 }
 
 fn bench_vs_exhaustive_shapes(c: &mut Criterion) {
-    let mut group = c.benchmark_group("fusion_wand_by_signal_count");
+    let mut group = c.benchmark_group("confidence_scaled_pool_wand_by_signal_count");
     for n_signals in [2_usize, 3, 5] {
         let sigs = signals(n_signals, 10_000);
         let bounds = vec![0.95; sigs.len()];
-        let scorer = FusionWANDScorer::new(sigs, bounds, 0.5, 50).unwrap();
+        let scorer = ConfidenceScaledPoolWANDScorer::new(sigs, bounds, 0.5, 50).unwrap();
         group.bench_with_input(
             BenchmarkId::from_parameter(n_signals),
             &n_signals,

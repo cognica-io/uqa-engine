@@ -181,6 +181,8 @@ Prepared statements and stored views retain optimized plans. The exact single-st
 
 The optimizer recursively visits CTEs, set-operation branches, scalar subqueries, mutations, prepared and explained bodies, and query-valued commands. Its access decision chooses row, `OperatorTree`, or hybrid posting-plus-residual execution only after the complete query block is lowered.
 
+Within query-block predicates, a direct same-relation `AND` containing both supported text and vector retrieval leaves is rewritten to canonical exact Bayesian evidence fusion before access-path selection. Raw `text_match` becomes Bayesian-calibrated only at this inferred fusion boundary, KNN becomes prior-free query-pool evidence, the resolved corpus prior enters the fused log-odds exactly once, relational conjuncts remain strict filters, cross-relation signals are excluded, and any explicit fusion function suppresses the inference. Unqualified retrieval fields are eligible only in a single-source query block; a joined block must qualify every inferred signal with the same relation alias. This automatic contract treats the text and vector modalities as conditionally independent. The logical-plan mutability classifier mirrors the detection before optimization so auto-calibration executes inside a writable statement transaction.
+
 Once an accelerated single-table access path has consumed a retrieval predicate, its text and vector field arguments remain index dependencies but are removed from the relational row projection; `ScoredDocumentSource` fetches only columns required by SELECT, ordering, grouping, facets, and the unexecuted residual predicate. This separation prevents a hybrid text candidate set from decoding and copying stored vectors merely because the original search expression named the vector field.
 
 For an eligible `ORDER BY _score DESC ... LIMIT` with no remaining row predicate or cardinality-changing compute, execution keeps exact retrieval and fusion exhaustive, partitions the completed scored carrier at `LIMIT + OFFSET`, retains every entry tied at the cutoff score, and sends only that prefix to `ScoredDocumentSource`. The ordinary relational sort and limit still apply all secondary keys and the final offset, so the optimization removes impossible document reads without changing tie semantics; distinct, aggregate, window, facet, residual-filter, and volatile-limit shapes do not use this cutoff.
@@ -238,6 +240,8 @@ Boolean or fusion parents do not receive text top-K pushdown because truncating 
 ## Fusion and vector calibration
 
 Exact `BayesianEvidenceFusion` adds signed likelihood-ratio evidence and one explicit prior. Robust positive-evidence pooling is a separately named ranking heuristic with gating, confidence scaling, and optional adaptive weights; it does not claim exact posterior calibration.
+
+Automatic same-relation text-and-vector SQL, `fuse_bayesian_evidence`, `fuse_log_odds`, and `Engine::hybrid_search` all select the exact node. Only `pool_positive_evidence` and `Engine::robust_hybrid_search` select the robust heuristic node.
 
 Independent fusion inputs execute concurrently on the engine's shared parallel executor. Bayesian text parameters are cached by field after the first execution-epoch load and validation, reused for both evidence scoring and the signal prior, and invalidated on local or externally observed table/catalog changes, publication, refresh, and rollback; auto-estimation itself still follows the documented corpus-size threshold instead of running for every query.
 

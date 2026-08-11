@@ -29,7 +29,8 @@ pub enum FunctionKind {
     BayesianMatchWithPrior,
     /// `knn_match(field, query_vector, k)` - top-k cosine KNN.
     KNNMatch,
-    /// Compatibility name for robust positive-evidence pooling.
+    /// `fuse_log_odds(signal_1, signal_2, ...)` - exact signed
+    /// log-likelihood-ratio addition with one relevance prior.
     FuseLogOdds,
     /// `pool_positive_evidence(signal_1, signal_2, ...)` - gated,
     /// confidence-scaled retrieval pooling without a calibration theorem.

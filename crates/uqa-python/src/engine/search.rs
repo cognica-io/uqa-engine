@@ -8,7 +8,8 @@
 
 use super::{
     pymethods, runtime_error, scored_entries_to_py, scoring_mode, validate_vector,
-    HybridSearchParams, Py, PyAny, PyEngine, PyResult, PyValueError, Python, ScoredEntry,
+    HybridSearchParams, Py, PyAny, PyEngine, PyResult, PyValueError, Python,
+    RobustHybridSearchParams, ScoredEntry,
 };
 
 #[pymethods]
@@ -71,7 +72,7 @@ impl PyEngine {
         scored_entries_to_py(py, &entries)
     }
 
-    #[pyo3(signature = (table, text_field, text_query, vector_field, query_vector, top_k=10, knn_pool=None, alpha=1.0))]
+    #[pyo3(signature = (table, text_field, text_query, vector_field, query_vector, top_k=10, knn_pool=None))]
     #[allow(clippy::too_many_arguments)]
     fn hybrid_search(
         &self,
@@ -83,7 +84,6 @@ impl PyEngine {
         query_vector: Vec<f32>,
         top_k: usize,
         knn_pool: Option<usize>,
-        alpha: f64,
     ) -> PyResult<Py<PyAny>> {
         let query_vector = validate_vector(query_vector, "hybrid query vector")?;
         let knn_pool = match knn_pool {
@@ -92,10 +92,46 @@ impl PyEngine {
                 PyValueError::new_err("default knn_pool exceeds the platform usize range")
             })?,
         };
-        if !alpha.is_finite() {
-            return Err(PyValueError::new_err("alpha must be finite"));
-        }
         let params = HybridSearchParams {
+            table,
+            text_field,
+            text_query,
+            vector_field,
+            query_vector,
+            knn_pool,
+            top_k,
+        };
+        let entries = py
+            .detach(|| self.inner.hybrid_search(&params))
+            .map_err(runtime_error)?;
+        scored_entries_to_py(py, &entries)
+    }
+
+    #[pyo3(signature = (table, text_field, text_query, vector_field, query_vector, top_k=10, knn_pool=None, alpha=0.5))]
+    #[allow(clippy::too_many_arguments)]
+    fn robust_hybrid_search(
+        &self,
+        py: Python<'_>,
+        table: &str,
+        text_field: &str,
+        text_query: &str,
+        vector_field: &str,
+        query_vector: Vec<f32>,
+        top_k: usize,
+        knn_pool: Option<usize>,
+        alpha: f64,
+    ) -> PyResult<Py<PyAny>> {
+        let query_vector = validate_vector(query_vector, "robust hybrid query vector")?;
+        let knn_pool = match knn_pool {
+            Some(pool) => pool,
+            None => top_k.checked_mul(4).ok_or_else(|| {
+                PyValueError::new_err("default knn_pool exceeds the platform usize range")
+            })?,
+        };
+        if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+            return Err(PyValueError::new_err("alpha must be finite and in [0, 1]"));
+        }
+        let params = RobustHybridSearchParams {
             table,
             text_field,
             text_query,
@@ -106,7 +142,7 @@ impl PyEngine {
             top_k,
         };
         let entries = py
-            .detach(|| self.inner.hybrid_search(&params))
+            .detach(|| self.inner.robust_hybrid_search(&params))
             .map_err(runtime_error)?;
         scored_entries_to_py(py, &entries)
     }

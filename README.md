@@ -129,7 +129,7 @@ cargo run -p uqa-engine --example compressed_encrypted_catalog
 | Streaming larger results | `Engine::sql_cursor` or `Engine::sql_columnar` |
 | Full-text retrieval | `text_match`, `fts_match`, or `bayesian_match` |
 | Vector retrieval | `VECTOR(N)`, `TENSOR(N)`, `knn_match`, and explicit IVF or HNSW indexes |
-| Hybrid ranking | `fuse_bayesian_evidence`, `pool_positive_evidence`, or `Engine::hybrid_search` |
+| Hybrid ranking | Automatic mixed-modality `AND`, exact `fuse_bayesian_evidence` or `fuse_log_odds`, `Engine::hybrid_search`, or explicit robust `pool_positive_evidence` and `Engine::robust_hybrid_search` |
 | Graph queries | `Engine::run_cypher`, SQL `cypher`, `rpq`, or `graph_*` functions |
 | Fluent query construction | `uqa_api::QueryBuilder` |
 
@@ -229,7 +229,7 @@ target/release/examples/tpch_runner --iterations 201
 
 In the 2026-08-09 local arm64 development snapshot, UQA matched all 22 results and had a lower median latency than PostgreSQL 17 on 14 of 22 queries. This is a small developer-machine compatibility workload, not a compliant or audited TPC-H result. The complete fixture provenance, per-query measurements, and reproduction rules are in the [TPC-H compatibility benchmark](benchmarks/tpch/README.md); the broader benchmark methodology is in the [performance design document](docs/design/performance.md).
 
-The 2026-08-11 clustered-posting pass measured release-profile persisted Block-Max WAND at 1.0142 ms and WAND at 0.9337 ms on the direct 5,000-document reopened-SQLite probe, down 73.7% and 76.5% from the preceding 3.8584 ms and 3.9801 ms baselines. Three separate end-to-end BEIR SQL runs used 30 Criterion samples each, kept every relevance metric unchanged, and had median BM25 `text_match`, HNSW, positive-evidence hybrid, and SQL GIN construction values of 0.82 ms, 2.58 ms, 3.62 ms, and 2.307 s versus the 20.13 ms, 2.87 ms, 56.49 ms, and 4.012 s pre-pass baselines. Clustered postings, map-free cursor merging, execution-epoch parameter caching, parallel fusion signals, residual-aware projection, and an exact tie-preserving post-fusion score cutoff produced these changes. These are same-machine regression baselines, not portable latency claims; commands, measured boundaries, full tables, correctness gates, observed ranges, and limitations are recorded in the [performance design document](docs/design/performance.md#clustered-posting-pass-2026-08-11).
+The 2026-08-11 clustered-posting pass measured release-profile persisted Block-Max WAND at 1.0142 ms and WAND at 0.9337 ms on the direct 5,000-document reopened-SQLite probe, down 73.7% and 76.5% from the preceding 3.8584 ms and 3.9801 ms baselines. The 2026-08-12 pinned SciFact run separately measured the current exact `hybrid_log_odds` contract at 0.7226 NDCG@10, 0.6820 MAP@10, 0.8322 Recall@10, and 3.29 ms per query; it passed every absolute and comparative gate. Commands, measured boundaries, validity rules, complete tables, and limitations are recorded in the [performance design document](docs/design/performance.md#clustered-posting-pass-2026-08-11).
 
 Contributor checks, benchmark build gates, and repository conventions are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 

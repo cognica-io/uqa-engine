@@ -215,7 +215,6 @@ fn bench_search(c: &mut Criterion) {
             vector_field: "embedding",
             query_vector: query_vector.clone(),
             knn_pool: LIMIT,
-            alpha: 0.5,
             top_k: LIMIT,
         })
         .expect("hybrid smoke search");
@@ -265,7 +264,6 @@ fn bench_search(c: &mut Criterion) {
                 vector_field: "embedding",
                 query_vector: query_vector.clone(),
                 knn_pool: LIMIT,
-                alpha: 0.5,
                 top_k: LIMIT,
             });
             black_box(result)

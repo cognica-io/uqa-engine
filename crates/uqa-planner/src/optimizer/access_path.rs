@@ -180,6 +180,8 @@ fn retrieval_function(name: &str) -> bool {
             | "calibrated_vector_match"
             | "knn_match"
             | "fuse_log_odds"
+            | "pool_positive_evidence"
+            | "fuse_bayesian_evidence"
             | "multi_field_match"
             | "staged_retrieval"
             | "attention"

@@ -36,7 +36,7 @@ The remaining local gaps are Q02, Q07, Q09, Q13, Q16, Q19, Q21, and Q22. Q22 sam
 
 The measurement contract explicitly fixes Criterion's linear sampling mode and slope point estimator. Linear sampling changes the iteration count between samples, so the regression slope of elapsed time against iterations is the per-iteration estimate used for every comparison; the median of sample averages is a different statistic and must not be substituted. The runner writes toolchain, CPU model, platform, commit and dirty state, manifest, workload-identity, benchmark-source, and executable hashes, raw slope samples, medians, paired ratios, and check results to a versioned JSON artifact, and CI uploads that artifact on every run.
 
-Pull-request CI treats the external-engine ratios as advisory evidence rather than a regression oracle. It builds the base and head benchmark binaries on one runner, executes four adjacent pairs in counterbalanced `head → base`, `base → head` order, and gates the median of the four paired head/base slope ratios. Q1 and Q6 permit at most a 1.10x slowdown; materialized and cursor scans permit 1.15x. The runner refuses the comparison unless the generator, row count, seed, memory budget, schema, and queries have identical workload identities at both revisions. This distinguishes a code regression from heterogeneous hosted-runner behavior while retaining the SQLite and DuckDB measurements for interpretation.
+Pull-request CI treats the external-engine ratios as advisory evidence rather than a regression oracle. It builds the base and head benchmark binaries on one runner, executes four adjacent pairs in counterbalanced `head -> base`, `base -> head` order, and gates the median of the four paired head/base slope ratios. Q1 and Q6 permit at most a 1.10x slowdown; materialized and cursor scans permit 1.15x. The runner refuses the comparison unless the generator, row count, seed, memory budget, schema, and queries have identical workload identities at both revisions. This distinguishes a code regression from heterogeneous hosted-runner behavior while retaining the SQLite and DuckDB measurements for interpretation.
 
 The refreshed full 20-sample run used 20,000 rows on macOS arm64 at clean commit `886d091e10ec884eee0f609446809c11632a8157`. The complete artifact is [`macos-arm64-2026-08-03.json`](../../benchmarks/analytical/reference/macos-arm64-2026-08-03.json).
 
@@ -201,11 +201,10 @@ The consuming-input posting-list benchmark uses equivalent owned inputs on both 
 | Bayesian text SQL, top 100 | 4k documents | 4.864 ms |
 | IVF vector SQL, top 100 | 4k documents | 1.131 ms |
 | Graph label `VertexMatch` | 1k vertices | 86.836 us |
-| Direct text/vector hybrid, top 100 | 4k documents | 8.571 ms |
 
-Targeted before/after probes isolated the largest retrieval changes: k-NN top-10 over 10k 32-dimensional vectors moved from about 802 us to 274 us (-65.8%), graph label matching moved from 206.64 us to 85.83 us (-58.5%), and the same 4k direct hybrid fixture moved from 12.010 ms to 8.802 ms (-26.7%) after query-scoped statistics. The configured unified run above is the publication baseline; these `--quick` pairs record direction and mechanism only.
+Targeted before/after probes isolated the largest retrieval changes: k-NN top-10 over 10k 32-dimensional vectors moved from about 802 us to 274 us (-65.8%), and graph label matching moved from 206.64 us to 85.83 us (-58.5%). The configured unified run above is the publication baseline; these `--quick` pairs record direction and mechanism only.
 
-The release-profile persistent probe independently recorded a 4k-document GIN build at 173.554 ms, IVF build at 25.082 ms, warm Bayesian SQL at 4.860 ms, direct Bayesian API search at 4.340 ms, vector SQL at 2.462 ms, and direct hybrid API search at 9.159 ms. Hybrid relevance remained above every existing floor: small-corpus NDCG@10/MAP@10 were 0.9143/0.3899 (floors 0.90/0.34), and large-corpus values were 0.7784/0.1062 (floors 0.74/0.05).
+The release-profile persistent probe independently recorded a 4k-document GIN build at 173.554 ms, IVF build at 25.082 ms, warm Bayesian SQL at 4.860 ms, direct Bayesian API search at 4.340 ms, and vector SQL at 2.462 ms. Direct hybrid latency and relevance values from this pass used the former robust default and are intentionally omitted because they do not measure the current exact single-prior API contract.
 
 ## Unified query-plan matrix (2026-07-31)
 
@@ -251,7 +250,6 @@ cargo bench -p uqa-engine --bench query_matrix --locked -- --save-baseline query
 | Bayesian operator tree | 2.002 ms |
 | Vector operator tree | 1.781 ms |
 | Hybrid residual filter | 1.164 ms |
-| Hybrid fusion | 6.063 ms |
 | Insert values | 717.77 us |
 | Insert select | 1.155 ms |
 | Insert on conflict | 737.37 us |
@@ -259,6 +257,8 @@ cargo bench -p uqa-engine --bench query_matrix --locked -- --save-baseline query
 | Update from | 7.595 ms |
 | Delete using | 3.412 ms |
 | Merge matched | 4.766 ms |
+
+The `hybrid_fusion` case now executes automatic exact single-prior log-odds fusion. Its former robust-pool timing is invalid for this case and is intentionally omitted until a new baseline is saved from the current benchmark source.
 
 ### Root-cause fixes
 
@@ -354,13 +354,13 @@ The default `standard` profile contains 100,000 persistent 128-dimensional rows,
 
 The 2026-08-10 `standard` run below used rustc 1.90.0 on the local 20-CPU arm64 workstation. The first pre-run sample reported load averages 5.60, 6.34, and 6.09 with 34% idle CPU, while the final pre-run sample reported 7.07, 6.58, and 5.83 with 70% idle CPU, so these absolute values establish a functional local baseline rather than an interleaved low-noise regression claim. An initial HNSW run with `ef_search = 128` correctly failed the first 100-query quality gate at recall@10 0.382; the final 1,000-query run with the declared search width of 4,096 reached recall@10 0.9993 and 2.02x the exact SQL query throughput.
 
-| Persistent SQL query path, 100k × 128, k = 10 | Recall@10 | Top-1 | Exact-set rate | Mean/query | Queries/s |
+| Persistent SQL query path, 100k x 128, k = 10 | Recall@10 | Top-1 | Exact-set rate | Mean/query | Queries/s |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Exact `sqlite-bruteforce` | 1.0000 | 1.000 | 1.000 | 61.79 ms | 16.2 |
 | IVF (`nlist=256`, `nprobe=32`) | 0.4596 | 0.496 | 0.000 | 38.01 ms | 26.3 |
 | HNSW (`m=16`, `ef_search=4096`) | 0.9993 | 1.000 | 0.993 | 30.59 ms | 32.7 |
 
-| Persistent SQL construction stage, 100k × 128 | Elapsed | Rows/s |
+| Persistent SQL construction stage, 100k x 128 | Elapsed | Rows/s |
 | --- | ---: | ---: |
 | SQL table creation and parameterized batched load | 6.69 s | 14,953 |
 | SQL `CREATE INDEX ... USING ivf` | 57.84 s | 1,729 |
@@ -376,21 +376,30 @@ The checked [BEIR benchmark](../../benchmarks/beir/README.md) is another opt-in 
 bash scripts/run-beir-benchmark.sh
 ```
 
-The 2026-08-11 current reruns used rustc 1.90.0 on the local macOS arm64 workstation and reused hash-validated prepared artifacts. Each combined report identified a dirty implementation worktree, so these numbers are same-machine directional evidence rather than release artifacts or independent reproductions. The final configuration used 30 Criterion samples, a two-second warmup, and a ten-second target measurement, and it was run three times; the table reports the median point estimate rather than selecting the fastest run. Relative to the documented pre-pass absolute baseline, the medians changed by -95.9% for text, -10.3% for vector, and -93.6% for hybrid. The observed ranges were 0.77-0.82 ms, 2.38-2.61 ms, and 3.25-3.84 ms respectively; vector moved with the machine state across runs, so absolute differences within those ranges are not attributed to code. Clustered postings account for the posting and GIN improvements; sorted cursor merging, bulk metadata access, execution-epoch parameter caching, parallel fusion branches, residual-aware projection, and the exact post-fusion score cutoff account for the query-path reductions.
+The current manifest names the hybrid system `hybrid_log_odds` and executes `text_match(body, $1) AND calibrated_vector_match(embedding, $2, 100)`, which the optimizer lowers to exact signed single-prior Bayesian evidence fusion. The 2026-08-12 reference run used macOS 26.5.1 on arm64 with rustc 1.90.0, regenerated every embedding from the pinned model revision, embedded the current manifest hash in the report, and passed every absolute and comparative quality gate. These same-machine values establish reproducible implementation evidence rather than a cross-machine performance claim.
 
-| Persistent SQL system, SciFact 5,183 documents and 300 queries | NDCG@10 | MAP@10 | Recall@10 | Pre-pass | Current | Queries/s |
+| Persistent SciFact SQL system, 300 queries | NDCG@10 | MAP@10 | Recall@10 | Mean/query | Queries/s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Bayesian text | 0.6860 | 0.6375 | 0.8193 | 0.79 ms | 1,264.4 |
+| Calibrated vector | 0.6451 | 0.5959 | 0.7833 | 2.46 ms | 407.1 |
+| Exact hybrid log-odds | 0.7226 | 0.6820 | 0.8322 | 3.29 ms | 303.6 |
+
+| Persistent SciFact construction stage, 5,183 documents | Elapsed |
+| --- | ---: |
+| SQL table creation and parameterized batched load | 0.582 s |
+| SQL `CREATE INDEX ... USING gin` | 2.298 s |
+| SQL `CREATE INDEX ... USING hnsw` | 12.284 s |
+
+Exact hybrid improved over the better single-modality result by 0.0366 NDCG@10, 0.0445 MAP@10, and 0.0129 Recall@10 in this run. These measured gains validate this workload and implementation; the fusion theorem defines the exact evidence algebra but does not claim that every unsupervised workload must improve over every constituent ranking.
+
+### Exact synthetic hybrid relevance guard (2026-08-12)
+
+The deterministic `hybrid_relevance` benchmark now calls the exact `Engine::hybrid_search` path and uses Criterion identities prefixed with `exact_hybrid_relevance`. A release-profile `--quick` verification measured the values below. The exact algebra does not promise that an unsupervised vector-evidence estimate improves every text-only ranking, so the gate requires stable absolute NDCG and MAP plus an improvement over vector-only retrieval, while text-only remains a reported reference.
+
+| Regime | Documents | Exact hybrid NDCG@10 | Exact hybrid MAP@10 | Text NDCG@10 | Vector NDCG@10 | Quick interval |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| BM25 `text_match` | 0.6860 | 0.6375 | 0.8193 | 20.13 ms | 0.82 ms | 1,216.1 |
-| HNSW `knn_match` | 0.6451 | 0.5959 | 0.7833 | 2.87 ms | 2.58 ms | 388.3 |
-| Positive-evidence hybrid | 0.7259 | 0.6829 | 0.8422 | 56.49 ms | 3.62 ms | 276.1 |
-
-| Persistent SQL construction stage | Pre-pass | Current | Change | Rows/s |
-| --- | ---: | ---: | ---: | ---: |
-| SQL table creation and parameterized load | 0.574 s | 0.597 s | +4.0% | 8,683 |
-| SQL GIN creation | 4.012 s | 2.307 s | -42.5% | 2,246 |
-| SQL HNSW creation | 12.042 s | 12.638 s | +4.9% | 410 |
-
-Hybrid exceeded the better single signal by 0.0399 NDCG@10, 0.0454 MAP@10, and 0.0229 Recall@10. The checked comparative floors require improvements of at least 0.02, 0.02, and 0.01 respectively, in addition to per-system absolute floors; this prevents a future result from retaining the hybrid label while silently collapsing to one signal. The quality pass uses all 300 qrels-backed queries, while Criterion measures a fixed 25-query warm batch and reports its mean divided by 25. The original SQL text is unchanged and exact fusion remains exhaustive. After retrieval, column pruning excludes search-only `body` and `embedding` values; for an eligible score-first limit, a linear selection retains the complete `LIMIT + OFFSET` boundary-score tie group before document access and the relational sort still resolves `id ASC`. Persistent SQLite tests record both projected fields and fetched document counts, verify two-document materialization for `LIMIT 2` and `LIMIT 1 OFFSET 1`, retain all cutoff ties for exact secondary ordering, and cover the explicit-column fallback. Construction timings are one-shot observations rather than distribution comparisons; the GIN reduction is mechanistically aligned with clustered writes, while the smaller load and HNSW differences should be treated as local variation.
+| Small corpus | 63 | 0.8680 | 0.3899 | 0.9062 | 0.7984 | 1.5922-1.6040 ms |
+| Large corpus | 630 | 0.7838 | 0.1122 | 0.8092 | 0.7020 | 8.2480-8.3796 ms |
 
 ## Reference numbers (post-optimization)
 
@@ -410,7 +419,6 @@ Hybrid exceeded the better single signal by 0.0399 NDCG@10, 0.0454 MAP@10, and 0
 | TPC-H-style Q6 indexed aggregate (100k rows) | same bench | ~6.54 ms |
 | Persistent Bayesian text search (4k docs, top 100) | `cargo bench -p uqa-engine --bench retrieval_workloads` | ~4.86 ms |
 | Persistent IVF search (4k docs, top 100) | same bench | ~1.13 ms |
-| Persistent direct hybrid search (4k docs, top 100) | same bench | ~8.57 ms |
 | Graph label match (1k vertices) | same bench | ~86.8 us |
 | Relevance bench (3 queries, BM25) | `cargo bench -p uqa-engine --bench relevance` | ~24 us |
 | RPQ concat 3-hop (1k vertices) | `cargo bench -p uqa-graph --bench rpq` | ~2.2 us |

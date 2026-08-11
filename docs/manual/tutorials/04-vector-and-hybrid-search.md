@@ -105,7 +105,20 @@ WHERE knn_match(embedding, ARRAY[0.75, 0.05, 0.65, 0.00], 6)
 ORDER BY _score DESC, id ASC;
 ```
 
-## 7. Pool positive evidence
+## 7. Fuse text and vector evidence automatically
+
+```sql
+SELECT id, title, _score
+FROM passages
+WHERE text_match(body, 'query retrieval')
+  AND knn_match(embedding, ARRAY[0.75, 0.05, 0.65, 0.00], 6)
+ORDER BY _score DESC, id ASC
+LIMIT 3;
+```
+
+The planner recognizes the same-relation text and vector leaves as hybrid retrieval, converts them to prior-free evidence, and combines their union support with exact Bayesian log-odds fusion. The text and vector modalities are conditionally independent under this automatic contract, and the resolved corpus prior enters exactly once. A relational conjunct such as `topic = 'database'` would remain a strict filter after fusion.
+
+Use an explicit function when the fusion contract or its options are part of the application specification:
 
 ```sql
 SELECT id, title, _score
@@ -118,7 +131,7 @@ ORDER BY _score DESC, id ASC
 LIMIT 3;
 ```
 
-The robust pool is a ranking heuristic that adapts signal weights to the candidate pool. It is distinct from the exact conditional-independence contract of `fuse_bayesian_evidence`.
+The explicit robust pool replaces the automatic exact contract for this query. It is a ranking heuristic with gating and confidence scaling, and any explicit fusion call always overrides automatic selection.
 
 ## 8. Call hybrid retrieval from Rust
 
@@ -135,7 +148,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         vector_field: "embedding",
         query_vector: vec![0.75, 0.05, 0.65, 0.00],
         knn_pool: 100,
-        alpha: 1.0,
         top_k: 10,
     })?;
     println!("{hits:?}");
@@ -143,7 +155,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-The API always validates the vector field, dimension, index state, and finite query values, even when the vector candidate pool is empty.
+The API applies the same exact single-prior log-odds contract as automatic SQL. It always validates the vector field, dimension, index state, and finite query values, even when the vector candidate pool is empty. Applications that deliberately want gated robust ranking call `robust_hybrid_search` with `RobustHybridSearchParams` instead.
 
 ## 9. Evaluate before tuning
 

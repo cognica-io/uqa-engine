@@ -12,7 +12,7 @@
 //! `update` train the matrix by gradient descent on the logistic loss
 //! against ground-truth relevance labels.
 
-use uqa_scoring::{logit, prob::log_odds_conjunction_weighted, sigmoid, PROB_EPSILON};
+use uqa_scoring::{logit, prob::confidence_scaled_log_odds_pool_weighted, sigmoid, PROB_EPSILON};
 
 #[derive(Debug, Clone)]
 pub struct AttentionFusion {
@@ -149,7 +149,7 @@ impl AttentionFusion {
             return Ok(self.apply_base_rate(probs[0]));
         }
         let weights = self.attention_weights(query_features)?;
-        let probability = log_odds_conjunction_weighted(probs, &weights, self.alpha)?;
+        let probability = confidence_scaled_log_odds_pool_weighted(probs, &weights, self.alpha)?;
         Ok(self.apply_base_rate(probability))
     }
 

@@ -31,7 +31,7 @@
     "index_lifecycle": "SQL CREATE INDEX",
     "text_query": "SELECT id, _score FROM beir_documents WHERE text_match(body, $1) ORDER BY _score DESC, id ASC LIMIT 10",
     "vector_query": "SELECT id, _score FROM beir_documents WHERE knn_match(embedding, $2, 10) ORDER BY _score DESC, id ASC LIMIT 10",
-    "hybrid_query": "SELECT id, _score FROM beir_documents WHERE pool_positive_evidence(bayesian_match(body, $1), calibrated_vector_match(embedding, $2, 100), alpha => 0.5) ORDER BY _score DESC, id ASC LIMIT 10"
+    "hybrid_query": "SELECT id, _score FROM beir_documents WHERE text_match(body, $1) AND calibrated_vector_match(embedding, $2, 100) ORDER BY _score DESC, id ASC LIMIT 10"
   },
   "indexes": [
     {
@@ -48,7 +48,6 @@
   "workload": {
     "top_k": 10,
     "knn_pool": 100,
-    "alpha": 0.5,
     "quality_query_count": 300,
     "performance_query_count": 25,
     "insert_batch_rows": 64
@@ -71,32 +70,32 @@
       "minimum_quality": {"ndcg_at_10": 0.62, "map_at_10": 0.57, "recall_at_10": 0.75}
     },
     {
-      "name": "hybrid_positive_evidence",
+      "name": "hybrid_log_odds",
       "query": "hybrid_query",
       "score_domain": "probability",
       "require_top_k": true,
-      "criterion_benchmark": "beir_hybrid_query_batch/scifact/hybrid_positive_evidence",
+      "criterion_benchmark": "beir_hybrid_query_batch/scifact/hybrid_log_odds",
       "minimum_quality": {"ndcg_at_10": 0.70, "map_at_10": 0.65, "recall_at_10": 0.81}
     }
   ],
   "comparative_quality": [
     {
       "name": "hybrid_ndcg_vs_best_single_signal",
-      "system": "hybrid_positive_evidence",
+      "system": "hybrid_log_odds",
       "metric": "ndcg_at_10",
       "baseline_systems": ["text_bm25", "vector_hnsw"],
       "minimum_delta": 0.02
     },
     {
       "name": "hybrid_map_vs_best_single_signal",
-      "system": "hybrid_positive_evidence",
+      "system": "hybrid_log_odds",
       "metric": "map_at_10",
       "baseline_systems": ["text_bm25", "vector_hnsw"],
       "minimum_delta": 0.02
     },
     {
       "name": "hybrid_recall_vs_best_single_signal",
-      "system": "hybrid_positive_evidence",
+      "system": "hybrid_log_odds",
       "metric": "recall_at_10",
       "baseline_systems": ["text_bm25", "vector_hnsw"],
       "minimum_delta": 0.01

@@ -42,6 +42,8 @@ mod sql_fts_index_lifecycle;
 mod sql_fts_match_coverage;
 #[path = "sql_fusion_wand_coverage.rs"]
 mod sql_fusion_wand_coverage;
+#[path = "sql_implicit_hybrid_fusion.rs"]
+mod sql_implicit_hybrid_fusion;
 #[path = "sql_match_field_validation.rs"]
 mod sql_match_field_validation;
 #[path = "sql_multi_field.rs"]

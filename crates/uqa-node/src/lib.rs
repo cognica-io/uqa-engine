@@ -31,8 +31,8 @@ use napi_derive::napi;
 use uqa_core::Value;
 use uqa_engine::migration::{migrate_python_database, PythonMigrationReport};
 use uqa_engine::{
-    Engine as CoreEngine, HybridSearchParams, SQLParam as CoreSQLParam, SQLResult as CoreSQLResult,
-    ScoredEntry, ScoringMode,
+    Engine as CoreEngine, HybridSearchParams, RobustHybridSearchParams, SQLParam as CoreSQLParam,
+    SQLResult as CoreSQLResult, ScoredEntry, ScoringMode,
 };
 use uqa_scoring::{BM25Params, CalibrationReport as CoreCalibrationReport};
 use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions};
@@ -54,7 +54,8 @@ pub use results::{
 };
 pub use tasks::{
     CalibrationReportTask, EstimateScoringParamsTask, HybridSearchTask, KNNSearchTask,
-    LearnScoringParamsTask, RunCypherTask, SQLBatchTask, SQLTask, SearchTask, VectorSimilarityTask,
+    LearnScoringParamsTask, RobustHybridSearchTask, RunCypherTask, SQLBatchTask, SQLTask,
+    SearchTask, VectorSimilarityTask,
 };
 pub use value::JSValue;
 

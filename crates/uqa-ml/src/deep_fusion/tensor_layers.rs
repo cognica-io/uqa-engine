@@ -7,10 +7,10 @@
 //! Embedding, signal, dense, pooling, normalization, and dropout kernels.
 
 use super::{
-    apply_gating, log_odds_conjunction_weighted, runtime_filled_vec, runtime_model_error,
-    runtime_vec_with_capacity, safe_logit, usize_to_f64_exact, Arc, BTreeMap, DeepFusionOperator,
-    ExecutionContext, ForwardState, Gating, GlobalPoolMethod, Operator, StorageBackendError,
-    StorageBackendResult,
+    apply_gating, confidence_scaled_log_odds_pool_weighted, runtime_filled_vec,
+    runtime_model_error, runtime_vec_with_capacity, safe_logit, usize_to_f64_exact, Arc, BTreeMap,
+    DeepFusionOperator, ExecutionContext, ForwardState, Gating, GlobalPoolMethod, Operator,
+    StorageBackendError, StorageBackendResult,
 };
 
 pub(super) fn apply_embed(embedding: &[f64], state: &mut ForwardState) -> StorageBackendResult<()> {
@@ -81,7 +81,7 @@ pub(super) fn apply_signal(
                 1.0 / usize_to_f64_exact(n, "signal count")?,
                 "deep-fusion signal weights",
             )?;
-            log_odds_conjunction_weighted(&probs, &weights, alpha)
+            confidence_scaled_log_odds_pool_weighted(&probs, &weights, alpha)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?
         };
         let layer_logit = apply_gating(safe_logit(fused), gating);

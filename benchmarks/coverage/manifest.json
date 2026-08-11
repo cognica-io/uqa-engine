@@ -63,7 +63,7 @@
     },
     {
       "path": "crates/uqa-engine/benches/hybrid_relevance.rs",
-      "tokens": ["bench_hybrid_relevance"]
+      "tokens": ["bench_exact_hybrid_relevance"]
     },
     {
       "path": "crates/uqa-engine/benches/join.rs",
@@ -249,7 +249,7 @@
     },
     {
       "path": "crates/uqa-scoring/benches/fusion_wand.rs",
-      "tokens": ["fusion_wand_top_k", "fusion_wand_by_signal_count"]
+      "tokens": ["confidence_scaled_pool_wand_top_k", "confidence_scaled_pool_wand_by_signal_count"]
     },
     {
       "path": "crates/uqa-scoring/benches/multi_field.rs",
@@ -265,8 +265,8 @@
         "bm25_idf",
         "bm25_score_batch_100k",
         "bm25_score_single",
-        "log_odds_fuse_batch_10k",
-        "log_odds_fusion",
+        "confidence_scaled_log_odds_pool_batch_10k",
+        "confidence_scaled_log_odds_pool",
         "vector_cosine_batch_10k_dim128",
         "vector_cosine_similarity",
         "vector_similarity_to_probability"

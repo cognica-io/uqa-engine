@@ -61,7 +61,6 @@ pub(super) struct IndexSpec {
 pub(super) struct WorkloadSpec {
     pub top_k: usize,
     pub knn_pool: usize,
-    pub alpha: f64,
     pub quality_query_count: usize,
     pub performance_query_count: usize,
     pub insert_batch_rows: usize,

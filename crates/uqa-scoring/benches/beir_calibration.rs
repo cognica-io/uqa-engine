@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use serde_json::Value as JSONValue;
 use uqa_scoring::{
-    average_precision_at_k, log_odds_conjunction, ndcg_at_k, CalibrationMetrics,
+    average_precision_at_k, confidence_scaled_log_odds_pool, ndcg_at_k, CalibrationMetrics,
     VectorProbabilityTransform, VectorScorer,
 };
 
@@ -528,7 +528,7 @@ fn convex_fusion(
     ranked
 }
 
-fn balanced_log_odds_fusion(
+fn balanced_confidence_scaled_pool(
     dense_p: &BTreeMap<usize, f64>,
     sparse_p: &BTreeMap<usize, f64>,
 ) -> Vec<(usize, f64)> {
@@ -538,7 +538,7 @@ fn balanced_log_odds_fusion(
         .map(|doc_id| {
             let d = dense_p.get(&doc_id).copied().unwrap_or(1e-10);
             let s = sparse_p.get(&doc_id).copied().unwrap_or(1e-10);
-            (doc_id, log_odds_conjunction(&[d, s], 0.5))
+            (doc_id, confidence_scaled_log_odds_pool(&[d, s], 0.5))
         })
         .collect();
     let len = ranked.len();
@@ -670,7 +670,7 @@ fn hybrid_reports(fx: &Fixture) -> BTreeMap<&'static str, MethodReport> {
         let sparse_p = normalize_scores(&bm25);
         let rrf = reciprocal_rank_fusion(&dense, &bm25);
         let convex = convex_fusion(&dense_p, &sparse_p);
-        let balanced = balanced_log_odds_fusion(&dense_p, &sparse_p);
+        let balanced = balanced_confidence_scaled_pool(&dense_p, &sparse_p);
         for (name, ranked) in [
             ("Dense", dense),
             ("BM25", bm25),

@@ -19,8 +19,9 @@ use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyIterator, PyList, P
 use uqa_core::{DecimalValue, TemporalValue, Value};
 use uqa_engine::migration::{migrate_python_database, PythonMigrationReport};
 use uqa_engine::{
-    Engine, HybridSearchParams, SQLAggregateFunction, SQLAggregateState, SQLParam, SQLResult,
-    SQLScalarFunction, SQLTableFunction, SQLTableFunctionResult, ScoredEntry, ScoringMode,
+    Engine, HybridSearchParams, RobustHybridSearchParams, SQLAggregateFunction, SQLAggregateState,
+    SQLParam, SQLResult, SQLScalarFunction, SQLTableFunction, SQLTableFunctionResult, ScoredEntry,
+    ScoringMode,
 };
 use uqa_scoring::{BM25Params, CalibrationReport};
 use uqa_sql::SQLError;

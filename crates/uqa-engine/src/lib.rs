@@ -42,8 +42,8 @@
 //! Querying:
 //! - `Engine::sql` (defined in [`sql`]) - full SQL surface (select /
 //!   insert / update / delete / create-table, plus the registered
-//!   functions: `text_match`, `knn_match`, `fuse_bayesian_evidence`,
-//!   `pool_positive_evidence` (plus compatibility alias `fuse_log_odds`),
+//!   functions: `text_match`, `knn_match`, `fuse_bayesian_evidence` (plus
+//!   exact alias `fuse_log_odds`), `pool_positive_evidence`,
 //!   `multi_field_match`, `staged_retrieval`, `graph_*`, `deep_predict`).
 //! - [`Engine::sql_cursor`] / [`Engine::sql_columnar`] - bounded, schema-ordered
 //!   column batches for result sets that should not be retained in memory.
@@ -51,8 +51,10 @@
 //!   list.
 //! - [`Engine::knn_search`], [`Engine::vector_similarity_search`] - k-NN
 //!   over a vector field.
-//! - [`Engine::hybrid_search`] - robust positive-evidence pooling of text
-//!   and vector posting lists (no SQL parsing in the hot path).
+//! - [`Engine::hybrid_search`] - exact signed single-prior fusion of text and
+//!   vector posting lists (no SQL parsing in the hot path).
+//! - [`Engine::robust_hybrid_search`] - explicitly requested gated,
+//!   confidence-scaled positive-evidence pooling.
 //!
 //! Deep-model persistence:
 //! - [`Engine::save_model`], [`Engine::load_model`], [`Engine::drop_model`]
@@ -628,8 +630,9 @@ impl uqa_sql::expr::EngineHook for Engine {
     }
 }
 
-/// Bundle of hybrid-search arguments. Keeps [`Engine::hybrid_search`]
-/// borrowing-friendly without an explosion of positional parameters.
+/// Exact signed single-prior hybrid-search arguments. Keeps
+/// [`Engine::hybrid_search`] borrowing-friendly without an explosion of
+/// positional parameters.
 #[derive(Debug, Clone)]
 pub struct HybridSearchParams<'a> {
     pub table: &'a str,
@@ -640,7 +643,24 @@ pub struct HybridSearchParams<'a> {
     /// How many KNN candidates to pull from the vector index before
     /// fusion. Tune above `top_k` to widen the recall pool.
     pub knn_pool: usize,
+    pub top_k: usize,
+}
+
+/// Explicit robust-ranking variant of [`HybridSearchParams`]. This contract
+/// applies positive-evidence gating and confidence scaling rather than exact
+/// single-prior Bayesian evidence fusion.
+#[derive(Debug, Clone)]
+pub struct RobustHybridSearchParams<'a> {
+    pub table: &'a str,
+    pub text_field: &'a str,
+    pub text_query: &'a str,
+    pub vector_field: &'a str,
+    pub query_vector: Vec<f32>,
+    /// How many KNN candidates to pull from the vector index before
+    /// fusion. Tune above `top_k` to widen the recall pool.
+    pub knn_pool: usize,
     /// Confidence-scaling exponent for robust positive-evidence pooling.
+    /// Must be finite and in `[0, 1]`.
     pub alpha: f64,
     pub top_k: usize,
 }

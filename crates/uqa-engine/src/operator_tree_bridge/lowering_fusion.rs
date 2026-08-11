@@ -16,7 +16,7 @@ pub(super) fn lower_positive_evidence_pool(
     args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Option<OperatorTree> {
-    // `fuse_log_odds(signal_1, signal_2, ...[, alpha[, gating]])`.
+    // `pool_positive_evidence(signal_1, signal_2, ...[, alpha[, gating]])`.
     // The UQA SQL contract defaults alpha to 0.5 when no numeric option is supplied;
     // don't treat the last signal as an alpha argument.
     if args.len() < 2 {

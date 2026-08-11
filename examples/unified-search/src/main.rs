@@ -124,7 +124,7 @@ fn show_lexical(engine: &Engine) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Dense retrieval, then the two named fusion contracts over both signals.
+/// Dense retrieval, then automatic exact fusion and an explicit robust pool.
 fn show_vector_and_fusion(engine: &Engine) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== 2. Vector neighbours of the same query intent ===");
     println!("A dense query vector leaning on the retrieval dimension.\n");
@@ -136,30 +136,27 @@ fn show_vector_and_fusion(engine: &Engine) -> Result<(), Box<dyn std::error::Err
     )?;
     print_rows(&dense, &["id", "title", "venue"]);
 
-    println!("\n=== 3. Fusing the two signals, with the contract named ===");
-    println!("`fuse_bayesian_evidence` is exact Bayesian fusion: it applies one");
-    println!("prior to signed likelihood-ratio evidence and carries a calibration");
-    println!("theorem. `fuse_log_odds` is robust positive-evidence pooling -- a");
-    println!("ranking heuristic with no such guarantee. The engine keeps them as");
-    println!("separate named functions precisely so the difference is not blurred.\n");
+    println!("\n=== 3. Automatic exact fusion and explicit robust pooling ===");
+    println!("A same-relation text-and-vector conjunction automatically uses exact");
+    println!("signed likelihood-ratio addition with one prior. The explicit aliases");
+    println!("`fuse_bayesian_evidence` and `fuse_log_odds` select that same contract.");
+    println!("The heuristic contract has its own name: `pool_positive_evidence`.\n");
     let fused_exact = engine.sql(
         "SELECT id, title, _score \
            FROM papers \
-          WHERE fuse_bayesian_evidence( \
-                    bayesian_match(abstract, 'retrieval ranking'), \
-                    knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 4) \
-                ) \
+          WHERE text_match(abstract, 'retrieval ranking') \
+            AND knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 4) \
           ORDER BY _score DESC \
           LIMIT 4",
         &[],
     )?;
-    println!("exact Bayesian evidence fusion:");
+    println!("automatic exact single-prior log-odds fusion:");
     print_rows(&fused_exact, &["id", "title", "_score"]);
 
     let fused_pooled = engine.sql(
         "SELECT id, title, _score \
            FROM papers \
-          WHERE fuse_log_odds( \
+          WHERE pool_positive_evidence( \
                     bayesian_match(abstract, 'retrieval ranking'), \
                     knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 4) \
                 ) \

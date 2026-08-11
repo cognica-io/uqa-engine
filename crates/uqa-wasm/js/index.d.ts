@@ -130,6 +130,15 @@ export declare class Engine {
     vectorField: string,
     queryVector: Float32Array | number[],
     topK?: number,
+    knnPool?: number
+  ): Promise<SearchHit[]>;
+  robustHybridSearch(
+    table: string,
+    textField: string,
+    textQuery: string,
+    vectorField: string,
+    queryVector: Float32Array | number[],
+    topK?: number,
     knnPool?: number,
     alpha?: number
   ): Promise<SearchHit[]>;

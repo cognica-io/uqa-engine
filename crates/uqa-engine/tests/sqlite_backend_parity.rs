@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use tempfile::tempdir;
 use uqa_core::{FieldName, Value};
-use uqa_engine::{Engine, HybridSearchParams, ScoringMode};
+use uqa_engine::{Engine, HybridSearchParams, RobustHybridSearchParams, ScoringMode};
 use uqa_scoring::{BM25Params, BayesianBM25Params};
 use uqa_storage::document_store::Document;
 
@@ -139,7 +139,7 @@ fn sqlite_engine_matches_text_search_fixture() {
 }
 
 #[test]
-fn sqlite_engine_matches_hybrid_search_fixture() {
+fn sqlite_engine_matches_robust_hybrid_search_fixture() {
     let bytes = std::fs::read(parity_path("hybrid_search_fixture.json")).unwrap();
     let fx: HybridFixture = serde_json::from_slice(&bytes).unwrap();
 
@@ -162,7 +162,7 @@ fn sqlite_engine_matches_hybrid_search_fixture() {
 
     for case in &fx.queries {
         let hits = eng
-            .hybrid_search(&HybridSearchParams {
+            .robust_hybrid_search(&RobustHybridSearchParams {
                 table: "articles",
                 text_field: &case.text_field,
                 text_query: &case.text_query,
@@ -203,7 +203,6 @@ fn engine_state_survives_close_and_reopen() {
         vector_field: "embedding",
         query_vector: vec![1.0, 0.0, 0.0],
         knn_pool: 5,
-        alpha: 0.5,
         top_k: 5,
     };
 

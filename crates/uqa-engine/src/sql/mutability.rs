@@ -28,7 +28,7 @@ fn query_may_mutate_engine_inner(
         return Ok(true);
     }
     let mut plan = uqa_planner::UnifiedPlan::Query(Box::new(query.clone()));
-    let mut mutates = false;
+    let mut mutates = uqa_planner::optimizer::query_contains_implicit_hybrid_fusion(query);
     plan.rewrite_scalar_expressions(&mut |expression| {
         let uqa_execution::ScalarExpr::Func { name, .. } = expression else {
             return;

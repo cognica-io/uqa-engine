@@ -4,25 +4,25 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! WAND-style top-k pruning for multi-signal fusion (Section 8.7,
-//! Paper 4).
+//! WAND-style top-k pruning for the confidence-scaled log-odds ranking pool.
 //!
 //! Treats each input posting list as a "term" in the WAND framework.
-//! Per-signal upper bounds compose into a fused upper bound through
-//! [`crate::prob::log_odds_conjunction`], which is monotone in each input
-//! probability so the bound is safe for pruning. Documents whose
+//! Per-signal upper bounds compose into a pooled upper bound through
+//! [`crate::prob::confidence_scaled_log_odds_pool`], which is monotone in each
+//! input probability so the bound is safe for pruning. Documents whose
 //! fused upper bound cannot beat the current top-k threshold are
 //! skipped without scoring.
 //!
 //! Inputs are pre-collected `(doc_id, score)` pairs (the upstream
 //! posting lists already produced their per-signal probabilities);
-//! the scorer focuses purely on the fusion pivot loop.
+//! the scorer focuses purely on the heuristic pool's pivot loop. Exact Bayesian
+//! evidence fusion uses a separate operator and does not use this scorer.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
 use crate::error::{invalid_input, require_probability};
-use crate::prob::log_odds_conjunction;
+use crate::prob::confidence_scaled_log_odds_pool;
 use crate::wand::BoundTightnessAnalyzer;
 use crate::ScoringResult;
 
@@ -30,14 +30,14 @@ use crate::ScoringResult;
 pub type SignalScoreMap = BTreeMap<u64, f64>;
 
 #[derive(Debug, Clone)]
-pub struct FusionWANDScorer {
+pub struct ConfidenceScaledPoolWANDScorer {
     pub signals: Vec<SignalScoreMap>,
     pub upper_bounds: Vec<f64>,
     pub alpha: f64,
     pub k: usize,
 }
 
-impl FusionWANDScorer {
+impl ConfidenceScaledPoolWANDScorer {
     pub fn new(
         signals: Vec<SignalScoreMap>,
         upper_bounds: Vec<f64>,
@@ -111,9 +111,9 @@ impl FusionWANDScorer {
             let fused = if probs.len() == 1 {
                 probs[0]
             } else {
-                log_odds_conjunction(&probs, self.alpha)
+                confidence_scaled_log_odds_pool(&probs, self.alpha)
             };
-            require_probability(fused, "fusion WAND score")?;
+            require_probability(fused, "confidence-scaled pool WAND score")?;
 
             if heap.len() < self.k {
                 heap.push(HeapEntry {
@@ -147,9 +147,9 @@ impl FusionWANDScorer {
         let bound = if active_ubs.is_empty() {
             0.0
         } else {
-            log_odds_conjunction(active_ubs, self.alpha)
+            confidence_scaled_log_odds_pool(active_ubs, self.alpha)
         };
-        require_probability(bound, "fusion WAND upper bound")?;
+        require_probability(bound, "confidence-scaled pool WAND upper bound")?;
         Ok(bound)
     }
 }
@@ -157,15 +157,15 @@ impl FusionWANDScorer {
 /// Tightened variant that scales the supplied upper bounds by
 /// `tightening_factor` (default 0.9) before pruning.
 #[derive(Debug, Clone)]
-pub struct TightenedFusionWANDScorer {
-    pub inner: FusionWANDScorer,
+pub struct TightenedConfidenceScaledPoolWANDScorer {
+    pub inner: ConfidenceScaledPoolWANDScorer,
     pub tightening_factor: f64,
     pub original_bounds: Vec<f64>,
     pub signal_upper_bounds: Vec<f64>,
     pub analyzer: BoundTightnessAnalyzer,
 }
 
-impl TightenedFusionWANDScorer {
+impl TightenedConfidenceScaledPoolWANDScorer {
     #[allow(clippy::needless_pass_by_value)]
     pub fn new(
         signals: Vec<SignalScoreMap>,
@@ -177,7 +177,7 @@ impl TightenedFusionWANDScorer {
         validate_fusion_inputs(&signals, &upper_bounds, alpha)?;
         if !tightening_factor.is_finite() || !(0.0..=1.0).contains(&tightening_factor) {
             return Err(invalid_input(format!(
-                "fusion WAND tightening factor must be finite and in [0, 1], got {tightening_factor}"
+                "confidence-scaled pool WAND tightening factor must be finite and in [0, 1], got {tightening_factor}"
             )));
         }
         let tightened: Vec<f64> = upper_bounds
@@ -190,7 +190,7 @@ impl TightenedFusionWANDScorer {
             .collect();
         let original_bounds = upper_bounds.clone();
         let signal_upper_bounds = tightened.clone();
-        let inner = FusionWANDScorer::new(signals, tightened, alpha, k)?;
+        let inner = ConfidenceScaledPoolWANDScorer::new(signals, tightened, alpha, k)?;
         Ok(Self {
             inner,
             tightening_factor,
@@ -254,23 +254,23 @@ fn validate_fusion_inputs(
 ) -> ScoringResult<()> {
     if signals.len() != upper_bounds.len() {
         return Err(invalid_input(format!(
-            "fusion WAND requires one upper bound per signal, got {} signals and {} bounds",
+            "confidence-scaled pool WAND requires one upper bound per signal, got {} signals and {} bounds",
             signals.len(),
             upper_bounds.len()
         )));
     }
     if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
         return Err(invalid_input(format!(
-            "fusion WAND alpha must be finite and in [0, 1], got {alpha}"
+            "confidence-scaled pool WAND alpha must be finite and in [0, 1], got {alpha}"
         )));
     }
     for (signal_index, (signal, upper_bound)) in signals.iter().zip(upper_bounds).enumerate() {
-        require_probability(*upper_bound, "fusion WAND upper bound")?;
+        require_probability(*upper_bound, "confidence-scaled pool WAND upper bound")?;
         for (doc_id, score) in signal {
-            require_probability(*score, "fusion WAND signal score")?;
+            require_probability(*score, "confidence-scaled pool WAND signal score")?;
             if score > upper_bound {
                 return Err(invalid_input(format!(
-                    "fusion WAND score {score} for document {doc_id} in signal {signal_index} exceeds upper bound {upper_bound}"
+                    "confidence-scaled pool WAND score {score} for document {doc_id} in signal {signal_index} exceeds upper bound {upper_bound}"
                 )));
             }
         }
@@ -296,13 +296,13 @@ mod tests {
 
     #[test]
     fn returns_empty_for_no_signals() {
-        let s = FusionWANDScorer::new(vec![], vec![], 0.5, 10).unwrap();
+        let s = ConfidenceScaledPoolWANDScorer::new(vec![], vec![], 0.5, 10).unwrap();
         assert!(s.score_top_k().unwrap().is_empty());
     }
 
     #[test]
     fn fuses_two_signals_descending_score() {
-        let s = FusionWANDScorer::new(
+        let s = ConfidenceScaledPoolWANDScorer::new(
             vec![
                 map(&[(1, 0.8), (2, 0.6), (3, 0.4)]),
                 map(&[(1, 0.9), (2, 0.5), (3, 0.3)]),
@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn tightening_scales_bounds() {
-        let s = TightenedFusionWANDScorer::new(
+        let s = TightenedConfidenceScaledPoolWANDScorer::new(
             vec![map(&[(1, 0.6)]), map(&[(1, 0.6)])],
             vec![0.9, 0.9],
             0.5,
@@ -340,9 +340,25 @@ mod tests {
 
     #[test]
     fn invalid_shapes_and_scores_are_rejected() {
-        assert!(FusionWANDScorer::new(vec![map(&[(1, 0.5)])], vec![], 0.5, 1).is_err());
-        assert!(FusionWANDScorer::new(vec![map(&[(1, f64::NAN)])], vec![1.0], 0.5, 1,).is_err());
-        assert!(FusionWANDScorer::new(vec![map(&[(1, 0.8)])], vec![0.7], 0.5, 1).is_err());
-        assert!(FusionWANDScorer::new(vec![map(&[(1, 0.5)])], vec![1.0], f64::NAN, 1).is_err());
+        assert!(
+            ConfidenceScaledPoolWANDScorer::new(vec![map(&[(1, 0.5)])], vec![], 0.5, 1).is_err()
+        );
+        assert!(ConfidenceScaledPoolWANDScorer::new(
+            vec![map(&[(1, f64::NAN)])],
+            vec![1.0],
+            0.5,
+            1,
+        )
+        .is_err());
+        assert!(
+            ConfidenceScaledPoolWANDScorer::new(vec![map(&[(1, 0.8)])], vec![0.7], 0.5, 1).is_err()
+        );
+        assert!(ConfidenceScaledPoolWANDScorer::new(
+            vec![map(&[(1, 0.5)])],
+            vec![1.0],
+            f64::NAN,
+            1
+        )
+        .is_err());
     }
 }

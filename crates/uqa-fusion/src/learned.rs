@@ -12,7 +12,7 @@
 //! the raw weight vector before fusion so weights can be compared
 //! across signals.
 
-use uqa_scoring::prob::log_odds_conjunction_weighted;
+use uqa_scoring::prob::confidence_scaled_log_odds_pool_weighted;
 
 #[derive(Debug, Clone)]
 pub struct LearnedFusion {
@@ -70,7 +70,7 @@ impl LearnedFusion {
             return Ok(probs[0]);
         }
         let weights = softmax(&self.weights);
-        log_odds_conjunction_weighted(probs, &weights, self.alpha)
+        confidence_scaled_log_odds_pool_weighted(probs, &weights, self.alpha)
     }
 
     pub fn state_dict(&self) -> LearnedFusionState {
@@ -95,7 +95,7 @@ impl LearnedFusion {
     }
 
     /// One SGD step on the logistic loss
-    /// `L = -[y log p̂ + (1-y) log(1-p̂)]` with per-signal weights.
+    /// `L = -[y log p_hat + (1-y) log(1-p_hat)]` with per-signal weights.
     /// Uses a simple gradient approximation: the contribution of each
     /// signal scales with its softmax weight times its logit.
     pub fn update(

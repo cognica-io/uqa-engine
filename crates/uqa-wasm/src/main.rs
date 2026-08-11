@@ -31,7 +31,10 @@ use parking_lot::Mutex;
 use serde_json::{json, Map as JSONMap, Value as JSON};
 
 use uqa_core::{DecimalValue, Value};
-use uqa_engine::{Engine, HybridSearchParams, SQLParam, SQLResult, ScoredEntry, ScoringMode};
+use uqa_engine::{
+    Engine, HybridSearchParams, RobustHybridSearchParams, SQLParam, SQLResult, ScoredEntry,
+    ScoringMode,
+};
 use uqa_scoring::{BM25Params, CalibrationReport};
 use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions};
 
@@ -343,11 +346,34 @@ fn dispatch_engine(engine: &Engine, method: &str, args: &JSON) -> Result<JSON, S
                     .checked_mul(4)
                     .ok_or("default knnPool exceeds this build's addressable range")?,
             };
-            let alpha = opt_f64(args, "alpha")?.unwrap_or(1.0);
-            if !alpha.is_finite() {
-                return Err("alpha must be finite".to_string());
-            }
             let params = HybridSearchParams {
+                table: &req_str(args, "table")?,
+                text_field: &req_str(args, "textField")?,
+                text_query: &req_str(args, "textQuery")?,
+                vector_field: &req_str(args, "vectorField")?,
+                query_vector: req_f32_list(args, "queryVector")?,
+                knn_pool,
+                top_k,
+            };
+            hits_to_json(
+                engine
+                    .hybrid_search(&params)
+                    .map_err(|err| err.to_string())?,
+            )
+        }
+        "robustHybridSearch" => {
+            let top_k = opt_usize(args, "topK")?.unwrap_or(10);
+            let knn_pool = match opt_usize(args, "knnPool")? {
+                Some(pool) => pool,
+                None => top_k
+                    .checked_mul(4)
+                    .ok_or("default knnPool exceeds this build's addressable range")?,
+            };
+            let alpha = opt_f64(args, "alpha")?.unwrap_or(0.5);
+            if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+                return Err("alpha must be finite and in [0, 1]".to_string());
+            }
+            let params = RobustHybridSearchParams {
                 table: &req_str(args, "table")?,
                 text_field: &req_str(args, "textField")?,
                 text_query: &req_str(args, "textQuery")?,
@@ -359,7 +385,7 @@ fn dispatch_engine(engine: &Engine, method: &str, args: &JSON) -> Result<JSON, S
             };
             hits_to_json(
                 engine
-                    .hybrid_search(&params)
+                    .robust_hybrid_search(&params)
                     .map_err(|err| err.to_string())?,
             )
         }

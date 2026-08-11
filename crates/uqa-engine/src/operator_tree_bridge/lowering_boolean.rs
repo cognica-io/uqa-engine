@@ -89,8 +89,8 @@ pub(super) fn lower_function(
         // Standalone knn_match preserves raw cosine similarities;
         // calibration to (0, 1) only fires inside fusion contexts.
         "knn_match" => try_lower_knn_match(args, params).ok(),
-        "fuse_bayesian_evidence" => lower_bayesian_evidence_fusion(args, params),
-        "pool_positive_evidence" | "fuse_log_odds" => lower_positive_evidence_pool(args, params),
+        "fuse_bayesian_evidence" | "fuse_log_odds" => lower_bayesian_evidence_fusion(args, params),
+        "pool_positive_evidence" => lower_positive_evidence_pool(args, params),
         "multi_field_match" => lower_multi_field_match(args, params),
         "staged_retrieval" => lower_staged_retrieval(args, params),
         "attention" | "fuse_attention" | "fuse_multihead" => {

@@ -39,13 +39,13 @@ pub use calibration_validation::{
 };
 pub use error::{ScoringError, ScoringResult};
 pub use external_prior::{authority_prior, recency_prior, ExternalPriorScorer, PriorFn};
-pub use fusion_wand::{FusionWANDScorer, TightenedFusionWANDScorer};
+pub use fusion_wand::{ConfidenceScaledPoolWANDScorer, TightenedConfidenceScaledPoolWANDScorer};
 pub use metrics::{average_precision_at_k, dcg_at_k, mean_average_precision_at_k, ndcg_at_k};
 pub use multi_field::{FieldConfig, MultiFieldBayesianScorer};
 pub use parameter_learner::ParameterLearner;
 pub use prob::{
-    cosine_to_probability, log_odds_conjunction, logit, prob_and, prob_not, prob_or, sigmoid,
-    PROB_EPSILON,
+    confidence_scaled_log_odds_pool, cosine_to_probability, logit, prob_and, prob_not, prob_or,
+    sigmoid, PROB_EPSILON,
 };
 pub use score_domain::{EvidenceLogit, PosteriorProbability, PriorLogit, RawBm25Score};
 pub use scorer::Scorer;

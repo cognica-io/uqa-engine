@@ -88,7 +88,17 @@ class Engine:
         query_vector: Sequence[float],
         top_k: int = 10,
         knn_pool: int | None = None,
-        alpha: float = 1.0,
+    ) -> list[dict[str, float | int]]: ...
+    def robust_hybrid_search(
+        self,
+        table: str,
+        text_field: str,
+        text_query: str,
+        vector_field: str,
+        query_vector: Sequence[float],
+        top_k: int = 10,
+        knn_pool: int | None = None,
+        alpha: float = 0.5,
     ) -> list[dict[str, float | int]]: ...
     def estimate_scoring_params(
         self,

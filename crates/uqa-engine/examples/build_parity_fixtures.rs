@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Refresh the committed text-search and hybrid-search parity fixtures.
+//! Refresh the committed text-search and robust-hybrid-search parity fixtures.
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use uqa_core::{FieldName, Value};
-use uqa_engine::{Engine, HybridSearchParams, ScoringMode};
+use uqa_engine::{Engine, RobustHybridSearchParams, ScoringMode};
 use uqa_scoring::{BM25Params, BayesianBM25Params};
 use uqa_storage::document_store::Document;
 
@@ -134,7 +134,7 @@ fn refresh_text_fixture(path: &Path) -> Result<usize, Box<dyn Error>> {
     Ok(query_count)
 }
 
-fn refresh_hybrid_fixture(path: &Path) -> Result<usize, Box<dyn Error>> {
+fn refresh_robust_hybrid_fixture(path: &Path) -> Result<usize, Box<dyn Error>> {
     let bytes = std::fs::read(path)?;
     let mut fixture: HybridFixture = serde_json::from_slice(&bytes)?;
 
@@ -152,7 +152,7 @@ fn refresh_hybrid_fixture(path: &Path) -> Result<usize, Box<dyn Error>> {
     fixture.version = FIXTURE_VERSION;
     for query in &mut fixture.queries {
         query.expected = engine
-            .hybrid_search(&HybridSearchParams {
+            .robust_hybrid_search(&RobustHybridSearchParams {
                 table: "articles",
                 text_field: &query.text_field,
                 text_query: &query.text_query,
@@ -181,8 +181,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let hybrid_path = directory.join("hybrid_search_fixture.json");
 
     let text_query_count = refresh_text_fixture(&text_path)?;
-    let hybrid_query_count = refresh_hybrid_fixture(&hybrid_path)?;
+    let hybrid_query_count = refresh_robust_hybrid_fixture(&hybrid_path)?;
 
-    println!("refreshed {text_query_count} text queries and {hybrid_query_count} hybrid queries");
+    println!(
+        "refreshed {text_query_count} text queries and {hybrid_query_count} robust hybrid queries"
+    );
     Ok(())
 }

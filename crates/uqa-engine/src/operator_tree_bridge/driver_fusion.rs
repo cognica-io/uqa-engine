@@ -334,9 +334,10 @@ impl EngineDriver<'_> {
                 signal_priors.push(prior);
             }
         }
-        let base_rate = explicit_base_rate
-            .or_else(|| combine_signal_priors(&signal_priors))
-            .unwrap_or(0.5);
+        let base_rate = match explicit_base_rate {
+            Some(base_rate) => base_rate,
+            None => resolve_exact_signal_prior(&signal_priors)?.unwrap_or(0.5),
+        };
         BayesianEvidenceFusionOperator::new(signal_ops, base_rate)
             .execute(&self.bridge_context()?)
             .map_err(|error| operator_execution_error("BayesianEvidenceFusion", error))
@@ -450,8 +451,8 @@ impl EngineDriver<'_> {
 
     /// Query-pool vector evidence: fit the two-Gaussian score transform on
     /// the source's selected cosine similarities and emit unit-interval,
-    /// prior-free evidence. This is a ranking heuristic, not a reusable
-    /// held-out calibration model.
+    /// prior-free likelihood-ratio evidence. This is an unsupervised,
+    /// query-local estimate rather than a reusable held-out calibration model.
     pub(super) fn execute_cosine_evidence(
         &self,
         source: &OperatorTree,
@@ -781,4 +782,19 @@ impl EngineDriver<'_> {
             }
         }
     }
+}
+
+fn resolve_exact_signal_prior(priors: &[f64]) -> DriverResult<Option<f64>> {
+    let Some(first) = priors.first().copied() else {
+        return Ok(None);
+    };
+    for prior in &priors[1..] {
+        let tolerance = 1e-12 * first.abs().max(prior.abs()).max(1.0);
+        if (prior - first).abs() > tolerance {
+            return Err(SQLError::TypeMismatch(format!(
+                "exact Bayesian evidence fusion requires one corpus prior, but signals reported {first} and {prior}; provide an explicit base_rate"
+            )));
+        }
+    }
+    Ok(Some(first))
 }

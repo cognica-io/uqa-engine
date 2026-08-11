@@ -29,7 +29,8 @@ export declare class Engine {
   knnSearch(table: string, field: string, vector: Float32Array | Array<number>, topK?: number | undefined | null): Promise<Array<SearchHit>>
   knnSearchSync(table: string, field: string, vector: Float32Array | Array<number>, topK?: number | undefined | null): Array<SearchHit>
   vectorSimilaritySearch(table: string, field: string, vector: Float32Array | Array<number>, threshold: number): Promise<Array<SearchHit>>
-  hybridSearch(table: string, textField: string, textQuery: string, vectorField: string, queryVector: Float32Array | Array<number>, topK?: number | undefined | null, knnPool?: number | undefined | null, alpha?: number | undefined | null): Promise<Array<SearchHit>>
+  hybridSearch(table: string, textField: string, textQuery: string, vectorField: string, queryVector: Float32Array | Array<number>, topK?: number | undefined | null, knnPool?: number | undefined | null): Promise<Array<SearchHit>>
+  robustHybridSearch(table: string, textField: string, textQuery: string, vectorField: string, queryVector: Float32Array | Array<number>, topK?: number | undefined | null, knnPool?: number | undefined | null, alpha?: number | undefined | null): Promise<Array<SearchHit>>
   estimateScoringParams(table: string, field: string, nSamples?: number | undefined | null, tokensPerQuery?: number | undefined | null, seed?: number | undefined | null): Promise<Record<string, number>>
   learnScoringParams(table: string, field: string, query: string, labels: Array<number>): Promise<Record<string, number>>
   updateScoringParams(table: string, field: string, score: number, label: number): void

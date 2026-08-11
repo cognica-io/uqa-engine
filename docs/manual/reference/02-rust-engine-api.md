@@ -123,7 +123,7 @@ The API also exposes typed operations that bypass SQL text:
 - Documents: `add_document`, `add_document_with_vectors`, `get_document`, `delete_document`, `document_count`
 - Vectors: `add_vector`, `knn_search`, `vector_similarity_search`
 - Text: `search`, `search_profiled`
-- Hybrid: `hybrid_search`
+- Hybrid: `hybrid_search` for exact single-prior log-odds fusion and `robust_hybrid_search` for explicitly requested positive-evidence pooling
 - Calibration: Bayesian parameter fitting and calibration reports
 
 SQL and typed operations use the same durable state and indexes. Applications can mix them, but a single transaction boundary should use one clear ownership path.
