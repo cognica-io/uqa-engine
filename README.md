@@ -237,6 +237,7 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 
 | Document | Use it for |
 | --- | --- |
+| [Reference manual and tutorials](docs/manual/README.md) | Learning the engine, supported SQL, public APIs, and internal architecture |
 | [Runnable examples](examples/README.md) | Seeing search, vectors, graphs, storage, and extensions working as complete programs |
 | [Design documentation index](docs/design/README.md) | Finding the right technical contract or architecture document |
 | [System architecture](docs/design/architecture.md) | Crate boundaries, query planning, carriers, execution, storage, and extension points |

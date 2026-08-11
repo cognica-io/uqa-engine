@@ -1,0 +1,149 @@
+# SQL Data Types
+
+UQA-RS has PostgreSQL-oriented type names mapped to the value carriers implemented by `uqa-core` and the SQL engine. Casts and assignment checks use these engine types rather than PostgreSQL binary storage formats.
+
+## Type matrix
+
+| SQL declaration | UQA-RS representation and notes |
+| --- | --- |
+| `SMALLINT`, `INTEGER`, `BIGINT` | Signed 64-bit integer carrier |
+| `INT2`, `INT4`, `INT8`, `INT` | Aliases of the integer carrier |
+| `SERIAL`, `SERIAL4`, `BIGSERIAL`, `SERIAL8` | Integer column with generated sequence behavior |
+| `REAL`, `FLOAT4`, `FLOAT8`, `DOUBLE PRECISION` | 64-bit floating-point carrier |
+| `NUMERIC(p,s)`, `DECIMAL(p,s)` | Exact decimal carrier with declared precision and scale checks |
+| `TEXT`, `VARCHAR`, `NAME`, `UUID` | Text carrier |
+| `CHARACTER(n)`, `CHAR(n)` | Blank-padded fixed-length character value; default length is 1 |
+| `BOOLEAN`, `BOOL` | Boolean carrier |
+| `DATE` | Calendar date |
+| `TIME` | Time without timezone |
+| `TIMETZ`, `TIME WITH TIME ZONE` | Time with timezone |
+| `TIMESTAMP` | Timestamp without timezone |
+| `TIMESTAMPTZ`, `TIMESTAMP WITH TIME ZONE` | Timestamp with timezone semantics |
+| `JSON` | Validated JSON value |
+| `JSONB` | Canonical JSON value with JSONB operations |
+| `BYTEA` | Byte string |
+| `type[]`, `ARRAY` | Homogeneous array of a supported element type |
+| `VECTOR(n)` | One finite fixed-dimensional numeric vector |
+| `TENSOR(n)` | A row-level list of finite vectors with fixed element dimension |
+
+`INTERVAL` values are supported by temporal expressions and functions, but `INTERVAL` is not an implemented table column declaration.
+
+## Integer and serial behavior
+
+All implemented integer aliases use the signed 64-bit value carrier. Do not rely on PostgreSQL's narrower overflow boundary for `SMALLINT` or `INTEGER`; declare application checks when a narrower domain is required.
+
+Serial declarations allocate generated integer identities. Sequence functions `nextval`, `currval`, and `setval` are available, and standalone sequences can be created explicitly. Identity-owned sequence syntax is not implemented.
+
+## Floating point
+
+`REAL`, `FLOAT4`, `FLOAT8`, and `DOUBLE PRECISION` use an IEEE 754 64-bit value. Floating-point equality, ordering, NaN, and infinity behavior should be tested for the application's edge cases. Vector inputs reject non-finite values even when a general floating expression can represent them.
+
+## Exact decimal
+
+`NUMERIC` and `DECIMAL` enforce declared precision and scale. The declaration parser accepts PostgreSQL-shaped precision from 1 through 1000 and scale from -1000 through 1000, while actual values must also fit the engine decimal carrier, which has substantially lower finite precision. Use representative boundary tests when a schema requests more than 28 significant digits.
+
+```sql
+CREATE TABLE invoices (
+    invoice_id INTEGER PRIMARY KEY,
+    amount NUMERIC(18, 2) NOT NULL CHECK (amount >= 0)
+);
+```
+
+Use exact decimal for financial values. Do not substitute floating point where exact base-10 arithmetic is an invariant.
+
+## Text and character types
+
+`TEXT`, `VARCHAR`, `NAME`, and `UUID` use the text carrier. A `VARCHAR(n)` declaration does not provide a portable length-enforcement contract in UQA-RS; add `CHECK (char_length(value) <= n)` when the limit is required.
+
+`CHARACTER(n)` pads shorter values with ASCII spaces to its fixed width. Comparisons follow the implemented character coercion behavior; normalize at application boundaries when exchanging data with another database.
+
+## Temporal types
+
+Temporal types support comparisons, extraction, truncation, construction, formatting, parsing, age calculation, and current-time functions. The default session timezone is `UTC`, and `SET timezone` changes session behavior where timezone conversion applies.
+
+```sql
+CREATE TABLE events (
+    event_id INTEGER PRIMARY KEY,
+    event_date DATE NOT NULL,
+    starts_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+SELECT event_id, date_trunc('day', starts_at) AS day
+FROM events;
+```
+
+Use `TIMESTAMPTZ` for instants and `TIMESTAMP` for timezone-independent wall-clock values. Store the original zone identifier separately when it is a business value.
+
+## JSON and JSONB
+
+JSON values must be syntactically valid. JSONB provides canonical object behavior and containment, path, update, insertion, deletion, key, and expansion functions.
+
+```sql
+CREATE TABLE records (
+    id INTEGER PRIMARY KEY,
+    payload JSONB NOT NULL
+);
+
+INSERT INTO records (id, payload)
+VALUES (1, '{"kind":"manual","tags":["sql","rust"]}'::jsonb);
+
+SELECT jsonb_extract_path_text(payload, 'kind') AS kind
+FROM records;
+```
+
+Object key order and formatting are not an application contract for JSONB. Use JSON text only when original textual representation matters.
+
+## BYTEA
+
+`BYTEA` carries arbitrary bytes. `encode` and `decode` convert supported textual encodings. Language bindings map byte values to their native byte container, such as Python `bytes` or Node.js `Buffer` and `Uint8Array`.
+
+## Arrays
+
+Create arrays with `ARRAY[...]` and inspect them with `array_length`, `array_lower`, `array_upper`, and `cardinality`. Functions also concatenate, append, prepend, remove, replace, search, format, fill, trim, sample, and unnest arrays.
+
+```sql
+SELECT array_length(ARRAY[10, 20, 30], 1) AS length;
+SELECT * FROM unnest(ARRAY['sql', 'graph']) AS item(value);
+```
+
+Array values are homogeneous under SQL coercion. A SQL `NULL` element remains distinct from an empty array.
+
+## VECTOR and TENSOR
+
+The dimension must be a positive integer:
+
+```sql
+CREATE TABLE embeddings (
+    id INTEGER PRIMARY KEY,
+    document_embedding VECTOR(384),
+    token_embeddings TENSOR(384)
+);
+```
+
+A vector input must contain exactly `n` finite numeric values. A tensor contains zero or more vectors, each with exactly `n` finite values. KNN uses cosine similarity, and tensor matching assigns the row its best element score.
+
+Only one physical IVF or HNSW index may own a vector column at a time. Brute force remains available when no physical vector index exists.
+
+## NULL
+
+SQL `NULL` represents an unknown or absent value and follows three-valued logic. Use `IS NULL` and `IS NOT NULL`, not equality with `NULL`.
+
+```sql
+SELECT id
+FROM records
+WHERE payload IS NOT NULL;
+```
+
+`COALESCE` selects the first non-NULL value, and `NULLIF` produces NULL when its two arguments compare equal. Aggregate functions normally ignore NULL inputs except where their stated contract differs; `count(*)` counts rows and `count(expression)` counts non-NULL values.
+
+## Casts and type inspection
+
+Use either cast syntax:
+
+```sql
+SELECT CAST('42' AS INTEGER) AS value;
+SELECT '42'::INTEGER AS value;
+SELECT pg_typeof(42) AS type_name;
+```
+
+Conversions can fail on invalid syntax, overflow, non-finite vector values, dimension mismatch, decimal precision or scale violation, invalid JSON, or incompatible assignment. Treat a conversion failure as an input error instead of silently substituting a default.
