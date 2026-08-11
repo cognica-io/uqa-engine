@@ -181,6 +181,10 @@ Prepared statements and stored views retain optimized plans. The exact single-st
 
 The optimizer recursively visits CTEs, set-operation branches, scalar subqueries, mutations, prepared and explained bodies, and query-valued commands. Its access decision chooses row, `OperatorTree`, or hybrid posting-plus-residual execution only after the complete query block is lowered.
 
+Once an accelerated single-table access path has consumed a retrieval predicate, its text and vector field arguments remain index dependencies but are removed from the relational row projection; `ScoredDocumentSource` fetches only columns required by SELECT, ordering, grouping, facets, and the unexecuted residual predicate. This separation prevents a hybrid text candidate set from decoding and copying stored vectors merely because the original search expression named the vector field.
+
+For an eligible `ORDER BY _score DESC ... LIMIT` with no remaining row predicate or cardinality-changing compute, execution keeps exact retrieval and fusion exhaustive, partitions the completed scored carrier at `LIMIT + OFFSET`, retains every entry tied at the cutoff score, and sends only that prefix to `ScoredDocumentSource`. The ordinary relational sort and limit still apply all secondary keys and the final offset, so the optimization removes impossible document reads without changing tie semantics; distinct, aggregate, window, facet, residual-filter, and volatile-limit shapes do not use this cutoff.
+
 ## OperatorTree access algebra
 
 `OperatorTree` is the specialized child algebra for posting-list, graph, scoring, fusion, and cross-paradigm access paths. Relational arithmetic, windows, subqueries, and row mutations remain in the enclosing `UnifiedPlan` instead of being distorted into document-id operators.
@@ -221,9 +225,9 @@ Clean equality predicates between left and right qualified columns select hash j
 
 Text scoring keeps raw BM25, evidence logits, prior logits, and posterior probabilities in distinct types. The legacy composite-prior transform remains explicitly named so it cannot be confused with query-level Bayesian BM25 calibration.
 
-For a score-ordered `LIMIT` over one field-bound text leaf, the planner creates a physical `TextTopKPlan`. It chooses exact WAND by default and Block-Max WAND only when every non-empty posting has persisted bounds whose fingerprint matches active BM25 parameters and field statistics.
+For a score-ordered `LIMIT` over one field-bound text leaf, the planner creates a physical `TextTopKPlan` without pre-reading every term's metadata. Execution bulk-loads scorer-versioned bounds and uses Block-Max WAND only when every non-empty posting has bounds whose fingerprint matches the active BM25 parameters and field statistics; otherwise it falls back to exact WAND.
 
-Duplicate query terms remain separate cursors, document lengths and statistics stay field-scoped, and Bayesian BM25 finalizes the complete raw term sum once. A write invalidates persisted block bounds atomically, and execution falls back to exact WAND if validity changes after planning.
+Duplicate query terms remain separate cursors, document lengths and statistics stay field-scoped, and Bayesian BM25 finalizes the complete raw term sum once. Exhaustive multi-term ranking advances sorted posting cursors together and reuses score buffers instead of constructing per-document maps, while WAND/BMW loads all scorer-versioned term bounds in one backend call. A write invalidates persisted block bounds atomically, and execution falls back to exact WAND if validity changes after planning.
 
 Persistent SQLite and Key/Value indexes store each `(table, field, term)` posting stream in document-ID clusters of 65,536 documents. Score columns and positions are encoded separately; a score cursor reads the cluster directory immediately and reuses one buffer while decoding only the current 128-entry block, so exhaustive ranking and WAND/BMW carry `(doc_id, term_frequency, document_length)` without allocating positional payloads or issuing per-document length lookups. SQLite stores these values in `_posting_clusters` and `_posting_documents`; redb and `SQLiteKeyValueStore` use the same codec under independent score, position, and document-term namespaces.
 
@@ -234,6 +238,8 @@ Boolean or fusion parents do not receive text top-K pushdown because truncating 
 ## Fusion and vector calibration
 
 Exact `BayesianEvidenceFusion` adds signed likelihood-ratio evidence and one explicit prior. Robust positive-evidence pooling is a separately named ranking heuristic with gating, confidence scaling, and optional adaptive weights; it does not claim exact posterior calibration.
+
+Independent fusion inputs execute concurrently on the engine's shared parallel executor. Bayesian text parameters are cached by field after the first execution-epoch load and validation, reused for both evidence scoring and the signal prior, and invalidated on local or externally observed table/catalog changes, publication, refresh, and rollback; auto-estimation itself still follows the documented corpus-size threshold instead of running for every query.
 
 Vector calibration models carry schema and model versions plus corpus, index, embedding model, dimensions, and candidate-K provenance. Model-based vector search validates that provenance before applying a fixed transform, while the compatibility query-pool operator remains explicitly unsupervised and query-local.
 

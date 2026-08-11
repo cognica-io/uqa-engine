@@ -13,9 +13,9 @@ use std::sync::Arc;
 use parking_lot::{Mutex, ReentrantMutex, RwLock};
 
 use super::{
-    DeepModel, RegisteredSQLFunction, RelationIdentity, SQLAggregateFunction, SQLScalarFunction,
-    SQLStatementCache, SQLTableFunction, SequenceState, TableFieldAnalyzerRegistry, TableState,
-    TransactionFrame,
+    BayesianBM25Params, DeepModel, RegisteredSQLFunction, RelationIdentity, SQLAggregateFunction,
+    SQLScalarFunction, SQLStatementCache, SQLTableFunction, SequenceState,
+    TableFieldAnalyzerRegistry, TableState, TransactionFrame,
 };
 
 pub(super) struct StorageContext {
@@ -201,6 +201,7 @@ pub(super) struct QueryRuntime {
     pub(super) cancellation: uqa_core::CancellationToken,
     pub(super) notices: Mutex<Vec<(String, String)>>,
     pub(super) function_depth_limit: AtomicUsize,
+    pub(super) bayesian_params_cache: RwLock<BTreeMap<String, BayesianBM25Params>>,
 }
 
 impl QueryRuntime {
@@ -210,6 +211,7 @@ impl QueryRuntime {
             cancellation: uqa_core::CancellationToken::new(),
             notices: Mutex::new(Vec::new()),
             function_depth_limit: AtomicUsize::new(function_depth_limit),
+            bayesian_params_cache: RwLock::new(BTreeMap::new()),
         }
     }
 }

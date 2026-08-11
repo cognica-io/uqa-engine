@@ -36,6 +36,45 @@ impl Engine {
         Ok(Self::rank_top_k(&pl, top_k))
     }
 
+    /// Run KNN and query-pool calibration directly against the registered vector index so metadata validation does not materialize an unrelated full execution context.
+    pub(crate) fn query_pool_vector_search_leaf(
+        &self,
+        table: &str,
+        field: &str,
+        query_vector: impl AsRef<[f32]>,
+        top_k: usize,
+    ) -> Result<Vec<ScoredEntry>, SQLError> {
+        let query_vector = query_vector.as_ref();
+        if query_vector.is_empty() || query_vector.iter().any(|component| !component.is_finite()) {
+            return Err(SQLError::TypeMismatch(
+                "calibrated vector search requires a non-empty finite query vector".to_string(),
+            ));
+        }
+        if top_k == 0 {
+            return Ok(Vec::new());
+        }
+        let Some(table_state) = self
+            .try_table(table)
+            .map_err(|error| storage_sql_error("resolve calibrated-vector table", error))?
+        else {
+            return Err(SQLError::UnknownTable(table.to_string()));
+        };
+        let indexes = table_state.vector_indexes.read();
+        let index = indexes
+            .get(field)
+            .ok_or_else(|| SQLError::UnknownColumn(field.to_string()))?;
+        let raw = index
+            .search_knn(query_vector, top_k)
+            .map_err(|error| storage_sql_error("execute calibrated-vector KNN", error))?;
+        let calibrated = uqa_operators::calibrate_query_pool_postings(
+            &raw,
+            uqa_operators::RelevantSampleSplit::default(),
+            0.5,
+        )
+        .map_err(|error| storage_sql_error("calibrate vector query pool", error))?;
+        Ok(Self::rank_top_k(&calibrated, top_k))
+    }
+
     /// Top-`k` nearest neighbors through the shared operator optimizer and
     /// executor.
     pub fn knn_search(

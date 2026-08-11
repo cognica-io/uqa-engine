@@ -7,6 +7,7 @@
 //! Engine-level Bayesian calibration parameter persistence through the save,
 //! single-load, and bulk-load APIs.
 
+use uqa_core::Value;
 use uqa_engine::Engine;
 
 #[test]
@@ -75,4 +76,43 @@ fn corrupt_persisted_parameters_are_reported() {
     assert!(error
         .to_string()
         .contains("decode persisted scoring parameters `docs.body`"));
+}
+
+#[test]
+fn external_parameter_commit_invalidates_execution_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("parameter-cache.db");
+    let writer = Engine::open(&path).unwrap();
+    writer
+        .sql("CREATE TABLE docs (id INTEGER PRIMARY KEY, body TEXT)", &[])
+        .unwrap();
+    writer
+        .sql("INSERT INTO docs (id, body) VALUES (1, 'rust search')", &[])
+        .unwrap();
+    writer
+        .sql("CREATE INDEX docs_body_gin ON docs USING gin (body)", &[])
+        .unwrap();
+    writer
+        .save_scoring_params("docs.body", r#"{"alpha":1.0,"beta":0.0,"base_rate":0.1}"#)
+        .unwrap();
+    let reader = Engine::open(&path).unwrap();
+    let score = |engine: &Engine| {
+        let result = engine
+            .sql(
+                "SELECT _score FROM docs WHERE bayesian_match(body, 'rust')",
+                &[],
+            )
+            .unwrap();
+        match result.rows[0].get("_score") {
+            Some(Value::Float(score)) => *score,
+            other => panic!("expected floating score, got {other:?}"),
+        }
+    };
+    let before = score(&reader);
+    assert_eq!(score(&reader), before);
+    writer
+        .save_scoring_params("docs.body", r#"{"alpha":1.0,"beta":10.0,"base_rate":0.1}"#)
+        .unwrap();
+    let after = score(&reader);
+    assert!(after < before * 0.01, "before={before}, after={after}");
 }

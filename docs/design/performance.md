@@ -376,21 +376,21 @@ The checked [BEIR benchmark](../../benchmarks/beir/README.md) is another opt-in 
 bash scripts/run-beir-benchmark.sh
 ```
 
-The 2026-08-11 clustered-posting rerun used rustc 1.90.0 on the local macOS arm64 workstation and reused hash-validated prepared artifacts. The combined report identified a dirty implementation worktree, so these numbers are same-machine directional evidence rather than a release artifact or independent reproduction. Relative to the documented pre-cluster absolute baseline, the final point estimates changed by -29.7% for text, -5.7% for vector, and -13.4% for hybrid; a repeat against the immediately preceding clustered artifacts found no statistically significant text or vector change and a further 2.9% hybrid improvement. The unchanged vector path also moved, so only the text and GIN results are attributed directly to clustered postings.
+The 2026-08-11 current reruns used rustc 1.90.0 on the local macOS arm64 workstation and reused hash-validated prepared artifacts. Each combined report identified a dirty implementation worktree, so these numbers are same-machine directional evidence rather than release artifacts or independent reproductions. The final configuration used 30 Criterion samples, a two-second warmup, and a ten-second target measurement, and it was run three times; the table reports the median point estimate rather than selecting the fastest run. Relative to the documented pre-pass absolute baseline, the medians changed by -95.9% for text, -10.3% for vector, and -93.6% for hybrid. The observed ranges were 0.77-0.82 ms, 2.38-2.61 ms, and 3.25-3.84 ms respectively; vector moved with the machine state across runs, so absolute differences within those ranges are not attributed to code. Clustered postings account for the posting and GIN improvements; sorted cursor merging, bulk metadata access, execution-epoch parameter caching, parallel fusion branches, residual-aware projection, and the exact post-fusion score cutoff account for the query-path reductions.
 
-| Persistent SQL system, SciFact 5,183 documents and 300 queries | NDCG@10 | MAP@10 | Recall@10 | Previous | Clustered | Queries/s |
+| Persistent SQL system, SciFact 5,183 documents and 300 queries | NDCG@10 | MAP@10 | Recall@10 | Pre-pass | Current | Queries/s |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| BM25 `text_match` | 0.6860 | 0.6375 | 0.8193 | 20.13 ms | 14.16 ms | 70.6 |
-| HNSW `knn_match` | 0.6451 | 0.5959 | 0.7833 | 2.87 ms | 2.71 ms | 369.3 |
-| Positive-evidence hybrid | 0.7259 | 0.6829 | 0.8422 | 56.49 ms | 48.91 ms | 20.4 |
+| BM25 `text_match` | 0.6860 | 0.6375 | 0.8193 | 20.13 ms | 0.82 ms | 1,216.1 |
+| HNSW `knn_match` | 0.6451 | 0.5959 | 0.7833 | 2.87 ms | 2.58 ms | 388.3 |
+| Positive-evidence hybrid | 0.7259 | 0.6829 | 0.8422 | 56.49 ms | 3.62 ms | 276.1 |
 
-| Persistent SQL construction stage | Previous | Clustered | Change | Rows/s |
+| Persistent SQL construction stage | Pre-pass | Current | Change | Rows/s |
 | --- | ---: | ---: | ---: | ---: |
-| SQL table creation and parameterized load | 0.574 s | 0.617 s | +7.4% | 8,406 |
-| SQL GIN creation | 4.012 s | 2.312 s | -42.4% | 2,242 |
-| SQL HNSW creation | 12.042 s | 12.242 s | +1.7% | 423 |
+| SQL table creation and parameterized load | 0.574 s | 0.597 s | +4.0% | 8,683 |
+| SQL GIN creation | 4.012 s | 2.307 s | -42.5% | 2,246 |
+| SQL HNSW creation | 12.042 s | 12.638 s | +4.9% | 410 |
 
-Hybrid exceeded the better single signal by 0.0399 NDCG@10, 0.0454 MAP@10, and 0.0229 Recall@10. The checked comparative floors require improvements of at least 0.02, 0.02, and 0.01 respectively, in addition to per-system absolute floors; this prevents a future result from retaining the hybrid label while silently collapsing to one signal. The quality pass uses all 300 qrels-backed queries, while Criterion measures a fixed 25-query warm batch and reports its mean divided by 25. The much higher hybrid latency reflects two calibrated candidate signals and positive-evidence fusion and is inside the measured SQL query boundary. Construction timings are one-shot observations rather than distribution comparisons; the GIN reduction is large and mechanistically aligned with writing clustered values, while the smaller load and HNSW differences should be treated as local variation.
+Hybrid exceeded the better single signal by 0.0399 NDCG@10, 0.0454 MAP@10, and 0.0229 Recall@10. The checked comparative floors require improvements of at least 0.02, 0.02, and 0.01 respectively, in addition to per-system absolute floors; this prevents a future result from retaining the hybrid label while silently collapsing to one signal. The quality pass uses all 300 qrels-backed queries, while Criterion measures a fixed 25-query warm batch and reports its mean divided by 25. The original SQL text is unchanged and exact fusion remains exhaustive. After retrieval, column pruning excludes search-only `body` and `embedding` values; for an eligible score-first limit, a linear selection retains the complete `LIMIT + OFFSET` boundary-score tie group before document access and the relational sort still resolves `id ASC`. Persistent SQLite tests record both projected fields and fetched document counts, verify two-document materialization for `LIMIT 2` and `LIMIT 1 OFFSET 1`, retain all cutoff ties for exact secondary ordering, and cover the explicit-column fallback. Construction timings are one-shot observations rather than distribution comparisons; the GIN reduction is mechanistically aligned with clustered writes, while the smaller load and HNSW differences should be treated as local variation.
 
 ## Reference numbers (post-optimization)
 

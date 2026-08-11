@@ -15,9 +15,6 @@ pub struct TextTopKCapabilities {
     /// unique terms, matter because duplicate query terms contribute twice.
     pub analyzed_term_count: usize,
     pub indexed_document_count: u64,
-    /// Every non-empty query posting has persisted bounds matching the active
-    /// BM25 parameters and field statistics.
-    pub valid_block_max: bool,
 }
 
 /// Push a score limit into a simple, field-bound text leaf.
@@ -55,16 +52,15 @@ pub fn plan_text_top_k(
         };
     }
 
-    let strategy = if capabilities.valid_block_max {
-        TextTopKStrategy::BlockMaxWand
-    } else {
-        TextTopKStrategy::Wand
-    };
     OperatorTree::Term {
         query,
         field,
         scoring,
-        top_k: Some(TextTopKPlan { k, strategy }),
+        // Execution validates scorer-versioned block bounds against the same transaction snapshot and falls back to exact WAND when unavailable.
+        top_k: Some(TextTopKPlan {
+            k,
+            strategy: TextTopKStrategy::BlockMaxWand,
+        }),
     }
 }
 
@@ -83,14 +79,13 @@ mod tests {
     }
 
     #[test]
-    fn chooses_bmw_only_for_version_matched_blocks() {
+    fn eligible_query_defers_block_validation_to_execution() {
         let planned = plan_text_top_k(
             term(),
             10,
             TextTopKCapabilities {
                 analyzed_term_count: 2,
                 indexed_document_count: 100,
-                valid_block_max: true,
             },
         );
         assert!(matches!(
@@ -114,7 +109,6 @@ mod tests {
                 TextTopKCapabilities {
                     analyzed_term_count: term_count,
                     indexed_document_count: documents,
-                    valid_block_max: true,
                 },
             );
             assert!(matches!(planned, OperatorTree::Term { top_k: None, .. }));

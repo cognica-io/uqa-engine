@@ -14,7 +14,8 @@ use super::{
     DriverExecution, DriverResult, EngineDriver, ExternalPriorMode, GatingSpec,
     GraphNeighborSnapshot, MultiStageCutoff, MultiStageEntry, OperatorTree, Payload,
     PositiveEvidencePoolExecution, PostingEntry, PostingList, RobustPositiveEvidencePoolOperator,
-    SQLError, ScalarExpr, StaticPostingList, StorageBackendError, TextScoringMode, Value,
+    SQLError, ScalarExpr, ScoredEntry, StaticPostingList, StorageBackendError, TextScoringMode,
+    Value,
 };
 
 impl EngineDriver<'_> {
@@ -280,8 +281,7 @@ impl EngineDriver<'_> {
         }
         let mut signal_ops: Vec<std::sync::Arc<dyn Operator>> = Vec::with_capacity(signals.len());
         let mut signal_priors: Vec<f64> = Vec::new();
-        for signal in signals {
-            let (pl, prior) = self.execute_fusion_signal(signal)?;
+        for (pl, prior) in self.execute_fusion_signal_branches(signals)? {
             signal_ops.push(std::sync::Arc::new(StaticPostingList { pl }));
             if let Some(prior) = prior {
                 signal_priors.push(prior);
@@ -328,8 +328,7 @@ impl EngineDriver<'_> {
         }
         let mut signal_ops: Vec<std::sync::Arc<dyn Operator>> = Vec::with_capacity(signals.len());
         let mut signal_priors = Vec::new();
-        for signal in signals {
-            let (posting, prior) = self.execute_fusion_signal(signal)?;
+        for (posting, prior) in self.execute_fusion_signal_branches(signals)? {
             signal_ops.push(std::sync::Arc::new(StaticPostingList { pl: posting }));
             if let Some(prior) = prior {
                 signal_priors.push(prior);
@@ -341,6 +340,21 @@ impl EngineDriver<'_> {
         BayesianEvidenceFusionOperator::new(signal_ops, base_rate)
             .execute(&self.bridge_context()?)
             .map_err(|error| operator_execution_error("BayesianEvidenceFusion", error))
+    }
+
+    /// Execute independent probability/evidence signals through the shared branch executor while preserving declaration order for weights and per-signal normalization. The fusion itself remains deterministic.
+    fn execute_fusion_signal_branches(
+        &self,
+        signals: &[OperatorTree],
+    ) -> DriverResult<Vec<(PostingList, Option<f64>)>> {
+        let workers: Vec<_> = signals
+            .iter()
+            .map(|signal| || self.execute_fusion_signal(signal))
+            .collect();
+        self.parallel
+            .execute_branches(&workers)
+            .into_iter()
+            .collect()
     }
 
     /// Execute a combination child at the typed probability/evidence boundary: the
@@ -373,22 +387,7 @@ impl EngineDriver<'_> {
                 field,
                 scoring: Some(TextScoringMode::BayesianBM25),
                 top_k: None,
-            } => {
-                let field_expr = match field {
-                    Some(f) => ScalarExpr::Column(f.clone()),
-                    None => ScalarExpr::Literal(Value::Str(String::new())),
-                };
-                let args = vec![field_expr, ScalarExpr::Literal(Value::Str(query.clone()))];
-                let run = match self.execution {
-                    DriverExecution::Public => sql::run_bayesian_evidence_match_public,
-                    DriverExecution::InExecution => sql::run_bayesian_evidence_match_in_execution,
-                };
-                let rows = run(self.engine, self.table, &args, self.params)?;
-                Ok((
-                    scored_to_posting_list(&rows),
-                    self.text_field_prior(field.as_deref())?,
-                ))
-            }
+            } => self.execute_bayesian_term_evidence(query, field.as_deref()),
             OperatorTree::CosineProbability(source) => self
                 .execute_cosine_evidence(source)
                 .map(|posting| (posting, None)),
@@ -398,23 +397,54 @@ impl EngineDriver<'_> {
         }
     }
 
-    /// The corpus relevance prior of a text field, or the logit-mean
-    /// prior across every text-indexed field for `_all` queries.
-    pub(super) fn text_field_prior(&self, field: Option<&str>) -> DriverResult<Option<f64>> {
-        let priors: Vec<f64> = if let Some(field) = field {
-            vec![self.bayesian_params_for(field)?.base_rate]
-        } else {
-            let mut priors = Vec::new();
-            for field in self.engine.fts_fields_for_table(self.table)? {
-                priors.push(self.bayesian_params_for(&field)?.base_rate);
+    /// Execute a Bayesian term as prior-free evidence while resolving each field calibration exactly once for both scoring and the fusion prior.
+    fn execute_bayesian_term_evidence(
+        &self,
+        query: &str,
+        field: Option<&str>,
+    ) -> DriverResult<(PostingList, Option<f64>)> {
+        if let Some(field) = field {
+            self.engine.validate_text_search_field(self.table, field)?;
+            let params = self.bayesian_params_for(field)?;
+            let prior = (params.base_rate > 0.0).then_some(params.base_rate);
+            let mode = crate::ScoringMode::BayesianBM25(params.evidence_params());
+            let rows =
+                self.engine
+                    .search_leaf(self.table, field, query, &mode, usize::MAX, None)?;
+            return Ok((scored_to_posting_list(&rows), prior));
+        }
+        let fields = self.engine.fts_fields_for_table(self.table)?;
+        if fields.is_empty() {
+            return Err(SQLError::TypeMismatch(format!(
+                "text search: table `{}` has no text-indexed columns",
+                self.table
+            )));
+        }
+        let mut by_document = std::collections::BTreeMap::<DocId, f64>::new();
+        let mut priors = Vec::with_capacity(fields.len());
+        for field in fields {
+            let params = self.bayesian_params_for(&field)?;
+            if params.base_rate > 0.0 {
+                priors.push(params.base_rate);
             }
-            priors
-        };
-        Ok(combine_signal_priors(
-            &priors
-                .into_iter()
-                .filter(|rate| *rate > 0.0)
-                .collect::<Vec<_>>(),
+            let mode = crate::ScoringMode::BayesianBM25(params.evidence_params());
+            for entry in
+                self.engine
+                    .search_leaf(self.table, &field, query, &mode, usize::MAX, None)?
+            {
+                by_document
+                    .entry(entry.doc_id)
+                    .and_modify(|score| *score = score.max(entry.score))
+                    .or_insert(entry.score);
+            }
+        }
+        let rows = by_document
+            .into_iter()
+            .map(|(doc_id, score)| ScoredEntry { doc_id, score })
+            .collect::<Vec<_>>();
+        Ok((
+            scored_to_posting_list(&rows),
+            combine_signal_priors(&priors),
         ))
     }
 

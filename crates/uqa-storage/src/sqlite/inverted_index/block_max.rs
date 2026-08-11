@@ -193,10 +193,25 @@ impl SQLiteInvertedIndex {
         term: &str,
         scorer_fingerprint: &str,
     ) -> StorageBackendResult<Option<Vec<f64>>> {
+        Ok(self
+            .get_versioned_block_max_scores_bulk(field, &[term.to_string()], scorer_fingerprint)?
+            .pop()
+            .flatten())
+    }
+
+    pub fn get_versioned_block_max_scores_bulk(
+        &self,
+        field: &str,
+        terms: &[String],
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<Vec<Option<Vec<f64>>>> {
+        if terms.is_empty() {
+            return Ok(Vec::new());
+        }
         let table = self.blockmax_table_name(field);
         Ok(self.conn.with(|conn| {
             if !table_exists(conn, &table)? {
-                return Ok(None);
+                return Ok(vec![None; terms.len()]);
             }
             let pragma = format!("PRAGMA table_info({})", quote_ident(&table));
             let mut columns = conn.prepare(&pragma)?;
@@ -207,34 +222,62 @@ impl SQLiteInvertedIndex {
                 .any(|name| name == "scorer_fingerprint");
             drop(columns);
             if !has_fingerprint {
-                return Ok(None);
+                return Ok(vec![None; terms.len()]);
             }
-            let sql = format!(
-                "SELECT block_idx, max_score FROM {}
-                 WHERE term = ?1 AND scorer_fingerprint = ?2
-                 ORDER BY block_idx",
-                quote_ident(&table)
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt
-                .query_map(params![term, scorer_fingerprint], |row| {
-                    Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            if rows.is_empty() {
-                return Ok(None);
-            }
-            let mut scores = Vec::with_capacity(rows.len());
-            for (expected, (block_idx, score)) in rows.into_iter().enumerate() {
-                let block_idx = decode_index_usize("block index", block_idx)?;
-                if block_idx != expected || !score.is_finite() || score < 0.0 {
-                    return Err(SQLiteError::StorageBackend(format!(
-                        "corrupt block-max index for `{field}.{term}` at block {block_idx}"
-                    )));
+
+            let unique_terms = terms
+                .iter()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>();
+            let unique_terms = unique_terms.into_iter().collect::<Vec<_>>();
+            let mut by_term = std::collections::BTreeMap::<String, Vec<(i64, f64)>>::new();
+            for chunk in unique_terms.chunks(900) {
+                let placeholders = std::iter::repeat_n("?", chunk.len())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sql = format!(
+                    "SELECT term, block_idx, max_score FROM {}
+                     WHERE scorer_fingerprint = ? AND term IN ({placeholders})
+                     ORDER BY term, block_idx",
+                    quote_ident(&table)
+                );
+                let mut values = Vec::with_capacity(chunk.len() + 1);
+                values.push(rusqlite::types::Value::Text(scorer_fingerprint.to_string()));
+                values.extend(chunk.iter().cloned().map(rusqlite::types::Value::Text));
+                let mut statement = conn.prepare(&sql)?;
+                let rows = statement.query_map(rusqlite::params_from_iter(values), |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, f64>(2)?,
+                    ))
+                })?;
+                for row in rows {
+                    let (term, block_idx, score) = row?;
+                    by_term.entry(term).or_default().push((block_idx, score));
                 }
-                scores.push(score);
             }
-            Ok(Some(scores))
+
+            let mut decoded = std::collections::BTreeMap::<String, Option<Vec<f64>>>::new();
+            for term in unique_terms {
+                let rows = by_term.remove(&term).unwrap_or_default();
+                if rows.is_empty() {
+                    decoded.insert(term, None);
+                    continue;
+                }
+                let mut scores = Vec::with_capacity(rows.len());
+                for (expected, (block_idx, score)) in rows.into_iter().enumerate() {
+                    let block_idx = decode_index_usize("block index", block_idx)?;
+                    if block_idx != expected || !score.is_finite() || score < 0.0 {
+                        return Err(SQLiteError::StorageBackend(format!(
+                            "corrupt block-max index for `{field}.{term}` at block {block_idx}"
+                        )));
+                    }
+                    scores.push(score);
+                }
+                decoded.insert(term, Some(scores));
+            }
+            Ok(terms.iter().map(|term| decoded[term].clone()).collect())
         })?)
     }
 

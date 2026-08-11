@@ -56,8 +56,8 @@ impl VectorIndex for SQLiteHNSWIndex {
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
-        if self.persisted_revision()?.is_some() {
-            Ok(self.cached_graph()?)
+        if let Some(revision) = self.persisted_revision()? {
+            Ok(self.cached_graph_for_revision(revision)?)
         } else if self.require_persisted_graph {
             Err(super::mutation::missing_metadata(self))
         } else {

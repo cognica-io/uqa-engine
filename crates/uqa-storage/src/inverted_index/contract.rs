@@ -155,6 +155,19 @@ pub trait InvertedIndex: Send + Sync {
         Ok(None)
     }
 
+    /// Load scorer-versioned block maxima for several terms while preserving input order; persistent backends override this to avoid one storage round trip per term.
+    fn persisted_block_max_scores_bulk(
+        &self,
+        field: &str,
+        terms: &[String],
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<Vec<Option<Vec<f64>>>> {
+        terms
+            .iter()
+            .map(|term| self.persisted_block_max_scores(field, term, scorer_fingerprint))
+            .collect()
+    }
+
     /// Visit every posting entry for `(field, term)` in ascending
     /// doc-id order without handing out an owned list.
     ///

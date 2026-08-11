@@ -467,6 +467,54 @@ impl QueryPoolVectorScoreOperator {
     }
 }
 
+/// Convert a retrieved cosine-similarity pool into query-local probability evidence without executing another vector lookup.
+pub fn calibrate_query_pool_postings(
+    raw: &PostingList,
+    split: RelevantSampleSplit,
+    base_rate: f64,
+) -> StorageBackendResult<PostingList> {
+    if !base_rate.is_finite() || base_rate <= 0.0 || base_rate >= 1.0 {
+        return Err(StorageBackendError::Other(format!(
+            "calibrated vector base_rate must be finite and in (0, 1), got {base_rate}"
+        )));
+    }
+    if raw.is_empty() {
+        return Ok(PostingList::default());
+    }
+
+    let mut distances = Vec::with_capacity(raw.len());
+    for entry in raw.entries() {
+        require_finite_score(entry.payload.score, "calibrated vector search")?;
+        if !(-1.0..=1.0).contains(&entry.payload.score) {
+            return Err(StorageBackendError::Other(format!(
+                "calibrated vector search requires cosine scores in [-1, 1], got {}",
+                entry.payload.score
+            )));
+        }
+        distances.push(1.0 - entry.payload.score);
+    }
+    let calibrator = fit_pool_calibration(&distances, split, base_rate)?;
+
+    let mut out_entries: Vec<PostingEntry> = Vec::with_capacity(raw.len());
+    for (entry, distance) in raw.iter().zip(&distances) {
+        let posterior = match calibrator.as_ref() {
+            Some(transform) => transform
+                .calibrate_one(*distance)
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?,
+            None => base_rate,
+        };
+        out_entries.push(PostingEntry::new(
+            entry.doc_id,
+            Payload {
+                score: posterior.clamp(1e-6, 1.0 - 1e-6),
+                ..Default::default()
+            },
+        ));
+    }
+    out_entries.sort_by_key(|entry| entry.doc_id);
+    Ok(PostingList::from_sorted_unchecked(out_entries))
+}
+
 impl Operator for QueryPoolVectorScoreOperator {
     fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
         if !self.base_rate.is_finite() || self.base_rate <= 0.0 || self.base_rate >= 1.0 {
@@ -489,42 +537,7 @@ impl Operator for QueryPoolVectorScoreOperator {
             return Err(missing_backend("vector-index", "calibrated vector search"));
         };
         let raw = idx.search_knn(&self.query_vector, self.k)?;
-        if raw.is_empty() {
-            return Ok(PostingList::default());
-        }
-
-        let mut distances = Vec::with_capacity(raw.len());
-        for entry in raw.entries() {
-            require_finite_score(entry.payload.score, "calibrated vector search")?;
-            if !(-1.0..=1.0).contains(&entry.payload.score) {
-                return Err(StorageBackendError::Other(format!(
-                    "calibrated vector search requires cosine scores in [-1, 1], got {}",
-                    entry.payload.score
-                )));
-            }
-            distances.push(1.0 - entry.payload.score);
-        }
-        let calibrator = fit_pool_calibration(&distances, self.split, self.base_rate)?;
-
-        let mut out_entries: Vec<PostingEntry> = Vec::with_capacity(raw.len());
-        for (entry, distance) in raw.iter().zip(&distances) {
-            let posterior = match calibrator.as_ref() {
-                Some(transform) => transform
-                    .calibrate_one(*distance)
-                    .map_err(|error| StorageBackendError::Other(error.to_string()))?,
-                None => self.base_rate,
-            };
-            out_entries.push(PostingEntry::new(
-                entry.doc_id,
-                Payload {
-                    score: posterior.clamp(1e-6, 1.0 - 1e-6),
-                    ..Default::default()
-                },
-            ));
-        }
-        // Sort by doc_id so the output is a valid PostingList.
-        out_entries.sort_by_key(|e| e.doc_id);
-        Ok(PostingList::from_sorted_unchecked(out_entries))
+        calibrate_query_pool_postings(&raw, self.split, self.base_rate)
     }
 }
 

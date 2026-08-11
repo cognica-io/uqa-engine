@@ -13,6 +13,7 @@ impl Engine {
     /// sessions. Their physical stores are rebuilt lazily from their own
     /// session-bound backend on the next table lookup.
     pub(crate) fn note_table_catalog_changed(&self) {
+        self.clear_bayesian_params_cache();
         if !self.session.transactions.lock().is_empty() {
             self.epochs
                 .table_catalog
@@ -24,6 +25,7 @@ impl Engine {
     }
 
     pub(crate) fn publish_table_catalog_changes(&self) {
+        self.clear_bayesian_params_cache();
         self.epochs
             .table_catalog
             .published
@@ -43,6 +45,7 @@ impl Engine {
     /// published after the outer storage transaction commits, so sibling
     /// sessions cannot invalidate and rebuild against uncommitted data.
     pub(crate) fn note_table_data_changed(&self) {
+        self.clear_bayesian_params_cache();
         self.clear_sql_statement_cache();
         // Rollback restoration replaces snapshots directly and never enters
         // this ordinary mutation hook. Therefore contention is not evidence
@@ -61,6 +64,7 @@ impl Engine {
     }
 
     pub(crate) fn publish_table_data_changes(&self) {
+        self.clear_bayesian_params_cache();
         self.epochs
             .table_data
             .published
@@ -196,6 +200,7 @@ impl Engine {
         if !force && previous_epoch == target_epoch {
             return Ok(());
         }
+        self.clear_bayesian_params_cache();
 
         let tables = self
             .storage

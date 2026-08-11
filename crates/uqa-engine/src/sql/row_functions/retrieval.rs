@@ -84,54 +84,6 @@ fn run_bayesian_match(
     )
 }
 
-/// `bayesian_match` with the corpus prior stripped: emits prior-free
-/// evidence probabilities for fusion contexts, where the prior enters
-/// the fusion exactly once instead of once per signal.
-fn run_bayesian_evidence_match(
-    engine: &Engine,
-    table: &str,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-    execution: RetrievalExecution,
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    run_text_match_scored(
-        engine,
-        table,
-        args,
-        params,
-        TextMatchExecution {
-            function_name: "bayesian_match",
-            mode_for_field: &|field| {
-                Ok(crate::ScoringMode::BayesianBM25(
-                    execution
-                        .bayesian_params(engine, table, field)?
-                        .evidence_params(),
-                ))
-            },
-            top_k: None,
-            retrieval: execution,
-        },
-    )
-}
-
-pub(crate) fn run_bayesian_evidence_match_public(
-    engine: &Engine,
-    table: &str,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    run_bayesian_evidence_match(engine, table, args, params, RetrievalExecution::Public)
-}
-
-pub(crate) fn run_bayesian_evidence_match_in_execution(
-    engine: &Engine,
-    table: &str,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    run_bayesian_evidence_match(engine, table, args, params, RetrievalExecution::InExecution)
-}
-
 struct TextMatchExecution<'a> {
     function_name: &'a str,
     mode_for_field: &'a dyn Fn(&str) -> Result<crate::ScoringMode, SQLError>,
@@ -300,27 +252,8 @@ fn run_calibrated_vector_match(
     } else {
         None
     };
-    let Some(ctx) = engine.snapshot_context(table)? else {
-        return Err(SQLError::UnknownTable(table.to_string()));
-    };
-    use uqa_operators::base::Operator;
-    let op = uqa_operators::QueryPoolVectorScoreOperator::new(query_vector, k, field);
-    let pl = op
-        .execute(&ctx)
-        .map_err(|error| SQLError::Internal(format!("calibrated vector search: {error}")))?;
-    let mut out: Vec<ScoredEntry> = pl
-        .iter()
-        .filter_map(|entry| {
-            let score = entry.payload.score;
-            if threshold.is_some_and(|t| score < t) {
-                return None;
-            }
-            Some(ScoredEntry {
-                doc_id: entry.doc_id,
-                score,
-            })
-        })
-        .collect();
+    let mut out = engine.query_pool_vector_search_leaf(table, &field, &query_vector, k)?;
+    out.retain(|entry| threshold.is_none_or(|minimum| entry.score >= minimum));
     out.sort_by(|a, b| {
         b.score
             .total_cmp(&a.score)

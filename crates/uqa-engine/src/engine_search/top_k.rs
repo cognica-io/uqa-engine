@@ -20,11 +20,10 @@ impl Engine {
         table: &str,
         field: &str,
         query: &str,
-        mode: &ScoringMode,
         scoring: TextScoringMode,
         top_k: usize,
     ) -> Result<OperatorTree, SQLError> {
-        let capabilities = self.text_top_k_capabilities(table, field, query, mode)?;
+        let capabilities = self.text_top_k_capabilities(table, field, query)?;
         Ok(uqa_planner::plan_text_top_k(
             OperatorTree::Term {
                 query: query.to_string(),
@@ -38,8 +37,8 @@ impl Engine {
     }
 
     /// Materialize scorer-versioned block bounds for one text field. `SQLite`
-    /// persists them across reopen; in-memory indexes return `false` and the
-    /// planner continues to choose plain WAND.
+    /// persists them across reopen; when a backend returns `false`, execution
+    /// falls back from the planned BMW strategy to exact WAND.
     pub fn rebuild_text_block_max(
         &self,
         table: &str,
@@ -83,24 +82,39 @@ impl Engine {
         let mut block_max = BlockMaxIndex::new(DEFAULT_BLOCK_SIZE)
             .map_err(|error| storage_sql_error("create block-max index", error))?;
         let mut checked = BTreeSet::new();
+        let mut requested = Vec::<(String, usize)>::new();
         for (term, doc_freq) in analyzed_terms.iter().zip(doc_freqs) {
             if *doc_freq == 0 || !checked.insert(term) {
                 continue;
             }
-            let Some(scores) = index
-                .persisted_block_max_scores(field, term, fingerprint)
-                .map_err(|error| storage_sql_error("read persisted block-max scores", error))?
-            else {
-                return Ok(None);
-            };
             let expected_blocks = usize::try_from(*doc_freq)
                 .map_err(|_| SQLError::Internal("text document frequency exceeds usize".into()))?
                 .div_ceil(DEFAULT_BLOCK_SIZE);
+            requested.push((term.clone(), expected_blocks));
+        }
+        let terms = requested
+            .iter()
+            .map(|(term, _)| term.clone())
+            .collect::<Vec<_>>();
+        let persisted = index
+            .persisted_block_max_scores_bulk(field, &terms, fingerprint)
+            .map_err(|error| storage_sql_error("read persisted block-max scores", error))?;
+        if persisted.len() != requested.len() {
+            return Err(SQLError::Internal(format!(
+                "block-max bulk read returned {} terms for {} requests",
+                persisted.len(),
+                requested.len()
+            )));
+        }
+        for ((term, expected_blocks), scores) in requested.into_iter().zip(persisted) {
+            let Some(scores) = scores else {
+                return Ok(None);
+            };
             if scores.len() != expected_blocks {
                 return Ok(None);
             }
             block_max
-                .set_block_maxes(table, field, term, scores)
+                .set_block_maxes(table, field, &term, scores)
                 .map_err(|error| storage_sql_error("load block-max scores", error))?;
         }
         Ok(Some(block_max))

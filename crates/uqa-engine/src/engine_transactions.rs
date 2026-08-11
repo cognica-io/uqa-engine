@@ -798,6 +798,7 @@ impl Engine {
     /// propagating keeps a (logic-bug) failure loud instead of leaving
     /// a half-restored engine behind a successful-looking rollback.
     fn restore_transaction_data(&self, snapshot: &EngineDataSnapshot) -> Result<(), SQLError> {
+        self.clear_bayesian_params_cache();
         {
             let mut tables = self.storage.tables.write();
             tables.retain(|name, _| snapshot.tables.contains_key(name));

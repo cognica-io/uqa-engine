@@ -13,8 +13,12 @@ use crate::hnsw_index::HNSWIndex;
 use crate::{StorageBackendError, StorageBackendResult};
 
 impl SQLiteHNSWIndex {
-    pub(super) fn cached_graph(&self) -> StorageBackendResult<Arc<HNSWIndex>> {
-        self.cached_graph_state().map(|cached| cached.graph)
+    pub(super) fn cached_graph_for_revision(
+        &self,
+        revision: u64,
+    ) -> StorageBackendResult<Arc<HNSWIndex>> {
+        self.cached_graph_state_for_revision(revision)
+            .map(|cached| cached.graph)
     }
 
     pub(super) fn cached_graph_state(&self) -> StorageBackendResult<CachedGraph> {
@@ -24,6 +28,10 @@ impl SQLiteHNSWIndex {
                 self.persistent.table, self.persistent.field
             ))
         })?;
+        self.cached_graph_state_for_revision(revision)
+    }
+
+    fn cached_graph_state_for_revision(&self, revision: u64) -> StorageBackendResult<CachedGraph> {
         if let Some(cached) = self.graph.read().as_ref() {
             if cached.revision == revision {
                 return Ok(cached.clone());

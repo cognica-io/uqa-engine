@@ -109,6 +109,23 @@ pub(in crate::sql) fn column_prune_for_stmt(
     stmt: &QueryBlockPlan,
     from: &SourcePlan,
 ) -> Option<ColumnPrune> {
+    column_prune_for_stmt_with_filter(engine, stmt, from, stmt.r#where.as_ref())
+}
+
+/// Compute the document projection for `stmt` while treating `filter` as the
+/// only predicate that remains to be evaluated by the relational pipeline.
+/// Accelerated retrieval consumes its search predicate before constructing a
+/// [`ScoredDocumentSource`](super::ScoredDocumentSource), so its field
+/// arguments are index dependencies rather than row-materialization
+/// dependencies. Callers that have executed retrieval pass only the residual
+/// predicate here; ordinary scans retain the statement's original `WHERE` via
+/// [`column_prune_for_stmt`].
+pub(in crate::sql) fn column_prune_for_stmt_with_filter(
+    engine: &Engine,
+    stmt: &QueryBlockPlan,
+    from: &SourcePlan,
+    filter: Option<&ScalarExpr>,
+) -> Option<ColumnPrune> {
     if has_window(&stmt.projections)
         || stmt.projections.iter().any(|projection| {
             matches!(projection.expr, ScalarExpr::Star)
@@ -134,7 +151,7 @@ pub(in crate::sql) fn column_prune_for_stmt(
     for projection in &stmt.projections {
         collect_expr_prune_columns(&projection.expr, &qualifiers, &mut prune, &mut valid);
     }
-    if let Some(filter) = stmt.r#where.as_ref() {
+    if let Some(filter) = filter {
         collect_expr_prune_columns(filter, &qualifiers, &mut prune, &mut valid);
     }
     for expr in &stmt.group_by {

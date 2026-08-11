@@ -54,21 +54,23 @@ The runner writes `beir-observations.json`, Criterion artifacts below `target/cr
 
 ## Local reference run
 
-The 2026-08-11 clustered-posting rerun used the complete pinned SciFact test workload on a local macOS arm64 host with rustc 1.90.0 and reused hash-validated prepared artifacts. The generated report identified a dirty implementation worktree and is therefore same-machine directional evidence rather than a release artifact or independent reproduction. Relative to the documented pre-cluster absolute baseline, the final point estimates changed by -29.7% for text, -5.7% for vector, and -13.4% for hybrid; a repeat against the immediately preceding clustered artifacts found no statistically significant text or vector change and a further 2.9% hybrid improvement.
+The 2026-08-11 current reruns used the complete pinned SciFact test workload on a local macOS arm64 host with rustc 1.90.0 and reused hash-validated prepared artifacts. Each generated report identified a dirty implementation worktree and is therefore same-machine directional evidence rather than a release artifact or independent reproduction. The final configuration used 30 Criterion samples, a two-second warmup, and a ten-second target measurement, and it was run three times. The median point estimates changed by -95.9% for text, -10.3% for vector, and -93.6% for hybrid versus the documented pre-pass baseline; the three-run ranges were 0.77-0.82 ms, 2.38-2.61 ms, and 3.25-3.84 ms respectively, with shared vector-control drift showing why a single fastest run is not used.
 
-| Persistent SQL system | NDCG@10 | MAP@10 | Recall@10 | Previous | Clustered | Queries/s |
+| Persistent SQL system | NDCG@10 | MAP@10 | Recall@10 | Pre-pass | Current | Queries/s |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `text_bm25` | 0.6860 | 0.6375 | 0.8193 | 20.13 ms | 14.16 ms | 70.6 |
-| `vector_hnsw` | 0.6451 | 0.5959 | 0.7833 | 2.87 ms | 2.71 ms | 369.3 |
-| `hybrid_positive_evidence` | 0.7259 | 0.6829 | 0.8422 | 56.49 ms | 48.91 ms | 20.4 |
+| `text_bm25` | 0.6860 | 0.6375 | 0.8193 | 20.13 ms | 0.82 ms | 1,216.1 |
+| `vector_hnsw` | 0.6451 | 0.5959 | 0.7833 | 2.87 ms | 2.58 ms | 388.3 |
+| `hybrid_positive_evidence` | 0.7259 | 0.6829 | 0.8422 | 56.49 ms | 3.62 ms | 276.1 |
 
-| Persistent SQL construction | Previous | Clustered | Change | Rows/s |
+| Persistent SQL construction | Pre-pass | Current | Change | Rows/s |
 | --- | ---: | ---: | ---: | ---: |
-| Table creation and parameterized load | 0.574 s | 0.617 s | +7.4% | 8,406 |
-| GIN index | 4.012 s | 2.312 s | -42.4% | 2,242 |
-| HNSW index | 12.042 s | 12.242 s | +1.7% | 423 |
+| Table creation and parameterized load | 0.574 s | 0.597 s | +4.0% | 8,683 |
+| GIN index | 4.012 s | 2.307 s | -42.5% | 2,246 |
+| HNSW index | 12.042 s | 12.638 s | +4.9% | 410 |
 
-The report retains the original forced-preparation observations of 67.508 seconds for corpus embedding and 0.591 seconds for query embedding on CPU; the clustered rerun skipped both because every prepared identity and hash matched. Quality metrics remained bit-for-bit unchanged and every absolute and hybrid-relative gate passed. Construction timings are one-shot observations rather than distribution comparisons; only the text query and GIN paths are directly changed by the clustered posting implementation.
+The reports retain the original forced-preparation observations of 67.508 seconds for corpus embedding and 0.591 seconds for query embedding on CPU; all three reruns skipped both because every prepared identity and hash matched. Quality metrics remained bit-for-bit unchanged in every run and every absolute and hybrid-relative gate passed. The benchmark SQL is unchanged, exact hybrid fusion still scores its complete carrier, and the executor removes search-only fields from the post-retrieval projection. For a score-first `LIMIT`, it then partitions the scored entries at `LIMIT + OFFSET`, retains the complete cutoff-score tie group, materializes only that exact prefix, and leaves `id ASC` or any other secondary ordering to the relational sort; filters, facets, distinctness, aggregation, and windows retain their full-input paths when they could change semantics.
+
+The same pass merges exhaustive multi-term scores directly across sorted cursors instead of building two document maps, loads scorer-versioned block maxima for all terms in one storage query, caches validated Bayesian parameters by field after the first execution-epoch lookup, runs independent fusion branches on the shared parallel executor, avoids duplicate HNSW revision reads, and keeps query-pool vector calibration query-local. Construction timings are one-shot observations rather than distribution comparisons; clustered posting writes directly affect GIN construction, while the smaller load and HNSW differences should be treated as local variation.
 
 ## Interpretation
 

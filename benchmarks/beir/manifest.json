@@ -104,9 +104,9 @@
   ],
   "measurement": {
     "criterion_point_estimator": "mean",
-    "sample_size": 10,
-    "warm_up_seconds": 1,
-    "measurement_seconds": 3,
+    "sample_size": 30,
+    "warm_up_seconds": 2,
+    "measurement_seconds": 10,
     "query_throughput_unit": "queries_per_second"
   }
 }

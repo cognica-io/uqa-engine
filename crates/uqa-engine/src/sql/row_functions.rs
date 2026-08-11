@@ -34,7 +34,6 @@ pub(super) use graph::{
     run_graph_drop_with_evaluator,
 };
 pub(crate) use retrieval::{
-    run_bayesian_evidence_match_in_execution, run_bayesian_evidence_match_public,
     run_bayesian_match_with_prior_in_execution, run_bayesian_match_with_prior_public,
     run_calibrated_vector_match_public, run_multi_field_match_in_execution,
     run_multi_field_match_public,

@@ -71,7 +71,7 @@ pub(super) use planning::{execute_compiled_statement, optimize_engine_plan};
 pub(crate) use plpgsql_exec::call_user_scalar_function;
 
 use aggregates::{
-    aggregate_value, has_aggregate, projection_label_at, AggregateAccumulator,
+    aggregate_value, contains_aggregate, has_aggregate, projection_label_at, AggregateAccumulator,
     PhysicalAggregateExecutor,
 };
 use catalog::build_info_schema_rows;
@@ -95,7 +95,6 @@ use row_functions::{
     validate_expr_text_match_fields, validate_joined_expr_text_match_fields,
 };
 pub(crate) use row_functions::{
-    run_bayesian_evidence_match_in_execution, run_bayesian_evidence_match_public,
     run_bayesian_match_with_prior_in_execution, run_bayesian_match_with_prior_public,
     run_calibrated_vector_match_public, run_multi_field_match_in_execution,
     run_multi_field_match_public,

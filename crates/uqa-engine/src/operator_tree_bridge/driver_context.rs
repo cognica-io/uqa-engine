@@ -98,23 +98,23 @@ impl EngineDriver<'_> {
                 )));
             }
         }
-        let context = self
+        let table = self
             .engine
-            .snapshot_context(self.table)?
+            .table(self.table)
+            .map_err(|error| operator_execution_error("resolve vector table", error))?
             .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))?;
-        let index =
-            context
-                .vector_indexes
-                .get(field)
-                .ok_or_else(|| match declared_type.as_ref() {
-                    Some(ColumnType::Vector(_) | ColumnType::Tensor(_)) => SQLError::Unsupported(
-                        format!("vector field {field:?} has no physical vector index"),
-                    ),
-                    Some(column_type) => SQLError::Internal(format!(
+        let indexes = table.vector_indexes.read();
+        let index = indexes
+            .get(field)
+            .ok_or_else(|| match declared_type.as_ref() {
+                Some(ColumnType::Vector(_) | ColumnType::Tensor(_)) => SQLError::Unsupported(
+                    format!("vector field {field:?} has no physical vector index"),
+                ),
+                Some(column_type) => SQLError::Internal(format!(
                     "non-vector field {field:?} with type {column_type:?} passed vector validation"
                 )),
-                    None => SQLError::UnknownColumn(field.to_string()),
-                })?;
+                None => SQLError::UnknownColumn(field.to_string()),
+            })?;
         let indexed_dimensions = index.dimensions() as usize;
         let expected_dimensions = match declared_type.as_ref() {
             Some(ColumnType::Vector(dimensions) | ColumnType::Tensor(dimensions)) => {

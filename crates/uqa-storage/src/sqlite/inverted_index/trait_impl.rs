@@ -308,6 +308,18 @@ impl InvertedIndex for SQLiteInvertedIndex {
         self.get_versioned_block_max_scores(field, term, scorer_fingerprint)
     }
 
+    fn persisted_block_max_scores_bulk(
+        &self,
+        field: &str,
+        terms: &[String],
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<Vec<Option<Vec<f64>>>> {
+        if scorer_fingerprint.is_empty() {
+            return Ok(vec![None; terms.len()]);
+        }
+        self.get_versioned_block_max_scores_bulk(field, terms, scorer_fingerprint)
+    }
+
     fn for_each_term_freq(
         &self,
         field: &str,

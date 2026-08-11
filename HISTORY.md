@@ -24,6 +24,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Decorrelated supported immutable `EXISTS` predicates into collision-safe borrowed-key hash probes and collected direct inner keys without projected-row materialization.
 - Added borrowed-slot hashing for unique-key inner equijoins with exact collision verification and encoded spill fallback when `work_mem` is exceeded.
 - Replaced one physical posting value per `(term, doc_id)` with 65,536-document term clusters, split score columns from positions, and connected exhaustive scoring plus WAND/BMW directly to 128-entry lazy score blocks.
+- Removed per-query Bayesian catalog validation after the first execution-epoch lookup, resolved evidence parameters once per field, loaded multi-term block bounds in bulk, merged exhaustive term cursors without per-document maps, reused HNSW revisions, and ran independent fusion signals on the shared parallel executor.
+- Stopped single-table and facet retrieval plans from rematerializing search-only text and vector fields after their predicates had already been consumed, then applied an exact tie-preserving score cutoff before document reads for score-first SQL limits; three unchanged persistent-SQL SciFact reruns had median text and hybrid latencies of 0.82 ms and 3.62 ms versus the 20.13 ms and 56.49 ms pre-pass baselines with identical rankings and relevance metrics.
 - Reduced the local TPC-H-derived Q20-excluded sum of per-query release medians from 45.917 ms to 14.184 ms while retaining exact PostgreSQL results; this development snapshot is documented as local directional evidence rather than an audited TPC-H score.
 
 ## [0.1.0] - 2026-08-07

@@ -7,9 +7,8 @@
 //! Exhaustive lexical scoring primitives and ranking.
 
 use super::{
-    block_max_scorer_fingerprint, raw_bm25_params, search_stats_for_terms, storage_sql_error, Arc,
-    BM25Scorer, BTreeMap, BTreeSet, BayesianBM25Scorer, DocId, Engine, InvertedIndex, Ordering,
-    PostingList, SQLError, ScoredEntry, Scorer, ScoringMode, DEFAULT_BLOCK_SIZE,
+    search_stats_for_terms, storage_sql_error, Arc, BM25Scorer, BayesianBM25Scorer, Engine,
+    InvertedIndex, Ordering, PostingList, SQLError, ScoredEntry, Scorer, ScoringMode,
 };
 
 impl Engine {
@@ -101,33 +100,13 @@ impl Engine {
         analyzed_terms: &[String],
         mode: &ScoringMode,
     ) -> Result<Vec<ScoredEntry>, SQLError> {
-        let mut present_terms = BTreeMap::<DocId, Vec<(usize, u64)>>::new();
-        let mut candidate_lengths = BTreeMap::<DocId, u64>::new();
-        let mut term_doc_freqs = Vec::with_capacity(analyzed_terms.len());
-        let cursors = index
+        let mut cursors = index
             .posting_cursors_bulk(field, analyzed_terms)
             .map_err(|error| storage_sql_error("open term score cursors", error))?;
-        for (term_index, mut cursor) in cursors.into_iter().enumerate() {
-            term_doc_freqs.push(cursor.doc_freq());
-            while let Some(entry) = cursor.current() {
-                let doc_length = entry.doc_length.max(entry.term_freq);
-                if let Some(previous) = candidate_lengths.insert(entry.doc_id, doc_length) {
-                    if previous != doc_length {
-                        return Err(SQLError::Internal(format!(
-                            "inconsistent indexed document length for document {}: {previous} and {doc_length}",
-                            entry.doc_id
-                        )));
-                    }
-                }
-                present_terms
-                    .entry(entry.doc_id)
-                    .or_default()
-                    .push((term_index, entry.term_freq));
-                cursor
-                    .advance()
-                    .map_err(|error| storage_sql_error("advance term score cursor", error))?;
-            }
-        }
+        let term_doc_freqs = cursors
+            .iter()
+            .map(|cursor| cursor.doc_freq())
+            .collect::<Vec<_>>();
         let stats = Arc::new(
             search_stats_for_terms(index, field, analyzed_terms, &term_doc_freqs)
                 .map_err(|error| storage_sql_error("read field statistics", error))?,
@@ -137,29 +116,54 @@ impl Engine {
             .iter()
             .map(|doc_freq| scorer.idf(*doc_freq))
             .collect();
-        let mut per_term = Vec::with_capacity(analyzed_terms.len());
-        Ok(candidate_lengths
-            .into_iter()
-            .map(|(doc_id, doc_length)| {
-                per_term.clear();
-                for idf in &term_idfs {
-                    per_term.push(scorer.term_score_with_idf(0, doc_length, *idf));
-                }
-                if let Some(terms) = present_terms.get(&doc_id) {
-                    for &(term_index, term_freq) in terms {
-                        per_term[term_index] = scorer.term_score_with_idf(
-                            term_freq,
-                            doc_length,
-                            term_idfs[term_index],
-                        );
+        let mut term_freqs = vec![0_u64; analyzed_terms.len()];
+        let mut per_term = vec![0.0; analyzed_terms.len()];
+        let mut entries = Vec::new();
+        loop {
+            let Some(doc_id) = cursors
+                .iter()
+                .filter_map(|cursor| cursor.current().map(|entry| entry.doc_id))
+                .min()
+            else {
+                break;
+            };
+            term_freqs.fill(0);
+            let mut candidate_length = None;
+            for (term_index, cursor) in cursors.iter_mut().enumerate() {
+                let Some(entry) = cursor.current().filter(|entry| entry.doc_id == doc_id) else {
+                    continue;
+                };
+                let doc_length = entry.doc_length.max(entry.term_freq);
+                if let Some(previous) = candidate_length {
+                    if previous != doc_length {
+                        return Err(SQLError::Internal(format!(
+                            "inconsistent indexed document length for document {doc_id}: {previous} and {doc_length}"
+                        )));
                     }
+                } else {
+                    candidate_length = Some(doc_length);
                 }
-                ScoredEntry {
-                    doc_id,
-                    score: scorer.finalize_score(&per_term),
-                }
-            })
-            .collect())
+                term_freqs[term_index] = entry.term_freq;
+                cursor
+                    .advance()
+                    .map_err(|error| storage_sql_error("advance term score cursor", error))?;
+            }
+            let doc_length = candidate_length.ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "text cursor merge found no posting for document {doc_id}"
+                ))
+            })?;
+            for ((term_score, term_freq), idf) in
+                per_term.iter_mut().zip(&term_freqs).zip(&term_idfs)
+            {
+                *term_score = scorer.term_score_with_idf(*term_freq, doc_length, *idf);
+            }
+            entries.push(ScoredEntry {
+                doc_id,
+                score: scorer.finalize_score(&per_term),
+            });
+        }
+        Ok(entries)
     }
 
     pub(super) fn text_top_k_capabilities(
@@ -167,7 +171,6 @@ impl Engine {
         table: &str,
         field: &str,
         query: &str,
-        mode: &ScoringMode,
     ) -> Result<uqa_planner::TextTopKCapabilities, SQLError> {
         let Some(t) = self
             .try_table(table)
@@ -183,57 +186,9 @@ impl Engine {
         let indexed_document_count = index
             .field_doc_count(field)
             .map_err(|error| storage_sql_error("read indexed document count", error))?;
-        if analyzed_terms.len() < 2 {
-            return Ok(uqa_planner::TextTopKCapabilities {
-                analyzed_term_count: analyzed_terms.len(),
-                indexed_document_count,
-                valid_block_max: false,
-            });
-        }
-
-        let mut frequencies = BTreeMap::<&str, u64>::new();
-        for term in &analyzed_terms {
-            if !frequencies.contains_key(term.as_str()) {
-                frequencies.insert(
-                    term.as_str(),
-                    index
-                        .doc_freq(field, term)
-                        .map_err(|error| storage_sql_error("read document frequency", error))?,
-                );
-            }
-        }
-        let doc_freqs = analyzed_terms
-            .iter()
-            .map(|term| frequencies[term.as_str()])
-            .collect::<Vec<_>>();
-        let stats = search_stats_for_terms(index.as_ref(), field, &analyzed_terms, &doc_freqs)
-            .map_err(|error| storage_sql_error("read field statistics", error))?;
-        let fingerprint = block_max_scorer_fingerprint(raw_bm25_params(mode), &stats);
-        let mut checked = BTreeSet::new();
-        let mut saw_nonempty = false;
-        let mut valid_block_max = true;
-        for (term, doc_freq) in analyzed_terms.iter().zip(&doc_freqs) {
-            if *doc_freq == 0 || !checked.insert(term) {
-                continue;
-            }
-            saw_nonempty = true;
-            let posting_len = usize::try_from(*doc_freq).map_err(|_| {
-                SQLError::Internal("text-search document frequency exceeds usize".into())
-            })?;
-            let expected_blocks = posting_len.div_ceil(DEFAULT_BLOCK_SIZE);
-            let persisted = index
-                .persisted_block_max_scores(field, term, &fingerprint)
-                .map_err(|error| storage_sql_error("read persisted block-max scores", error))?;
-            if persisted.as_ref().map(Vec::len) != Some(expected_blocks) {
-                valid_block_max = false;
-                break;
-            }
-        }
-
         Ok(uqa_planner::TextTopKCapabilities {
             analyzed_term_count: analyzed_terms.len(),
             indexed_document_count,
-            valid_block_max: saw_nonempty && valid_block_max,
         })
     }
 }

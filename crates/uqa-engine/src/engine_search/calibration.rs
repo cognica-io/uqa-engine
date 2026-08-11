@@ -63,6 +63,10 @@ fn resolve_saved_params(params: &BTreeMap<String, f64>) -> BayesianBM25Params {
 }
 
 impl Engine {
+    pub(crate) fn clear_bayesian_params_cache(&self) {
+        self.runtime.bayesian_params_cache.write().clear();
+    }
+
     /// Resolve the Bayesian BM25 calibration for `table.field`.
     ///
     /// Saved parameters win. Absent or stale auto-estimated parameters
@@ -105,7 +109,15 @@ impl Engine {
         field: &str,
     ) -> Result<BayesianBM25Params, SQLError> {
         self.validate_text_search_field(table, field)?;
+        let key = format!("{table}.{field}");
+        if let Some(params) = self.runtime.bayesian_params_cache.read().get(&key).copied() {
+            return Ok(params);
+        }
         if let Some(params) = self.load_fresh_bayesian_params(table, field)? {
+            self.runtime
+                .bayesian_params_cache
+                .write()
+                .insert(key, params);
             return Ok(params);
         }
         if self.transaction_depth() == 0 {
@@ -113,7 +125,12 @@ impl Engine {
                 "Bayesian calibration execution requires an active statement transaction".into(),
             ));
         }
-        self.resolve_missing_bayesian_params_in_transaction(table, field)
+        let params = self.resolve_missing_bayesian_params_in_transaction(table, field)?;
+        self.runtime
+            .bayesian_params_cache
+            .write()
+            .insert(key, params);
+        Ok(params)
     }
 
     pub(super) fn resolve_missing_bayesian_params_in_transaction(

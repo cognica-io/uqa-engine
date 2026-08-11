@@ -28,7 +28,7 @@ impl Engine {
                 uqa_operators::TextScoringMode::CustomBayesianBM25(*params)
             }
         };
-        let tree = self.plan_text_top_k_tree(table, field, query, mode, scoring, top_k)?;
+        let tree = self.plan_text_top_k_tree(table, field, query, scoring, top_k)?;
         let entries = crate::operator_tree_bridge::execute_scored_tree(self, table, &[], &tree)?;
         Ok(Self::rank_scored_entries_top_k(entries, top_k))
     }
@@ -49,7 +49,7 @@ impl Engine {
             ScoringMode::BM25(params) => TextScoringMode::CustomBM25(*params),
             ScoringMode::BayesianBM25(params) => TextScoringMode::CustomBayesianBM25(*params),
         };
-        let tree = self.plan_text_top_k_tree(table, field, query, mode, scoring, top_k)?;
+        let tree = self.plan_text_top_k_tree(table, field, query, scoring, top_k)?;
         let physical_top_k = match tree {
             OperatorTree::Term { top_k, .. } => top_k,
             _ => None,

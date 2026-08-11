@@ -7,11 +7,12 @@
 //! Facet output, star expansion, top-k, limit, and projection helpers.
 
 use super::{
-    collect_query_operator, eval_physical_scalar, expect_column_name, has_aggregate,
-    physical_exec_error, physical_projections, physical_work_mem_bytes, projection_label_at,
-    CteScope, Document, Engine, EngineExpressionEvaluator, PhysicalEvalContext, ProjectionPlan,
-    QueryBlockPlan, QueryOutput, QueryOutputMode, QueryRows, ResultRow, SQLError, SQLParam,
-    ScalarExpr, ScopedEngineHook, ScoredDocumentSource, ScoredInput, Value, SCORE_COLUMN,
+    collect_query_operator, contains_aggregate, eval_physical_scalar, expect_column_name,
+    expr_contains_volatile_function, has_aggregate, physical_exec_error, physical_projections,
+    physical_work_mem_bytes, projection_label_at, ComputePlan, CteScope, Document, Engine,
+    EngineExpressionEvaluator, PhysicalEvalContext, ProjectionPlan, QueryBlockPlan, QueryOutput,
+    QueryOutputMode, QueryRows, ResultRow, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
+    ScoredDocumentSource, ScoredInput, Value, SCORE_COLUMN,
 };
 
 pub(in crate::sql) fn facet_projection_fields(
@@ -35,6 +36,7 @@ pub(in crate::sql) fn facet_projection_fields(
 
 pub(in crate::sql) struct FacetExecution<'a> {
     pub(super) fields: &'a [String],
+    pub(super) source_schema: Vec<String>,
     pub(super) params: &'a [SQLParam],
     pub(super) ctes: &'a CteScope,
     pub(super) output_mode: QueryOutputMode,
@@ -54,10 +56,14 @@ pub(in crate::sql) fn build_facet_output(
 
     let include_field = execution.fields.len() > 1;
     let table_state = engine.require_table(table)?;
-    let source_schema = engine.try_table_columns(table).map_err(|error| {
-        SQLError::Internal(format!("read table columns for `{table}`: {error}"))
-    })?;
-    let source = ScoredDocumentSource::new(table, table_state, scored, source_schema, None, None);
+    let source = ScoredDocumentSource::new(
+        table,
+        table_state,
+        scored,
+        execution.source_schema,
+        None,
+        None,
+    );
     let mut source: Box<dyn PhysicalOperator + '_> =
         Box::new(uqa_execution::TableScan::new(Box::new(source)));
     if let Some(predicate) = predicate {
@@ -227,12 +233,61 @@ pub(in crate::sql) fn score_order_top_k(
 ) -> Result<Option<usize>, SQLError> {
     if stmt.distinct
         || !stmt.distinct_on.is_empty()
+        || !matches!(stmt.compute, ComputePlan::Project)
         || stmt.order_by.is_empty()
         || order_by_references_field(stmt)
         || stmt.order_by.iter().any(|order| !order.descending)
         || has_aggregate(engine, &stmt.projections)
         || !stmt.group_by.is_empty()
         || !stmt.grouping_sets.is_empty()
+    {
+        return Ok(None);
+    }
+    resolve_score_slice_top_k(stmt, engine, params, ctes)
+}
+
+/// Return the score prefix required by a score-first SQL slice. Secondary
+/// sort keys are allowed because the caller retains every row tied at the
+/// boundary score and leaves exact tie ordering to the relational pipeline.
+pub(in crate::sql) fn post_retrieval_score_top_k(
+    stmt: &QueryBlockPlan,
+    engine: &Engine,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<Option<usize>, SQLError> {
+    let Some(primary_order) = stmt.order_by.first() else {
+        return Ok(None);
+    };
+    if stmt.distinct
+        || !stmt.distinct_on.is_empty()
+        || !matches!(stmt.compute, ComputePlan::Project)
+        || !primary_order.descending
+        || !matches!(
+            &primary_order.expr,
+            ScalarExpr::Column(name) | ScalarExpr::QualifiedColumn { column: name, .. }
+                if name == SCORE_COLUMN
+        )
+        || stmt
+            .order_by
+            .iter()
+            .any(|order| order.expr.contains_window() || contains_aggregate(engine, &order.expr))
+    {
+        return Ok(None);
+    }
+    resolve_score_slice_top_k(stmt, engine, params, ctes)
+}
+
+fn resolve_score_slice_top_k(
+    stmt: &QueryBlockPlan,
+    engine: &Engine,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<Option<usize>, SQLError> {
+    if stmt
+        .limit
+        .iter()
+        .chain(stmt.offset.iter())
+        .any(|expr| expr_contains_volatile_function(engine, expr))
     {
         return Ok(None);
     }

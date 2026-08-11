@@ -35,9 +35,9 @@ pub use base::{
 pub use boolean::{ComplementOperator, IntersectOperator, UnionOperator};
 #[allow(deprecated)]
 pub use fusion_wrappers::{
-    fit_pool_calibration, AttentionFuser, AttentionFusionOperator, CalibratedVectorOperator,
-    LearnedFusionOperator, MultiFieldSearchOperator, QueryPoolVectorScoreOperator,
-    RelevantSampleSplit,
+    calibrate_query_pool_postings, fit_pool_calibration, AttentionFuser, AttentionFusionOperator,
+    CalibratedVectorOperator, LearnedFusionOperator, MultiFieldSearchOperator,
+    QueryPoolVectorScoreOperator, RelevantSampleSplit,
 };
 pub use hierarchical::{
     eval_path, parse_path, project_paths, unnest_array, AggregationKind as PathAggKind,

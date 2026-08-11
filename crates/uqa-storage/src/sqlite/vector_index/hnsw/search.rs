@@ -18,8 +18,10 @@ impl SQLiteHNSWIndex {
         query: &[f32],
         k: usize,
     ) -> StorageBackendResult<PostingList> {
-        if self.persisted_revision()?.is_some() {
-            return self.cached_graph()?.search_knn(query, k);
+        if let Some(revision) = self.persisted_revision()? {
+            return self
+                .cached_graph_for_revision(revision)?
+                .search_knn(query, k);
         }
         if self.require_persisted_graph {
             return Err(super::mutation::missing_metadata(self));

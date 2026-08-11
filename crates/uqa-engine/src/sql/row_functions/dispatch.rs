@@ -114,19 +114,7 @@ fn plan_bound_text_top_k(
         } => (query, field, scoring),
         other => return Ok(other),
     };
-    let mode = match scoring {
-        uqa_operators::TextScoringMode::BM25 => {
-            crate::ScoringMode::BM25(crate::BM25Params::default())
-        }
-        uqa_operators::TextScoringMode::BayesianBM25 => crate::ScoringMode::BayesianBM25(
-            engine.bayesian_params_for_in_execution(table, &field)?,
-        ),
-        uqa_operators::TextScoringMode::CustomBM25(params) => crate::ScoringMode::BM25(params),
-        uqa_operators::TextScoringMode::CustomBayesianBM25(params) => {
-            crate::ScoringMode::BayesianBM25(params)
-        }
-    };
-    engine.plan_text_top_k_tree(table, &field, &query, &mode, scoring, top_k)
+    engine.plan_text_top_k_tree(table, &field, &query, scoring, top_k)
 }
 
 #[derive(Clone, Copy)]
