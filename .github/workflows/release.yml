@@ -330,10 +330,7 @@ jobs:
           print()
           print("## Packages")
           print()
-          print("Python wheels, a Python source distribution, the Node.js")
-          print("JS-only npm package, self-contained per-platform npm tarballs,")
-          print("standalone native addons, and the browser WASM package are")
-          print("attached to this release. They are not published to PyPI or npm.")
+          print("Python wheels, a Python source distribution, the Node.js JS-only npm package, self-contained per-platform npm tarballs, standalone native addons, and the browser WASM package are attached to this release. They are not published to PyPI or npm.")
 
           missing = [line.strip() for line in os.environ.get("MISSING", "").splitlines()]
           missing = [name for name in missing if name]
@@ -341,16 +338,13 @@ jobs:
               print()
               print("### Packages not in this release")
               print()
-              print("These builds did not succeed, so their packages are absent.")
-              print("Re-running the release workflow for this tag uploads them")
-              print("alongside the assets already published.")
+              print("These builds did not succeed, so their packages are absent. Re-running the release workflow for this tag uploads them alongside the assets already published.")
               print()
               for name in missing:
                   print(f"- `{name}`")
 
           print()
-          print("Licensing: AGPL-3.0-only with optional FOSS and noncommercial")
-          print("application exceptions. See LICENSING.md.")
+          print("Licensing: AGPL-3.0-only with optional FOSS and noncommercial application exceptions. See LICENSING.md.")
           PY
           cat release-notes.md
 
