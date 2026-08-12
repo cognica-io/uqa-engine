@@ -74,7 +74,7 @@ Official source and registry distributions must carry a licensing notice that id
 
 ## Contributions
 
-Alternative licensing requires Cognica to retain sufficient rights in every accepted contribution. External code contributions are governed by [CONTRIBUTOR_POLICY.md](https://github.com/cognica-io/uqa-rs/blob/main/CONTRIBUTOR_POLICY.md). Issues, design discussion, bug reports, and other feedback that do not contribute copyrightable code do not require a contributor agreement.
+Alternative licensing requires Cognica to retain sufficient rights in every accepted contribution. External copyrightable contributions of code or documentation are governed by [CONTRIBUTOR_POLICY.md](https://github.com/cognica-io/uqa-rs/blob/main/CONTRIBUTOR_POLICY.md). Issues, design discussion, bug reports, and other feedback that do not contribute copyrightable material do not require a contributor agreement.
 
 ## Questions
 

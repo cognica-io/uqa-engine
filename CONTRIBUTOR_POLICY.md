@@ -6,9 +6,9 @@ UQA-RS uses public open-source licensing together with optional exceptions and c
 
 Code accepted into the public UQA-RS core will remain available under at least one license approved by the Open Source Initiative. Commercial licensing will not withdraw or narrow open-source rights already granted for an accepted contribution.
 
-## Code contributions
+## Copyrightable contributions of code and documentation
 
-Before an external code or documentation contribution can be merged, its copyright holders must enter into a contributor agreement accepted by Cognica. The agreement must permit Cognica to use, modify, distribute, and sublicense the contribution:
+Before an external copyrightable contribution of code or documentation can be merged, its copyright holders must enter into a contributor agreement accepted by Cognica. The agreement must permit Cognica to use, modify, distribute, and sublicense the contribution:
 
 - under AGPL-3.0-only;
 - with the public additional permissions documented in this repository;
@@ -17,7 +17,7 @@ Before an external code or documentation contribution can be merged, its copyrig
 
 The agreement must also address patent rights needed to exercise those grants and must confirm that the contributor has authority to make the contribution. A corporate contributor must have authority from the relevant employer or rights holder.
 
-Cognica has not yet published the execution workflow or final contributor agreement. Until that process is available, external copyrightable code and documentation contributions will not be merged. This preserves the ability to operate every licensing path without later requesting retroactive permission.
+Cognica has not yet published the execution workflow or final contributor agreement. Until that process is available, external copyrightable contributions of code or documentation will not be merged. This preserves the ability to operate every licensing path without later requesting retroactive permission.
 
 ## Contributions that do not require an agreement
 

@@ -2,6 +2,12 @@
 
 Thanks for considering a contribution. This document explains the gates every change has to clear, the conventions the codebase follows, and where new code lives.
 
+## Contributor licensing
+
+UQA-RS is distributed under AGPL-3.0-only, optional public exceptions, and separate commercial terms. Cognica must have sufficient rights to distribute every accepted contribution through all of those paths.
+
+External copyrightable contributions of code or documentation require a contributor agreement accepted by Cognica. The execution workflow and final agreement are not yet published, so such contributions will not be merged until that process is available. Issues, bug reports, design discussion, and non-copyrightable factual corrections remain welcome. See [CONTRIBUTOR_POLICY.md](CONTRIBUTOR_POLICY.md) for the complete policy and the public-core commitment.
+
 The master plan in [`docs/plans/0001-uqa-rs-implementation-plan.md`](docs/plans/0001-uqa-rs-implementation-plan.md) is the source of truth for staged deliverables and explicit deferrals. Read the relevant section before starting work on a new crate or operator.
 
 ## Local gates
@@ -120,16 +126,12 @@ If a single PR introduces several logically distinct changes (for example, an im
 
 ## Pull requests
 
+Before opening a pull request, confirm that the contribution is one of the [types that do not require an agreement](CONTRIBUTOR_POLICY.md#contributions-that-do-not-require-an-agreement) or is covered by a contributor agreement accepted by Cognica.
+
 - Branch off `main` for every change.
 - Keep the PR scope focused; reviews are easier when each PR has one reason to exist.
 - The PR description should mention which gates were run locally and call out anything that needs reviewer attention (intentional divergences from upstream, performance trade-offs, deferred follow-ups).
 - Squash-merge is the default; if the PR has a non-trivial multi-commit history that aids review, prefer rebase-merge.
-
-## Contributor licensing
-
-UQA-RS is distributed under AGPL-3.0-only, optional public exceptions, and separate commercial terms. Cognica must have sufficient rights to distribute every accepted contribution through all of those paths.
-
-External copyrightable code and documentation contributions require a contributor agreement accepted by Cognica. The execution workflow and final agreement are not yet published, so such contributions will not be merged until that process is available. Issues, bug reports, design discussion, and non-copyrightable factual corrections remain welcome. See [CONTRIBUTOR_POLICY.md](CONTRIBUTOR_POLICY.md) for the complete policy and the public-core commitment.
 
 ## Filing bugs
 

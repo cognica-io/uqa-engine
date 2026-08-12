@@ -18,6 +18,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Aligned the licensing and contribution guides on copyrightable code and documentation, contributor-agreement scope, and the currently mergeable contribution paths.
 - Standardized analyzer, operator-join, graph, and Cypher documentation around syntax, argument, result, effect, error, and example contracts.
 - Consolidated integration sources into domain harnesses so workspace builds and tests share linker work while retaining direct module filtering.
 - Replaced map-backed relational rows with positional `RowSchema` mappings and shared-fragment `PhysicalRow` composition across scans, projections, joins, aggregates, subqueries, spill boundaries, and result collection.
