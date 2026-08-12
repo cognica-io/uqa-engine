@@ -48,6 +48,8 @@ Document a function or feature with this contract order:
 
 Use canonical names in prose and code. Link to an existing detailed chapter instead of duplicating its contract in the skill or another manual page.
 
+Keep each prose paragraph on one physical line. Do not insert line breaks inside paragraphs.
+
 Classify fenced manual SQL as follows:
 
 - `sql`: compile on every CI run.

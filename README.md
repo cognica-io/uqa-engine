@@ -4,6 +4,11 @@ UQA-RS is an embeddable database engine that lets one application use PostgreSQL
 
 It is designed for applications that need more than a relational table but do not want to assemble a separate database, search server, vector store, and graph engine for every query path.
 
+> [!TIP]
+> **Using an LLM or coding agent?**
+>
+> Start with [`llms.txt`](llms.txt). It maps the authoritative manual, implementation, examples, and verification workflow without requiring the agent to load the entire repository.
+
 ## What you can build
 
 - Run relational queries, joins, aggregates, CTEs, windows, JSON operations, and transactions with a PostgreSQL-oriented SQL surface.

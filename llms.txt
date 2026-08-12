@@ -4,6 +4,8 @@
 
 The manual is the canonical product contract. Parser acceptance alone does not prove execution support; follow the documented argument shape, result schema, state effects, and errors, then verify executable claims against tests or the engine.
 
+Do not infer behavior from familiar labels such as PostgreSQL-oriented SQL, AGE compatibility, vector search, fusion, or CJK analysis. Read the exact UQA-RS contract for the feature in question.
+
 When generating SQL:
 
 - Keep relation and column identifiers in SQL syntax. Positional parameters bind values only.

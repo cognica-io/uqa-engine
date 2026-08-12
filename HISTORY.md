@@ -10,7 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Added a compact `llms.txt` discovery map and one repository UQA-RS skill shared by Codex and Claude Code.
+- Added a compact `llms.txt` discovery map, a root `AGENTS.md` entry point, and one repository UQA-RS skill shared by Codex and Claude Code.
 - Added a CI gate that compiles every manual SQL fence and executes explicitly classified examples in document order.
 - Added a deterministic all-22-query TPC-H-derived scale-factor `0.001` fixture, exact PostgreSQL 17.10 result gate, package-scoped release timing runner, and live differential script.
 - Added a machine-checked integration-harness coverage contract so test sources cannot silently become unregistered or duplicate Cargo targets.
