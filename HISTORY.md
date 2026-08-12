@@ -6,17 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-12
+
 ### Added
 
+- Added a compact `llms.txt` discovery map and one repository UQA-RS skill shared by Codex and Claude Code.
+- Added a CI gate that compiles every manual SQL fence and executes explicitly classified examples in document order.
 - Added a deterministic all-22-query TPC-H-derived scale-factor `0.001` fixture, exact PostgreSQL 17.10 result gate, package-scoped release timing runner, and live differential script.
 - Added a machine-checked integration-harness coverage contract so test sources cannot silently become unregistered or duplicate Cargo targets.
 - Added a backend-neutral clustered posting codec, score-only lazy cursors, and automatic atomic migration of existing SQLite and Key/Value/redb full-text indexes.
 
 ### Changed
 
+- Standardized analyzer, operator-join, graph, and Cypher documentation around syntax, argument, result, effect, error, and example contracts.
 - Consolidated integration sources into domain harnesses so workspace builds and tests share linker work while retaining direct module filtering.
 - Replaced map-backed relational rows with positional `RowSchema` mappings and shared-fragment `PhysicalRow` composition across scans, projections, joins, aggregates, subqueries, spill boundaries, and result collection.
 - Streamed eligible single-consumer derived-table projections into their parent operators while retaining materialization for blocking, repeatable, or volatile shapes.
+
+### Fixed
+
+- Made `fts_index_stats(table)` reject an unknown relation instead of silently returning statistics for every indexed table.
 
 ### Performance
 

@@ -109,7 +109,7 @@ The workspace lives under `crates/`. New crates follow the existing shape:
 1. `crates/<name>/Cargo.toml` with `version.workspace = true`, `edition.workspace = true`, `license.workspace = true`, `license-file.workspace = true`, `readme.workspace = true`, and `[lints] workspace = true`.
 2. `crates/<name>/src/lib.rs`.
 3. Add `crates/<name>` to the `members` list in the root `Cargo.toml`.
-4. Add a workspace-internal `[workspace.dependencies]` entry of the form `uqa-foo = { version = "0.1.0", path = "crates/uqa-foo" }` so other crates can depend on it via `workspace = true` without a wildcard pin (cargo deny will reject wildcards).
+4. Add a workspace-internal `[workspace.dependencies]` entry of the form `uqa-foo = { version = "0.1.1", path = "crates/uqa-foo" }` so other crates can depend on it via `workspace = true` without a wildcard pin (cargo deny will reject wildcards).
 5. Document the new crate and its dependency boundary in `docs/design/architecture.md`; keep the repository `README.md` focused on user-facing capabilities and entry points.
 
 ## Commit messages
