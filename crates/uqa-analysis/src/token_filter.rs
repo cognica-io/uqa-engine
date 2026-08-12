@@ -28,6 +28,7 @@ pub enum TokenFilter {
         custom_words: Vec<String>,
     },
     PorterStem,
+    #[serde(rename = "ascii_folding")]
     ASCIIFolding,
     Synonym {
         /// Inline `term -> [expansion, ...]` mapping. Empty when the

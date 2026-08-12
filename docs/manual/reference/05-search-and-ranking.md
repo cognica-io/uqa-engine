@@ -34,6 +34,19 @@ LIMIT 20;
 
 Every indexed text field has an analyzer pipeline for document indexing and query analysis. Without an explicit assignment, the field uses the built-in `standard` analyzer: standard tokenization, lowercase, ASCII folding, English stop-word removal, and Porter stemming.
 
+For CJK-style text, assign the built-in `standard_cjk` analyzer. It extends the `standard` pipeline with 2-to-3-character n-grams and retains shorter tokens, which provides character-substring matching without claiming language-specific morphological segmentation:
+
+```sql
+SELECT * FROM set_table_analyzer(
+    'articles',
+    'body',
+    'standard_cjk',
+    'both'
+);
+```
+
+The field must already be in a GIN index. The `both` assignment rebuilds existing postings and applies `standard_cjk` to later document and query analysis.
+
 Custom analyzers are ordered JSON pipelines of character filters, one tokenizer, and token filters. They can normalize HTML-shaped input, split with standard, pattern, keyword, letter, whitespace, or n-gram tokenizers, and apply lowercase, stop words, stemming, ASCII folding, synonyms, n-grams, edge n-grams, or length filtering.
 
 Use `create_analyzer` to register a pipeline and either name it in `CREATE INDEX ... WITH (analyzer = ...)` or assign it to an existing GIN field with `set_table_analyzer`. Analyzer phases are `index`, `search` or its `query` alias, and `both`. An index-time change rebuilds postings; a search-only change does not.

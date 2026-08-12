@@ -35,6 +35,7 @@ fn html_strip_entities() {
 fn html_strip_roundtrip() {
     let f = CharFilter::HTMLStrip;
     let json = serde_json::to_string(&f).unwrap();
+    assert_eq!(json, r#"{"type":"html_strip"}"#);
     let back: CharFilter = serde_json::from_str(&json).unwrap();
     assert!(matches!(back, CharFilter::HTMLStrip));
 }

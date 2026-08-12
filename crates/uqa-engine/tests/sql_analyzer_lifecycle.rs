@@ -39,7 +39,9 @@ fn create_and_list_analyzers() {
         })
         .collect();
     assert!(listed.contains(&"rs_my_test_analyzer".to_string()));
-    assert!(listed.contains(&"standard".to_string()));
+    for builtin in ["keyword", "standard", "standard_cjk", "whitespace"] {
+        assert!(listed.iter().any(|name| name == builtin));
+    }
     let _ = run_one(&eng, "SELECT * FROM drop_analyzer('rs_my_test_analyzer')");
 }
 

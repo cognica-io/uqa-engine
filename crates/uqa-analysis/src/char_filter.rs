@@ -17,6 +17,7 @@ use crate::error::{AnalysisError, AnalysisResult};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CharFilter {
+    #[serde(rename = "html_strip")]
     HTMLStrip,
     Mapping {
         mapping: BTreeMap<String, String>,

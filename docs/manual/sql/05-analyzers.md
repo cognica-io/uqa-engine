@@ -14,6 +14,28 @@ UQA-RS exposes analyzer catalog operations as row-producing SQL functions and bi
 
 These functions are used in `FROM` like other table functions. `SELECT * FROM function(...)` is the direct lifecycle form.
 
+## Built-in analyzers
+
+| Name | Pipeline | Typical use |
+| --- | --- | --- |
+| `standard` | Standard tokenizer, lowercase, ASCII folding, English stop words, Porter stemming | Default English-oriented prose |
+| `whitespace` | Whitespace tokenizer, lowercase | Pre-segmented text whose punctuation must remain within tokens |
+| `standard_cjk` | `standard` pipeline followed by 2-to-3-character n-grams with short-token retention | CJK-style text and substring-oriented matching |
+| `keyword` | Keyword tokenizer with no filters | Treat the complete non-empty field as one exact token |
+
+`standard` is used when a GIN field has no explicit analyzer. `standard_cjk` is a built-in character n-gram pipeline, not a Chinese, Japanese, or Korean morphological segmenter. It can be assigned without calling `create_analyzer`:
+
+```sql
+SELECT * FROM set_table_analyzer(
+    'articles',
+    'body',
+    'standard_cjk',
+    'both'
+);
+```
+
+The field must already belong to a physical GIN index. Assigning `both` rebuilds its postings and uses the same analyzer for queries.
+
 ## Analyzer JSON
 
 The top-level schema is:
@@ -32,7 +54,7 @@ Stages run in this order: every `char_filters` entry, the one `tokenizer`, and e
 
 | Type | Required properties | Optional properties |
 | --- | --- | --- |
-| `h_t_m_l_strip` | None | None |
+| `html_strip` | None | None |
 | `mapping` | `mapping` object from source string to replacement string | None |
 | `pattern_replace` | `pattern` | `replacement`, default empty |
 
@@ -54,13 +76,13 @@ Stages run in this order: every `char_filters` entry, the one `tokenizer`, and e
 | `lowercase` | None | None |
 | `stop` | None | `language`, default `english`; `custom_words`, default empty |
 | `porter_stem` | None | None |
-| `a_s_c_i_i_folding` | None | None |
+| `ascii_folding` | None | None |
 | `synonym` | `synonyms` or `synonyms_path` | The unused source can be omitted |
 | `ngram` | `min_gram`, `max_gram` | `keep_short`, default false |
 | `edge_ngram` | `min_gram`, `max_gram` | None |
 | `length` | None | `min_length`, default 0; `max_length`, default 0 for unlimited |
 
-`h_t_m_l_strip` and `a_s_c_i_i_folding` are the exact current JSON tags. Gram bounds require a positive minimum and a maximum not smaller than the minimum. Pattern fields use Rust regular-expression syntax.
+`html_strip` and `ascii_folding` are the exact JSON tags. Gram bounds require a positive minimum and a maximum not smaller than the minimum. Pattern fields use Rust regular-expression syntax.
 
 ## CREATE ANALYZER function
 
@@ -71,11 +93,11 @@ SELECT * FROM create_analyzer(
     'html_vehicle',
     $analyzer$
 {
-  "char_filters": [{"type": "h_t_m_l_strip"}],
+  "char_filters": [{"type": "html_strip"}],
   "tokenizer": {"type": "standard"},
   "token_filters": [
     {"type": "lowercase"},
-    {"type": "a_s_c_i_i_folding"},
+    {"type": "ascii_folding"},
     {"type": "stop", "language": "english", "custom_words": ["manual"]},
     {"type": "synonym", "synonyms": {"car": ["automobile"], "automobile": ["car"]}}
   ]

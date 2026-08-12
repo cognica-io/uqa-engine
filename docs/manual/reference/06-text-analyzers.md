@@ -31,6 +31,17 @@ The indexing phase analyzes document field values before writing postings. The s
 
 `standard` is the default analyzer when a GIN field has no explicit assignment. `standard_cjk` is a character n-gram extension, not a language-specific morphological segmenter. SQL `list_analyzers()` includes the four built-ins and custom catalog analyzers.
 
+Bind the CJK-oriented built-in directly to an indexed field; it does not need a custom JSON definition:
+
+```sql
+SELECT * FROM set_table_analyzer(
+    'articles',
+    'body',
+    'standard_cjk',
+    'both'
+);
+```
+
 ## JSON configuration shape
 
 A custom analyzer is stored as JSON with one tokenizer and optional ordered filter arrays:
@@ -38,12 +49,12 @@ A custom analyzer is stored as JSON with one tokenizer and optional ordered filt
 ```json
 {
   "char_filters": [
-    {"type": "h_t_m_l_strip"}
+    {"type": "html_strip"}
   ],
   "tokenizer": {"type": "standard"},
   "token_filters": [
     {"type": "lowercase"},
-    {"type": "a_s_c_i_i_folding"},
+    {"type": "ascii_folding"},
     {"type": "stop", "language": "english", "custom_words": ["manual"]},
     {"type": "synonym", "synonyms": {"car": ["automobile"], "automobile": ["car"]}},
     {"type": "length", "min_length": 2, "max_length": 24}
@@ -51,13 +62,13 @@ A custom analyzer is stored as JSON with one tokenizer and optional ordered filt
 }
 ```
 
-The acronym-split tags `h_t_m_l_strip` and `a_s_c_i_i_folding` are the current serialized names and must be written exactly. The tokenizer defaults to `whitespace` when omitted; both filter arrays default to empty. This empty default is case-sensitive and differs from the built-in analyzer named `whitespace`, which adds lowercase filtering. The tokenizer and parameterless token filters also accept string shorthand, such as `{"tokenizer":"keyword","token_filters":["lowercase"]}`, but canonical object form is clearer when configurations are reviewed or generated.
+`html_strip` and `ascii_folding` are the serialized names and must be written exactly. The tokenizer defaults to `whitespace` when omitted; both filter arrays default to empty. This empty default is case-sensitive and differs from the built-in analyzer named `whitespace`, which adds lowercase filtering. The tokenizer and parameterless token filters also accept string shorthand, such as `{"tokenizer":"keyword","token_filters":["lowercase"]}`, but canonical object form is clearer when configurations are reviewed or generated.
 
 ## Character filters
 
 | JSON type | Configuration | Behavior |
 | --- | --- | --- |
-| `h_t_m_l_strip` | None | Replaces tag-shaped text with spaces and decodes the built-in `amp`, `lt`, `gt`, `quot`, `#39`, `apos`, and `nbsp` entities |
+| `html_strip` | None | Replaces tag-shaped text with spaces and decodes the built-in `amp`, `lt`, `gt`, `quot`, `#39`, `apos`, and `nbsp` entities |
 | `mapping` | `mapping` object | Applies string replacements longest-key-first |
 | `pattern_replace` | `pattern`, optional `replacement` | Replaces every Rust regular-expression match; replacement defaults to an empty string |
 
@@ -83,7 +94,7 @@ N-gram bounds require `min_gram > 0` and `max_gram >= min_gram`. A pattern token
 | `lowercase` | None | Applies Unicode lowercase conversion |
 | `stop` | Optional `language`, optional `custom_words` | Removes built-in English stop words plus exact custom words; the default language is `english` |
 | `porter_stem` | None | Applies the built-in Porter stemmer |
-| `a_s_c_i_i_folding` | None | Uses Unicode decomposition to fold characters with ASCII equivalents and preserves characters without one |
+| `ascii_folding` | None | Uses Unicode decomposition to fold characters with ASCII equivalents and preserves characters without one |
 | `synonym` | Inline `synonyms` or `synonyms_path` | Retains each source token and appends its configured expansions |
 | `ngram` | `min_gram`, `max_gram`, optional `keep_short` | Emits every character n-gram; a shorter token is retained only when `keep_short` is true |
 | `edge_ngram` | `min_gram`, `max_gram` | Emits token prefixes in the inclusive range |
@@ -100,7 +111,7 @@ SELECT * FROM create_analyzer(
     'html_vehicle',
     $analyzer$
 {
-  "char_filters": [{"type": "h_t_m_l_strip"}],
+  "char_filters": [{"type": "html_strip"}],
   "tokenizer": {"type": "standard"},
   "token_filters": [
     {"type": "lowercase"},
@@ -205,7 +216,7 @@ let engine = Engine::new();
 let config = r#"{
   "tokenizer":{"type":"standard"},
   "token_filters":[{"type":"lowercase"},{"type":"porter_stem"}],
-  "char_filters":[{"type":"h_t_m_l_strip"}]
+  "char_filters":[{"type":"html_strip"}]
 }"#;
 
 engine.register_named_analyzer("html_english", config)?;

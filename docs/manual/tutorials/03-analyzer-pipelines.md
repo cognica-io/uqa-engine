@@ -38,12 +38,12 @@ SELECT * FROM create_analyzer(
     $analyzer$
 {
   "char_filters": [
-    {"type": "h_t_m_l_strip"}
+    {"type": "html_strip"}
   ],
   "tokenizer": {"type": "standard"},
   "token_filters": [
     {"type": "lowercase"},
-    {"type": "a_s_c_i_i_folding"},
+    {"type": "ascii_folding"},
     {"type": "stop", "language": "english", "custom_words": ["manual"]},
     {"type": "synonym", "synonyms": {"car": ["automobile"], "automobile": ["car"]}},
     {"type": "length", "min_length": 2, "max_length": 24}
@@ -64,6 +64,8 @@ WHERE analyzer_name = 'html_vehicle';
 ```
 
 The result contains one `html_vehicle` row. `list_analyzers()` also returns the built-in `keyword`, `standard`, `standard_cjk`, and `whitespace` names.
+
+For CJK-style content, `standard_cjk` can be bound directly without registering custom JSON. It adds 2-to-3-character n-grams to the `standard` pipeline and retains shorter tokens; it is substring-oriented analysis rather than a language-specific morphological segmenter.
 
 ## 4. Create a table and GIN index
 

@@ -99,6 +99,7 @@ fn ascii_folding_filter_accented_chars() {
 fn ascii_folding_filter_roundtrip() {
     let f = TokenFilter::ASCIIFolding;
     let json = serde_json::to_string(&f).unwrap();
+    assert_eq!(json, r#"{"type":"ascii_folding"}"#);
     let back: TokenFilter = serde_json::from_str(&json).unwrap();
     assert!(matches!(back, TokenFilter::ASCIIFolding));
 }
