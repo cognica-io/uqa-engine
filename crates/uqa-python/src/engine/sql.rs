@@ -23,8 +23,9 @@ impl PyEngine {
     ) -> PyResult<PySQLResult> {
         let query = query.to_string();
         let params = params_from_py(params)?;
+        let inner = self.inner()?;
         let result = py
-            .detach(|| self.inner.sql(&query, &params))
+            .detach(|| inner.sql(&query, &params))
             .map_err(runtime_error)?;
         Ok(result.into())
     }
@@ -49,8 +50,9 @@ impl PyEngine {
             .iter()
             .map(|(sql, params)| (sql.as_str(), params.as_slice()))
             .collect();
+        let inner = self.inner()?;
         let results = py
-            .detach(|| self.inner.sql_batch(&borrowed))
+            .detach(|| inner.sql_batch(&borrowed))
             .map_err(runtime_error)?;
         Ok(results.into_iter().map(Into::into).collect())
     }
@@ -65,7 +67,7 @@ impl PyEngine {
         may_mutate_engine: bool,
     ) -> PyResult<()> {
         ensure_callable(py, &callable, "scalar function")?;
-        self.inner
+        self.inner()?
             .register_scalar_function_with_options(
                 name,
                 function_options(volatility, may_mutate_engine)?,
@@ -87,7 +89,7 @@ impl PyEngine {
         may_mutate_engine: bool,
     ) -> PyResult<()> {
         ensure_callable(py, &callable, "table function")?;
-        self.inner
+        self.inner()?
             .register_table_function_with_options(
                 name,
                 function_options(volatility, may_mutate_engine)?,
@@ -109,7 +111,7 @@ impl PyEngine {
         may_mutate_engine: bool,
     ) -> PyResult<()> {
         ensure_callable(py, &factory, "aggregate function factory")?;
-        self.inner
+        self.inner()?
             .register_aggregate_function_with_options(
                 name,
                 function_options(volatility, may_mutate_engine)?,

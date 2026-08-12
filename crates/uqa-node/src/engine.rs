@@ -36,7 +36,15 @@ use super::{
 
 #[napi]
 pub struct Engine {
-    inner: Arc<CoreEngine>,
+    inner: Option<Arc<CoreEngine>>,
+}
+
+impl Engine {
+    fn inner(&self) -> Result<&Arc<CoreEngine>> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| Error::from_reason("engine is closed"))
+    }
 }
 
 #[napi]
@@ -46,14 +54,16 @@ impl Engine {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(CoreEngine::new()),
+            inner: Some(Arc::new(CoreEngine::new())),
         }
     }
 
     #[napi(factory)]
     pub fn open(path: String) -> Result<Engine> {
         Ok(Engine {
-            inner: Arc::new(CoreEngine::open(Path::new(&path)).map_err(runtime_error)?),
+            inner: Some(Arc::new(
+                CoreEngine::open(Path::new(&path)).map_err(runtime_error)?,
+            )),
         })
     }
 
@@ -61,35 +71,37 @@ impl Engine {
     #[napi]
     pub fn new_session(&self) -> Result<Engine> {
         Ok(Engine {
-            inner: Arc::new(self.inner.new_session().map_err(runtime_error)?),
+            inner: Some(Arc::new(
+                self.inner()?.new_session().map_err(runtime_error)?,
+            )),
         })
     }
 
     #[napi(factory)]
     pub fn open_encrypted(path: String, key: String) -> Result<Engine> {
         Ok(Engine {
-            inner: Arc::new(
+            inner: Some(Arc::new(
                 CoreEngine::open_encrypted(Path::new(&path), &key).map_err(runtime_error)?,
-            ),
+            )),
         })
     }
 
     #[napi(factory)]
     pub fn open_auto(path: String, key: Option<String>) -> Result<Engine> {
         Ok(Engine {
-            inner: Arc::new(
+            inner: Some(Arc::new(
                 CoreEngine::open_auto(Path::new(&path), key.as_deref()).map_err(runtime_error)?,
-            ),
+            )),
         })
     }
 
     #[napi(factory)]
     pub fn open_compressed(path: String, options: Option<CompressionOptions>) -> Result<Engine> {
         Ok(Engine {
-            inner: Arc::new(
+            inner: Some(Arc::new(
                 CoreEngine::open_compressed(Path::new(&path), compression_options(options)?)
                     .map_err(runtime_error)?,
-            ),
+            )),
         })
     }
 
@@ -100,14 +112,14 @@ impl Engine {
         options: Option<CompressionOptions>,
     ) -> Result<Engine> {
         Ok(Engine {
-            inner: Arc::new(
+            inner: Some(Arc::new(
                 CoreEngine::open_compressed_encrypted(
                     Path::new(&path),
                     &key,
                     compression_options(options)?,
                 )
                 .map_err(runtime_error)?,
-            ),
+            )),
         })
     }
 
@@ -125,7 +137,7 @@ impl Engine {
         params: Option<Vec<ParamInput>>,
     ) -> Result<AsyncTask<SQLTask>> {
         Ok(AsyncTask::new(SQLTask {
-            engine: self.inner.clone(),
+            engine: self.inner()?.clone(),
             query,
             params: params_from_input(params)?,
         }))
@@ -134,7 +146,7 @@ impl Engine {
     #[napi]
     pub fn sql_sync(&self, query: String, params: Option<Vec<ParamInput>>) -> Result<SQLResult> {
         let params = params_from_input(params)?;
-        self.inner
+        self.inner()?
             .sql(&query, &params)
             .map_err(runtime_error)?
             .try_into()
@@ -146,7 +158,7 @@ impl Engine {
         statements: Vec<(String, Vec<ParamInput>)>,
     ) -> Result<AsyncTask<SQLBatchTask>> {
         Ok(AsyncTask::new(SQLBatchTask {
-            engine: self.inner.clone(),
+            engine: self.inner()?.clone(),
             statements: batch_from_input(statements)?,
         }))
     }
@@ -161,7 +173,7 @@ impl Engine {
             .iter()
             .map(|(sql, params)| (sql.as_str(), params.as_slice()))
             .collect();
-        self.inner
+        self.inner()?
             .sql_batch(&borrowed)
             .map_err(runtime_error)?
             .into_iter()
@@ -181,7 +193,7 @@ impl Engine {
         options: Option<JSFunctionOptions>,
     ) -> Result<()> {
         let function = JSScalarFunction::new(name.clone(), callback)?;
-        self.inner
+        self.inner()?
             .register_scalar_function_with_options(&name, function_options(options), function)
             .map_err(runtime_error)
     }
@@ -197,7 +209,7 @@ impl Engine {
         options: Option<JSFunctionOptions>,
     ) -> Result<()> {
         let function = JSTableFunction::new(name.clone(), callback)?;
-        self.inner
+        self.inner()?
             .register_table_function_with_options(&name, function_options(options), function)
             .map_err(runtime_error)
     }
@@ -214,14 +226,14 @@ impl Engine {
         options: Option<JSFunctionOptions>,
     ) -> Result<()> {
         let function = JSAggregateFunction::new(name.clone(), factory)?;
-        self.inner
+        self.inner()?
             .register_aggregate_function_with_options(&name, function_options(options), function)
             .map_err(runtime_error)
     }
 
     #[napi]
     pub fn create_default_table(&self, name: String, fts_fields: Vec<String>) -> Result<()> {
-        self.inner
+        self.inner()?
             .create_default_table(&name, fts_fields)
             .map_err(runtime_error)
     }
@@ -233,7 +245,7 @@ impl Engine {
         field: String,
         dimensions: u32,
     ) -> Result<bool> {
-        self.inner
+        self.inner()?
             .create_vector_field(&table, &field, dimensions)
             .map_err(runtime_error)
     }
@@ -245,7 +257,7 @@ impl Engine {
         doc_id: i64,
         document: BTreeMap<String, JSValue>,
     ) -> Result<()> {
-        self.inner
+        self.inner()?
             .add_document(
                 &table,
                 doc_id_from_input(doc_id)?,
@@ -274,7 +286,7 @@ impl Engine {
                 Ok((field, rows))
             })
             .collect::<Result<BTreeMap<_, _>>>()?;
-        self.inner
+        self.inner()?
             .add_document_with_vector_values(
                 &table,
                 doc_id_from_input(doc_id)?,
@@ -292,7 +304,7 @@ impl Engine {
         field: String,
         vector: Either<Float32Array, Vec<f64>>,
     ) -> Result<bool> {
-        self.inner
+        self.inner()?
             .add_vector(
                 &table,
                 doc_id_from_input(doc_id)?,
@@ -310,7 +322,7 @@ impl Engine {
         field: String,
         vectors: Vec<Vec<f64>>,
     ) -> Result<bool> {
-        self.inner
+        self.inner()?
             .add_vector_values(
                 &table,
                 doc_id_from_input(doc_id)?,
@@ -327,7 +339,7 @@ impl Engine {
         doc_id: i64,
     ) -> Result<Option<BTreeMap<String, JSValue>>> {
         Ok(self
-            .inner
+            .inner()?
             .get_document(&table, doc_id_from_input(doc_id)?)
             .map_err(runtime_error)?
             .map(|document| {
@@ -340,7 +352,7 @@ impl Engine {
 
     #[napi]
     pub fn delete_document(&self, table: String, doc_id: i64) -> Result<()> {
-        self.inner
+        self.inner()?
             .delete_document(&table, doc_id_from_input(doc_id)?)
             .map_err(runtime_error)
     }
@@ -348,7 +360,9 @@ impl Engine {
     #[napi]
     pub fn document_count(&self, table: String) -> Result<i64> {
         js_number_from_u64(
-            self.inner.document_count(&table).map_err(runtime_error)?,
+            self.inner()?
+                .document_count(&table)
+                .map_err(runtime_error)?,
             "document count",
         )
     }
@@ -363,7 +377,7 @@ impl Engine {
         scoring: Option<String>,
     ) -> Result<AsyncTask<SearchTask>> {
         Ok(AsyncTask::new(SearchTask {
-            engine: self.inner.clone(),
+            engine: self.inner()?.clone(),
             table,
             field,
             query,
@@ -382,9 +396,9 @@ impl Engine {
         scoring: Option<String>,
     ) -> Result<Vec<SearchHit>> {
         let scoring = scoring.unwrap_or_else(|| "bm25".to_string());
-        let mode = scoring_mode(&self.inner, &table, &field, &scoring)?;
+        let mode = scoring_mode(self.inner()?, &table, &field, &scoring)?;
         search_hits(
-            self.inner
+            self.inner()?
                 .search(
                     &table,
                     &field,
@@ -405,7 +419,7 @@ impl Engine {
         top_k: Option<u32>,
     ) -> Result<AsyncTask<KNNSearchTask>> {
         Ok(AsyncTask::new(KNNSearchTask {
-            engine: self.inner.clone(),
+            engine: self.inner()?.clone(),
             table,
             field,
             vector: vector_from_input(vector, "KNN query vector")?,
@@ -422,7 +436,7 @@ impl Engine {
         top_k: Option<u32>,
     ) -> Result<Vec<SearchHit>> {
         search_hits(
-            self.inner
+            self.inner()?
                 .knn_search(
                     &table,
                     &field,
@@ -442,7 +456,7 @@ impl Engine {
         threshold: f64,
     ) -> Result<AsyncTask<VectorSimilarityTask>> {
         Ok(AsyncTask::new(VectorSimilarityTask {
-            engine: self.inner.clone(),
+            engine: self.inner()?.clone(),
             table,
             field,
             vector: vector_from_input(vector, "vector-similarity query vector")?,
@@ -470,7 +484,7 @@ impl Engine {
             })?,
         };
         Ok(AsyncTask::new(HybridSearchTask {
-            engine: self.inner.clone(),
+            engine: self.inner()?.clone(),
             table,
             text_field,
             text_query,
@@ -506,7 +520,7 @@ impl Engine {
             return Err(Error::from_reason("alpha must be finite and in [0, 1]"));
         }
         Ok(AsyncTask::new(RobustHybridSearchTask {
-            engine: self.inner.clone(),
+            engine: self.inner()?.clone(),
             table,
             text_field,
             text_query,
@@ -528,7 +542,7 @@ impl Engine {
         seed: Option<i64>,
     ) -> Result<AsyncTask<EstimateScoringParamsTask>> {
         Ok(AsyncTask::new(EstimateScoringParamsTask {
-            engine: self.inner.clone(),
+            engine: self.inner()?.clone(),
             table,
             field,
             n_samples: usize_from_u32(n_samples.unwrap_or(50), "nSamples")?,
@@ -546,7 +560,7 @@ impl Engine {
         labels: Vec<u32>,
     ) -> Result<AsyncTask<LearnScoringParamsTask>> {
         Ok(AsyncTask::new(LearnScoringParamsTask {
-            engine: self.inner.clone(),
+            engine: self.inner()?.clone(),
             table,
             field,
             query,
@@ -563,7 +577,7 @@ impl Engine {
         label: u32,
     ) -> Result<()> {
         let label = labels_from_input(vec![label])?[0];
-        self.inner
+        self.inner()?
             .update_scoring_params(&table, &field, score, label)
             .map_err(runtime_error)
     }
@@ -577,7 +591,7 @@ impl Engine {
         labels: Vec<u32>,
     ) -> Result<AsyncTask<CalibrationReportTask>> {
         Ok(AsyncTask::new(CalibrationReportTask {
-            engine: self.inner.clone(),
+            engine: self.inner()?.clone(),
             table,
             field,
             query,
@@ -589,14 +603,14 @@ impl Engine {
     pub fn save_scoring_params(&self, name: String, params: BTreeMap<String, f64>) -> Result<()> {
         let json = serde_json::to_string(&params)
             .map_err(|err| Error::from_reason(format!("serialize scoring params: {err}")))?;
-        self.inner
+        self.inner()?
             .save_scoring_params(&name, &json)
             .map_err(runtime_error)
     }
 
     #[napi]
     pub fn load_scoring_params(&self, name: String) -> Result<Option<BTreeMap<String, f64>>> {
-        self.inner
+        self.inner()?
             .load_scoring_params(&name)
             .map_err(runtime_error)?
             .map(|json| parse_scoring_params(&name, &json))
@@ -605,7 +619,7 @@ impl Engine {
 
     #[napi]
     pub fn load_all_scoring_params(&self) -> Result<BTreeMap<String, BTreeMap<String, f64>>> {
-        self.inner
+        self.inner()?
             .load_all_scoring_params()
             .map_err(runtime_error)?
             .into_iter()
@@ -618,7 +632,9 @@ impl Engine {
 
     #[napi]
     pub fn drop_scoring_params(&self, name: String) -> Result<bool> {
-        self.inner.drop_scoring_params(&name).map_err(runtime_error)
+        self.inner()?
+            .drop_scoring_params(&name)
+            .map_err(runtime_error)
     }
 
     #[napi(ts_return_type = "Promise<SQLResult>")]
@@ -627,13 +643,13 @@ impl Engine {
         graph: String,
         query: String,
         params: Option<BTreeMap<String, JSValue>>,
-    ) -> AsyncTask<RunCypherTask> {
-        AsyncTask::new(RunCypherTask {
-            engine: self.inner.clone(),
+    ) -> Result<AsyncTask<RunCypherTask>> {
+        Ok(AsyncTask::new(RunCypherTask {
+            engine: self.inner()?.clone(),
             graph,
             query,
             params: params.map(document_from_js).unwrap_or_default(),
-        })
+        }))
     }
 
     #[napi]
@@ -645,7 +661,7 @@ impl Engine {
     ) -> Result<SQLResult> {
         let params = params.map(document_from_js).unwrap_or_default();
         let (columns, rows) = self
-            .inner
+            .inner()?
             .run_cypher(&graph, &query, params)
             .map_err(runtime_error)?;
         Ok(cypher_result(columns, rows))
@@ -653,93 +669,100 @@ impl Engine {
 
     #[napi]
     pub fn create_graph(&self, name: String) -> Result<bool> {
-        self.inner.create_graph(&name).map_err(runtime_error)
+        self.inner()?.create_graph(&name).map_err(runtime_error)
     }
 
     #[napi]
     pub fn drop_graph(&self, name: String) -> Result<bool> {
-        self.inner.drop_graph(&name).map_err(runtime_error)
+        self.inner()?.drop_graph(&name).map_err(runtime_error)
     }
 
     #[napi]
     pub fn list_graphs(&self) -> Result<Vec<String>> {
-        self.inner.list_graphs().map_err(runtime_error)
+        self.inner()?.list_graphs().map_err(runtime_error)
     }
 
     #[napi]
     pub fn list_path_indexes(&self) -> Result<Vec<String>> {
-        self.inner.list_path_indexes().map_err(runtime_error)
+        self.inner()?.list_path_indexes().map_err(runtime_error)
     }
 
     #[napi]
     pub fn table_names(&self) -> Result<Vec<String>> {
-        self.inner.table_names().map_err(runtime_error)
+        self.inner()?.table_names().map_err(runtime_error)
     }
 
     #[napi]
     pub fn list_views(&self) -> Result<Vec<String>> {
-        self.inner.list_views().map_err(runtime_error)
+        self.inner()?.list_views().map_err(runtime_error)
     }
 
     #[napi]
     pub fn list_schemas(&self) -> Result<Vec<String>> {
-        self.inner.list_schemas().map_err(runtime_error)
+        self.inner()?.list_schemas().map_err(runtime_error)
     }
 
     #[napi]
     pub fn list_sequences(&self) -> Result<Vec<String>> {
-        self.inner
+        self.inner()?
             .list_sequences()
             .map_err(|err| Error::from_reason(format!("list sequences: {err}")))
     }
 
     #[napi]
     pub fn list_named_analyzers(&self) -> Result<Vec<String>> {
-        self.inner.list_named_analyzers().map_err(runtime_error)
+        self.inner()?.list_named_analyzers().map_err(runtime_error)
     }
 
     #[napi]
     pub fn list_foreign_servers(&self) -> Result<Vec<String>> {
-        self.inner.list_foreign_servers().map_err(runtime_error)
+        self.inner()?.list_foreign_servers().map_err(runtime_error)
     }
 
     #[napi]
     pub fn list_foreign_tables(&self) -> Result<Vec<String>> {
-        self.inner.list_foreign_tables().map_err(runtime_error)
+        self.inner()?.list_foreign_tables().map_err(runtime_error)
     }
 
     #[napi(js_name = "takeSQLNotices")]
-    pub fn take_sql_notices(&self) -> Vec<SQLNotice> {
-        self.inner
+    pub fn take_sql_notices(&self) -> Result<Vec<SQLNotice>> {
+        Ok(self
+            .inner()?
             .take_sql_notices()
             .into_iter()
             .map(|(level, message)| SQLNotice { level, message })
-            .collect()
+            .collect())
     }
 
     #[napi(js_name = "sqlFunctionDepthLimit")]
     pub fn sql_function_depth_limit(&self) -> Result<u32> {
-        u32::try_from(self.inner.sql_function_depth_limit()).map_err(|_| {
+        u32::try_from(self.inner()?.sql_function_depth_limit()).map_err(|_| {
             Error::from_reason("SQL function depth limit exceeds the Node.js u32 bridge")
         })
     }
 
     #[napi(js_name = "setSQLFunctionDepthLimit")]
     pub fn set_sql_function_depth_limit(&self, limit: u32) -> Result<()> {
-        self.inner
+        self.inner()?
             .set_sql_function_depth_limit(usize_from_u32(limit, "SQL function depth limit")?);
         Ok(())
     }
 
     #[napi]
-    pub fn cancel(&self) {
-        self.inner.cancel();
+    pub fn cancel(&self) -> Result<()> {
+        self.inner()?.cancel();
+        Ok(())
     }
 
     #[napi]
-    pub fn close(&self) -> Result<()> {
-        self.inner
-            .close()
-            .map_err(|err| Error::from_reason(format!("close engine: {err}")))
+    pub fn close(&mut self) -> Result<()> {
+        let Some(inner) = self.inner.take() else {
+            return Ok(());
+        };
+        if let Err(error) = inner.close() {
+            self.inner = Some(inner);
+            return Err(Error::from_reason(format!("close engine: {error}")));
+        }
+        Ok(())
     }
 }

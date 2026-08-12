@@ -24,10 +24,10 @@ impl PyEngine {
         tokens_per_query: usize,
         seed: i64,
     ) -> PyResult<Py<PyAny>> {
+        let inner = self.inner()?;
         let params = py
             .detach(|| {
-                self.inner
-                    .estimate_scoring_params(table, field, n_samples, tokens_per_query, seed)
+                inner.estimate_scoring_params(table, field, n_samples, tokens_per_query, seed)
             })
             .map_err(runtime_error)?;
         float_map_to_py(py, &params)
@@ -42,11 +42,9 @@ impl PyEngine {
         labels: Vec<u8>,
     ) -> PyResult<Py<PyAny>> {
         let labels = validate_binary_labels(labels)?;
+        let inner = self.inner()?;
         let params = py
-            .detach(|| {
-                self.inner
-                    .learn_scoring_params(table, field, query, &labels)
-            })
+            .detach(|| inner.learn_scoring_params(table, field, query, &labels))
             .map_err(runtime_error)?;
         float_map_to_py(py, &params)
     }
@@ -62,7 +60,7 @@ impl PyEngine {
             return Err(PyValueError::new_err("score must be finite"));
         }
         let label = validate_binary_label(label)?;
-        self.inner
+        self.inner()?
             .update_scoring_params(table, field, score, label)
             .map_err(runtime_error)
     }
@@ -76,8 +74,9 @@ impl PyEngine {
         labels: Vec<u8>,
     ) -> PyResult<Py<PyAny>> {
         let labels = validate_binary_labels(labels)?;
+        let inner = self.inner()?;
         let report = py
-            .detach(|| self.inner.calibration_report(table, field, query, &labels))
+            .detach(|| inner.calibration_report(table, field, query, &labels))
             .map_err(runtime_error)?;
         calibration_report_to_py(py, &report)
     }
@@ -86,14 +85,14 @@ impl PyEngine {
         let params = float_map_from_py(params)?;
         let json = serde_json::to_string(&params)
             .map_err(|err| PyValueError::new_err(format!("serialize scoring params: {err}")))?;
-        self.inner
+        self.inner()?
             .save_scoring_params(name, &json)
             .map_err(runtime_error)
     }
 
     fn load_scoring_params(&self, py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
         match self
-            .inner
+            .inner()?
             .load_scoring_params(name)
             .map_err(runtime_error)?
         {
@@ -105,7 +104,7 @@ impl PyEngine {
     fn load_all_scoring_params(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         for (name, json) in self
-            .inner
+            .inner()?
             .load_all_scoring_params()
             .map_err(runtime_error)?
         {
@@ -116,6 +115,8 @@ impl PyEngine {
     }
 
     fn drop_scoring_params(&self, name: &str) -> PyResult<bool> {
-        self.inner.drop_scoring_params(name).map_err(runtime_error)
+        self.inner()?
+            .drop_scoring_params(name)
+            .map_err(runtime_error)
     }
 }

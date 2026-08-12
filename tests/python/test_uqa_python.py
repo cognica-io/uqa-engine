@@ -78,6 +78,20 @@ def test_persistent_open_and_batch(tmp_path) -> None:
     assert reopened.sql("SELECT count(*) AS n FROM docs").rows == [{"n": 1}]
 
 
+def test_close_releases_persistent_file_and_is_idempotent(tmp_path) -> None:
+    path = tmp_path / "close.db"
+    engine = uqa.open(path)
+    engine.sql("CREATE TABLE docs (id INTEGER PRIMARY KEY)")
+
+    engine.close()
+    engine.close()
+
+    with pytest.raises(RuntimeError, match="engine is closed"):
+        engine.sql("SELECT 1")
+    path.unlink()
+    assert not path.exists()
+
+
 def test_python_user_defined_functions() -> None:
     engine = uqa.Engine()
     engine.sql("CREATE TABLE samples (grp TEXT, val INTEGER)")

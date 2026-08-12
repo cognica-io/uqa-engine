@@ -25,8 +25,9 @@ impl PyEngine {
             .map(document_from_py)
             .transpose()?
             .unwrap_or_default();
+        let inner = self.inner()?;
         let (columns, rows) = py
-            .detach(|| self.inner.run_cypher(graph, query, params))
+            .detach(|| inner.run_cypher(graph, query, params))
             .map_err(runtime_error)?;
         Ok(PySQLResult {
             columns,
@@ -36,14 +37,14 @@ impl PyEngine {
     }
 
     fn create_graph(&self, name: &str) -> PyResult<bool> {
-        self.inner.create_graph(name).map_err(runtime_error)
+        self.inner()?.create_graph(name).map_err(runtime_error)
     }
 
     fn drop_graph(&self, name: &str) -> PyResult<bool> {
-        self.inner.drop_graph(name).map_err(runtime_error)
+        self.inner()?.drop_graph(name).map_err(runtime_error)
     }
 
     fn list_graphs(&self) -> PyResult<Vec<String>> {
-        self.inner.list_graphs().map_err(runtime_error)
+        self.inner()?.list_graphs().map_err(runtime_error)
     }
 }

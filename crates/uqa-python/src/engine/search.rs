@@ -24,9 +24,10 @@ impl PyEngine {
         top_k: usize,
         scoring: &str,
     ) -> PyResult<Py<PyAny>> {
+        let inner = self.inner()?;
         let entries = py.detach(|| -> PyResult<Vec<ScoredEntry>> {
-            let mode = scoring_mode(&self.inner, table, field, scoring)?;
-            self.inner
+            let mode = scoring_mode(inner, table, field, scoring)?;
+            inner
                 .search(table, field, query, &mode, top_k)
                 .map_err(runtime_error)
         })?;
@@ -43,8 +44,9 @@ impl PyEngine {
         top_k: usize,
     ) -> PyResult<Py<PyAny>> {
         let vector = validate_vector(vector, "KNN query vector")?;
+        let inner = self.inner()?;
         let entries = py
-            .detach(|| self.inner.knn_search(table, field, vector, top_k))
+            .detach(|| inner.knn_search(table, field, vector, top_k))
             .map_err(runtime_error)?;
         scored_entries_to_py(py, &entries)
     }
@@ -63,11 +65,9 @@ impl PyEngine {
                 "vector-similarity threshold must be finite",
             ));
         }
+        let inner = self.inner()?;
         let entries = py
-            .detach(|| {
-                self.inner
-                    .vector_similarity_search(table, field, vector, threshold)
-            })
+            .detach(|| inner.vector_similarity_search(table, field, vector, threshold))
             .map_err(runtime_error)?;
         scored_entries_to_py(py, &entries)
     }
@@ -101,8 +101,9 @@ impl PyEngine {
             knn_pool,
             top_k,
         };
+        let inner = self.inner()?;
         let entries = py
-            .detach(|| self.inner.hybrid_search(&params))
+            .detach(|| inner.hybrid_search(&params))
             .map_err(runtime_error)?;
         scored_entries_to_py(py, &entries)
     }
@@ -141,8 +142,9 @@ impl PyEngine {
             alpha,
             top_k,
         };
+        let inner = self.inner()?;
         let entries = py
-            .detach(|| self.inner.robust_hybrid_search(&params))
+            .detach(|| inner.robust_hybrid_search(&params))
             .map_err(runtime_error)?;
         scored_entries_to_py(py, &entries)
     }

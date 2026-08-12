@@ -66,7 +66,15 @@ use value_conversion::{
 
 #[pyclass(name = "Engine", module = "uqa._uqa")]
 struct PyEngine {
-    inner: Arc<Engine>,
+    inner: Option<Arc<Engine>>,
+}
+
+impl PyEngine {
+    fn inner(&self) -> PyResult<&Arc<Engine>> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("engine is closed"))
+    }
 }
 
 #[pymodule]

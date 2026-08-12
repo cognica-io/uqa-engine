@@ -17,6 +17,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Changed
 
 - Extended Python callback registration with the same volatility and engine-mutation options exposed by the JavaScript bindings.
+- Made Python and Node.js `close()` idempotently release each binding object's native engine reference so persistent files can be removed immediately after all related sessions close.
 - Reorganized standalone Rust examples under `examples/rust` and made `examples/README.md` the authoritative language and platform parity matrix.
 - Updated the manual, repository README, `llms.txt`, and UQA-RS skill with callback contracts, threading and reverse-dispatch constraints, lifecycle rules, and executable example parity requirements.
 

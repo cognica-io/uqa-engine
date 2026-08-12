@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -155,6 +155,19 @@ test("persistent open, batch, and format detection", async () => {
     [{ n: 0 }]
   );
   compressedReopened.close();
+});
+
+test("close releases persistent files and is idempotent", () => {
+  const dir = mkdtempSync(join(tmpdir(), "uqa-node-close-"));
+  const path = join(dir, "close.db");
+  const engine = uqa.open(path);
+  engine.sqlSync("CREATE TABLE docs (id INTEGER PRIMARY KEY)");
+
+  engine.close();
+  engine.close();
+
+  assert.throws(() => engine.sqlSync("SELECT 1"), /engine is closed/);
+  rmSync(dir, { recursive: true });
 });
 
 test("scoring params calibration workflow", async () => {
