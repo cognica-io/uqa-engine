@@ -190,6 +190,23 @@ pub fn is_registered(name: &str) -> bool {
     lookup(name).is_some()
 }
 
+/// Whether a row-producing operator function owns an explicit relation
+/// argument. These functions are compiled specially so their first SQL
+/// argument is a relation identifier rather than a scalar value.
+pub fn is_operator_join_table_function(name: &str) -> bool {
+    if name.contains('.') {
+        return false;
+    }
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "text_similarity_join"
+            | "vector_similarity_join"
+            | "graph_join"
+            | "hybrid_join"
+            | "cross_paradigm_join"
+    )
+}
+
 /// Sorted list of registered SQL function names. CLI completion and
 /// documentation generators should consume this instead of duplicating
 /// function names.
@@ -220,5 +237,15 @@ mod tests {
     #[test]
     fn unknown_returns_none() {
         assert_eq!(lookup("does_not_exist"), None);
+    }
+
+    #[test]
+    fn operator_join_table_functions_are_classified_separately() {
+        assert!(is_operator_join_table_function("vector_similarity_join"));
+        assert!(is_operator_join_table_function("GRAPH_JOIN"));
+        assert!(!is_operator_join_table_function(
+            "app.vector_similarity_join"
+        ));
+        assert!(!is_operator_join_table_function("knn_match"));
     }
 }

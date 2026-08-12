@@ -182,7 +182,13 @@ pub(super) fn bind_source_plan_relations<E>(
         SourcePlan::Subquery { body, .. } => {
             bind_query_plan_relations(body, visible_ctes, resolve)?;
         }
-        SourcePlan::Values { .. } | SourcePlan::Function { .. } => {}
+        SourcePlan::Function {
+            relation: Some(relation),
+            ..
+        } => {
+            *relation = resolve(relation)?;
+        }
+        SourcePlan::Values { .. } | SourcePlan::Function { relation: None, .. } => {}
     }
     Ok(())
 }
@@ -216,7 +222,10 @@ pub(super) fn source_plan_references_relation(
         uqa_planner::SourcePlan::Subquery { body, .. } => {
             query_plan_references_relation(body, target, ctes)
         }
-        uqa_planner::SourcePlan::Values { .. } | uqa_planner::SourcePlan::Function { .. } => false,
+        uqa_planner::SourcePlan::Function { relation, .. } => relation
+            .as_ref()
+            .is_some_and(|relation| relation_reference_matches(relation, target)),
+        uqa_planner::SourcePlan::Values { .. } => false,
     }
 }
 

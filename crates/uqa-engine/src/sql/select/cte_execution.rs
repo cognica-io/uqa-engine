@@ -343,14 +343,9 @@ pub(in crate::sql) fn expand_projection_srf_output<'a>(
             hook,
             &stmt.subqueries,
         );
-        let produced = crate::sql::from_rows::build_table_function_row_stream(
-            &context,
-            &lower,
-            args,
-            None,
-            &[],
-            &[],
-        )?;
+        let call =
+            crate::sql::from_rows::TableFunctionCall::new(&lower, None, args, None, &[], &[]);
+        let produced = crate::sql::from_rows::build_table_function_row_stream(&context, call)?;
         Ok(Box::new(produced.map({
             let label = label.clone();
             move |produced_row| {

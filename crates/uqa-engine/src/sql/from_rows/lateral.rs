@@ -11,7 +11,7 @@ use super::{
     prefix_row, projection_columns, query_output_shared, AccessPathPlan, ComputePlan, CteScope,
     Engine, PlanSubqueryArena, QueryBlockPlan, QueryOutput, QueryOutputMode, QueryPlan,
     RelationalPlan, ResultRow, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, ScopedEngineHook,
-    SourcePlan, TableFunctionEvalContext, Value,
+    SourcePlan, TableFunctionCall, TableFunctionEvalContext, Value,
 };
 
 pub(in crate::sql) struct EngineLateralSource<'a> {
@@ -29,6 +29,7 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
     ) -> uqa_execution::ExecResult<uqa_execution::LateralRows> {
         if let SourcePlan::Function {
             name,
+            relation,
             args,
             alias,
             column_aliases,
@@ -43,13 +44,17 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
                 &hook,
                 &self.ctes.scalar_subqueries,
             );
-            return Ok(build_table_function_row_stream_with_row(
-                &context,
+            let call = TableFunctionCall::new(
                 name,
+                relation.as_deref(),
                 args,
                 alias.as_deref(),
                 column_aliases,
                 column_types,
+            );
+            return Ok(build_table_function_row_stream_with_row(
+                &context,
+                call,
                 Some(left_row),
             )?);
         }

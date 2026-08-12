@@ -18,7 +18,8 @@ use super::{
     table_function_empty_schema, ColumnPrune, CteScope, Engine, EngineExpressionEvaluator,
     EngineLateralSource, JoinExecutionStrategy, JoinKind, PlanSubqueryArena, QualifierFilters,
     QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
-    ScoredDocumentSource, ScoredInput, SourcePlan, TableFunctionEvalContext, Value,
+    ScoredDocumentSource, ScoredInput, SourcePlan, TableFunctionCall, TableFunctionEvalContext,
+    Value,
 };
 
 use uqa_planner::{AccessPathPlan, ComputePlan, RelationalPlan};
@@ -647,6 +648,7 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
         }
         SourcePlan::Function {
             name,
+            relation,
             args,
             alias,
             column_aliases,
@@ -660,14 +662,15 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                 &hook,
                 &ctes.scalar_subqueries,
             );
-            let mut rows = build_table_function_row_stream(
-                &context,
+            let call = TableFunctionCall::new(
                 name,
+                relation.as_deref(),
                 args,
                 alias.as_deref(),
                 column_aliases,
                 column_types,
-            )?;
+            );
+            let mut rows = build_table_function_row_stream(&context, call)?;
             let first = rows
                 .next()
                 .transpose()

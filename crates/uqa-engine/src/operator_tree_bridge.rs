@@ -626,14 +626,7 @@ fn estimate_operator_tree_access(
 }
 
 pub(crate) fn is_operator_join_table_function(name: &str) -> bool {
-    matches!(
-        name,
-        "text_similarity_join"
-            | "vector_similarity_join"
-            | "graph_join"
-            | "hybrid_join"
-            | "cross_paradigm_join"
-    )
+    uqa_sql::registry::is_operator_join_table_function(name)
 }
 
 fn lower_join_operand(
@@ -672,57 +665,57 @@ fn const_join_threshold(
 fn lower_operator_join_table_function(
     engine: &Engine,
     name: &str,
+    relation: Option<&str>,
     args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> DriverResult<(String, OperatorTree)> {
     let expected = match name {
-        "text_similarity_join" | "vector_similarity_join" => "4",
-        "graph_join" => "5",
-        "hybrid_join" | "cross_paradigm_join" => "3",
+        "text_similarity_join" | "vector_similarity_join" => 4,
+        "graph_join" => 5,
+        "hybrid_join" | "cross_paradigm_join" => 3,
         _ => {
             return Err(SQLError::Unsupported(format!(
                 "operator join table function `{name}`"
             )))
         }
     };
-    let expected_count = match name {
-        "text_similarity_join" | "vector_similarity_join" => 4,
-        "graph_join" => 5,
-        _ => 3,
-    };
-    if args.len() != expected_count {
+    let actual = args.len() + usize::from(relation.is_some());
+    if actual != expected {
         return Err(SQLError::BadArity {
             name: name.to_string(),
             expected: expected.to_string(),
-            actual: args.len(),
+            actual,
         });
     }
-    let table = const_string(&args[0], params)
-        .ok_or_else(|| SQLError::TypeMismatch(format!("{name}.table must be a constant string")))?;
-    let left = lower_join_operand(engine, &args[1], params, name)?;
-    let right = lower_join_operand(engine, &args[2], params, name)?;
+    let table = relation.ok_or_else(|| {
+        SQLError::TypeMismatch(format!(
+            "{name}.relation must be supplied as a table identifier"
+        ))
+    })?;
+    let left = lower_join_operand(engine, &args[0], params, name)?;
+    let right = lower_join_operand(engine, &args[1], params, name)?;
     let tree = match name {
         "text_similarity_join" => OperatorTree::TextSimilarityJoin {
             left: Box::new(left),
             right: Box::new(right),
-            threshold: const_join_threshold(&args[3], params, "text_similarity_join", 0.0, 1.0)?,
+            threshold: const_join_threshold(&args[2], params, "text_similarity_join", 0.0, 1.0)?,
         },
         "vector_similarity_join" => OperatorTree::VectorSimilarityJoin {
             left: Box::new(left),
             right: Box::new(right),
-            threshold: const_join_threshold(&args[3], params, "vector_similarity_join", -1.0, 1.0)?,
+            threshold: const_join_threshold(&args[2], params, "vector_similarity_join", -1.0, 1.0)?,
         },
         "graph_join" => OperatorTree::GraphJoin {
             left: Box::new(left),
             right: Box::new(right),
-            label: const_optional_string(&args[3], params)
+            label: const_optional_string(&args[2], params)
                 .ok_or_else(|| {
                     SQLError::TypeMismatch(
                         "graph_join.label must be a constant string or NULL".into(),
                     )
                 })?
                 .into_option(),
-            graph: const_string(&args[4], params).ok_or_else(|| {
+            graph: const_string(&args[3], params).ok_or_else(|| {
                 SQLError::TypeMismatch("graph_join.graph must be a constant string".into())
             })?,
         },
@@ -736,16 +729,17 @@ fn lower_operator_join_table_function(
         },
         _ => unreachable!("operator join name validated above"),
     };
-    Ok((table, tree))
+    Ok((table.to_string(), tree))
 }
 
 pub(crate) fn estimate_operator_join_table_function(
     engine: &Engine,
     name: &str,
+    relation: Option<&str>,
     args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> DriverResult<uqa_planner::LocalAccessEstimate> {
-    let (table, tree) = lower_operator_join_table_function(engine, name, args, params)?;
+    let (table, tree) = lower_operator_join_table_function(engine, name, relation, args, params)?;
     estimate_operator_tree_access(engine, &table, tree, false)
 }
 
@@ -753,10 +747,11 @@ pub(crate) fn estimate_operator_join_table_function(
 pub(crate) fn execute_operator_join_table_function(
     engine: &Engine,
     name: &str,
+    relation: Option<&str>,
     args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> DriverResult<GeneralizedPostingList> {
-    let (table, tree) = lower_operator_join_table_function(engine, name, args, params)?;
+    let (table, tree) = lower_operator_join_table_function(engine, name, relation, args, params)?;
     match execute_operator_tree_in_execution(engine, &table, params, &tree)? {
         OperatorOutput::Generalized(result) => Ok(result),
         OperatorOutput::Posting(_) | OperatorOutput::Graph(_) => Err(SQLError::Internal(format!(

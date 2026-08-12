@@ -302,12 +302,14 @@ impl SourcePlan {
             },
             FromClause::Function {
                 name,
+                relation,
                 args,
                 alias,
                 column_aliases,
                 column_types,
             } => Self::Function {
                 name,
+                relation,
                 args: args
                     .into_iter()
                     .map(|expr| lower_scalar_expression(expr, aggregates, subqueries))

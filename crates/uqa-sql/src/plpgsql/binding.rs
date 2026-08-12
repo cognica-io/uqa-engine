@@ -274,12 +274,14 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
         },
         FromClause::Function {
             name,
+            relation,
             args,
             alias,
             column_aliases,
             column_types,
         } => FromClause::Function {
             name: name.clone(),
+            relation: relation.clone(),
             args: bind_exprs(args, r)?,
             alias: alias.clone(),
             column_aliases: column_aliases.clone(),

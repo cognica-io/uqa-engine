@@ -410,6 +410,65 @@ fn unsupported_from_forms_fail_instead_of_becoming_cross_joins() {
 }
 
 #[test]
+fn operator_join_relation_is_compiled_as_an_identifier() {
+    let Statement::Select(select) = first(
+        "SELECT * FROM vector_similarity_join(\
+             app.passages,\
+             knn_match(embedding, ARRAY[1.0, 0.0], 6),\
+             knn_match(embedding, ARRAY[0.8, 0.2], 6),\
+             0.8\
+         ) AS pairs",
+    ) else {
+        panic!("not SELECT");
+    };
+    let Some(FromClause::Function {
+        name,
+        relation,
+        args,
+        alias,
+        ..
+    }) = select.from
+    else {
+        panic!("not a table function");
+    };
+    assert_eq!(name, "vector_similarity_join");
+    assert_eq!(relation.as_deref(), Some("app.passages"));
+    assert_eq!(args.len(), 3);
+    assert_eq!(alias.as_deref(), Some("pairs"));
+}
+
+#[test]
+fn operator_join_relation_rejects_scalar_values() {
+    for relation in ["'passages'", "$1", "lower('passages')"] {
+        let sql = format!(
+            "SELECT * FROM vector_similarity_join(\
+                 {relation},\
+                 knn_match(embedding, ARRAY[1.0, 0.0], 6),\
+                 knn_match(embedding, ARRAY[0.8, 0.2], 6),\
+                 0.8\
+             )"
+        );
+        let error = compile(&sql).expect_err(&sql);
+        assert!(
+            matches!(&error, SQLError::TypeMismatch(message) if message.contains("relation must be a table identifier")),
+            "unexpected error for {sql}: {error}"
+        );
+    }
+}
+
+#[test]
+fn ordinary_table_function_keeps_scalar_identifier_arguments() {
+    let Statement::Select(select) = first("SELECT * FROM unnest(items) AS value") else {
+        panic!("not SELECT");
+    };
+    let Some(FromClause::Function { relation, args, .. }) = select.from else {
+        panic!("not a table function");
+    };
+    assert!(relation.is_none());
+    assert!(matches!(args.as_slice(), [Expr::Column(name)] if name == "items"));
+}
+
+#[test]
 fn unsupported_cte_control_clauses_fail_explicitly() {
     let not_materialized =
         compile("WITH c AS NOT MATERIALIZED (SELECT 1) SELECT * FROM c").unwrap_err();

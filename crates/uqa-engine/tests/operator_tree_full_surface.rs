@@ -620,7 +620,7 @@ fn operator_join_table_functions_lower_and_execute_from_sql() {
             "text_similarity_join",
             "SELECT left_doc_id, right_doc_id \
              FROM text_similarity_join(\
-                 'docs',\
+                 docs,\
                  text_match(title, 'rust'),\
                  text_match(title, 'rust'),\
                  0.2\
@@ -631,7 +631,7 @@ fn operator_join_table_functions_lower_and_execute_from_sql() {
             "vector_similarity_join",
             "SELECT left_doc_id, right_doc_id \
              FROM vector_similarity_join(\
-                 'docs',\
+                 docs,\
                  knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                  knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                  0.8\
@@ -642,7 +642,7 @@ fn operator_join_table_functions_lower_and_execute_from_sql() {
             "graph_join",
             "SELECT left_doc_id, right_doc_id \
              FROM graph_join(\
-                 'docs',\
+                 docs,\
                  graph_pagerank('social'),\
                  graph_pagerank('social'),\
                  'follows',\
@@ -654,7 +654,7 @@ fn operator_join_table_functions_lower_and_execute_from_sql() {
             "hybrid_join",
             "SELECT left_doc_id, right_doc_id \
              FROM hybrid_join(\
-                 'docs',\
+                 docs,\
                  category = 'A' AND knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                  category = 'A' AND knn_match(embedding, ARRAY[1.0, 0.0], 3)\
              )",
@@ -664,7 +664,7 @@ fn operator_join_table_functions_lower_and_execute_from_sql() {
             "cross_paradigm_join",
             "SELECT left_doc_id, right_doc_id \
              FROM cross_paradigm_join(\
-                 'docs',\
+                 docs,\
                  graph_pagerank('social'),\
                  category IS NOT NULL\
              )",
@@ -684,7 +684,7 @@ fn operator_join_table_functions_validate_thresholds() {
         .sql(
             "SELECT left_doc_id \
              FROM vector_similarity_join(\
-                 'docs',\
+                 docs,\
                  knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                  knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                  2.0\
@@ -698,11 +698,117 @@ fn operator_join_table_functions_validate_thresholds() {
 }
 
 #[test]
+fn operator_join_relation_uses_catalog_name_resolution() {
+    let engine = Engine::new();
+    engine.sql("CREATE SCHEMA search_scope", &[]).unwrap();
+    engine
+        .sql(
+            "CREATE TABLE search_scope.scoped_docs (\
+                 id INTEGER PRIMARY KEY, embedding VECTOR(2)\
+             )",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO search_scope.scoped_docs (id, embedding) \
+             VALUES (1, ARRAY[1.0, 0.0])",
+            &[],
+        )
+        .unwrap();
+
+    let qualified = engine
+        .sql(
+            "SELECT left_doc_id, right_doc_id \
+             FROM vector_similarity_join(\
+                 search_scope.scoped_docs,\
+                 knn_match(embedding, ARRAY[1.0, 0.0], 1),\
+                 knn_match(embedding, ARRAY[1.0, 0.0], 1),\
+                 0.8\
+             )",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(qualified.rows.len(), 1);
+
+    engine
+        .sql("SET search_path TO search_scope, public", &[])
+        .unwrap();
+    let unqualified = engine
+        .sql(
+            "SELECT left_doc_id, right_doc_id \
+             FROM vector_similarity_join(\
+                 scoped_docs,\
+                 knn_match(embedding, ARRAY[1.0, 0.0], 1),\
+                 knn_match(embedding, ARRAY[1.0, 0.0], 1),\
+                 0.8\
+             )",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(unqualified.rows, qualified.rows);
+}
+
+#[test]
+fn operator_join_relation_is_tracked_as_a_view_dependency() {
+    let engine = fixture();
+    engine
+        .sql(
+            "CREATE VIEW doc_pairs AS \
+             SELECT left_doc_id, right_doc_id \
+             FROM vector_similarity_join(\
+                 docs,\
+                 knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                 knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                 0.8\
+             )",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        engine
+            .sql("SELECT left_doc_id FROM doc_pairs", &[])
+            .unwrap()
+            .rows
+            .len(),
+        5
+    );
+
+    let error = engine.sql("DROP TABLE docs", &[]).unwrap_err();
+    assert!(error.to_string().contains("public.doc_pairs"), "{error}");
+}
+
+#[test]
+fn operator_join_result_can_be_nested_relationally() {
+    let engine = fixture();
+    let result = engine
+        .sql(
+            "WITH pairs AS (\
+                 SELECT left_doc_id, right_doc_id, _score \
+                 FROM vector_similarity_join(\
+                     docs,\
+                     knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                     knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                     0.8\
+                 )\
+             ) \
+             SELECT pairs.left_doc_id, left_doc.title, right_doc.title AS right_title \
+             FROM pairs \
+             JOIN docs AS left_doc ON left_doc.id = pairs.left_doc_id \
+             JOIN docs AS right_doc ON right_doc.id = pairs.right_doc_id",
+            &[],
+        )
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 5);
+}
+
+#[test]
 fn operator_join_sources_participate_in_two_way_dpccp() {
     let engine = fixture();
     let joined_sql = "SELECT pairs.left_doc_id, d.id \
                       FROM vector_similarity_join(\
-                          'docs',\
+                          docs,\
                           knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                           knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                           0.8\
@@ -719,7 +825,7 @@ fn operator_join_sources_participate_in_two_way_dpccp() {
     let reverse_joined_sql = "SELECT d.id, pairs.right_doc_id \
                               FROM docs AS d \
                               JOIN vector_similarity_join(\
-                                  'docs',\
+                                  docs,\
                                   knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                                   knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                                   0.8\
@@ -754,7 +860,7 @@ fn operator_join_sources_participate_in_three_way_dpccp() {
     engine.sql("ANALYZE join_groups", &[]).unwrap();
     let three_way_sql = "SELECT pairs.left_doc_id, d.id, g.id AS group_id \
                          FROM vector_similarity_join(\
-                             'docs',\
+                             docs,\
                              knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                              knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                              0.8\

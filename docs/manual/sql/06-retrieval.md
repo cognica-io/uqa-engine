@@ -145,22 +145,22 @@ Never treat highlighted text as trusted HTML solely because the engine inserted 
 
 ## Operator joins as SQL sources
 
-Five tuple-producing join operators are exposed in `FROM`. Their first argument is a constant table name, and both operand expressions are lowered and executed against that table through the ordinary `OperatorTree` optimizer. The result has columns `left_doc_id BIGINT`, `right_doc_id BIGINT`, and `_score DOUBLE PRECISION`; a table-function column alias list may rename them.
+Five tuple-producing join operators are exposed in `FROM`. Their first argument is a table identifier, not a string value, and both operand expressions are lowered and executed against that relation through the ordinary `OperatorTree` optimizer. Unqualified and schema-qualified identifiers use the same catalog and `search_path` resolution as ordinary table references. The result has columns `left_doc_id BIGINT`, `right_doc_id BIGINT`, and `_score DOUBLE PRECISION`; a table-function column alias list may rename them.
 
 | Function | Join contract |
 | --- | --- |
-| `text_similarity_join(table, left, right, threshold)` | Jaccard similarity over the text fields named by the operands; `threshold` is in `[0, 1]` |
-| `vector_similarity_join(table, left, right, threshold)` | Cosine similarity over the vector fields named by the operands; `threshold` is in `[-1, 1]` |
-| `graph_join(table, left, right, label, graph)` | Directed graph-edge join from left identities to right identities; `label` is a string or `NULL` |
-| `hybrid_join(table, left, right)` | Structured equijoin followed by cosine similarity of at least `0.5` over the shared structured and vector fields identified by the operands |
-| `cross_paradigm_join(table, left, right)` | Graph-vertex-property to document-field equijoin; the left operand identifies one graph and the operands identify the property fields |
+| `text_similarity_join(relation, left, right, threshold)` | Jaccard similarity over the text fields named by the operands; `threshold` is in `[0, 1]` |
+| `vector_similarity_join(relation, left, right, threshold)` | Cosine similarity over the vector fields named by the operands; `threshold` is in `[-1, 1]` |
+| `graph_join(relation, left, right, label, graph)` | Directed graph-edge join from left identities to right identities; `label` is a string or `NULL` |
+| `hybrid_join(relation, left, right)` | Structured equijoin followed by cosine similarity of at least `0.5` over the shared structured and vector fields identified by the operands |
+| `cross_paradigm_join(relation, left, right)` | Graph-vertex-property to document-field equijoin; the left operand identifies one graph and the operands identify the property fields |
 
 The following query creates vector-pair tuples and then joins their left identities back to ordinary SQL rows. Because `pairs` is an aliased, fully bound source, its optimized cardinality and access cost participate in DPccp with `passages`.
 
 ```sql
 SELECT pairs.left_doc_id, pairs.right_doc_id, pairs._score, p.title
 FROM vector_similarity_join(
-    'passages',
+    passages,
     knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 100),
     knn_match(embedding, ARRAY[0.8, 0.1, 0.1, 0.0], 100),
     0.85
@@ -168,6 +168,8 @@ FROM vector_similarity_join(
 JOIN passages AS p ON p.id = pairs.left_doc_id
 ORDER BY pairs._score DESC, pairs.left_doc_id, pairs.right_doc_id;
 ```
+
+An operator-join result is a normal SQL source, so it can participate in multiway joins or be wrapped in a subquery or CTE. Tuple-producing join functions are not scalar operands, however: nest their result relationally instead of passing one `*_join(...)` call directly as an operand to another.
 
 The operator result preserves pair identity in `GeneralizedPostingList`; it does not collapse a pair to one synthetic document id. Text and vector joins place their similarity in `_score`, while graph and hybrid operators preserve their documented merged-score contract. Arguments that remain unbound at planning time retain SQL source order until they can be costed without guessing.
 

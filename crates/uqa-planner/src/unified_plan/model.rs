@@ -137,6 +137,8 @@ pub enum SourcePlan {
     },
     Function {
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        relation: Option<String>,
         args: Vec<ScalarExpr>,
         alias: Option<String>,
         column_aliases: Vec<String>,

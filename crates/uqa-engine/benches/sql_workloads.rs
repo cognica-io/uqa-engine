@@ -333,7 +333,7 @@ fn bench_operator_joins(c: &mut Criterion) {
             "e2e_operator_vector_similarity_join",
             "SELECT left_doc_id, right_doc_id \
              FROM vector_similarity_join(\
-                 'operator_docs',\
+                 operator_docs,\
                  knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32),\
                  knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32),\
                  0.8\
@@ -343,7 +343,7 @@ fn bench_operator_joins(c: &mut Criterion) {
             "e2e_operator_hybrid_join",
             "SELECT left_doc_id, right_doc_id \
              FROM hybrid_join(\
-                 'operator_docs',\
+                 operator_docs,\
                  category = 'cat_1' AND \
                      knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32),\
                  category = 'cat_1' AND \
@@ -354,7 +354,7 @@ fn bench_operator_joins(c: &mut Criterion) {
             "e2e_operator_join_dpccp",
             "SELECT pairs.left_doc_id, docs.category \
              FROM vector_similarity_join(\
-                 'operator_docs',\
+                 operator_docs,\
                  knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32),\
                  knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32),\
                  0.8\

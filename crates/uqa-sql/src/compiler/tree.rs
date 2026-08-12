@@ -21,7 +21,7 @@ use super::types::{
     compile_foreign_key_action, compile_foreign_key_match, compile_type_name, raw_type_name,
     validate_foreign_key_set_columns,
 };
-use super::{compile_qualified_name, range_var_name};
+use super::{compile_qualified_name, range_var_name, render_relation_component};
 
 pub(super) fn extract_string(node: &Node) -> Result<String> {
     let Some(inner) = node.node.as_ref() else {

@@ -593,6 +593,11 @@ pub enum FromClause {
     /// dispatches by name.
     Function {
         name: String,
+        /// Catalog relation bound to a relation-aware table function.
+        /// Kept separate from scalar arguments so name resolution,
+        /// dependency tracking, and planning never treat it as text data.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        relation: Option<String>,
         args: Vec<Expr>,
         alias: Option<String>,
         column_aliases: Vec<String>,

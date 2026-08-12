@@ -166,7 +166,7 @@ Tune approximate indexes with measured recall and latency on production-shaped q
 
 Retrieval operands can produce typed document pairs from SQL `FROM` through `text_similarity_join`, `vector_similarity_join`, `graph_join`, `hybrid_join`, and `cross_paradigm_join`. Each result preserves `left_doc_id` and `right_doc_id` in a `GeneralizedPostingList` and exposes `_score`; it can be joined to ordinary tables without collapsing pair identity into one document id.
 
-These functions execute both operand expressions against the constant table named by their first argument. When the function source has an alias and all cost-relevant arguments are bound, DPccp receives its estimated pair cardinality and physical access cost and may reorder it with table relations. See [Retrieval SQL](../sql/06-retrieval.md#operator-joins-as-sql-sources) for signatures and an executable relational-join example.
+These functions execute both operand expressions against the physical relation identified by their first argument. Write that argument as `passages` or `app.passages`, without string quotes; it follows ordinary catalog and `search_path` resolution. When the function source has an alias and all cost-relevant arguments are bound, DPccp receives its estimated pair cardinality and physical access cost and may reorder it with table relations. See [Retrieval SQL](../sql/06-retrieval.md#operator-joins-as-sql-sources) for signatures and an executable relational-join example.
 
 ## Hybrid retrieval
 

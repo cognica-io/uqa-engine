@@ -11,19 +11,23 @@ use super::{
     expect_optional_graph_value, generate_series_values, graph_betweenness_entries,
     graph_hits_entries, graph_pagerank_entries, json_table_arg, json_table_value_to_text,
     prefix_row, PlanSubqueryArena, ResultRow, SQLError, SQLTableFunctionResult,
-    SQLTableFunctionStream, ScalarEvalContext, ScalarExpr, TableFunctionEvalContext, Value,
+    SQLTableFunctionStream, ScalarEvalContext, TableFunctionCall, TableFunctionEvalContext, Value,
 };
 
 #[allow(clippy::similar_names)]
 pub(in crate::sql) fn build_table_function_rows_with_row(
     context: &TableFunctionEvalContext<'_>,
-    name: &str,
-    args: &[ScalarExpr],
-    alias: Option<&str>,
-    column_aliases: &[String],
-    column_types: &[String],
+    call: TableFunctionCall<'_>,
     row: Option<&ResultRow>,
 ) -> Result<Vec<ResultRow>, SQLError> {
+    let TableFunctionCall {
+        name,
+        relation,
+        args,
+        alias,
+        column_aliases,
+        column_types,
+    } = call;
     use uqa_sql::expr::unknown_function_error;
     let engine = context.engine;
     let subquery_arena = PlanSubqueryArena::new(context.subqueries, Some(context.subquery_runner));
@@ -36,6 +40,7 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
         let tuples = crate::operator_tree_bridge::execute_operator_join_table_function(
             engine,
             &lower,
+            relation,
             args,
             context.params,
         )?;

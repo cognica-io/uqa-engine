@@ -7,9 +7,37 @@
 //! FROM sources, joins, aliases, and table-function columns.
 
 use super::{
-    compile_expr, compile_select, extract_strings, range_var_name, Expr, FromClause, JoinKind,
-    Node, NodeEnum, Result, SQLError,
+    compile_expr, compile_select, extract_strings, range_var_name, render_relation_component, Expr,
+    FromClause, JoinKind, Node, NodeEnum, Result, SQLError,
 };
+
+fn compile_relation_argument(node: &Node, function_name: &str) -> Result<String> {
+    let Some(NodeEnum::ColumnRef(reference)) = node.node.as_ref() else {
+        return Err(SQLError::TypeMismatch(format!(
+            "{function_name}.relation must be a table identifier, not a scalar value"
+        )));
+    };
+    let mut parts = Vec::with_capacity(reference.fields.len());
+    for field in &reference.fields {
+        let Some(NodeEnum::String(name)) = field.node.as_ref() else {
+            return Err(SQLError::TypeMismatch(format!(
+                "{function_name}.relation must be a table identifier"
+            )));
+        };
+        if name.sval.is_empty() {
+            return Err(SQLError::TypeMismatch(format!(
+                "{function_name}.relation contains an empty identifier"
+            )));
+        }
+        parts.push(render_relation_component(&name.sval));
+    }
+    match parts.len() {
+        1 | 2 => Ok(parts.join(".")),
+        _ => Err(SQLError::Unsupported(format!(
+            "{function_name}.relation: cross-database relation names are not supported"
+        ))),
+    }
+}
 
 pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> {
     let Some(inner) = node.node.as_ref() else {
@@ -157,7 +185,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                 _ => first_node,
             };
             let expr = compile_expr(call)?;
-            let (name, args) = match expr {
+            let (name, mut args) = match expr {
                 Expr::Func { name, args, .. } => (name, args),
                 other => {
                     return Err(SQLError::Unsupported(format!(
@@ -165,12 +193,30 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                     )));
                 }
             };
+            let relation = if crate::registry::is_operator_join_table_function(&name) {
+                let Some(NodeEnum::FuncCall(raw_call)) = call.node.as_ref() else {
+                    return Err(SQLError::Internal(format!(
+                        "operator join `{name}` lost its function-call parse node"
+                    )));
+                };
+                let relation_node = raw_call.args.first().ok_or_else(|| SQLError::BadArity {
+                    name: name.clone(),
+                    expected: "a relation identifier followed by operator operands".into(),
+                    actual: 0,
+                })?;
+                let relation = compile_relation_argument(relation_node, &name)?;
+                args.remove(0);
+                Some(relation)
+            } else {
+                None
+            };
             let (alias, column_aliases) = compile_alias(rf.alias.as_ref())?;
             let coldefs = compile_column_definitions(&rf.coldeflist)?;
             let column_types: Vec<String> = coldefs.iter().map(|(_, ty)| ty.clone()).collect();
             let coldef_aliases: Vec<String> = coldefs.into_iter().map(|(name, _)| name).collect();
             Ok(FromClause::Function {
                 name,
+                relation,
                 args,
                 alias,
                 column_aliases: if coldef_aliases.is_empty() {

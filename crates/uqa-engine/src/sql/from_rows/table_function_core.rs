@@ -41,39 +41,60 @@ impl<'a> TableFunctionEvalContext<'a> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(in crate::sql) struct TableFunctionCall<'a> {
+    pub(super) name: &'a str,
+    pub(super) relation: Option<&'a str>,
+    pub(super) args: &'a [ScalarExpr],
+    pub(super) alias: Option<&'a str>,
+    pub(super) column_aliases: &'a [String],
+    pub(super) column_types: &'a [String],
+}
+
+impl<'a> TableFunctionCall<'a> {
+    pub(in crate::sql) fn new(
+        name: &'a str,
+        relation: Option<&'a str>,
+        args: &'a [ScalarExpr],
+        alias: Option<&'a str>,
+        column_aliases: &'a [String],
+        column_types: &'a [String],
+    ) -> Self {
+        Self {
+            name,
+            relation,
+            args,
+            alias,
+            column_aliases,
+            column_types,
+        }
+    }
+}
+
 /// Build a table-function result as a fallible owned row stream. Built-in
 /// cardinality-producing functions are evaluated lazily; registered/user
 /// functions keep their existing vector-valued API and are adapted at this
 /// explicit extension boundary.
 pub(in crate::sql) fn build_table_function_row_stream(
     context: &TableFunctionEvalContext<'_>,
-    name: &str,
-    args: &[ScalarExpr],
-    alias: Option<&str>,
-    column_aliases: &[String],
-    column_types: &[String],
+    call: TableFunctionCall<'_>,
 ) -> Result<uqa_execution::ProjectRows, SQLError> {
-    build_table_function_row_stream_with_row(
-        context,
-        name,
-        args,
-        alias,
-        column_aliases,
-        column_types,
-        None,
-    )
+    build_table_function_row_stream_with_row(context, call, None)
 }
 
 #[allow(clippy::similar_names)]
 pub(in crate::sql) fn build_table_function_row_stream_with_row(
     context: &TableFunctionEvalContext<'_>,
-    name: &str,
-    args: &[ScalarExpr],
-    alias: Option<&str>,
-    column_aliases: &[String],
-    column_types: &[String],
+    call: TableFunctionCall<'_>,
     row: Option<&ResultRow>,
 ) -> Result<uqa_execution::ProjectRows, SQLError> {
+    let TableFunctionCall {
+        name,
+        args,
+        alias,
+        column_aliases,
+        ..
+    } = call;
     let identity = name.to_ascii_lowercase();
     let lower = crate::sql::builtin_function_dispatch_name(&identity);
     if matches!(
@@ -163,15 +184,7 @@ pub(in crate::sql) fn build_table_function_row_stream_with_row(
         return registered_table_function_row_stream(name, result, alias, column_aliases);
     }
 
-    let rows = build_table_function_rows_with_row(
-        context,
-        name,
-        args,
-        alias,
-        column_aliases,
-        column_types,
-        row,
-    )?;
+    let rows = build_table_function_rows_with_row(context, call, row)?;
     Ok(Box::new(rows.into_iter().map(Ok)))
 }
 

@@ -173,7 +173,7 @@ fn show_typed_operator_joins(engine: &Engine) -> Result<(), Box<dyn std::error::
         "SELECT pairs.left_doc_id AS left_id, \
                 pairs.right_doc_id AS right_id, pairs._score AS score \
            FROM vector_similarity_join( \
-                    'papers', \
+                    papers, \
                     knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 4), \
                     knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 4), \
                     0.80 \
@@ -190,7 +190,7 @@ fn show_typed_operator_joins(engine: &Engine) -> Result<(), Box<dyn std::error::
             "SELECT pairs.left_doc_id AS vertex_id, \
                     pairs.right_doc_id AS paper_id, p.title \
                FROM cross_paradigm_join( \
-                        'papers', \
+                        papers, \
                         graph_pagerank('{GRAPH}'), \
                         venue IS NOT NULL \
                     ) AS pairs \

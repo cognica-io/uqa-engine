@@ -167,7 +167,7 @@ SELECT pairs.left_doc_id,
        pairs._score,
        left_passage.title AS left_title
 FROM vector_similarity_join(
-    'passages',
+    passages,
     knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 6),
     knn_match(embedding, ARRAY[0.75, 0.05, 0.65, 0.00], 6),
     0.80
