@@ -124,6 +124,92 @@ fn engine_uses_dpccp_source_order_and_preserves_join_results() {
 }
 
 #[test]
+fn dpccp_uses_operator_tree_knn_cardinality_for_join_order() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE dp_knn_a (id INTEGER PRIMARY KEY, embedding VECTOR(2))",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE TABLE dp_knn_b (id INTEGER PRIMARY KEY, a_id INTEGER)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE TABLE dp_knn_c (id INTEGER PRIMARY KEY, b_id INTEGER)",
+            &[],
+        )
+        .unwrap();
+
+    engine
+        .sql(
+            &format!(
+                "INSERT INTO dp_knn_a (id, embedding) VALUES {}",
+                values((1..=200).map(|id| format!("({id}, ARRAY[1.0, 0.0])")))
+            ),
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            &format!(
+                "INSERT INTO dp_knn_b (id, a_id) VALUES {}",
+                values((1..=20).map(|id| format!("({id}, {id})")))
+            ),
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO dp_knn_c (id, b_id) VALUES (1, 1), (2, 2), (3, 3)",
+            &[],
+        )
+        .unwrap();
+    for table in ["dp_knn_a", "dp_knn_b", "dp_knn_c"] {
+        engine.sql(&format!("ANALYZE {table}"), &[]).unwrap();
+    }
+
+    let query = "SELECT a.id AS id \
+                 FROM dp_knn_a AS a \
+                 JOIN dp_knn_b AS b ON a.id = b.a_id \
+                 JOIN dp_knn_c AS c ON b.id = c.b_id \
+                 WHERE knn_match(a.embedding, ARRAY[1.0, 0.0], 1) \
+                 ORDER BY a.id";
+    let explain = engine.sql(&format!("EXPLAIN {query}"), &[]).unwrap();
+    let plan = explain
+        .rows
+        .iter()
+        .filter_map(|row| match row.get("plan") {
+            Some(Value::Str(line)) => Some(line.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let a_pos = plan
+        .find("name: \"dp_knn_a\"")
+        .expect("KNN relation scan in plan");
+    let b_pos = plan
+        .find("name: \"dp_knn_b\"")
+        .expect("middle relation scan in plan");
+    let c_pos = plan
+        .find("name: \"dp_knn_c\"")
+        .expect("leaf relation scan in plan");
+    assert!(
+        a_pos < c_pos && b_pos < c_pos,
+        "literal k=1 must make the a-b edge the first join: {plan}"
+    );
+
+    let result = engine.sql(query, &[]).unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0].get("id"), Some(&Value::Int(1)));
+}
+
+#[test]
 fn dpccp_does_not_move_a_volatile_join_predicate() {
     let engine = Engine::new();
     let calls = Arc::new(AtomicUsize::new(0));

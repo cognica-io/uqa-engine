@@ -127,6 +127,13 @@ pub(in crate::sql) fn table_function_empty_schema(
             "pagerank" | "graph_pagerank" | "hits" | "graph_hits" | "betweenness"
             | "graph_betweenness" => vec!["_doc_id".into(), "_score".into()],
             "rpq" => vec!["vertex_id".into()],
+            "text_similarity_join"
+            | "vector_similarity_join"
+            | "graph_join"
+            | "hybrid_join"
+            | "cross_paradigm_join" => {
+                vec!["left_doc_id".into(), "right_doc_id".into(), "_score".into()]
+            }
             _ => vec![scalar_table_function_default_column(
                 &lower,
                 alias,

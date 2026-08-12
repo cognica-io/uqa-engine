@@ -154,22 +154,29 @@ Planner cardinalities are estimates used for cost decisions. Sampling error and 
 Every compiled statement follows `Statement -> UnifiedPlan -> plan-native optimizer -> UnifiedPlanExecutor`. There is no second top-level row dispatcher that bypasses the unified executor.
 
 ```mermaid
-flowchart LR
+flowchart TD
     SQL["SQL string"] --> Parse["libpg_query and uqa-sql"]
     Parse --> Lower["UnifiedPlan lowering"]
     Lower --> Optimize["Plan-native optimizer"]
     Optimize --> Execute["UnifiedPlanExecutor"]
     Execute --> Query["QueryPlan and ScalarExpr"]
     Execute --> Command["Physical command plans"]
-    Query --> Access{"AccessPathPlan"}
+    Query --> Region["DPccp inner-join region"]
+    Region --> TableAtom["Table atom"]
+    TableAtom --> LocalTree["Relation-local OperatorTree access"]
+    Region --> TupleAtom["Aliased operator-join source"]
+    TupleAtom --> Tree["OperatorTree join"]
+    Query --> Access{"Single-source AccessPathPlan"}
     Access -->|row| Row["Relational pipeline"]
     Access -->|hybrid| Hybrid["Posting candidates plus residual"]
-    Access -->|operator| Tree["OperatorTree"]
-    Tree --> TreeOpt["QueryOptimizer, 10 passes"]
+    Access -->|operator| LocalTree
+    LocalTree --> TreeOpt["QueryOptimizer, 10 passes"]
+    Tree --> TreeOpt
     TreeOpt --> Driver["PlanExecutor and EngineDriver"]
+    Driver --> TupleRows["Posting, graph, or generalized tuples"]
+    TupleRows --> Row
     Row --> Result["SQL result boundary"]
     Hybrid --> Result
-    Driver --> Result
     Command --> Result
 ```
 
@@ -179,7 +186,7 @@ The relational tree owns CTEs, set operations, joins, values and function source
 
 Prepared statements and stored views retain optimized plans. The exact single-statement cache retains parsed and lowered plans, in-memory read-only calls can reuse optimized plans until relevant state changes, and persistent calls optimize after pinning the current storage snapshot.
 
-The optimizer recursively visits CTEs, set-operation branches, scalar subqueries, mutations, prepared and explained bodies, and query-valued commands. Its access decision chooses row, `OperatorTree`, or hybrid posting-plus-residual execution only after the complete query block is lowered.
+The optimizer recursively visits CTEs, set-operation branches, scalar subqueries, mutations, prepared and explained bodies, and query-valued commands. Its single-source access decision chooses row, `OperatorTree`, or hybrid posting-plus-residual execution only after the complete query block is lowered. Joined blocks use the same child algebra to cost relation-local retrieval and to realize tuple-producing operator-function atoms, so relational join enumeration and cross-paradigm access are nested parts of one hierarchy rather than mutually exclusive planners.
 
 Within query-block predicates, a direct same-relation `AND` containing both supported text and vector retrieval leaves is rewritten to canonical exact Bayesian evidence fusion before access-path selection. Raw `text_match` becomes Bayesian-calibrated only at this inferred fusion boundary, KNN becomes prior-free query-pool evidence, the resolved corpus prior enters the fused log-odds exactly once, relational conjuncts remain strict filters, cross-relation signals are excluded, and any explicit fusion function suppresses the inference. Unqualified retrieval fields are eligible only in a single-source query block; a joined block must qualify every inferred signal with the same relation alias. This automatic contract treats the text and vector modalities as conditionally independent. The logical-plan mutability classifier mirrors the detection before optimization so auto-calibration executes inside a writable statement transaction.
 
@@ -217,9 +224,11 @@ Duplicate schema labels remain distinct logical and physical slots throughout op
 
 ## Join planning
 
-The plan-native optimizer flattens reorderable INNER JOIN regions, reads live row and column statistics, and materializes a DPccp order without crossing outer or lateral boundaries.
+The plan-native optimizer flattens reorderable INNER JOIN regions, reads live row and column statistics, and materializes a DPccp order without crossing outer or lateral boundaries. Moerkotte-Neumann connected-subgraph/complement enumeration is exact through 16 relation atoms and switches to the greedy fallback above 16.
 
-DPccp costs equijoins using the physically available hash-join strategy and retains that strategy in the materialized plan. Physical lowering rejects a hash plan when equality keys cannot be recovered, and an unavailable index join is never allowed to influence the selected order.
+Each DPccp leaf records both its output cardinality and executable access cost. A table leaf with relation-local `WHERE` text, vector, graph, fusion, or relational predicates receives the optimized `OperatorTree` estimate when lowering succeeds; literal KNN uses `min(k, table_rows)` support rather than a generic selectivity. An aliased `text_similarity_join`, `vector_similarity_join`, `graph_join`, `hybrid_join`, or `cross_paradigm_join` table-function source becomes a costed relation atom when its arguments are bound. Those operators retain pair identity as `GeneralizedPostingList` and expose the pair as SQL rows before a larger relational join consumes it.
+
+DPccp calls the shared physical `CostEstimator` for base access, executable hash equijoins, and cross joins between disconnected components, and retains the selected strategy in the materialized plan. Physical lowering rejects a hash plan when equality keys cannot be recovered, and an unavailable index join is never allowed to influence the selected order. Join selectivity uses analyzed distinct counts from either side when present and the configured cardinality fallback when neither side has statistics.
 
 Clean equality predicates between left and right qualified columns select hash join; other predicates select nested-loop join. Both consume their left input as batches, use bounded storage for the right input and output, and preserve the required outer-join semantics.
 
@@ -256,6 +265,8 @@ Calibration quality is evaluated on held-out labels with reliability, ECE, Brier
 `uqa-graph` provides memory and SQLite graph stores, named graph workspaces, graph pattern matching, RPQ parsing, Thompson NFA construction, DFA conversion, Cypher read and mutation execution, centrality, message passing, embeddings, path indexes, temporal traversal, and versioned deltas.
 
 `GraphPostingList` requires graph payload keys to be contained in the underlying document support. Union, intersection, difference, graph-name conflicts, and overlapping subgraphs use explicit policies instead of inheriting generic payload precedence accidentally.
+
+Planner graph context is bound from the live graph store: vertex and edge counts, label counts, average degree, degree distribution, vertex-label distribution, label-specific degree, and temporal range feed cardinality estimation. Pattern matches over more than 10,000 vertices can draw random-walk samples from a snapshot of that same store. The graph rewrite `Filter(Traverse(...)) -> Traverse(vertex_predicate=...)` lets an eligible property predicate prune during BFS expansion and has direct optimizer and execution-oriented estimator coverage.
 
 The Phi representation is a versioned lossless codec between `GraphPostingList` and reserved posting payload fields, not a claim that arbitrary graphs and document sets are isomorphic. Object-only representation transforms are named adapters rather than categorical functors unless identity and composition laws are implemented and tested.
 
@@ -317,7 +328,7 @@ Correctness is covered by unit, integration, property, differential, golden, fuz
 
 Parity fixtures are versioned and described in [`parity.md`](parity.md). The benchmark coverage manifest enumerates every current Rust benchmark entrypoint and checks representative semantic evidence tokens so workload surfaces cannot disappear silently.
 
-Criterion benchmarks cover storage, scoring, fusion, operators, planning, SQL, graph, retrieval, and analytical execution. Published measurements are internal regression baselines unless independently reproduced; pull-request analytical regression uses counterbalanced base/head measurements on one runner, while cross-engine ratios remain advisory. The methodology, provenance artifacts, gates, and remaining execution-model differences are documented in [`performance.md`](performance.md).
+Criterion benchmarks cover storage, scoring, fusion, operators, planning, SQL, graph, retrieval, and analytical execution. `planner_dpccp_costed_access` exercises a KNN-cardinality leaf with the shared operator cost model, while `e2e_operator_join` covers tuple-producing joins, a relational join over an operator source, and relation-local KNN inside a joined SQL block. Published measurements are internal regression baselines unless independently reproduced; pull-request analytical regression uses counterbalanced base/head measurements on one runner, while cross-engine ratios remain advisory. The methodology, provenance artifacts, gates, and remaining execution-model differences are documented in [`performance.md`](performance.md).
 
 The all-workspace benchmark command is a compile gate, not a published performance run. Focused runners define their own fixture, feature set, warmup, sample count, validation, and provenance so results from different executable hashes are not mixed.
 

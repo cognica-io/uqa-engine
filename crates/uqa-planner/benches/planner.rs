@@ -5,11 +5,17 @@
 //
 
 //! Planner benchmarks for `DPccp` join enumeration on chain, star, clique,
-//! and cycle
-//! topologies, plus the greedy fallback path for larger relation sets.
+//! and cycle topologies, plus costed local access paths and the greedy
+//! fallback path for larger relation sets.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use uqa_planner::{enumerate_dpccp, JoinGraph};
+use uqa_core::IndexStats;
+use uqa_operators::OperatorTree;
+use uqa_planner::cost_model::CostModel;
+use uqa_planner::{
+    enumerate_dpccp_with_cost_estimator, CardinalityEstimator, CostEstimator, JoinGraph,
+    OperatorKind,
+};
 
 #[derive(Debug, Clone, Copy)]
 enum Shape {
@@ -21,9 +27,17 @@ enum Shape {
 
 fn graph(shape: Shape, n: usize) -> JoinGraph {
     let mut graph = JoinGraph::new();
+    let estimator = CostEstimator::default();
     for i in 0..n {
+        let rows = 1_000.0 + i as f64 * 100.0;
         graph
-            .add_relation(format!("t{i}"), 1_000.0 + i as f64 * 100.0)
+            .add_relation_with_cost(
+                format!("t{i}"),
+                rows,
+                estimator
+                    .estimate_unary(OperatorKind::TableScan, rows)
+                    .total(),
+            )
             .unwrap();
     }
     match shape {
@@ -65,7 +79,10 @@ fn bench_dpccp_shapes(c: &mut Criterion) {
             let g = graph(shape, *n);
             group.bench_with_input(BenchmarkId::new(shape_name, n), n, |bencher, _| {
                 bencher.iter(|| {
-                    let plan = enumerate_dpccp(black_box(&g));
+                    let plan = enumerate_dpccp_with_cost_estimator(
+                        black_box(&g),
+                        CostEstimator::default(),
+                    );
                     black_box(plan.map(|p| p.cost))
                 });
             });
@@ -85,7 +102,8 @@ fn bench_dpccp_fixed_topology(c: &mut Criterion) {
         let g = graph(shape, 8);
         group.bench_function(name, |bencher| {
             bencher.iter(|| {
-                let plan = enumerate_dpccp(black_box(&g));
+                let plan =
+                    enumerate_dpccp_with_cost_estimator(black_box(&g), CostEstimator::default());
                 black_box(plan.map(|p| p.cost))
             });
         });
@@ -99,7 +117,8 @@ fn bench_greedy_fallback(c: &mut Criterion) {
         let g = graph(Shape::Chain, n);
         chain_group.bench_with_input(BenchmarkId::from_parameter(n), &n, |bencher, _| {
             bencher.iter(|| {
-                let plan = enumerate_dpccp(black_box(&g));
+                let plan =
+                    enumerate_dpccp_with_cost_estimator(black_box(&g), CostEstimator::default());
                 black_box(plan.map(|p| p.cost))
             });
         });
@@ -111,7 +130,8 @@ fn bench_greedy_fallback(c: &mut Criterion) {
         let g = graph(Shape::Star, n);
         star_group.bench_with_input(BenchmarkId::from_parameter(n), &n, |bencher, _| {
             bencher.iter(|| {
-                let plan = enumerate_dpccp(black_box(&g));
+                let plan =
+                    enumerate_dpccp_with_cost_estimator(black_box(&g), CostEstimator::default());
                 black_box(plan.map(|p| p.cost))
             });
         });
@@ -119,10 +139,50 @@ fn bench_greedy_fallback(c: &mut Criterion) {
     star_group.finish();
 }
 
+fn bench_costed_access_path(c: &mut Criterion) {
+    let estimator = CostEstimator::default();
+    let mut index_stats = IndexStats::new(1_000_000);
+    index_stats.dimensions = 128;
+    let retrieval_tree = OperatorTree::KNN {
+        query_vector: vec![0.0; 128],
+        k: 3,
+        field: "embedding".into(),
+    };
+    let retrieval_rows = CardinalityEstimator::new().estimate(&retrieval_tree, &index_stats);
+    let retrieval_cost = CostModel::new().estimate(&retrieval_tree, &index_stats);
+    let mut graph = JoinGraph::new();
+    let retrieval = graph
+        .add_relation_with_cost("retrieval", retrieval_rows, retrieval_cost)
+        .unwrap();
+    let mut previous = retrieval;
+    for index in 1..8 {
+        let rows = 1_000.0 * f64::from(index);
+        let relation = graph
+            .add_relation_with_cost(
+                format!("table_{index}"),
+                rows,
+                estimator
+                    .estimate_unary(OperatorKind::TableScan, rows)
+                    .total(),
+            )
+            .unwrap();
+        graph.add_edge(previous, relation, 0.01).unwrap();
+        previous = relation;
+    }
+    c.bench_function("planner_dpccp_costed_access", |bencher| {
+        bencher.iter(|| {
+            let plan =
+                enumerate_dpccp_with_cost_estimator(black_box(&graph), CostEstimator::default());
+            black_box(plan.map(|plan| plan.cost))
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_dpccp_shapes,
     bench_dpccp_fixed_topology,
-    bench_greedy_fallback
+    bench_greedy_fallback,
+    bench_costed_access_path
 );
 criterion_main!(benches);

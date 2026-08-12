@@ -29,7 +29,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::cost_model::OperatorKind;
+use crate::cost_model::{CostEstimator, OperatorKind};
 use crate::join_graph::{JoinEdge, JoinGraph};
 
 /// Beyond this count, exact enumeration switches to the greedy fallback.
@@ -65,11 +65,11 @@ pub struct JoinPlan {
 
 impl JoinPlan {
     /// Build a leaf plan for a single relation.
-    fn leaf(idx: usize, rows: f64) -> Self {
+    fn leaf(idx: usize, rows: f64, access_cost: f64) -> Self {
         Self {
             relations: 1u64 << idx,
             cardinality: rows,
-            cost: rows,
+            cost: access_cost,
             left: None,
             right: None,
             join_edge: None,
@@ -93,6 +93,14 @@ pub fn enumerate_dpccp(graph: &JoinGraph) -> Option<JoinPlan> {
     DPccp::new(graph).optimize()
 }
 
+/// Run DPccp with an explicit physical cost estimator.
+pub fn enumerate_dpccp_with_cost_estimator(
+    graph: &JoinGraph,
+    cost_estimator: CostEstimator,
+) -> Option<JoinPlan> {
+    DPccp::with_cost_estimator(graph, cost_estimator).optimize()
+}
+
 /// DPccp join-order optimiser. Public so callers that need the
 /// cancellation-friendly stages (`optimize`, `find_connected_components`)
 /// can drive them directly.
@@ -100,6 +108,7 @@ pub struct DPccp<'g> {
     graph: &'g JoinGraph,
     dp: BTreeMap<u64, JoinPlan>,
     all_mask: u64,
+    cost_estimator: CostEstimator,
 }
 
 impl<'g> DPccp<'g> {
@@ -109,6 +118,17 @@ impl<'g> DPccp<'g> {
             graph,
             dp: BTreeMap::new(),
             all_mask,
+            cost_estimator: CostEstimator::default(),
+        }
+    }
+
+    pub fn with_cost_estimator(graph: &'g JoinGraph, cost_estimator: CostEstimator) -> Self {
+        let all_mask = graph.full_set();
+        Self {
+            graph,
+            dp: BTreeMap::new(),
+            all_mask,
+            cost_estimator,
         }
     }
 
@@ -121,12 +141,18 @@ impl<'g> DPccp<'g> {
             return None;
         }
         if n == 1 {
-            return Some(JoinPlan::leaf(0, self.graph.cardinalities[0]));
+            return Some(JoinPlan::leaf(
+                0,
+                self.graph.cardinalities[0],
+                self.graph.access_costs[0],
+            ));
         }
         // Initialise base relations.
         for i in 0..n {
-            self.dp
-                .insert(1u64 << i, JoinPlan::leaf(i, self.graph.cardinalities[i]));
+            self.dp.insert(
+                1u64 << i,
+                JoinPlan::leaf(i, self.graph.cardinalities[i], self.graph.access_costs[i]),
+            );
         }
         if n <= MAX_DP_RELATIONS {
             if let Some(plan) = self.optimize_star(n) {
@@ -196,7 +222,7 @@ impl<'g> DPccp<'g> {
         let mut dp: Vec<Option<StarState>> = vec![None; states];
         dp[0] = Some(StarState {
             cardinality: self.graph.cardinalities[centre],
-            cost: self.graph.cardinalities[centre],
+            cost: self.graph.access_costs[centre],
             prev_mask: 0,
             leaf_pos: usize::MAX,
         });
@@ -215,10 +241,10 @@ impl<'g> DPccp<'g> {
                 for edge in edges {
                     cardinality *= edge.selectivity;
                 }
-                let join_cost = Self::join_cost(base.cardinality, leaf_cardinality).0;
+                let join_cost = self.join_cost(base.cardinality, leaf_cardinality).0;
                 let candidate = StarState {
                     cardinality,
-                    cost: base.cost + leaf_cardinality + join_cost,
+                    cost: base.cost + self.graph.access_costs[*leaf_idx] + join_cost,
                     prev_mask: mask,
                     leaf_pos,
                 };
@@ -243,11 +269,19 @@ impl<'g> DPccp<'g> {
         }
         order.reverse();
 
-        let mut plan = JoinPlan::leaf(centre, self.graph.cardinalities[centre]);
+        let mut plan = JoinPlan::leaf(
+            centre,
+            self.graph.cardinalities[centre],
+            self.graph.access_costs[centre],
+        );
         for leaf_pos in order {
             let (leaf_idx, edges) = &leaves[leaf_pos];
-            let leaf = JoinPlan::leaf(*leaf_idx, self.graph.cardinalities[*leaf_idx]);
-            plan = Self::join_plans(&plan, &leaf, edges);
+            let leaf = JoinPlan::leaf(
+                *leaf_idx,
+                self.graph.cardinalities[*leaf_idx],
+                self.graph.access_costs[*leaf_idx],
+            );
+            plan = self.join_plans(&plan, &leaf, edges);
         }
         Some(plan)
     }
@@ -370,7 +404,7 @@ impl<'g> DPccp<'g> {
         edges: &[JoinEdge],
         combined_mask: u64,
     ) {
-        let candidate = Self::join_plans(plan1, plan2, edges);
+        let candidate = self.join_plans(plan1, plan2, edges);
         let install = match self.dp.get(&combined_mask) {
             Some(existing) => candidate.cost < existing.cost,
             None => true,
@@ -380,14 +414,14 @@ impl<'g> DPccp<'g> {
         }
     }
 
-    fn join_plans(plan1: &JoinPlan, plan2: &JoinPlan, edges: &[JoinEdge]) -> JoinPlan {
+    fn join_plans(&self, plan1: &JoinPlan, plan2: &JoinPlan, edges: &[JoinEdge]) -> JoinPlan {
         let mut cardinality = plan1.cardinality * plan2.cardinality;
         for edge in edges {
             cardinality *= edge.selectivity;
         }
         let c1 = plan1.cardinality;
         let c2 = plan2.cardinality;
-        let (join_cost, kind) = Self::join_cost(c1, c2);
+        let (join_cost, kind) = self.join_cost(c1, c2);
         JoinPlan {
             relations: plan1.relations | plan2.relations,
             cardinality,
@@ -399,8 +433,18 @@ impl<'g> DPccp<'g> {
         }
     }
 
-    fn join_cost(c1: f64, c2: f64) -> (f64, OperatorKind) {
-        (c1 + c2, OperatorKind::HashJoinInner)
+    fn join_cost(&self, c1: f64, c2: f64) -> (f64, OperatorKind) {
+        let kind = OperatorKind::HashJoinInner;
+        (
+            self.cost_estimator.estimate_join(kind, c1, c2).total(),
+            kind,
+        )
+    }
+
+    fn cross_join_cost(&self, c1: f64, c2: f64) -> f64 {
+        self.cost_estimator
+            .estimate_join(OperatorKind::CrossJoin, c1, c2)
+            .total()
     }
 
     /// Cross-join every connected component in cardinality-ascending order.
@@ -427,7 +471,8 @@ impl<'g> DPccp<'g> {
                 v
             };
             let sub_graph = self.build_subgraph(&original_indices)?;
-            let sub_plan = DPccp::new(&sub_graph).optimize()?;
+            let sub_plan =
+                DPccp::with_cost_estimator(&sub_graph, self.cost_estimator.clone()).optimize()?;
             component_plans.push(remap_plan(&sub_plan, &original_indices));
         }
         component_plans.sort_by(|a, b| a.cardinality.total_cmp(&b.cardinality));
@@ -436,7 +481,9 @@ impl<'g> DPccp<'g> {
         for plan in iter {
             let combined = result.relations | plan.relations;
             let cardinality = result.cardinality * plan.cardinality;
-            let cost = cardinality + result.cost + plan.cost;
+            let cost = self.cross_join_cost(result.cardinality, plan.cardinality)
+                + result.cost
+                + plan.cost;
             result = JoinPlan {
                 relations: combined,
                 cardinality,
@@ -485,6 +532,7 @@ impl<'g> DPccp<'g> {
             let new_idx = sub.relations.len();
             sub.relations.push(self.graph.relations[old_idx].clone());
             sub.cardinalities.push(self.graph.cardinalities[old_idx]);
+            sub.access_costs.push(self.graph.access_costs[old_idx]);
             index_map.insert(old_idx, new_idx);
         }
         for edge in &self.graph.edges {
@@ -527,7 +575,7 @@ impl<'g> DPccp<'g> {
                     for edge in &edges {
                         cardinality *= edge.selectivity;
                     }
-                    let (greedy_join_cost, kind) = Self::join_cost(p1.cardinality, p2.cardinality);
+                    let (greedy_join_cost, kind) = self.join_cost(p1.cardinality, p2.cardinality);
                     let cost = greedy_join_cost + p1.cost + p2.cost;
                     if cost < best_cost {
                         best_cost = cost;
@@ -554,7 +602,9 @@ impl<'g> DPccp<'g> {
                 for plan in iter {
                     let combined = result.relations | plan.relations;
                     let cardinality = result.cardinality * plan.cardinality;
-                    let cost = cardinality + result.cost + plan.cost;
+                    let cost = self.cross_join_cost(result.cardinality, plan.cardinality)
+                        + result.cost
+                        + plan.cost;
                     result = JoinPlan {
                         relations: combined,
                         cardinality,
@@ -621,6 +671,7 @@ fn remap_mask(mask: u64, original_indices: &[usize]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cost_model::CostCoefficients;
 
     fn assert_executable_join_kinds(plan: &JoinPlan) {
         match (&plan.left, &plan.right) {
@@ -660,6 +711,28 @@ mod tests {
         assert!(plan.left.is_none());
         assert!(plan.right.is_none());
         assert_eq!(plan.relations, 0b1);
+    }
+
+    #[test]
+    fn explicit_cost_estimator_drives_join_cost() {
+        let mut graph = JoinGraph::new();
+        let left = graph.add_relation_with_cost("left", 10.0, 7.0).unwrap();
+        let right = graph.add_relation_with_cost("right", 100.0, 11.0).unwrap();
+        graph.add_edge(left, right, 0.5).unwrap();
+
+        let coefficients = CostCoefficients {
+            hashjoin_build_per_row: 2.0,
+            hashjoin_probe_per_row: 3.0,
+            ..CostCoefficients::default()
+        };
+        let estimator = CostEstimator::new(coefficients);
+        let expected_join_cost = estimator
+            .estimate_join(OperatorKind::HashJoinInner, 10.0, 100.0)
+            .total();
+
+        let plan = enumerate_dpccp_with_cost_estimator(&graph, estimator).unwrap();
+
+        assert_eq!(plan.cost, 7.0 + 11.0 + expected_join_cost);
     }
 
     #[test]

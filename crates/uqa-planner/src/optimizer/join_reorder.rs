@@ -185,22 +185,53 @@ fn reordered_inner_join_source(
 
     let mut aliases = BTreeSet::new();
     let mut relations = Vec::with_capacity(atoms.len());
+    let mut relation_tables = BTreeMap::new();
     for (source_id, atom) in atoms.iter().enumerate() {
-        let SourcePlan::Table { name, alias } = atom else {
-            return Ok(None);
+        let (qualifier, cardinality, column_stats, access_cost, paradigm) = match atom {
+            SourcePlan::Table { name, alias } => {
+                let qualifier = alias
+                    .clone()
+                    .unwrap_or_else(|| name.rsplit('.').next().unwrap_or(name).to_string());
+                relation_tables.insert(qualifier.clone(), name.clone());
+                let relation_stats = statistics.relation_statistics(name);
+                let cardinality = relation_stats
+                    .as_ref()
+                    .map_or(DEFAULT_JOIN_CARDINALITY, |stats| stats.row_count)
+                    as f64;
+                let column_stats = relation_stats.map_or_else(BTreeMap::new, |stats| stats.columns);
+                let access_cost = crate::CostEstimator::default()
+                    .estimate_unary(crate::OperatorKind::TableScan, cardinality)
+                    .total();
+                (
+                    qualifier,
+                    cardinality,
+                    column_stats,
+                    access_cost,
+                    crate::AccessParadigm::Relational,
+                )
+            }
+            SourcePlan::Function {
+                alias: Some(alias), ..
+            } => {
+                let Some(estimate) = statistics.source_access_estimate(atom) else {
+                    return Ok(None);
+                };
+                (
+                    alias.clone(),
+                    estimate.output_rows,
+                    BTreeMap::new(),
+                    estimate.cost,
+                    estimate.paradigm,
+                )
+            }
+            SourcePlan::Join { .. }
+            | SourcePlan::Values { .. }
+            | SourcePlan::Function { alias: None, .. }
+            | SourcePlan::Subquery { .. } => return Ok(None),
         };
-        let qualifier = alias
-            .clone()
-            .unwrap_or_else(|| name.rsplit('.').next().unwrap_or(name).to_string());
         if qualifier.is_empty() || !aliases.insert(qualifier.clone()) {
             return Ok(None);
         }
-        let relation_stats = statistics.relation_statistics(name);
-        let cardinality = relation_stats
-            .as_ref()
-            .map_or(DEFAULT_JOIN_CARDINALITY, |stats| stats.row_count)
-            as f64;
-        let column_stats = relation_stats.map_or_else(BTreeMap::new, |stats| stats.columns);
         let source_id = u64::try_from(source_id).map_err(|_| JoinGraphError::InvalidPlan {
             detail: format!("source index {source_id} exceeds the join plan identifier range"),
         })?;
@@ -208,16 +239,20 @@ fn reordered_inner_join_source(
             alias: qualifier,
             cardinality,
             column_stats,
+            access_cost,
+            paradigm,
             source_id,
         });
     }
     let column_owners = unique_column_owners(&relations);
-    apply_local_filter_selectivity(
+    apply_local_filter_estimates(
         &mut relations,
         external_predicates,
         &aliases,
         &column_owners,
-    );
+        &relation_tables,
+        statistics,
+    )?;
 
     // SQL's comma-separated FROM form lowers to a tree of cross joins while
     // its join equalities remain in the query-block WHERE expression. Treat
@@ -287,14 +322,11 @@ fn flatten_reorderable_inner_join(
             }
             true
         }
-        SourcePlan::Table { .. } => {
+        SourcePlan::Table { .. } | SourcePlan::Function { .. } => {
             atoms.push(source.clone());
             true
         }
-        SourcePlan::Join { .. }
-        | SourcePlan::Values { .. }
-        | SourcePlan::Function { .. }
-        | SourcePlan::Subquery { .. } => false,
+        SourcePlan::Join { .. } | SourcePlan::Values { .. } | SourcePlan::Subquery { .. } => false,
     }
 }
 
@@ -323,13 +355,16 @@ fn unique_column_owners(relations: &[JoinRelation]) -> ColumnOwners {
     owners
 }
 
-fn apply_local_filter_selectivity(
+fn apply_local_filter_estimates(
     relations: &mut [JoinRelation],
     predicates: &[ScalarExpr],
     aliases: &BTreeSet<String>,
     column_owners: &ColumnOwners,
-) {
+    relation_tables: &BTreeMap<String, String>,
+    source_statistics: &dyn SourceStatistics,
+) -> JoinGraphResult<()> {
     let estimator = crate::CardinalityEstimator::new();
+    let mut predicates_by_alias = BTreeMap::<String, Vec<ScalarExpr>>::new();
     for predicate in predicates {
         let mut referenced = BTreeSet::new();
         if !collect_resolved_aliases(predicate, aliases, column_owners, &mut referenced)
@@ -340,19 +375,52 @@ fn apply_local_filter_selectivity(
         let Some(alias) = referenced.first() else {
             continue;
         };
-        let Some(relation) = relations
-            .iter_mut()
-            .find(|relation| relation.alias == *alias)
-        else {
+        predicates_by_alias
+            .entry(alias.clone())
+            .or_default()
+            .push(predicate.clone());
+    }
+
+    for relation in relations.iter_mut() {
+        let Some(predicates) = predicates_by_alias.remove(&relation.alias) else {
             continue;
+        };
+        let predicate = match predicates.as_slice() {
+            [predicate] => predicate.clone(),
+            _ => ScalarExpr::And(predicates),
         };
         let statistics = crate::RelationStats {
             row_count: relation.cardinality.round() as u64,
             columns: relation.column_stats.clone(),
         };
-        let selectivity = estimator.scalar_selectivity(predicate, &statistics).raw();
-        relation.cardinality = (relation.cardinality * selectivity).max(1.0);
+        let local_estimate = relation_tables
+            .get(&relation.alias)
+            .and_then(|table| source_statistics.local_access_estimate(table.as_str(), &predicate));
+        if let Some(estimate) = local_estimate {
+            if !estimate.output_rows.is_finite() || estimate.output_rows < 0.0 {
+                return Err(JoinGraphError::InvalidCardinality {
+                    name: relation.alias.clone(),
+                    rows: estimate.output_rows,
+                });
+            }
+            if !estimate.cost.is_finite() || estimate.cost < 0.0 {
+                return Err(JoinGraphError::InvalidAccessCost {
+                    name: relation.alias.clone(),
+                    cost: estimate.cost,
+                });
+            }
+            relation.cardinality = estimate.output_rows.min(relation.cardinality).max(0.0);
+            relation.access_cost = estimate.cost;
+            relation.paradigm = estimate.paradigm;
+            continue;
+        }
+        let selectivity = estimator.scalar_selectivity(&predicate, &statistics).raw();
+        relation.cardinality = (relation.cardinality * selectivity).max(0.0);
+        relation.access_cost += crate::CostEstimator::default()
+            .estimate_unary(crate::OperatorKind::Filter, statistics.row_count as f64)
+            .total();
     }
+    Ok(())
 }
 
 fn collect_resolved_aliases(
@@ -609,12 +677,29 @@ fn attach_join_predicates(
 
 fn source_qualifiers(source: &SourcePlan) -> BTreeSet<String> {
     let mut qualifiers = BTreeSet::new();
-    if let SourcePlan::Table { name, alias } = source {
-        qualifiers.insert(
-            alias
-                .clone()
-                .unwrap_or_else(|| name.rsplit('.').next().unwrap_or(name).to_string()),
-        );
+    match source {
+        SourcePlan::Table { name, alias } => {
+            qualifiers.insert(
+                alias
+                    .clone()
+                    .unwrap_or_else(|| name.rsplit('.').next().unwrap_or(name).to_string()),
+            );
+        }
+        SourcePlan::Function {
+            alias: Some(alias), ..
+        }
+        | SourcePlan::Values {
+            alias: Some(alias), ..
+        }
+        | SourcePlan::Subquery {
+            alias: Some(alias), ..
+        } => {
+            qualifiers.insert(alias.clone());
+        }
+        SourcePlan::Join { .. }
+        | SourcePlan::Function { alias: None, .. }
+        | SourcePlan::Values { alias: None, .. }
+        | SourcePlan::Subquery { alias: None, .. } => {}
     }
     qualifiers
 }

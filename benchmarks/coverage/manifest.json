@@ -101,7 +101,9 @@
     {
       "path": "crates/uqa-engine/benches/sql_workloads.rs",
       "tokens": [
+        "e2e_knn_local_access_dpccp",
         "e2e_join",
+        "e2e_operator_join",
         "e2e_olap",
         "e2e_oltp",
         "e2e_oltp_delete_where",
@@ -208,6 +210,7 @@
       "path": "crates/uqa-planner/benches/planner.rs",
       "tokens": [
         "planner_dpccp_fixed_8",
+        "planner_dpccp_costed_access",
         "planner_dpccp_topology",
         "planner_greedy_chain",
         "planner_greedy_star"

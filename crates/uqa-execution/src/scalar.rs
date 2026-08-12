@@ -294,6 +294,66 @@ impl ScalarExpr {
     }
 
     #[must_use]
+    pub fn contains_parameter(&self) -> bool {
+        match self {
+            Self::Param(_) => true,
+            Self::Func {
+                args,
+                order_by,
+                filter,
+                ..
+            } => {
+                args.iter().any(Self::contains_parameter)
+                    || order_by.iter().any(|order| order.expr.contains_parameter())
+                    || filter.as_deref().is_some_and(Self::contains_parameter)
+            }
+            Self::Array(items) | Self::And(items) | Self::Or(items) => {
+                items.iter().any(Self::contains_parameter)
+            }
+            Self::Binary { lhs, rhs, .. } => lhs.contains_parameter() || rhs.contains_parameter(),
+            Self::Not(expr) | Self::IsNull { expr, .. } | Self::Cast { expr, .. } => {
+                expr.contains_parameter()
+            }
+            Self::Between { expr, low, high } => {
+                expr.contains_parameter() || low.contains_parameter() || high.contains_parameter()
+            }
+            Self::InList { expr, list, .. } => {
+                expr.contains_parameter() || list.iter().any(Self::contains_parameter)
+            }
+            Self::WindowCall { args, spec, .. } => {
+                args.iter().any(Self::contains_parameter)
+                    || spec.partition_by.iter().any(Self::contains_parameter)
+                    || spec
+                        .order_by
+                        .iter()
+                        .any(|order| order.expr.contains_parameter())
+                    || spec.frame.as_ref().is_some_and(|frame| {
+                        scalar_frame_bound_contains_parameter(&frame.start)
+                            || scalar_frame_bound_contains_parameter(&frame.end)
+                    })
+            }
+            Self::Case {
+                base,
+                when,
+                else_branch,
+            } => {
+                base.as_deref().is_some_and(Self::contains_parameter)
+                    || when.iter().any(|(condition, result)| {
+                        condition.contains_parameter() || result.contains_parameter()
+                    })
+                    || else_branch.as_deref().is_some_and(Self::contains_parameter)
+            }
+            Self::InSubquery { expr, .. } => expr.contains_parameter(),
+            Self::Star
+            | Self::Column(_)
+            | Self::QualifiedColumn { .. }
+            | Self::Literal(_)
+            | Self::ScalarSubquery(_)
+            | Self::Exists { .. } => false,
+        }
+    }
+
+    #[must_use]
     pub fn contains_aggregate(&self, is_aggregate: &dyn Fn(&str) -> bool) -> bool {
         match self {
             Self::Func {
@@ -359,6 +419,17 @@ impl ScalarExpr {
             | Self::Exists { .. }
             | Self::WindowCall { .. } => false,
         }
+    }
+}
+
+fn scalar_frame_bound_contains_parameter(bound: &ScalarFrameBound) -> bool {
+    match bound {
+        ScalarFrameBound::Preceding(expression) | ScalarFrameBound::Following(expression) => {
+            expression.contains_parameter()
+        }
+        ScalarFrameBound::UnboundedPreceding
+        | ScalarFrameBound::UnboundedFollowing
+        | ScalarFrameBound::CurrentRow => false,
     }
 }
 
@@ -831,5 +902,23 @@ mod tests {
             ),
             Err(SQLError::MissingParam(0))
         ));
+    }
+
+    #[test]
+    fn parameter_detection_descends_into_nested_expressions() {
+        let expression = ScalarExpr::Func {
+            name: "knn_match".into(),
+            args: vec![
+                ScalarExpr::Column("embedding".into()),
+                ScalarExpr::Array(vec![ScalarExpr::Param(1)]),
+                ScalarExpr::Literal(Value::Int(3)),
+            ],
+            distinct: false,
+            order_by: Vec::new(),
+            filter: None,
+        };
+
+        assert!(expression.contains_parameter());
+        assert!(!ScalarExpr::Literal(Value::Int(3)).contains_parameter());
     }
 }

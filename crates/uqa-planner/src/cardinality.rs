@@ -38,8 +38,8 @@ mod stats;
 
 pub use entropy::{column_entropy, entropy_cardinality_lower_bound, mutual_information_estimate};
 pub use stats::{
-    ColumnStats, EdgeSample, GraphStats, GraphStoreSampler, RelationStats, Selectivity,
-    GRAPH_AVG_DEGREE_DEFAULT, JACCARD_JOIN_SELECTIVITY, VECTOR_JOIN_SELECTIVITY,
+    AccessParadigm, ColumnStats, EdgeSample, GraphStats, GraphStoreSampler, LocalAccessEstimate,
+    RelationStats, Selectivity, GRAPH_AVG_DEGREE_DEFAULT, JACCARD_JOIN_SELECTIVITY,
 };
 
 use ast_helpers::{

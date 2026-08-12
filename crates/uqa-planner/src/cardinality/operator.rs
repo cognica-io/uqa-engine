@@ -28,12 +28,19 @@ impl CardinalityEstimator {
                 stats.doc_freq(field_name, query) as f64
             }
             OperatorTree::VectorSimilarity { threshold, .. } => {
-                n * Self::vector_selectivity(*threshold)
+                n * Self::vector_selectivity(f64::from(*threshold), stats.dimensions)
             }
             OperatorTree::KNN { k, .. } => *k as f64,
             OperatorTree::Filter {
-                field, predicate, ..
-            } => n * self.filter_selectivity(field, predicate, n),
+                field,
+                predicate,
+                source,
+            } => {
+                let input = source
+                    .as_deref()
+                    .map_or(n, |source| self.estimate(source, stats));
+                input * self.filter_selectivity(field, predicate, n)
+            }
             OperatorTree::Score { source, .. } => self.estimate(source, stats),
             OperatorTree::BayesianScore { source, .. } => self.estimate(source, stats),
             OperatorTree::Intersect(ops) => self.estimate_intersect(ops, stats, n),

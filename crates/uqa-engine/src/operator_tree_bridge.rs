@@ -101,7 +101,7 @@ use lowering_retrieval::{
     validate_checked_retrieval_call_tree, validate_operator_function_arity,
     validate_probability_signal_contract,
 };
-use optimizer_binding::{engine_query_optimizer, scored_term_count};
+use optimizer_binding::{engine_query_optimizer, operator_tree_paradigm, scored_term_count};
 use posting_utils::{
     fuse_signal_batches_with, fuse_signals_with, numeric_score, posting_list_to_scored,
     scored_to_posting_list, sparse_threshold_inline, static_operator, StaticPostingList,
@@ -572,6 +572,197 @@ pub fn optimised_tree_for(
     Ok(Some(
         engine_query_optimizer(engine, table, &tree)?.optimize(tree),
     ))
+}
+
+/// Cost a relation-local SQL predicate through the same lowering and
+/// optimizer configuration used by execution.
+pub(crate) fn estimate_local_access(
+    engine: &Engine,
+    table: &str,
+    where_expr: &ScalarExpr,
+    params: &[SQLParam],
+) -> DriverResult<Option<uqa_planner::LocalAccessEstimate>> {
+    let Some(tree) = lower_where_bound(engine, where_expr, params)? else {
+        return Ok(None);
+    };
+    estimate_operator_tree_access(engine, table, tree, true).map(Some)
+}
+
+fn estimate_operator_tree_access(
+    engine: &Engine,
+    table: &str,
+    tree: OperatorTree,
+    clamp_to_table: bool,
+) -> DriverResult<uqa_planner::LocalAccessEstimate> {
+    let optimizer = engine_query_optimizer(engine, table, &tree)?;
+    let planned_tree = optimizer.optimize(tree);
+    let total_docs = optimizer.index_stats.total_docs as f64;
+    let output_rows = optimizer
+        .estimator
+        .estimate(&planned_tree, &optimizer.index_stats);
+    if !output_rows.is_finite() || output_rows < 0.0 {
+        return Err(SQLError::Internal(format!(
+            "operator access produced invalid cardinality {output_rows}"
+        )));
+    }
+    let output_rows = if clamp_to_table {
+        output_rows.min(total_docs)
+    } else {
+        output_rows
+    };
+    let cost = optimizer
+        .cost_model
+        .estimate(&planned_tree, &optimizer.index_stats);
+    if !cost.is_finite() || cost < 0.0 {
+        return Err(SQLError::Internal(format!(
+            "operator access produced invalid cost {cost}"
+        )));
+    }
+    Ok(uqa_planner::LocalAccessEstimate {
+        output_rows,
+        cost,
+        paradigm: operator_tree_paradigm(&planned_tree),
+    })
+}
+
+pub(crate) fn is_operator_join_table_function(name: &str) -> bool {
+    matches!(
+        name,
+        "text_similarity_join"
+            | "vector_similarity_join"
+            | "graph_join"
+            | "hybrid_join"
+            | "cross_paradigm_join"
+    )
+}
+
+fn lower_join_operand(
+    engine: &Engine,
+    expression: &ScalarExpr,
+    params: &[SQLParam],
+    function_name: &str,
+) -> DriverResult<OperatorTree> {
+    lower_where_bound(engine, expression, params)?.ok_or_else(|| {
+        SQLError::TypeMismatch(format!(
+            "{function_name} operand cannot be represented by the operator IR"
+        ))
+    })
+}
+
+fn const_join_threshold(
+    expression: &ScalarExpr,
+    params: &[SQLParam],
+    function_name: &str,
+    minimum: f64,
+    maximum: f64,
+) -> DriverResult<f64> {
+    let threshold = const_f64(expression, params).ok_or_else(|| {
+        SQLError::TypeMismatch(format!(
+            "{function_name}.threshold must be a constant number"
+        ))
+    })?;
+    if !threshold.is_finite() || !(minimum..=maximum).contains(&threshold) {
+        return Err(SQLError::TypeMismatch(format!(
+            "{function_name}.threshold must be finite and in [{minimum}, {maximum}], got {threshold}"
+        )));
+    }
+    Ok(threshold)
+}
+
+fn lower_operator_join_table_function(
+    engine: &Engine,
+    name: &str,
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> DriverResult<(String, OperatorTree)> {
+    let expected = match name {
+        "text_similarity_join" | "vector_similarity_join" => "4",
+        "graph_join" => "5",
+        "hybrid_join" | "cross_paradigm_join" => "3",
+        _ => {
+            return Err(SQLError::Unsupported(format!(
+                "operator join table function `{name}`"
+            )))
+        }
+    };
+    let expected_count = match name {
+        "text_similarity_join" | "vector_similarity_join" => 4,
+        "graph_join" => 5,
+        _ => 3,
+    };
+    if args.len() != expected_count {
+        return Err(SQLError::BadArity {
+            name: name.to_string(),
+            expected: expected.to_string(),
+            actual: args.len(),
+        });
+    }
+    let table = const_string(&args[0], params)
+        .ok_or_else(|| SQLError::TypeMismatch(format!("{name}.table must be a constant string")))?;
+    let left = lower_join_operand(engine, &args[1], params, name)?;
+    let right = lower_join_operand(engine, &args[2], params, name)?;
+    let tree = match name {
+        "text_similarity_join" => OperatorTree::TextSimilarityJoin {
+            left: Box::new(left),
+            right: Box::new(right),
+            threshold: const_join_threshold(&args[3], params, "text_similarity_join", 0.0, 1.0)?,
+        },
+        "vector_similarity_join" => OperatorTree::VectorSimilarityJoin {
+            left: Box::new(left),
+            right: Box::new(right),
+            threshold: const_join_threshold(&args[3], params, "vector_similarity_join", -1.0, 1.0)?,
+        },
+        "graph_join" => OperatorTree::GraphJoin {
+            left: Box::new(left),
+            right: Box::new(right),
+            label: const_optional_string(&args[3], params)
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(
+                        "graph_join.label must be a constant string or NULL".into(),
+                    )
+                })?
+                .into_option(),
+            graph: const_string(&args[4], params).ok_or_else(|| {
+                SQLError::TypeMismatch("graph_join.graph must be a constant string".into())
+            })?,
+        },
+        "hybrid_join" => OperatorTree::HybridJoin {
+            left: Box::new(left),
+            right: Box::new(right),
+        },
+        "cross_paradigm_join" => OperatorTree::CrossParadigmJoin {
+            left: Box::new(left),
+            right: Box::new(right),
+        },
+        _ => unreachable!("operator join name validated above"),
+    };
+    Ok((table, tree))
+}
+
+pub(crate) fn estimate_operator_join_table_function(
+    engine: &Engine,
+    name: &str,
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> DriverResult<uqa_planner::LocalAccessEstimate> {
+    let (table, tree) = lower_operator_join_table_function(engine, name, args, params)?;
+    estimate_operator_tree_access(engine, &table, tree, false)
+}
+
+/// Execute a tuple-producing operator join exposed as a SQL table function.
+pub(crate) fn execute_operator_join_table_function(
+    engine: &Engine,
+    name: &str,
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> DriverResult<GeneralizedPostingList> {
+    let (table, tree) = lower_operator_join_table_function(engine, name, args, params)?;
+    match execute_operator_tree_in_execution(engine, &table, params, &tree)? {
+        OperatorOutput::Generalized(result) => Ok(result),
+        OperatorOutput::Posting(_) | OperatorOutput::Graph(_) => Err(SQLError::Internal(format!(
+            "{name} did not produce generalized tuple rows"
+        ))),
+    }
 }
 
 fn centrality_kind(name: &str) -> Option<&'static str> {

@@ -32,6 +32,15 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
         .with_subquery_runner(&subquery_arena);
     let identity = name.to_ascii_lowercase();
     let lower = crate::sql::builtin_function_dispatch_name(&identity);
+    if crate::operator_tree_bridge::is_operator_join_table_function(&lower) {
+        let tuples = crate::operator_tree_bridge::execute_operator_join_table_function(
+            engine,
+            &lower,
+            args,
+            context.params,
+        )?;
+        return operator_join_rows(tuples, alias, column_aliases);
+    }
     let call_args = eval_call_arguments(args, &ctx)?;
     let has_named_args = call_args.iter().any(|(name, _)| name.is_some());
     let evaluated: Vec<Value> = call_args.iter().map(|(_, value)| value.clone()).collect();
@@ -452,6 +461,52 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
             "table function `{other}` in FROM"
         ))),
     }
+}
+
+fn operator_join_rows(
+    tuples: uqa_core::GeneralizedPostingList,
+    alias: Option<&str>,
+    column_aliases: &[String],
+) -> Result<Vec<ResultRow>, SQLError> {
+    let left_column = column_aliases
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "left_doc_id".into());
+    let right_column = column_aliases
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| "right_doc_id".into());
+    let score_column = column_aliases
+        .get(2)
+        .cloned()
+        .unwrap_or_else(|| "_score".into());
+    let mut rows = Vec::with_capacity(tuples.len());
+    for tuple in tuples.entries() {
+        let [left_doc_id, right_doc_id] = tuple.doc_ids.as_slice() else {
+            return Err(SQLError::Internal(format!(
+                "operator join produced a {}-element tuple; SQL table joins require pairs",
+                tuple.doc_ids.len()
+            )));
+        };
+        let mut row = ResultRow::new();
+        row.insert(left_column.clone(), doc_id_value(*left_doc_id)?);
+        row.insert(right_column.clone(), doc_id_value(*right_doc_id)?);
+        row.insert(
+            score_column.clone(),
+            tuple
+                .payload
+                .fields
+                .get("_score")
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
+        if let Some(alias) = alias {
+            rows.push(prefix_row(alias, &row));
+        } else {
+            rows.push(row);
+        }
+    }
+    Ok(rows)
 }
 
 pub(in crate::sql) fn registered_table_function_rows(

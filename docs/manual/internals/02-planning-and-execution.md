@@ -37,7 +37,7 @@ The plan owns read queries and physical command bodies. Relational query blocks 
 
 ## Access path selection
 
-The optimizer chooses among three broad query access shapes:
+The optimizer chooses among three broad query access shapes inside one `UnifiedPlan` hierarchy:
 
 | Shape | Use |
 | --- | --- |
@@ -46,6 +46,10 @@ The optimizer chooses among three broad query access shapes:
 | `OperatorTree` path | Posting-list, graph, scoring, fusion, staged, sparse, and model operators |
 
 An accelerated retrieval leaf consumes its search expression. Field names remain index dependencies, but the physical row projection fetches only columns needed by output, ordering, grouping, facets, and unexecuted residual predicates. This avoids decoding a stored vector merely because it appeared as the KNN argument.
+
+In a join block, each table keeps its relation identity while its relation-local `WHERE` predicates are lowered through the same `OperatorTree`, `QueryOptimizer`, cardinality estimator, and cost model used by execution. For example, literal `knn_match(embedding, query, 3)` contributes an estimated support of three rows, clamped by the table cardinality, rather than a generic percentage. Text document frequencies, analyzed column distinct counts, vector dimensions, graph statistics, and executable access costs remain attached to that relation when DPccp compares join orders.
+
+Tuple-producing operator joins are SQL table-function sources. `text_similarity_join`, `vector_similarity_join`, `graph_join`, `hybrid_join`, and `cross_paradigm_join` lower to `OperatorTree` join nodes, execute as `GeneralizedPostingList`, expose `left_doc_id`, `right_doc_id`, and `_score`, and can participate in a larger relational join when given an alias.
 
 ## Plan-native optimization
 
@@ -57,9 +61,61 @@ Membership idempotence and absorption use address-independent structural equival
 
 ## Join planning
 
-The unified optimizer flattens reorderable inner-join regions without crossing outer or lateral boundaries. DPccp reads current row and column statistics and selects a join order using the physical algorithms actually available.
+The unified optimizer flattens reorderable inner-join regions without crossing outer or lateral boundaries. A region can contain ordinary tables and aliased, fully bound operator-join table-function sources. DPccp performs exact connected-subgraph/complement enumeration through 16 relations and uses its greedy fallback above that threshold.
 
-Clean equality predicates between qualified columns select hash join. Other predicates select nested-loop join. A physical hash plan is rejected if equality keys cannot be recovered; an unavailable index join cannot influence plan cost.
+Every DPccp leaf carries the executable local access cost, including an optimized `OperatorTree` access when one was selected. Candidate equijoins use `CostEstimator` with the executable hash-join operator, disconnected components use its cross-join operator, and the chosen physical kind is retained in the materialized plan. Only clean equality predicates between qualified columns become join-graph edges; other predicates remain semantic guards on the reconstructed join tree. A physical hash plan is rejected if equality keys cannot be recovered, and an unavailable index join cannot influence plan cost.
+
+For an equijoin candidate with subplans `P_1` and `P_2`, DPccp accumulates executable child access cost and the shared physical hash-join cost rather than substituting `|P_1| + |P_2|` as the complete plan cost.
+
+$$
+C(P_1 \bowtie P_2)
+=
+C(P_1)+C(P_2)+C_{\mathrm{hash}}\!\left(\widehat{|P_1|},\widehat{|P_2|}\right)
+$$
+
+Vector threshold selectivity is a continuous, dimension-aware normal approximation to the spherical-cap tail. Here `Phi` is the standard-normal cumulative distribution function and `d` is the bound vector dimension.
+
+$$
+\widehat{s}_{\mathrm{vec}}(\tau,d)
+=
+\begin{cases}
+1, & \tau\le -1,\\
+1-\Phi\!\left(\tau\sqrt{\max(d,1)}\right), & -1<\tau<1,\\
+0, & \tau\ge 1.
+\end{cases}
+$$
+
+Let `L` and `R` be estimated operand cardinalities, `N` the table cardinality, `V` the graph vertex count, `d_bar` the average out-degree, and `s_label` the edge-label selectivity. Typed operator joins use the following cardinality models; no four-tier vector threshold table is involved.
+
+$$
+\begin{aligned}
+\widehat{J}_{\mathrm{vec}}
+&=LR\,\widehat{s}_{\mathrm{vec}}(\tau,d),\\
+\widehat{J}_{\mathrm{graph}}
+&=LR\min\!\left(\frac{\bar d\,s_{\mathrm{label}}}{\max(V,1)},1\right),\\
+\widehat{J}_{\mathrm{hybrid}}
+&=\frac{LR}{\max(N,1)}\,\widehat{s}_{\mathrm{vec}}(0.5,d),\\
+\widehat{J}_{\mathrm{cross}}
+&=\frac{LR}{\max(N,1)}.
+\end{aligned}
+$$
+
+The cross-paradigm physical cost is recursive child work plus the shared hash-join model, not a constant multiple of table cardinality. Vector similarity uses nested-loop pair comparison scaled by dimension; hybrid join pays a hash equality phase followed by vector comparison only for equality candidates.
+
+$$
+\begin{aligned}
+C_{\mathrm{cross}}
+&=C(L)+C(R)+C_{\mathrm{hash}}(L,R),\\
+C_{\mathrm{vec}}
+&=C(L)+C(R)+d\,C_{\mathrm{nested}}(L,R),\\
+Q
+&=\frac{LR}{\max(N,1)},\\
+C_{\mathrm{hybrid}}
+&=C(L)+C(R)+C_{\mathrm{hash}}(L,R)+d\,C_{\mathrm{nested}}(Q,1).
+\end{aligned}
+$$
+
+Graph estimates bind live graph size, edge count, label distribution, average degree, degree distribution, vertex-label counts, label-specific degree, and temporal range. Pattern estimates over graphs larger than 10,000 vertices may also use random-walk samples from the bound graph store. The `Filter(Traverse(...))` rewrite moves an eligible graph-property predicate into the traversal vertex predicate so BFS can prune during expansion; an ordinary SQL table filter remains a relational filter unless it was explicitly lowered as a graph-property predicate.
 
 ## Physical rows
 

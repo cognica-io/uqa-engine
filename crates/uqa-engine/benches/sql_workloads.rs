@@ -89,6 +89,57 @@ fn build_planner_engine() -> Engine {
     engine
 }
 
+fn build_operator_join_engine() -> Engine {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE operator_docs (\
+                id INTEGER PRIMARY KEY,\
+                category TEXT,\
+                embedding VECTOR(4)\
+            )",
+            &[],
+        )
+        .expect("create operator join corpus");
+    let mut values = String::from("INSERT INTO operator_docs (id, category, embedding) VALUES ");
+    for i in 0_u32..256 {
+        if i > 0 {
+            values.push_str(", ");
+        }
+        let x = f64::from(i % 17) / 16.0;
+        let y = f64::from(i % 13) / 12.0;
+        let z = f64::from(i % 11) / 10.0;
+        let w = f64::from(i % 7) / 6.0;
+        let _ = write!(values, "({i}, 'cat_{}', ARRAY[{x}, {y}, {z}, {w}])", i % 8);
+    }
+    engine
+        .sql(&values, &[])
+        .expect("insert operator join corpus");
+    engine
+        .sql("ANALYZE operator_docs", &[])
+        .expect("analyze operator join corpus");
+    engine
+        .sql(
+            "CREATE TABLE operator_groups (id INTEGER PRIMARY KEY, category TEXT)",
+            &[],
+        )
+        .expect("create operator join groups");
+    let mut groups = String::from("INSERT INTO operator_groups (id, category) VALUES ");
+    for i in 0_u32..32 {
+        if i > 0 {
+            groups.push_str(", ");
+        }
+        let _ = write!(groups, "({i}, 'cat_{}')", i % 8);
+    }
+    engine
+        .sql(&groups, &[])
+        .expect("insert operator join groups");
+    engine
+        .sql("ANALYZE operator_groups", &[])
+        .expect("analyze operator join groups");
+    engine
+}
+
 fn bench_oltp(c: &mut Criterion) {
     let engine = build_engine();
     let cases = [
@@ -275,12 +326,70 @@ fn bench_planner_statistics(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_operator_joins(c: &mut Criterion) {
+    let engine = build_operator_join_engine();
+    let cases = [
+        (
+            "e2e_operator_vector_similarity_join",
+            "SELECT left_doc_id, right_doc_id \
+             FROM vector_similarity_join(\
+                 'operator_docs',\
+                 knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32),\
+                 knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32),\
+                 0.8\
+             )",
+        ),
+        (
+            "e2e_operator_hybrid_join",
+            "SELECT left_doc_id, right_doc_id \
+             FROM hybrid_join(\
+                 'operator_docs',\
+                 category = 'cat_1' AND \
+                     knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32),\
+                 category = 'cat_1' AND \
+                     knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32)\
+             )",
+        ),
+        (
+            "e2e_operator_join_dpccp",
+            "SELECT pairs.left_doc_id, docs.category \
+             FROM vector_similarity_join(\
+                 'operator_docs',\
+                 knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32),\
+                 knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32),\
+                 0.8\
+             ) AS pairs \
+             JOIN operator_docs AS docs ON docs.id = pairs.left_doc_id",
+        ),
+        (
+            "e2e_knn_local_access_dpccp",
+            "SELECT docs.id, groups.id \
+             FROM operator_docs AS docs \
+             JOIN operator_groups AS groups ON groups.category = docs.category \
+             WHERE knn_match(\
+                 docs.embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32\
+             )",
+        ),
+    ];
+    let mut group = c.benchmark_group("e2e_operator_join");
+    for (name, sql) in cases {
+        group.bench_function(name, |bencher| {
+            bencher.iter(|| {
+                let result = engine.sql(black_box(sql), &[]).expect("operator join");
+                black_box(result.rows.len())
+            });
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_oltp,
     bench_olap,
     bench_joins,
     bench_subquery_cte_window_analyze,
-    bench_planner_statistics
+    bench_planner_statistics,
+    bench_operator_joins
 );
 criterion_main!(benches);

@@ -12,12 +12,29 @@ use super::{BTreeMap, Value, VertexConstraint};
 /// per-column statistics are available.
 pub const JACCARD_JOIN_SELECTIVITY: f64 = 0.05;
 
-/// Default vector-similarity join selectivity.
-pub const VECTOR_JOIN_SELECTIVITY: f64 = 0.1;
-
 /// Fallback average out-degree used by graph traversal cardinality
 /// when no [`GraphStats`] is supplied.
 pub const GRAPH_AVG_DEGREE_DEFAULT: f64 = 10.0;
+
+/// Physical domain used to produce one relation before relational joins.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AccessParadigm {
+    #[default]
+    Relational,
+    Text,
+    Vector,
+    Graph,
+    Hybrid,
+    CrossParadigm,
+}
+
+/// Cardinality and work estimate for a relation-local access predicate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LocalAccessEstimate {
+    pub output_rows: f64,
+    pub cost: f64,
+    pub paradigm: AccessParadigm,
+}
 
 // ---------------------------------------------------------------------
 // Graph statistics

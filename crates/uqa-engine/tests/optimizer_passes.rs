@@ -375,9 +375,16 @@ fn fuse_log_odds_with_relational_filter_lowers_to_intersect() {
     assert!(parts
         .iter()
         .any(|p| matches!(p, OperatorTree::BayesianEvidenceFusion { .. })));
-    assert!(parts
-        .iter()
-        .any(|p| matches!(p, OperatorTree::Filter { .. })));
+    assert!(parts.iter().any(|p| {
+        matches!(
+            p,
+            OperatorTree::IndexScan {
+                index_name,
+                field,
+                ..
+            } if index_name == "notes_year_idx" && field == "year"
+        )
+    }));
 }
 
 #[test]

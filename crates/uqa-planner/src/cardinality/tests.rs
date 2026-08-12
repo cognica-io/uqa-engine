@@ -5,6 +5,8 @@
 //
 
 use super::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use uqa_operators::{EdgePatternIR, VertexPatternIR};
 
 fn col(name: &str) -> Expr {
     Expr::Column(name.into())
@@ -80,11 +82,39 @@ fn term_uses_doc_freq() {
 }
 
 #[test]
-fn vector_threshold_picks_tier() {
-    assert_eq!(CardinalityEstimator::vector_selectivity(0.95), 0.01);
-    assert_eq!(CardinalityEstimator::vector_selectivity(0.7), 0.05);
-    assert_eq!(CardinalityEstimator::vector_selectivity(0.5), 0.1);
-    assert_eq!(CardinalityEstimator::vector_selectivity(0.0), 0.2);
+fn vector_threshold_uses_continuous_dimension_aware_tail() {
+    let low = CardinalityEstimator::vector_selectivity(0.5, 64);
+    let high = CardinalityEstimator::vector_selectivity(0.7, 64);
+    let higher_dimension = CardinalityEstimator::vector_selectivity(0.5, 256);
+    assert!(low > high);
+    assert!(low > higher_dimension);
+    assert!((CardinalityEstimator::vector_selectivity(0.0, 64) - 0.5).abs() < 1e-6);
+    assert_eq!(CardinalityEstimator::vector_selectivity(-1.0, 64), 1.0);
+    assert_eq!(CardinalityEstimator::vector_selectivity(1.0, 64), 0.0);
+}
+
+#[test]
+fn vector_join_threshold_uses_the_same_continuous_tail_model() {
+    let operand = || OperatorTree::KNN {
+        query_vector: vec![1.0; 64],
+        k: 20,
+        field: "embedding".into(),
+    };
+    let join = |threshold| OperatorTree::VectorSimilarityJoin {
+        left: Box::new(operand()),
+        right: Box::new(operand()),
+        threshold,
+    };
+    let mut stats = IndexStats::new(1_000);
+    stats.dimensions = 64;
+    let estimator = CardinalityEstimator::new();
+    let permissive = estimator.estimate(&join(0.3), &stats);
+    let selective = estimator.estimate(&join(0.8), &stats);
+    stats.dimensions = 256;
+    let higher_dimension = estimator.estimate(&join(0.3), &stats);
+
+    assert!(permissive > selective);
+    assert!(permissive > higher_dimension);
 }
 
 #[test]
@@ -150,4 +180,74 @@ fn pattern_match_falls_back_when_no_stats() {
     };
     let r = est.estimate(&op, &stats);
     assert!(r > 0.0);
+}
+
+struct CountingGraphSampler {
+    outgoing_calls: Arc<AtomicUsize>,
+}
+
+impl GraphStoreSampler for CountingGraphSampler {
+    fn vertex_ids(&self) -> Vec<u64> {
+        (0..10_001).collect()
+    }
+
+    fn outgoing_edges(&self, vid: u64) -> Vec<EdgeSample> {
+        self.outgoing_calls.fetch_add(1, Ordering::SeqCst);
+        vec![EdgeSample {
+            target_id: (vid + 1) % 10_001,
+            label: "cites".into(),
+        }]
+    }
+
+    fn vertex_satisfies(&self, _vid: u64, constraint: &VertexConstraint) -> bool {
+        constraint(&uqa_core::Vertex::new(0, "Paper"))
+    }
+}
+
+#[test]
+fn large_pattern_match_uses_the_bound_graph_sampler() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let sampler = CountingGraphSampler {
+        outgoing_calls: Arc::clone(&calls),
+    };
+    let graph_stats = GraphStats {
+        num_vertices: 10_001,
+        num_edges: 10_001,
+        avg_out_degree: 1.0,
+        graph_name: "citations".into(),
+        ..GraphStats::default()
+    };
+    let estimator = CardinalityEstimator::new()
+        .with_graph_stats(graph_stats)
+        .with_graph_store(Arc::new(sampler));
+    let pattern = GraphPatternIR {
+        vertex_patterns: vec![
+            VertexPatternIR {
+                variable: "a".into(),
+                constraints: Vec::new(),
+                label: None,
+            },
+            VertexPatternIR {
+                variable: "b".into(),
+                constraints: Vec::new(),
+                label: None,
+            },
+        ],
+        edge_patterns: vec![EdgePatternIR {
+            source_var: "a".into(),
+            target_var: "b".into(),
+            label: Some("cites".into()),
+            constraints: Vec::new(),
+        }],
+    };
+    let result = estimator.estimate(
+        &OperatorTree::PatternMatch {
+            pattern,
+            graph: "citations".into(),
+        },
+        &IndexStats::new(10_001),
+    );
+
+    assert_eq!(calls.load(Ordering::SeqCst), 100);
+    assert_eq!(result, 10_001.0);
 }

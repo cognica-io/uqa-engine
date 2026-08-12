@@ -8,8 +8,9 @@
 
 use super::{
     optimize_unified_plan, reorder_unified_plan_joins, AggregateClassifier, JoinGraphResult,
-    RelationStats, UnifiedPlan,
+    RelationStats, ScalarExpr, SourcePlan, UnifiedPlan,
 };
+use crate::LocalAccessEstimate;
 
 #[derive(Debug, Clone)]
 pub struct OptimizerConfig {
@@ -36,6 +37,22 @@ impl Default for OptimizerConfig {
 /// from the optimizer's fallback cardinality.
 pub trait SourceStatistics {
     fn relation_statistics(&self, table: &str) -> Option<RelationStats>;
+
+    /// Estimate a non-table source that can participate as one atom in an
+    /// inner-join region. Returning `None` keeps that region in SQL order.
+    fn source_access_estimate(&self, _source: &SourcePlan) -> Option<LocalAccessEstimate> {
+        None
+    }
+
+    /// Estimate a predicate that references only `table`. Returning `None`
+    /// delegates to the planner's scalar selectivity model.
+    fn local_access_estimate(
+        &self,
+        _table: &str,
+        _predicate: &ScalarExpr,
+    ) -> Option<LocalAccessEstimate> {
+        None
+    }
 }
 
 impl<F> SourceStatistics for F

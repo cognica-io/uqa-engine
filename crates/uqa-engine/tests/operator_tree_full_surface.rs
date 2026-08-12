@@ -16,6 +16,7 @@ use uqa_operators::{
     SumMonoid, TemporalFilterIR, TextScoringMode, VertexPatternIR,
 };
 use uqa_planner::executor::{OperatorOutput, OperatorTreeDriver};
+use uqa_planner::QueryOptimizer;
 use uqa_scoring::Scorer;
 
 fn fixture() -> Engine {
@@ -355,6 +356,39 @@ fn graph_temporal_and_centrality_nodes_execute_physically() {
 }
 
 #[test]
+fn graph_filter_pushdown_prunes_bfs_expansion() {
+    let engine = fixture();
+    let driver = EngineDriver::new(&engine, "docs", &[]);
+    let optimized = QueryOptimizer::new().optimize(OperatorTree::Filter {
+        field: "category".into(),
+        predicate: Predicate::Equals(Value::Str("A".into())),
+        source: Some(Box::new(OperatorTree::Traverse {
+            start_vertex: 1,
+            graph: "social".into(),
+            label: Some("follows".into()),
+            max_hops: 2,
+            vertex_predicate: None,
+        })),
+    });
+    assert!(matches!(
+        &optimized,
+        OperatorTree::Traverse {
+            vertex_predicate: Some(_),
+            ..
+        }
+    ));
+
+    let output = driver.execute_node(&optimized).unwrap();
+    let graph = output
+        .as_graph()
+        .expect("pushed traversal must preserve the graph carrier");
+    assert_eq!(graph.inner().doc_ids().collect::<Vec<_>>(), vec![1, 2]);
+    let payload = graph.get_graph_payload(1).unwrap();
+    assert_eq!(payload.subgraph_vertices, vec![1, 2]);
+    assert_eq!(payload.subgraph_edges, vec![1]);
+}
+
+#[test]
 fn graph_set_nodes_preserve_the_graph_carrier_and_merge_subgraphs() {
     let engine = fixture();
     let driver = EngineDriver::new(&engine, "docs", &[]);
@@ -551,6 +585,199 @@ fn similarity_and_cross_paradigm_joins_execute_physically() {
             .len(),
         5
     );
+}
+
+fn assert_operator_join_result(engine: &Engine, name: &str, sql: &str, expected_rows: usize) {
+    let result = engine.sql(sql, &[]).unwrap_or_else(|error| {
+        panic!("{name} SQL lowering failed: {error}");
+    });
+    assert_eq!(result.rows.len(), expected_rows, "{name}");
+    assert!(result.rows.iter().all(|row| {
+        matches!(row.get("left_doc_id"), Some(Value::Int(_)))
+            && matches!(row.get("right_doc_id"), Some(Value::Int(_)))
+    }));
+}
+
+fn explain_plan(engine: &Engine, sql: &str) -> String {
+    engine
+        .sql(&format!("EXPLAIN {sql}"), &[])
+        .unwrap()
+        .rows
+        .iter()
+        .filter_map(|row| match row.get("plan") {
+            Some(Value::Str(line)) => Some(line.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn operator_join_table_functions_lower_and_execute_from_sql() {
+    let engine = fixture();
+    let cases = [
+        (
+            "text_similarity_join",
+            "SELECT left_doc_id, right_doc_id \
+             FROM text_similarity_join(\
+                 'docs',\
+                 text_match(title, 'rust'),\
+                 text_match(title, 'rust'),\
+                 0.2\
+             )",
+            4,
+        ),
+        (
+            "vector_similarity_join",
+            "SELECT left_doc_id, right_doc_id \
+             FROM vector_similarity_join(\
+                 'docs',\
+                 knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                 knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                 0.8\
+             )",
+            5,
+        ),
+        (
+            "graph_join",
+            "SELECT left_doc_id, right_doc_id \
+             FROM graph_join(\
+                 'docs',\
+                 graph_pagerank('social'),\
+                 graph_pagerank('social'),\
+                 'follows',\
+                 'social'\
+             )",
+            2,
+        ),
+        (
+            "hybrid_join",
+            "SELECT left_doc_id, right_doc_id \
+             FROM hybrid_join(\
+                 'docs',\
+                 category = 'A' AND knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                 category = 'A' AND knn_match(embedding, ARRAY[1.0, 0.0], 3)\
+             )",
+            4,
+        ),
+        (
+            "cross_paradigm_join",
+            "SELECT left_doc_id, right_doc_id \
+             FROM cross_paradigm_join(\
+                 'docs',\
+                 graph_pagerank('social'),\
+                 category IS NOT NULL\
+             )",
+            5,
+        ),
+    ];
+
+    for (name, sql, expected_rows) in cases {
+        assert_operator_join_result(&engine, name, sql, expected_rows);
+    }
+}
+
+#[test]
+fn operator_join_table_functions_validate_thresholds() {
+    let engine = fixture();
+    let invalid_threshold = engine
+        .sql(
+            "SELECT left_doc_id \
+             FROM vector_similarity_join(\
+                 'docs',\
+                 knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                 knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                 2.0\
+             )",
+            &[],
+        )
+        .expect_err("out-of-range SQL operator threshold must be rejected");
+    assert!(invalid_threshold
+        .to_string()
+        .contains("must be finite and in [-1, 1]"));
+}
+
+#[test]
+fn operator_join_sources_participate_in_two_way_dpccp() {
+    let engine = fixture();
+    let joined_sql = "SELECT pairs.left_doc_id, d.id \
+                      FROM vector_similarity_join(\
+                          'docs',\
+                          knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                          knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                          0.8\
+                      ) AS pairs \
+                      JOIN docs AS d ON d.id = pairs.left_doc_id";
+    let plan = explain_plan(&engine, joined_sql);
+    assert!(
+        plan.contains("strategy: Hash"),
+        "operator join source must participate in DPccp: {plan}"
+    );
+    let joined = engine.sql(joined_sql, &[]).unwrap();
+    assert_eq!(joined.rows.len(), 5);
+
+    let reverse_joined_sql = "SELECT d.id, pairs.right_doc_id \
+                              FROM docs AS d \
+                              JOIN vector_similarity_join(\
+                                  'docs',\
+                                  knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                                  knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                                  0.8\
+                              ) AS pairs ON d.id = pairs.left_doc_id";
+    let reverse_plan = explain_plan(&engine, reverse_joined_sql);
+    assert!(
+        reverse_plan.contains("strategy: Hash"),
+        "right-side operator join source must participate in DPccp: {reverse_plan}"
+    );
+    let reverse_joined = engine.sql(reverse_joined_sql, &[]).unwrap();
+    assert_eq!(reverse_joined.rows.len(), 5);
+}
+
+#[test]
+fn operator_join_sources_participate_in_three_way_dpccp() {
+    let engine = fixture();
+    engine
+        .sql(
+            "CREATE TABLE join_groups (id INTEGER PRIMARY KEY, category TEXT)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO join_groups (id, category) VALUES \
+             (1, 'A'), (2, 'B'), (3, 'A'), (4, 'B'), (5, 'A'), \
+             (6, 'B'), (7, 'A'), (8, 'B'), (9, 'A'), (10, 'B')",
+            &[],
+        )
+        .unwrap();
+    engine.sql("ANALYZE docs", &[]).unwrap();
+    engine.sql("ANALYZE join_groups", &[]).unwrap();
+    let three_way_sql = "SELECT pairs.left_doc_id, d.id, g.id AS group_id \
+                         FROM vector_similarity_join(\
+                             'docs',\
+                             knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                             knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                             0.8\
+                         ) AS pairs \
+                         JOIN docs AS d ON d.id = pairs.left_doc_id \
+                         JOIN join_groups AS g ON g.category = d.category";
+    let three_way_plan = explain_plan(&engine, three_way_sql);
+    let pairs_position = three_way_plan
+        .find("vector_similarity_join")
+        .expect("operator source in three-way plan");
+    let docs_position = three_way_plan
+        .find("name: \"docs\"")
+        .expect("docs source in three-way plan");
+    let groups_position = three_way_plan
+        .find("name: \"join_groups\"")
+        .expect("group source in three-way plan");
+    assert!(
+        pairs_position < groups_position && docs_position < groups_position,
+        "costed operator source and docs must form the first join: {three_way_plan}"
+    );
+    assert_eq!(three_way_plan.matches("strategy: Hash").count(), 2);
+    let three_way = engine.sql(three_way_sql, &[]).unwrap();
+    assert_eq!(three_way.rows.len(), 25);
 }
 
 #[test]

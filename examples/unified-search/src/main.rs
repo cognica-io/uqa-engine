@@ -86,6 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     load(&engine)?;
     show_lexical(&engine)?;
     show_vector_and_fusion(&engine)?;
+    show_typed_operator_joins(&engine)?;
     let seed = show_udf_ranking(&engine)?;
     show_graph_composition(&engine, seed)?;
     Ok(())
@@ -94,10 +95,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Raw BM25 against the calibrated Bayesian posterior.
 fn show_lexical(engine: &Engine) -> Result<(), Box<dyn std::error::Error>> {
     println!("=== 1. Lexical retrieval: raw BM25 versus Bayesian BM25 ===");
-    println!("`text_match` scores with raw BM25. `bayesian_match` returns a");
-    println!("calibrated posterior probability instead of an unbounded score, so");
-    println!("its values are comparable across queries and fusable by the rules");
-    println!("in section 3.\n");
+    println!("`text_match` scores with raw BM25. `bayesian_match` returns a calibrated posterior probability instead of an unbounded score, so its values are comparable across queries and fusable by the rules in section 3.\n");
     let lexical = engine.sql(
         "SELECT id, title, year, _score \
            FROM papers \
@@ -137,10 +135,7 @@ fn show_vector_and_fusion(engine: &Engine) -> Result<(), Box<dyn std::error::Err
     print_rows(&dense, &["id", "title", "venue"]);
 
     println!("\n=== 3. Automatic exact fusion and explicit robust pooling ===");
-    println!("A same-relation text-and-vector conjunction automatically uses exact");
-    println!("signed likelihood-ratio addition with one prior. The explicit aliases");
-    println!("`fuse_bayesian_evidence` and `fuse_log_odds` select that same contract.");
-    println!("The heuristic contract has its own name: `pool_positive_evidence`.\n");
+    println!("A same-relation text-and-vector conjunction automatically uses exact signed likelihood-ratio addition with one prior. The explicit aliases `fuse_bayesian_evidence` and `fuse_log_odds` select that same contract. The heuristic contract has its own name: `pool_positive_evidence`.\n");
     let fused_exact = engine.sql(
         "SELECT id, title, _score \
            FROM papers \
@@ -169,12 +164,51 @@ fn show_vector_and_fusion(engine: &Engine) -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
+/// Materialize generalized identifier pairs from typed operator joins, then
+/// feed one of those tuple sources into an ordinary SQL equijoin.
+fn show_typed_operator_joins(engine: &Engine) -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n=== 4. Typed operator joins produce real SQL tuple sources ===");
+    println!("VectorSimilarityJoin emits (left_doc_id, right_doc_id) pairs. CrossParadigmJoin bridges graph vertex properties to document fields, and DPccp can place that typed source inside a larger SQL join.\n");
+    let vector_pairs = engine.sql(
+        "SELECT pairs.left_doc_id AS left_id, \
+                pairs.right_doc_id AS right_id, pairs._score AS score \
+           FROM vector_similarity_join( \
+                    'papers', \
+                    knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 4), \
+                    knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 4), \
+                    0.80 \
+                ) AS pairs \
+          ORDER BY score DESC, left_id, right_id \
+          LIMIT 8",
+        &[],
+    )?;
+    println!("vector similarity pairs:");
+    print_rows(&vector_pairs, &["left_id", "right_id", "score"]);
+
+    let graph_document_pairs = engine.sql(
+        &format!(
+            "SELECT pairs.left_doc_id AS vertex_id, \
+                    pairs.right_doc_id AS paper_id, p.title \
+               FROM cross_paradigm_join( \
+                        'papers', \
+                        graph_pagerank('{GRAPH}'), \
+                        venue IS NOT NULL \
+                    ) AS pairs \
+               JOIN papers AS p ON p.id = pairs.right_doc_id \
+              ORDER BY vertex_id, paper_id"
+        ),
+        &[],
+    )?;
+    println!("\ngraph-to-document pairs joined back to SQL rows:");
+    print_rows(&graph_document_pairs, &["vertex_id", "paper_id", "title"]);
+    Ok(())
+}
+
 /// Blend BM25 with a user-defined recency boost, and return the winning id so
 /// the graph stage can be seeded by an ordinary SQL row.
 fn show_udf_ranking(engine: &Engine) -> Result<i64, Box<dyn std::error::Error>> {
-    println!("\n=== 4. A user-defined function joins the ranking ===");
-    println!("`recency_boost` decays with age; the optimizer may fold it because");
-    println!("it is registered immutable. Final order blends BM25 with the boost.\n");
+    println!("\n=== 5. A user-defined function joins the ranking ===");
+    println!("`recency_boost` decays with age; the optimizer may fold it because it is registered immutable. Final order blends BM25 with the boost.\n");
     let blended = engine.sql(
         "SELECT id, title, year, _score, \
                 _score * recency_boost(year) AS blended \
@@ -203,11 +237,8 @@ fn show_udf_ranking(engine: &Engine) -> Result<i64, Box<dyn std::error::Error>> 
 /// Graph traversal joined to the table, nested as a predicate, and finally
 /// every mechanism combined in a single statement.
 fn show_graph_composition(engine: &Engine, seed: i64) -> Result<(), Box<dyn std::error::Error>> {
-    println!("\n=== 5. Graph traversal, joined to the table in one statement ===");
-    println!("Paper {seed} ranked first, so walk what it cites. `cypher(...)` is a");
-    println!("table function, so the traversal is a relation: declaring its column");
-    println!("`int` lets it join the integer primary key with no cast. That typed");
-    println!("definition list is a UQA-RS extension; Apache AGE requires agtype.\n");
+    println!("\n=== 6. Graph traversal, joined to the table in one statement ===");
+    println!("Paper {seed} ranked first, so walk what it cites. `cypher(...)` is a table function, so the traversal is a relation: declaring its column `int` lets it join the integer primary key with no cast. That typed definition list is a UQA-RS extension; Apache AGE requires agtype.\n");
     let cited = engine.sql(
         &format!(
             "SELECT p.id, p.title, p.venue, p.year, recency_boost(p.year) AS boost \
@@ -224,7 +255,7 @@ fn show_graph_composition(engine: &Engine, seed: i64) -> Result<(), Box<dyn std:
     )?;
     print_rows(&cited, &["id", "title", "venue", "year", "boost"]);
 
-    println!("\n=== 6. Two-hop closure as a subquery predicate ===");
+    println!("\n=== 7. Two-hop closure as a subquery predicate ===");
     println!("The same traversal nests inside an ordinary WHERE clause.\n");
     let reachable = engine.sql(
         &format!(
@@ -241,10 +272,8 @@ fn show_graph_composition(engine: &Engine, seed: i64) -> Result<(), Box<dyn std:
     )?;
     print_rows(&reachable, &["id", "title", "year"]);
 
-    println!("\n=== 7. Everything in one statement ===");
-    println!("Full-text predicate, relational filter, user-defined function in");
-    println!("both the projection and the ORDER BY, and a citation-graph");
-    println!("membership test -- one plan, one pass, one set of row identities.\n");
+    println!("\n=== 8. Everything in one statement ===");
+    println!("Full-text predicate, relational filter, user-defined function in both the projection and the ORDER BY, and a citation-graph membership test -- one plan, one pass, one set of row identities.\n");
     let unified = engine.sql(
         &format!(
             "SELECT id, title, year, \
@@ -305,8 +334,11 @@ fn load(engine: &Engine) -> Result<(), Box<dyn std::error::Error>> {
     // The citation graph is built through the same SQL boundary as everything
     // else; `cypher(...)` is a table function, not a separate API.
     engine.sql(&format!("SELECT create_graph('{GRAPH}') AS ok"), &[])?;
-    for (id, ..) in PAPERS {
-        cypher(engine, &format!("CREATE (n:Paper {{paper_id: {id}}})"))?;
+    for (id, _, _, venue, _, _) in PAPERS {
+        cypher(
+            engine,
+            &format!("CREATE (n:Paper {{paper_id: {id}, venue: '{venue}'}})"),
+        )?;
     }
     for (citing, cited) in CITES {
         cypher(

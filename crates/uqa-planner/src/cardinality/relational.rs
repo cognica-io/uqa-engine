@@ -177,7 +177,43 @@ impl CardinalityEstimator {
             ScalarExpr::Func { name, .. } if name.eq_ignore_ascii_case("like") => {
                 Selectivity(self.like_selectivity).clamp()
             }
+            ScalarExpr::Func { name, args, .. } => {
+                self.scalar_function_selectivity(name, args, stats)
+            }
             ScalarExpr::Literal(Value::Bool(value)) => Selectivity(if *value { 1.0 } else { 0.0 }),
+            _ => Selectivity(self.default_selectivity).clamp(),
+        }
+    }
+
+    fn scalar_function_selectivity(
+        &self,
+        name: &str,
+        args: &[ScalarExpr],
+        stats: &RelationStats,
+    ) -> Selectivity {
+        let lower = name.to_ascii_lowercase();
+        match lower.as_str() {
+            "knn_match" | "calibrated_vector_match" => {
+                args.get(2).and_then(scalar_positive_usize).map_or_else(
+                    || Selectivity(self.default_selectivity).clamp(),
+                    |k| top_k_selectivity(k, stats.row_count),
+                )
+            }
+            "fuse_bayesian_evidence"
+            | "fuse_log_odds"
+            | "pool_positive_evidence"
+            | "attention"
+            | "fuse_attention"
+            | "fuse_multihead"
+            | "learned_fusion"
+            | "fuse_learned" => {
+                let support = args
+                    .iter()
+                    .filter(|signal| !scalar_named_argument(signal))
+                    .map(|signal| self.scalar_selectivity(signal, stats).raw())
+                    .sum::<f64>();
+                Selectivity(support.min(1.0)).clamp()
+            }
             _ => Selectivity(self.default_selectivity).clamp(),
         }
     }
@@ -223,6 +259,28 @@ impl CardinalityEstimator {
             }
         }
     }
+}
+
+fn scalar_positive_usize(expression: &ScalarExpr) -> Option<usize> {
+    let ScalarExpr::Literal(Value::Int(value)) = expression else {
+        return None;
+    };
+    usize::try_from(*value).ok().filter(|value| *value > 0)
+}
+
+fn scalar_named_argument(expression: &ScalarExpr) -> bool {
+    matches!(
+        expression,
+        ScalarExpr::Func { name, args, .. } if name == "__named_arg" && args.len() == 2
+    )
+}
+
+fn top_k_selectivity(k: usize, row_count: u64) -> Selectivity {
+    if row_count == 0 {
+        return Selectivity(0.0);
+    }
+    let rows = u64::try_from(k).unwrap_or(u64::MAX).min(row_count);
+    Selectivity(rows as f64 / row_count as f64).clamp()
 }
 
 fn scalar_column(expression: &ScalarExpr) -> Option<&str> {

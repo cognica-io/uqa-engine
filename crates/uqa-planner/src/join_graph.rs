@@ -26,6 +26,10 @@ pub enum JoinGraphError {
     UnknownRelation { index: usize, relation_count: usize },
     #[error("relation `{name}` has invalid cardinality estimate {rows}; expected a finite non-negative value")]
     InvalidCardinality { name: String, rows: f64 },
+    #[error(
+        "relation `{name}` has invalid access cost {cost}; expected a finite non-negative value"
+    )]
+    InvalidAccessCost { name: String, cost: f64 },
     #[error("join selectivity must be finite and between 0 and 1, got {selectivity}")]
     InvalidSelectivity { selectivity: f64 },
     #[error("duplicate join relation alias `{alias}`")]
@@ -56,6 +60,8 @@ pub struct JoinGraph {
     pub(crate) relations: Vec<String>,
     /// Per-relation row count estimate.
     pub(crate) cardinalities: Vec<f64>,
+    /// Cost of producing each base relation after its local access predicates.
+    pub(crate) access_costs: Vec<f64>,
     /// Connecting edges. Order is irrelevant; the enumerator probes
     /// them by bitmask membership.
     pub(crate) edges: Vec<JoinEdge>,
@@ -67,6 +73,15 @@ impl JoinGraph {
     }
 
     pub fn add_relation(&mut self, name: impl Into<String>, rows: f64) -> JoinGraphResult<usize> {
+        self.add_relation_with_cost(name, rows, rows)
+    }
+
+    pub fn add_relation_with_cost(
+        &mut self,
+        name: impl Into<String>,
+        rows: f64,
+        access_cost: f64,
+    ) -> JoinGraphResult<usize> {
         let idx = self.relations.len();
         let name = name.into();
         if idx >= 64 {
@@ -75,8 +90,15 @@ impl JoinGraph {
         if !rows.is_finite() || rows < 0.0 {
             return Err(JoinGraphError::InvalidCardinality { name, rows });
         }
+        if !access_cost.is_finite() || access_cost < 0.0 {
+            return Err(JoinGraphError::InvalidAccessCost {
+                name,
+                cost: access_cost,
+            });
+        }
         self.relations.push(name);
         self.cardinalities.push(rows);
+        self.access_costs.push(access_cost);
         Ok(idx)
     }
 
@@ -219,6 +241,10 @@ mod tests {
         assert!(matches!(
             graph.add_relation("bad", f64::NAN),
             Err(JoinGraphError::InvalidCardinality { .. })
+        ));
+        assert!(matches!(
+            graph.add_relation_with_cost("bad_cost", 1.0, f64::INFINITY),
+            Err(JoinGraphError::InvalidAccessCost { .. })
         ));
         let left = graph.add_relation("left", 1.0).unwrap();
         let right = graph.add_relation("right", 1.0).unwrap();

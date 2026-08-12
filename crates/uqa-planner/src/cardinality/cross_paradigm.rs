@@ -4,11 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Fusion, retrieval, graph, and cross-paradigm operator heuristics.
+//! Fusion, retrieval, graph, and cross-paradigm cardinality estimators.
 
 use super::{
     CardinalityEstimator, DeepFusionLayer, IndexStats, MultiStageCutoff, OperatorTree,
-    ProbBoolMode, GRAPH_AVG_DEGREE_DEFAULT, JACCARD_JOIN_SELECTIVITY, VECTOR_JOIN_SELECTIVITY,
+    ProbBoolMode, GRAPH_AVG_DEGREE_DEFAULT, JACCARD_JOIN_SELECTIVITY,
 };
 
 impl CardinalityEstimator {
@@ -159,46 +159,46 @@ impl CardinalityEstimator {
                 l * r * JACCARD_JOIN_SELECTIVITY
             }
 
-            OperatorTree::VectorSimilarityJoin { left, right, .. } => {
+            OperatorTree::VectorSimilarityJoin {
+                left,
+                right,
+                threshold,
+            } => {
                 let l = self.estimate_join_side(left, stats, n);
                 let r = self.estimate_join_side(right, stats, n);
-                l * r * VECTOR_JOIN_SELECTIVITY
+                l * r * Self::vector_selectivity(*threshold, stats.dimensions)
             }
 
-            OperatorTree::GraphJoin { left, label, .. } => {
+            OperatorTree::GraphJoin {
+                left, right, label, ..
+            } => {
                 let l = self.estimate_join_side(left, stats, n);
-                let avg_degree = self
-                    .graph_stats
-                    .as_ref()
-                    .map(|gs| gs.avg_out_degree)
-                    .unwrap_or(GRAPH_AVG_DEGREE_DEFAULT);
-                let label_sel = self
-                    .graph_stats
-                    .as_ref()
-                    .map(|gs| gs.label_selectivity(label.as_deref()))
-                    .unwrap_or(1.0);
-                l * avg_degree * label_sel
+                let r = self.estimate_join_side(right, stats, n);
+                let edge_probability = self.graph_stats.as_ref().map_or_else(
+                    || (GRAPH_AVG_DEGREE_DEFAULT / n.max(1.0)).min(1.0),
+                    |gs| {
+                        let vertices = (gs.num_vertices as f64).max(1.0);
+                        (gs.avg_out_degree * gs.label_selectivity(label.as_deref()) / vertices)
+                            .min(1.0)
+                    },
+                );
+                l * r * edge_probability
             }
 
             OperatorTree::HybridJoin { left, right } => {
                 let l = self.estimate_join_side(left, stats, n);
                 let r = self.estimate_join_side(right, stats, n);
                 if n > 0.0 {
-                    (l * r) / n
+                    (l * r) / n * Self::vector_selectivity(0.5, stats.dimensions)
                 } else {
                     0.0
                 }
             }
 
-            OperatorTree::CrossParadigmJoin { left, .. } => {
+            OperatorTree::CrossParadigmJoin { left, right } => {
                 let l = self.estimate_join_side(left, stats, n);
-                let avg_degree = self
-                    .graph_stats
-                    .as_ref()
-                    .map(|gs| gs.avg_out_degree)
-                    .unwrap_or(GRAPH_AVG_DEGREE_DEFAULT);
-                let label_sel = 1.0;
-                l * avg_degree * label_sel
+                let r = self.estimate_join_side(right, stats, n);
+                (l * r) / n.max(1.0)
             }
 
             OperatorTree::ProgressiveFusion { stages, .. } => {

@@ -470,6 +470,27 @@ fn dpccp_accounts_for_single_relation_filter_selectivity() {
 }
 
 #[test]
+fn dpccp_uses_literal_knn_k_for_join_cardinality() {
+    let plan = optimized_with_rows(
+        "SELECT a.id FROM a \
+         JOIN b ON a.id = b.a_id \
+         JOIN c ON b.id = c.b_id \
+         WHERE knn_match(a.embedding, ARRAY[1.0, 0.0], 3)",
+        &[("a", 1_000_000), ("b", 10_000), ("c", 100)],
+    );
+    let source = query_block(&plan).from.as_ref().expect("join source");
+    let SourcePlan::Join { left, right, .. } = source else {
+        panic!("top-level join expected");
+    };
+
+    let knn_pair = BTreeSet::from(["a".to_string(), "b".to_string()]);
+    assert!(
+        source_aliases(left) == knn_pair || source_aliases(right) == knn_pair,
+        "literal KNN k must make a-b the first join: {source:?}"
+    );
+}
+
+#[test]
 fn dpccp_uses_where_equalities_for_comma_join_sources() {
     let plan = optimized_with_rows(
         "SELECT a.id FROM a, b, c \

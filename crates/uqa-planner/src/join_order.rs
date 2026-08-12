@@ -21,9 +21,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::cardinality::ColumnStats;
+use crate::cardinality::{AccessParadigm, ColumnStats};
 use crate::cost_model::{CostEstimator, OperatorKind};
-use crate::join_enumerator::{enumerate_dpccp, JoinPlan};
+use crate::join_enumerator::{enumerate_dpccp_with_cost_estimator, JoinPlan};
 use crate::join_graph::{JoinEdge, JoinGraph, JoinGraphResult};
 
 /// Description of a base relation feeding a join-order search.
@@ -32,6 +32,10 @@ pub struct JoinRelation {
     pub alias: String,
     pub cardinality: f64,
     pub column_stats: BTreeMap<String, ColumnStats>,
+    /// Cost of producing this relation after local access predicates.
+    pub access_cost: f64,
+    /// Physical domain used by the relation-local access path.
+    pub paradigm: AccessParadigm,
     /// Relation reference the engine resolves back to its backing
     /// data (e.g. a table id or scan handle).
     pub source_id: u64,
@@ -119,7 +123,11 @@ impl JoinOrderOptimizer {
                 .first()
                 .ok_or(crate::join_graph::JoinGraphError::EmptyGraph)?;
             let mut validation = JoinGraph::new();
-            validation.add_relation(relation.alias.clone(), relation.cardinality)?;
+            validation.add_relation_with_cost(
+                relation.alias.clone(),
+                relation.cardinality,
+                relation.access_cost,
+            )?;
             let rel = relations.into_iter().next().ok_or(
                 crate::join_graph::JoinGraphError::UnknownRelation {
                     index: 0,
@@ -139,7 +147,11 @@ impl JoinOrderOptimizer {
         let mut graph = JoinGraph::new();
         let mut alias_to_idx: BTreeMap<String, usize> = BTreeMap::new();
         for rel in &relations {
-            let idx = graph.add_relation(rel.alias.clone(), rel.cardinality)?;
+            let idx = graph.add_relation_with_cost(
+                rel.alias.clone(),
+                rel.cardinality,
+                rel.access_cost,
+            )?;
             if alias_to_idx.insert(rel.alias.clone(), idx).is_some() {
                 return Err(crate::join_graph::JoinGraphError::DuplicateAlias {
                     alias: rel.alias.clone(),
@@ -175,7 +187,7 @@ impl JoinOrderOptimizer {
             predicate_lookup.insert((l.min(r), l.max(r)), pred);
         }
 
-        let plan = enumerate_dpccp(&graph);
+        let plan = enumerate_dpccp_with_cost_estimator(&graph, self.cost_estimator.clone());
         let tree = match plan {
             Some(p) => Self::materialize_plan(&p, &graph, &relations, &predicate_lookup)?,
             None => {
@@ -217,14 +229,16 @@ impl JoinOrderOptimizer {
         let l_distinct = relations
             .get(left_idx)
             .and_then(|r| r.column_stats.get(left_field))
-            .map(|s| s.distinct_count.max(1))
-            .unwrap_or(1);
+            .map(|s| s.distinct_count.max(1));
         let r_distinct = relations
             .get(right_idx)
             .and_then(|r| r.column_stats.get(right_field))
-            .map(|s| s.distinct_count.max(1))
-            .unwrap_or(1);
-        1.0 / l_distinct.max(r_distinct) as f64
+            .map(|s| s.distinct_count.max(1));
+        match (l_distinct, r_distinct) {
+            (Some(left), Some(right)) => 1.0 / left.max(right) as f64,
+            (Some(distinct), None) | (None, Some(distinct)) => 1.0 / distinct as f64,
+            (None, None) => crate::CardinalityEstimator::new().default_selectivity,
+        }
     }
 
     fn materialize_plan(
@@ -352,6 +366,8 @@ mod tests {
             alias: alias.into(),
             cardinality: card,
             column_stats: BTreeMap::new(),
+            access_cost: card,
+            paradigm: AccessParadigm::Relational,
             source_id: src,
         }
     }
@@ -370,6 +386,8 @@ mod tests {
             alias: alias.into(),
             cardinality: card,
             column_stats: cs,
+            access_cost: card,
+            paradigm: AccessParadigm::Relational,
             source_id: src,
         }
     }
@@ -454,6 +472,17 @@ mod tests {
         let s = JoinOrderOptimizer::estimate_predicate_selectivity(&relations, 0, 1, "x", "y");
         assert!((s - 0.01).abs() < 1e-9);
         let _ = Value::Int(0);
+    }
+
+    #[test]
+    fn predicate_selectivity_uses_the_configured_fallback_without_statistics() {
+        let relations = vec![rel("a", 1000.0, 1), rel("b", 1000.0, 2)];
+        let selectivity =
+            JoinOrderOptimizer::estimate_predicate_selectivity(&relations, 0, 1, "x", "y");
+        assert_eq!(
+            selectivity,
+            crate::CardinalityEstimator::new().default_selectivity
+        );
     }
 
     #[test]

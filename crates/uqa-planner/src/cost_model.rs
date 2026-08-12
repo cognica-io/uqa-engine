@@ -118,9 +118,9 @@ impl CostEstimator {
         Self { coefficients }
     }
 
-    /// Cost of materialising `rows` rows from `kind`. For join
-    /// operators, `rows` is the input cardinality; the enumerator
-    /// folds the build / probe sides separately and adds the costs.
+    /// Cost of materializing `rows` rows from a unary physical operator.
+    /// Join operators use [`Self::estimate_join`] so their two inputs remain
+    /// explicit.
     pub fn estimate_unary(&self, kind: OperatorKind, rows: f64) -> OperatorCost {
         let c = &self.coefficients;
         let rows = rows.max(0.0);
@@ -233,15 +233,15 @@ impl CostEstimator {
 // Algebraic-tree cost model constants and estimator.
 // ---------------------------------------------------------------
 
+use std::collections::BTreeMap;
+
 use uqa_core::IndexStats;
 use uqa_operators::{DeepFusionLayer, OperatorTree};
 
-use crate::cardinality::GraphStats;
+use crate::cardinality::{ColumnStats, GraphStats};
 
 /// Multiplier for score-producing operators.
 pub const SCORE_OVERHEAD_FACTOR: f64 = 1.1;
-/// Fraction of a scan charged to a selective filter.
-pub const FILTER_SCAN_FRACTION: f64 = 0.1;
 /// Multiplier for grouping overhead.
 pub const GROUP_BY_OVERHEAD_FACTOR: f64 = 1.5;
 /// Fractional cost assigned to vertex aggregation.
@@ -255,6 +255,8 @@ pub const TRAVERSE_FRACTION: f64 = 0.1;
 #[derive(Debug, Clone, Default)]
 pub struct CostModel {
     pub graph_stats: Option<GraphStats>,
+    pub column_stats: BTreeMap<String, ColumnStats>,
+    pub physical_cost: CostEstimator,
 }
 
 impl CostModel {
@@ -264,6 +266,16 @@ impl CostModel {
 
     pub fn with_graph_stats(mut self, stats: GraphStats) -> Self {
         self.graph_stats = Some(stats);
+        self
+    }
+
+    pub fn with_column_stats(mut self, stats: BTreeMap<String, ColumnStats>) -> Self {
+        self.column_stats = stats;
+        self
+    }
+
+    pub fn with_cost_estimator(mut self, estimator: CostEstimator) -> Self {
+        self.physical_cost = estimator;
         self
     }
 
@@ -281,19 +293,20 @@ impl CostModel {
                 }
             }
             OperatorTree::VectorSimilarity { .. } | OperatorTree::KNN { .. } => {
-                let dims = f64::from(stats.dimensions);
+                let dims = f64::from(stats.dimensions.max(1));
                 dims * ((stats.total_docs as f64) + 1.0).log2()
             }
             OperatorTree::CalibratedVectorMatch { .. } => {
-                let dims = f64::from(stats.dimensions);
+                let dims = f64::from(stats.dimensions.max(1));
                 dims * ((stats.total_docs as f64) + 1.0).log2() * SCORE_OVERHEAD_FACTOR
             }
-            OperatorTree::IndexScan { .. } => {
-                // Treat index-scan cost as proportional to the number of
-                // documents covered until index-specific estimates are
-                // available through the operator interface.
-                n * 0.1
-            }
+            OperatorTree::IndexScan { .. } => self
+                .physical_cost
+                .estimate_unary(
+                    OperatorKind::IndexScan,
+                    self.estimated_cardinality(op, stats),
+                )
+                .total(),
             OperatorTree::Score { source, .. } => {
                 self.estimate(source, stats) * SCORE_OVERHEAD_FACTOR
             }
@@ -309,11 +322,22 @@ impl CostModel {
                 postings * SCORE_OVERHEAD_FACTOR
             }
             OperatorTree::Filter { source, .. } => {
-                let mut base = n;
-                if let Some(src) = source.as_deref() {
-                    base = self.estimate(src, stats) + base * FILTER_SCAN_FRACTION;
-                }
-                base
+                let input_rows = source
+                    .as_deref()
+                    .map_or(n, |source| self.estimated_cardinality(source, stats));
+                let input_cost = source.as_deref().map_or_else(
+                    || {
+                        self.physical_cost
+                            .estimate_unary(OperatorKind::TableScan, n)
+                            .total()
+                    },
+                    |source| self.estimate(source, stats),
+                );
+                input_cost
+                    + self
+                        .physical_cost
+                        .estimate_unary(OperatorKind::Filter, input_rows)
+                        .total()
             }
             OperatorTree::Intersect(ops) => {
                 let total: f64 = ops.iter().map(|o| self.estimate(o, stats)).sum();
@@ -423,12 +447,69 @@ impl CostModel {
             OperatorTree::PageRank { .. } => n * 20.0 * 0.1,
             OperatorTree::HITS { .. } => n * 20.0 * 0.2,
             OperatorTree::BetweennessCentrality { .. } => n * n * 0.5,
-            OperatorTree::TextSimilarityJoin { .. } => {
-                2.0 * n * f64::from(stats.dimensions.max(10))
+            OperatorTree::TextSimilarityJoin { left, right, .. } => {
+                let left_rows = self.estimated_cardinality(left, stats);
+                let right_rows = self.estimated_cardinality(right, stats);
+                self.estimate(left, stats)
+                    + self.estimate(right, stats)
+                    + self
+                        .physical_cost
+                        .estimate_join(OperatorKind::NestedLoopJoin, left_rows, right_rows)
+                        .total()
             }
-            OperatorTree::VectorSimilarityJoin { .. } => n * n * f64::from(stats.dimensions.max(1)),
-            OperatorTree::GraphJoin { .. } | OperatorTree::CrossParadigmJoin { .. } => n * 10.0,
-            OperatorTree::HybridJoin { .. } => n + n * f64::from(stats.dimensions.max(1)),
+            OperatorTree::VectorSimilarityJoin { left, right, .. } => {
+                let left_rows = self.estimated_cardinality(left, stats);
+                let right_rows = self.estimated_cardinality(right, stats);
+                self.estimate(left, stats)
+                    + self.estimate(right, stats)
+                    + self
+                        .physical_cost
+                        .estimate_join(OperatorKind::NestedLoopJoin, left_rows, right_rows)
+                        .total()
+                        * f64::from(stats.dimensions.max(1))
+            }
+            OperatorTree::GraphJoin {
+                left, right, label, ..
+            } => {
+                let left_rows = self.estimated_cardinality(left, stats);
+                let right_rows = self.estimated_cardinality(right, stats);
+                let candidate_edges = self.graph_stats.as_ref().map_or(left_rows, |graph| {
+                    left_rows * graph.avg_out_degree * graph.label_selectivity(label.as_deref())
+                });
+                self.estimate(left, stats)
+                    + self.estimate(right, stats)
+                    + candidate_edges
+                    + self
+                        .physical_cost
+                        .estimate_join(OperatorKind::HashJoinInner, candidate_edges, right_rows)
+                        .total()
+            }
+            OperatorTree::CrossParadigmJoin { left, right } => {
+                let left_rows = self.estimated_cardinality(left, stats);
+                let right_rows = self.estimated_cardinality(right, stats);
+                self.estimate(left, stats)
+                    + self.estimate(right, stats)
+                    + self
+                        .physical_cost
+                        .estimate_join(OperatorKind::HashJoinInner, left_rows, right_rows)
+                        .total()
+            }
+            OperatorTree::HybridJoin { left, right } => {
+                let left_rows = self.estimated_cardinality(left, stats);
+                let right_rows = self.estimated_cardinality(right, stats);
+                let equality_candidates = (left_rows * right_rows) / n.max(1.0);
+                self.estimate(left, stats)
+                    + self.estimate(right, stats)
+                    + self
+                        .physical_cost
+                        .estimate_join(OperatorKind::HashJoinInner, left_rows, right_rows)
+                        .total()
+                    + self
+                        .physical_cost
+                        .estimate_join(OperatorKind::NestedLoopJoin, equality_candidates, 1.0)
+                        .total()
+                        * f64::from(stats.dimensions.max(1))
+            }
             OperatorTree::ProgressiveFusion { stages, .. } => {
                 stages.last().map(|s| s.k as f64).unwrap_or(n)
             }
@@ -466,6 +547,15 @@ impl CostModel {
             }
         }
         cost.max(n * 0.1)
+    }
+
+    fn estimated_cardinality(&self, op: &OperatorTree, stats: &IndexStats) -> f64 {
+        let mut estimator =
+            crate::CardinalityEstimator::new().with_column_stats(self.column_stats.clone());
+        if let Some(graph_stats) = self.graph_stats.clone() {
+            estimator = estimator.with_graph_stats(graph_stats);
+        }
+        estimator.estimate(op, stats)
     }
 }
 
@@ -529,5 +619,37 @@ mod tests {
         let cost = est.estimate_unary(OperatorKind::Sort, 10_000.0);
         assert!(cost.cpu > 0.0);
         assert!(cost.memory > 0.0);
+    }
+
+    #[test]
+    fn operator_similarity_join_uses_the_physical_cost_estimator() {
+        let left = OperatorTree::KNN {
+            query_vector: vec![1.0, 0.0],
+            k: 10,
+            field: "embedding".into(),
+        };
+        let right = OperatorTree::KNN {
+            query_vector: vec![1.0, 0.0],
+            k: 20,
+            field: "embedding".into(),
+        };
+        let join = OperatorTree::TextSimilarityJoin {
+            left: Box::new(left.clone()),
+            right: Box::new(right.clone()),
+            threshold: 0.5,
+        };
+        let mut stats = IndexStats::new(100);
+        stats.dimensions = 2;
+        let coefficients = CostCoefficients {
+            nestedloop_per_pair: 2.0,
+            ..CostCoefficients::default()
+        };
+        let model = CostModel::new().with_cost_estimator(CostEstimator::new(coefficients));
+        let child_cost = model.estimate(&left, &stats) + model.estimate(&right, &stats);
+
+        assert_eq!(
+            model.estimate(&join, &stats),
+            child_cost + 10.0 * 20.0 * 2.0
+        );
     }
 }

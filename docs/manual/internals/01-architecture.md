@@ -124,20 +124,29 @@ The reverse direction cannot reconstruct positions, scores, or fields. Optimizer
 ## Composition boundary
 
 ```mermaid
-flowchart LR
+flowchart TD
     A[SQL or typed request] --> B[uqa-sql AST]
     B --> C[UnifiedPlan]
     C --> D[Plan-native optimizer]
-    D --> E[UnifiedPlanExecutor]
-    E --> F[Relational access]
-    E --> G[Hybrid candidates and residual]
-    E --> H[OperatorTree]
-    F --> I[SQL result boundary]
-    G --> I
-    H --> I
+    D --> E[Relational query block]
+    E --> F[DPccp inner-join region]
+    F --> G[Table relation atom]
+    G --> H[Relation-local OperatorTree access]
+    F --> I[Aliased operator-join source]
+    I --> J[Generalized tuple rows]
+    E --> K[Single-source access path]
+    K --> L[Relational rows]
+    K --> M[Hybrid candidates and residual]
+    K --> H
+    D --> N[UnifiedPlanExecutor]
+    H --> N
+    J --> N
+    L --> N
+    M --> N
+    N --> O[SQL result boundary]
 ```
 
-`UnifiedPlan` is the shared executable boundary. It can own query blocks, command plans, CTEs, mutations, prepared bodies, and explained bodies. `OperatorTree` remains a specialized child algebra for posting, graph, scoring, fusion, and model access; it does not absorb arbitrary SQL row semantics.
+`UnifiedPlan` is the shared executable boundary. It can own query blocks, command plans, CTEs, mutations, prepared bodies, and explained bodies. `OperatorTree` remains a specialized child algebra for posting, graph, scoring, fusion, model access, and tuple-producing operator joins; it does not absorb arbitrary SQL row semantics. A joined query can use an optimized `OperatorTree` as a table relation's local access path or use an aliased operator join as a costed relation source, so these are nested planning domains rather than mutually exclusive top-level planners.
 
 ## Source entry points
 

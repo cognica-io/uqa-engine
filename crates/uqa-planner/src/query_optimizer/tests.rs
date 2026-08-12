@@ -255,3 +255,39 @@ fn query_local_index_candidate_enables_physical_scan_rewrite() {
         } if index_name == "docs_year_idx" && field == "year"
     ));
 }
+
+#[test]
+fn filter_over_traverse_becomes_a_vertex_predicate() {
+    let optimized = QueryOptimizer::new().optimize(OperatorTree::Filter {
+        field: "year".into(),
+        predicate: Predicate::Equals(uqa_core::Value::Int(2024)),
+        source: Some(Box::new(OperatorTree::Traverse {
+            start_vertex: 1,
+            graph: "citations".into(),
+            label: Some("cites".into()),
+            max_hops: 3,
+            vertex_predicate: None,
+        })),
+    });
+
+    let OperatorTree::Traverse {
+        vertex_predicate: Some(predicate),
+        ..
+    } = optimized
+    else {
+        panic!("expected Filter(Traverse) to become Traverse(vertex_predicate)");
+    };
+    let mut matching = uqa_core::Vertex::new(1, "Paper");
+    matching
+        .properties
+        .insert("year".into(), uqa_core::Value::Int(2024));
+    let mut rejected = uqa_core::Vertex::new(2, "Paper");
+    rejected
+        .properties
+        .insert("year".into(), uqa_core::Value::Int(2023));
+    let missing = uqa_core::Vertex::new(3, "Paper");
+
+    assert!(predicate(&matching));
+    assert!(!predicate(&rejected));
+    assert!(!predicate(&missing));
+}

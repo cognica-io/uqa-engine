@@ -157,6 +157,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 The API applies the same exact single-prior log-odds contract as automatic SQL. It always validates the vector field, dimension, index state, and finite query values, even when the vector candidate pool is empty. Applications that deliberately want gated robust ranking call `robust_hybrid_search` with `RobustHybridSearchParams` instead.
 
-## 9. Evaluate before tuning
+## 9. Join retrieval supports without leaving SQL
+
+`vector_similarity_join` treats two retrieval expressions as pair-producing operands. It retains each pair as `(left_doc_id, right_doc_id)`, computes cosine similarity from the vector field named by each operand, and exposes the similarity as `_score`.
+
+```sql
+SELECT pairs.left_doc_id,
+       pairs.right_doc_id,
+       pairs._score,
+       left_passage.title AS left_title
+FROM vector_similarity_join(
+    'passages',
+    knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 6),
+    knn_match(embedding, ARRAY[0.75, 0.05, 0.65, 0.00], 6),
+    0.80
+) AS pairs
+JOIN passages AS left_passage
+  ON left_passage.id = pairs.left_doc_id
+ORDER BY pairs._score DESC,
+         pairs.left_doc_id,
+         pairs.right_doc_id;
+```
+
+The table-function source is lowered to `VectorSimilarityJoin`, costed through the same operator estimator used by execution, and then treated as an aliased relation by DPccp. The ordinary table remains a relational atom, while its local retrieval predicates can independently use `OperatorTree`; the two planning domains are nested in one `UnifiedPlan` rather than selected as mutually exclusive query modes.
+
+Use `text_similarity_join`, `graph_join`, `hybrid_join`, or `cross_paradigm_join` when the pair predicate is respectively token overlap, graph connectivity, structured equality plus vector similarity, or graph-property to document-field equality. See [Retrieval SQL](../sql/06-retrieval.md#operator-joins-as-sql-sources) for exact signatures and output columns.
+
+## 10. Evaluate before tuning
 
 Measure exact recall, latency distributions, index build time, storage size, and relevance metrics on held out queries. Tune HNSW `ef_search` or IVF `probes` only against those measurements, and re-evaluate after data distribution changes.

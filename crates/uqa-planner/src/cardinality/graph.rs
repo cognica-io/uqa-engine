@@ -7,8 +7,8 @@
 //! Graph traversal, pattern, RPQ, temporal, and sampling estimates.
 
 use super::{
-    rpq_label_count, BTreeMap, CardinalityEstimator, GraphPatternIR, GraphStats, GraphStoreSampler,
-    IndexStats, OperatorTree, TemporalFilterIR, XorShiftRng,
+    rpq_label_count, Arc, BTreeMap, CardinalityEstimator, GraphPatternIR, GraphStats,
+    GraphStoreSampler, IndexStats, OperatorTree, TemporalFilterIR, VertexConstraint, XorShiftRng,
 };
 
 impl CardinalityEstimator {
@@ -145,19 +145,19 @@ impl CardinalityEstimator {
         n.min(n.powf(1.5))
     }
 
-    /// Estimate vector selectivity from a similarity threshold (Paper 1,
-    /// Section 5.3).
-    pub(super) fn vector_selectivity(threshold: f32) -> f64 {
-        if threshold >= 0.9 {
-            return 0.01;
+    /// Estimate the spherical-cap tail probability for cosine similarity.
+    /// Random unit vectors in `dimensions` coordinates have an asymptotically
+    /// normal dot product with variance `1 / dimensions`.
+    pub(super) fn vector_selectivity(threshold: f64, dimensions: u32) -> f64 {
+        if threshold <= -1.0 {
+            return 1.0;
         }
-        if threshold >= 0.7 {
-            return 0.05;
+        if threshold >= 1.0 {
+            return 0.0;
         }
-        if threshold >= 0.5 {
-            return 0.1;
-        }
-        0.2
+        let cosine = threshold.clamp(-1.0, 1.0);
+        let z = cosine * f64::from(dimensions.max(1)).sqrt();
+        normal_survival(z).clamp(0.0, 1.0)
     }
 
     pub(super) fn estimate_join_side(
@@ -193,22 +193,19 @@ impl CardinalityEstimator {
 
         let n = vertex_ids.len();
         let rng = XorShiftRng::new(0xDEAD_BEEF);
-        let mut successes = 0_usize;
+        let mut weighted_matches = 0.0;
 
         for _ in 0..sample_size {
             let start = vertex_ids[rng.bounded(n)?];
             let vp0 = &pattern.vertex_patterns[0];
-            if !vp0
-                .constraints
-                .iter()
-                .all(|c| store.vertex_satisfies(start, c))
-            {
+            if !sample_vertex_matches(store.as_ref(), start, vp0) {
                 continue;
             }
 
             let mut assignment: BTreeMap<String, u64> = BTreeMap::new();
             assignment.insert(vp0.variable.clone(), start);
             let mut valid = true;
+            let mut path_weight = 1.0;
 
             for vi in 1..k {
                 let vp = &pattern.vertex_patterns[vi];
@@ -228,15 +225,12 @@ impl CardinalityEstimator {
                                 continue;
                             }
                         }
-                        if vp
-                            .constraints
-                            .iter()
-                            .all(|c| store.vertex_satisfies(edge.target_id, c))
-                        {
+                        if sample_vertex_matches(store.as_ref(), edge.target_id, vp) {
                             candidates.push(edge.target_id);
                         }
                     }
                     if !candidates.is_empty() {
+                        path_weight *= candidates.len() as f64;
                         let picked = candidates[rng.bounded(candidates.len())?];
                         assignment.insert(vp.variable.clone(), picked);
                         neighbor_found = true;
@@ -250,12 +244,12 @@ impl CardinalityEstimator {
             }
 
             if valid && assignment.len() == k {
-                successes += 1;
+                weighted_matches += path_weight;
             }
         }
 
-        let success_rate = successes as f64 / sample_size as f64;
-        Some(success_rate * (n as f64).powf(k as f64))
+        let mean_matches_per_start = weighted_matches / sample_size as f64;
+        Some(mean_matches_per_start * n as f64)
     }
 
     fn temporal_selectivity(&self, filter: &TemporalFilterIR, gs: &GraphStats) -> f64 {
@@ -274,5 +268,40 @@ impl CardinalityEstimator {
             return (span / total_range).min(1.0);
         }
         1.0
+    }
+}
+
+fn sample_vertex_matches(
+    store: &dyn GraphStoreSampler,
+    vertex_id: u64,
+    pattern: &uqa_operators::VertexPatternIR,
+) -> bool {
+    if let Some(label) = pattern.label.as_ref() {
+        let expected = label.clone();
+        let label_constraint: VertexConstraint = Arc::new(move |vertex| vertex.label == expected);
+        if !store.vertex_satisfies(vertex_id, &label_constraint) {
+            return false;
+        }
+    }
+    pattern
+        .constraints
+        .iter()
+        .all(|constraint| store.vertex_satisfies(vertex_id, constraint))
+}
+
+/// Abramowitz-Stegun 26.2.17 approximation of the standard-normal survival
+/// function. The maximum absolute error is below 7.5e-8.
+fn normal_survival(z: f64) -> f64 {
+    let x = z.abs();
+    let t = 1.0 / (1.0 + 0.231_641_9 * x);
+    let polynomial = t
+        * (0.319_381_530
+            + t * (-0.356_563_782
+                + t * (1.781_477_937 + t * (-1.821_255_978 + t * 1.330_274_429))));
+    let upper = (-0.5 * x * x).exp() * polynomial / (2.0 * std::f64::consts::PI).sqrt();
+    if z >= 0.0 {
+        upper
+    } else {
+        1.0 - upper
     }
 }

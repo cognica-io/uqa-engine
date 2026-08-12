@@ -8,6 +8,8 @@
 
 use uqa_operators::OperatorTree;
 
+use crate::OperatorKind;
+
 use super::{tree_map::map_operator_children, QueryOptimizer};
 
 impl QueryOptimizer {
@@ -51,7 +53,11 @@ impl QueryOptimizer {
                 // Prefer the index only when its `scan_cost(predicate)` beats
                 // a full scan; otherwise keep the filter over the original
                 // operator.
-                let full_scan_cost = self.row_count.unwrap_or(0) as f64;
+                let full_scan_cost = self
+                    .cost_model
+                    .physical_cost
+                    .estimate_unary(OperatorKind::TableScan, self.index_stats.total_docs as f64)
+                    .total();
                 if scan_cost < full_scan_cost {
                     return OperatorTree::IndexScan {
                         index_name: name,

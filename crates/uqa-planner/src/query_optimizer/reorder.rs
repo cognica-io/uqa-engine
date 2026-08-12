@@ -79,10 +79,9 @@ impl QueryOptimizer {
             // `Score`, `Traverse`, `RegularPathQuery`, fusion / hybrid
             // / cross-paradigm join nodes, and any operator with a
             // dedicated formula in `cost_model`.
-            let cost_stats = uqa_core::IndexStats::new(self.row_count.unwrap_or(1_000));
             children.sort_by(|a, b| {
-                let ca = self.cost_model.estimate(a, &cost_stats);
-                let cb = self.cost_model.estimate(b, &cost_stats);
+                let ca = self.cost_model.estimate(a, &self.index_stats);
+                let cb = self.cost_model.estimate(b, &self.index_stats);
                 ca.total_cmp(&cb)
             });
             return OperatorTree::Intersect(children);
@@ -169,7 +168,7 @@ impl QueryOptimizer {
     }
 
     pub(super) fn graph_aware_signal_cost(&self, signal: &OperatorTree) -> f64 {
-        let base = self.estimator.estimate_operator(signal, self.row_count);
+        let base = self.estimator.estimate(signal, &self.index_stats);
         if self.graph_stats.is_some()
             && matches!(
                 signal,

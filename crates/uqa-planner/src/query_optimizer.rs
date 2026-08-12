@@ -34,7 +34,7 @@
 //! 10. `apply_index_scan` -- substitute leaf Filter with IndexScan
 //!     when a covering index is registered and cheaper.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 mod algebra;
 mod graph_rewrites;
@@ -42,12 +42,12 @@ mod index_selection;
 mod reorder;
 mod tree_map;
 
-use uqa_core::Predicate;
+use uqa_core::{IndexStats, Predicate};
 use uqa_operators::OperatorTree;
 use uqa_storage::IndexManager;
 
-use crate::cardinality::{CardinalityEstimator, GraphStats};
-use crate::cost_model::{CostEstimator, CostModel};
+use crate::cardinality::{CardinalityEstimator, ColumnStats, GraphStats, GraphStoreSampler};
+use crate::cost_model::CostModel;
 
 /// Fluent configuration for the optimizer pipeline. Lets callers
 /// disable individual stages for testing without poking at private
@@ -101,13 +101,13 @@ impl Default for OptimizerConfig {
 /// Operator-tree query optimizer.
 pub struct QueryOptimizer {
     pub estimator: CardinalityEstimator,
-    pub cost_estimator: CostEstimator,
     pub cost_model: CostModel,
     pub graph_stats: Option<GraphStats>,
     pub index_manager: Option<Arc<IndexManager>>,
     pub index_candidates: Vec<IndexScanCandidate>,
     pub table_name: Option<String>,
     pub row_count: Option<u64>,
+    pub index_stats: IndexStats,
     pub config: OptimizerConfig,
 }
 
@@ -115,13 +115,13 @@ impl QueryOptimizer {
     pub fn new() -> Self {
         Self {
             estimator: CardinalityEstimator::new(),
-            cost_estimator: CostEstimator::default(),
             cost_model: CostModel::new(),
             graph_stats: None,
             index_manager: None,
             index_candidates: Vec::new(),
             table_name: None,
             row_count: None,
+            index_stats: IndexStats::new(1_000),
             config: OptimizerConfig::default(),
         }
     }
@@ -145,14 +145,32 @@ impl QueryOptimizer {
     }
 
     pub fn with_graph_stats(mut self, gs: GraphStats) -> Self {
-        self.cost_model = CostModel::new().with_graph_stats(gs.clone());
+        self.cost_model = std::mem::take(&mut self.cost_model).with_graph_stats(gs.clone());
         self.estimator = std::mem::take(&mut self.estimator).with_graph_stats(gs.clone());
         self.graph_stats = Some(gs);
         self
     }
 
+    pub fn with_graph_store(mut self, store: Arc<dyn GraphStoreSampler>) -> Self {
+        self.estimator = std::mem::take(&mut self.estimator).with_graph_store(store);
+        self
+    }
+
     pub fn with_row_count(mut self, n: u64) -> Self {
         self.row_count = Some(n);
+        self.index_stats.total_docs = n;
+        self
+    }
+
+    pub fn with_index_stats(mut self, stats: IndexStats) -> Self {
+        self.row_count = Some(stats.total_docs);
+        self.index_stats = stats;
+        self
+    }
+
+    pub fn with_column_stats(mut self, stats: BTreeMap<String, ColumnStats>) -> Self {
+        self.cost_model = std::mem::take(&mut self.cost_model).with_column_stats(stats.clone());
+        self.estimator = std::mem::take(&mut self.estimator).with_column_stats(stats);
         self
     }
 

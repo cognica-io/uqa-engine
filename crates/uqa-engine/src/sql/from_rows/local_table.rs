@@ -478,7 +478,14 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             let left_filter_ref = left_filters.as_ref().or(filters);
             let left_operator =
                 build_join_operator_with_ctes(engine, left, params, ctes, prune, left_filter_ref)?;
-            let implicit_lateral_function = matches!(right.as_ref(), SourcePlan::Function { .. });
+            let implicit_lateral_function = match right.as_ref() {
+                SourcePlan::Function { name, .. } => {
+                    let identity = name.to_ascii_lowercase();
+                    let lower = crate::sql::builtin_function_dispatch_name(&identity);
+                    !crate::operator_tree_bridge::is_operator_join_table_function(&lower)
+                }
+                _ => false,
+            };
             if *lateral || implicit_lateral_function {
                 if !matches!(strategy, JoinExecutionStrategy::Auto) {
                     return Err(SQLError::Internal(

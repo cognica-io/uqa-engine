@@ -63,13 +63,14 @@ pub mod text_top_k;
 pub mod unified_plan;
 
 pub use cardinality::{
-    column_entropy, entropy_cardinality_lower_bound, mutual_information_estimate,
-    CardinalityEstimator, ColumnStats, EdgeSample, GraphStats, GraphStoreSampler, RelationStats,
-    Selectivity, GRAPH_AVG_DEGREE_DEFAULT, JACCARD_JOIN_SELECTIVITY, VECTOR_JOIN_SELECTIVITY,
+    column_entropy, entropy_cardinality_lower_bound, mutual_information_estimate, AccessParadigm,
+    CardinalityEstimator, ColumnStats, EdgeSample, GraphStats, GraphStoreSampler,
+    LocalAccessEstimate, RelationStats, Selectivity, GRAPH_AVG_DEGREE_DEFAULT,
+    JACCARD_JOIN_SELECTIVITY,
 };
 pub use cost_model::{CostEstimator, OperatorCost, OperatorKind};
 pub use executor::{ExecutionStats, OperatorOutput, OperatorTreeDriver, PlanExecutor};
-pub use join_enumerator::{enumerate_dpccp, JoinPlan};
+pub use join_enumerator::{enumerate_dpccp, enumerate_dpccp_with_cost_estimator, JoinPlan};
 pub use join_graph::{JoinEdge, JoinGraph, JoinGraphError, JoinGraphResult};
 pub use join_order::{
     JoinAlgorithm, JoinCondition, JoinOrderOptimizer, JoinOrderResult, JoinOrderTree,

@@ -9,6 +9,111 @@ use super::{volatility, Engine, SQLError, SQLParam, SQLResult, Statement, Unifie
 #[cfg(test)]
 use super::{compile, Arc};
 
+struct EngineSourceStatistics<'a> {
+    engine: &'a Engine,
+    error: &'a std::cell::RefCell<Option<SQLError>>,
+}
+
+impl EngineSourceStatistics<'_> {
+    fn record_error(&self, error: SQLError) {
+        if self.error.borrow().is_none() {
+            *self.error.borrow_mut() = Some(error);
+        }
+    }
+}
+
+impl uqa_planner::SourceStatistics for EngineSourceStatistics<'_> {
+    fn relation_statistics(&self, table: &str) -> Option<uqa_planner::RelationStats> {
+        match self.engine.try_table(table) {
+            Ok(None) => None,
+            Ok(Some(_)) => match (
+                self.engine.table_doc_count(table),
+                self.engine.try_column_stats(table),
+            ) {
+                (Ok(row_count), Ok(columns)) => {
+                    Some(uqa_planner::RelationStats { row_count, columns })
+                }
+                (Err(error), _) => {
+                    self.record_error(error);
+                    None
+                }
+                (_, Err(error)) => {
+                    self.record_error(SQLError::Internal(format!(
+                        "read optimizer statistics for `{table}`: {error}"
+                    )));
+                    None
+                }
+            },
+            Err(error) => {
+                self.record_error(SQLError::Internal(format!(
+                    "resolve optimizer storage table `{table}`: {error}"
+                )));
+                None
+            }
+        }
+    }
+
+    fn source_access_estimate(
+        &self,
+        source: &uqa_planner::SourcePlan,
+    ) -> Option<uqa_planner::LocalAccessEstimate> {
+        let uqa_planner::SourcePlan::Function { name, args, .. } = source else {
+            return None;
+        };
+        if args
+            .iter()
+            .any(uqa_execution::ScalarExpr::contains_parameter)
+        {
+            return None;
+        }
+        let identity = name.to_ascii_lowercase();
+        let lower = crate::sql::builtin_function_dispatch_name(&identity);
+        if !crate::operator_tree_bridge::is_operator_join_table_function(&lower) {
+            return None;
+        }
+        match crate::operator_tree_bridge::estimate_operator_join_table_function(
+            self.engine,
+            &lower,
+            args,
+            &[],
+        ) {
+            Ok(estimate) => Some(estimate),
+            Err(error) => {
+                self.record_error(error);
+                None
+            }
+        }
+    }
+
+    fn local_access_estimate(
+        &self,
+        table: &str,
+        predicate: &uqa_execution::ScalarExpr,
+    ) -> Option<uqa_planner::LocalAccessEstimate> {
+        if predicate.contains_parameter() {
+            return None;
+        }
+        match self.engine.try_table(table) {
+            Ok(Some(_)) => {}
+            Ok(None) => return None,
+            Err(error) => {
+                self.record_error(SQLError::Internal(format!(
+                    "resolve optimizer storage table `{table}`: {error}"
+                )));
+                return None;
+            }
+        }
+        match crate::operator_tree_bridge::estimate_local_access(self.engine, table, predicate, &[])
+        {
+            Ok(estimate) => estimate,
+            Err(error) => {
+                self.record_error(error);
+                None
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 pub(super) fn compile_logical_plans(
     engine: &Engine,
@@ -53,37 +158,15 @@ pub(crate) fn optimize_engine_plan(
         optimizer_config.enable_filter_pushdown = false;
         optimizer_config.enable_join_reordering = false;
     }
+    let statistics = EngineSourceStatistics {
+        engine,
+        error: &callback_error,
+    };
     let optimized = uqa_planner::optimizer::optimize_with_aggregates_and_statistics(
         plan,
         &optimizer_config,
         &|name: &str| engine.has_registered_aggregate_function(name),
-        &|table: &str| match engine.try_has_table(table) {
-            Ok(false) => None,
-            Ok(true) => match (
-                engine.table_doc_count(table),
-                engine.try_column_stats(table),
-            ) {
-                (Ok(row_count), Ok(columns)) => {
-                    Some(uqa_planner::RelationStats { row_count, columns })
-                }
-                (Err(error), _) => {
-                    *callback_error.borrow_mut() = Some(error);
-                    None
-                }
-                (_, Err(error)) => {
-                    *callback_error.borrow_mut() = Some(SQLError::Internal(format!(
-                        "read optimizer statistics for `{table}`: {error}"
-                    )));
-                    None
-                }
-            },
-            Err(error) => {
-                *callback_error.borrow_mut() = Some(SQLError::Internal(format!(
-                    "resolve optimizer relation `{table}`: {error}"
-                )));
-                None
-            }
-        },
+        &statistics,
     );
     if let Some(error) = callback_error.into_inner() {
         return Err(error);
