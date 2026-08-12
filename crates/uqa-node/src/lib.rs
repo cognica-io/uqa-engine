@@ -9,9 +9,8 @@
 //! Heavy operations (SQL, searches, calibration) are exposed as
 //! Promise-returning methods executed on the libuv thread pool so the
 //! JavaScript event loop never blocks; `*Sync` variants exist for
-//! scripts and tests. User-defined SQL functions are not yet exposed:
-//! calling back into JavaScript from engine execution threads needs a
-//! threadsafe-function design that is planned separately.
+//! scripts and tests. SQL callbacks return to the owning JavaScript
+//! thread through Node-API threadsafe functions.
 
 // The Node-API value-conversion traits (`ToNapiValue` / `FromNapiValue`)
 // are `unsafe fn`s over raw `napi_env` pointers; implementing them is
@@ -40,6 +39,7 @@ use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions};
 const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 
 mod api;
+mod callbacks;
 mod engine;
 mod input;
 mod results;
@@ -47,6 +47,7 @@ mod tasks;
 mod value;
 
 pub use api::*;
+pub use callbacks::{JSFunctionOptions, JSFunctionVolatility};
 pub use engine::Engine;
 pub use results::{
     CalibrationReport, CompressionOptions, MigrationReport, ReliabilityBin, SQLNotice, SQLParam,

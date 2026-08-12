@@ -1,6 +1,6 @@
 [package]
 name = "example-extensibility"
-description = "Custom Rust scalar and aggregate functions, and PL/pgSQL routines"
+description = "Custom Rust scalar, table, and aggregate SQL callbacks"
 publish = false
 version.workspace = true
 edition.workspace = true

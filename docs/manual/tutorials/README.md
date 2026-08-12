@@ -20,6 +20,6 @@ flowchart LR
 | [4. Vector and hybrid search](04-vector-and-hybrid-search.md) | Compare exact, HNSW, and IVF KNN, then fuse text and vector evidence |
 | [5. Graphs and Cypher](05-graphs-and-cypher.md) | Create a named graph and join a traversal to relational data |
 | [6. Persistence and transactions](06-persistence-and-transactions.md) | Reopen durable state, use savepoints, batches, and independent sessions |
-| [7. Custom functions](07-custom-functions.md) | Register safe Rust and Python callbacks for SQL |
+| [7. Custom functions](07-custom-functions.md) | Register safe Rust, Python, Node.js, and browser WASM callbacks for SQL |
 
 Run shell commands from the workspace root. The tutorials use small deterministic data sets so results can be inspected directly. Production index and ranking parameters must be evaluated with production-shaped data.

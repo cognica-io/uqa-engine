@@ -117,7 +117,7 @@ cargo run -p uqa-engine --example sqlcipher_encrypted_catalog
 cargo run -p uqa-engine --example compressed_encrypted_catalog
 ```
 
-The workspace also contains complete programs under `examples/` for vector KNN, Cypher, unified retrieval, storage, extensions, and bindings.
+The [example matrix](../../../examples/README.md) provides matching unified-search, vector-KNN, graph/Cypher, storage/transaction, and extensibility programs for Rust, Python, Node.js, and Browser WASM.
 
 ## Next steps
 

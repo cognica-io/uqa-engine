@@ -15,6 +15,23 @@ export type JSValue =
 
 export type ParamInput = SQLParam | JSValue;
 
+export type SQLFunctionVolatility = "volatile" | "stable" | "immutable";
+
+export interface SQLFunctionOptions {
+  volatility?: SQLFunctionVolatility;
+  mayMutateEngine?: boolean;
+}
+
+export type SQLTableFunctionRows = JSValue[][] | Array<Record<string, JSValue>>;
+
+export type SQLTableFunctionResult =
+  | { columns: string[]; rows: SQLTableFunctionRows }
+  | [string[], SQLTableFunctionRows];
+
+export type SQLAggregateState =
+  & ({ observe(...args: JSValue[]): unknown } | { step(...args: JSValue[]): unknown })
+  & ({ finish(): JSValue } | { finalize(): JSValue });
+
 export interface SQLResult {
   columns: string[];
   rows: Array<Record<string, JSValue>>;
@@ -90,6 +107,24 @@ export declare class Engine {
 
   sql(query: string, params?: ParamInput[]): Promise<SQLResult>;
   sqlBatch(statements: Array<[string, ParamInput[]]>): Promise<SQLResult[]>;
+  /** Register a synchronous JavaScript scalar callback. Promise results are rejected. */
+  registerScalarFunction(
+    name: string,
+    callback: (...args: JSValue[]) => JSValue,
+    options?: SQLFunctionOptions
+  ): Promise<void>;
+  /** Register a synchronous JavaScript table callback. Promise results are rejected. */
+  registerTableFunction(
+    name: string,
+    callback: (...args: JSValue[]) => SQLTableFunctionResult,
+    options?: SQLFunctionOptions
+  ): Promise<void>;
+  /** Register a factory that creates one synchronous JavaScript state object per SQL group. */
+  registerAggregateFunction(
+    name: string,
+    factory: () => SQLAggregateState,
+    options?: SQLFunctionOptions
+  ): Promise<void>;
   createDefaultTable(name: string, ftsFields: string[]): Promise<void>;
   createVectorField(table: string, field: string, dimensions: number): Promise<boolean>;
   addDocument(table: string, docId: number, document: Record<string, JSValue | bigint>): Promise<void>;

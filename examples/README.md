@@ -1,17 +1,24 @@
 # UQA-RS examples
 
-Each subdirectory is a standalone crate that depends on the workspace the way an external consumer would. Run any of them with `cargo run -p <package>`.
+The example suite is organized by language binding and platform. Every public binding provides the same five scenarios so that users can compare equivalent SQL, data, assertions, and lifecycle behavior without translating from Rust first.
 
-| Example | Package | What it shows |
-| --- | --- | --- |
-| [`unified-search`](unified-search) | `example-unified-search` | The flagship: BM25 and Bayesian BM25, vector KNN, both fusion contracts, a user-defined function, relational filtering, and citation-graph traversal against one dataset in one session |
-| [`vector-knn`](vector-knn) | `example-vector-knn` | `VECTOR(n)` columns, the `knn_match` predicate, and the brute-force, HNSW, and IVF access paths |
-| [`graph-cypher`](graph-cypher) | `example-graph-cypher` | Named graphs driven entirely from SQL through the AGE-compatible `cypher(...)` table function, including joining a traversal against a table |
-| [`storage-transactions`](storage-transactions) | `example-storage-transactions` | redb-backed durability and reopen, plus transactions, savepoints, and session isolation |
-| [`extensibility`](extensibility) | `example-extensibility` | Custom Rust scalar and aggregate functions, and PL/pgSQL routines |
+| Scenario | Rust | Python | Node.js | Browser WASM |
+| --- | --- | --- | --- | --- |
+| Unified search | [`rust/unified-search`](rust/unified-search) | [`python/unified_search.py`](python/unified_search.py) | [`node/unified-search.mjs`](node/unified-search.mjs) | [`browser/unified-search.mjs`](browser/unified-search.mjs) |
+| Vector KNN | [`rust/vector-knn`](rust/vector-knn) | [`python/vector_knn.py`](python/vector_knn.py) | [`node/vector-knn.mjs`](node/vector-knn.mjs) | [`browser/vector-knn.mjs`](browser/vector-knn.mjs) |
+| Graph and Cypher | [`rust/graph-cypher`](rust/graph-cypher) | [`python/graph_cypher.py`](python/graph_cypher.py) | [`node/graph-cypher.mjs`](node/graph-cypher.mjs) | [`browser/graph-cypher.mjs`](browser/graph-cypher.mjs) |
+| Storage and transactions | [`rust/storage-transactions`](rust/storage-transactions) | [`python/storage_transactions.py`](python/storage_transactions.py) | [`node/storage-transactions.mjs`](node/storage-transactions.mjs) | [`browser/storage-transactions.mjs`](browser/storage-transactions.mjs) |
+| Extensibility | [`rust/extensibility`](rust/extensibility) | [`python/extensibility.py`](python/extensibility.py) | [`node/extensibility.mjs`](node/extensibility.mjs) | [`browser/extensibility.mjs`](browser/extensibility.mjs) |
 
-Start with `unified-search` if you want the argument for a unified engine in one file; start with the others if you want one subsystem at a time.
+Start with unified search for the complete relational, full-text, vector, graph, fusion, and host-language UDF story. Use the focused scenarios when learning or verifying one subsystem.
 
-These are separate crates rather than `cargo` examples so that each one declares only the dependencies it actually needs, and so the manifests show exactly what an application must depend on.
+## Run by binding
 
-The engine also ships smaller single-file examples under [`crates/uqa-engine/examples/`](../crates/uqa-engine/examples), including the encrypted-storage variants and the `doomql` demo.
+- Rust: `cargo run -p example-unified-search`, replacing the package name with any entry in [`rust/README.md`](rust/README.md).
+- Python: install a built `uqa` wheel, then run `python3 examples/python/unified_search.py`.
+- Node.js: build `crates/uqa-node`, then run `node examples/node/unified-search.mjs`.
+- Browser WASM: run `bash scripts/build-wasm.sh`, serve the repository root over HTTP, then open `examples/browser/`.
+
+The Node.js and Browser WASM entry points share the binding-neutral JavaScript scenarios in [`javascript/`](javascript). Platform-specific files still own engine construction, persistence, callback registration, and resource cleanup.
+
+The engine also ships smaller single-file Rust examples under [`crates/uqa-engine/examples/`](../crates/uqa-engine/examples), including encrypted-storage variants and the `doomql` demo.

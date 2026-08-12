@@ -8,6 +8,14 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("emscripten") {
         return;
     }
+    let callback_library = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("js")
+        .join("callback-library.js");
+    println!("cargo:rerun-if-changed={}", callback_library.display());
+    println!(
+        "cargo:rustc-link-arg=--js-library={}",
+        callback_library.display()
+    );
     let link_args = [
         // Rust's `panic_unwind` for this target is implemented on the C++ ABI
         // (`__cxa_throw`, `__cxa_begin_catch`, and the `__class_type_info`

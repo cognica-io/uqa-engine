@@ -39,11 +39,15 @@ use uqa_scoring::{BM25Params, CalibrationReport};
 use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions};
 
 mod arguments;
+mod callbacks;
 
 use arguments::{
     binary_label, f32_from_f64, f32_list, opt_f64, opt_i64, opt_str, opt_u64, opt_usize,
     req_f32_list, req_f32_rows, req_f64, req_labels, req_str, req_str_list, req_u32, req_u64,
     req_usize,
+};
+use callbacks::{
+    callback_id, function_options, WASMAggregateFunction, WASMScalarFunction, WASMTableFunction,
 };
 
 static ENGINES: Mutex<BTreeMap<i32, Arc<Engine>>> = Mutex::new(BTreeMap::new());
@@ -218,6 +222,48 @@ fn dispatch_engine(engine: &Engine, method: &str, args: &JSON) -> Result<JSON, S
                 .map(sql_result_to_json)
                 .collect::<Result<Vec<_>, _>>()
                 .map(JSON::Array)
+        }
+        "registerScalarFunction" => {
+            let name = req_str(args, "name")?;
+            engine
+                .register_scalar_function_with_options(
+                    &name,
+                    function_options(args)?,
+                    WASMScalarFunction {
+                        name: name.clone(),
+                        callback_id: callback_id(args)?,
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+            Ok(JSON::Null)
+        }
+        "registerTableFunction" => {
+            let name = req_str(args, "name")?;
+            engine
+                .register_table_function_with_options(
+                    &name,
+                    function_options(args)?,
+                    WASMTableFunction {
+                        name: name.clone(),
+                        callback_id: callback_id(args)?,
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+            Ok(JSON::Null)
+        }
+        "registerAggregateFunction" => {
+            let name = req_str(args, "name")?;
+            engine
+                .register_aggregate_function_with_options(
+                    &name,
+                    function_options(args)?,
+                    WASMAggregateFunction {
+                        name: name.clone(),
+                        callback_id: callback_id(args)?,
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+            Ok(JSON::Null)
         }
         "createDefaultTable" => {
             engine

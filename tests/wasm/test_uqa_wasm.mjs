@@ -206,3 +206,140 @@ test("sql notices, depth limit, and encryption rejection", async () => {
   await engine.setSQLFunctionDepthLimit(64);
   assert.deepEqual((await engine.sql("SELECT rec(10) AS v")).rows, [{ v: 0 }]);
 });
+
+test("browser scalar, table, and aggregate SQL callbacks", async () => {
+  const engine = await Engine.inMemory();
+  await engine.sql("CREATE TABLE samples (grp TEXT, val INTEGER)");
+  await engine.sql("INSERT INTO samples (grp, val) VALUES ('a', 1), ('a', 2), ('b', 3)");
+
+  await engine.registerScalarFunction(
+    "js_prefix",
+    (value) => `tag:${value}`,
+    { volatility: "immutable", mayMutateEngine: false }
+  );
+  assert.deepEqual((await engine.sql("SELECT js_prefix(grp) AS tagged FROM samples WHERE val = 3")).rows, [
+    { tagged: "tag:b" },
+  ]);
+
+  await engine.registerTableFunction("js_repeat_rows", (label, times) => ({
+    columns: ["label", "idx"],
+    rows: Array.from({ length: times }, (_, idx) => [label, idx]),
+  }));
+  assert.deepEqual(
+    (
+      await engine.sql(
+        "SELECT label, idx FROM js_repeat_rows('row', 3) AS r(label, idx) ORDER BY idx"
+      )
+    ).rows,
+    [
+      { idx: 0, label: "row" },
+      { idx: 1, label: "row" },
+      { idx: 2, label: "row" },
+    ]
+  );
+
+  await engine.registerTableFunction("js_object_rows", () => [
+    { name: "first", score: 2 },
+    { name: "second", score: 1 },
+  ]);
+  assert.deepEqual((await engine.sql("SELECT name, score FROM js_object_rows() ORDER BY score")).rows, [
+    { name: "second", score: 1 },
+    { name: "first", score: 2 },
+  ]);
+
+  await engine.registerTableFunction("js_pair_rows", () => [
+    ["label", "idx"],
+    [["pair", 0]],
+  ]);
+  assert.deepEqual(
+    (await engine.sql("SELECT label, idx FROM js_pair_rows() AS r(label, idx)")).rows,
+    [{ idx: 0, label: "pair" }]
+  );
+
+  await engine.registerAggregateFunction("js_sum_squares", () => ({
+    total: 0,
+    observe(value) {
+      if (value !== null) {
+        this.total += value * value;
+      }
+    },
+    finish() {
+      return this.total;
+    },
+  }));
+  assert.deepEqual(
+    (
+      await engine.sql(
+        "SELECT grp, js_sum_squares(val) AS total FROM samples GROUP BY grp ORDER BY grp"
+      )
+    ).rows,
+    [
+      { grp: "a", total: 5 },
+      { grp: "b", total: 9 },
+    ]
+  );
+
+  await engine.registerAggregateFunction("js_sum_aliases", () => ({
+    total: 0,
+    step(value) {
+      this.total += value;
+    },
+    finalize() {
+      return this.total;
+    },
+  }));
+  assert.deepEqual((await engine.sql("SELECT js_sum_aliases(val) AS total FROM samples")).rows, [
+    { total: 6 },
+  ]);
+
+  await engine.close();
+});
+
+test("browser SQL callbacks are shared by sessions and propagate errors", async () => {
+  const engine = await Engine.open(`${UQA.persistDir}/callback-sessions.db`);
+  await engine.registerScalarFunction("js_double", (value) => value * 2);
+  const session = await engine.newSession();
+  assert.deepEqual((await session.sql("SELECT js_double(5) AS value")).rows, [{ value: 10 }]);
+
+  await session.registerScalarFunction("js_double", (value) => value * 3);
+  assert.deepEqual((await engine.sql("SELECT js_double(4) AS value")).rows, [{ value: 12 }]);
+
+  await engine.registerScalarFunction("js_throws", () => {
+    throw new Error("callback exploded");
+  });
+  await assert.rejects(engine.sql("SELECT js_throws()"), /callback exploded/);
+
+  await engine.registerScalarFunction("js_promise", async () => 1);
+  await assert.rejects(engine.sql("SELECT js_promise()"), /must return synchronously/);
+
+  await engine.registerTableFunction("js_table_promise", async () => []);
+  await assert.rejects(engine.sql("SELECT * FROM js_table_promise()"), /must return synchronously/);
+
+  await engine.registerAggregateFunction("js_factory_promise", async () => ({
+    observe() {},
+    finish() {
+      return 1;
+    },
+  }));
+  await assert.rejects(
+    engine.sql("SELECT js_factory_promise(val) AS value FROM (VALUES (1)) AS t(val)"),
+    /must return synchronously/
+  );
+
+  await engine.registerScalarFunction("js_reenter", () => engine.sql("SELECT 1"));
+  await assert.rejects(
+    engine.sql("SELECT js_reenter()"),
+    /Engine methods cannot be called from a JavaScript SQL callback/
+  );
+
+  await assert.rejects(
+    engine.registerScalarFunction("invalid_options", (value) => value, {
+      volatility: "stable",
+    }),
+    /must be VOLATILE/i
+  );
+
+  await session.close();
+  assert.deepEqual((await engine.sql("SELECT js_double(6) AS value")).rows, [{ value: 18 }]);
+  await engine.close();
+});

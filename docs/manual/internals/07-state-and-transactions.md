@@ -9,7 +9,7 @@
 | `StorageContext` | Session-bound table handles, catalog and backend facades, provider factory | Rebuilt per logical session; provider is a shared factory |
 | `DurableCatalogState` | Graph, model, scoring, view, schema, sequence, analyzer, FDW, index, and SQL-routine caches | Private per session and synchronized by epochs |
 | `SessionContext` | Search path, variables, PRNG, sequence `currval`, prepared plans, statement cache, and transaction stack | Never shared between sessions |
-| `RuntimeExtensions` | Rust callbacks and in-memory FDW rows | Deliberately shared by derived sessions |
+| `RuntimeExtensions` | Runtime callbacks and in-memory FDW rows | Deliberately shared by derived sessions |
 | `EpochCoordinator` | Published and observed generations, dirty bits, and refresh serialization | Published counters shared; observations local |
 | `QueryRuntime` | Statement gate, cancellation, notices, and routine-depth policy | Private per session |
 

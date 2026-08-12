@@ -50,6 +50,16 @@ Use canonical names in prose and code. Link to an existing detailed chapter inst
 
 Keep each prose paragraph on one physical line. Do not insert line breaks inside paragraphs.
 
+## Maintain binding example parity
+
+Treat [`examples/README.md`](../../../examples/README.md) as the public scenario matrix. The supported targets are Rust, Python, Node.js, and Browser WASM, and each target must provide unified search, vector KNN, graph and Cypher, storage and transactions, and extensibility examples.
+
+- Keep Rust entry points under `examples/rust`, Python entry points under `examples/python`, Node.js entry points under `examples/node`, and Browser WASM entry points under `examples/browser`.
+- Equivalent examples must use the same fixture intent, SQL feature, assertions, and lifecycle outcome. Preserve language-idiomatic filenames and APIs.
+- Node.js and Browser WASM may share binding-neutral scenario modules under `examples/javascript`, but engine construction, persistence, callback registration, and cleanup belong in their platform entry points.
+- When a scenario or binding changes, update the matrix, its platform README files, the relevant manual link, and CI execution in the same change.
+- Do not document an example as supported after compilation alone. Execute it through the actual binding artifact.
+
 Classify fenced manual SQL as follows:
 
 - `sql`: compile on every CI run.
@@ -67,3 +77,13 @@ cargo test -p uqa-engine --test engine_queries manual_sql_examples::manual_sql_e
 ```
 
 Run the subsystem's focused tests as well when behavior, not only documentation, changes. In the final report, distinguish examples that were compiled from those that were executed; never claim runtime verification from compilation alone.
+
+For a complete binding-parity change, execute the five Rust packages, every Python and Node.js entry point, and the five Browser WASM modules after building their respective artifacts. The CI workflows under `.github/workflows/ci.yml`, `python-wheels.yml`, and `javascript-bindings.yml` are the authoritative command definitions.
+
+## Prepare a release
+
+- Keep the workspace package version, every workspace-internal dependency requirement, Python project version, Node.js package version, Browser WASM package version, CLI version assertion, README, manual target, `llms.txt`, citation metadata, and generated Node.js loader on one release version.
+- Move user-visible changes from `Unreleased` into a dated `HISTORY.md` section before tagging. The release workflow extracts that exact section as GitHub release notes.
+- Regenerate `Cargo.lock` and the Node.js loader after changing package versions, then verify that no public version surface still names the previous release except historical changelog sections.
+- Run the manual SQL test, binding tests, all binding-parity examples, package archive license checks, formatting, Clippy with warnings denied, and repository policy scripts against the release tree.
+- Create an annotated `v<version>` tag only after the release commit is on `main`, push the commit and tag, monitor `.github/workflows/release.yml` to completion, and verify the GitHub release inventory and archive versions.

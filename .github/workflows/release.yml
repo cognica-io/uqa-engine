@@ -101,21 +101,20 @@ jobs:
         working-directory: crates/uqa-node
         run: npx napi build --platform --profile release-stripped --target ${{ matrix.target }}
 
-      - name: Smoke test the addon
+      - name: Test the addon
         if: matrix.target != 'aarch64-pc-windows-msvc'
         working-directory: crates/uqa-node
         shell: bash
+        run: node --test ../../tests/node/test_uqa_node.mjs
+
+      - name: Run Node.js examples
+        if: matrix.target != 'aarch64-pc-windows-msvc'
+        shell: bash
         run: |
           set -euo pipefail
-          node -e "
-            const uqa = require('./index.js');
-            const engine = new uqa.Engine();
-            const result = engine.sqlSync('SELECT 1 AS n');
-            if (result.rows[0].n !== 1) {
-              throw new Error('unexpected result: ' + JSON.stringify(result.rows));
-            }
-            console.log('node addon smoke test OK');
-          "
+          for example in examples/node/*.mjs; do
+            node "$example"
+          done
 
       - name: Pack platform package
         shell: bash
@@ -199,6 +198,16 @@ jobs:
 
       - name: Build the browser WASM bundle
         run: bash scripts/build-wasm.sh
+
+      - name: Test the browser WASM bundle
+        run: node --test tests/wasm/test_uqa_wasm.mjs
+
+      - name: Run Browser WASM examples
+        run: |
+          set -euo pipefail
+          for name in unified-search vector-knn graph-cypher storage-transactions extensibility; do
+            node "examples/browser/${name}.mjs"
+          done
 
       - name: Pack the WASM package
         working-directory: crates/uqa-wasm/js

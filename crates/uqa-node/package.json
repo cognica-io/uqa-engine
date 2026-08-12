@@ -1,6 +1,6 @@
 {
   "name": "uqa",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Node.js bindings for the UQA engine",
   "license": "AGPL-3.0-only",
   "author": "Jaepil Jeong <jaepil@cognica.io>",
@@ -9,9 +9,18 @@
     "url": "https://github.com/cognica-io/uqa-rs"
   },
   "homepage": "https://github.com/cognica-io/uqa-rs",
-  "main": "index.js",
+  "main": "api.js",
   "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./api.js",
+      "require": "./api.js",
+      "default": "./api.js"
+    }
+  },
   "files": [
+    "api.js",
     "index.js",
     "index.d.ts",
     "*.node",
@@ -26,7 +35,7 @@
   },
   "napi": {
     "binaryName": "uqa",
-    "dtsHeader": "export type JSValue = null | boolean | number | bigint | string | Buffer | Uint8Array | Float32Array | Float64Array | Array<JSValue> | { [key: string]: JSValue }\nexport type ParamInput = SQLParam | JSValue\n",
+    "dtsHeader": "export type JSValue = null | boolean | number | bigint | string | Buffer | Uint8Array | Float32Array | Float64Array | Array<JSValue> | { [key: string]: JSValue }\nexport type ParamInput = SQLParam | JSValue\nexport type SQLTableFunctionRows = JSValue[][] | Array<Record<string, JSValue>>\nexport type SQLTableFunctionResult = { columns: string[]; rows: SQLTableFunctionRows } | [string[], SQLTableFunctionRows]\nexport type SQLAggregateState = ({ observe(...args: JSValue[]): unknown } | { step(...args: JSValue[]): unknown }) & ({ finish(): JSValue } | { finalize(): JSValue })\n",
     "targets": [
       "x86_64-unknown-linux-gnu",
       "aarch64-unknown-linux-gnu",

@@ -7,9 +7,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Literal, Mapping, Protocol, Sequence
 
 Scalar = None | bool | int | float | str | bytes | list["Scalar"] | dict[str, "Scalar"]
+FunctionVolatility = Literal["volatile", "stable", "immutable"]
 
 class SQLParam:
     @staticmethod
@@ -58,9 +59,30 @@ class Engine:
     def sql(self, query: str, params: Sequence[Scalar | SQLParam] | None = None) -> SQLResult: ...
     def execute(self, query: str, params: Sequence[Scalar | SQLParam] | None = None) -> SQLResult: ...
     def sql_batch(self, statements: Sequence[tuple[str, Sequence[Scalar | SQLParam]]]) -> list[SQLResult]: ...
-    def register_scalar_function(self, name: str, callable: Callable[..., Scalar]) -> None: ...
-    def register_table_function(self, name: str, callable: Callable[..., TableResult]) -> None: ...
-    def register_aggregate_function(self, name: str, factory: Callable[[], AggregateState]) -> None: ...
+    def register_scalar_function(
+        self,
+        name: str,
+        callable: Callable[..., Scalar],
+        *,
+        volatility: FunctionVolatility = "volatile",
+        may_mutate_engine: bool = True,
+    ) -> None: ...
+    def register_table_function(
+        self,
+        name: str,
+        callable: Callable[..., TableResult],
+        *,
+        volatility: FunctionVolatility = "volatile",
+        may_mutate_engine: bool = True,
+    ) -> None: ...
+    def register_aggregate_function(
+        self,
+        name: str,
+        factory: Callable[[], AggregateState],
+        *,
+        volatility: FunctionVolatility = "volatile",
+        may_mutate_engine: bool = True,
+    ) -> None: ...
     def create_default_table(self, name: str, fts_fields: Sequence[str]) -> None: ...
     def create_vector_field(self, table: str, field: str, dimensions: int) -> bool: ...
     def add_document(self, table: str, doc_id: int, document: Mapping[str, Scalar]) -> None: ...

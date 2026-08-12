@@ -1,5 +1,8 @@
 export type JSValue = null | boolean | number | bigint | string | Buffer | Uint8Array | Float32Array | Float64Array | Array<JSValue> | { [key: string]: JSValue }
 export type ParamInput = SQLParam | JSValue
+export type SQLTableFunctionRows = JSValue[][] | Array<Record<string, JSValue>>
+export type SQLTableFunctionResult = { columns: string[]; rows: SQLTableFunctionRows } | [string[], SQLTableFunctionRows]
+export type SQLAggregateState = ({ observe(...args: JSValue[]): unknown } | { step(...args: JSValue[]): unknown }) & ({ finish(): JSValue } | { finalize(): JSValue })
 export declare class Engine {
   /** Create an in-memory engine. */
   constructor()
@@ -15,6 +18,9 @@ export declare class Engine {
   sqlSync(query: string, params?: Array<ParamInput> | undefined | null): SQLResult
   sqlBatch(statements: Array<[string, Array<ParamInput>]>): Promise<Array<SQLResult>>
   sqlBatchSync(statements: Array<[string, Array<ParamInput>]>): Array<SQLResult>
+  registerScalarFunction(name: string, callback: (...args: JSValue[]) => JSValue, options?: SQLFunctionOptions | undefined | null): void
+  registerTableFunction(name: string, callback: (...args: JSValue[]) => SQLTableFunctionResult | Array<Record<string, JSValue>>, options?: SQLFunctionOptions | undefined | null): void
+  registerAggregateFunction(name: string, factory: () => SQLAggregateState, options?: SQLFunctionOptions | undefined | null): void
   createDefaultTable(name: string, ftsFields: Array<string>): void
   createVectorField(table: string, field: string, dimensions: number): boolean
   addDocument(table: string, docId: number, document: Record<string, JSValue>): void
@@ -81,6 +87,12 @@ export interface CompressionOptions {
 
 export declare function detectDatabaseFile(path: string): string
 
+export declare const enum JSFunctionVolatility {
+  Volatile = 'volatile',
+  Stable = 'stable',
+  Immutable = 'immutable'
+}
+
 export declare function migratePythonDB(source: string, destination: string): MigrationReport
 
 export interface MigrationReport {
@@ -123,6 +135,11 @@ export interface ReliabilityBin {
 export interface SearchHit {
   docId: number
   score: number
+}
+
+export interface SQLFunctionOptions {
+  volatility?: "volatile" | "stable" | "immutable"
+  mayMutateEngine?: boolean
 }
 
 export interface SQLNotice {

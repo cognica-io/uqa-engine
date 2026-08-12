@@ -153,7 +153,7 @@ DROP FUNCTION add_tax(NUMERIC, NUMERIC);
 DROP PROCEDURE record_message(TEXT);
 ```
 
-Signatures disambiguate overloads. Durable SQL and PL/pgSQL routine definitions are restored with the catalog. Rust and Python runtime callbacks are not durable and must be registered after process start.
+Signatures disambiguate overloads. Durable SQL and PL/pgSQL routine definitions are restored with the catalog. Rust, Python, Node.js, and browser WASM runtime callbacks are not durable and must be registered after process start.
 
 ## Cancellation and failure
 

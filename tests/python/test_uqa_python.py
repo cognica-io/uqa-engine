@@ -85,7 +85,12 @@ def test_python_user_defined_functions() -> None:
         "INSERT INTO samples (grp, val) VALUES ('a', 1), ('a', 2), ('b', 3)"
     )
 
-    engine.register_scalar_function("py_prefix", lambda value: f"tag:{value}")
+    engine.register_scalar_function(
+        "py_prefix",
+        lambda value: f"tag:{value}",
+        volatility="immutable",
+        may_mutate_engine=False,
+    )
     scalar = engine.sql(
         "SELECT py_prefix(grp) AS tagged FROM samples WHERE val = 3"
     )
@@ -123,6 +128,11 @@ def test_python_user_defined_functions() -> None:
         {"grp": "a", "total": 5},
         {"grp": "b", "total": 9},
     ]
+
+    with pytest.raises(RuntimeError, match="must be VOLATILE"):
+        engine.register_scalar_function(
+            "invalid_options", lambda value: value, volatility="stable"
+        )
 
 
 def test_open_auto_and_format_detection(tmp_path) -> None:

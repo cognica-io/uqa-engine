@@ -1,6 +1,6 @@
 # UQA-RS
 
-> UQA-RS 0.1.1 is an embedded Rust database that combines PostgreSQL-oriented relational SQL, full-text and vector retrieval, graph queries, and ranked fusion in one runtime.
+> UQA-RS 0.1.2 is an embedded Rust database that combines PostgreSQL-oriented relational SQL, full-text and vector retrieval, graph queries, ranked fusion, and host-language SQL callbacks in one runtime.
 
 The manual is the canonical product contract. Parser acceptance alone does not prove execution support; follow the documented argument shape, result schema, state effects, and errors, then verify executable claims against tests or the engine.
 
@@ -22,6 +22,7 @@ When generating SQL:
 - [Quick start](docs/manual/reference/01-quick-start.md): Minimal Rust and SQL workflow.
 - [Supported SQL](docs/manual/sql/README.md): SQL surface, parameters, names, ranking columns, and the function contract format.
 - [Compatibility](docs/manual/sql/09-compatibility.md): PostgreSQL alignment, deliberate differences, and unsupported behavior.
+- [Runnable examples](examples/README.md): Matching unified-search, vector-KNN, graph/Cypher, storage/transaction, and extensibility programs for Rust, Python, Node.js, and Browser WASM.
 - [UQA-RS agent skill](.agents/skills/uqa-rs/SKILL.md): Repository workflow for authoring and verifying queries or documentation.
 
 ## SQL contracts
@@ -43,7 +44,7 @@ When generating SQL:
 - [Search and ranking](docs/manual/reference/05-search-and-ranking.md): Retrieval behavior and evaluation guidance.
 - [Text analyzer pipelines](docs/manual/reference/06-text-analyzers.md): Pipeline stages, exact component vocabulary, phases, and bindings.
 - [Graphs](docs/manual/reference/07-graphs.md): Graph lifecycle and relational composition.
-- [Bindings and extensions](docs/manual/reference/08-bindings-and-extensions.md): Python, Node.js, WASM, callbacks, FDWs, and models.
+- [Bindings and extensions](docs/manual/reference/08-bindings-and-extensions.md): Python, Node.js, Browser WASM, host callbacks, callback safety, FDWs, and models.
 
 ## Optional
 

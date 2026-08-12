@@ -15,6 +15,10 @@ import createUQAModule from "./uqa.js";
 const PERSIST_DIR = "/uqa";
 
 let modulePromise = null;
+const sqlCallbacks = new Map();
+let nextSQLCallbackId = 1;
+let nextAggregateStateId = 1;
+let sqlCallbackDepth = 0;
 
 function hasIndexedDB() {
   return typeof indexedDB !== "undefined";
@@ -24,6 +28,7 @@ async function loadModule() {
   if (modulePromise === null) {
     modulePromise = (async () => {
       const module = await createUQAModule();
+      installCallbackBridge(module);
       module.FS.mkdirTree(PERSIST_DIR);
       if (hasIndexedDB()) {
         module.FS.mount(module.IDBFS, {}, PERSIST_DIR);
@@ -33,6 +38,201 @@ async function loadModule() {
     })();
   }
   return modulePromise;
+}
+
+function installCallbackBridge(module) {
+  module.uqaInvokeCallback = (callbackId, requestText) => {
+    try {
+      const entry = sqlCallbacks.get(callbackId);
+      if (entry === undefined) {
+        throw new Error(`unknown JavaScript SQL callback ID ${callbackId}`);
+      }
+      const request = JSON.parse(requestText);
+      const result = invokeSQLCallback(entry, request);
+      return JSON.stringify({ ok: encodeValue(result) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ error: message });
+    }
+  };
+}
+
+function invokeSQLCallback(entry, request) {
+  sqlCallbackDepth += 1;
+  try {
+    const args = decodeValue(request.args ?? []);
+    switch (request.operation) {
+      case "scalar":
+        requireCallbackKind(entry, "scalar");
+        return synchronousResult(entry.callback(...args), "scalar SQL callback");
+      case "table":
+        requireCallbackKind(entry, "table");
+        return synchronousResult(entry.callback(...args), "table SQL callback");
+      case "aggregateCreate":
+        requireCallbackKind(entry, "aggregate");
+        return createAggregateState(entry);
+      case "aggregateObserve":
+        requireCallbackKind(entry, "aggregate");
+        return observeAggregateState(entry, request.stateId, args);
+      case "aggregateFinish":
+        requireCallbackKind(entry, "aggregate");
+        return finishAggregateState(entry, request.stateId);
+      case "aggregateDrop":
+        requireCallbackKind(entry, "aggregate");
+        entry.states.delete(request.stateId);
+        return null;
+      default:
+        throw new Error(`unknown JavaScript SQL callback operation ${request.operation}`);
+    }
+  } finally {
+    sqlCallbackDepth -= 1;
+  }
+}
+
+function assertEngineCallAllowed() {
+  if (sqlCallbackDepth !== 0) {
+    throw new Error("Engine methods cannot be called from a JavaScript SQL callback");
+  }
+}
+
+function guardEngineMethods(engineClass) {
+  const prototype = engineClass.prototype;
+  for (const name of Object.getOwnPropertyNames(prototype)) {
+    if (name === "constructor") {
+      continue;
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
+    if (descriptor === undefined || typeof descriptor.value !== "function") {
+      continue;
+    }
+    const method = descriptor.value;
+    Object.defineProperty(prototype, name, {
+      ...descriptor,
+      value(...args) {
+        assertEngineCallAllowed();
+        return Reflect.apply(method, this, args);
+      },
+    });
+  }
+}
+
+function requireCallbackKind(entry, expected) {
+  if (entry.kind !== expected) {
+    throw new Error(`SQL callback kind mismatch: expected ${expected}, got ${entry.kind}`);
+  }
+}
+
+function synchronousResult(value, label) {
+  if (value !== null && (typeof value === "object" || typeof value === "function")) {
+    if (typeof value.then === "function") {
+      throw new Error(`${label} must return synchronously; Promise results are not supported`);
+    }
+  }
+  return value === undefined ? null : value;
+}
+
+function createAggregateState(entry) {
+  const state = synchronousResult(entry.callback(), "SQL aggregate factory");
+  if (state === null || typeof state !== "object") {
+    throw new Error("SQL aggregate factory must return an object");
+  }
+  const observe = state.observe ?? state.step;
+  const finish = state.finish ?? state.finalize;
+  if (typeof observe !== "function") {
+    throw new Error("SQL aggregate state needs an observe or step method");
+  }
+  if (typeof finish !== "function") {
+    throw new Error("SQL aggregate state needs a finish or finalize method");
+  }
+  const stateId = allocateAggregateStateId();
+  entry.states.set(stateId, {
+    observe: observe.bind(state),
+    finish: finish.bind(state),
+  });
+  return stateId;
+}
+
+function aggregateState(entry, stateId) {
+  const state = entry.states.get(stateId);
+  if (state === undefined) {
+    throw new Error(`unknown JavaScript SQL aggregate state ID ${stateId}`);
+  }
+  return state;
+}
+
+function observeAggregateState(entry, stateId, args) {
+  const state = aggregateState(entry, stateId);
+  synchronousResult(state.observe(...args), "SQL aggregate observe method");
+  return null;
+}
+
+function finishAggregateState(entry, stateId) {
+  const state = aggregateState(entry, stateId);
+  try {
+    return synchronousResult(state.finish(), "SQL aggregate finish method");
+  } finally {
+    entry.states.delete(stateId);
+  }
+}
+
+function allocateAggregateStateId() {
+  if (nextAggregateStateId > 0xffffffff) {
+    throw new Error("JavaScript SQL aggregate state ID space is exhausted");
+  }
+  const stateId = nextAggregateStateId;
+  nextAggregateStateId += 1;
+  return stateId;
+}
+
+function createCallbackGroup() {
+  return { references: 1, registrations: new Map() };
+}
+
+function retainCallbackGroup(group) {
+  group.references += 1;
+}
+
+function releaseCallbackGroup(group) {
+  group.references -= 1;
+  if (group.references !== 0) {
+    return;
+  }
+  for (const callbackId of group.registrations.values()) {
+    sqlCallbacks.delete(callbackId);
+  }
+  group.registrations.clear();
+}
+
+function registerSQLCallback(group, kind, name, callback, registerNative) {
+  if (typeof callback !== "function") {
+    throw new TypeError(`${kind} SQL callback must be a function`);
+  }
+  const normalizedName = String(name).trim().toLowerCase();
+  if (normalizedName.length === 0) {
+    throw new TypeError("SQL function name cannot be empty");
+  }
+  if (nextSQLCallbackId > 0xffffffff) {
+    throw new Error("JavaScript SQL callback ID space is exhausted");
+  }
+  const callbackId = nextSQLCallbackId;
+  nextSQLCallbackId += 1;
+  sqlCallbacks.set(callbackId, {
+    kind,
+    callback,
+    states: kind === "aggregate" ? new Map() : null,
+  });
+  try {
+    registerNative(callbackId);
+  } catch (error) {
+    sqlCallbacks.delete(callbackId);
+    throw error;
+  }
+  const key = `${kind}:${normalizedName}`;
+  const previous = group.registrations.get(key);
+  group.registrations.set(key, callbackId);
+  if (previous !== undefined) {
+    sqlCallbacks.delete(previous);
+  }
 }
 
 function syncFS(module, populate) {
@@ -87,6 +287,9 @@ function decodeValue(value) {
 }
 
 function encodeValue(value) {
+  if (value === undefined) {
+    return null;
+  }
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
       throw new Error(`non-finite numbers cannot cross the JSON bridge: ${value}`);
@@ -206,9 +409,11 @@ export const UQA = {
 };
 
 export class Engine {
-  constructor(module, handle) {
+  constructor(module, handle, callbackGroup = createCallbackGroup()) {
     this.module = module;
     this.handle = handle;
+    this.callbackGroup = callbackGroup;
+    this.closed = false;
   }
 
   static async inMemory() {
@@ -232,11 +437,16 @@ export class Engine {
   }
 
   call(method, args = {}) {
+    if (this.closed) {
+      throw new Error("engine is closed");
+    }
     return rawCall(this.module, this.handle, method, args);
   }
 
   async newSession() {
-    return new Engine(this.module, this.call("newSession", {}));
+    const handle = this.call("newSession", {});
+    retainCallbackGroup(this.callbackGroup);
+    return new Engine(this.module, handle, this.callbackGroup);
   }
 
   async sql(query, params) {
@@ -246,6 +456,24 @@ export class Engine {
   async sqlBatch(statements) {
     return this.call("sqlBatch", {
       statements: statements.map(([sql, params]) => [sql, encodeParams(params) ?? []]),
+    });
+  }
+
+  async registerScalarFunction(name, callback, options) {
+    registerSQLCallback(this.callbackGroup, "scalar", name, callback, (callbackId) => {
+      this.call("registerScalarFunction", { name, callbackId, options });
+    });
+  }
+
+  async registerTableFunction(name, callback, options) {
+    registerSQLCallback(this.callbackGroup, "table", name, callback, (callbackId) => {
+      this.call("registerTableFunction", { name, callbackId, options });
+    });
+  }
+
+  async registerAggregateFunction(name, factory, options) {
+    registerSQLCallback(this.callbackGroup, "aggregate", name, factory, (callbackId) => {
+      this.call("registerAggregateFunction", { name, callbackId, options });
     });
   }
 
@@ -434,6 +662,13 @@ export class Engine {
   }
 
   async close() {
-    return this.call("close", {});
+    if (this.closed) {
+      return;
+    }
+    this.call("close", {});
+    this.closed = true;
+    releaseCallbackGroup(this.callbackGroup);
   }
 }
+
+guardEngineMethods(Engine);

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>UQA-RS Browser WASM examples</title>
+    <style>
+      :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+      body { max-width: 72rem; margin: 2rem auto; padding: 0 1rem; }
+      nav { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+      pre { overflow: auto; padding: 1rem; border: 1px solid #8888; border-radius: 0.5rem; }
+    </style>
+  </head>
+  <body>
+    <h1>UQA-RS Browser WASM examples</h1>
+    <nav>
+      <a href="?example=unified-search">Unified search</a>
+      <a href="?example=vector-knn">Vector KNN</a>
+      <a href="?example=graph-cypher">Graph and Cypher</a>
+      <a href="?example=storage-transactions">Storage and transactions</a>
+      <a href="?example=extensibility">Extensibility</a>
+    </nav>
+    <pre id="output">Loading...</pre>
+    <script type="module" src="./runner.mjs"></script>
+  </body>
+</html>

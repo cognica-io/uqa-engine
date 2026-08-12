@@ -14,7 +14,8 @@ use super::{
     validate_tensor, validate_vector, vector_values_from_py, Arc, Bound, Engine,
     HybridSearchParams, PathBuf, Py, PyAggregateFunction, PyAny, PyDict, PyDictMethods, PyEngine,
     PyIOError, PyResult, PyRuntimeError, PySQLResult, PyScalarFunction, PyTableFunction,
-    PyValueError, Python, RobustHybridSearchParams, SQLParam, ScoredEntry,
+    PyValueError, Python, RobustHybridSearchParams, SQLFunctionOptions, SQLFunctionVolatility,
+    SQLParam, ScoredEntry,
 };
 
 mod calibration;

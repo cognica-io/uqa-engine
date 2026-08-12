@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-13
+
+### Added
+
+- Added scalar, table, and aggregate host-language SQL callbacks to the Node.js and Browser WASM bindings, including synchronous result enforcement, error propagation, optimizer safety options, derived-session lifetime management, and callback re-entry protection.
+- Added matching unified-search, vector-KNN, graph/Cypher, storage/transaction, and extensibility programs for Rust, Python, Node.js, and Browser WASM, plus a browser runner and CI execution of every scenario.
+- Added generated Node.js and handwritten Browser WASM callback types covering table result shapes, per-group aggregate state, volatility, and engine mutation declarations.
+
+### Changed
+
+- Extended Python callback registration with the same volatility and engine-mutation options exposed by the JavaScript bindings.
+- Reorganized standalone Rust examples under `examples/rust` and made `examples/README.md` the authoritative language and platform parity matrix.
+- Updated the manual, repository README, `llms.txt`, and UQA-RS skill with callback contracts, threading and reverse-dispatch constraints, lifecycle rules, and executable example parity requirements.
+
 ## [0.1.1] - 2026-08-12
 
 ### Added

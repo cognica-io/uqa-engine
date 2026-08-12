@@ -34,11 +34,17 @@ An immutable function depends only on arguments. A stable function may observe s
 
 Callbacks are shared by derived sessions and are not stored in the durable catalog. Register them before creating worker sessions or accepting queries. Do not hold engine registry locks while invoking callback code.
 
+Host-language callbacks need a reverse call boundary in addition to the forward method dispatch used by a generated binding. Node.js must move callback execution from an engine worker back to the owning JavaScript thread, while browser WASM must re-enter JavaScript through Emscripten and retain callback and aggregate-state identities for the full registry lifetime. Without those lifecycle-safe bridges, registration would violate runtime thread ownership or leave dangling callback state, so forward binding generation alone cannot expose UDF callbacks correctly.
+
+Node.js owns a strong function reference for same-thread execution and a weak thread-safe function bridge for asynchronous SQL workers. A worker sends converted arguments to the owning JavaScript thread, waits for the synchronous result, and converts thrown errors into SQL errors. The package wrapper rejects `Engine` method re-entry while a callback is active.
+
+Browser WASM assigns numeric callback and aggregate-state identifiers in JavaScript. Emscripten imports perform synchronous reverse dispatch across a JSON value bridge, and aggregate state is released after finish, query failure, or engine-group teardown. Derived sessions retain the shared callback group until its last engine closes, and the wrapper rejects `Engine` method re-entry during reverse dispatch.
+
 Streaming table functions can yield a late error after rows. The physical pipeline propagates that error and does not convert it into an apparently complete truncated relation.
 
 ## SQL and PL/pgSQL routines
 
-Durable SQL routines are compiled by `uqa-sql` and owned by the engine catalog. Their source, signature, volatility, language, defaults, return shape, and compiled plan identity survive reopen. They are distinct from runtime Rust and Python callbacks.
+Durable SQL routines are compiled by `uqa-sql` and owned by the engine catalog. Their source, signature, volatility, language, defaults, return shape, and compiled plan identity survive reopen. They are distinct from runtime host-language callbacks.
 
 Routine depth is bounded in `QueryRuntime`. Dynamic SQL re-enters normal parse, plan, transaction, and error boundaries.
 
@@ -77,8 +83,8 @@ Python, Node.js, and Emscripten WASM wrap the engine rather than reimplement SQL
 | Binding | Special boundary |
 | --- | --- |
 | Python | pyo3 value conversion, interpreter lock release, and Python callbacks |
-| Node.js | Node-API promises, synchronous variants, buffers, typed arrays, and cancellation |
-| WASM | Emscripten request dispatch, browser async lifecycle, and IndexedDB synchronization |
+| Node.js | Node-API promises, synchronous variants, buffers, typed arrays, cancellation, and thread-safe JavaScript callback dispatch |
+| WASM | Emscripten request and reverse-callback dispatch, browser async lifecycle, callback-state ownership, and IndexedDB synchronization |
 
 When adding an engine method, decide explicitly whether each binding can support its storage, threading, native-library, callback, and security requirements. Absence from a binding should be deliberate and documented.
 

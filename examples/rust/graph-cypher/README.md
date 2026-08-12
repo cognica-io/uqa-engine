@@ -22,7 +22,7 @@ JOIN cypher('social', $$ ... RETURN f.member_id $$) AS followed(member_id agtype
   ON m.member_id = (followed.member_id::text)::int
 ```
 
-The `agtype` form in this example is portable to AGE; the `int` form is not. The repository's AGE-parity fixtures under [`crates/uqa-engine/tests/`](../../crates/uqa-engine/tests) use `agtype` exclusively for exactly that reason.
+The `agtype` form in this example is portable to AGE; the `int` form is not. The repository's AGE-parity fixtures under [`crates/uqa-engine/tests/`](../../../crates/uqa-engine/tests) use `agtype` exclusively for exactly that reason.
 
 Covered along the way: property predicates, fixed-length traversal, `MERGE` idempotence versus `CREATE`, and `SET`.
 

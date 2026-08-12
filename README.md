@@ -23,7 +23,7 @@ It is designed for applications that need more than a relational table but do no
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
 > [!NOTE]
-> UQA-RS is under active development at version 0.1.1. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
+> UQA-RS is under active development at version 0.1.2. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
 
 ## Mathematical foundation
 
@@ -174,9 +174,9 @@ Read the [compressed VFS security contract](docs/design/compressed-vfs-security.
 | Environment | Workspace package | Notes |
 | --- | --- | --- |
 | Rust | [`uqa-engine`](crates/uqa-engine) | Direct embedded API and runnable examples |
-| Python | [`uqa-python`](crates/uqa-python) | pyo3/maturin bindings for SQL, retrieval, graph, calibration, and extensions |
-| Node.js | [`uqa-node`](crates/uqa-node) | Node-API bindings with asynchronous query and search methods |
-| Browser | [`uqa-wasm`](crates/uqa-wasm) | Emscripten build with SQLite persistence mounted on IndexedDB |
+| Python | [`uqa-python`](crates/uqa-python) | pyo3/maturin bindings for SQL, retrieval, graph, calibration, and runtime callbacks |
+| Node.js | [`uqa-node`](crates/uqa-node) | Node-API bindings with asynchronous query and search methods plus JavaScript callbacks |
+| Browser | [`uqa-wasm`](crates/uqa-wasm) | Emscripten build with IndexedDB persistence and JavaScript callbacks |
 
 Prebuilt Linux Python wheels target glibc 2.28 or newer because the bundled DuckDB runtime requires the modern C++11 ABI.
 
@@ -248,7 +248,7 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 | Document | Use it for |
 | --- | --- |
 | [Reference manual and tutorials](docs/manual/README.md) | Learning the engine, supported SQL, public APIs, and internal architecture |
-| [Runnable examples](examples/README.md) | Seeing search, vectors, graphs, storage, and extensions working as complete programs |
+| [Runnable examples](examples/README.md) | Comparing the same search, vector, graph, storage, and extension scenarios across Rust, Python, Node.js, and Browser WASM |
 | [Design documentation index](docs/design/README.md) | Finding the right technical contract or architecture document |
 | [System architecture](docs/design/architecture.md) | Crate boundaries, query planning, carriers, execution, storage, and extension points |
 | [Vector indexes](docs/design/vector-indexes.md) | Brute-force, IVF, and HNSW behavior, parameters, persistence, and correctness contracts |

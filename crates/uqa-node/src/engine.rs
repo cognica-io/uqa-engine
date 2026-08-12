@@ -6,6 +6,10 @@
 
 //! Node-API Engine class and synchronous/asynchronous methods.
 
+use super::callbacks::{
+    function_options, CallbackArguments, JSAggregateCallbacks, JSAggregateFunction,
+    JSFunctionOptions, JSScalarFunction, JSTableFunction, SynchronousJSValue,
+};
 use super::input::{
     batch_from_input, compression_options, database_file_format_name, doc_id_from_input,
     f32_from_f64, js_number_from_u64, labels_from_input, params_from_input, parse_scoring_params,
@@ -22,8 +26,8 @@ use super::tasks::{
 };
 use super::value::{document_from_js, JSValue};
 use super::{
-    napi, Arc, AsyncTask, BTreeMap, CoreEngine, CoreSQLParam, Either, Error, Float32Array, Path,
-    Result,
+    napi, Arc, AsyncTask, BTreeMap, CoreEngine, CoreSQLParam, Either, Error, Float32Array,
+    Function, Path, Result,
 };
 
 // ---------------------------------------------------------------------
@@ -163,6 +167,56 @@ impl Engine {
             .into_iter()
             .map(SQLResult::try_from)
             .collect()
+    }
+
+    #[napi]
+    pub fn register_scalar_function(
+        &self,
+        name: String,
+        #[napi(ts_arg_type = "(...args: JSValue[]) => JSValue")] callback: Function<
+            '_,
+            CallbackArguments,
+            SynchronousJSValue,
+        >,
+        options: Option<JSFunctionOptions>,
+    ) -> Result<()> {
+        let function = JSScalarFunction::new(name.clone(), callback)?;
+        self.inner
+            .register_scalar_function_with_options(&name, function_options(options), function)
+            .map_err(runtime_error)
+    }
+
+    #[napi]
+    pub fn register_table_function(
+        &self,
+        name: String,
+        #[napi(
+            ts_arg_type = "(...args: JSValue[]) => SQLTableFunctionResult | Array<Record<string, JSValue>>"
+        )]
+        callback: Function<'_, CallbackArguments, SynchronousJSValue>,
+        options: Option<JSFunctionOptions>,
+    ) -> Result<()> {
+        let function = JSTableFunction::new(name.clone(), callback)?;
+        self.inner
+            .register_table_function_with_options(&name, function_options(options), function)
+            .map_err(runtime_error)
+    }
+
+    #[napi]
+    pub fn register_aggregate_function(
+        &self,
+        name: String,
+        #[napi(ts_arg_type = "() => SQLAggregateState")] factory: Function<
+            '_,
+            CallbackArguments,
+            JSAggregateCallbacks,
+        >,
+        options: Option<JSFunctionOptions>,
+    ) -> Result<()> {
+        let function = JSAggregateFunction::new(name.clone(), factory)?;
+        self.inner
+            .register_aggregate_function_with_options(&name, function_options(options), function)
+            .map_err(runtime_error)
     }
 
     #[napi]

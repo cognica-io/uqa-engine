@@ -1,0 +1,99 @@
+name: JavaScript Bindings
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/javascript-bindings.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/uqa-*/**"
+      - "examples/browser/**"
+      - "examples/javascript/**"
+      - "examples/node/**"
+      - "scripts/build-wasm.sh"
+      - "tests/node/**"
+      - "tests/wasm/**"
+  pull_request:
+    paths:
+      - ".github/workflows/javascript-bindings.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/uqa-*/**"
+      - "examples/browser/**"
+      - "examples/javascript/**"
+      - "examples/node/**"
+      - "scripts/build-wasm.sh"
+      - "tests/node/**"
+      - "tests/wasm/**"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  node:
+    name: Node.js callbacks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Free Linux runner disk
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: false
+      - name: Install Node build dependencies
+        working-directory: crates/uqa-node
+        run: npm install --no-package-lock
+      - name: Build native addon
+        working-directory: crates/uqa-node
+        run: npx napi build --platform --profile release-stripped
+      - name: Test native addon
+        run: node --test tests/node/test_uqa_node.mjs
+      - name: Run Node.js examples
+        run: |
+          set -euo pipefail
+          for example in examples/node/*.mjs; do
+            node "$example"
+          done
+
+  wasm:
+    name: Browser WASM callbacks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-emscripten
+      - name: Free Linux runner disk
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: false
+      - name: Build browser WASM bundle
+        run: bash scripts/build-wasm.sh
+      - name: Test browser WASM bundle
+        run: node --test tests/wasm/test_uqa_wasm.mjs
+      - name: Run Browser WASM examples
+        run: |
+          set -euo pipefail
+          for name in unified-search vector-knn graph-cypher storage-transactions extensibility; do
+            node "examples/browser/${name}.mjs"
+          done

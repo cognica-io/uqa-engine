@@ -52,7 +52,7 @@ The persistent catalog records:
 - Serializable ML model definitions
 - SQL and PL/pgSQL routines
 
-Runtime Rust or Python callback code is not a durable catalog object.
+Runtime host-language callback code is not a durable catalog object.
 
 Analyzer JSON, field-phase assignments, GIN ownership, reopen behavior, and external synonym resources are detailed in [Analyzer pipeline internals](04-analyzer-pipeline.md).
 

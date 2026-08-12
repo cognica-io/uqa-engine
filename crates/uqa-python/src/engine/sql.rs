@@ -9,7 +9,7 @@
 use super::{
     batch_from_py, ensure_callable, params_from_py, pymethods, runtime_error, Bound, Py,
     PyAggregateFunction, PyAny, PyEngine, PyResult, PySQLResult, PyScalarFunction, PyTableFunction,
-    Python, SQLParam,
+    PyValueError, Python, SQLFunctionOptions, SQLFunctionVolatility, SQLParam,
 };
 
 #[pymethods]
@@ -55,16 +55,20 @@ impl PyEngine {
         Ok(results.into_iter().map(Into::into).collect())
     }
 
+    #[pyo3(signature = (name, callable, *, volatility = "volatile", may_mutate_engine = true))]
     fn register_scalar_function(
         &self,
         py: Python<'_>,
         name: &str,
         callable: Py<PyAny>,
+        volatility: &str,
+        may_mutate_engine: bool,
     ) -> PyResult<()> {
         ensure_callable(py, &callable, "scalar function")?;
         self.inner
-            .register_scalar_function(
+            .register_scalar_function_with_options(
                 name,
+                function_options(volatility, may_mutate_engine)?,
                 PyScalarFunction {
                     name: name.to_string(),
                     callable,
@@ -73,16 +77,20 @@ impl PyEngine {
             .map_err(runtime_error)
     }
 
+    #[pyo3(signature = (name, callable, *, volatility = "volatile", may_mutate_engine = true))]
     fn register_table_function(
         &self,
         py: Python<'_>,
         name: &str,
         callable: Py<PyAny>,
+        volatility: &str,
+        may_mutate_engine: bool,
     ) -> PyResult<()> {
         ensure_callable(py, &callable, "table function")?;
         self.inner
-            .register_table_function(
+            .register_table_function_with_options(
                 name,
+                function_options(volatility, may_mutate_engine)?,
                 PyTableFunction {
                     name: name.to_string(),
                     callable,
@@ -91,16 +99,20 @@ impl PyEngine {
             .map_err(runtime_error)
     }
 
+    #[pyo3(signature = (name, factory, *, volatility = "volatile", may_mutate_engine = true))]
     fn register_aggregate_function(
         &self,
         py: Python<'_>,
         name: &str,
         factory: Py<PyAny>,
+        volatility: &str,
+        may_mutate_engine: bool,
     ) -> PyResult<()> {
         ensure_callable(py, &factory, "aggregate function factory")?;
         self.inner
-            .register_aggregate_function(
+            .register_aggregate_function_with_options(
                 name,
+                function_options(volatility, may_mutate_engine)?,
                 PyAggregateFunction {
                     name: name.to_string(),
                     factory,
@@ -108,4 +120,18 @@ impl PyEngine {
             )
             .map_err(runtime_error)
     }
+}
+
+fn function_options(volatility: &str, may_mutate_engine: bool) -> PyResult<SQLFunctionOptions> {
+    let volatility = match volatility.to_ascii_lowercase().as_str() {
+        "volatile" => SQLFunctionVolatility::Volatile,
+        "stable" => SQLFunctionVolatility::Stable,
+        "immutable" => SQLFunctionVolatility::Immutable,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown SQL function volatility `{other}`; expected volatile, stable, or immutable"
+            )));
+        }
+    };
+    Ok(SQLFunctionOptions::new(volatility, may_mutate_engine))
 }

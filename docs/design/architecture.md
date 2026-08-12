@@ -278,7 +278,7 @@ The SQL compiler is PostgreSQL-oriented and currently covers schemas and `search
 
 Retrieval and graph functions include text and Bayesian match, KNN, exact and robust fusion, multi-field and staged retrieval, calibration, sparse thresholds, highlighting, facets, graph lifecycle and traversal, RPQ, centrality, Cypher, and deep model training and inference.
 
-Embedding applications can register Rust scalar, table, and aggregate functions. Scalar callbacks participate in projection and filtering, table callbacks stream from `FROM`, aggregates participate in grouping and ordered aggregation, and explicit callback properties drive transaction classification and optimization safety.
+Embedding applications can register Rust, Python, Node.js, and browser WASM scalar, table, and aggregate functions. Scalar callbacks participate in projection and filtering, table callbacks provide relations in `FROM`, aggregates participate in grouping and ordered aggregation, and explicit callback properties drive transaction classification and optimization safety. Rust table implementations can stream, while host-language binding callbacks materialize the rows returned across the binding boundary.
 
 `uqa-fdw` defines foreign servers, tables, predicates, projection and limit pushdown, and handler contracts. DuckDB, Arrow IPC, and in-memory handlers plug into this boundary without giving the SQL compiler concrete backend dependencies.
 
