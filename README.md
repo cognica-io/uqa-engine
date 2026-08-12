@@ -4,6 +4,11 @@ UQA-RS is an embeddable database engine that lets one application use PostgreSQL
 
 It is designed for applications that need more than a relational table but do not want to assemble a separate database, search server, vector store, and graph engine for every query path.
 
+> [!IMPORTANT]
+> **Open source with broad application exceptions**
+>
+> UQA-RS uses AGPL-3.0-only as its base license, with FOSS and noncommercial application exceptions. Qualifying open-source applications, including commercial ones, and qualifying personal, educational, academic, or charitable applications may keep their independent code under their own licenses or chosen terms. In practice, separate commercial terms are mainly needed for proprietary commercial products or services that must keep their application or UQA-RS changes closed. UQA-RS and modifications to UQA-RS remain under the AGPL when using the public paths. See the [licensing policy](LICENSING.md) for the exact conditions.
+
 > [!TIP]
 > **Using an LLM or coding agent?**
 >
