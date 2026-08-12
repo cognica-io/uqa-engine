@@ -1,0 +1,4 @@
+interface:
+  display_name: "UQA-RS"
+  short_description: "Author and verify UQA-RS SQL and documentation"
+  default_prompt: "Use $uqa-rs to write and verify this UQA-RS query or documentation change."

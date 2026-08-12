@@ -147,6 +147,17 @@ Never treat highlighted text as trusted HTML solely because the engine inserted 
 
 Five tuple-producing join operators are exposed in `FROM`. Their first argument is a table identifier, not a string value, and both operand expressions are lowered and executed against that relation through the ordinary `OperatorTree` optimizer. Unqualified and schema-qualified identifiers use the same catalog and `search_path` resolution as ordinary table references. The result has columns `left_doc_id BIGINT`, `right_doc_id BIGINT`, and `_score DOUBLE PRECISION`; a table-function column alias list may rename them.
 
+### Shared contract
+
+| Contract part | Definition |
+| --- | --- |
+| Syntax | `join_function(relation_identifier, left_expression, right_expression [, options...])` as a `FROM` source |
+| Arguments | `relation_identifier` is SQL grammar and cannot be quoted as a string or replaced by a value parameter; the remaining operands are expressions bound to that relation |
+| Result | A relation with `left_doc_id BIGINT`, `right_doc_id BIGINT`, and `_score DOUBLE PRECISION`; pair identity is preserved |
+| Effects | Read-only; the source participates in ordinary relational planning and cost estimation |
+| Errors | Wrong arity, an unresolvable relation or field, invalid threshold ranges, incompatible operand shapes, malformed or non-finite vectors, and unsupported scalar placement are rejected |
+| Composition | Alias the result and join it normally, or wrap it in a subquery or CTE; do not pass one tuple-producing join call directly as another join function's scalar operand |
+
 | Function | Join contract |
 | --- | --- |
 | `text_similarity_join(relation, left, right, threshold)` | Jaccard similarity over the text fields named by the operands; `threshold` is in `[0, 1]` |
@@ -170,6 +181,25 @@ ORDER BY pairs._score DESC, pairs.left_doc_id, pairs.right_doc_id;
 ```
 
 An operator-join result is a normal SQL source, so it can participate in multiway joins or be wrapped in a subquery or CTE. Tuple-producing join functions are not scalar operands, however: nest their result relationally instead of passing one `*_join(...)` call directly as an operand to another.
+
+For example, relational nesting can filter one operator join before composing it with another table:
+
+```sql
+WITH close_pairs AS (
+    SELECT left_doc_id, right_doc_id, _score
+    FROM vector_similarity_join(
+        passages,
+        knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 100),
+        knn_match(embedding, ARRAY[0.8, 0.1, 0.1, 0.0], 100),
+        0.85
+    )
+    WHERE _score >= 0.90
+)
+SELECT close_pairs.left_doc_id, close_pairs.right_doc_id, p.title
+FROM close_pairs
+JOIN passages AS p ON p.id = close_pairs.left_doc_id
+ORDER BY close_pairs.left_doc_id, close_pairs.right_doc_id;
+```
 
 The operator result preserves pair identity in `GeneralizedPostingList`; it does not collapse a pair to one synthetic document id. Text and vector joins place their similarity in `_score`, while graph and hybrid operators preserve their documented merged-score contract. Arguments that remain unbound at planning time retain SQL source order until they can be costed without guessing.
 

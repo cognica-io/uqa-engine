@@ -88,6 +88,14 @@ Stages run in this order: every `char_filters` entry, the one `tokenizer`, and e
 
 `create_analyzer` parses and validates the complete configuration before publishing it:
 
+| Contract part | Definition |
+| --- | --- |
+| Syntax | `create_analyzer(name TEXT, config_json TEXT)` in `FROM` |
+| Arguments | `name` and `config_json` are string values; `config_json` must contain one supported analyzer JSON object |
+| Result | One `create_analyzer TEXT` status column; a table-function column alias can rename it |
+| Effects | Creates or replaces one custom catalog analyzer in the current transaction; replacing a definition does not by itself rebuild existing postings |
+| Errors | Wrong arity or types, invalid JSON, unknown component tags, invalid regular expressions or gram bounds, and unreadable synonym files fail before publication |
+
 ```sql
 SELECT * FROM create_analyzer(
     'html_vehicle',
@@ -112,6 +120,14 @@ Registering the same custom name replaces its stored JSON definition, but alread
 
 ## LIST ANALYZERS function
 
+| Contract part | Definition |
+| --- | --- |
+| Syntax | `list_analyzers()` in `FROM` |
+| Arguments | None |
+| Result | Zero or more rows with one `analyzer_name TEXT` column, sorted by name in the direct result |
+| Effects | Read-only; includes custom catalog analyzers and the four built-ins |
+| Errors | Any argument is an arity error |
+
 ```sql
 SELECT analyzer_name
 FROM list_analyzers()
@@ -133,6 +149,14 @@ The analyzer must already resolve when the index is created. It is applied to bo
 ## SET TABLE ANALYZER function
 
 Create a GIN index without an analyzer option when assignments will be managed separately:
+
+| Contract part | Definition |
+| --- | --- |
+| Syntax | `set_table_analyzer(table TEXT, field TEXT, name TEXT [, phase TEXT])` in `FROM` |
+| Arguments | All operands are string values naming a table, text column, analyzer, and optional `index`, `search`/`query`, or `both` phase; `phase` defaults to `both` |
+| Result | One `set_table_analyzer TEXT` status column; a table-function column alias can rename it |
+| Effects | Replaces the field's durable assignment in the transaction; `index` and `both` rebuild current postings before publication |
+| Errors | Wrong arity or types, an unknown table, column, or analyzer, a non-`TEXT` column, a field outside a physical GIN index, and an unknown phase are rejected |
 
 ```sql
 CREATE INDEX articles_body_gin
@@ -173,6 +197,14 @@ If no search-phase analyzer is installed, execution falls back to the field's in
 
 Inspect every GIN field or filter by table:
 
+| Contract part | Definition |
+| --- | --- |
+| Syntax | `fts_index_stats()` or `fts_index_stats(table TEXT)` in `FROM` |
+| Arguments | The optional table filter is a string value resolved through the catalog and `search_path` |
+| Result | Zero or more rows with the eight columns defined below; count columns are `BIGINT` values |
+| Effects | Read-only diagnostics over current physical full-text indexes |
+| Errors | More than one argument, a non-string filter, catalog-resolution failures, and physical index read failures are rejected |
+
 ```sql
 SELECT table_name, field, analyzer, posting_count,
        doc_length_count, indexed_doc_count,
@@ -195,6 +227,14 @@ ORDER BY field;
 The zero-argument form returns all indexed fields. More than one argument or a non-string table argument is rejected.
 
 ## DROP ANALYZER function
+
+| Contract part | Definition |
+| --- | --- |
+| Syntax | `drop_analyzer(name TEXT)` in `FROM` |
+| Arguments | `name` is a string value naming one custom catalog analyzer |
+| Result | One `drop_analyzer TEXT` status column; a table-function column alias can rename it |
+| Effects | Removes the custom definition in the current transaction |
+| Errors | Wrong arity or type, a missing name, a built-in name, and a definition still owned by an assignment or GIN index are rejected |
 
 ```sql
 SELECT * FROM drop_analyzer('html_vehicle');

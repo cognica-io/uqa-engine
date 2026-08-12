@@ -32,7 +32,7 @@ The order is intentional. Lowercase runs before stop words and synonyms so their
 
 Use tagged dollar quoting for readable JSON:
 
-```sql
+```sql execute
 SELECT * FROM create_analyzer(
     'html_vehicle',
     $analyzer$
@@ -57,7 +57,7 @@ Registration validates the JSON, component names, regular expressions, n-gram bo
 
 Confirm the custom name is visible:
 
-```sql
+```sql execute
 SELECT analyzer_name
 FROM list_analyzers()
 WHERE analyzer_name = 'html_vehicle';
@@ -69,7 +69,7 @@ For CJK-style content, `standard_cjk` can be bound directly without registering 
 
 ## 4. Create a table and GIN index
 
-```sql
+```sql execute
 CREATE TABLE analyzer_articles (
     id INTEGER PRIMARY KEY,
     title TEXT NOT NULL,
@@ -84,7 +84,7 @@ The field must be in a physical GIN index before `set_table_analyzer` can bind i
 
 ## 5. Bind both analysis phases
 
-```sql
+```sql execute
 SELECT * FROM set_table_analyzer(
     'analyzer_articles',
     'body',
@@ -97,7 +97,7 @@ SELECT * FROM set_table_analyzer(
 
 ## 6. Insert HTML-bearing content
 
-```sql
+```sql execute
 INSERT INTO analyzer_articles (id, title, body) VALUES
     (1, 'Car setup', '<p>A fast car setup manual</p>'),
     (2, 'Maintenance', '<p>Automobile maintenance guide</p>'),
@@ -108,7 +108,7 @@ For row 1, HTML tags are removed, `A` is lowercased and removed as an English st
 
 ## 7. Query through the same analyzer
 
-```sql
+```sql execute
 SELECT id, title, _score
 FROM analyzer_articles
 WHERE text_match(body, 'car')
@@ -119,7 +119,7 @@ The expected identities are 1 and 2. Search analysis turns `car` into both `car`
 
 The inverse query returns the same support:
 
-```sql
+```sql execute
 SELECT id, title, _score
 FROM analyzer_articles
 WHERE text_match(body, 'automobile')
@@ -128,7 +128,7 @@ ORDER BY _score DESC, id ASC;
 
 ## 8. Inspect index state
 
-```sql
+```sql execute
 SELECT table_name, field, analyzer,
        indexed_doc_count, term_count, total_field_length
 FROM fts_index_stats('analyzer_articles');
@@ -166,7 +166,7 @@ Search-only synonym expansion can avoid indexing every synonym, but its expansio
 
 An analyzer cannot be dropped while its name is assigned to a field. Replace it with the built-in `standard` analyzer first:
 
-```sql
+```sql execute
 SELECT * FROM set_table_analyzer(
     'analyzer_articles',
     'body',

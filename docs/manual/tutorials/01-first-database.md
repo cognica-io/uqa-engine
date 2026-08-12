@@ -12,7 +12,7 @@ The file is created with the default SQLite-backed format. Run `\where` to confi
 
 ## 2. Create the schema
 
-```sql
+```sql execute
 CREATE TABLE projects (
     project_id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE
@@ -42,7 +42,7 @@ The primary keys reject duplicate identities. `NOT NULL`, `UNIQUE`, `CHECK`, `DE
 
 ## 3. Insert related rows atomically
 
-```sql
+```sql execute
 BEGIN;
 
 INSERT INTO projects (project_id, name)
@@ -60,7 +60,7 @@ The two tables publish together at commit. If any statement fails before `COMMIT
 
 ## 4. Query, aggregate, and order
 
-```sql
+```sql execute
 SELECT issue_id, title, status, priority
 FROM issues
 WHERE status = 'open'
@@ -69,7 +69,7 @@ ORDER BY priority ASC, issue_id ASC;
 
 Group by status:
 
-```sql
+```sql execute
 SELECT status, count(*) AS issue_count, avg(priority) AS average_priority
 FROM issues
 GROUP BY status
@@ -78,7 +78,7 @@ ORDER BY status;
 
 Join the project:
 
-```sql
+```sql execute
 SELECT p.name AS project, i.issue_id, i.title
 FROM projects AS p
 JOIN issues AS i ON i.project_id = p.project_id
@@ -87,7 +87,7 @@ ORDER BY i.issue_id;
 
 ## 5. Update with `RETURNING`
 
-```sql
+```sql execute
 UPDATE issues
 SET status = 'closed'
 WHERE issue_id = 102
@@ -96,7 +96,7 @@ RETURNING issue_id, status;
 
 Verify the remaining open work:
 
-```sql
+```sql execute
 SELECT issue_id, title
 FROM issues
 WHERE status = 'open'
@@ -105,7 +105,7 @@ ORDER BY issue_id;
 
 ## 6. Use a common table expression
 
-```sql
+```sql execute
 WITH open_issues AS (
     SELECT project_id, priority
     FROM issues
@@ -148,7 +148,7 @@ Binding preserves value types and avoids treating input as SQL syntax. Identifie
 
 Exit with `\q`, start the same command again, and run:
 
-```sql
+```sql execute
 SELECT count(*) AS projects FROM projects;
 SELECT count(*) AS issues FROM issues;
 ```

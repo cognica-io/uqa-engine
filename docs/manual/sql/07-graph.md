@@ -4,14 +4,30 @@ Named property graphs are durable engine objects. SQL reaches them through an AG
 
 ## Graph lifecycle
 
-```sql
+| Contract part | Definition |
+| --- | --- |
+| Syntax | `create_graph(name TEXT)` or `drop_graph(name TEXT [, cascade BOOLEAN])` as scalar lifecycle calls |
+| Arguments | `name` is a string value naming a graph, not an SQL relation identifier; dropping an existing AGE-compatible graph requires `cascade = true` |
+| Result | SQL `NULL` (the AGE-compatible `void` result) on success |
+| Effects | Creates or removes the durable named graph in the current transaction |
+| Errors | Wrong arity or type, invalid names, duplicate creation, missing drop targets, a false or omitted drop cascade, and graph persistence failures are rejected |
+
+```sql execute
 SELECT create_graph('network') AS created;
-SELECT drop_graph('network') AS dropped;
+SELECT drop_graph('network', true) AS dropped;
 ```
 
-Aliases `graph_create` and `graph_drop` address the same lifecycle operations. The Rust engine API also provides `create_graph`, `drop_graph`, and `list_graphs`.
+Aliases `graph_create` and `graph_drop` expose the native Boolean lifecycle result and are less strict than the AGE-compatible names. The Rust engine API also provides `create_graph`, `drop_graph`, and `list_graphs`.
 
 ## Cypher table function
+
+| Contract part | Definition |
+| --- | --- |
+| Syntax | `cypher(graph_name TEXT, source TEXT [, parameters]) AS alias(column type, ...)` in `FROM` |
+| Arguments | Graph name and Cypher source are string values; SQL calls require an output column definition list |
+| Result | One relation shaped by the declared output list; `agtype` columns contain canonical AGE-shaped text |
+| Effects | Read-only clauses only read graph state; supported Cypher mutations participate in the surrounding SQL transaction |
+| Errors | An unknown graph, malformed or unsupported Cypher, a missing or incompatible output definition, parameter mismatches, and runtime graph errors are rejected |
 
 ```sql
 SELECT *

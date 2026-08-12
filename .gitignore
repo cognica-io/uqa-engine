@@ -42,8 +42,11 @@ flamegraph.svg
 # Generated docs (we publish via cargo doc, not committed)
 /target/doc/
 
-# Claude Code workspace metadata (local only)
-/.claude/
+# Claude Code workspace metadata is local, except for shared project skills.
+/.claude/*
+!/.claude/skills/
+/.claude/skills/*
+!/.claude/skills/uqa-rs
 
 # emscripten build outputs copied into the WASM npm package
 crates/uqa-wasm/js/uqa.js

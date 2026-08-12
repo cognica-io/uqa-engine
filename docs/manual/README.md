@@ -11,6 +11,12 @@ The manual is divided by reader intent:
 | [Supported SQL](sql/README.md) | SQL statements, types, expressions, functions, retrieval, and compatibility |
 | [Internals](internals/README.md) | Crate ownership, planning, execution, persistence, state, and extension contracts |
 
+## LLM and agent entry points
+
+Use the repository-root [llms.txt](../../llms.txt) as a compact discovery map, then follow its links into this manual for the complete contract. The map intentionally does not duplicate detailed syntax or behavior.
+
+Codex and Claude Code can also discover the shared [UQA-RS skill](../../.agents/skills/uqa-rs/SKILL.md). The skill supplies the query-authoring and verification workflow; this manual remains authoritative for product behavior.
+
 ## File naming
 
 Each section keeps `README.md` as its landing page and names every chapter `NN-topic.md` with a two-digit prefix. The numeric order matches the chapter order in that section's index; adding or moving a chapter requires updating its filename, displayed chapter number where applicable, and every inbound link in the same change.
@@ -43,9 +49,10 @@ New users should read the [quick start](reference/01-quick-start.md), then work 
 - A result score is available as the virtual `_score` column in ranked SQL queries.
 - Mathematical definitions use LaTeX in display blocks and define every symbol close to the formula.
 - Mermaid diagrams describe structure and flow. They are explanatory and do not replace the contracts stated in prose.
+- SQL code fences are verified in CI. An unqualified `sql` fence must compile, `sql execute` runs in source order against one engine per file, and `sql compile-fail` must be intentionally rejected by the compiler.
 
 ## Version and compatibility scope
 
-This manual targets UQA-RS 0.1.0 and Rust 1.90 or newer. UQA-RS implements a large PostgreSQL-oriented surface, but it is an embedded engine rather than a PostgreSQL server clone. The [compatibility guide](sql/09-compatibility.md) states important differences and unsupported behavior.
+This manual targets UQA-RS 0.1.1 and Rust 1.90 or newer. UQA-RS implements a large PostgreSQL-oriented surface, but it is an embedded engine rather than a PostgreSQL server clone. The [compatibility guide](sql/09-compatibility.md) states important differences and unsupported behavior.
 
 The implementation and tests are authoritative when behavior changes. Source paths are included throughout the internal documentation to make each claim traceable.

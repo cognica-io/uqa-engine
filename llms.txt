@@ -1,0 +1,52 @@
+# UQA-RS
+
+> UQA-RS 0.1.1 is an embedded Rust database that combines PostgreSQL-oriented relational SQL, full-text and vector retrieval, graph queries, and ranked fusion in one runtime.
+
+The manual is the canonical product contract. Parser acceptance alone does not prove execution support; follow the documented argument shape, result schema, state effects, and errors, then verify executable claims against tests or the engine.
+
+When generating SQL:
+
+- Keep relation and column identifiers in SQL syntax. Positional parameters bind values only.
+- Use exact function, analyzer, and JSON component names. In particular, use `html_strip`, `ascii_folding`, and the built-in analyzer `standard_cjk`.
+- `standard_cjk` is a character n-gram pipeline, not a language-specific morphological segmenter.
+- Pass a relation identifier, not a string literal, as the first operand of an operator join.
+- Compose tuple-producing operator joins through aliases, joins, subqueries, or CTEs. They are not scalar operands.
+- Order ranked results by `_score DESC` and a stable identity tie key.
+- Treat unsupported shapes as errors rather than silently approximating them.
+
+## Start here
+
+- [Manual overview](docs/manual/README.md): Scope, reading paths, conventions, and compatibility target.
+- [Quick start](docs/manual/reference/01-quick-start.md): Minimal Rust and SQL workflow.
+- [Supported SQL](docs/manual/sql/README.md): SQL surface, parameters, names, ranking columns, and the function contract format.
+- [Compatibility](docs/manual/sql/09-compatibility.md): PostgreSQL alignment, deliberate differences, and unsupported behavior.
+- [UQA-RS agent skill](.agents/skills/uqa-rs/SKILL.md): Repository workflow for authoring and verifying queries or documentation.
+
+## SQL contracts
+
+- [Data types](docs/manual/sql/01-data-types.md): Scalars, temporal values, JSON, arrays, vectors, tensors, NULL, and conversions.
+- [DDL](docs/manual/sql/02-ddl.md): Schemas, relations, constraints, indexes, views, sequences, and foreign tables.
+- [Queries and DML](docs/manual/sql/03-queries-and-dml.md): SELECT, joins, CTEs, grouping, windows, sets, and mutation.
+- [Expressions and functions](docs/manual/sql/04-expressions-and-functions.md): Operators, scalar functions, aggregates, windows, and general table functions.
+- [Analyzer SQL](docs/manual/sql/05-analyzers.md): Exact analyzer JSON, built-ins including `standard_cjk`, lifecycle functions, GIN binding, and diagnostics.
+- [Retrieval SQL](docs/manual/sql/06-retrieval.md): Text, vector, hybrid, fusion, model retrieval, and tuple-producing operator joins.
+- [Graph SQL and Cypher](docs/manual/sql/07-graph.md): Named graphs, Cypher, regular paths, traversal, and centrality.
+- [Transactions and routines](docs/manual/sql/08-transactions-and-routines.md): Transactions, prepared SQL, functions, PL/pgSQL, and procedures.
+
+## Guides and APIs
+
+- [Tutorials](docs/manual/tutorials/README.md): Ordered, working database exercises.
+- [Rust engine API](docs/manual/reference/02-rust-engine-api.md): Engine lifecycle, parameters, results, cursors, and direct APIs.
+- [CLI](docs/manual/reference/03-cli.md): `usql` commands and persistent database usage.
+- [Search and ranking](docs/manual/reference/05-search-and-ranking.md): Retrieval behavior and evaluation guidance.
+- [Text analyzer pipelines](docs/manual/reference/06-text-analyzers.md): Pipeline stages, exact component vocabulary, phases, and bindings.
+- [Graphs](docs/manual/reference/07-graphs.md): Graph lifecycle and relational composition.
+- [Bindings and extensions](docs/manual/reference/08-bindings-and-extensions.md): Python, Node.js, WASM, callbacks, FDWs, and models.
+
+## Optional
+
+- [Internal architecture](docs/manual/internals/README.md): Crate ownership and subsystem navigation.
+- [Planning and execution](docs/manual/internals/02-planning-and-execution.md): Unified plans, operator joins, optimization, and execution.
+- [Analyzer internals](docs/manual/internals/04-analyzer-pipeline.md): Analyzer representation and index/search phases.
+- [Search internals](docs/manual/internals/05-search-and-ranking.md): Physical retrieval, scoring, and fusion.
+- [Verification](docs/manual/internals/09-verification.md): Test suites, benchmarks, and compatibility fixtures.

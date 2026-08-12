@@ -12,6 +12,8 @@ mod aggregate_monoid;
 mod correlated_outer_qualifier;
 #[path = "join_correctness.rs"]
 mod join_correctness;
+#[path = "manual_sql_examples.rs"]
+mod manual_sql_examples;
 #[path = "operator_tree_full_surface.rs"]
 mod operator_tree_full_surface;
 #[path = "operator_tree_pipeline.rs"]

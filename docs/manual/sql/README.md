@@ -34,6 +34,23 @@ UQA-RS parses PostgreSQL-oriented SQL with `libpg_query`, compiles it into UQA-R
 
 Unsupported statement shapes fail with an error instead of silently discarding clauses.
 
+## Function contract format
+
+Function and feature references use one consistent contract order so a reader or LLM can distinguish syntax from executable behavior:
+
+1. **Syntax** gives the implemented call shape rather than every PostgreSQL overload with the same name.
+2. **Arguments** states each type and whether an operand is an SQL identifier, an expression, or a value.
+3. **Result** states scalar type, support behavior, or table columns and types.
+4. **Effects** states catalog, index, session, transaction, or persistence changes; read-only functions say so explicitly.
+5. **Errors** states validation and unsupported shapes that fail.
+6. **Example** is the smallest complete SQL example that demonstrates the contract.
+
+Names in code font are canonical. Do not derive alternate spellings by splitting initialisms or component names: for example, analyzer JSON uses `html_strip` and `ascii_folding` exactly. A compatibility alias is documented only when the implementation registers it.
+
+Arguments described as relation or column identifiers are SQL grammar, not string values. Parameters such as `$1` can replace values but cannot replace those identifiers. Relation-producing functions compose through `FROM`, aliases, joins, subqueries, and CTEs; they are not scalar expressions unless a function contract explicitly says otherwise.
+
+Every fenced SQL block in this manual is checked by the `manual_sql_examples` integration test. Plain `sql` blocks must compile, `sql execute` blocks also run in source order against one in-memory engine per Markdown file, and `sql compile-fail` blocks must fail compilation. Unknown classifications and empty SQL blocks fail the test.
+
 ## Parameters
 
 Use PostgreSQL positional placeholders:
