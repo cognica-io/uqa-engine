@@ -56,11 +56,14 @@ impl Engine {
     ) -> Result<Vec<FtsIndexStat>, SQLError> {
         self.synchronize_table_catalog()
             .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
-        let resolved_filter = table_filter
-            .map(|name| self.try_resolve_table_name(name))
-            .transpose()
-            .map_err(|err| SQLError::Internal(format!("resolve table filter: {err}")))?
-            .flatten();
+        let resolved_filter = match table_filter {
+            Some(name) => Some(
+                self.try_resolve_table_name(name)
+                    .map_err(|err| SQLError::Internal(format!("resolve table filter: {err}")))?
+                    .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?,
+            ),
+            None => None,
+        };
         let mut tables: Vec<(String, Arc<TableState>)> = self
             .storage
             .tables

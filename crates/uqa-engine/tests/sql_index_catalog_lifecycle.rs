@@ -99,6 +99,26 @@ fn assert_shared_gin_is_live(engine: &Engine) {
     );
 }
 
+#[test]
+fn fts_index_stats_rejects_unknown_table_filter() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE docs (id INTEGER PRIMARY KEY, body TEXT);
+             CREATE INDEX docs_body_gin ON docs USING gin (body)",
+            &[],
+        )
+        .unwrap();
+
+    let error = engine
+        .sql("SELECT * FROM fts_index_stats('missing')", &[])
+        .unwrap_err();
+    assert!(
+        matches!(error, uqa_sql::SQLError::UnknownTable(ref name) if name == "missing"),
+        "expected unknown table, got {error}"
+    );
+}
+
 fn create_unnamed_index_fixture(engine: &Engine) {
     engine
         .sql(
