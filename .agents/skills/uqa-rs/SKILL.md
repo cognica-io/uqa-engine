@@ -73,7 +73,7 @@ Do not use an unverified SQL fence or an unknown fence qualifier.
 For manual SQL changes, run:
 
 ```sh
-cargo test -p uqa-engine --test engine_queries manual_sql_examples::manual_sql_examples_compile_or_execute
+cargo test -p uqa-engine --test integration engine_queries::manual_sql_examples::manual_sql_examples_compile_or_execute
 ```
 
 Run the subsystem's focused tests as well when behavior, not only documentation, changes. In the final report, distinguish examples that were compiled from those that were executed; never claim runtime verification from compilation alone.
