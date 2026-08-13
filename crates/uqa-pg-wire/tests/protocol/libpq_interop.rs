@@ -57,7 +57,9 @@ fn container_name() -> String {
 }
 
 fn docker_host() -> String {
-    env::var("UQA_PG18_DOCKER_HOST").unwrap_or_else(|_| "host.docker.internal".to_owned())
+    env::var("UQA_PG18_DOCKER_HOST").expect(
+        "UQA_PG18_DOCKER_HOST must name the test server host as reachable from the PostgreSQL 18 client container",
+    )
 }
 
 fn assert_postgresql_18_libpq() {
@@ -352,7 +354,7 @@ fn assert_psql_success(output: &Output, expected_protocol: ProtocolVersion) {
 }
 
 #[test]
-#[ignore = "requires UQA_PG18_WIRE_CONTAINER (default: pg-parity) with PostgreSQL 18 psql/libpq"]
+#[ignore = "requires UQA_PG18_DOCKER_HOST and UQA_PG18_WIRE_CONTAINER (default: pg-parity) with PostgreSQL 18 psql/libpq"]
 fn postgresql_18_libpq_negotiates_30_32_latest_and_downgrade() {
     assert_postgresql_18_libpq();
     let cases = [
@@ -387,7 +389,7 @@ fn requested_version(value: &str) -> ProtocolVersion {
 }
 
 #[test]
-#[ignore = "requires UQA_PG18_WIRE_CONTAINER (default: pg-parity) with PostgreSQL 18 psql/libpq"]
+#[ignore = "requires UQA_PG18_DOCKER_HOST and UQA_PG18_WIRE_CONTAINER (default: pg-parity) with PostgreSQL 18 psql/libpq"]
 fn postgresql_18_libpq_retries_after_ssl_rejection() {
     assert_postgresql_18_libpq();
     let (listener, port) = bind_test_listener();
@@ -524,7 +526,7 @@ fn serve_cancellation(
 }
 
 #[test]
-#[ignore = "requires UQA_PG18_WIRE_CONTAINER (default: pg-parity) with PostgreSQL 18 psql/libpq"]
+#[ignore = "requires UQA_PG18_DOCKER_HOST and UQA_PG18_WIRE_CONTAINER (default: pg-parity) with PostgreSQL 18 psql/libpq"]
 fn postgresql_18_libpq_cancels_with_legacy_and_256_byte_keys() {
     assert_postgresql_18_libpq();
     for (requested, newest_supported, expected_key_length) in [

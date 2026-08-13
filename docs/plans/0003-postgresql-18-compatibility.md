@@ -132,12 +132,12 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked
 cargo test -p uqa-engine --test integration engine_queries::manual_sql_examples::manual_sql_examples_compile_or_execute
 cargo test -p uqa-engine --test integration sql_tpch::
-cargo test -p uqa-pg-wire --test protocol libpq_interop:: -- --ignored
+UQA_PG18_DOCKER_HOST=container-reachable-host cargo test -p uqa-pg-wire --test protocol libpq_interop:: -- --ignored
 python3 tests/parity/pg18/run_diff.py
 python3 scripts/run-tpch-pg18.py --iterations 3
 ```
 
-The live wire command requires a PostgreSQL 18 client container named `pg-parity` by default. Set `UQA_PG18_WIRE_CONTAINER` to another container name and `UQA_PG18_DOCKER_HOST` when the container reaches the host through a name other than `host.docker.internal`.
+The live wire command requires `UQA_PG18_DOCKER_HOST` to name the test server host as reachable from the client container; this is explicit because the correct address differs between Docker Desktop, native Linux Docker, and remote container runtimes. It uses a PostgreSQL 18 client container named `pg-parity` by default, and `UQA_PG18_WIRE_CONTAINER` selects another container.
 
 Run repository policy scripts, binding builds and examples, and supported-platform CI whenever the parser dependency, public AST, catalog serialization, value representation, or wire types change.
 
