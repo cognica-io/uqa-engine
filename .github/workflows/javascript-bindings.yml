@@ -81,6 +81,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-emscripten
+      - name: Ensure the emscripten target is installed
+        run: rustup target add wasm32-unknown-emscripten
       - name: Free Linux runner disk
         run: bash .github/scripts/free-linux-runner-disk.sh
       - uses: Swatinem/rust-cache@v2
