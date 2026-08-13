@@ -8,11 +8,11 @@
 
 use super::{
     build_returning_row, coerce_to_column_type, dml_returning_result, dml_storage_error,
-    eval_mutation_expr, index_vectors_for_type, missing_document_error, referrers_to_for_actions,
-    rewrite_document_with_referential_actions, run_update_from, validate_mutation_columns,
-    BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope, Engine, ReturningRowImage,
-    ReturningRowImages, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, ScalarExpr,
-    UpdatePlan, Value,
+    eval_mutation_assignment, eval_mutation_expr, index_vectors_for_type, missing_document_error,
+    referrers_to_for_actions, rewrite_document_with_referential_actions, run_update_from,
+    validate_mutation_columns, BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope, Engine,
+    MutationAssignmentTarget, ReturningRowImage, ReturningRowImages, RowIndependentUpdateValues,
+    SQLError, SQLParam, SQLResult, ScalarExpr, UpdatePlan, Value,
 };
 
 pub(in crate::sql) fn run_update(
@@ -87,20 +87,30 @@ pub(in crate::sql) fn run_update_inner(
             }
         }
         for assignment in &stmt.assignments {
-            let value = coerce_to_column_type(
+            let value = eval_mutation_assignment(
                 engine,
-                &stmt.table,
-                &assignment.column,
-                eval_mutation_expr(engine, &ctes, &assignment.value, Some(&doc), params)?,
+                &ctes,
+                MutationAssignmentTarget {
+                    table: &stmt.table,
+                    column: &assignment.column,
+                    action: "UPDATE",
+                },
+                &assignment.value,
+                Some(&doc),
+                params,
             )?;
-            doc.insert(assignment.column.clone(), value);
+            if let Some(value) = value {
+                doc.insert(assignment.column.clone(), value);
+            } else {
+                doc.remove(&assignment.column);
+            }
         }
         let rewritten_doc_id = rewrite_document_with_referential_actions(
             engine,
             &stmt.table,
             doc_id,
             &original_doc,
-            doc.clone(),
+            &mut doc,
             params,
         )?;
         if !stmt.returning.is_empty() {
@@ -142,6 +152,13 @@ pub(in crate::sql) fn try_run_point_update(
     stmt: &UpdatePlan,
     params: &[SQLParam],
 ) -> Result<Option<SQLResult>, SQLError> {
+    if engine
+        .try_describe_table(&stmt.table)
+        .map_err(|error| dml_storage_error("UPDATE", error))?
+        .is_some_and(|columns| columns.iter().any(|column| column.generated.is_some()))
+    {
+        return Ok(None);
+    }
     if !stmt.returning.is_empty() {
         return Ok(None);
     }
@@ -274,7 +291,8 @@ pub(in crate::sql) fn expr_is_row_independent(expr: &ScalarExpr) -> bool {
                 && else_branch.as_deref().map_or(true, expr_is_row_independent)
         }
         ScalarExpr::Cast { expr, .. } => expr_is_row_independent(expr),
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Func { .. }

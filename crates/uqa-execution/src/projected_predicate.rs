@@ -205,6 +205,7 @@ mod tests {
         ] {
             let expression = ScalarExpr::Func {
                 name: name.into(),
+                binding: None,
                 args: vec![
                     ScalarExpr::Column("text".into()),
                     ScalarExpr::Literal(Value::Str(pattern.into())),
@@ -233,6 +234,7 @@ mod tests {
     fn qualified_like_runs_directly_on_a_composite_physical_row() {
         let expression = ScalarExpr::Not(Box::new(ScalarExpr::Func {
             name: "like".into(),
+            binding: None,
             args: vec![
                 ScalarExpr::qualified_column("o", "comment"),
                 ScalarExpr::Literal(Value::Str("%special%requests%".into())),

@@ -40,7 +40,8 @@ pub(in crate::sql) fn expr_contains_function(expression: &ScalarExpr) -> bool {
                 || else_branch.as_deref().is_some_and(expr_contains_function)
         }
         ScalarExpr::InSubquery { expr, .. } => expr_contains_function(expr),
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
@@ -146,7 +147,8 @@ pub(in crate::sql) fn collect_expr_qualifiers(
             }
         }
         ScalarExpr::InSubquery { expr, .. } => collect_expr_qualifiers(expr, qualifiers),
-        ScalarExpr::Column(_)
+        ScalarExpr::Default
+        | ScalarExpr::Column(_)
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::Star
@@ -212,7 +214,8 @@ pub(in crate::sql) fn expr_has_unqualified_column(expr: &ScalarExpr) -> bool {
                     .is_some_and(|expr| expr_has_unqualified_column(expr))
         }
         ScalarExpr::InSubquery { expr, .. } => expr_has_unqualified_column(expr),
-        ScalarExpr::QualifiedColumn { .. }
+        ScalarExpr::Default
+        | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::Star
@@ -227,7 +230,8 @@ pub(in crate::sql) fn qualify_unqualified_columns(
 ) -> ScalarExpr {
     match expr {
         ScalarExpr::Column(column) => ScalarExpr::qualified_column(qualifier, column),
-        ScalarExpr::QualifiedColumn { .. }
+        ScalarExpr::Default
+        | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::Star => expr.clone(),
@@ -280,12 +284,14 @@ pub(in crate::sql) fn qualify_unqualified_columns(
         },
         ScalarExpr::Func {
             name,
+            binding,
             args,
             distinct,
             order_by,
             filter,
         } => ScalarExpr::Func {
             name: name.clone(),
+            binding: binding.clone(),
             args: args
                 .iter()
                 .map(|arg| qualify_unqualified_columns(arg, qualifier))

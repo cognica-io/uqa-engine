@@ -431,7 +431,8 @@ fn outer_expression_contains_volatile_function(engine: &Engine, expression: &Sca
                     outer_expression_contains_volatile_function(engine, branch)
                 })
         }
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
@@ -533,7 +534,8 @@ fn collect_subquery_ids(expression: &ScalarExpr, output: &mut BTreeSet<usize>) {
                 collect_subquery_ids(branch, output);
             }
         }
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
@@ -622,7 +624,7 @@ fn collect_pushdown_outer_columns(expression: &ScalarExpr, output: &mut BTreeSet
                     .as_deref()
                     .is_none_or(|branch| collect_pushdown_outer_columns(branch, output))
         }
-        ScalarExpr::Star | ScalarExpr::WindowCall { .. } => false,
+        ScalarExpr::Default | ScalarExpr::Star | ScalarExpr::WindowCall { .. } => false,
     }
 }
 
@@ -952,7 +954,8 @@ pub(in crate::sql) fn rewrite_output_filter(
             column,
             ..
         } if expression_qualifier.eq_ignore_ascii_case(qualifier) => map_column(column, used)?,
-        ScalarExpr::QualifiedColumn { .. }
+        ScalarExpr::Default
+        | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Star
         | ScalarExpr::WindowCall { .. }
         | ScalarExpr::ScalarSubquery(_)
@@ -967,12 +970,14 @@ pub(in crate::sql) fn rewrite_output_filter(
         ),
         ScalarExpr::Func {
             name,
+            binding,
             args,
             distinct,
             order_by,
             filter,
         } => ScalarExpr::Func {
             name: name.clone(),
+            binding: binding.clone(),
             args: args
                 .iter()
                 .map(|arg| recur(arg, used))

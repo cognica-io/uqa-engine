@@ -163,6 +163,7 @@ fn hash_join_prepares_constant_like_residual_once() {
     );
     let predicate = ScalarExpr::Not(Box::new(ScalarExpr::Func {
         name: "like".into(),
+        binding: None,
         args: vec![
             ScalarExpr::qualified_column("o", "comment"),
             ScalarExpr::Literal(Value::Str("%special%requests%".into())),

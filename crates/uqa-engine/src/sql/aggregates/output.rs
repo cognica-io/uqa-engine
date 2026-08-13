@@ -295,7 +295,7 @@ fn references_external_row(expression: &ScalarExpr) -> bool {
         ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }
         | ScalarExpr::InSubquery { .. } => true,
-        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => false,
+        ScalarExpr::Default | ScalarExpr::Literal(_) | ScalarExpr::Param(_) => false,
     }
 }
 

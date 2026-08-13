@@ -50,6 +50,7 @@ mod dml;
 mod driver;
 mod engine_api;
 mod from_rows;
+mod generated;
 mod mutability;
 mod plan_executor;
 mod planning;
@@ -68,7 +69,7 @@ use mutability::{is_transaction_control, query_may_mutate_engine};
 use planning::compile_logical_plans;
 use planning::lower_statement;
 pub(super) use planning::{execute_compiled_statement, optimize_engine_plan};
-pub(crate) use plpgsql_exec::call_user_scalar_function;
+pub(crate) use plpgsql_exec::{call_bound_user_scalar_function, call_user_scalar_function};
 
 use aggregates::{
     aggregate_value, contains_aggregate, has_aggregate, projection_label_at, AggregateAccumulator,
@@ -86,6 +87,7 @@ use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update}
 use from_rows::{
     build_join_spill_with_ctes, engine_func_intercept, prefix_row, ColumnPrune, QualifierFilters,
 };
+pub(crate) use generated::refresh_stored_generated_columns;
 use plan_executor::UnifiedPlanExecutor;
 use row_functions::{
     execute_function, execute_function_with_top_k, execute_tree_entries, expect_column_name,

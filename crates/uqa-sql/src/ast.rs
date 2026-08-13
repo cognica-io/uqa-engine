@@ -62,6 +62,28 @@ pub enum ColumnType {
     Tensor(u32),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GeneratedColumnKind {
+    Virtual,
+    Stored,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneratedColumn {
+    pub kind: GeneratedColumnKind,
+    pub expression: Box<Expr>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub function_dependencies: Vec<GeneratedFunctionDependency>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FunctionBinding {
+    pub name: String,
+    pub argument_types: Vec<String>,
+}
+
+pub type GeneratedFunctionDependency = FunctionBinding;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ColumnDef {
@@ -91,6 +113,11 @@ pub struct ColumnDef {
     /// reopened engines keep the same INSERT semantics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Expr>,
+    /// `PostgreSQL` 18 generated-column definition. Stored values are refreshed
+    /// on every row write; virtual values are evaluated from the physical row
+    /// only when a logical row is read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated: Option<GeneratedColumn>,
     /// `CHECK (<expr>)` column-level constraint. Evaluated at INSERT
     /// (and UPDATE-replace) time against the row being written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -462,6 +489,13 @@ pub enum AlterTableAction {
         default: Expr,
     },
     DropDefault {
+        name: String,
+    },
+    SetExpression {
+        name: String,
+        expression: Expr,
+    },
+    DropExpression {
         name: String,
     },
     SetNotNull {

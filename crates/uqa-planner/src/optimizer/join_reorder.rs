@@ -478,7 +478,8 @@ fn collect_resolved_aliases(
                     .all(|(condition, result)| recur(condition) && recur(result))
                 && else_branch.as_deref().is_none_or(recur)
         }
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::WindowCall { .. }
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }
@@ -780,7 +781,8 @@ fn collect_scalar_qualifiers(expression: &ScalarExpr, output: &mut BTreeSet<Stri
             }
         }
         ScalarExpr::InSubquery { expr, .. } => collect_scalar_qualifiers(expr, output),
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)

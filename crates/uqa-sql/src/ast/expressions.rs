@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use uqa_core::Value;
 
-use super::SelectStmt;
+use super::{FunctionBinding, SelectStmt};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Projection {
@@ -67,6 +67,10 @@ pub enum FrameBound {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Star,
+    /// `DEFAULT` in an INSERT/UPDATE assignment. This is a mutation marker,
+    /// not a scalar value, and must be resolved against the target column
+    /// before expression evaluation.
+    Default,
     /// Unqualified column reference (`col`).
     Column(String),
     /// Qualified column reference (`table.col` or `alias.col`).
@@ -83,6 +87,8 @@ pub enum Expr {
     /// the function registry.
     Func {
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<FunctionBinding>,
         args: Vec<Expr>,
         /// `func(DISTINCT expr)` - only meaningful for aggregate
         /// functions. Mirrors `PostgreSQL`'s `agg_distinct`.

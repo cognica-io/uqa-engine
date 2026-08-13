@@ -207,7 +207,8 @@ pub(super) fn expr_contains_volatile_function(engine: &Engine, expr: &ScalarExpr
         ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }
         | ScalarExpr::InSubquery { .. } => true,
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)

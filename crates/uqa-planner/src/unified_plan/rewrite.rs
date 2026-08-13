@@ -345,7 +345,8 @@ pub(super) fn rewrite_scalar(
             }
         }
         ScalarExpr::InSubquery { expr, .. } => rewrite_scalar(expr, rewrite),
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)

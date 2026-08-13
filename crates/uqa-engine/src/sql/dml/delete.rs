@@ -242,7 +242,12 @@ pub(in crate::sql) fn apply_referenced_key_delete_actions(
                         params,
                     )?;
                     rewrite_document_with_referential_actions(
-                        engine, &ref_table, child_id, &child_doc, updated, params,
+                        engine,
+                        &ref_table,
+                        child_id,
+                        &child_doc,
+                        &mut updated,
+                        params,
                     )?;
                 }
             }

@@ -38,15 +38,17 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
             Some(value) => Expr::Literal(value),
             None => expr.clone(),
         },
-        Expr::Literal(_) | Expr::Star => expr.clone(),
+        Expr::Default | Expr::Literal(_) | Expr::Star => expr.clone(),
         Expr::Func {
             name,
+            binding,
             args,
             distinct,
             order_by,
             filter,
         } => Expr::Func {
             name: name.clone(),
+            binding: binding.clone(),
             args: bind_exprs(args, r)?,
             distinct: *distinct,
             order_by: bind_order_by(order_by, r)?,

@@ -18,6 +18,7 @@ pub(super) fn lower_scalar_expression(
 ) -> ScalarExpr {
     match expression {
         Expr::Star => ScalarExpr::Star,
+        Expr::Default => ScalarExpr::Default,
         Expr::Column(column) => ScalarExpr::Column(column),
         Expr::QualifiedColumn {
             qualifier,
@@ -32,12 +33,14 @@ pub(super) fn lower_scalar_expression(
         Expr::Param(index) => ScalarExpr::Param(index),
         Expr::Func {
             name,
+            binding,
             args,
             distinct,
             order_by,
             filter,
         } => ScalarExpr::Func {
             name,
+            binding,
             args: args
                 .into_iter()
                 .map(|argument| lower_scalar_expression(argument, aggregates, subqueries))

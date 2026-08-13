@@ -169,6 +169,7 @@ pub(super) fn observe_target(
         distinct,
         order_by,
         filter,
+        ..
     } = expression
     else {
         return Ok(());

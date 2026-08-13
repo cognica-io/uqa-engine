@@ -148,6 +148,7 @@ fn direct_schema_mutations_reject_missing_relations_columns_and_duplicates() {
         auto_increment: false,
         unique: false,
         default: None,
+        generated: None,
         check: None,
         check_name: None,
         check_enforced: true,
@@ -253,7 +254,7 @@ fn document_mutations_distinguish_unknown_tables_from_missing_documents() {
             .patch_document_fields("missing", 1, &updates, &vectors)
             .unwrap_err(),
         engine
-            .rewrite_document("missing", 1, Document::new())
+            .rewrite_prepared_document("missing", 1, Document::new())
             .unwrap_err(),
         engine.delete_document("missing", 1).unwrap_err(),
     ] {
@@ -282,6 +283,7 @@ fn tensor_backfill_reports_inner_dimension_mismatch_and_allows_null() {
         auto_increment: false,
         unique: false,
         default: None,
+        generated: None,
         check: None,
         check_name: None,
         check_enforced: true,

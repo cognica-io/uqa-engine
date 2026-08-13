@@ -8,13 +8,14 @@
 
 use super::{
     apply_missing_column_defaults, build_join_spill_with_ctes, build_projection_row_with_ctes,
-    coerce_to_column_type, decode_merge_pair, delete_document_with_referential_actions,
-    dml_returning_result, dml_storage_error, doc_id_value, document_supplied_id, encode_merge_pair,
-    eval_mutation_expr, insert_document_with_constraints, insert_identity_columns,
-    merge_pair_schema, merge_source_index_value, missing_document_error, prefix_row,
-    returning_row_context, rewrite_document_with_referential_actions, validate_mutation_columns,
-    BTreeSet, CteScope, Document, Engine, MergePlan, MergeWhenPlan, ProjectionPlan, ResultRow,
-    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
+    decode_merge_pair, delete_document_with_referential_actions, dml_returning_result,
+    dml_storage_error, doc_id_value, document_supplied_id, encode_merge_pair,
+    eval_mutation_assignment, eval_mutation_expr, insert_identity_columns,
+    insert_prepared_document_with_constraints, merge_pair_schema, merge_source_index_value,
+    missing_document_error, prefix_row, returning_row_context,
+    rewrite_document_with_referential_actions, validate_mutation_columns, BTreeSet, CteScope,
+    Document, Engine, MergePlan, MergeWhenPlan, MutationAssignmentTarget, ProjectionPlan,
+    ResultRow, ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
     MERGE_ACTION_COLUMN,
 };
 
@@ -229,26 +230,30 @@ pub(in crate::sql) fn run_merge_inner(
                         };
                         let original_doc = doc.clone();
                         for assignment in assignments {
-                            let value = coerce_to_column_type(
+                            let value = eval_mutation_assignment(
                                 engine,
-                                &target_table,
-                                &assignment.column,
-                                eval_mutation_expr(
-                                    engine,
-                                    &ctes,
-                                    &assignment.value,
-                                    Some(&joined),
-                                    params,
-                                )?,
+                                &ctes,
+                                MutationAssignmentTarget {
+                                    table: &target_table,
+                                    column: &assignment.column,
+                                    action: "MERGE UPDATE",
+                                },
+                                &assignment.value,
+                                Some(&joined),
+                                params,
                             )?;
-                            doc.insert(assignment.column.clone(), value);
+                            if let Some(value) = value {
+                                doc.insert(assignment.column.clone(), value);
+                            } else {
+                                doc.remove(&assignment.column);
+                            }
                         }
                         let rewritten_doc_id = rewrite_document_with_referential_actions(
                             engine,
                             &target_table,
                             doc_id,
                             &original_doc,
-                            doc.clone(),
+                            &mut doc,
                             params,
                         )?;
                         affected += 1;
@@ -334,21 +339,45 @@ pub(in crate::sql) fn run_merge_inner(
                     },
                 ) => {
                     let mut document = Document::new();
-                    if values.len() != columns.len() {
-                        return Err(SQLError::Internal(format!(
+                    let implicit_columns = columns.is_empty();
+                    let target_columns = if implicit_columns {
+                        engine
+                            .try_table_columns(&target_table)
+                            .map_err(|error| dml_storage_error("MERGE INSERT", error))?
+                    } else {
+                        columns.clone()
+                    };
+                    if values.len() > target_columns.len()
+                        || (!implicit_columns && values.len() != target_columns.len())
+                    {
+                        return Err(SQLError::TypeMismatch(format!(
                             "MERGE INSERT row width {} != column count {}",
                             values.len(),
-                            columns.len()
+                            target_columns.len()
                         )));
                     }
-                    for (i, col) in columns.iter().enumerate() {
-                        let v = coerce_to_column_type(
+                    validate_mutation_columns(
+                        engine,
+                        &target_table,
+                        target_columns.iter().map(String::as_str),
+                        "MERGE INSERT",
+                    )?;
+                    for (i, col) in target_columns.iter().take(values.len()).enumerate() {
+                        let value = eval_mutation_assignment(
                             engine,
-                            &target_table,
-                            col,
-                            eval_mutation_expr(engine, &ctes, &values[i], Some(&joined), params)?,
+                            &ctes,
+                            MutationAssignmentTarget {
+                                table: &target_table,
+                                column: col,
+                                action: "MERGE INSERT",
+                            },
+                            &values[i],
+                            Some(&joined),
+                            params,
                         )?;
-                        document.insert(col.clone(), v);
+                        if let Some(value) = value {
+                            document.insert(col.clone(), value);
+                        }
                     }
                     apply_missing_column_defaults(engine, &target_table, &mut document, params)?;
                     let (auto_id_col, id_column) =
@@ -367,7 +396,12 @@ pub(in crate::sql) fn run_merge_inner(
                     engine
                         .advance_next_id(&target_table, doc_id)
                         .map_err(|err| dml_storage_error("MERGE INSERT", err))?;
-                    let inserted = insert_document_with_constraints(
+                    crate::sql::generated::refresh_stored_generated_columns(
+                        engine,
+                        &target_table,
+                        &mut document,
+                    )?;
+                    let inserted = insert_prepared_document_with_constraints(
                         engine,
                         &target_table,
                         doc_id,

@@ -31,6 +31,7 @@ pub(in crate::sql) fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
         (
             ScalarExpr::Func {
                 name: an,
+                binding: ab,
                 args: aa,
                 distinct: ad,
                 order_by: ao,
@@ -38,6 +39,7 @@ pub(in crate::sql) fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
             },
             ScalarExpr::Func {
                 name: bn,
+                binding: bb,
                 args: ba,
                 distinct: bd,
                 order_by: bo,
@@ -45,6 +47,7 @@ pub(in crate::sql) fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
             },
         ) => {
             an.eq_ignore_ascii_case(bn)
+                && ab == bb
                 && ad == bd
                 && aa.len() == ba.len()
                 && aa.iter().zip(ba.iter()).all(|(x, y)| exprs_match(x, y))
@@ -226,7 +229,8 @@ pub(in crate::sql) fn collect_aggregate_exprs<'a>(
             }
         }
         ScalarExpr::InSubquery { expr, .. } => collect_aggregate_exprs(engine, expr, out),
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
@@ -286,7 +290,7 @@ pub(in crate::sql) fn expr_references_columns(expr: &ScalarExpr) -> bool {
         }
         ScalarExpr::InSubquery { expr, .. } => expr_references_columns(expr),
         ScalarExpr::ScalarSubquery(_) | ScalarExpr::Exists { .. } => true,
-        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => false,
+        ScalarExpr::Default | ScalarExpr::Literal(_) | ScalarExpr::Param(_) => false,
     }
 }
 

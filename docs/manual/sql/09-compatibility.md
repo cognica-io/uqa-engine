@@ -55,7 +55,7 @@ Each missing clause above must be implemented with PostgreSQL 18 semantics; sour
 
 ## Open PostgreSQL 18 DDL bugs
 
-- Virtual and stored generated columns are not implemented.
+- Virtual and stored generated columns implement durable definitions, selective virtual evaluation, exactly-once stored evaluation, DML assignment rules, DDL-time static typing for the implemented expression surface, exact stored SQL routine overload binding and dependencies, supported constraints and indexes, catalogs, ALTER operations, failure atomicity, and reopen behavior. The complete PostgreSQL built-in function and operator overload matrix, privileges, inheritance and partition propagation, `pg_dump`/`pg_restore`, and complete upstream regression coverage remain open compatibility bugs.
 - `WITHOUT OVERLAPS` keys and `PERIOD` foreign keys are not implemented because range and multirange column types are not yet available.
 - Expression indexes are not implemented.
 - SQL index access methods are B-tree, GIN, IVF, and HNSW.

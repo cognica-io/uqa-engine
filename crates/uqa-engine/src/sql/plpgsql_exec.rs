@@ -14,7 +14,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use uqa_core::Value;
-use uqa_sql::ast::{CreateFunction, DropFunctionStmt, Expr, FunctionReturns, Statement};
+use uqa_sql::ast::{
+    CreateFunction, DropFunctionStmt, Expr, FunctionBinding, FunctionReturns, Statement,
+};
 use uqa_sql::expr::{cast_value, truthy, value_type_name};
 use uqa_sql::plpgsql::{
     bind_expr, bind_statement, condition_sqlstate, condition_sqlstates, IntoTarget, PLpgSQLBlock,
@@ -24,7 +26,8 @@ use uqa_sql::plpgsql::{
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 
 use crate::engine_user_functions::{
-    canonical_routine_type_name, routine_local_name, CompiledFunctionBody, SQLUserFunction,
+    canonical_routine_type_name, routine_local_name, routine_signature_types, CompiledFunctionBody,
+    SQLUserFunction,
 };
 use crate::{Engine, SQLTableFunctionResult};
 
@@ -46,7 +49,8 @@ mod state;
 mod statements;
 
 pub(crate) use handlers::{
-    call_user_scalar_function, call_user_table_function, resolved_user_function_returns_set,
+    call_bound_user_scalar_function, call_user_scalar_function, call_user_table_function,
+    resolved_user_function_returns_set,
 };
 pub(super) use handlers::{run_call, run_create_function, run_do_block, run_drop_function};
 
@@ -55,7 +59,7 @@ use diagnostics::{
     return_query_context_error, routine_message, row_value, strict_into_check, to_i64_value,
 };
 use resolution::{
-    best_effort_cast, call_signature, output_column_names, resolve_routine,
+    best_effort_cast, call_signature, output_column_names, resolve_bound_routine, resolve_routine,
     routine_resolution_error,
 };
 use routine::{execute_routine, DepthGuard};

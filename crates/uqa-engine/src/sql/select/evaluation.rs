@@ -441,6 +441,14 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
     ) -> Option<std::result::Result<Value, SQLError>> {
         crate::sql::call_user_scalar_function(self.engine, name, args)
     }
+
+    fn call_bound_user_function(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+        args: &[(Option<String>, Value)],
+    ) -> Option<std::result::Result<Value, SQLError>> {
+        crate::sql::call_bound_user_scalar_function(self.engine, binding, args)
+    }
 }
 
 impl PhysicalSubqueryRunner for ScopedEngineHook<'_> {
@@ -849,7 +857,8 @@ pub(in crate::sql) fn expr_contains_subquery(expr: &ScalarExpr) -> bool {
                     .as_ref()
                     .is_some_and(|expr| expr_contains_subquery(expr))
         }
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)

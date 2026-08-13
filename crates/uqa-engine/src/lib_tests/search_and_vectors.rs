@@ -126,6 +126,7 @@ fn run_analyze_populates_column_stats() {
             auto_increment: false,
             unique: false,
             default: None,
+            generated: None,
             check: None,
             check_name: None,
             check_enforced: true,

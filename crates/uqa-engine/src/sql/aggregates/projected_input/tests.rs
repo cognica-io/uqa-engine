@@ -35,6 +35,7 @@ impl RowLookup for TestRow {
 fn aggregate(name: &str, argument: ScalarExpr) -> ScalarExpr {
     ScalarExpr::Func {
         name: name.into(),
+        binding: None,
         args: vec![argument],
         distinct: false,
         order_by: Vec::new(),

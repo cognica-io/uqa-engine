@@ -48,6 +48,9 @@ impl Engine {
         if let Some(default) = &mut column.default {
             self.bind_sequence_references_in_expr(default)?;
         }
+        if let Some(generated) = &mut column.generated {
+            self.bind_sequence_references_in_expr(&mut generated.expression)?;
+        }
         if let Some(reference) = &mut column.references {
             reference.table = self.canonical_foreign_key_target(&reference.table)?;
         }

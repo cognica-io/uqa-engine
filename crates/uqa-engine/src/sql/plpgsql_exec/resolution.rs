@@ -7,8 +7,9 @@
 //! Routine overload resolution, argument binding, and coercion.
 
 use super::{
-    canonical_routine_type_name, cast_value, eval_lowered_expression, value_type_name, Arc,
-    CreateFunction, Engine, SQLError, SQLUserFunction, Value,
+    canonical_routine_type_name, cast_value, eval_lowered_expression, routine_signature_types,
+    value_type_name, Arc, CreateFunction, Engine, FunctionBinding, SQLError, SQLUserFunction,
+    Value,
 };
 
 pub(super) fn output_column_names(def: &CreateFunction) -> Vec<String> {
@@ -186,6 +187,32 @@ pub(super) fn resolve_routine(
     let (function, slots, _) = candidates
         .pop()
         .ok_or_else(|| SQLError::Internal("winning routine candidate disappeared".into()))?;
+    let bound = materialize_arguments(engine, &function.def, slots)?;
+    Ok(Some((function, bound)))
+}
+
+pub(super) fn resolve_bound_routine(
+    engine: &Engine,
+    binding: &FunctionBinding,
+    args: &[(Option<String>, Value)],
+) -> Result<Option<ResolvedRoutine>, SQLError> {
+    let Some(overloads) = engine.lookup_sql_functions(&binding.name) else {
+        return Ok(None);
+    };
+    let function = overloads
+        .into_iter()
+        .find(|function| routine_signature_types(&function.def) == binding.argument_types)
+        .ok_or_else(|| SQLError::Routine {
+            sqlstate: "42883".into(),
+            message: format!(
+                "bound function {}({}) does not exist",
+                binding.name,
+                binding.argument_types.join(", ")
+            ),
+        })?;
+    let slots = try_match_arguments(&function.def, args).ok_or_else(|| {
+        routine_resolution_error("function", &binding.name, args, "does not exist")
+    })?;
     let bound = materialize_arguments(engine, &function.def, slots)?;
     Ok(Some((function, bound)))
 }

@@ -106,6 +106,7 @@ fn optimize_scalar(expression: ScalarExpr, config: &OptimizerConfig) -> ScalarEx
         },
         ScalarExpr::Func {
             name,
+            binding,
             args,
             distinct,
             mut order_by,
@@ -119,6 +120,7 @@ fn optimize_scalar(expression: ScalarExpr, config: &OptimizerConfig) -> ScalarEx
             }
             ScalarExpr::Func {
                 name,
+                binding,
                 args: args
                     .into_iter()
                     .map(|argument| optimize_scalar(argument, config))

@@ -17,6 +17,7 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
         return Err(SQLError::Internal("missing expr node".into()));
     };
     match inner {
+        NodeEnum::SetToDefault(_) => Ok(Expr::Default),
         NodeEnum::AConst(c) => compile_const(c),
         NodeEnum::ColumnRef(c) => compile_column_ref(c),
         NodeEnum::ParamRef(p) => {
@@ -44,6 +45,7 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
                 return Err(SQLError::Internal("NamedArgExpr without value".into()));
             };
             Ok(Expr::Func {
+                binding: None,
                 name: "__named_arg".into(),
                 args: vec![
                     Expr::Literal(Value::Str(arg.name.clone())),
@@ -66,6 +68,7 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
         NodeEnum::AExpr(a) => compile_a_expr(a),
         NodeEnum::SqlvalueFunction(svf) => compile_sql_value_function(svf),
         NodeEnum::MergeSupportFunc(_) => Ok(Expr::Func {
+            binding: None,
             name: "merge_action".into(),
             args: Vec::new(),
             distinct: false,
@@ -85,6 +88,7 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
                 .map(compile_expr)
                 .collect::<Result<Vec<_>>>()?;
             Ok(Expr::Func {
+                binding: None,
                 name: "coalesce".into(),
                 args,
                 distinct: false,
@@ -116,6 +120,7 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
                 )));
             }
             Ok(Expr::Func {
+                binding: None,
                 name: name.into(),
                 args,
                 distinct: false,
@@ -175,6 +180,7 @@ pub(in crate::compiler) fn compile_indirection(
                         .transpose()?
                         .unwrap_or(Expr::Literal(Value::Null));
                     current = Expr::Func {
+                        binding: None,
                         name: "__slice".into(),
                         args: vec![current, lower, upper],
                         distinct: false,
@@ -189,6 +195,7 @@ pub(in crate::compiler) fn compile_indirection(
                         .transpose()?
                         .ok_or_else(|| SQLError::Internal("subscript without index".into()))?;
                     current = Expr::Func {
+                        binding: None,
                         name: "__subscript".into(),
                         args: vec![current, index],
                         distinct: false,
@@ -205,6 +212,7 @@ pub(in crate::compiler) fn compile_indirection(
                 }
                 // `(composite).field` access on map values.
                 current = Expr::Func {
+                    binding: None,
                     name: "__subscript".into(),
                     args: vec![current, Expr::Literal(Value::Str(field.sval.clone()))],
                     distinct: false,
@@ -249,6 +257,7 @@ pub(in crate::compiler) fn compile_sql_value_function(
         }
     };
     Ok(Expr::Func {
+        binding: None,
         name: name.into(),
         args: Vec::new(),
         distinct: false,

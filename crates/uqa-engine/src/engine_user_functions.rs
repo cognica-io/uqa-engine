@@ -279,6 +279,8 @@ impl Engine {
                         "resolved {kind} registry entry `{key}` disappeared before DROP"
                     ))
                 })?;
+                let signature = routine_signature_types(&list[position].def);
+                self.ensure_no_generated_function_dependencies(&key, &signature)?;
                 list.remove(position);
                 if list.is_empty() {
                     next.remove(&key);
@@ -316,6 +318,55 @@ impl Engine {
             self.push_sql_notice(level, &message);
         }
         Ok(())
+    }
+
+    fn generated_function_dependents(
+        &self,
+        name: &str,
+        argument_types: &[String],
+    ) -> Result<Vec<String>, SQLError> {
+        let mut dependents = Vec::new();
+        for table in self.table_names().map_err(|error| {
+            SQLError::Internal(format!("read generated function dependencies: {error}"))
+        })? {
+            let columns = self
+                .try_describe_table(&table)
+                .map_err(|error| {
+                    SQLError::Internal(format!("read generated function dependencies: {error}"))
+                })?
+                .ok_or_else(|| SQLError::UnknownTable(table.clone()))?;
+            for column in columns {
+                let Some(generated) = column.generated else {
+                    continue;
+                };
+                if generated.function_dependencies.iter().any(|dependency| {
+                    dependency.name == name && dependency.argument_types == argument_types
+                }) {
+                    dependents.push(format!("{table}.{}", column.name));
+                }
+            }
+        }
+        dependents.sort();
+        Ok(dependents)
+    }
+
+    fn ensure_no_generated_function_dependencies(
+        &self,
+        name: &str,
+        argument_types: &[String],
+    ) -> Result<(), SQLError> {
+        let dependents = self.generated_function_dependents(name, argument_types)?;
+        if dependents.is_empty() {
+            return Ok(());
+        }
+        Err(SQLError::Routine {
+            sqlstate: "2BP01".into(),
+            message: format!(
+                "cannot drop function {} because generated column(s) `{}` depend on it",
+                routine_signature_label(name, argument_types),
+                dependents.join("`, `")
+            ),
+        })
     }
 
     fn resolve_sql_function_drop_target(

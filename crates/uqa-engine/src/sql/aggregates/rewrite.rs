@@ -62,12 +62,14 @@ fn rewrite_aggregates(
     match expr {
         ScalarExpr::Func {
             name,
+            binding,
             args,
             distinct,
             order_by,
             filter,
         } => Ok(ScalarExpr::Func {
             name: name.clone(),
+            binding: binding.clone(),
             args: args
                 .iter()
                 .map(|arg| rewrite_aggregates(engine, arg, replace))

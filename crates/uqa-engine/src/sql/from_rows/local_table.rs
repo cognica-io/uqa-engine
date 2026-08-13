@@ -29,6 +29,7 @@ type StreamingLocalTableScan<'a> = (Box<dyn uqa_execution::PhysicalOperator + 'a
 pub(in crate::sql) struct EngineTableRowSource {
     table_name: String,
     table: std::sync::Arc<crate::TableState>,
+    column_definitions: Vec<uqa_sql::ast::ColumnDef>,
     columns: Vec<String>,
     schema: Vec<String>,
     predicate: Option<uqa_execution::ProjectedPredicate>,
@@ -43,6 +44,12 @@ impl EngineTableRowSource {
     ) -> uqa_execution::ExecResult<Vec<uqa_execution::PhysicalRow>> {
         if max_rows == 0 {
             return Ok(Vec::new());
+        }
+        if crate::engine_generated::projection_contains_virtual_generated_column(
+            &self.column_definitions,
+            &self.columns,
+        ) {
+            return self.next_virtual_physical_rows_batch(max_rows);
         }
         let store = self.table.document_store.read();
         let fields = self.columns.iter().map(String::as_str).collect::<Vec<_>>();
@@ -180,6 +187,59 @@ impl EngineTableRowSource {
         }
         Ok(rows)
     }
+
+    fn next_virtual_physical_rows_batch(
+        &mut self,
+        max_rows: usize,
+    ) -> uqa_execution::ExecResult<Vec<uqa_execution::PhysicalRow>> {
+        let store = self.table.document_store.read();
+        let mut rows = Vec::with_capacity(max_rows);
+        while rows.len() < max_rows {
+            let remaining = max_rows - rows.len();
+            let doc_ids = store.next_doc_ids(self.after, remaining).map_err(|error| {
+                SQLError::Internal(format!(
+                    "scan generated rows from `{}`: {error}",
+                    self.table_name
+                ))
+            })?;
+            let Some(last) = doc_ids.last().copied() else {
+                break;
+            };
+            self.after = Some(last);
+            let mut documents = store.get_many(&doc_ids).map_err(|error| {
+                SQLError::Internal(format!(
+                    "read generated rows from `{}`: {error}",
+                    self.table_name
+                ))
+            })?;
+            for doc_id in doc_ids {
+                let mut document = documents.remove(&doc_id).ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "table `{}` listed document {doc_id} but did not return it",
+                        self.table_name
+                    ))
+                })?;
+                crate::engine_generated::materialize_projected_virtual_generated_columns(
+                    &self.column_definitions,
+                    &mut document,
+                    &self.columns,
+                )?;
+                let values = self
+                    .columns
+                    .iter()
+                    .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
+                    .collect::<Vec<_>>();
+                let value_refs = values.iter().collect::<Vec<_>>();
+                if let Some(predicate) = self.predicate.as_ref() {
+                    if !predicate.keep(&value_refs)? {
+                        continue;
+                    }
+                }
+                rows.push(uqa_execution::PhysicalRow::from_values(values));
+            }
+        }
+        Ok(rows)
+    }
 }
 
 impl uqa_execution::RowSource for EngineTableRowSource {
@@ -294,9 +354,11 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         .transpose()?
         .flatten();
     let filter_pushed = predicate.is_some();
+    let column_definitions = table.columns.read().clone();
     let source = EngineTableRowSource {
         table_name: name.clone(),
         table,
+        column_definitions,
         columns,
         schema,
         predicate,

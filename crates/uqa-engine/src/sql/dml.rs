@@ -104,6 +104,48 @@ fn eval_mutation_expr(
     eval_physical_scalar(expression, &ctes.scalar_subqueries, &context)
 }
 
+struct MutationAssignmentTarget<'a> {
+    table: &'a str,
+    column: &'a str,
+    action: &'a str,
+}
+
+fn eval_mutation_assignment(
+    engine: &Engine,
+    ctes: &CteScope,
+    target: MutationAssignmentTarget<'_>,
+    expression: &ScalarExpr,
+    row: Option<&ResultRow>,
+    params: &[SQLParam],
+) -> Result<Option<Value>, SQLError> {
+    let MutationAssignmentTarget {
+        table,
+        column,
+        action,
+    } = target;
+    let generated = crate::sql::generated::generated_column_kind(engine, table, column)?;
+    if matches!(expression, ScalarExpr::Default) {
+        if generated.is_some() {
+            return Ok(None);
+        }
+        let value = match engine
+            .try_column_default_expr(table, column)
+            .map_err(|error| dml_storage_error(action, error))?
+        {
+            Some(default) => eval_lowered_expression(engine, &default, None, params)?,
+            None => Value::Null,
+        };
+        return coerce_to_column_type(engine, table, column, value).map(Some);
+    }
+    if generated.is_some() {
+        return Err(SQLError::TypeMismatch(format!(
+            "column `{column}` is a generated column; only DEFAULT may be assigned"
+        )));
+    }
+    let value = eval_mutation_expr(engine, ctes, expression, row, params)?;
+    coerce_to_column_type(engine, table, column, value).map(Some)
+}
+
 const MERGE_PAIR_DOC_ID: &str = "__uqa_merge_pair_doc_id";
 
 struct MergePairing {

@@ -158,6 +158,7 @@ fn compile_plan(
         distinct,
         order_by,
         filter,
+        ..
     } = expression
     else {
         return ProjectedAggregatePlan::General;

@@ -14,8 +14,41 @@ use super::{
 impl Engine {
     pub fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {
         let t = self.require_table(table)?;
-        let result = t.document_store.read().get(doc_id);
-        result.map_err(|error| document_store_read_error("read document", &error))
+        let mut document = t
+            .document_store
+            .read()
+            .get(doc_id)
+            .map_err(|error| document_store_read_error("read document", &error))?;
+        if let Some(document) = document.as_mut() {
+            crate::engine_generated::materialize_virtual_generated_columns(
+                &t.columns.read(),
+                document,
+            )?;
+        }
+        Ok(document)
+    }
+
+    /// Fetch complete physical documents while materialising only the virtual
+    /// generated columns named by `projection`. Callers that need full rows
+    /// should use [`Engine::get_document`]; projected execution paths use this
+    /// boundary so unrelated virtual expressions remain deferred.
+    pub(crate) fn get_documents_with_virtual_projection(
+        &self,
+        table: &str,
+        doc_ids: &[DocId],
+        projection: &[String],
+    ) -> Result<BTreeMap<DocId, Document>, SQLError> {
+        let t = self.require_table(table)?;
+        let columns = t.columns.read().clone();
+        let mut documents = t.document_store.read().get_many(doc_ids).map_err(|error| {
+            document_store_read_error("read generated document projection", &error)
+        })?;
+        for document in documents.values_mut() {
+            crate::engine_generated::materialize_projected_virtual_generated_columns(
+                &columns, document, projection,
+            )?;
+        }
+        Ok(documents)
     }
 
     /// Fetch a column projection for many documents in one round trip.
@@ -29,6 +62,28 @@ impl Engine {
         fields: &[&str],
     ) -> Result<BTreeMap<DocId, Vec<Value>>, SQLError> {
         let t = self.require_table(table)?;
+        let columns = t.columns.read().clone();
+        let requested = fields
+            .iter()
+            .map(|field| (*field).to_string())
+            .collect::<Vec<_>>();
+        if crate::engine_generated::projection_contains_virtual_generated_column(
+            &columns, &requested,
+        ) {
+            let documents =
+                self.get_documents_with_virtual_projection(table, doc_ids, &requested)?;
+            let mut projected = BTreeMap::new();
+            for (doc_id, document) in documents {
+                projected.insert(
+                    doc_id,
+                    fields
+                        .iter()
+                        .map(|field| document.get(*field).cloned().unwrap_or(Value::Null))
+                        .collect(),
+                );
+            }
+            return Ok(projected);
+        }
         let result = t.document_store.read().get_fields_multi(doc_ids, fields);
         result.map_err(|error| document_store_read_error("read document fields", &error))
     }
@@ -39,12 +94,7 @@ impl Engine {
         doc_ids: &[DocId],
         field: &str,
     ) -> Result<BTreeMap<DocId, Value>, SQLError> {
-        let t = self.require_table(table)?;
-        let rows = t
-            .document_store
-            .read()
-            .get_fields_multi(doc_ids, &[field])
-            .map_err(|error| document_store_read_error("read document field", &error))?;
+        let rows = self.get_document_fields_multi(table, doc_ids, &[field])?;
         let mut out = BTreeMap::new();
         for (doc_id, mut values) in rows {
             if values.len() != 1 {
@@ -350,18 +400,7 @@ impl Engine {
         Ok(true)
     }
 
-    pub(crate) fn rewrite_document(
-        &self,
-        table: &str,
-        doc_id: DocId,
-        document: Document,
-    ) -> Result<(), SQLError> {
-        self.with_implicit_transaction(|engine| {
-            engine.rewrite_document_inner(table, doc_id, document)
-        })
-    }
-
-    pub(super) fn rewrite_document_inner(
+    pub(crate) fn rewrite_prepared_document(
         &self,
         table: &str,
         doc_id: DocId,
@@ -371,13 +410,12 @@ impl Engine {
             .try_resolve_table_name(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-        let t = self
+        let table_state = self
             .try_table(&table_name)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
-        let vectors = Self::document_vector_values(&t, &document)?;
-        self.validate_vector_values(&table_name, &vectors)?;
-        self.add_document_with_vector_values_inner(&table_name, doc_id, document, vectors, false)
+        let vectors = Self::document_vector_values(&table_state, &document)?;
+        self.add_prepared_document_with_vector_values(&table_name, doc_id, document, vectors, false)
     }
 
     /// Rewrite a row while a column is being dropped or renamed. The

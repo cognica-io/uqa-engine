@@ -184,6 +184,7 @@ pub(in crate::sql) struct ScoredDocumentSource {
     /// [`ScoredDocumentSource::with_outer_qualifier`].
     outer_qualifier: Option<String>,
     table: Arc<crate::TableState>,
+    column_definitions: Vec<uqa_sql::ast::ColumnDef>,
     input: ScoredInputCursor,
     schema: uqa_execution::RowSchema,
     projected_fields: Vec<String>,
@@ -277,10 +278,12 @@ impl ScoredDocumentSource {
             .collect::<Vec<_>>();
         let projected_slots = ProjectedValueSlot::compile(&schema, &projected_fields);
         let schema = uqa_execution::RowSchema::new(schema);
+        let column_definitions = table.columns.read().clone();
         Self {
             table_name: table_name.to_string(),
             outer_qualifier: None,
             table,
+            column_definitions,
             input,
             schema,
             projected_fields,

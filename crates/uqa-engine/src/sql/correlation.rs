@@ -556,7 +556,8 @@ fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -
                     .is_some_and(|expr| expression_has_external_reference(expr, scopes))
         }
         ScalarExpr::InSubquery { expr, .. } => expression_has_external_reference(expr, scopes),
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)

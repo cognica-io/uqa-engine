@@ -133,7 +133,8 @@ fn walk_schema_expr_mut(
                     .into(),
             ));
         }
-        Expr::Star
+        Expr::Default
+        | Expr::Star
         | Expr::Column(_)
         | Expr::QualifiedColumn { .. }
         | Expr::Literal(_)
@@ -182,7 +183,7 @@ fn regclass_literal_mut(expression: &mut uqa_sql::ast::Expr) -> Option<&mut Stri
     }
 }
 
-fn schema_expr_references_column(expression: &uqa_sql::ast::Expr, column: &str) -> bool {
+pub(crate) fn schema_expr_references_column(expression: &uqa_sql::ast::Expr, column: &str) -> bool {
     let mut expression = expression.clone();
     let mut referenced = false;
     let result = walk_schema_expr_mut(&mut expression, &mut |node| {

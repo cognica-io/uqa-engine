@@ -124,6 +124,14 @@ pub trait EngineHook {
     ) -> Option<Result<Value>> {
         None
     }
+
+    fn call_bound_user_function(
+        &self,
+        _binding: &crate::ast::FunctionBinding,
+        _args: &[(Option<String>, Value)],
+    ) -> Option<Result<Value>> {
+        None
+    }
 }
 
 /// Read-only row interface used by the expression evaluator. Most callers
@@ -261,6 +269,9 @@ impl<'a> EvalContext<'a> {
 /// `Unsupported` so latent function-in-projection bugs surface loudly.
 pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
     match expr {
+        Expr::Default => Err(SQLError::Internal(
+            "DEFAULT reached scalar expression evaluation without a mutation target".into(),
+        )),
         Expr::Literal(v) => Ok(v.clone()),
         Expr::Param(i) => match i.checked_sub(1).and_then(|index| ctx.params.get(index)) {
             Some(SQLParam::Scalar(v)) => Ok(v.clone()),
@@ -304,9 +315,25 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             Ok(Value::List(out))
         }
         Expr::Star => Err(SQLError::Internal("`*` cannot be evaluated".into())),
-        Expr::Func { name, args, .. } => {
+        Expr::Func {
+            name,
+            binding,
+            args,
+            ..
+        } => {
             let call_args = evaluate_call_args(args, ctx)?;
-            eval_function_call(name, call_args, ctx)
+            if let Some(binding) = binding {
+                let engine = ctx.engine.ok_or_else(|| {
+                    SQLError::Unsupported(
+                        "bound user function requires a logical engine session".into(),
+                    )
+                })?;
+                engine
+                    .call_bound_user_function(binding, &call_args)
+                    .unwrap_or_else(|| Err(SQLError::UnknownFunction(binding.name.clone())))
+            } else {
+                eval_function_call(name, call_args, ctx)
+            }
         }
         Expr::WindowCall { name, .. } => Err(SQLError::Unsupported(format!(
             "window function `{name}` must be evaluated by the window-aware executor"

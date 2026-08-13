@@ -24,6 +24,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                     .ok_or_else(|| SQLError::Internal("AExpr missing rhs".into()))?;
                 let rhs = compile_expr(rhs)?;
                 let unary_func = |name: &str, arg: Expr| Expr::Func {
+                    binding: None,
                     name: name.into(),
                     args: vec![arg],
                     distinct: false,
@@ -70,6 +71,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 // skips NULL arguments.
                 "||" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "concat_op".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -79,6 +81,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "@@" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "fts_match".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -88,6 +91,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "@?" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "jsonpath_exists".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -97,6 +101,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "%" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "mod".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -106,6 +111,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "^" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "power".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -121,6 +127,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                         args.push(Expr::Literal(Value::Str("i".into())));
                     }
                     let call = Expr::Func {
+                        binding: None,
                         name: "regexp_like".into(),
                         args,
                         distinct: false,
@@ -136,6 +143,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 // Array overlap.
                 "&&" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "array_overlap".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -145,6 +153,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "~~" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "like".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -154,6 +163,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "~~*" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "ilike".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -163,6 +173,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "!~~" => {
                     return Ok(Expr::Not(Box::new(Expr::Func {
+                        binding: None,
                         name: "like".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -172,6 +183,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "!~~*" => {
                     return Ok(Expr::Not(Box::new(Expr::Func {
+                        binding: None,
                         name: "ilike".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -181,6 +193,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "->" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "json_extract_path".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -190,6 +203,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "->>" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "json_extract_path_text".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -199,6 +213,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "#>" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "json_extract_path".into(),
                         args: json_path_args(compile_expr(lhs)?, compile_expr(rhs)?),
                         distinct: false,
@@ -208,6 +223,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "#>>" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "json_extract_path_text".into(),
                         args: json_path_args(compile_expr(lhs)?, compile_expr(rhs)?),
                         distinct: false,
@@ -217,6 +233,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "#-" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "json_delete_path".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -226,6 +243,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "@>" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "json_contains".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -235,6 +253,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "<@" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "json_contained_by".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -244,6 +263,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "?" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "json_has_key".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -253,6 +273,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "?|" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "json_has_any_key".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -262,6 +283,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
                 "?&" => {
                     return Ok(Expr::Func {
+                        binding: None,
                         name: "json_has_all_keys".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
@@ -315,6 +337,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 _ => return Err(SQLError::Internal("BETWEEN expects 2 bounds".into())),
             };
             let call = Expr::Func {
+                binding: None,
                 name: "__between_symmetric".into(),
                 args: vec![
                     compile_expr(expr)?,
@@ -341,6 +364,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 .as_ref()
                 .ok_or_else(|| SQLError::Internal("IS DISTINCT FROM without rhs".into()))?;
             let call = Expr::Func {
+                binding: None,
                 name: "__is_distinct".into(),
                 args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                 distinct: false,
@@ -405,6 +429,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 _ => compile_expr(rhs)?,
             };
             let call = Expr::Func {
+                binding: None,
                 name: "similar_to".into(),
                 args: vec![compile_expr(lhs)?, pattern],
                 distinct: false,
@@ -435,6 +460,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 "__all_op"
             };
             Ok(Expr::Func {
+                binding: None,
                 name: name.into(),
                 args: vec![
                     compile_expr(lhs)?,
@@ -456,6 +482,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 .as_ref()
                 .ok_or_else(|| SQLError::Internal("NULLIF without rhs".into()))?;
             return Ok(Expr::Func {
+                binding: None,
                 name: "nullif".into(),
                 args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                 distinct: false,
@@ -489,6 +516,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
             }
             let func = Expr::Func {
+                binding: None,
                 name: "like".into(),
                 args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                 distinct: false,
@@ -526,6 +554,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 }
             }
             let func = Expr::Func {
+                binding: None,
                 name: "ilike".into(),
                 args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                 distinct: false,

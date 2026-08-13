@@ -256,7 +256,8 @@ pub(in crate::sql) fn collect_expr_prune_columns(
             }
         }
         ScalarExpr::Literal(_) | ScalarExpr::Param(_) => {}
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }
         | ScalarExpr::InSubquery { .. } => {

@@ -60,6 +60,7 @@ pub(in crate::sql) fn run_create_table_as(
             auto_increment: false,
             unique: false,
             default: None,
+            generated: None,
             check: None,
             check_name: None,
             check_enforced: true,

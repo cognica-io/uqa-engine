@@ -10,8 +10,8 @@ use super::helpers::{
     all_schema_names, catalog_name, catalog_ordinal, catalog_type_name, constraint_catalog_rows,
     current_user_name, default_expr_text, info_character_maximum_length,
     info_character_octet_length, info_data_type, info_datetime_precision, info_numeric_precision,
-    info_numeric_scale, info_udt_name, int_value, row, split_schema_name, stable_oid, str_value,
-    ConstraintCatalogKind, PG18_BUILTIN_ROUTINES,
+    info_numeric_scale, info_udt_name, int_value, row, schema_expr_text, split_schema_name,
+    stable_oid, str_value, ConstraintCatalogKind, PG18_BUILTIN_ROUTINES,
 };
 use super::{
     registered_names, routine_signature_types, value_to_text, Engine, ResultRow, SQLError, Value,
@@ -186,8 +186,20 @@ pub(super) fn build_info_columns(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
                 ("identity_maximum", Value::Null),
                 ("identity_minimum", Value::Null),
                 ("identity_cycle", str_value("NO")),
-                ("is_generated", str_value("NEVER")),
-                ("generation_expression", Value::Null),
+                (
+                    "is_generated",
+                    str_value(if col.generated.is_some() {
+                        "ALWAYS"
+                    } else {
+                        "NEVER"
+                    }),
+                ),
+                (
+                    "generation_expression",
+                    col.generated.as_ref().map_or(Value::Null, |generated| {
+                        str_value(schema_expr_text(&generated.expression))
+                    }),
+                ),
                 ("is_updatable", str_value("YES")),
             ]));
         }

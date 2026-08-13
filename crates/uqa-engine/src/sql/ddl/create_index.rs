@@ -43,6 +43,8 @@ pub(in crate::sql) fn run_create_index(
         allocate_default_index_name(engine, &c.table, &c.columns)?
     };
 
+    validate_index_columns(engine, &c)?;
+
     match am.as_str() {
         "gin" => {
             for col in &c.columns {
@@ -71,6 +73,39 @@ pub(in crate::sql) fn run_create_index(
         .try_register_catalog_index(&name, catalog_index_type, &c.table, &c.columns, &c.options)
         .map_err(|e| ddl_storage_error("CREATE INDEX", e))?;
     Ok(SQLResult::empty())
+}
+
+fn validate_index_columns(engine: &Engine, statement: &CreateIndex) -> Result<(), SQLError> {
+    let definitions = engine
+        .try_describe_table(&statement.table)
+        .map_err(|error| ddl_storage_error("CREATE INDEX", error))?
+        .ok_or_else(|| {
+            SQLError::Unsupported(format!(
+                "CREATE INDEX: relation `{}` does not exist",
+                statement.table
+            ))
+        })?;
+    if definitions.is_empty() {
+        return Ok(());
+    }
+    for name in &statement.columns {
+        let Some(column) = definitions.iter().find(|column| &column.name == name) else {
+            return Err(SQLError::Unsupported(format!(
+                "CREATE INDEX: column `{}`.`{name}` does not exist",
+                statement.table
+            )));
+        };
+        if column
+            .generated
+            .as_ref()
+            .is_some_and(|generated| generated.kind == uqa_sql::ast::GeneratedColumnKind::Virtual)
+        {
+            return Err(SQLError::TypeMismatch(format!(
+                "indexes on virtual generated column `{name}` are not supported"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn create_vector_index(

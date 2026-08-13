@@ -12,6 +12,7 @@ use super::{
     CreateIndex, CreateTable, Expr, NodeEnum, Result, SQLError, TableKeyConstraint,
     TableKeyConstraintKind,
 };
+use crate::ast::{GeneratedColumn, GeneratedColumnKind};
 
 pub(in crate::compiler) fn compile_create_table(
     stmt: &pg_query::protobuf::CreateStmt,
@@ -289,6 +290,7 @@ pub(in crate::compiler) fn compile_column_def(
     let mut not_null_name = None;
     let mut unique = false;
     let mut default: Option<Expr> = None;
+    let mut generated: Option<GeneratedColumn> = None;
     let mut check: Option<Expr> = None;
     let mut check_name = None;
     let mut check_enforced = true;
@@ -333,9 +335,24 @@ pub(in crate::compiler) fn compile_column_def(
                     last_enforceable = None;
                 }
                 pg_query::protobuf::ConstrType::ConstrGenerated => {
-                    return Err(SQLError::Unsupported(
-                        "generated columns are not implemented".into(),
-                    ));
+                    let raw = cstr.raw_expr.as_deref().ok_or_else(|| {
+                        SQLError::Internal("generated column without expression".into())
+                    })?;
+                    let kind = match cstr.generated_kind.as_str() {
+                        "v" => GeneratedColumnKind::Virtual,
+                        "s" => GeneratedColumnKind::Stored,
+                        other => {
+                            return Err(SQLError::Internal(format!(
+                                "generated column has unknown kind {other:?}"
+                            )));
+                        }
+                    };
+                    generated = Some(GeneratedColumn {
+                        kind,
+                        expression: Box::new(compile_expr(raw)?),
+                        function_dependencies: Vec::new(),
+                    });
+                    last_enforceable = None;
                 }
                 pg_query::protobuf::ConstrType::ConstrCheck => {
                     let raw = cstr
@@ -427,6 +444,7 @@ pub(in crate::compiler) fn compile_column_def(
         auto_increment,
         unique,
         default,
+        generated,
         check,
         check_name,
         check_enforced,

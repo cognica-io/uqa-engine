@@ -26,6 +26,8 @@ mod sql_ddl_extensions;
 mod sql_extended_ddl;
 #[path = "sql_foreign_ddl.rs"]
 mod sql_foreign_ddl;
+#[path = "sql_generated_columns.rs"]
+mod sql_generated_columns;
 #[path = "sql_index_catalog_lifecycle.rs"]
 mod sql_index_catalog_lifecycle;
 #[path = "sql_information_schema.rs"]

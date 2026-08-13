@@ -186,6 +186,7 @@ pub(in crate::compiler) fn compile_func_call(f: &pg_query::protobuf::FuncCall) -
         None => None,
     };
     Ok(Expr::Func {
+        binding: None,
         name: raw_name,
         args,
         distinct: f.agg_distinct,

@@ -200,23 +200,23 @@ fn generated_identity_insert_returning_reports_generated_id() {
 }
 
 #[test]
-fn unsupported_pg18_generated_column_is_failure_atomic() {
+fn pg18_virtual_generated_column_is_computed_on_read() {
     let eng = Engine::new();
-    let error = eng
-        .sql(
-            "CREATE TABLE generated_probe (
-                 source INTEGER,
-                 derived INTEGER GENERATED ALWAYS AS (source + 1) VIRTUAL
-             )",
-            &[],
-        )
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("generated columns are not implemented"),
-        "{error}"
-    );
-    assert!(!eng.has_table("generated_probe").unwrap());
+    eng.sql(
+        "CREATE TABLE generated_probe (
+             source INTEGER,
+             derived INTEGER GENERATED ALWAYS AS (source + 1) VIRTUAL
+         )",
+        &[],
+    )
+    .unwrap();
+    eng.sql("INSERT INTO generated_probe VALUES (4, DEFAULT)", &[])
+        .unwrap();
+    let result = eng
+        .sql("SELECT source, derived FROM generated_probe", &[])
+        .unwrap();
+    assert_eq!(result.rows[0]["source"], Value::Int(4));
+    assert_eq!(result.rows[0]["derived"], Value::Int(5));
 }
 
 #[test]

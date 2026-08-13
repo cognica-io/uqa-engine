@@ -163,6 +163,7 @@ fn rewrite_conjunction(parts: Vec<ScalarExpr>, allow_unqualified_signals: bool) 
 
     let fusion = ScalarExpr::Func {
         name: "fuse_bayesian_evidence".to_string(),
+        binding: None,
         args: fusion_signals,
         distinct: false,
         order_by: Vec::new(),
@@ -241,6 +242,7 @@ fn classify_signal(expression: &ScalarExpr) -> Option<(RetrievalSignalKind, Opti
         distinct,
         order_by,
         filter,
+        ..
     } = expression
     else {
         return None;
@@ -352,7 +354,8 @@ fn contains_explicit_fusion(expression: &ScalarExpr) -> bool {
                 || else_branch.as_deref().is_some_and(contains_explicit_fusion)
         }
         ScalarExpr::InSubquery { expr, .. } => contains_explicit_fusion(expr),
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)

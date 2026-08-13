@@ -179,6 +179,7 @@ pub(super) fn column_to_rust(col: &PythonColumnDef) -> Result<ColumnDef, PythonM
             .map(json_to_value)
             .transpose()?
             .map(Expr::Literal),
+        generated: None,
         check: None,
         check_name: None,
         check_enforced: true,

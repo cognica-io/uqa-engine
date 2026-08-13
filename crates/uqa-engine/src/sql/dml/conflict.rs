@@ -7,11 +7,11 @@
 //! INSERT conflict resolution, identity extraction, and RETURNING assembly.
 
 use super::{
-    build_projection_row_with_ctes, coerce_to_column_type, dml_storage_error, doc_id_value,
+    build_projection_row_with_ctes, dml_storage_error, doc_id_value, eval_mutation_assignment,
     eval_mutation_expr, expand_star_columns, key_constraint_values, missing_document_error,
     projection_columns, rewrite_document_with_referential_actions, BTreeSet, ConflictActionPlan,
-    ConflictPlan, CteScope, DocId, Document, Engine, ProjectionPlan, ResultRow, SQLError, SQLParam,
-    SQLResult, Value, DOC_ID_COLUMN,
+    ConflictPlan, CteScope, DocId, Document, Engine, MutationAssignmentTarget, ProjectionPlan,
+    ResultRow, SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN,
 };
 use uqa_sql::ast::ReturningAliases;
 
@@ -105,7 +105,16 @@ pub(in crate::sql) fn resolve_insert_conflict(
             for (column, value) in &existing_doc {
                 conflict_ctx_doc.insert(format!("{table}.{column}"), value.clone());
             }
-            for (column, value) in document {
+            let definitions = engine
+                .try_describe_table(table)
+                .map_err(|error| dml_storage_error("INSERT EXCLUDED schema", error))?
+                .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+            let mut excluded_document = document.clone();
+            crate::engine_generated::materialize_virtual_generated_columns(
+                &definitions,
+                &mut excluded_document,
+            )?;
+            for (column, value) in &excluded_document {
                 conflict_ctx_doc.insert(format!("excluded.{column}"), value.clone());
             }
             if let Some(predicate) = predicate {
@@ -117,26 +126,30 @@ pub(in crate::sql) fn resolve_insert_conflict(
             }
             let mut updated_doc = existing_doc.clone();
             for assignment in assignments {
-                let value = coerce_to_column_type(
+                let value = eval_mutation_assignment(
                     engine,
-                    table,
-                    &assignment.column,
-                    eval_mutation_expr(
-                        engine,
-                        scope,
-                        &assignment.value,
-                        Some(&conflict_ctx_doc),
-                        params,
-                    )?,
+                    scope,
+                    MutationAssignmentTarget {
+                        table,
+                        column: &assignment.column,
+                        action: "INSERT ON CONFLICT DO UPDATE",
+                    },
+                    &assignment.value,
+                    Some(&conflict_ctx_doc),
+                    params,
                 )?;
-                updated_doc.insert(assignment.column.clone(), value);
+                if let Some(value) = value {
+                    updated_doc.insert(assignment.column.clone(), value);
+                } else {
+                    updated_doc.remove(&assignment.column);
+                }
             }
             let rewritten_doc_id = rewrite_document_with_referential_actions(
                 engine,
                 table,
                 existing_id,
                 &existing_doc,
-                updated_doc.clone(),
+                &mut updated_doc,
                 params,
             )?;
             Ok(InsertConflictResolution::Updated {
@@ -172,7 +185,12 @@ pub(in crate::sql) fn returning_row_context(
             "RETURNING for table `{table}` has neither an old nor a new row image"
         ))
     })?;
+    let definitions = engine
+        .try_describe_table(table)
+        .map_err(|error| dml_storage_error("RETURNING schema lookup", error))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
     let mut row_doc = current.document.clone();
+    crate::engine_generated::materialize_virtual_generated_columns(&definitions, &mut row_doc)?;
     row_doc.insert(DOC_ID_COLUMN.into(), doc_id_value(current.doc_id)?);
 
     let mut columns = engine
@@ -189,22 +207,28 @@ pub(in crate::sql) fn returning_row_context(
     columns.insert(DOC_ID_COLUMN.into());
 
     for column in columns {
-        let old_value = row_image_value(images.old, &column)?;
-        let new_value = row_image_value(images.new, &column)?;
+        let old_value = row_image_value(images.old, &column, &definitions)?;
+        let new_value = row_image_value(images.new, &column, &definitions)?;
         row_doc.insert(format!("{}.{}", aliases.old, column), old_value);
         row_doc.insert(format!("{}.{}", aliases.new, column), new_value);
     }
     Ok(row_doc)
 }
 
-fn row_image_value(image: Option<ReturningRowImage<'_>>, column: &str) -> Result<Value, SQLError> {
+fn row_image_value(
+    image: Option<ReturningRowImage<'_>>,
+    column: &str,
+    definitions: &[uqa_sql::ast::ColumnDef],
+) -> Result<Value, SQLError> {
     let Some(image) = image else {
         return Ok(Value::Null);
     };
     if column == DOC_ID_COLUMN {
         return doc_id_value(image.doc_id);
     }
-    Ok(image.document.get(column).cloned().unwrap_or(Value::Null))
+    let mut document = image.document.clone();
+    crate::engine_generated::materialize_virtual_generated_columns(definitions, &mut document)?;
+    Ok(document.get(column).cloned().unwrap_or(Value::Null))
 }
 
 pub(in crate::sql) fn build_returning_row(

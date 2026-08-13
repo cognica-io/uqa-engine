@@ -81,6 +81,7 @@ mod engine_cancellation;
 mod engine_catalog_indexes;
 mod engine_fdw;
 mod engine_fts;
+mod engine_generated;
 mod engine_graphs;
 mod engine_models;
 mod engine_open;

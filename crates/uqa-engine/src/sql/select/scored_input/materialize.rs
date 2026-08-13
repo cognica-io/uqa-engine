@@ -83,6 +83,46 @@ impl ScoredDocumentSource {
         }
         let doc_ids = entries.iter().map(|entry| entry.doc_id).collect::<Vec<_>>();
         let store = self.table.document_store.read();
+        if crate::engine_generated::projection_contains_virtual_generated_column(
+            &self.column_definitions,
+            &self.projected_fields,
+        ) {
+            let mut documents =
+                store
+                    .get_many(&doc_ids)
+                    .map_err(|error| -> uqa_execution::ExecError {
+                        SQLError::Internal(format!(
+                            "read `{}` generated documents: {error}",
+                            self.table_name
+                        ))
+                        .into()
+                    })?;
+            for entry in entries {
+                let mut document = documents.remove(&entry.doc_id).ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "access path returned document {}, but table `{}` omitted it",
+                        entry.doc_id, self.table_name
+                    ))
+                })?;
+                crate::engine_generated::materialize_projected_virtual_generated_columns(
+                    &self.column_definitions,
+                    &mut document,
+                    &self.projected_fields,
+                )?;
+                let values = fields
+                    .iter()
+                    .map(|field| document.get(*field).cloned().unwrap_or(Value::Null))
+                    .collect::<Vec<_>>();
+                let value_refs = values.iter().collect::<Vec<_>>();
+                if let Some(predicate) = self.predicate.as_ref() {
+                    if !predicate.keep(&value_refs)? {
+                        continue;
+                    }
+                }
+                visitor(entry.doc_id, entry, &fields, &value_refs)?;
+            }
+            return Ok(());
+        }
         let mut index = 0usize;
         let mut materialization_error = None;
         store

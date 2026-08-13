@@ -8,12 +8,12 @@
 
 use super::{
     build_returning_row, coerce_to_column_type, dml_returning_result, dml_storage_error,
-    doc_id_value, document_supplied_id, eval_lowered_expression, eval_mutation_expr,
+    doc_id_value, document_supplied_id, eval_lowered_expression, eval_mutation_assignment,
     index_vectors_for_type, insert_identity_columns, resolve_insert_conflict,
     validate_document_constraints, validate_document_non_key_constraints, validate_key_constraints,
     validate_mutation_columns, BTreeMap, ColumnType, ConflictActionPlan, ConflictPlan, CteScope,
-    DocId, Document, Engine, InsertConflictResolution, InsertPlan, ReturningRowImage,
-    ReturningRowImages, SQLError, SQLParam, SQLResult,
+    DocId, Document, Engine, InsertConflictResolution, InsertPlan, MutationAssignmentTarget,
+    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult,
 };
 
 pub(in crate::sql) fn run_insert(
@@ -61,10 +61,11 @@ pub(in crate::sql) fn run_insert_inner(
     if let Some(source) = stmt.source.as_deref() {
         let result =
             crate::sql::select::execute_query_plan_with_ctes(engine, source, params, &mut scope)?;
-        let columns: Vec<String> = if stmt.columns.is_empty() {
+        let implicit_columns = stmt.columns.is_empty();
+        let columns: Vec<String> = if implicit_columns {
             let target_columns = engine
                 .try_table_columns(&stmt.table)
-                .map_err(|err| dml_storage_error("INSERT SELECT", err))?;
+                .map_err(|error| dml_storage_error("INSERT SELECT", error))?;
             if target_columns.is_empty() {
                 result.columns.clone()
             } else {
@@ -79,8 +80,10 @@ pub(in crate::sql) fn run_insert_inner(
             columns.iter().map(String::as_str),
             "INSERT SELECT",
         )?;
-        if result.columns.len() != columns.len() {
-            return Err(SQLError::Internal(format!(
+        if result.columns.len() > columns.len()
+            || (!implicit_columns && result.columns.len() != columns.len())
+        {
+            return Err(SQLError::TypeMismatch(format!(
                 "INSERT SELECT width {} != column count {}",
                 result.columns.len(),
                 columns.len()
@@ -92,7 +95,13 @@ pub(in crate::sql) fn run_insert_inner(
         for source_row in result.rows {
             cancel.check()?;
             let mut document = Document::new();
-            for (idx, col) in columns.iter().enumerate() {
+            for (idx, col) in columns.iter().take(result.columns.len()).enumerate() {
+                if crate::sql::generated::generated_column_kind(engine, &stmt.table, col)?.is_some()
+                {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "column `{col}` is a generated column; only DEFAULT may be assigned"
+                    )));
+                }
                 let source_col = &result.columns[idx];
                 if let Some(v) = source_row.get(source_col) {
                     document.insert(
@@ -108,6 +117,11 @@ pub(in crate::sql) fn run_insert_inner(
             // non-key constraints are checked before a conflicting row
             // can be rewritten or skipped.
             apply_missing_column_defaults(engine, &stmt.table, &mut document, params)?;
+            crate::sql::generated::refresh_stored_generated_columns(
+                engine,
+                &stmt.table,
+                &mut document,
+            )?;
             validate_document_non_key_constraints(engine, &stmt.table, &document, params)?;
             if let Some(on_conflict) = stmt.on_conflict.as_ref() {
                 match resolve_insert_conflict(
@@ -167,7 +181,7 @@ pub(in crate::sql) fn run_insert_inner(
             engine
                 .advance_next_id(&stmt.table, doc_id)
                 .map_err(|err| dml_storage_error("INSERT SELECT", err))?;
-            let document = insert_document_with_constraints(
+            let document = insert_prepared_document_with_constraints(
                 engine,
                 &stmt.table,
                 doc_id,
@@ -215,11 +229,12 @@ pub(in crate::sql) fn run_insert_inner(
         .map_err(|err| dml_storage_error("INSERT", err))?
         .contains(&id_column);
 
-    let columns: Vec<String> = if stmt.columns.is_empty() {
+    let implicit_columns = stmt.columns.is_empty();
+    let columns: Vec<String> = if implicit_columns {
         // INSERT without explicit column list: project the table schema.
         let cols = engine
             .try_table_columns(&stmt.table)
-            .map_err(|err| dml_storage_error("INSERT", err))?;
+            .map_err(|error| dml_storage_error("INSERT", error))?;
         if cols.is_empty() {
             return Err(SQLError::Unsupported(
                 "INSERT without column list against a table with no schema".into(),
@@ -245,18 +260,29 @@ pub(in crate::sql) fn run_insert_inner(
     let cancel = engine.cancellation_token();
     for row in &stmt.rows {
         cancel.check()?;
-        if row.len() != columns.len() {
-            return Err(SQLError::Internal(format!(
+        if row.len() > columns.len() || (!implicit_columns && row.len() != columns.len()) {
+            return Err(SQLError::TypeMismatch(format!(
                 "row width {} != column count {}",
                 row.len(),
                 columns.len()
             )));
         }
         let mut document = Document::new();
-        for (i, col) in columns.iter().enumerate() {
-            let mut v = eval_mutation_expr(engine, &scope, &row[i], None, params)?;
-            v = coerce_to_column_type(engine, &stmt.table, col, v)?;
-            document.insert(col.clone(), v);
+        for (i, col) in columns.iter().take(row.len()).enumerate() {
+            if let Some(value) = eval_mutation_assignment(
+                engine,
+                &scope,
+                MutationAssignmentTarget {
+                    table: &stmt.table,
+                    column: col,
+                    action: "INSERT",
+                },
+                &row[i],
+                None,
+                params,
+            )? {
+                document.insert(col.clone(), value);
+            }
         }
 
         // Defaults and all non-key constraints are shared with
@@ -264,6 +290,11 @@ pub(in crate::sql) fn run_insert_inner(
         // an integer primary-key DEFAULT cannot diverge from the row's
         // physical document id.
         apply_missing_column_defaults(engine, &stmt.table, &mut document, params)?;
+        crate::sql::generated::refresh_stored_generated_columns(
+            engine,
+            &stmt.table,
+            &mut document,
+        )?;
         validate_document_non_key_constraints(engine, &stmt.table, &document, params)?;
         let doc_id = document_supplied_id(
             &document,
@@ -353,7 +384,7 @@ pub(in crate::sql) fn run_insert_inner(
         // CONFLICT skips the pre-check, and its target can miss the
         // primary key, so that path keeps the replacement-aware write.
         let known_new = stmt.on_conflict.is_none() && (!supplied_id || id_column_is_unique_key);
-        let document = insert_document_with_constraints(
+        let document = insert_prepared_document_with_constraints(
             engine,
             &stmt.table,
             doc_id,
@@ -397,7 +428,7 @@ pub(in crate::sql) fn run_insert_inner(
 /// ran). Paths that can legitimately overwrite an existing document -
 /// MERGE inserts and INSERT ... SELECT with caller-supplied ids - must
 /// pass `false` so value-index maintenance unindexes the old values.
-pub(in crate::sql) fn insert_document_with_constraints(
+pub(in crate::sql) fn insert_prepared_document_with_constraints(
     engine: &Engine,
     table: &str,
     doc_id: DocId,
@@ -407,21 +438,13 @@ pub(in crate::sql) fn insert_document_with_constraints(
 ) -> Result<Document, SQLError> {
     apply_missing_column_defaults(engine, table, &mut document, params)?;
     validate_document_constraints(engine, table, &document, params, None)?;
-    if known_new {
-        engine.add_document_with_vector_values_known_new(
-            table,
-            doc_id,
-            document.clone(),
-            document_vectors(engine, table, &document)?,
-        )?;
-    } else {
-        engine.add_document_with_vector_values(
-            table,
-            doc_id,
-            document.clone(),
-            document_vectors(engine, table, &document)?,
-        )?;
-    }
+    engine.add_prepared_document_with_vector_values(
+        table,
+        doc_id,
+        document.clone(),
+        document_vectors(engine, table, &document)?,
+        known_new,
+    )?;
     Ok(document)
 }
 

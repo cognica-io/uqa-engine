@@ -209,6 +209,7 @@ pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
                 auto_increment: false,
                 unique: false,
                 default: None,
+                generated: None,
                 check: None,
                 check_name: None,
                 check_enforced: true,
@@ -248,14 +249,24 @@ pub(super) fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> R
         ("attnotnull", bool_value(col.not_null || col.primary_key)),
         (
             "atthasdef",
-            bool_value(col.default.is_some() || col.auto_increment),
+            bool_value(col.default.is_some() || col.auto_increment || col.generated.is_some()),
         ),
         ("atthasmissing", bool_value(false)),
         (
             "attidentity",
             str_value(if col.auto_increment { "d" } else { "" }),
         ),
-        ("attgenerated", str_value("")),
+        (
+            "attgenerated",
+            str_value(
+                col.generated
+                    .as_ref()
+                    .map_or("", |generated| match generated.kind {
+                        uqa_sql::ast::GeneratedColumnKind::Virtual => "v",
+                        uqa_sql::ast::GeneratedColumnKind::Stored => "s",
+                    }),
+            ),
+        ),
         ("attisdropped", bool_value(false)),
         ("attislocal", bool_value(true)),
         ("attinhcount", int_value(0)),
@@ -275,11 +286,13 @@ pub(super) fn build_pg_attrdef(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
         let (schema, table) = split_schema_name(&table_name)?;
         let relid = relation_oid("r", &schema, &table);
         for (idx, col) in table_columns_for(engine, &table_name)?.iter().enumerate() {
-            if col.default.is_none() && !col.auto_increment {
+            if col.default.is_none() && !col.auto_increment && col.generated.is_none() {
                 continue;
             }
             let default = if col.auto_increment {
                 format!("nextval('{}_{}_seq')", table, col.name)
+            } else if let Some(generated) = &col.generated {
+                super::helpers::schema_expr_text(&generated.expression)
             } else {
                 value_to_text(&default_expr_text(col.default.as_ref()))
             };

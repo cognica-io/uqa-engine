@@ -7,9 +7,10 @@
 //! SQL statement handlers and scalar/table routine entry points.
 
 use super::{
-    call_signature, execute_routine, output_column_names, resolve_routine, routine_local_name,
-    routine_resolution_error, BTreeMap, CreateFunction, DepthGuard, DropFunctionStmt, Engine,
-    FunctionReturns, Interpreter, ResultRow, SQLError, SQLResult, SQLTableFunctionResult, Value,
+    call_signature, execute_routine, output_column_names, resolve_bound_routine, resolve_routine,
+    routine_local_name, routine_resolution_error, BTreeMap, CreateFunction, DepthGuard,
+    DropFunctionStmt, Engine, FunctionBinding, FunctionReturns, Interpreter, ResultRow, SQLError,
+    SQLResult, SQLTableFunctionResult, Value,
 };
 
 pub(in crate::sql) fn run_create_function(
@@ -111,44 +112,73 @@ pub(crate) fn call_user_scalar_function(
         Ok(None) => return None,
         Err(e) => return Some(Err(e)),
     };
+    Some(execute_resolved_scalar_function(
+        engine, name, args, resolved,
+    ))
+}
+
+pub(crate) fn call_bound_user_scalar_function(
+    engine: &Engine,
+    binding: &FunctionBinding,
+    args: &[(Option<String>, Value)],
+) -> Option<Result<Value, SQLError>> {
+    let resolved = match resolve_bound_routine(engine, binding, args) {
+        Ok(Some(resolved)) => resolved,
+        Ok(None) => return None,
+        Err(error) => return Some(Err(error)),
+    };
+    Some(execute_resolved_scalar_function(
+        engine,
+        &binding.name,
+        args,
+        resolved,
+    ))
+}
+
+fn execute_resolved_scalar_function(
+    engine: &Engine,
+    name: &str,
+    args: &[(Option<String>, Value)],
+    resolved: (
+        std::sync::Arc<crate::engine_user_functions::SQLUserFunction>,
+        Vec<Value>,
+    ),
+) -> Result<Value, SQLError> {
     let (function, bound) = resolved;
     if function.def.is_procedure {
-        return Some(Err(SQLError::Routine {
+        return Err(SQLError::Routine {
             sqlstate: "42809".into(),
             message: format!("{} is a procedure", call_signature(name, args)),
-        }));
+        });
     }
     if function.def.returns_set() {
-        return Some(Err(SQLError::Routine {
+        return Err(SQLError::Routine {
             sqlstate: "0A000".into(),
             message: "set-valued function called in context that cannot accept a set".into(),
-        }));
+        });
     }
     if function.def.strict && bound.iter().any(|v| matches!(v, Value::Null)) {
-        return Some(Ok(Value::Null));
+        return Ok(Value::Null);
     }
-    let outcome = match execute_routine(engine, &function, bound) {
-        Ok(outcome) => outcome,
-        Err(e) => return Some(Err(e)),
-    };
+    let outcome = execute_routine(engine, &function, bound)?;
     let out_params = function.def.output_params();
     if outcome.out_values.len() != out_params.len() {
-        return Some(Err(SQLError::Internal(format!(
+        return Err(SQLError::Internal(format!(
             "routine `{}` produced {} OUT values for {} OUT parameters",
             function.def.name,
             outcome.out_values.len(),
             out_params.len()
-        ))));
+        )));
     }
     let value = match out_params.len() {
         0 => outcome.value,
         1 => match outcome.out_values.into_iter().next() {
             Some(value) => value,
             None => {
-                return Some(Err(SQLError::Internal(format!(
+                return Err(SQLError::Internal(format!(
                     "routine `{}` lost its validated OUT value",
                     function.def.name
-                ))));
+                )));
             }
         },
         _ => {
@@ -162,7 +192,7 @@ pub(crate) fn call_user_scalar_function(
             Value::Map(record)
         }
     };
-    Some(Ok(value))
+    Ok(value)
 }
 
 /// Resolve a user function call far enough for the projection planner to

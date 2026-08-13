@@ -216,7 +216,8 @@ pub(in crate::sql) fn expression_may_return_set(engine: &Engine, expression: &Sc
                     .is_some_and(|branch| expression_may_return_set(engine, branch))
         }
         ScalarExpr::InSubquery { expr, .. } => expression_may_return_set(engine, expr),
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
@@ -384,7 +385,8 @@ fn validate_set_context(engine: &Engine, expression: &ScalarExpr) -> Result<(), 
                 "set-returning functions are not allowed in IN",
             )?;
         }
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
@@ -574,7 +576,8 @@ fn rewrite_set_calls(
         ScalarExpr::InSubquery { expr, .. } => {
             **expr = rewrite_set_calls(engine, (**expr).clone(), calls);
         }
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
@@ -701,7 +704,8 @@ fn replace_group_set_expression(expression: &mut ScalarExpr, mappings: &[(Scalar
         ScalarExpr::InSubquery { expr, .. } => {
             replace_group_set_expression(expr, mappings);
         }
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
@@ -813,12 +817,14 @@ fn rewrite_aggregate_dependencies(
         }
         ScalarExpr::Func {
             name,
+            binding,
             args,
             distinct,
             order_by,
             filter,
         } => ScalarExpr::Func {
             name: name.clone(),
+            binding: binding.clone(),
             args: args
                 .iter()
                 .map(|argument| {
@@ -1009,7 +1015,8 @@ fn rewrite_aggregate_dependencies(
             subquery: *subquery,
             negated: *negated,
         },
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)

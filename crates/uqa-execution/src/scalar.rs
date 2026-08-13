@@ -7,7 +7,7 @@
 //! AST-independent scalar physical IR shared by the planner and executors.
 
 use uqa_core::Value;
-use uqa_sql::ast::{BinaryOp, FrameMode, NullsOrder};
+use uqa_sql::ast::{BinaryOp, FrameMode, FunctionBinding, NullsOrder};
 use uqa_sql::expr::{
     cast_value_from, eval_binary_values, eval_binary_values_with_integer_width, eval_function_call,
     integer_width_for_literal, integer_width_for_type, truthy, EngineHook, EvalContext,
@@ -23,6 +23,7 @@ pub type SubqueryId = usize;
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ScalarExpr {
     Star,
+    Default,
     Column(String),
     QualifiedColumn {
         qualifier: String,
@@ -33,6 +34,8 @@ pub enum ScalarExpr {
     Param(usize),
     Func {
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<FunctionBinding>,
         args: Vec<Self>,
         distinct: bool,
         order_by: Vec<ScalarOrder>,
@@ -185,7 +188,8 @@ impl ScalarExpr {
                         .as_deref()
                         .is_none_or(|branch| branch.collect_columns(output))
             }
-            Self::Star
+            Self::Default
+            | Self::Star
             | Self::WindowCall { .. }
             | Self::ScalarSubquery(_)
             | Self::Exists { .. }
@@ -232,7 +236,8 @@ impl ScalarExpr {
                     || else_branch.as_deref().is_some_and(Self::contains_window)
             }
             Self::InSubquery { expr, .. } => expr.contains_window(),
-            Self::Star
+            Self::Default
+            | Self::Star
             | Self::Column(_)
             | Self::QualifiedColumn { .. }
             | Self::Literal(_)
@@ -288,7 +293,8 @@ impl ScalarExpr {
                     })
                     || else_branch.as_deref().is_some_and(Self::contains_subquery)
             }
-            Self::Star
+            Self::Default
+            | Self::Star
             | Self::Column(_)
             | Self::QualifiedColumn { .. }
             | Self::Literal(_)
@@ -347,7 +353,8 @@ impl ScalarExpr {
                     || else_branch.as_deref().is_some_and(Self::contains_parameter)
             }
             Self::InSubquery { expr, .. } => expr.contains_parameter(),
-            Self::Star
+            Self::Default
+            | Self::Star
             | Self::Column(_)
             | Self::QualifiedColumn { .. }
             | Self::Literal(_)
@@ -413,7 +420,8 @@ impl ScalarExpr {
                         .is_some_and(|expression| expression.contains_aggregate(is_aggregate))
             }
             Self::InSubquery { expr, .. } => expr.contains_aggregate(is_aggregate),
-            Self::Star
+            Self::Default
+            | Self::Star
             | Self::Column(_)
             | Self::QualifiedColumn { .. }
             | Self::Literal(_)
@@ -618,6 +626,9 @@ pub fn eval_scalar(
     context: &ScalarEvalContext<'_>,
 ) -> Result<Value, SQLError> {
     match expression {
+        ScalarExpr::Default => Err(SQLError::Internal(
+            "DEFAULT reached scalar expression evaluation without a mutation target".into(),
+        )),
         ScalarExpr::Star => Err(SQLError::Internal("`*` cannot be evaluated".into())),
         ScalarExpr::Column(name) => context.sql_context().column_value(name),
         ScalarExpr::QualifiedColumn {
@@ -629,9 +640,26 @@ pub fn eval_scalar(
             .qualified_column_value(qualifier, column, key),
         ScalarExpr::Literal(value) => Ok(value.clone()),
         ScalarExpr::Param(index) => eval_parameter(*index, context.params),
-        ScalarExpr::Func { name, args, .. } => {
+        ScalarExpr::Func {
+            name,
+            binding,
+            args,
+            ..
+        } => {
             let arguments = eval_call_arguments(args, context)?;
-            eval_function_call(name, arguments, &context.sql_context())
+            if let Some(binding) = binding {
+                let sql_context = context.sql_context();
+                let engine = sql_context.engine.ok_or_else(|| {
+                    SQLError::Unsupported(
+                        "bound user function requires a logical engine session".into(),
+                    )
+                })?;
+                engine
+                    .call_bound_user_function(binding, &arguments)
+                    .unwrap_or_else(|| Err(SQLError::UnknownFunction(binding.name.clone())))
+            } else {
+                eval_function_call(name, arguments, &context.sql_context())
+            }
         }
         ScalarExpr::Array(items) => items
             .iter()
@@ -957,6 +985,7 @@ mod tests {
     fn parameter_detection_descends_into_nested_expressions() {
         let expression = ScalarExpr::Func {
             name: "knn_match".into(),
+            binding: None,
             args: vec![
                 ScalarExpr::Column("embedding".into()),
                 ScalarExpr::Array(vec![ScalarExpr::Param(1)]),

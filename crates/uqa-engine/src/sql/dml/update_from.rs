@@ -7,10 +7,11 @@
 //! UPDATE FROM join-source execution.
 
 use super::{
-    build_join_spill_with_ctes, build_returning_row, coerce_to_column_type, dml_returning_result,
-    eval_mutation_expr, missing_document_error, rewrite_document_with_referential_actions,
-    CteScope, Engine, ResultRow, ReturningRowImage, ReturningRowImages, SQLError, SQLParam,
-    SQLResult, SourcePlan, UpdatePlan,
+    build_join_spill_with_ctes, build_returning_row, dml_returning_result,
+    eval_mutation_assignment, eval_mutation_expr, missing_document_error,
+    rewrite_document_with_referential_actions, CteScope, Engine, MutationAssignmentTarget,
+    ResultRow, ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, SourcePlan,
+    UpdatePlan,
 };
 
 pub(in crate::sql) fn run_update_from(
@@ -65,20 +66,30 @@ pub(in crate::sql) fn run_update_from(
             // Apply assignments evaluated against the joined row so
             // RHS expressions can read FROM-side columns.
             for assignment in &stmt.assignments {
-                let value = coerce_to_column_type(
+                let value = eval_mutation_assignment(
                     engine,
-                    &target,
-                    &assignment.column,
-                    eval_mutation_expr(engine, ctes, &assignment.value, Some(&joined), params)?,
+                    ctes,
+                    MutationAssignmentTarget {
+                        table: &target,
+                        column: &assignment.column,
+                        action: "UPDATE FROM",
+                    },
+                    &assignment.value,
+                    Some(&joined),
+                    params,
                 )?;
-                doc.insert(assignment.column.clone(), value);
+                if let Some(value) = value {
+                    doc.insert(assignment.column.clone(), value);
+                } else {
+                    doc.remove(&assignment.column);
+                }
             }
             let rewritten_doc_id = rewrite_document_with_referential_actions(
                 engine,
                 &target,
                 doc_id,
                 &original_doc,
-                doc.clone(),
+                &mut doc,
                 params,
             )?;
             if !stmt.returning.is_empty() {

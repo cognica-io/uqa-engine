@@ -120,7 +120,8 @@ pub fn contains_retrieval(expression: &ScalarExpr) -> bool {
                 || else_branch.as_deref().is_some_and(contains_retrieval)
         }
         ScalarExpr::InSubquery { expr, .. } => contains_retrieval(expr),
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)

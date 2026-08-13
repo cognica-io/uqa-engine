@@ -238,7 +238,8 @@ fn collect_constraint_columns(expression: &uqa_sql::ast::Expr, output: &mut Vec<
             }
         }
         Expr::InSubquery { expr, .. } => collect_constraint_columns(expr, output),
-        Expr::Star
+        Expr::Default
+        | Expr::Star
         | Expr::Literal(_)
         | Expr::Param(_)
         | Expr::ScalarSubquery(_)
@@ -280,6 +281,47 @@ impl Engine {
             .find(|col| col.name == column)
             .ok_or_else(|| column_not_found(&table_name, column))?;
         col.default = default;
+        self.mark_column_stats_dirty(&table_name, &t)?;
+        if self.is_persistent() {
+            self.try_save_table_schema_with_columns(&table_name, &t, &next)?;
+        }
+        *columns = next;
+        Ok(true)
+    }
+
+    pub(crate) fn set_column_generated(
+        &self,
+        table: &str,
+        column: &str,
+        generated: Option<uqa_sql::ast::GeneratedColumn>,
+    ) -> StorageBackendResult<bool> {
+        self.with_implicit_storage_transaction(|engine| {
+            engine.set_column_generated_inner(table, column, generated)
+        })
+    }
+
+    pub(super) fn set_column_generated_inner(
+        &self,
+        table: &str,
+        column: &str,
+        mut generated: Option<uqa_sql::ast::GeneratedColumn>,
+    ) -> StorageBackendResult<bool> {
+        let table_name = self
+            .try_resolve_table_name(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let t = self
+            .try_table(&table_name)?
+            .ok_or_else(|| table_not_found(&table_name))?;
+        if let Some(generated) = &mut generated {
+            self.bind_sequence_references_in_expr(&mut generated.expression)?;
+        }
+        let mut columns = t.columns.write();
+        let mut next = columns.clone();
+        let col = next
+            .iter_mut()
+            .find(|col| col.name == column)
+            .ok_or_else(|| column_not_found(&table_name, column))?;
+        col.generated = generated;
         self.mark_column_stats_dirty(&table_name, &t)?;
         if self.is_persistent() {
             self.try_save_table_schema_with_columns(&table_name, &t, &next)?;

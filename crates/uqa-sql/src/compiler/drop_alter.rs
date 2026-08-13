@@ -198,6 +198,19 @@ pub(super) fn compile_alter_table(
                 }
             }
         }
+        AlterTableType::AtSetExpression => {
+            let expression = cmd
+                .def
+                .as_deref()
+                .ok_or_else(|| SQLError::Internal("SET EXPRESSION without expression".into()))?;
+            AlterTableAction::SetExpression {
+                name: cmd.name.clone(),
+                expression: compile_expr(expression)?,
+            }
+        }
+        AlterTableType::AtDropExpression => AlterTableAction::DropExpression {
+            name: cmd.name.clone(),
+        },
         AlterTableType::AtSetNotNull => AlterTableAction::SetNotNull {
             name: cmd.name.clone(),
         },

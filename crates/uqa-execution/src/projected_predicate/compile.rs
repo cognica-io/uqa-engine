@@ -76,6 +76,7 @@ pub(super) fn compile(
             distinct,
             order_by,
             filter,
+            ..
         } if !distinct && order_by.is_empty() && filter.is_none() => {
             let normalized = name.strip_prefix("pg_catalog.").unwrap_or(name);
             if !normalized.eq_ignore_ascii_case("like") && !normalized.eq_ignore_ascii_case("ilike")
@@ -115,7 +116,8 @@ pub(super) fn compile(
                 },
             }
         }
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Func { .. }
         | ScalarExpr::Array(_)
         | ScalarExpr::WindowCall { .. }

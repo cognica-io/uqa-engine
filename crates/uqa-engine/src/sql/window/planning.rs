@@ -45,7 +45,8 @@ pub(super) fn expr_has_window(expr: &ScalarExpr) -> bool {
                     .as_ref()
                     .is_some_and(|expr| expr_has_window(expr))
         }
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
@@ -76,6 +77,7 @@ pub(super) fn rewrite_window_expr(
         }
         ScalarExpr::Func {
             name,
+            binding,
             args,
             distinct,
             order_by,
@@ -95,6 +97,7 @@ pub(super) fn rewrite_window_expr(
             (
                 ScalarExpr::Func {
                     name: name.clone(),
+                    binding: binding.clone(),
                     args,
                     distinct: *distinct,
                     order_by,

@@ -97,12 +97,12 @@
       "open_issue": "Credentialed GSS, non-trust authentication, extended-query, binary-format, and broader live-driver coverage remain."
     },
     {
-      "id": "ddl.virtual-generated-columns",
-      "postgresql_reference": "PostgreSQL 18 CREATE TABLE generated columns",
-      "uqa_test": "crates/uqa-engine/tests/sql_ddl_extensions.rs",
-      "supported_version": "PostgreSQL 18",
-      "status": "explicitly_rejected",
-      "open_issue": "Definition, dependency, catalog, read, DML, dump, and reopen behavior are not implemented."
+      "id": "ddl.generated-columns",
+      "postgresql_reference": "PostgreSQL 18 CREATE TABLE and ALTER TABLE generated columns",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_generated_columns::",
+      "supported_version": "PostgreSQL 18 core generated-column semantics",
+      "status": "partial",
+      "open_issue": "The complete PostgreSQL built-in function and operator overload matrix, privileges, inheritance and partition propagation, dump/restore, and complete upstream regression coverage remain."
     },
     {
       "id": "ddl.temporal-constraints",

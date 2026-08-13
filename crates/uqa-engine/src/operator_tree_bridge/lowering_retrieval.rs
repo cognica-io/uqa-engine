@@ -96,6 +96,7 @@ pub(super) fn bind_operator_argument(
         ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. } => Ok(expression.clone()),
         ScalarExpr::Func {
             name,
+            binding,
             args,
             distinct,
             order_by,
@@ -108,6 +109,7 @@ pub(super) fn bind_operator_argument(
             }
             Ok(ScalarExpr::Func {
                 name: name.clone(),
+                binding: binding.clone(),
                 args: args
                     .iter()
                     .map(|argument| bind_operator_argument(engine, argument, params))
