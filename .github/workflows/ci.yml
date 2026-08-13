@@ -130,7 +130,7 @@ jobs:
         run: cargo clean
       - name: Validate manual SQL examples on Linux
         if: runner.os == 'Linux'
-        run: cargo test -p uqa-engine --test engine_queries --locked manual_sql_examples::manual_sql_examples_compile_or_execute -- --exact
+        run: cargo test -p uqa-engine --test integration --locked engine_queries::manual_sql_examples::manual_sql_examples_compile_or_execute -- --exact
       - name: Test workspace on Linux
         if: runner.os == 'Linux'
         run: cargo test --workspace --exclude uqa-fdw --locked -- --skip manual_sql_examples::manual_sql_examples_compile_or_execute

@@ -45,8 +45,8 @@ Integration domains can be selected by test harness and module path:
 ```sh
 cargo test -p uqa-engine --test integration engine_queries::sql_joins::
 cargo test -p uqa-engine --test integration sql_tpch::
-cargo test -p uqa-scoring --test wand_exactness
-cargo test -p uqa-graph --test rpq
+cargo test -p uqa-scoring --test integration wand_exactness::
+cargo test -p uqa-graph --test integration rpq::
 cargo test -p uqa-sql --test integration parser_fuzz::
 ```
 
