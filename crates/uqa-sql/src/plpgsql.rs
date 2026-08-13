@@ -128,7 +128,7 @@ fn collect_fori_vars_stmts(stmts: &[PLpgSQLStmt], out: &mut std::collections::BT
 /// references inside statements index into this table.
 #[derive(Debug, Clone)]
 pub enum PLpgSQLDatum {
-    Var(PLpgSQLVar),
+    Var(Box<PLpgSQLVar>),
     /// `RECORD` variable (also `FOR rec IN ...` loop targets).
     Rec {
         name: String,
@@ -356,7 +356,7 @@ pub enum PLpgSQLStmt {
     },
 }
 
-/// Value source for `RETURN` and `RETURN NEXT`. PostgreSQL 18 stores a simple
+/// Value source for `RETURN` and `RETURN NEXT`. `PostgreSQL` 18 stores a simple
 /// datum reference in `retvarno`, distinct from a general SQL expression.
 #[derive(Debug, Clone)]
 pub enum PLpgSQLReturnValue {

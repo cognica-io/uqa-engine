@@ -11,6 +11,7 @@ use uqa_sql::expr::cast_value;
 use uqa_sql::{SQLError, SQLParam};
 
 use super::ProjectedExpr;
+use crate::scalar::scalar_integer_binary_width;
 use crate::ScalarExpr;
 
 pub(super) fn compile(
@@ -37,11 +38,15 @@ pub(super) fn compile(
         }
         ScalarExpr::Literal(value) => ProjectedExpr::Literal(value.clone()),
         ScalarExpr::Param(index) => ProjectedExpr::Literal(parameter(*index, params)?),
-        ScalarExpr::Binary { op, lhs, rhs } => compiled_binary(
-            *op,
-            require(lhs, fields, params)?,
-            require(rhs, fields, params)?,
-        ),
+        ScalarExpr::Binary { op, lhs, rhs } => {
+            let integer_width = scalar_integer_binary_width(lhs, rhs);
+            compiled_binary(
+                *op,
+                require(lhs, fields, params)?,
+                require(rhs, fields, params)?,
+                integer_width,
+            )
+        }
         ScalarExpr::Not(expression) => {
             ProjectedExpr::Not(Box::new(require(expression, fields, params)?))
         }
@@ -181,6 +186,7 @@ fn compiled_binary(
     op: uqa_sql::ast::BinaryOp,
     lhs: ProjectedExpr,
     rhs: ProjectedExpr,
+    integer_width: Option<uqa_sql::expr::IntegerWidth>,
 ) -> ProjectedExpr {
     use uqa_sql::ast::BinaryOp;
 
@@ -217,6 +223,7 @@ fn compiled_binary(
         op,
         lhs: Box::new(lhs),
         rhs: Box::new(rhs),
+        integer_width,
     }
 }
 

@@ -142,19 +142,8 @@ pub(super) fn value_to_display(v: Option<&Value>) -> String {
             out
         }
         Some(Value::Temporal(t)) => t.to_sql_string(),
-        // Lists are SQL arrays unless they contain JSON objects (the
-        // engine only produces Map elements from JSON values): SQL
-        // arrays print PostgreSQL array-literal syntax `{...}`, JSON
-        // arrays print canonical jsonb text. A jsonb array of plain
-        // scalars is indistinguishable from a SQL array without type
-        // metadata and renders in array syntax - documented divergence.
-        Some(value @ Value::List(items)) => {
-            if items.iter().any(|item| matches!(item, Value::Map(_))) {
-                json_value_display(value)
-            } else {
-                pg_array_display(items)
-            }
-        }
+        Some(Value::Json(text) | Value::JsonB(text)) => text.clone(),
+        Some(Value::List(items)) => pg_array_display(items),
         // Maps come from JSON/JSONB values: render canonical JSON the
         // way psql prints jsonb, not a Rust-debug-ish map.
         Some(value @ Value::Map(_)) => json_value_display(value),
@@ -203,6 +192,7 @@ pub(super) fn json_value_display(v: &Value) -> String {
         Value::Bytes(_) | Value::Temporal(_) => {
             serde_json::Value::String(value_to_display(Some(v))).to_string()
         }
+        Value::Json(text) | Value::JsonB(text) => text.clone(),
         Value::List(items) => {
             let inner: Vec<String> = items.iter().map(json_value_display).collect();
             format!("[{}]", inner.join(", "))

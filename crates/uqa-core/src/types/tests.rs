@@ -604,6 +604,8 @@ fn value_json_round_trips_every_variant() {
             micros: 4_000_000,
         }),
         Value::Decimal(DecimalValue::parse("-12.75").unwrap()),
+        Value::Json("{\"b\":2,\"a\":1}".into()),
+        Value::JsonB("{\"a\": 1, \"b\": 2}".into()),
         Value::List(vec![Value::Str("a".into()), Value::Int(300)]),
         Value::Map(BTreeMap::from([(
             "k".to_string(),

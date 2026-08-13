@@ -9,9 +9,8 @@
 use std::collections::BTreeMap;
 
 use uqa_core::{DecimalValue, TemporalValue, Value};
-use uqa_sql::ResultRow;
 
-use crate::batch::{Batch, RowSchema};
+use crate::batch::{Batch, PhysicalRow, RowSchema};
 use crate::physical::ExecResult;
 use crate::spill::format::spill_error;
 
@@ -19,23 +18,52 @@ use super::MAX_VALUE_DEPTH;
 
 pub(crate) fn decode_batch(record: &[u8]) -> ExecResult<Batch> {
     let mut reader = BinaryReader::new(record);
-    let column_count = reader.read_count("schema column count", 8)?;
+    let physical_width = reader.read_count("schema physical width", 1)?;
+    let column_count = reader.read_count("schema column count", 16)?;
     let mut columns = Vec::new();
+    let mut slots = Vec::new();
     columns
         .try_reserve_exact(column_count)
         .map_err(|error| spill_error(format!("cannot allocate spill schema: {error}")))?;
+    slots
+        .try_reserve_exact(column_count)
+        .map_err(|error| spill_error(format!("cannot allocate spill schema slots: {error}")))?;
     for _ in 0..column_count {
         columns.push(reader.read_string("schema column")?);
+        slots.push(reader.read_slot("schema logical slot", physical_width)?);
     }
+    let alias_count = reader.read_count("schema alias count", 16)?;
+    let mut aliases = Vec::new();
+    aliases
+        .try_reserve_exact(alias_count)
+        .map_err(|error| spill_error(format!("cannot allocate spill schema aliases: {error}")))?;
+    for _ in 0..alias_count {
+        aliases.push((
+            reader.read_string("schema alias")?,
+            reader.read_slot("schema alias slot", physical_width)?,
+        ));
+    }
+    let schema = RowSchema::from_physical_layout(columns, slots, physical_width, aliases)
+        .map_err(|error| spill_error(format!("invalid spill schema: {error}")))?;
     let row_count = reader.read_count("batch row count", 8)?;
     let mut rows = Vec::new();
     rows.try_reserve_exact(row_count)
         .map_err(|error| spill_error(format!("cannot allocate spill rows: {error}")))?;
     for _ in 0..row_count {
-        rows.push(reader.read_row()?);
+        rows.push(reader.read_row(physical_width)?);
     }
     reader.finish("spill batch")?;
-    Ok(Batch::new(RowSchema::new(columns), rows))
+    Ok(Batch::from_physical_rows(schema, rows))
+}
+
+pub(crate) fn decode_physical_row_record(
+    record: &[u8],
+    physical_width: usize,
+) -> ExecResult<PhysicalRow> {
+    let mut reader = BinaryReader::new(record);
+    let row = reader.read_row(physical_width)?;
+    reader.finish("indexed spill row")?;
+    Ok(row)
 }
 
 struct BinaryReader<'a> {
@@ -113,19 +141,36 @@ impl<'a> BinaryReader<'a> {
             .map_err(|error| spill_error(format!("invalid UTF-8 in {description}: {error}")))
     }
 
-    fn read_row(&mut self) -> ExecResult<ResultRow> {
-        let field_count = self.read_count("row field count", 9)?;
-        let mut row = ResultRow::new();
-        for _ in 0..field_count {
-            let name = self.read_string("row field name")?;
-            let value = self.read_value(0)?;
-            if row.insert(name.clone(), value).is_some() {
-                return Err(spill_error(format!(
-                    "duplicate field `{name}` in spill row"
-                )));
-            }
+    fn read_slot(&mut self, description: &str, physical_width: usize) -> ExecResult<Option<usize>> {
+        let encoded = self.read_u64(description)?;
+        if encoded == u64::MAX {
+            return Ok(None);
         }
-        Ok(row)
+        let slot = usize::try_from(encoded)
+            .map_err(|_| spill_error(format!("{description} exceeds address space")))?;
+        if slot >= physical_width {
+            return Err(spill_error(format!(
+                "{description} {slot} is outside physical width {physical_width}"
+            )));
+        }
+        Ok(Some(slot))
+    }
+
+    fn read_row(&mut self, expected_values: usize) -> ExecResult<PhysicalRow> {
+        let value_count = self.read_count("row value count", 1)?;
+        if value_count != expected_values {
+            return Err(spill_error(format!(
+                "spill row has {value_count} values for {expected_values} columns"
+            )));
+        }
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(value_count)
+            .map_err(|error| spill_error(format!("cannot allocate spill row: {error}")))?;
+        for _ in 0..value_count {
+            values.push(self.read_value(0)?);
+        }
+        Ok(PhysicalRow::from_values(values))
     }
 
     fn read_value(&mut self, depth: usize) -> ExecResult<Value> {
@@ -180,6 +225,8 @@ impl<'a> BinaryReader<'a> {
             10 => self
                 .read_string("fixed character value")
                 .map(Value::FixedChar),
+            11 => self.read_string("JSON value").map(Value::Json),
+            12 => self.read_string("JSONB value").map(Value::JsonB),
             tag => Err(spill_error(format!("invalid spill value tag {tag}"))),
         }
     }

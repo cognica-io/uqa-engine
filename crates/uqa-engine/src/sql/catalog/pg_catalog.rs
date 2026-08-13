@@ -306,17 +306,17 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
         .into_iter()
         .map(|constraint| {
             let foreign_key = constraint.foreign_key.as_ref();
-            let conkey: Vec<i64> = constraint
+            let constrained_key: Vec<i64> = constraint
                 .columns
                 .iter()
                 .map(|column| column.table_ordinal)
                 .collect();
-            let conkey = if conkey.is_empty() {
+            let constrained_key = if constrained_key.is_empty() {
                 Value::Null
             } else {
-                list_int(&conkey)
+                list_int(&constrained_key)
             };
-            let confkey = foreign_key.map_or(Value::Null, |foreign_key| {
+            let referenced_key = foreign_key.map_or(Value::Null, |foreign_key| {
                 list_int(&foreign_key.column_ordinals)
             });
             row([
@@ -372,8 +372,8 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
                 ("coninhcount", int_value(0)),
                 ("connoinherit", bool_value(constraint.kind.no_inherit())),
                 ("conperiod", bool_value(false)),
-                ("conkey", conkey),
-                ("confkey", confkey),
+                ("conkey", constrained_key),
+                ("confkey", referenced_key),
                 ("conpfeqop", Value::Null),
                 ("conppeqop", Value::Null),
                 ("conffeqop", Value::Null),
@@ -759,17 +759,19 @@ pub(super) fn build_pg_database() -> Vec<ResultRow> {
         ("datname", str_value("uqa")),
         ("datdba", int_value(current_user_oid())),
         ("encoding", int_value(6)),
-        ("datlocprovider", str_value("c")),
+        ("datlocprovider", str_value("b")),
         ("datistemplate", bool_value(false)),
         ("datallowconn", bool_value(true)),
+        ("dathasloginevt", bool_value(false)),
         ("datconnlimit", int_value(-1)),
         ("datfrozenxid", int_value(0)),
         ("datminmxid", int_value(0)),
         ("dattablespace", int_value(0)),
         ("datcollate", str_value("C")),
         ("datctype", str_value("C")),
-        ("daticulocale", Value::Null),
-        ("datcollversion", Value::Null),
+        ("datlocale", str_value("PG_UNICODE_FAST")),
+        ("daticurules", Value::Null),
+        ("datcollversion", str_value("1")),
         ("datacl", Value::Null),
     ])]
 }

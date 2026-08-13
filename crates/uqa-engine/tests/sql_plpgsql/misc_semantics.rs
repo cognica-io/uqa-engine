@@ -30,7 +30,7 @@ fn nested_blocks_and_exception_recovery() {
          END;
          $$ LANGUAGE plpgsql",
     );
-    // PG17: abcd - the inner handler recovers, outer code continues.
+    // PG18: abcd - the inner handler recovers, outer code continues.
     assert_eq!(
         scalar(&eng, "SELECT nested() AS v"),
         Value::Str("abcd".into())
@@ -48,7 +48,7 @@ fn variable_defaults_and_declarations() {
            b int DEFAULT 20;
            c int;
          BEGIN
-           -- c defaults to NULL (PG17).
+           -- c defaults to NULL (PG18).
            IF c IS NULL THEN
              RETURN a + b;
            END IF;
@@ -97,7 +97,7 @@ fn return_query_execute_dynamic() {
          END;
          $$ LANGUAGE plpgsql",
     );
-    // PG17: 5, 10
+    // PG18: 5, 10
     let result = exec(&eng, "SELECT * FROM rqe(5)");
     let values: Vec<Value> = result
         .rows
@@ -110,7 +110,7 @@ fn return_query_execute_dynamic() {
 #[test]
 fn positional_dollar_references_in_body() {
     let eng = engine();
-    // Unnamed parameters are only addressable as $n (PG17: 304).
+    // Unnamed parameters are only addressable as $n (PG18: 304).
     exec(
         &eng,
         "CREATE FUNCTION dollar_ref(int, int) RETURNS int AS $$
@@ -142,7 +142,7 @@ fn call_procedure_inside_function_body() {
          END;
          $$ LANGUAGE plpgsql",
     );
-    // PG17: 1
+    // PG18: 1
     assert_eq!(scalar(&eng, "SELECT call_proc() AS v"), Value::Int(1));
 }
 
@@ -155,10 +155,10 @@ fn named_arguments_and_aliases_in_from() {
            SELECT g FROM generate_series(1, n) AS g
          $$ LANGUAGE sql",
     );
-    // Named argument in FROM position (PG17: 1, 2).
+    // Named argument in FROM position (PG18: 1, 2).
     let result = exec(&eng, "SELECT * FROM gen5(n => 2)");
     assert_eq!(result.rows.len(), 2);
-    // Column alias list renames the output column (PG17: val = 2).
+    // Column alias list renames the output column (PG18: val = 2).
     assert_eq!(
         scalar(
             &eng,
@@ -179,7 +179,7 @@ fn default_arguments_make_overloads_ambiguous() {
         &eng,
         "CREATE FUNCTION amb(a int, b int DEFAULT 1) RETURNS int AS $$ SELECT 2 $$ LANGUAGE sql",
     );
-    // PG17: function amb(integer) is not unique.
+    // PG18: function amb(integer) is not unique.
     let err = exec_err(&eng, "SELECT amb(9) AS v");
     assert!(
         err.to_string()

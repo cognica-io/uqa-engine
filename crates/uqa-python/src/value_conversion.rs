@@ -60,6 +60,9 @@ pub(super) fn value_to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> 
         Value::Float(value) => value.into_py_any(py),
         Value::Decimal(value) => decimal_to_py(py, value),
         Value::Str(value) | Value::FixedChar(value) => value.into_py_any(py),
+        Value::Json(value) | Value::JsonB(value) => {
+            Ok(py.import("json")?.call_method1("loads", (value,))?.unbind())
+        }
         Value::Bytes(value) => Ok(PyBytes::new(py, value).into_any().unbind()),
         Value::Temporal(value) => temporal_to_string(value).into_py_any(py),
         Value::List(values) => {

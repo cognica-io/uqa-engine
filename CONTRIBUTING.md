@@ -75,7 +75,7 @@ Integration test source files are modules, not independent Cargo targets. Add a 
 
 ```sh
 cargo test -p uqa-sql --test integration parser_fuzz::
-cargo test -p uqa-engine --test engine_queries sql_joins::
+cargo test -p uqa-engine --test integration engine_queries::sql_joins::
 ```
 
 Do not add a new Cargo test target merely to isolate a module during development. Use the module filter above; a separate target requires a real process-level fixture or lifecycle boundary that cannot share its harness without changing semantics.
@@ -85,7 +85,7 @@ Do not add a new Cargo test target merely to isolate a module during development
 Performance work must preserve an exact correctness gate and measure an optimized package-scoped executable. For the PostgreSQL 18 TPC-H-derived fixture, run:
 
 ```sh
-cargo test -p uqa-engine --test sql_tpch
+cargo test -p uqa-engine --test integration sql_tpch::
 cargo build --release -p uqa-engine --example tpch_runner --locked
 target/release/examples/tpch_runner --iterations 201
 ```

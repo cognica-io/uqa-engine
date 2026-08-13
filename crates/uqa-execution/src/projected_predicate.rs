@@ -8,6 +8,7 @@
 
 use uqa_core::Value;
 use uqa_sql::ast::BinaryOp;
+use uqa_sql::expr::IntegerWidth;
 use uqa_sql::{SQLError, SQLParam};
 
 use crate::ScalarExpr;
@@ -29,6 +30,7 @@ pub(super) enum ProjectedExpr {
         op: BinaryOp,
         lhs: Box<Self>,
         rhs: Box<Self>,
+        integer_width: Option<IntegerWidth>,
     },
     IntFieldComparison {
         field: usize,

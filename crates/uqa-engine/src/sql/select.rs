@@ -45,6 +45,7 @@ mod physical_plan;
 mod query_block;
 mod recursive_cte;
 mod scored_input;
+mod set_projection;
 mod table_access;
 
 pub(in crate::sql) use cte_execution::*;
@@ -61,6 +62,7 @@ pub(in crate::sql) use physical_plan::*;
 pub(in crate::sql) use query_block::*;
 pub(in crate::sql) use recursive_cte::*;
 pub(in crate::sql) use scored_input::*;
+pub(in crate::sql) use set_projection::*;
 pub(in crate::sql) use table_access::*;
 
 // -------------------------------------------------------------------------
@@ -149,19 +151,28 @@ impl QueryOutput {
     }
 
     fn into_subquery_result(self) -> Result<uqa_execution::SubqueryResult, SQLError> {
-        let columns = self.columns;
-        let rows: Box<dyn Iterator<Item = Result<ResultRow, SQLError>> + Send> = match self.rows {
-            QueryRows::Rows(rows) => Box::new(rows.into_iter().map(|mut row| {
-                row.retain(|column, _| !is_score_provenance_column(column));
-                Ok(row)
-            })),
-            QueryRows::SharedSpill(rows) => {
-                Box::new(rows.read_rows().map_err(physical_exec_error)?.map(|row| {
-                    let mut row = row.map_err(physical_exec_error)?;
-                    row.retain(|column, _| !is_score_provenance_column(column));
-                    Ok(row)
+        let QueryOutput {
+            columns,
+            internal_columns,
+            rows,
+        } = self;
+        let rows: Box<
+            dyn Iterator<Item = Result<uqa_execution::OwnedPhysicalRow, SQLError>> + Send,
+        > = match rows {
+            QueryRows::Rows(rows) => {
+                let schema = uqa_execution::RowSchema::new(internal_columns);
+                Box::new(rows.into_iter().map(move |row| {
+                    Ok(uqa_execution::OwnedPhysicalRow::new(
+                        schema.clone(),
+                        uqa_execution::PhysicalRow::from_result_row(&schema, row),
+                    ))
                 }))
             }
+            QueryRows::SharedSpill(rows) => Box::new(
+                rows.read_rows()
+                    .map_err(physical_exec_error)?
+                    .map(|row| row.map_err(physical_exec_error)),
+            ),
             QueryRows::ExistsKeySet(_) => {
                 return Err(SQLError::Internal(
                     "EXISTS key-set output cannot become a scalar subquery result".into(),
@@ -273,6 +284,7 @@ pub(super) fn execute_query_plan_output(
             collect_query_operator(engine, columns, operation, output_mode)
         }
         RelationalPlan::Values { rows, subqueries } => {
+            validate_values_set_contexts(engine, rows)?;
             execute_plan_values_output(engine, rows, subqueries, params, ctes, output_mode)
         }
     }
@@ -284,7 +296,8 @@ pub(super) fn collect_query_operator<'a>(
     mut operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
-    let internal_columns = operator.schema().to_vec();
+    let internal_schema = operator.row_schema().clone();
+    let internal_columns = internal_schema.columns().to_vec();
     let rows = match output_mode {
         QueryOutputMode::Rows => QueryRows::Rows(
             uqa_execution::physical::run_to_rows(operator.as_mut())
@@ -326,7 +339,7 @@ pub(super) fn collect_query_operator<'a>(
             operator.close().map_err(physical_exec_error)?;
             QueryRows::SharedSpill(
                 buffer
-                    .into_shared(internal_columns.clone())
+                    .into_shared(internal_schema)
                     .map_err(physical_exec_error)?,
             )
         }

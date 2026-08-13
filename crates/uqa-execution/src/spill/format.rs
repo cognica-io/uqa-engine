@@ -16,13 +16,10 @@ use crate::physical::{ExecError, ExecResult};
 use super::SPILL_MAGIC;
 
 mod binary;
-mod indexed;
-
 pub(super) use binary::{
-    append_batches, decode_batch, encoded_batch_size, encoded_named_single_row_batch_size,
-    encoded_single_row_batch_size,
+    append_batches, decode_batch, decode_physical_row_record, encode_physical_row_record,
+    encoded_batch_size, encoded_physical_row_record_size, encoded_single_row_batch_size,
 };
-pub(super) use indexed::{decode_row, ExactRow};
 
 pub(super) const RECORD_PREFIX_BYTES: usize = std::mem::size_of::<u64>();
 

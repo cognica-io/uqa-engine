@@ -221,20 +221,18 @@ impl Interpreter<'_> {
                 Some(uqa_sql::plpgsql::PLpgSQLDatum::Var(variable))
                     if variable.name.eq_ignore_ascii_case("sqlstate") =>
                 {
-                    Ok(self
-                        .err_stack
-                        .last()
-                        .map(|(state, _)| Value::Str(state.clone()))
-                        .unwrap_or_else(|| self.values[*index].clone()))
+                    Ok(self.err_stack.last().map_or_else(
+                        || self.values[*index].clone(),
+                        |(state, _)| Value::Str(state.clone()),
+                    ))
                 }
                 Some(uqa_sql::plpgsql::PLpgSQLDatum::Var(variable))
                     if variable.name.eq_ignore_ascii_case("sqlerrm") =>
                 {
-                    Ok(self
-                        .err_stack
-                        .last()
-                        .map(|(_, message)| Value::Str(message.clone()))
-                        .unwrap_or_else(|| self.values[*index].clone()))
+                    Ok(self.err_stack.last().map_or_else(
+                        || self.values[*index].clone(),
+                        |(_, message)| Value::Str(message.clone()),
+                    ))
                 }
                 Some(
                     uqa_sql::plpgsql::PLpgSQLDatum::Var(_)

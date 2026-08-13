@@ -216,11 +216,7 @@ impl CachedScalarSubquery {
             .rows
             .read_rows()
             .map_err(physical_exec_error)?
-            .map(|row| {
-                let mut row = row.map_err(physical_exec_error)?;
-                row.retain(|column, _| !is_score_provenance_column(column));
-                Ok(row)
-            });
+            .map(|row| row.map_err(physical_exec_error));
         Ok(uqa_execution::SubqueryResult {
             columns: self.columns.clone(),
             rows: Box::new(rows),

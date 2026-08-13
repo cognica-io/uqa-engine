@@ -509,7 +509,7 @@ impl Engine {
             .collect())
     }
 
-    /// Snapshot of every CHECK constraint, including PostgreSQL 18 enforcement
+    /// Snapshot of every CHECK constraint, including `PostgreSQL` 18 enforcement
     /// metadata.
     pub fn try_check_constraint_definitions(
         &self,

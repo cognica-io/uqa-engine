@@ -1983,7 +1983,7 @@ dependencies = [
 [[package]]
 name = "pg_query"
 version = "6.1.1"
-source = "git+https://github.com/jaepil/pg_query.rs?rev=eeae6a8c765d907ef8038670951ff45498856fd2#eeae6a8c765d907ef8038670951ff45498856fd2"
+source = "git+https://github.com/jaepil/pg_query.rs?rev=7f020727f9fcdefa434b944bbe9a8f0ef029bef7#7f020727f9fcdefa434b944bbe9a8f0ef029bef7"
 dependencies = [
  "bindgen",
  "cc",

@@ -16,11 +16,30 @@ HERE = Path(__file__).parent
 REPO_ROOT = HERE.parent.parent.parent
 USQL = os.environ.get("UQA_USQL", str(REPO_ROOT / "target" / "release" / "usql"))
 PG_CONTAINER = os.environ.get("UQA_PG_CONTAINER", "uqa-pg18")
+PG_DATABASE = os.environ.get("UQA_PG_DATABASE", "uqa")
+FIELD_SEP = "\x1f"
 PSQL = [
     "docker", "exec", "-i", PG_CONTAINER,
-    "psql", "-U", "postgres", "-d", "uqa_compat",
-    "-tA", "-v", "ON_ERROR_STOP=0", "-P", "null=<NULL>",
+    "psql", "-U", "postgres", "-d", PG_DATABASE,
+    "-tA", "-F", FIELD_SEP, "-v", "ON_ERROR_STOP=0", "-P", "null=<NULL>",
 ]
+
+
+def sql_error(output: str) -> str | None:
+    """Return a SQL error message, excluding unrelated process failures."""
+    line = next(
+        (line for line in output.splitlines() if line.lstrip().startswith("ERROR:")),
+        None,
+    )
+    return line.split("ERROR:", 1)[1].strip() if line is not None else None
+
+
+def require_success(program: str, proc: subprocess.CompletedProcess[str]) -> None:
+    """Abort the comparison when the oracle or subject process did not run."""
+    if proc.returncode == 0:
+        return
+    detail = proc.stderr.strip() or proc.stdout.strip() or "no diagnostic output"
+    raise RuntimeError(f"{program} exited with status {proc.returncode}: {detail}")
 
 
 def run_pg(query: str) -> tuple[str, str]:
@@ -28,15 +47,43 @@ def run_pg(query: str) -> tuple[str, str]:
     proc = subprocess.run(
         PSQL + ["-c", query], capture_output=True, text=True, timeout=30
     )
-    err = proc.stderr.strip()
-    if "ERROR" in err:
-        first = next((l for l in err.splitlines() if "ERROR" in l), err)
-        return ("error", first.split("ERROR:")[-1].strip())
+    error = sql_error(proc.stderr)
+    if error is not None:
+        return ("error", error)
+    require_success("psql", proc)
     rows = [l for l in proc.stdout.splitlines()]
     return ("ok", "\n".join(rows).strip())
 
 
 USQL_ROW_SEP = re.compile(r"^[-+| ]+$")
+
+
+def aligned_cells(line: str, widths: list[int]) -> list[str]:
+    """Extract cells from one fixed-width usql row without altering cell content."""
+    cells = []
+    offset = 0
+    for index, width in enumerate(widths):
+        cells.append(line[offset:offset + width].strip())
+        offset += width
+        if index + 1 < len(widths):
+            if line[offset:offset + 3] != " | ":
+                raise RuntimeError(f"malformed usql result row: {line!r}")
+            offset += 3
+    return cells
+
+
+def separator_widths(separator: str) -> list[int]:
+    """Recover the widths used by usql's `-+-` separator join."""
+    parts = separator.split("+")
+    if len(parts) == 1:
+        return [len(parts[0])]
+    widths = [
+        len(part) - (1 if index in (0, len(parts) - 1) else 2)
+        for index, part in enumerate(parts)
+    ]
+    if any(width <= 0 for width in widths):
+        raise RuntimeError(f"malformed usql result separator: {separator!r}")
+    return widths
 
 
 def run_usql(query: str) -> tuple[str, str]:
@@ -45,22 +92,28 @@ def run_usql(query: str) -> tuple[str, str]:
     )
     out = proc.stdout
     err = proc.stderr.strip()
-    if "ERROR" in out or "ERROR" in err:
-        blob = out + "\n" + err
-        first = next((l for l in blob.splitlines() if "ERROR" in l), "ERROR")
-        return ("error", first.split("ERROR:")[-1].strip())
+    error = sql_error(out + "\n" + err)
+    if error is not None:
+        return ("error", error)
+    require_success("usql", proc)
     lines = [l.rstrip() for l in out.splitlines() if l.strip()]
     # table shape: header, separator (---), value rows..., (N row(s))
     values = []
     in_body = False
-    for line in lines:
+    widths = None
+    for index, line in enumerate(lines):
         if USQL_ROW_SEP.match(line) and set(line.strip()) <= set("-+ "):
+            if index == 0:
+                raise RuntimeError("usql result separator has no header")
+            widths = separator_widths(line)
             in_body = True
             continue
         if in_body:
             if re.match(r"^\(\d+ row", line):
                 break
-            values.append(line.strip())
+            if widths is None:
+                raise RuntimeError("usql result row has no column widths")
+            values.append(FIELD_SEP.join(aligned_cells(line, widths)))
     return ("ok", "\n".join(values).strip())
 
 
@@ -76,11 +129,6 @@ def normalize_cell(cell: str) -> str:
         return "false"
     if c in ("", "<NULL>", "NULL"):
         return "<NULL>"
-    # jsonb spacing: {"a": 1} vs {"a":1}
-    if (c.startswith("{") and c.endswith("}")) or (c.startswith("[") and c.endswith("]")):
-        c = re.sub(r'\s+', ' ', c)
-        c = c.replace('", "', '","').replace('": "', '":"')
-        c = c.replace(": ", ":").replace(", ", ",")
     if FLOAT_RE.match(c):
         try:
             f = float(c)
@@ -95,11 +143,14 @@ def normalize_cell(cell: str) -> str:
 def normalize(kind: str, payload: str) -> str:
     if kind == "error":
         return "<ERROR>"
-    rows = [normalize_cell(r) for r in payload.splitlines()]
+    rows = [
+        FIELD_SEP.join(normalize_cell(cell) for cell in row.split(FIELD_SEP))
+        for row in payload.splitlines()
+    ]
     return "\n".join(rows)
 
 
-def main() -> None:
+def main() -> int:
     probes = [
         line.strip()
         for line in (HERE / "probes.sql").read_text().splitlines()
@@ -133,10 +184,11 @@ def main() -> None:
     for cat, items in sorted(by_cat.items()):
         print(f"\n=== {cat} ({len(items)}) ===")
         for q, pg, uq in items:
-            pg_disp = pg.replace("\n", "|")[:90]
-            uq_disp = uq.replace("\n", "|")[:90]
+            pg_disp = pg.replace(FIELD_SEP, "|").replace("\n", "|")[:90]
+            uq_disp = uq.replace(FIELD_SEP, "|").replace("\n", "|")[:90]
             print(f"  {q}\n     PG: {pg_disp}\n     UQ: {uq_disp}")
+    return 1 if diffs else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

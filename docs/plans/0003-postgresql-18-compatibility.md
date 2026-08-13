@@ -16,7 +16,7 @@ This plan distinguishes a PostgreSQL 18 baseline from complete compatibility. Th
 - Protocol 3.0 remains supported while protocol 3.2 is added. Version negotiation and unsupported `_pq_.` options must follow PostgreSQL rather than relying on the current libpq default.
 - A compatibility claim is no broader than its passing evidence. The manual must identify the current milestone until the complete-compatibility gates pass.
 
-## Current implementation status and known gaps
+## Current implementation status and open PostgreSQL 18 bugs
 
 The historical starting point used `pg_query` 6.1.1 with PostgreSQL 17 grammar, reported `server_version` as `17.0-uqa`, stored the active TPC-H-derived oracle in `expected/pg17.json`, and accepted only frontend/backend protocol 3.0 primitives. Active assets now use `pg18`, session metadata reports `18.0-uqa`, and the checked-in 22-query oracle records PostgreSQL 18.4 server and platform provenance.
 
@@ -27,11 +27,12 @@ The PostgreSQL 18 parser migration replaces the four DML `returning_list` fields
 | Active PG18 baseline | Active paths, scripts, tests, defaults, and fixtures use `pg18`; the parser chain is pinned by full remote revisions; 22/22 TPC-H-derived results match PostgreSQL 18.4 | Complete the AST coverage inventory |
 | `RETURNING WITH (OLD/NEW ...)` | Old and new images and custom aliases are preserved through SQL AST, planning, and DML execution | Expand live differential coverage to triggers, partitions, and every MERGE action as those features become available |
 | Constraint metadata | CHECK and foreign-key enforcement flags and named NOT NULL catalog rows are represented and tested | Complete `NOT VALID`, `ALTER CONSTRAINT`, and all dump/reopen cases |
-| Identified PG18 functions and casts | The discovered array, bytea, Unicode, UUID, checksum, JSON, numeric, interval, Roman-numeral, aggregate, and regex cases are implemented and tested | Complete function catalog metadata and the wider PostgreSQL 18 function matrix |
-| PL/pgSQL datum slots and bound cursors | `retvarno`, the `-1` cursor sentinel, bound cursor arguments, named arguments, `OPEN`, `FETCH NEXT`, and `CLOSE` are structural AST and interpreter state backed by the pinned parser revisions | Add session portal state before supporting refcursor parameters, returns, or cursors surviving routine exit |
-| Protocol 3.2 primitives | Minor-version negotiation, ordered `_pq_.` reporting, message tag `v`, variable cancellation keys, and legacy 3.0 validation have byte-exact tests; raw startup negotiation was checked against PostgreSQL 18 | Add full libpq/driver cancellation and authentication-sequence interoperability tests |
-| Virtual generated columns | Explicitly unsupported | Implement definition, dependency, catalog, read, DML, dump, and reopen behavior |
-| Temporal constraints | Explicitly unsupported because range and multirange carriers are absent | Implement the carrier, operator, index, and constraint layers before accepting the syntax |
+| Identified PG18 functions and casts | The discovered array, bytea, Unicode, UUID, checksum, JSON, numeric, interval, Roman-numeral, aggregate, and regex cases are implemented and tested, including the identified `pg_proc` overload metadata | Expand the PostgreSQL 18 function, type, and catalog matrix beyond the identified additions |
+| PG18 database locale catalog | `pg_database` exposes PostgreSQL 18's builtin provider, `datlocale`, `daticurules`, `datcollversion`, and `dathasloginevt` shape for the engine database, with Unicode behavior tests | Implement the complete database, collation, locale-provider, ownership, ACL, and lifecycle surface |
+| PL/pgSQL datum slots and bound cursors | `retvarno`, the `-1` cursor sentinel, bound cursor arguments, named arguments, `OPEN`, `FETCH NEXT`, and `CLOSE` are structural AST and interpreter state backed by the pinned parser revisions; scalar and cursor-argument `SelectStmt` envelopes reject unsupported structure | Add session portal state before supporting refcursor parameters, returns, or cursors surviving routine exit |
+| Protocol 3.2 | Byte-exact tests cover minor negotiation, ordered `_pq_.` reporting, message tag `v`, variable cancellation keys, legacy 3.0 validation, and the PostgreSQL 18 reserved-3.1 edge; PostgreSQL 18.4 `psql`/libpq live tests cover 3.0, 3.2, `latest`, 3.2-to-3.0 downgrade, authentication ordering, SSL rejection and retry, and both cancellation-key shapes | Add credentialed GSS negotiation, non-trust authentication methods, extended-query coverage, and the wider driver matrix |
+| Virtual generated columns | Open compatibility bug; syntax is rejected fail-safely until the implementation is complete | Implement definition, dependency, catalog, read, DML, dump, and reopen behavior |
+| Temporal constraints | Open compatibility bug; range and multirange carriers are absent | Implement the carrier, operator, index, and constraint layers before accepting the syntax |
 
 ## Workstreams
 
@@ -86,11 +87,13 @@ Audit PostgreSQL 18 migration changes that overlap UQA-RS, including timezone-ab
 
 ### 6. Frontend/backend protocol 3.2
 
-Add protocol constants and a negotiation API that accepts major version 3 startup packets, selects the highest supported minor version not greater than the request, reports every unsupported `_pq_.` option, and encodes `NegotiateProtocolVersion` with message tag `v`. A request for an unsupported major version remains a protocol error. PostgreSQL 18 accepts a 3.1 request unchanged, so it retains pre-3.2 cancellation-key shapes while 3.2 enables variable-length keys.
+Add protocol constants and a negotiation API that accepts major version 3 startup packets, selects the highest supported minor version not greater than the request or the embedding server's explicit maximum, reports every unsupported `_pq_.` option, and encodes `NegotiateProtocolVersion` with message tag `v`. A request for an unsupported major version remains a protocol error. The embedding server's implementation maximum must be 3.0 or 3.2; PostgreSQL 18 nevertheless accepts a frontend 3.1 request unchanged and echoes selected version 3.1 when it must report an unsupported `_pq_.` option, while 3.2 enables variable-length keys. PostgreSQL 18 libpq never requests 3.1 and rejects a 3.2-to-3.1 downgrade.
 
 Represent cancellation secrets as validated opaque bytes. Protocol 3.0 requires exactly four bytes. Under PostgreSQL 18 protocol 3.2, `BackendKeyData` emits 4 through 256 bytes and the server's `CancelRequest` parser accepts 1 through 256 bytes. Preserve zero bytes, enforce the distinct message boundaries, and provide an explicit four-byte constructor for existing integrations.
 
-Add byte-exact unit tests from PostgreSQL 18 message formats plus live interoperability tests using PostgreSQL 18 `psql` and libpq with `max_protocol_version=3.0`, `3.2`, and `latest`. Test downgrade responses, unsupported `_pq_.` options, cancellation, malformed lengths, authentication sequencing, SSL/GSS pre-startup requests, and layered middleware keys near the 256-byte limit.
+Byte-exact unit tests cover PostgreSQL 18 message formats, downgrade responses, unsupported `_pq_.` options, malformed lengths, SSL/GSS pre-startup requests, and cancellation-key boundaries. Ignored live interoperability tests use PostgreSQL 18.4 `psql` as a thin libpq driver and a server assembled directly from `uqa-pg-wire` codecs; they verify `max_protocol_version=3.0`, `3.2`, and `latest`, an explicit 3.2-to-3.0 server downgrade, authentication sequencing, SSL rejection and startup retry, legacy cancellation, and a 256-byte protocol 3.2 cancellation key.
+
+Complete the remaining protocol evidence with a credentialed Kerberos environment that actually emits `GSSEncRequest`, non-trust authentication exchanges, extended-query and binary formats, layered middleware keys near the 256-byte limit, malformed live peers, and the client matrix in workstream 8.
 
 ### 7. Complete SQL, catalog, and transaction compatibility
 
@@ -127,11 +130,14 @@ cargo fmt --all -- --check
 cargo check --workspace --all-targets --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked
-cargo test -p uqa-engine --test engine_queries manual_sql_examples::manual_sql_examples_compile_or_execute
-cargo test -p uqa-engine --test sql_tpch
+cargo test -p uqa-engine --test integration engine_queries::manual_sql_examples::manual_sql_examples_compile_or_execute
+cargo test -p uqa-engine --test integration sql_tpch::
+cargo test -p uqa-pg-wire --test protocol libpq_interop:: -- --ignored
 python3 tests/parity/pg18/run_diff.py
 python3 scripts/run-tpch-pg18.py --iterations 3
 ```
+
+The live wire command requires a PostgreSQL 18 client container named `pg-parity` by default. Set `UQA_PG18_WIRE_CONTAINER` to another container name and `UQA_PG18_DOCKER_HOST` when the container reaches the host through a name other than `host.docker.internal`.
 
 Run repository policy scripts, binding builds and examples, and supported-platform CI whenever the parser dependency, public AST, catalog serialization, value representation, or wire types change.
 

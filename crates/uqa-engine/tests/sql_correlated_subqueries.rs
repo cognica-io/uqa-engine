@@ -161,7 +161,7 @@ fn not_exists_with_composite_key_and_residual_filter() {
             tile TEXT
         )",
     );
-    // Coordinates chosen so PostgreSQL 17 float -> int casts (round
+    // Coordinates chosen so PostgreSQL 18 float -> int casts (round
     // half to even, not truncation) hit the '#' wall for candidate 1.
     exec(
         &engine,

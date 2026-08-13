@@ -105,10 +105,18 @@ impl<'a> Sort<'a> {
 /// per-key direction plus `PostgreSQL` NULLS placement (default NULLS
 /// LAST for ascending, NULLS FIRST for descending).
 pub fn compare_sort_key_values(keys: &[SortKey], av: &[Value], bv: &[Value]) -> std::cmp::Ordering {
+    compare_sort_key_values_by(keys, |index| (&av[index], &bv[index]))
+}
+
+pub(crate) fn compare_sort_key_values_by<'a>(
+    keys: &[SortKey],
+    mut values: impl FnMut(usize) -> (&'a Value, &'a Value),
+) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     for (i, k) in keys.iter().enumerate() {
-        let a_null = matches!(av[i], Value::Null);
-        let b_null = matches!(bv[i], Value::Null);
+        let (a, b) = values(i);
+        let a_null = matches!(a, Value::Null);
+        let b_null = matches!(b, Value::Null);
         let nulls_first = k.nulls_first.unwrap_or(k.descending);
         if a_null || b_null {
             let null_cmp = if a_null == b_null {
@@ -129,7 +137,7 @@ pub fn compare_sort_key_values(keys: &[SortKey], av: &[Value], bv: &[Value]) -> 
             }
             continue;
         }
-        let ord = compare_values(&av[i], &bv[i]);
+        let ord = compare_values(a, b);
         let ord = if k.descending { ord.reverse() } else { ord };
         if ord != Ordering::Equal {
             return ord;

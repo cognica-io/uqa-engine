@@ -92,19 +92,14 @@ fn pg18_return_slots_and_cursor_minus_one_sentinel_lower_directly() {
     assert!(cursor.datums.iter().any(|datum| {
         matches!(
             datum,
-            PLpgSQLDatum::Var(PLpgSQLVar {
-                cursor: Some(PLpgSQLCursor {
-                    argument_row: None,
-                    ..
-                }),
-                ..
-            })
+            PLpgSQLDatum::Var(variable)
+                if matches!(variable.cursor.as_ref(), Some(cursor) if cursor.argument_row.is_none())
         )
     }));
 }
 
 fn scalar_datum(name: &str) -> PLpgSQLDatum {
-    PLpgSQLDatum::Var(PLpgSQLVar {
+    PLpgSQLDatum::Var(Box::new(PLpgSQLVar {
         name: name.into(),
         type_name: "integer".into(),
         default: None,
@@ -112,7 +107,7 @@ fn scalar_datum(name: &str) -> PLpgSQLDatum {
         not_null: false,
         cursor: None,
         lineno: None,
-    })
+    }))
 }
 
 fn json_expr(query: &str, mode: i64) -> JSONValue {

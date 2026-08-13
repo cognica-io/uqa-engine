@@ -7,8 +7,8 @@
 //! SQL casts and `PostgreSQL` array-literal parsing.
 
 use super::{
-    json_to_value, out_of_range, parse_json, to_decimal, to_f64, value_to_string, Result, SQLError,
-    TemporalValue, Value,
+    out_of_range, parse_json, to_decimal, to_f64, typed_json_value, value_to_json, value_to_string,
+    Result, SQLError, TemporalValue, Value,
 };
 
 /// Cast a value to the named SQL type, mirroring `CAST(expr AS ty)`.
@@ -20,7 +20,7 @@ pub fn cast_value(v: &Value, ty: &str) -> Result<Value> {
 }
 
 /// Cast a value while preserving an explicitly declared source type when the
-/// runtime carrier erases it. PostgreSQL 18 integer/`bytea` casts require this
+/// runtime carrier erases it. `PostgreSQL` 18 integer/`bytea` casts require this
 /// for the source integer's two-, four-, or eight-byte representation.
 pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<Value> {
     if matches!(v, Value::Null) {
@@ -130,12 +130,26 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
             "timestamp with time zone",
         ),
         "interval" => cast_temporal(v, TemporalValue::parse_interval, "interval"),
-        // Documented divergences from PostgreSQL: (1) `json` (non-b)
-        // does not preserve the source text - objects land in the same
-        // key-sorted Map representation as `jsonb`; (2) top-level jsonb
-        // scalars materialize as plain engine values, so a jsonb string
-        // renders without JSON quotes.
-        "json" | "jsonb" => Ok(json_to_value(&parse_json(&value_to_string(v))?)),
+        "json" => {
+            if let Value::Json(text) = v {
+                return Ok(Value::Json(text.clone()));
+            }
+            if let Value::Str(text) | Value::FixedChar(text) = v {
+                let _validated = parse_json(text)?;
+                return Ok(Value::Json(text.clone()));
+            }
+            Ok(typed_json_value(&value_to_json(v), false))
+        }
+        "jsonb" => {
+            if let Value::JsonB(text) = v {
+                return Ok(Value::JsonB(text.clone()));
+            }
+            let parsed = match v {
+                Value::Json(text) | Value::Str(text) | Value::FixedChar(text) => parse_json(text)?,
+                other => value_to_json(other),
+            };
+            Ok(typed_json_value(&parsed, true))
+        }
         "bytea" => match v {
             Value::Bytes(bytes) => Ok(Value::Bytes(bytes.clone())),
             Value::Int(value) => integer_to_bytea(*value, source_ty),

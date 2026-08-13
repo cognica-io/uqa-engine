@@ -124,6 +124,8 @@ pub(super) fn infer_arrow_type(column: &str, result: &SQLResult) -> DataType {
             Value::Decimal(_)
             | Value::Str(_)
             | Value::FixedChar(_)
+            | Value::Json(_)
+            | Value::JsonB(_)
             | Value::Bytes(_)
             | Value::Temporal(_)
             | Value::List(_)
@@ -254,6 +256,8 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Float(_) => "float",
         Value::Decimal(_) => "decimal",
         Value::Str(_) | Value::FixedChar(_) => "string",
+        Value::Json(_) => "json",
+        Value::JsonB(_) => "jsonb",
         Value::Bytes(_) => "bytes",
         Value::Temporal(_) => "temporal",
         Value::List(_) => "list",
@@ -268,7 +272,7 @@ fn value_to_arrow_string(value: &Value) -> Option<String> {
         Value::Int(v) => Some(v.to_string()),
         Value::Float(v) => Some(v.to_string()),
         Value::Decimal(v) => Some(v.to_sql_string()),
-        Value::Str(v) | Value::FixedChar(v) => Some(v.clone()),
+        Value::Str(v) | Value::FixedChar(v) | Value::Json(v) | Value::JsonB(v) => Some(v.clone()),
         Value::Bytes(v) => Some(format!("{v:?}")),
         Value::Temporal(v) => Some(v.to_sql_string()),
         Value::List(v) => Some(format!("{v:?}")),

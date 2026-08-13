@@ -162,21 +162,20 @@ impl Interpreter<'_> {
         let mut values = vec![None; fields.len()];
         let mut next_positional = 0usize;
         for argument in arguments {
-            let index = match &argument.name {
-                Some(name) => fields
+            let index = if let Some(name) = &argument.name {
+                fields
                     .iter()
                     .position(|field| field.name.eq_ignore_ascii_case(name))
                     .ok_or_else(|| {
                         SQLError::Internal(format!(
                             "PL/pgSQL cursor `{cursor_name}` has no argument named `{name}`"
                         ))
-                    })?,
-                None => {
-                    while next_positional < values.len() && values[next_positional].is_some() {
-                        next_positional += 1;
-                    }
-                    next_positional
+                    })?
+            } else {
+                while next_positional < values.len() && values[next_positional].is_some() {
+                    next_positional += 1;
                 }
+                next_positional
             };
             let Some(slot) = values.get_mut(index) else {
                 return Err(SQLError::Internal(format!(

@@ -98,6 +98,14 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
             value.hash(state);
         }
         Value::Temporal(value) => hash_temporal(value, state),
+        Value::Json(value) => {
+            8_u8.hash(state);
+            value.hash(state);
+        }
+        Value::JsonB(value) => {
+            9_u8.hash(state);
+            value.hash(state);
+        }
         Value::List(values) => {
             5_u8.hash(state);
             values.len().hash(state);

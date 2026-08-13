@@ -19,6 +19,7 @@ use uqa_planner::{
     ConflictActionPlan, ConflictPlan, DeletePlan, InsertPlan, MergePlan, MergeWhenPlan,
     ProjectionPlan, SourcePlan, UpdatePlan,
 };
+use uqa_sql::expr::RowLookup;
 
 use super::scalar::{eval_lowered_expression, eval_physical_scalar, PhysicalEvalContext};
 use super::ScopedEngineHook;
@@ -131,36 +132,32 @@ fn merge_pair_schema(target_columns: &[String], source_columns: &[String]) -> Ve
 fn encode_merge_pair(
     doc_id: Option<DocId>,
     target_row: &ResultRow,
-    source_row: &ResultRow,
+    source_row: &dyn RowLookup,
     target_columns: &[String],
     source_columns: &[String],
-) -> ResultRow {
-    let mut encoded = ResultRow::new();
-    encoded.insert(
-        MERGE_PAIR_DOC_ID.into(),
-        doc_id.map_or(Value::Null, |doc_id| Value::Str(doc_id.to_string())),
-    );
-    for (index, column) in target_columns.iter().enumerate() {
-        encoded.insert(
-            format!("__uqa_merge_target_{index}"),
-            target_row.get(column).cloned().unwrap_or(Value::Null),
-        );
-    }
-    for (index, column) in source_columns.iter().enumerate() {
-        encoded.insert(
-            format!("__uqa_merge_source_{index}"),
-            source_row.get(column).cloned().unwrap_or(Value::Null),
-        );
-    }
-    encoded
+) -> uqa_execution::PhysicalRow {
+    let values =
+        std::iter::once(doc_id.map_or(Value::Null, |doc_id| Value::Str(doc_id.to_string())))
+            .chain(
+                target_columns
+                    .iter()
+                    .map(|column| target_row.get(column).cloned().unwrap_or(Value::Null)),
+            )
+            .chain(
+                source_columns
+                    .iter()
+                    .map(|column| source_row.column(column).cloned().unwrap_or(Value::Null)),
+            )
+            .collect();
+    uqa_execution::PhysicalRow::from_values(values)
 }
 
 fn decode_merge_pair(
-    encoded: &ResultRow,
+    encoded: &dyn RowLookup,
     target_columns: &[String],
     source_columns: &[String],
 ) -> Result<MergePairing, SQLError> {
-    let doc_id = match encoded.get(MERGE_PAIR_DOC_ID) {
+    let doc_id = match encoded.positional_column(0) {
         Some(Value::Null) | None => None,
         Some(Value::Str(doc_id)) => Some(doc_id.parse::<DocId>().map_err(|error| {
             SQLError::Internal(format!(
@@ -180,7 +177,7 @@ fn decode_merge_pair(
             (
                 column.clone(),
                 encoded
-                    .get(&format!("__uqa_merge_target_{index}"))
+                    .positional_column(index + 1)
                     .cloned()
                     .unwrap_or(Value::Null),
             )
@@ -193,7 +190,7 @@ fn decode_merge_pair(
             (
                 column.clone(),
                 encoded
-                    .get(&format!("__uqa_merge_source_{index}"))
+                    .positional_column(index + 1 + target_columns.len())
                     .cloned()
                     .unwrap_or(Value::Null),
             )
@@ -206,8 +203,8 @@ fn decode_merge_pair(
     })
 }
 
-fn merge_source_index_row(index: usize) -> ResultRow {
-    ResultRow::from([("source_index".into(), Value::Str(index.to_string()))])
+fn merge_source_index_value(index: usize) -> Value {
+    Value::Str(index.to_string())
 }
 
 mod conflict;

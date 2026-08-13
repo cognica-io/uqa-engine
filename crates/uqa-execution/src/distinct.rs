@@ -724,6 +724,14 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
             encode_bytes(value, output)?;
         }
         Value::Temporal(value) => encode_temporal(value, output),
+        Value::Json(value) => {
+            output.push_byte(8);
+            encode_bytes(value.as_bytes(), output)?;
+        }
+        Value::JsonB(value) => {
+            output.push_byte(9);
+            encode_bytes(value.as_bytes(), output)?;
+        }
         Value::List(values) => {
             output.push_byte(5);
             encode_len(values.len(), output)?;

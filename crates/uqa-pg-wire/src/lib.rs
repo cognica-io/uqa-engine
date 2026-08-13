@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL wire protocol 3.0 through 3.2 primitives for UQA-compatible servers.
+//! `PostgreSQL` wire protocol 3.0 through 3.2 primitives for UQA-compatible servers.
 //!
 //! This crate intentionally stops at protocol parsing and message encoding.
 //! It does not own sockets, tasks, TLS, authentication storage, query

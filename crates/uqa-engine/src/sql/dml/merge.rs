@@ -11,7 +11,7 @@ use super::{
     coerce_to_column_type, decode_merge_pair, delete_document_with_referential_actions,
     dml_returning_result, dml_storage_error, doc_id_value, document_supplied_id, encode_merge_pair,
     eval_mutation_expr, insert_document_with_constraints, insert_identity_columns,
-    merge_pair_schema, merge_source_index_row, missing_document_error, prefix_row,
+    merge_pair_schema, merge_source_index_value, missing_document_error, prefix_row,
     returning_row_context, rewrite_document_with_referential_actions, validate_mutation_columns,
     BTreeSet, CteScope, Document, Engine, MergePlan, MergeWhenPlan, ProjectionPlan, ResultRow,
     ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
@@ -75,7 +75,6 @@ pub(in crate::sql) fn run_merge_inner(
     let pair_row_schema = uqa_execution::RowSchema::new(pair_schema.clone());
     let work_mem = crate::sql::select::physical_work_mem_bytes(engine)?.max(1);
     let mut pairings = uqa_execution::SpillBuffer::new(work_mem);
-    let source_index_schema = vec!["source_index".to_string()];
     let mut matched_source = uqa_execution::ExactRowSet::new(work_mem);
 
     for doc_id in &engine.table_doc_ids(&target_table)? {
@@ -83,15 +82,15 @@ pub(in crate::sql) fn run_merge_inner(
             return Err(missing_document_error("MERGE scan", &target_table, *doc_id));
         };
         let target_row = prefix_row(&target_qual, &doc);
-        let mut paired_source: Option<(usize, ResultRow)> = None;
+        let mut paired_source: Option<(usize, uqa_execution::OwnedPhysicalRow)> = None;
         let source_reader = source_rows
             .read_rows()
             .map_err(crate::sql::select::physical_exec_error)?;
         for (idx, src) in source_reader.enumerate() {
             let src = src.map_err(crate::sql::select::physical_exec_error)?;
-            let index_row = merge_source_index_row(idx);
+            let index_value = merge_source_index_value(idx);
             if matched_source
-                .contains_row(&index_row, &source_index_schema)
+                .contains_values(std::slice::from_ref(&index_value))
                 .map_err(crate::sql::select::physical_exec_error)?
             {
                 continue;
@@ -100,8 +99,8 @@ pub(in crate::sql) fn run_merge_inner(
             for (k, v) in &target_row {
                 joined.insert(k.clone(), v.clone());
             }
-            for (k, v) in &src {
-                joined.insert(k.clone(), v.clone());
+            for (k, v) in src.view().iter() {
+                joined.insert(k.to_string(), v.clone());
             }
             if truthy(&eval_mutation_expr(
                 engine,
@@ -112,7 +111,7 @@ pub(in crate::sql) fn run_merge_inner(
             )?) {
                 paired_source = Some((idx, src));
                 if !matched_source
-                    .insert_row(&index_row, &source_index_schema)
+                    .insert_values(std::slice::from_ref(&index_value))
                     .map_err(crate::sql::select::physical_exec_error)?
                 {
                     return Err(SQLError::Internal(
@@ -126,7 +125,7 @@ pub(in crate::sql) fn run_merge_inner(
         // MERGE only emits an action when the join condition holds.
         if let Some((_idx, source_row)) = paired_source {
             pairings
-                .push(uqa_execution::Batch::new(
+                .push(uqa_execution::Batch::from_physical_rows(
                     pair_row_schema.clone(),
                     vec![encode_merge_pair(
                         Some(*doc_id),
@@ -144,15 +143,15 @@ pub(in crate::sql) fn run_merge_inner(
         .map_err(crate::sql::select::physical_exec_error)?;
     for (idx, src) in source_reader.enumerate() {
         let src = src.map_err(crate::sql::select::physical_exec_error)?;
-        let index_row = merge_source_index_row(idx);
+        let index_value = merge_source_index_value(idx);
         if matched_source
-            .contains_row(&index_row, &source_index_schema)
+            .contains_values(std::slice::from_ref(&index_value))
             .map_err(crate::sql::select::physical_exec_error)?
         {
             continue;
         }
         pairings
-            .push(uqa_execution::Batch::new(
+            .push(uqa_execution::Batch::from_physical_rows(
                 pair_row_schema.clone(),
                 vec![encode_merge_pair(
                     None,
@@ -172,11 +171,8 @@ pub(in crate::sql) fn run_merge_inner(
         .read_rows()
         .map_err(crate::sql::select::physical_exec_error)?;
     for pair in pairing_reader {
-        let pair = decode_merge_pair(
-            &pair.map_err(crate::sql::select::physical_exec_error)?,
-            &target_columns,
-            &source_columns,
-        )?;
+        let pair = pair.map_err(crate::sql::select::physical_exec_error)?;
+        let pair = decode_merge_pair(&pair, &target_columns, &source_columns)?;
         // MERGE matched semantics: a target row is "matched" only when
         // the join produced a source pairing. A target row that has
         // no corresponding source counts as unmatched and falls

@@ -4,7 +4,7 @@ This document records UQA-RS benchmark baselines measured on developer hardware.
 
 ## PostgreSQL 17 TPC-H-derived compatibility pass (2026-08-09)
 
-The checked-in [`benchmarks/tpch`](../../benchmarks/tpch/README.md) workload contains all 22 default TPC-H-derived queries and deterministic `dbgen` data at scale factor `0.001`. It is an exact SQL compatibility and local latency fixture, not a compliant or audited TPC-H result. `cargo test -p uqa-engine --test sql_tpch` verifies columns, ordered rows, NULLs, text bytes, and type-aware canonical numeric values against PostgreSQL 17.10 before timing is considered.
+The checked-in [`benchmarks/tpch`](../../benchmarks/tpch/README.md) workload contains all 22 default TPC-H-derived queries and deterministic `dbgen` data at scale factor `0.001`. It is an exact SQL compatibility and local latency fixture, not a compliant or audited TPC-H result. `cargo test -p uqa-engine --test integration sql_tpch::` verifies columns, ordered rows, NULLs, text bytes, and type-aware canonical numeric values against PostgreSQL 17.10 before timing is considered.
 
 The current UQA snapshot was built with `cargo build --release -p uqa-engine --example tpch_runner --locked` on an Apple M1 Ultra arm64 host with Rust 1.90.0. UQA values are medians of 201 executions after an untimed validation execution; PostgreSQL values are medians of five executions in the dedicated PostgreSQL 17.10 arm64 container on the same host. The runs were not interleaved, so their ratios are local directional evidence rather than a base/head regression estimate.
 

@@ -1,25 +1,25 @@
 # PostgreSQL Compatibility and Limits
 
-UQA-RS deliberately uses PostgreSQL-oriented syntax and behavior while remaining an embedded engine with its own storage, planner, catalog, and extension model. Treat it as a compatible query surface for implemented features, not as a drop-in PostgreSQL server.
+UQA-RS deliberately uses PostgreSQL-oriented syntax and behavior while remaining an embedded engine with its own storage, planner, catalog, and extension model. PostgreSQL 18 is the behavioral oracle: every externally observable difference is a compatibility bug, including differences in features not yet implemented.
 
 ## Compatibility baseline
 
 - SQL parsing uses PostgreSQL grammar through `libpg_query`.
 - Session metadata reports `server_version` as `18.0-uqa`.
 - The repository checks all 22 deterministic TPC-H-derived scale-factor `0.001` query results against PostgreSQL 18.4 fixtures.
-- The optional wire crate implements PostgreSQL protocol 3.0 through 3.2 codec primitives, minor-version negotiation, reserved startup-option reporting, and protocol-specific cancellation-key validation.
+- The optional wire crate implements PostgreSQL protocol 3.0 through 3.2 codec primitives, minor-version negotiation, reserved startup-option reporting, and protocol-specific cancellation-key validation. PostgreSQL 18.4 `psql`/libpq tests verify 3.0, 3.2, and `latest` startup, 3.2-to-3.0 downgrade, authentication ordering, SSL rejection and retry, and legacy and 256-byte cancellation keys.
 - PostgreSQL-shaped `information_schema` and `pg_catalog` virtual relations support common inspection paths.
 - Apache AGE-shaped `cypher(...) AS (...)` integrates graph results into SQL.
 
 The fixture coverage is evidence for those queries and types, not a claim of complete PostgreSQL 18 compatibility.
 
-## Embedded runtime differences
+## Embedded runtime architecture
 
-UQA-RS does not implement PostgreSQL processes, network protocol semantics as its core API, MVCC storage pages, roles, grants, extensions, background workers, replication, WAL administration, or server configuration. The optional PostgreSQL wire and FDW crates are adapters around the engine, not a replacement PostgreSQL server.
+UQA-RS does not yet implement PostgreSQL processes, network protocol semantics as its core API, MVCC storage pages, roles, grants, extensions, background workers, replication, WAL administration, or server configuration. The optional PostgreSQL wire and FDW crates are adapters around the engine. Every externally visible difference caused by this architecture remains an open compatibility bug rather than an accepted alternative behavior.
 
-Integer aliases share a signed 64-bit carrier. Floating aliases share a 64-bit carrier. Text-like declarations can share one text carrier. These choices can differ from PostgreSQL overflow, storage, collation, and display behavior.
+Integer aliases currently share a signed 64-bit storage carrier. Floating aliases share a 64-bit carrier. Text-like declarations can share one text carrier. Any resulting difference in PostgreSQL 18 overflow, storage, collation, or display behavior is an open compatibility bug.
 
-## Explicitly unsupported relation features
+## Open PostgreSQL 18 relation-feature bugs
 
 - Temporary and unlogged tables, views, and sequences
 - Table inheritance and partitioning
@@ -33,9 +33,9 @@ Integer aliases share a signed 64-bit carrier. Floating aliases share a 64-bit c
 - `SELECT INTO`
 - CTAS column-name lists and `WITH NO DATA`
 
-These forms fail during compilation without creating a partial object.
+These forms currently fail during compilation without creating a partial object. That failure is fail-safe behavior while implementation is incomplete, not a compatibility exemption.
 
-## Explicitly unsupported query clauses
+## Open PostgreSQL 18 query-clause bugs
 
 - `NATURAL JOIN`
 - `JOIN ... USING`
@@ -51,9 +51,9 @@ These forms fail during compilation without creating a partial object.
 - Explicit `ESCAPE` for `LIKE`, `ILIKE`, and `SIMILAR TO`
 - `MERGE WHEN NOT MATCHED BY SOURCE`
 
-Use an equivalent implemented shape only when it preserves the application's semantics. For example, replace `JOIN ... USING (id)` with an explicit `JOIN ... ON left.id = right.id` and project the desired key once.
+Each missing clause above must be implemented with PostgreSQL 18 semantics; source-query rewriting is not an accepted compatibility solution.
 
-## DDL limits
+## Open PostgreSQL 18 DDL bugs
 
 - Virtual and stored generated columns are not implemented.
 - `WITHOUT OVERLAPS` keys and `PERIOD` foreign keys are not implemented because range and multirange column types are not yet available.
@@ -67,7 +67,7 @@ Use an equivalent implemented shape only when it preserves the application's sem
 - `ANALYZE` accepts all tables or one table, without options or a column list.
 - `EXPLAIN` options are limited to `ANALYZE`, `VERBOSE`, and `FORMAT TEXT` or `FORMAT JSON`.
 
-## Type limits
+## Open PostgreSQL 18 type bugs
 
 - `INTERVAL` can be an expression value but is not a table column declaration.
 - `VARCHAR(n)` should not be used as the sole enforcement of a length invariant; add a check.
@@ -76,7 +76,7 @@ Use an equivalent implemented shape only when it preserves the application's sem
 - Collation and locale behavior is not a complete PostgreSQL collation implementation.
 - `VECTOR(n)` and `TENSOR(n)` are UQA-RS retrieval types rather than PostgreSQL core types.
 
-## Catalog and administration limits
+## Open PostgreSQL 18 catalog and administration bugs
 
 The virtual catalogs expose engine metadata needed by supported clients and tests. OIDs, ownership, ACLs, server processes, WAL, statistics views, and extension catalogs are not complete PostgreSQL implementations.
 
@@ -84,7 +84,7 @@ Known mutable settings are `search_path`, `client_encoding`, `datestyle`, `timez
 
 `DISCARD TEMP` is rejected because temporary relations are unavailable.
 
-## Routine limits
+## Open PostgreSQL 18 routine bugs
 
 SQL and PL/pgSQL routines cover a broad tested subset, including overloads, defaults, set returns, procedures, control flow, dynamic SQL, recursion limits, diagnostics, exception handling, and bound cursors used entirely within one routine activation. Dynamic cursor queries, `MOVE`, non-`NEXT` fetch directions, `refcursor` parameters and returns, and cursors that survive routine exit are not implemented because session portal state is not available. The routine surface does not claim the full PL/pgSQL language, PostgreSQL extension languages, security-definer ecosystem, or server privilege model.
 

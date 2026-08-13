@@ -39,7 +39,7 @@ fn sql_language_scalar_and_setof() {
     );
     let result = exec(&eng, "SELECT * FROM above(1)");
     assert_eq!(result.rows.len(), 2);
-    // An empty SETOF result produces zero rows in FROM (PG17).
+    // An empty SETOF result produces zero rows in FROM (PG18).
     assert_eq!(
         scalar(&eng, "SELECT count(*) AS n FROM above(100)"),
         Value::Int(0)

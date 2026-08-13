@@ -8,7 +8,10 @@
 
 use uqa_core::Value;
 use uqa_sql::ast::BinaryOp;
-use uqa_sql::expr::{cast_value_from, eval_binary_values, eval_comparison_truth, truthy};
+use uqa_sql::expr::{
+    cast_value_from, eval_binary_values, eval_binary_values_with_integer_width,
+    eval_comparison_truth, truthy,
+};
 use uqa_sql::SQLError;
 
 use super::ProjectedExpr;
@@ -62,7 +65,7 @@ fn evaluate_truth<F: FieldValues + ?Sized>(
     fields: &F,
 ) -> Result<Option<bool>, SQLError> {
     let truth = match expression {
-        ProjectedExpr::Binary { op, lhs, rhs } if is_comparison(*op) => {
+        ProjectedExpr::Binary { op, lhs, rhs, .. } if is_comparison(*op) => {
             let lhs = evaluate(lhs, fields)?;
             let rhs = evaluate(rhs, fields)?;
             eval_comparison_truth(*op, lhs.as_value(), rhs.as_value())?
@@ -141,10 +144,20 @@ fn evaluate<'a, F: FieldValues + ?Sized>(
     let value = match expression {
         ProjectedExpr::Field(index) => ProjectedValue::Borrowed(fields.field(*index)),
         ProjectedExpr::Literal(value) => ProjectedValue::Borrowed(value),
-        ProjectedExpr::Binary { op, lhs, rhs } => {
+        ProjectedExpr::Binary {
+            op,
+            lhs,
+            rhs,
+            integer_width,
+        } => {
             let lhs = evaluate(lhs, fields)?;
             let rhs = evaluate(rhs, fields)?;
-            ProjectedValue::Owned(eval_binary_values(*op, lhs.as_value(), rhs.as_value())?)
+            ProjectedValue::Owned(eval_binary_values_with_integer_width(
+                *op,
+                lhs.as_value(),
+                rhs.as_value(),
+                *integer_width,
+            )?)
         }
         ProjectedExpr::IntFieldComparison {
             field,

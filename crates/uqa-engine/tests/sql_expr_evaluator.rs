@@ -218,7 +218,7 @@ fn arithmetic_compound_expression() {
 
 #[test]
 fn arithmetic_division_by_zero_errors() {
-    // PostgreSQL 17 raises `division by zero` (SQLSTATE 22012) instead
+    // PostgreSQL 18 raises `division by zero` (SQLSTATE 22012) instead
     // of yielding NULL.
     let eng = engine();
     let err = eng

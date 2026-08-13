@@ -45,7 +45,9 @@ mod sql_runtime;
 mod state;
 mod statements;
 
-pub(crate) use handlers::{call_user_scalar_function, call_user_table_function};
+pub(crate) use handlers::{
+    call_user_scalar_function, call_user_table_function, resolved_user_function_returns_set,
+};
 pub(super) use handlers::{run_call, run_create_function, run_do_block, run_drop_function};
 
 use diagnostics::{

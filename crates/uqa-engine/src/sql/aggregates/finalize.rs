@@ -7,8 +7,9 @@
 //! Built-in aggregate finalization and percentile/statistical helpers.
 
 use super::{
-    core_value_to_json, distinct_key, value_as_f64, AggregateAccumulator, AggregateValueBuffer,
-    BTreeMap, DecimalValue, ProjectionPlan, SQLError, ScalarExpr, Value,
+    cast_value, core_value_to_json, distinct_key, value_as_f64, value_to_json_text,
+    AggregateAccumulator, AggregateValueBuffer, DecimalValue, ProjectionPlan, SQLError, ScalarExpr,
+    Value,
 };
 
 pub(in crate::sql) fn aggregate_value(
@@ -88,11 +89,13 @@ pub(in crate::sql) fn aggregate_value_with_args(
                     Value::Decimal(d) => Ok(Some(d.to_sql_string())),
                     Value::Bool(b) => Ok(Some(b.to_string())),
                     Value::Temporal(t) => Ok(Some(t.to_sql_string())),
-                    Value::Bytes(_) | Value::List(_) | Value::Map(_) => {
-                        Err(SQLError::TypeMismatch(format!(
-                            "string_agg requires a text-coercible value, got {v:?}"
-                        )))
-                    }
+                    Value::Bytes(_)
+                    | Value::Json(_)
+                    | Value::JsonB(_)
+                    | Value::List(_)
+                    | Value::Map(_) => Err(SQLError::TypeMismatch(format!(
+                        "string_agg requires a text-coercible value, got {v:?}"
+                    ))),
                 })
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
@@ -112,11 +115,23 @@ pub(in crate::sql) fn aggregate_value_with_args(
             if ordered_values.is_empty() {
                 return Ok(Value::Null);
             }
-            Value::List(ordered_values)
+            let text = format!(
+                "[{}]",
+                ordered_values
+                    .iter()
+                    .map(value_to_json_text)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            if lname == "jsonb_agg" {
+                cast_value(&Value::Str(text), "jsonb")?
+            } else {
+                Value::Json(text)
+            }
         }
         "json_object_agg" | "jsonb_object_agg" => {
             let ordered_values = acc.values.ordered_values()?;
-            let mut map = BTreeMap::new();
+            let mut fields = Vec::with_capacity(ordered_values.len());
             for value in ordered_values {
                 let Value::List(pair) = value else {
                     return Err(SQLError::Internal(
@@ -133,12 +148,25 @@ pub(in crate::sql) fn aggregate_value_with_args(
                         "JSON object aggregate key must not be NULL".into(),
                     ));
                 }
-                map.insert(aggregate_json_key(&pair[0]), pair[1].clone());
+                let key = serde_json::Value::String(aggregate_json_key(&pair[0])).to_string();
+                fields.push((key, value_to_json_text(&pair[1])));
             }
-            if map.is_empty() {
+            if fields.is_empty() {
                 Value::Null
+            } else if lname == "jsonb_object_agg" {
+                let text = fields
+                    .into_iter()
+                    .map(|(key, value)| format!("{key}:{value}"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                cast_value(&Value::Str(format!("{{{text}}}")), "jsonb")?
             } else {
-                Value::Map(map)
+                let text = fields
+                    .into_iter()
+                    .map(|(key, value)| format!("{key} : {value}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Value::Json(format!("{{ {text} }}"))
             }
         }
         "bool_and" => match acc.bool_and {
@@ -232,6 +260,7 @@ pub(in crate::sql) fn aggregate_json_key(value: &Value) -> String {
         Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
         Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
         Value::Temporal(t) => t.to_sql_string(),
+        Value::Json(text) | Value::JsonB(text) => text.clone(),
         Value::List(_) | Value::Map(_) => serde_json::to_string(&core_value_to_json(value))
             .unwrap_or_else(|_| format!("{value:?}")),
     }

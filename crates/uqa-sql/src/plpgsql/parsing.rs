@@ -188,8 +188,8 @@ pub(super) fn lower_datum(raw: &JSONValue) -> Result<PLpgSQLDatum> {
             Some(node) => Some(lower_expr(node)?),
             None => None,
         };
-        let cursor = match var.get("cursor_explicit_expr") {
-            Some(query) => Some(PLpgSQLCursor {
+        let cursor = if let Some(query) = var.get("cursor_explicit_expr") {
+            Some(PLpgSQLCursor {
                 query: lower_full_statement(query)?,
                 argument_row: match json_optional_i64(var, "cursor_explicit_argrow")? {
                     None | Some(-1) => None,
@@ -204,17 +204,16 @@ pub(super) fn lower_datum(raw: &JSONValue) -> Result<PLpgSQLDatum> {
                         )));
                     }
                 },
-            }),
-            None => {
-                if var.get("cursor_explicit_argrow").is_some() {
-                    return Err(SQLError::Internal(format!(
-                        "PL/pgSQL cursor variable `{name}` has arguments but no query"
-                    )));
-                }
-                None
+            })
+        } else {
+            if var.get("cursor_explicit_argrow").is_some() {
+                return Err(SQLError::Internal(format!(
+                    "PL/pgSQL cursor variable `{name}` has arguments but no query"
+                )));
             }
+            None
         };
-        return Ok(PLpgSQLDatum::Var(PLpgSQLVar {
+        return Ok(PLpgSQLDatum::Var(Box::new(PLpgSQLVar {
             name,
             type_name,
             default,
@@ -222,7 +221,7 @@ pub(super) fn lower_datum(raw: &JSONValue) -> Result<PLpgSQLDatum> {
             not_null: json_bool_or_false(var, "notnull")?,
             cursor,
             lineno: json_optional_i64(var, "lineno")?,
-        }));
+        })));
     }
     if let Some(rec) = raw.get("PLpgSQL_rec") {
         return Ok(PLpgSQLDatum::Rec {

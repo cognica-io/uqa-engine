@@ -6,19 +6,19 @@
 
 //! Volcano scan over an owned [`crate::spill::SpillBuffer`].
 //!
-//! The scan transfers ownership of the spill file to its row iterator at
+//! The scan transfers ownership of the spill file to its batch iterator at
 //! `open`, so disk batches are decoded one at a time and the file is removed
 //! even when execution stops early.
 
-use crate::batch::{Batch, RowSchema, DEFAULT_BATCH_SIZE};
+use crate::batch::{Batch, RowSchema};
 use crate::physical::{ExecResult, PhysicalOperator};
-use crate::spill::{SharedSpill, SharedSpillReader, SpillBuffer, SpillDrain, SpillRows};
+use crate::spill::{SharedSpill, SharedSpillReader, SpillBuffer, SpillDrain};
 
 /// One-shot physical scan over a disk-backed spill buffer.
 pub struct SpillScan {
     schema: RowSchema,
     buffer: Option<SpillBuffer>,
-    rows: Option<SpillRows<SpillDrain>>,
+    reader: Option<SpillDrain>,
 }
 
 /// Repeatable scan over an immutable shared spill. Cloning the source only
@@ -31,7 +31,7 @@ pub struct SharedSpillScan {
 
 impl SharedSpillScan {
     pub fn new(source: SharedSpill) -> Self {
-        let schema = RowSchema::new(source.schema().to_vec());
+        let schema = source.row_schema().clone();
         Self {
             source,
             schema,
@@ -67,11 +67,12 @@ impl PhysicalOperator for SharedSpillScan {
 }
 
 impl SpillScan {
-    pub fn new(schema: Vec<String>, buffer: SpillBuffer) -> Self {
+    pub fn new(schema: impl Into<RowSchema>, buffer: SpillBuffer) -> Self {
+        let schema = schema.into();
         Self {
-            schema: RowSchema::new(schema),
+            schema,
             buffer: Some(buffer),
-            rows: None,
+            reader: None,
         }
     }
 }
@@ -85,31 +86,29 @@ impl PhysicalOperator for SpillScan {
         let mut buffer = self.buffer.take().ok_or_else(|| {
             crate::physical::ExecError::Other("spill scan cannot be reopened".into())
         })?;
-        self.rows = Some(buffer.drain_rows()?);
+        self.reader = Some(buffer.drain()?);
         Ok(())
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
-        let Some(rows) = self.rows.as_mut() else {
+        let Some(reader) = self.reader.as_mut() else {
             return Ok(None);
         };
-        let mut batch = Vec::with_capacity(DEFAULT_BATCH_SIZE);
-        for _ in 0..DEFAULT_BATCH_SIZE {
-            match rows.next() {
-                Some(Ok(row)) => batch.push(row),
-                Some(Err(error)) => return Err(error),
-                None => break,
-            }
+        let Some(batch) = reader.next().transpose()? else {
+            return Ok(None);
+        };
+        if batch.schema != self.schema {
+            return Err(crate::physical::ExecError::Other(format!(
+                "spill scan schema mismatch: expected {:?}, got {:?}",
+                self.schema.columns(),
+                batch.schema.columns()
+            )));
         }
-        if batch.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(Batch::new(self.schema.clone(), batch)))
-        }
+        Ok(Some(batch))
     }
 
     fn close(&mut self) -> ExecResult<()> {
-        self.rows = None;
+        self.reader = None;
         Ok(())
     }
 }

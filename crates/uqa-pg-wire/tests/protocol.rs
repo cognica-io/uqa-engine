@@ -13,6 +13,9 @@ use uqa_pg_wire::{
     PROTOCOL_VERSION_3_0, PROTOCOL_VERSION_3_2, SSL_REQUEST_CODE,
 };
 
+#[path = "protocol/libpq_interop.rs"]
+mod libpq_interop;
+
 fn startup_packet(code_or_version: i32, body: &[u8]) -> Vec<u8> {
     let length = i32::try_from(8 + body.len()).expect("test packet fits");
     let mut packet = Vec::new();
@@ -250,7 +253,7 @@ fn cancellation_key_lengths_are_validated_at_both_protocol_boundaries() {
 
 #[test]
 fn negotiation_preserves_duplicate_unsupported_protocol_options_in_wire_order() {
-    let body = b"user\0alice\0_pq_.zeta\01\0_pq_.alpha\02\0_pq_.zeta\03\0\0";
+    let body = b"user\0alice\0_pq_.zeta\x001\0_pq_.alpha\x002\0_pq_.zeta\x003\0\0";
     let packet = startup_packet(PROTOCOL_VERSION_3_2, body);
     let Some((StartupFrame::Startup(startup), _)) =
         decode_startup(&packet).expect("startup options decode")
@@ -277,6 +280,72 @@ fn negotiation_response_cannot_advertise_a_newer_unsupported_minor() {
         .encode(),
         Err(PgWireError::UnsupportedProtocolVersion(version.raw()))
     );
+}
+
+#[test]
+fn negotiation_can_downgrade_to_an_embedding_servers_implemented_version() {
+    let packet = startup_packet(PROTOCOL_VERSION_3_2, b"user\0alice\0\0");
+    let Some((StartupFrame::Startup(startup), _)) =
+        decode_startup(&packet).expect("3.2 startup decodes")
+    else {
+        panic!("expected startup message");
+    };
+
+    let negotiation = startup
+        .negotiate_with_max(ProtocolVersion::V3_0, &[])
+        .expect("3.2 can downgrade to 3.0");
+    assert_eq!(negotiation.requested_version, ProtocolVersion::V3_2);
+    assert_eq!(negotiation.negotiated_version, ProtocolVersion::V3_0);
+    assert!(negotiation.requires_response());
+    assert_eq!(
+        negotiation.response(),
+        Some(BackendMessage::NegotiateProtocolVersion {
+            newest_protocol_version: ProtocolVersion::V3_0,
+            unrecognized_options: Vec::new(),
+        })
+    );
+}
+
+#[test]
+fn reserved_protocol_31_cannot_be_configured_as_the_server_maximum() {
+    let reserved = ProtocolVersion { major: 3, minor: 1 };
+    let packet = startup_packet(PROTOCOL_VERSION_3_2, b"user\0alice\0\0");
+    let Some((StartupFrame::Startup(startup), _)) =
+        decode_startup(&packet).expect("3.2 startup decodes")
+    else {
+        panic!("expected startup message");
+    };
+    assert_eq!(
+        startup.negotiate_with_max(reserved, &[]),
+        Err(PgWireError::UnsupportedProtocolVersion(reserved.raw()))
+    );
+}
+
+#[test]
+fn postgresql_18_can_echo_a_31_request_when_reporting_unknown_options() {
+    let reserved = ProtocolVersion { major: 3, minor: 1 };
+    let packet = startup_packet(reserved.raw(), b"user\0alice\0_pq_.unknown\0enabled\0\0");
+    let Some((StartupFrame::Startup(startup), _)) =
+        decode_startup(&packet).expect("3.1 startup decodes")
+    else {
+        panic!("expected startup message");
+    };
+
+    let negotiation = startup.negotiate(&[]).expect("3.1 remains selected");
+    assert_eq!(negotiation.negotiated_version, reserved);
+    assert_eq!(negotiation.unrecognized_options, ["_pq_.unknown"]);
+    assert_eq!(
+        negotiation.response(),
+        Some(BackendMessage::NegotiateProtocolVersion {
+            newest_protocol_version: reserved,
+            unrecognized_options: vec!["_pq_.unknown".to_owned()],
+        })
+    );
+    negotiation
+        .response()
+        .expect("unknown option requires response")
+        .encode()
+        .expect("PostgreSQL 18 emits selected 3.1 for this edge case");
 }
 
 #[test]

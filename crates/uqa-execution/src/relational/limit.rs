@@ -47,7 +47,7 @@ impl PhysicalOperator for Limit<'_> {
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
-        if matches!(self.limit, Some(0)) {
+        if self.limit.is_some_and(|limit| self.emitted >= limit) {
             return Ok(None);
         }
         loop {

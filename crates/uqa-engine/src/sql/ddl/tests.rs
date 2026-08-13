@@ -23,9 +23,9 @@ fn integer_coercion_rejects_non_finite_and_out_of_range_floats() {
 
 #[test]
 fn json_coercion_rejects_invalid_json_strings() {
-    assert!(coerce_json_value(Value::Str("{invalid".into())).is_err());
+    assert!(coerce_json_value(Value::Str("{invalid".into()), true).is_err());
     assert!(matches!(
-        coerce_json_value(Value::Str("{\"ok\":true}".into())).unwrap(),
-        Value::Map(_)
+        coerce_json_value(Value::Str("{\"ok\":true}".into()), true).unwrap(),
+        Value::JsonB(_)
     ));
 }

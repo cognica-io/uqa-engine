@@ -61,6 +61,12 @@ impl Default for RowSchema {
     }
 }
 
+impl From<Vec<String>> for RowSchema {
+    fn from(columns: Vec<String>) -> Self {
+        Self::new(columns)
+    }
+}
+
 impl RowSchema {
     pub fn new(columns: Vec<String>) -> Self {
         let width = columns.len();
@@ -159,7 +165,7 @@ impl RowSchema {
         self.index.physical_width
     }
 
-    fn slot(&self, logical: usize) -> Option<usize> {
+    pub(crate) fn slot(&self, logical: usize) -> Option<usize> {
         self.index
             .slots
             .get(logical)
@@ -218,6 +224,125 @@ impl RowSchema {
             .map(|(_, source)| input.exact_slot(source).unwrap_or(NULL_SLOT))
             .collect();
         Self::from_parts(output_names, slots, input.physical_width())
+    }
+
+    /// Build a compact positional layout for a blocking or spill boundary.
+    /// Logical columns and hidden lookup aliases are remapped to a deduplicated
+    /// list of referenced physical slots; projecting a row through the returned
+    /// slot list shares its existing value fragments without cloning values.
+    pub(crate) fn canonical_projection(&self) -> (Self, Vec<usize>) {
+        fn remap_slot(
+            slot: usize,
+            source_slots: &mut Vec<usize>,
+            positions: &mut HashMap<usize, usize>,
+        ) -> usize {
+            if slot == NULL_SLOT {
+                return NULL_SLOT;
+            }
+            if let Some(position) = positions.get(&slot) {
+                return *position;
+            }
+            let position = source_slots.len();
+            source_slots.push(slot);
+            positions.insert(slot, position);
+            position
+        }
+
+        let mut source_slots = Vec::new();
+        let mut positions = HashMap::new();
+        let slots = self
+            .index
+            .slots
+            .iter()
+            .map(|slot| remap_slot(*slot, &mut source_slots, &mut positions))
+            .collect();
+        let mut source_aliases = self.index.aliases.iter().collect::<Vec<_>>();
+        source_aliases.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        let aliases = source_aliases
+            .into_iter()
+            .map(|(name, slot)| {
+                (
+                    name.clone(),
+                    remap_slot(*slot, &mut source_slots, &mut positions),
+                )
+            })
+            .collect();
+        (
+            Self::from_parts_with_aliases(
+                self.columns().to_vec(),
+                slots,
+                source_slots.len(),
+                aliases,
+            ),
+            source_slots,
+        )
+    }
+
+    /// Rebuild a schema decoded from a positional spill record.
+    ///
+    /// `None` represents a logical or alias identity whose source was absent
+    /// and therefore resolves to SQL NULL. Every physical slot is validated
+    /// before the derived lookup indexes are constructed.
+    pub(crate) fn from_physical_layout(
+        columns: Vec<String>,
+        slots: Vec<Option<usize>>,
+        physical_width: usize,
+        aliases: Vec<(String, Option<usize>)>,
+    ) -> ExecResult<Self> {
+        if columns.len() != slots.len() {
+            return Err(ExecError::Other(format!(
+                "physical schema has {} columns but {} logical slots",
+                columns.len(),
+                slots.len()
+            )));
+        }
+        let slots = slots
+            .into_iter()
+            .map(|slot| match slot {
+                Some(slot) if slot < physical_width => Ok(slot),
+                Some(slot) => Err(ExecError::Other(format!(
+                    "physical schema logical slot {slot} is outside width {physical_width}"
+                ))),
+                None => Ok(NULL_SLOT),
+            })
+            .collect::<ExecResult<Vec<_>>>()?;
+        let mut lookup_aliases = HashMap::with_capacity(aliases.len());
+        for (name, slot) in aliases {
+            let slot = match slot {
+                Some(slot) if slot < physical_width => slot,
+                Some(slot) => {
+                    return Err(ExecError::Other(format!(
+                    "physical schema alias `{name}` slot {slot} is outside width {physical_width}"
+                )))
+                }
+                None => NULL_SLOT,
+            };
+            if lookup_aliases
+                .insert(Box::<str>::from(name.as_str()), slot)
+                .is_some()
+            {
+                return Err(ExecError::Other(format!(
+                    "physical schema contains duplicate alias `{name}`"
+                )));
+            }
+        }
+        Ok(Self::from_parts_with_aliases(
+            columns,
+            slots,
+            physical_width,
+            lookup_aliases,
+        ))
+    }
+
+    pub(crate) fn lookup_aliases(&self) -> Vec<(&str, Option<usize>)> {
+        let mut aliases = self
+            .index
+            .aliases
+            .iter()
+            .map(|(name, slot)| (name.as_ref(), (*slot != NULL_SLOT).then_some(*slot)))
+            .collect::<Vec<_>>();
+        aliases.sort_unstable_by_key(|(name, _)| *name);
+        aliases
     }
 
     /// Add hidden lookup names for existing slots. These aliases participate
@@ -444,7 +569,7 @@ impl PhysicalRow {
         Self { fragments }
     }
 
-    fn value(&self, mut slot: usize) -> Option<&Value> {
+    pub(crate) fn value(&self, mut slot: usize) -> Option<&Value> {
         for fragment in &self.fragments {
             if slot < fragment.len() {
                 return fragment.get(slot);
@@ -458,7 +583,7 @@ impl PhysicalRow {
     /// sharing the underlying value vectors. Consecutive slots backed by the
     /// same source fragment share one projection fragment; no `Value` (and in
     /// particular no string payload) is cloned.
-    fn project_slots(&self, slots: &[usize]) -> Self {
+    pub(crate) fn project_slots(&self, slots: &[usize]) -> Self {
         let mut output = RowFragments::new();
         let null_values = Arc::new(Vec::new());
         let null_source = self.fragments.len();
@@ -590,6 +715,63 @@ impl RowLookup for PhysicalRowView<'_> {
     }
 }
 
+/// Owned schema/row pair for row-at-a-time consumers that must outlive a
+/// decoded batch. Cloning this carrier shares the immutable schema index and
+/// row fragments; it does not build a named row or clone contained values.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OwnedPhysicalRow {
+    pub schema: RowSchema,
+    pub row: PhysicalRow,
+}
+
+impl OwnedPhysicalRow {
+    pub fn new(schema: RowSchema, row: PhysicalRow) -> Self {
+        Self { schema, row }
+    }
+
+    pub fn view(&self) -> PhysicalRowView<'_> {
+        self.schema.view(&self.row)
+    }
+
+    pub fn get(&self, name: &str) -> Option<&Value> {
+        self.schema
+            .exact_slot(name)
+            .and_then(|slot| self.row.value(slot))
+    }
+
+    pub fn into_result_row(self) -> ResultRow {
+        self.schema.view(&self.row).to_result_row()
+    }
+}
+
+impl RowLookup for OwnedPhysicalRow {
+    fn column(&self, name: &str) -> Option<&Value> {
+        self.schema
+            .column_slot(name)
+            .and_then(|slot| self.row.value(slot))
+    }
+
+    fn qualified_column(&self, qualifier: &str, column: &str, key: &str) -> Option<&Value> {
+        self.schema
+            .qualified_slot(qualifier, column, key)
+            .and_then(|slot| self.row.value(slot))
+    }
+
+    fn positional_column(&self, index: usize) -> Option<&Value> {
+        self.schema
+            .slot(index)
+            .and_then(|slot| self.row.value(slot))
+    }
+
+    fn visit_columns(&self, visitor: &mut dyn FnMut(&str, &Value)) {
+        self.view().visit_columns(visitor);
+    }
+
+    fn visit_lookup_columns(&self, visitor: &mut dyn FnMut(&str, &Value)) {
+        self.view().visit_lookup_columns(visitor);
+    }
+}
+
 /// A schema and bounded vector of physical rows flowing between operators.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Batch {
@@ -615,34 +797,6 @@ impl Batch {
             row.fragments.iter().map(RowFragment::len).sum::<usize>() == schema.physical_width()
         }));
         Self { schema, rows }
-    }
-
-    /// Canonicalize a materialization boundary to one positional slot per
-    /// logical column. Composite input fragments remain shared in memory;
-    /// only the slot projections are rebuilt. This gives repeatable spill/CTE
-    /// scans one stable physical schema regardless of whether the buffer later
-    /// crosses to disk.
-    pub(crate) fn into_canonical(self, columns: &[String]) -> ExecResult<Self> {
-        if self.schema.columns() != columns {
-            return Err(ExecError::Other(format!(
-                "materialized batch schema mismatch: expected {:?}, got {:?}",
-                columns,
-                self.schema.columns()
-            )));
-        }
-        let schema = RowSchema::new(columns.to_vec());
-        let slots = self.schema.index.slots.to_vec();
-        let identity = self.schema.physical_width() == slots.len()
-            && slots.iter().enumerate().all(|(index, slot)| index == *slot);
-        let rows = if identity {
-            self.rows
-        } else {
-            self.rows
-                .iter()
-                .map(|row| row.project_slots(&slots))
-                .collect()
-        };
-        Ok(Self::from_physical_rows(schema, rows))
     }
 
     pub fn empty(schema: RowSchema) -> Self {
@@ -739,26 +893,6 @@ mod tests {
     }
 
     #[test]
-    fn materialization_canonicalizes_slots_without_cloning_values() {
-        let input = RowSchema::new(vec!["source".into(), "value".into()]);
-        let selected = RowSchema::select(&input, &[("renamed".into(), "value".into())]);
-        let row =
-            PhysicalRow::from_values(vec![Value::Int(1), Value::Str("shared payload".repeat(32))]);
-        let values = Arc::clone(&row.fragments[0].values);
-
-        let batch = Batch::from_physical_rows(selected, vec![row])
-            .into_canonical(&["renamed".into()])
-            .unwrap();
-
-        assert_eq!(batch.schema.physical_width(), 1);
-        assert_eq!(
-            batch.schema.view(&batch.rows[0]).get("renamed"),
-            values.get(1)
-        );
-        assert!(Arc::ptr_eq(&batch.rows[0].fragments[0].values, &values));
-    }
-
-    #[test]
     fn shared_storage_projection_remaps_without_cloning_values() {
         let stored = Arc::new(vec![Value::Str("alpha".repeat(64)), Value::Int(7)]);
         let row =
@@ -790,6 +924,32 @@ mod tests {
             view.to_result_row(),
             BTreeMap::from([("id".into(), Value::Int(7))])
         );
+    }
+
+    #[test]
+    fn canonical_projection_preserves_public_columns_and_hidden_alias_slots() {
+        let input = RowSchema::new(vec!["value".into()]);
+        let aliased =
+            RowSchema::with_lookup_aliases(&input, &[("source.value".into(), "value".into())]);
+        let projected = RowSchema::append(&aliased, &["value".into()]);
+        let source = PhysicalRow::from_values(vec![Value::Str("source".into())]);
+        let source_values = Arc::clone(&source.fragments[0].values);
+        let source = source.append_values(vec![Value::Str("projected".into())]);
+        let projected_values = Arc::clone(&source.fragments[1].values);
+
+        let (canonical, slots) = projected.canonical_projection();
+        let row = source.project_slots(&slots);
+        let view = canonical.view(&row);
+
+        assert_eq!(canonical.columns(), ["value"]);
+        assert_eq!(canonical.physical_width(), 2);
+        assert_eq!(view.get("value"), Some(&Value::Str("projected".into())));
+        assert_eq!(
+            view.qualified_column("source", "value", "source.value"),
+            Some(&Value::Str("source".into()))
+        );
+        assert!(Arc::ptr_eq(&row.fragments[0].values, &projected_values));
+        assert!(Arc::ptr_eq(&row.fragments[1].values, &source_values));
     }
 
     #[test]

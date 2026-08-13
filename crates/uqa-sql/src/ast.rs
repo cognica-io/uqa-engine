@@ -73,9 +73,9 @@ pub struct ColumnDef {
     /// implied by `PRIMARY KEY` or an auto-incrementing identity.
     #[serde(default)]
     pub not_null_explicit: bool,
-    /// Durable PostgreSQL 18 `NOT NULL` constraint name. Parsing leaves an
+    /// Durable `PostgreSQL` 18 `NOT NULL` constraint name. Parsing leaves an
     /// unnamed declaration as `None`; table registration assigns and persists
-    /// PostgreSQL's generated name before the constraint becomes visible.
+    /// `PostgreSQL`'s generated name before the constraint becomes visible.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub not_null_name: Option<String>,
     /// `SERIAL` / `BIGSERIAL` columns auto-allocate from a per-table
@@ -495,7 +495,7 @@ pub struct InsertStmt {
     pub on_conflict: Option<OnConflict>,
     /// `RETURNING ...` projection list. Empty when absent.
     pub returning: Vec<Projection>,
-    /// PostgreSQL 18 names for the old and new row images visible to
+    /// `PostgreSQL` 18 names for the old and new row images visible to
     /// `RETURNING`. The defaults are `old` and `new`.
     pub returning_aliases: ReturningAliases,
 }

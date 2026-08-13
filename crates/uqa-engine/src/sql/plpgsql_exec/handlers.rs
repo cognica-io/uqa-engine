@@ -165,6 +165,29 @@ pub(crate) fn call_user_scalar_function(
     Some(Ok(value))
 }
 
+/// Resolve a user function call far enough for the projection planner to
+/// choose scalar or set execution. `None` means no routine with this name
+/// exists; argument-resolution errors remain observable at execution time.
+pub(crate) fn resolved_user_function_returns_set(
+    engine: &Engine,
+    name: &str,
+    args: &[(Option<String>, Value)],
+) -> Option<Result<bool, SQLError>> {
+    let resolved = match resolve_routine(engine, name, args, "function") {
+        Ok(Some(resolved)) => resolved,
+        Ok(None) => return None,
+        Err(error) => return Some(Err(error)),
+    };
+    let (function, _) = resolved;
+    if function.def.is_procedure {
+        return Some(Err(SQLError::Routine {
+            sqlstate: "42809".into(),
+            message: format!("{} is a procedure", call_signature(name, args)),
+        }));
+    }
+    Some(Ok(function.def.returns_set()))
+}
+
 /// FROM-clause invocation: any user routine is callable as a table
 /// source (`SELECT * FROM f(...)`); scalar functions produce a single
 /// row. `None` means no routine with this name exists.

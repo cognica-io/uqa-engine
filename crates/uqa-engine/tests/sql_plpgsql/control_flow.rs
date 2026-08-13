@@ -62,7 +62,7 @@ fn if_elsif_else_and_case() {
         scalar(&eng, "SELECT case_kind(99) AS v"),
         Value::Str("big+".into())
     );
-    // PG17: CASE with no matching arm and no ELSE => "case not found".
+    // PG18: CASE with no matching arm and no ELSE => "case not found".
     exec(
         &eng,
         "CREATE FUNCTION case_miss(n int) RETURNS int AS $$
@@ -96,7 +96,7 @@ fn loops_with_exit_and_continue() {
          END;
          $$ LANGUAGE plpgsql",
     );
-    // 1 + 3 + 5 + 7 + 9 = 25 (verified against PG17)
+    // 1 + 3 + 5 + 7 + 9 = 25 (verified against PG18)
     assert_eq!(scalar(&eng, "SELECT loop_sum(10) AS v"), Value::Int(25));
 
     exec(
@@ -126,18 +126,18 @@ fn loops_with_exit_and_continue() {
            acc := acc || ':';
            FOR i IN 1..7 BY 3 LOOP acc := acc || i; END LOOP;
            acc := acc || ':';
-           -- PG17: REVERSE 1..3 iterates zero times.
+           -- PG18: REVERSE 1..3 iterates zero times.
            FOR i IN REVERSE 1..3 LOOP acc := acc || i; END LOOP;
            RETURN acc;
          END;
          $$ LANGUAGE plpgsql",
     );
-    // Verified against PG17: 123:321:147:
+    // Verified against PG18: 123:321:147:
     assert_eq!(
         scalar(&eng, "SELECT for_text() AS v"),
         Value::Str("123:321:147:".into())
     );
-    // PG17: BY 0 => "BY value of FOR loop must be greater than zero".
+    // PG18: BY 0 => "BY value of FOR loop must be greater than zero".
     exec(
         &eng,
         "CREATE FUNCTION for_zero() RETURNS int AS $$

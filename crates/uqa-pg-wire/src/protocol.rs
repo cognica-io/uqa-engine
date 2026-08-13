@@ -114,20 +114,39 @@ impl ProtocolVersion {
     /// Select the newest protocol version this crate supports without
     /// negotiating to a version newer than the frontend requested.
     pub fn negotiate(self) -> Result<Self, PgWireError> {
+        self.negotiate_with_max(Self::LATEST)
+    }
+
+    /// Select a protocol version no newer than either the frontend request or
+    /// the newest version implemented by the embedding server.
+    pub fn negotiate_with_max(self, newest_supported: Self) -> Result<Self, PgWireError> {
         if self.major != Self::LATEST.major {
             return Err(PgWireError::UnsupportedProtocolVersion(self.raw()));
         }
+        if !newest_supported.is_supported_server_max() {
+            return Err(PgWireError::UnsupportedProtocolVersion(
+                newest_supported.raw(),
+            ));
+        }
         Ok(Self {
             major: self.major,
-            minor: self.minor.min(Self::LATEST.minor),
+            minor: self.minor.min(newest_supported.minor),
         })
+    }
+
+    /// Versions an embedding server may configure as its implementation
+    /// maximum. `PostgreSQL` 18 has implementations for 3.0 and 3.2; a 3.1
+    /// frontend request can remain selected, but 3.1 is not a server maximum.
+    #[must_use]
+    pub const fn is_supported_server_max(self) -> bool {
+        matches!(self, Self::V3_0 | Self::V3_2)
     }
 }
 
 /// Opaque cancellation secret carried by `BackendKeyData` and
 /// `CancelRequest`.
 ///
-/// PostgreSQL 18 accepts 1 through 256 bytes when decoding a cancel request.
+/// `PostgreSQL` 18 accepts 1 through 256 bytes when decoding a cancel request.
 /// A backend key has the stricter 4 through 256 byte range in protocol 3.2,
 /// and is exactly 4 bytes before protocol 3.2.
 #[derive(Debug, Clone, PartialEq, Eq)]

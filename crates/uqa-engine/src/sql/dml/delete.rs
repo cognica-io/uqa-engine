@@ -88,8 +88,8 @@ pub(in crate::sql) fn run_delete_inner(
                         joined.insert(k.clone(), v.clone());
                         joined.insert(format!("{}.{k}", stmt.table), v.clone());
                     }
-                    for (k, v) in &using_row {
-                        joined.insert(k.clone(), v.clone());
+                    for (k, v) in using_row.view().iter() {
+                        joined.insert(k.to_string(), v.clone());
                     }
                     if uqa_sql::expr::truthy(&eval_mutation_expr(
                         engine,

@@ -36,7 +36,7 @@ pub(in crate::sql) struct PhysicalAggregateExecutor<'a> {
 impl<'a> PhysicalAggregateExecutor<'a> {
     pub(in crate::sql) fn new(
         engine: &'a Engine,
-        statement: &'a QueryBlockPlan,
+        statement: &QueryBlockPlan,
         params: &'a [SQLParam],
         ctes: &'a CteScope,
         input_schema: Vec<String>,

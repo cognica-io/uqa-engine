@@ -12,11 +12,12 @@ use uqa_execution::{
     ScalarWindowSpec, SortKey, SpillBuffer, SpillScan, WindowExecutor,
 };
 use uqa_planner::ProjectionPlan;
+use uqa_sql::expr::RowLookup;
 
 use super::scalar::PlanSubqueryArena;
 use super::{
-    aggregate_value, projection_columns, AggregateAccumulator, CteScope, Engine, ResultRow,
-    SQLError, SQLParam, ScopedEngineHook, Value,
+    aggregate_value, projection_columns, AggregateAccumulator, CteScope, Engine, SQLError,
+    SQLParam, ScopedEngineHook, Value,
 };
 
 mod planning;
@@ -202,22 +203,30 @@ fn execute_spilled_window_slot(
 
     let hook = ScopedEngineHook::new(engine, ctes);
     let subquery_arena = PlanSubqueryArena::new(&ctes.scalar_subqueries, Some(&hook));
-    let mut partition = IndexedSpill::new().map_err(exec_to_sql_error)?;
+    let partition_schema = sorted.row_schema().clone();
+    let mut partition = IndexedSpill::new(partition_schema.clone()).map_err(exec_to_sql_error)?;
     let mut partition_key: Option<Vec<Value>> = None;
     let mut output = SpillBuffer::new(phase_budget);
-    let output_schema = RowSchema::new({
+    let output_schema = RowSchema::append(&partition_schema, std::slice::from_ref(&slot.key));
+    let expected_columns = {
         let mut columns = schema.to_vec();
         if !columns.contains(&slot.key) {
             columns.push(slot.key.clone());
         }
         columns
-    });
+    };
+    if output_schema.columns() != expected_columns {
+        return Err(SQLError::Internal(format!(
+            "window output schema mismatch: expected {expected_columns:?}, got {:?}",
+            output_schema.columns()
+        )));
+    }
 
     let execution = (|| -> Result<(), SQLError> {
         while let Some(batch) = sorted.next().map_err(exec_to_sql_error)? {
             for row in batch.rows {
-                let named = batch.schema.view(&row).to_result_row();
-                let context = ScalarEvalContext::new(Some(&named), params)
+                let view = batch.schema.view(&row);
+                let context = ScalarEvalContext::from_row_lookup(&view, params)
                     .with_function_hook(&hook)
                     .with_subquery_runner(&subquery_arena);
                 let key = slot
@@ -239,10 +248,11 @@ fn execute_spilled_window_slot(
                         &hook,
                         &subquery_arena,
                     )?;
-                    partition = IndexedSpill::new().map_err(exec_to_sql_error)?;
+                    partition =
+                        IndexedSpill::new(partition_schema.clone()).map_err(exec_to_sql_error)?;
                 }
                 partition_key = Some(key);
-                partition.push(&named).map_err(exec_to_sql_error)?;
+                partition.push(&row).map_err(exec_to_sql_error)?;
             }
         }
         if !partition.is_empty() {
@@ -300,8 +310,19 @@ fn emit_window_partition(
     if len == 0 {
         return Ok(());
     }
+    let partition_schema = partition.row_schema().clone();
+    let physical_output_schema =
+        RowSchema::append(&partition_schema, std::slice::from_ref(&slot.key));
+    if &physical_output_schema != schema {
+        return Err(SQLError::Internal(format!(
+            "window output schema mismatch: expected {:?}, got {:?}",
+            schema.columns(),
+            physical_output_schema.columns()
+        )));
+    }
     let name = slot.name.to_ascii_lowercase();
     let first_row = partition.get(0).map_err(exec_to_sql_error)?;
+    let first_view = partition_schema.view(&first_row);
     let lag_lead = if matches!(name.as_str(), "lag" | "lead") {
         let target = slot.args.first().ok_or_else(|| SQLError::BadArity {
             name: name.clone(),
@@ -311,7 +332,8 @@ fn emit_window_partition(
         let offset = match slot.args.get(1) {
             None => 1,
             Some(expression) => {
-                match evaluate_on_row(expression, &first_row, params, eval_hook, subquery_runner)? {
+                match evaluate_on_row(expression, &first_view, params, eval_hook, subquery_runner)?
+                {
                     Value::Int(offset) => offset,
                     value => {
                         return Err(SQLError::TypeMismatch(format!(
@@ -322,7 +344,7 @@ fn emit_window_partition(
             }
         };
         let default = slot.args.get(2).map_or(Ok(Value::Null), |expression| {
-            evaluate_on_row(expression, &first_row, params, eval_hook, subquery_runner)
+            evaluate_on_row(expression, &first_view, params, eval_hook, subquery_runner)
         })?;
         Some((target.clone(), offset, default))
     } else {
@@ -331,7 +353,8 @@ fn emit_window_partition(
     let ntile_buckets = if name == "ntile" {
         match slot.args.first() {
             Some(expression) => {
-                match evaluate_on_row(expression, &first_row, params, eval_hook, subquery_runner)? {
+                match evaluate_on_row(expression, &first_view, params, eval_hook, subquery_runner)?
+                {
                     Value::Int(buckets) if buckets > 0 => {
                         Some(u64::try_from(buckets).map_err(|_| {
                             SQLError::TypeMismatch("ntile bucket count exceeds u64".into())
@@ -379,10 +402,11 @@ fn emit_window_partition(
             let mut accumulator = AggregateAccumulator::builtin(aggregate_name);
             for index in 0..len {
                 let row = partition.get(index).map_err(exec_to_sql_error)?;
+                let view = partition_schema.view(&row);
                 let value = window_aggregate_argument(
                     &name,
                     &slot.args,
-                    &row,
+                    &view,
                     params,
                     eval_hook,
                     subquery_runner,
@@ -407,10 +431,11 @@ fn emit_window_partition(
     let mut dense_rank = 0_i64;
     let mut pending = Vec::with_capacity(uqa_execution::batch::DEFAULT_BATCH_SIZE);
     for index in 0..len {
-        let mut row = partition.get(index).map_err(exec_to_sql_error)?;
+        let row = partition.get(index).map_err(exec_to_sql_error)?;
+        let row_view = partition_schema.view(&row);
         let order_key = evaluate_order_key(
             &slot.spec.order_by,
-            &row,
+            &row_view,
             params,
             eval_hook,
             subquery_runner,
@@ -445,7 +470,8 @@ fn emit_window_partition(
                             SQLError::Internal("lag/lead target index is out of range".into())
                         })?)
                         .map_err(exec_to_sql_error)?;
-                    evaluate_on_row(target, &target_row, params, eval_hook, subquery_runner)?
+                    let target_view = partition_schema.view(&target_row);
+                    evaluate_on_row(target, &target_view, params, eval_hook, subquery_runner)?
                 }
             }
             "ntile" => Value::Int(window_ntile(
@@ -462,7 +488,7 @@ fn emit_window_partition(
                     let value = window_aggregate_argument(
                         &name,
                         &slot.args,
-                        &row,
+                        &row_view,
                         params,
                         eval_hook,
                         subquery_runner,
@@ -497,18 +523,20 @@ fn emit_window_partition(
             }
         };
         previous_order_key = Some(order_key);
-        row.insert(slot.key.clone(), value);
-        pending.push(row);
+        pending.push(row.append_values(vec![value]));
         if pending.len() == uqa_execution::batch::DEFAULT_BATCH_SIZE {
             output
-                .push(Batch::new(schema.clone(), std::mem::take(&mut pending)))
+                .push(Batch::from_physical_rows(
+                    schema.clone(),
+                    std::mem::take(&mut pending),
+                ))
                 .map_err(exec_to_sql_error)?;
             pending = Vec::with_capacity(uqa_execution::batch::DEFAULT_BATCH_SIZE);
         }
     }
     if !pending.is_empty() {
         output
-            .push(Batch::new(schema.clone(), pending))
+            .push(Batch::from_physical_rows(schema.clone(), pending))
             .map_err(exec_to_sql_error)?;
     }
     Ok(())
@@ -516,12 +544,12 @@ fn emit_window_partition(
 
 fn evaluate_on_row(
     expression: &ScalarExpr,
-    row: &ResultRow,
+    row: &dyn RowLookup,
     params: &[SQLParam],
     eval_hook: &dyn uqa_sql::expr::EngineHook,
     subquery_runner: &dyn ScalarSubqueryRunner,
 ) -> Result<Value, SQLError> {
-    let context = ScalarEvalContext::new(Some(row), params)
+    let context = ScalarEvalContext::from_row_lookup(row, params)
         .with_function_hook(eval_hook)
         .with_subquery_runner(subquery_runner);
     eval_scalar(expression, &context)
@@ -529,7 +557,7 @@ fn evaluate_on_row(
 
 fn evaluate_order_key(
     order: &[ScalarOrder],
-    row: &ResultRow,
+    row: &dyn RowLookup,
     params: &[SQLParam],
     eval_hook: &dyn uqa_sql::expr::EngineHook,
     subquery_runner: &dyn ScalarSubqueryRunner,
@@ -590,7 +618,7 @@ fn window_ntile(index: u64, rows: u64, buckets: u64) -> Result<i64, SQLError> {
 fn window_aggregate_argument(
     name: &str,
     args: &[ScalarExpr],
-    row: &ResultRow,
+    row: &dyn RowLookup,
     params: &[SQLParam],
     eval_hook: &dyn uqa_sql::expr::EngineHook,
     subquery_runner: &dyn ScalarSubqueryRunner,
@@ -617,6 +645,7 @@ fn evaluate_spilled_window_frame(
     eval_hook: &dyn uqa_sql::expr::EngineHook,
     subquery_runner: &dyn ScalarSubqueryRunner,
 ) -> Result<Value, SQLError> {
+    let partition_schema = partition.row_schema().clone();
     let start = resolve_spilled_frame_bound(
         partition,
         current,
@@ -650,8 +679,9 @@ fn evaluate_spilled_window_frame(
             .map_err(|_| SQLError::TypeMismatch("window frame end is out of range".into()))?;
         for index in first..=last {
             let row = partition.get(index).map_err(exec_to_sql_error)?;
+            let view = partition_schema.view(&row);
             let value =
-                window_aggregate_argument(name, args, &row, params, eval_hook, subquery_runner)?;
+                window_aggregate_argument(name, args, &view, params, eval_hook, subquery_runner)?;
             accumulator.observe(&value)?;
         }
     }
@@ -672,22 +702,24 @@ fn resolve_spilled_frame_bound(
 ) -> Result<i128, SQLError> {
     use uqa_sql::ast::FrameMode;
 
+    let partition_schema = partition.row_schema().clone();
     let len = i128::from(partition.len());
     let current_i128 = i128::from(current);
     if !matches!(mode, FrameMode::Range) {
         let row = partition.get(current).map_err(exec_to_sql_error)?;
+        let view = partition_schema.view(&row);
         return Ok(match bound {
             ScalarFrameBound::UnboundedPreceding => 0,
             ScalarFrameBound::UnboundedFollowing => len - 1,
             ScalarFrameBound::CurrentRow => current_i128,
             ScalarFrameBound::Preceding(expression) => {
                 let offset =
-                    eval_frame_offset(expression, &row, params, eval_hook, subquery_runner)?;
+                    eval_frame_offset(expression, &view, params, eval_hook, subquery_runner)?;
                 (current_i128 - i128::from(offset)).max(0)
             }
             ScalarFrameBound::Following(expression) => {
                 let offset =
-                    eval_frame_offset(expression, &row, params, eval_hook, subquery_runner)?;
+                    eval_frame_offset(expression, &view, params, eval_hook, subquery_runner)?;
                 (current_i128 + i128::from(offset)).min(len - 1)
             }
         });
@@ -698,9 +730,10 @@ fn resolve_spilled_frame_bound(
         ScalarFrameBound::UnboundedFollowing => Ok(len - 1),
         ScalarFrameBound::CurrentRow => {
             let current_row = partition.get(current).map_err(exec_to_sql_error)?;
+            let current_view = partition_schema.view(&current_row);
             let current_key = evaluate_order_key(
                 &spec.order_by,
-                &current_row,
+                &current_view,
                 params,
                 eval_hook,
                 subquery_runner,
@@ -709,8 +742,14 @@ fn resolve_spilled_frame_bound(
             if is_start {
                 while peer > 0 {
                     let row = partition.get(peer - 1).map_err(exec_to_sql_error)?;
-                    if evaluate_order_key(&spec.order_by, &row, params, eval_hook, subquery_runner)?
-                        != current_key
+                    let view = partition_schema.view(&row);
+                    if evaluate_order_key(
+                        &spec.order_by,
+                        &view,
+                        params,
+                        eval_hook,
+                        subquery_runner,
+                    )? != current_key
                     {
                         break;
                     }
@@ -719,8 +758,14 @@ fn resolve_spilled_frame_bound(
             } else {
                 while peer + 1 < partition.len() {
                     let row = partition.get(peer + 1).map_err(exec_to_sql_error)?;
-                    if evaluate_order_key(&spec.order_by, &row, params, eval_hook, subquery_runner)?
-                        != current_key
+                    let view = partition_schema.view(&row);
+                    if evaluate_order_key(
+                        &spec.order_by,
+                        &view,
+                        params,
+                        eval_hook,
+                        subquery_runner,
+                    )? != current_key
                     {
                         break;
                     }
@@ -731,12 +776,17 @@ fn resolve_spilled_frame_bound(
         }
         ScalarFrameBound::Preceding(expression) | ScalarFrameBound::Following(expression) => {
             let current_row = partition.get(current).map_err(exec_to_sql_error)?;
-            let offset =
-                eval_frame_offset(expression, &current_row, params, eval_hook, subquery_runner)?
-                    as f64;
+            let current_view = partition_schema.view(&current_row);
+            let offset = eval_frame_offset(
+                expression,
+                &current_view,
+                params,
+                eval_hook,
+                subquery_runner,
+            )? as f64;
             let current_key = evaluate_order_key(
                 &spec.order_by,
-                &current_row,
+                &current_view,
                 params,
                 eval_hook,
                 subquery_runner,
@@ -754,8 +804,9 @@ fn resolve_spilled_frame_bound(
             let mut resolved = if is_start { len } else { -1 };
             for index in 0..partition.len() {
                 let row = partition.get(index).map_err(exec_to_sql_error)?;
+                let view = partition_schema.view(&row);
                 let key =
-                    evaluate_order_key(&spec.order_by, &row, params, eval_hook, subquery_runner)?;
+                    evaluate_order_key(&spec.order_by, &view, params, eval_hook, subquery_runner)?;
                 let Some(value) = numeric_value(key.first()) else {
                     continue;
                 };
@@ -786,12 +837,12 @@ fn numeric_value(value: Option<&Value>) -> Option<f64> {
 
 fn eval_frame_offset(
     expr: &ScalarExpr,
-    row: &ResultRow,
+    row: &dyn RowLookup,
     params: &[SQLParam],
     eval_hook: &dyn uqa_sql::expr::EngineHook,
     subquery_runner: &dyn ScalarSubqueryRunner,
 ) -> Result<i64, SQLError> {
-    let ctx = ScalarEvalContext::new(Some(row), params)
+    let ctx = ScalarEvalContext::from_row_lookup(row, params)
         .with_function_hook(eval_hook)
         .with_subquery_runner(subquery_runner);
     match eval_scalar(expr, &ctx)? {
@@ -816,8 +867,6 @@ fn float_frame_offset(offset: f64) -> Result<i64, SQLError> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
 
     #[test]
@@ -841,12 +890,13 @@ mod tests {
         let hook = ScopedEngineHook::new(&engine, &ctes);
         let subqueries = Vec::new();
         let arena = PlanSubqueryArena::new(&subqueries, Some(&hook));
-        let mut partition = IndexedSpill::new().unwrap();
+        let partition_schema = RowSchema::new(vec!["id".into(), "v".into()]);
+        let mut partition = IndexedSpill::new(partition_schema.clone()).unwrap();
         for id in 0..4096_i64 {
             partition
-                .push(&BTreeMap::from([
-                    ("id".into(), Value::Int(id)),
-                    ("v".into(), Value::Int(1)),
+                .push(&uqa_execution::PhysicalRow::from_values(vec![
+                    Value::Int(id),
+                    Value::Int(1),
                 ]))
                 .unwrap();
         }
@@ -863,7 +913,7 @@ mod tests {
                 frame: None,
             },
         };
-        let schema = RowSchema::new(vec!["id".into(), "v".into(), "total".into()]);
+        let schema = RowSchema::append(&partition_schema, &["total".into()]);
         let mut output = SpillBuffer::new(1);
         emit_window_partition(
             &slot,
@@ -879,8 +929,11 @@ mod tests {
         assert!(output.has_spilled());
         assert!(output.in_memory_bytes() <= output.budget_bytes());
         assert_eq!(output.rows(), 4096);
-        for row in output.drain_rows().unwrap() {
-            assert_eq!(row.unwrap().get("total"), Some(&Value::Int(4096)));
+        for batch in output.drain().unwrap() {
+            let batch = batch.unwrap();
+            for row in &batch.rows {
+                assert_eq!(batch.schema.view(row).get("total"), Some(&Value::Int(4096)));
+            }
         }
     }
 }

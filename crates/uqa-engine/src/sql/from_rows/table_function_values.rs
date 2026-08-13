@@ -203,6 +203,22 @@ pub(in crate::sql) fn json_array_values(
     ))
 }
 
+pub(in crate::sql) fn json_object_key_values(
+    name: &str,
+    evaluated: Vec<Value>,
+) -> Result<Box<dyn Iterator<Item = Value> + Send>, SQLError> {
+    if evaluated.len() != 1 {
+        return Err(SQLError::TypeMismatch(format!("{name} takes 1 arg")));
+    }
+    let parsed = json_table_arg(&evaluated[0], name)?;
+    let serde_json::Value::Object(object) = parsed else {
+        return Err(SQLError::TypeMismatch(format!(
+            "{name}: argument is not an object"
+        )));
+    };
+    Ok(Box::new(object.into_iter().map(|(key, _)| Value::Str(key))))
+}
+
 pub(in crate::sql) fn json_each_row_stream(
     name: &str,
     evaluated: Vec<Value>,

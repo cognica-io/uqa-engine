@@ -77,7 +77,7 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
                 let alias = alias.clone();
                 let aliases = column_aliases.clone();
                 Ok(Box::new(reader.map(move |row| {
-                    let row = row?;
+                    let row = row?.into_result_row();
                     Ok(remap_subquery_row(
                         row,
                         &source_columns,
@@ -106,7 +106,9 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
                     QueryOutputMode::SharedSpill,
                 )?;
                 let rows = query_output_shared(output, "lateral source")?;
-                Ok(Box::new(rows.read_rows()?))
+                Ok(Box::new(rows.read_rows()?.map(|row| {
+                    row.map(uqa_execution::OwnedPhysicalRow::into_result_row)
+                })))
             }
         }
     }

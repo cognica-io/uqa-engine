@@ -9,7 +9,9 @@
 use super::{
     AssignmentPlan, BTreeMap, OptimizerConfig, ProjectionPlan, ScalarExpr, ScalarFrameBound, Value,
 };
-use uqa_sql::expr::{cast_value, eval_binary_values, truthy};
+use uqa_sql::expr::{
+    cast_value, eval_binary_values_with_integer_width, integer_width_for_literal, truthy,
+};
 
 pub(super) fn optimize_assignments(assignments: &mut [AssignmentPlan], config: &OptimizerConfig) {
     for assignment in assignments {
@@ -213,7 +215,13 @@ fn fold_literal_expression(expression: ScalarExpr) -> ScalarExpr {
         },
         ScalarExpr::Binary { op, lhs, rhs } => match (*lhs, *rhs) {
             (ScalarExpr::Literal(lhs), ScalarExpr::Literal(rhs)) => {
-                eval_binary_values(op, &lhs, &rhs)
+                let integer_width = match (&lhs, &rhs) {
+                    (Value::Int(lhs), Value::Int(rhs)) => {
+                        Some(integer_width_for_literal(*lhs).max(integer_width_for_literal(*rhs)))
+                    }
+                    _ => None,
+                };
+                eval_binary_values_with_integer_width(op, &lhs, &rhs, integer_width)
                     .map(ScalarExpr::Literal)
                     .unwrap_or_else(|_| ScalarExpr::Binary {
                         op,

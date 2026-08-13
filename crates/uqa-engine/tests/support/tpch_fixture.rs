@@ -230,7 +230,9 @@ fn canonical_value(value: &Value) -> String {
         Value::Int(value) => value.to_string(),
         Value::Float(value) => value.to_string(),
         Value::Decimal(value) => value.to_canonical_string(),
-        Value::Str(value) | Value::FixedChar(value) => value.clone(),
+        Value::Str(value) | Value::FixedChar(value) | Value::Json(value) | Value::JsonB(value) => {
+            value.clone()
+        }
         Value::Temporal(value) => value.to_sql_string(),
         Value::Bytes(value) => {
             let mut encoded = String::with_capacity(value.len() * 2);

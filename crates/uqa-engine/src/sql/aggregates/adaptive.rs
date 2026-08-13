@@ -458,7 +458,9 @@ fn estimate_group_bytes(key: &[Value], accumulators: &[AggregateAccumulator]) ->
 
 fn value_retained_bytes(value: &Value) -> usize {
     std::mem::size_of::<Value>().saturating_add(match value {
-        Value::Str(value) | Value::FixedChar(value) => value.capacity(),
+        Value::Str(value) | Value::FixedChar(value) | Value::Json(value) | Value::JsonB(value) => {
+            value.capacity()
+        }
         Value::Bytes(value) => value.capacity(),
         Value::List(values) => values
             .capacity()

@@ -129,6 +129,8 @@ Physical relational operators are pull-based and exchange batches of dynamic `Va
 
 Sort, distinct, set operations, ordered aggregates, windows, grouping output, joins, and result materialization account against `work_mem`. When a blocking structure exceeds its budget, it uses the execution spill layer instead of retaining unbounded process memory.
 
+Spill format version 1 keeps rows positional: each batch records its exact physical width and logical-column and hidden `(qualifier, column)` alias-to-slot layout once, followed by physical values, while indexed random-access spill retains that exact layout in its owner and writes only row values plus offsets. Spill paths do not construct or serialize `ResultRow` maps, and temporary spill files have no cross-version compatibility contract.
+
 Single-consumer derived-table projections can remain pull pipelines. Repeatable, volatile, blocking, or otherwise unsafe derived tables retain materialization, and repeatable CTE readers use `SharedSpill`.
 
 ## Hash joins and spill

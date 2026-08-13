@@ -294,6 +294,32 @@ SELECT jsonb_object_agg(k, v) FROM (VALUES ('a', 1), ('b', 2)) AS t(k, v)
 -- rows / set returning / misc
 SELECT * FROM generate_series(1, 3)
 SELECT generate_series(1, 3)
+SELECT abs(generate_series(-2, 0))
+SELECT generate_series(1, 2), generate_series(10, 12)
+SELECT generate_series(1, generate_series(1, 2))
+SELECT id, generate_series(1, id) AS n FROM (VALUES (2), (1)) AS t(id) ORDER BY id, n
+SELECT generate_series(1, 5) AS n LIMIT 2
+SELECT generate_series(1, CASE WHEN id = 1 THEN 2 ELSE 10 / (id - id) END) AS n FROM (VALUES (1), (2)) AS t(id) LIMIT 2
+SELECT jsonb_object_keys('{"b":1,"a":2}'::jsonb)
+SELECT count(*), generate_series(1, 2) FROM (VALUES (1), (2)) AS t(x)
+SELECT count(*) + generate_series(1, 2) FROM (VALUES (1), (2)) AS t(x)
+SELECT row_number() OVER (ORDER BY x), generate_series(1, 2) FROM (VALUES (1), (2)) AS t(x)
+SELECT 1 ORDER BY generate_series(1, 2)
+SELECT DISTINCT ON (generate_series(1, 2)) 1 ORDER BY generate_series(1, 2)
+SELECT generate_series(1, 2) AS x ORDER BY generate_series(10, 12)
+SELECT count(*) FROM (VALUES (1), (2)) AS t(x) ORDER BY generate_series(1, 2)
+SELECT row_number() OVER () FROM (VALUES (1), (2)) AS t(x) ORDER BY generate_series(1, 2)
+SELECT generate_series(1, 2), count(*) FROM (VALUES (1), (2)) AS t(x) GROUP BY generate_series(1, 2) ORDER BY 1
+SELECT generate_series(1, 2), count(*) FROM (VALUES (1)) AS t(x) GROUP BY generate_series(1, 3) ORDER BY 1
+SELECT CASE WHEN true THEN generate_series(1, 2) END
+SELECT coalesce(generate_series(1, 2), 0)
+SELECT 1 WHERE generate_series(1, 2) > 0
+SELECT 1 HAVING generate_series(1, 2) > 0
+SELECT 1 LIMIT generate_series(1, 2)
+SELECT 1 OFFSET generate_series(1, 2)
+SELECT 1 FROM (VALUES (1)) AS t(x) JOIN (VALUES (1)) AS u(y) ON generate_series(1, 2) > 0
+VALUES (generate_series(1, 2))
+SELECT * FROM generate_series(1, generate_series(1, 2))
 SELECT * FROM generate_series(5, 1, -2)
 SELECT * FROM unnest(ARRAY['x', 'y'])
 SELECT x FROM (VALUES (1), (2)) AS t(x) ORDER BY x DESC LIMIT 1

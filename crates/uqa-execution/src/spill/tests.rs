@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 
 use uqa_core::{DecimalValue, TemporalValue, Value};
+use uqa_sql::expr::RowLookup as _;
 
 use super::*;
 
@@ -16,6 +17,14 @@ fn dummy_batch(start: usize, n: usize) -> Batch {
         .map(|value| BTreeMap::from([("x".into(), Value::Int(value as i64))]))
         .collect();
     Batch::new(schema, rows)
+}
+
+fn indexed_id_schema() -> RowSchema {
+    RowSchema::new(vec!["id".into()])
+}
+
+fn indexed_id_row(value: i64) -> PhysicalRow {
+    PhysicalRow::from_values(vec![Value::Int(value)])
 }
 
 #[test]
@@ -32,6 +41,22 @@ fn low_budget_creates_file_and_round_trips_in_order() {
     assert_eq!(buffer.spilled_rows(), 2);
     assert_eq!(buffer.spilled_batches(), 1);
     assert!(buffer.spilled_bytes() > 1);
+    let mut header = [0_u8; SPILL_MAGIC.len()];
+    buffer
+        .spill_file
+        .as_mut()
+        .unwrap()
+        .as_file_mut()
+        .seek(SeekFrom::Start(0))
+        .unwrap();
+    buffer
+        .spill_file
+        .as_mut()
+        .unwrap()
+        .as_file_mut()
+        .read_exact(&mut header)
+        .unwrap();
+    assert_eq!(&header, b"UQA-SPILL\x01\n");
 
     buffer.push(dummy_batch(2, 1)).unwrap();
     let restored = buffer.drain_all().unwrap();
@@ -47,6 +72,48 @@ fn low_budget_creates_file_and_round_trips_in_order() {
     );
     assert!(!path.exists());
     assert_eq!(buffer.rows(), 0);
+}
+
+#[test]
+fn positional_spill_preserves_duplicate_logical_columns() {
+    let schema = RowSchema::new(vec!["value".into(), "value".into()]);
+    let batch = Batch::from_physical_rows(
+        schema,
+        vec![PhysicalRow::from_values(vec![
+            Value::Str("left".into()),
+            Value::Str("right".into()),
+        ])],
+    );
+    let mut buffer = SpillBuffer::new(0);
+    buffer.push(batch).unwrap();
+
+    let restored = buffer.drain_all().unwrap();
+    let view = restored[0].schema.view(&restored[0].rows[0]);
+    assert_eq!(restored[0].schema.columns(), ["value", "value"]);
+    assert_eq!(view.value_at(0), Some(&Value::Str("left".into())));
+    assert_eq!(view.value_at(1), Some(&Value::Str("right".into())));
+}
+
+#[test]
+fn positional_spill_preserves_hidden_alias_layout() {
+    let input = RowSchema::new(vec!["source.id".into()]);
+    let projected = RowSchema::select(&input, &[("id".into(), "source.id".into())]);
+    let schema = RowSchema::with_lookup_aliases(&projected, &[("source.id".into(), "id".into())]);
+    let mut buffer = SpillBuffer::new(0);
+    buffer
+        .push(Batch::from_physical_rows(
+            schema,
+            vec![PhysicalRow::from_values(vec![Value::Int(42)])],
+        ))
+        .unwrap();
+
+    let restored = buffer.drain_all().unwrap();
+    let view = restored[0].schema.view(&restored[0].rows[0]);
+    assert_eq!(view.column("id"), Some(&Value::Int(42)));
+    assert_eq!(
+        view.qualified_column("source", "id", "source.id"),
+        Some(&Value::Int(42))
+    );
 }
 
 #[test]
@@ -71,15 +138,13 @@ fn multiple_spills_preserve_batch_order() {
 
 #[test]
 fn indexed_spill_reads_large_partitions_without_an_offset_vector() {
-    let mut spill = IndexedSpill::new().unwrap();
+    let schema = RowSchema::new(vec!["id".into(), "payload".into()]);
+    let mut spill = IndexedSpill::new(schema).unwrap();
     for value in 0..4096_i64 {
         spill
-            .push(&BTreeMap::from([
-                ("id".into(), Value::Int(value)),
-                (
-                    "payload".into(),
-                    Value::List(vec![Value::Str(format!("row-{value}"))]),
-                ),
+            .push(&PhysicalRow::from_values(vec![
+                Value::Int(value),
+                Value::List(vec![Value::Str(format!("row-{value}"))]),
             ]))
             .unwrap();
     }
@@ -87,17 +152,55 @@ fn indexed_spill_reads_large_partitions_without_an_offset_vector() {
     assert!(spill.encoded_bytes() > 4096 * 8);
     for index in [4095_u64, 0, 2048, 17] {
         let row = spill.get(index).unwrap();
-        assert_eq!(row.get("id"), Some(&Value::Int(index as i64)));
+        assert_eq!(
+            spill.row_schema().view(&row).get("id"),
+            Some(&Value::Int(index as i64))
+        );
     }
     assert!(spill.get(4096).unwrap_err().to_string().contains("outside"));
 }
 
 #[test]
+fn indexed_spill_preserves_hidden_aliases_without_named_rows() {
+    let input = RowSchema::new(vec!["value".into()]);
+    let aliased =
+        RowSchema::with_lookup_aliases(&input, &[("source.value".into(), "value".into())]);
+    let schema = RowSchema::append(&aliased, &["value".into()]);
+    let row = PhysicalRow::from_values(vec![Value::Str("source".into())])
+        .append_values(vec![Value::Str("projected".into())]);
+    let mut spill = IndexedSpill::new(schema).unwrap();
+    spill.push(&row).unwrap();
+
+    let restored = spill.get(0).unwrap();
+    let view = spill.row_schema().view(&restored);
+    assert_eq!(view.get("value"), Some(&Value::Str("projected".into())));
+    assert_eq!(
+        view.qualified_column("source", "value", "source.value"),
+        Some(&Value::Str("source".into()))
+    );
+}
+
+#[test]
+fn indexed_spill_retains_the_exact_input_physical_layout() {
+    let input = RowSchema::new(vec!["discarded".into(), "id".into()]);
+    let schema = RowSchema::select(&input, &[("id".into(), "id".into())]);
+    let row = PhysicalRow::from_values(vec![Value::Str("unused".into()), Value::Int(7)]);
+    let mut spill = IndexedSpill::new(schema.clone()).unwrap();
+    spill.push(&row).unwrap();
+
+    let restored = spill.get(0).unwrap();
+    assert_eq!(spill.row_schema(), &schema);
+    assert_eq!(spill.row_schema().physical_width(), 2);
+    assert_eq!(
+        spill.row_schema().view(&restored).get("id"),
+        Some(&Value::Int(7))
+    );
+}
+
+#[test]
 fn indexed_spill_rejects_corrupt_length_before_payload_allocation() {
-    let mut spill = IndexedSpill::new().unwrap();
-    spill
-        .push(&BTreeMap::from([("id".into(), Value::Int(1))]))
-        .unwrap();
+    let mut spill = IndexedSpill::new(indexed_id_schema()).unwrap();
+    spill.push(&indexed_id_row(1)).unwrap();
     spill.data.as_file_mut().seek(SeekFrom::Start(0)).unwrap();
     spill
         .data
@@ -112,13 +215,9 @@ fn indexed_spill_rejects_corrupt_length_before_payload_allocation() {
 
 #[test]
 fn indexed_spill_rejects_corrupt_record_offsets() {
-    let mut spill = IndexedSpill::new().unwrap();
-    spill
-        .push(&BTreeMap::from([("id".into(), Value::Int(1))]))
-        .unwrap();
-    spill
-        .push(&BTreeMap::from([("id".into(), Value::Int(2))]))
-        .unwrap();
+    let mut spill = IndexedSpill::new(indexed_id_schema()).unwrap();
+    spill.push(&indexed_id_row(1)).unwrap();
+    spill.push(&indexed_id_row(2)).unwrap();
     spill
         .offsets
         .as_file_mut()
@@ -137,16 +236,16 @@ fn indexed_spill_rejects_corrupt_record_offsets() {
 
 #[test]
 fn indexed_spill_rejects_metadata_overflow_before_writing() {
-    let row = BTreeMap::from([("id".into(), Value::Int(1))]);
+    let row = indexed_id_row(1);
 
-    let mut row_overflow = IndexedSpill::new().unwrap();
+    let mut row_overflow = IndexedSpill::new(indexed_id_schema()).unwrap();
     row_overflow.rows = u64::MAX;
     let error = row_overflow.push(&row).unwrap_err();
     assert!(error.to_string().contains("row count overflow"));
     assert_eq!(row_overflow.data.as_file().metadata().unwrap().len(), 0);
     assert_eq!(row_overflow.offsets.as_file().metadata().unwrap().len(), 0);
 
-    let mut byte_overflow = IndexedSpill::new().unwrap();
+    let mut byte_overflow = IndexedSpill::new(indexed_id_schema()).unwrap();
     byte_overflow.encoded_bytes = u64::MAX;
     let error = byte_overflow.push(&row).unwrap_err();
     assert!(error.to_string().contains("byte count overflow"));
@@ -187,6 +286,8 @@ fn exact_value_variants_and_float_bits_round_trip() {
         ),
         ("negative_zero".into(), Value::Float(-0.0)),
         ("fixed_char".into(), Value::FixedChar("x   ".into())),
+        ("json".into(), Value::Json("{\"b\":2,\"a\":1}".into())),
+        ("jsonb".into(), Value::JsonB("{\"a\": 1, \"b\": 2}".into())),
         ("decimal".into(), Value::Decimal(decimal)),
         (
             "temporal".into(),
@@ -285,7 +386,9 @@ fn corrupted_spill_record_surfaces_decode_error_and_cleans_up() {
         dummy_batch(0, 1).into_result_rows()
     );
     let error = drain.next().unwrap().unwrap_err();
-    assert!(error.to_string().contains("truncated schema column count"));
+    assert!(error
+        .to_string()
+        .contains("truncated schema physical width"));
     assert!(drain.next().is_none());
     drop(drain);
     assert!(!path.exists());
@@ -361,9 +464,9 @@ fn encoded_byte_budget_never_retains_an_oversized_batch() {
     assert!(buffer.in_memory_bytes() <= buffer.budget_bytes());
 
     let oversized = Batch::new(
-        RowSchema::new(vec!["payload".into()]),
+        RowSchema::new(vec!["x".into()]),
         vec![BTreeMap::from([(
-            "payload".into(),
+            "x".into(),
             Value::Bytes(vec![7; budget * 2]),
         )])],
     );

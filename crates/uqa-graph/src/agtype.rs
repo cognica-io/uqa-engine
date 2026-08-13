@@ -181,6 +181,7 @@ pub fn agtype_type_ordinal(value: &Value) -> u8 {
             Value::Bool(_) => 5,
             Value::List(_) => 9,
             Value::Map(_) => 10,
+            Value::Json(text) | Value::JsonB(text) => json_type_ordinal(text),
             Value::Bytes(_) | Value::Temporal(_) => 11,
         },
     }
@@ -202,6 +203,7 @@ pub fn agtype_type_name(value: &Value) -> &'static str {
             Value::Str(_) | Value::FixedChar(_) => "string",
             Value::List(_) => "list",
             Value::Map(_) => "map",
+            Value::Json(text) | Value::JsonB(text) => json_type_name(text),
             Value::Bytes(_) => "bytea",
             Value::Temporal(_) => "temporal",
         },
@@ -328,6 +330,7 @@ fn render_into(value: &Value, out: &mut String) {
             Value::FixedChar(s) => render_json_string(s.trim_end_matches(' '), out),
             Value::Bytes(b) => render_json_string(&String::from_utf8_lossy(b), out),
             Value::Temporal(t) => render_json_string(&t.to_sql_string(), out),
+            Value::Json(text) | Value::JsonB(text) => out.push_str(text),
             Value::List(items) => {
                 out.push('[');
                 for (i, item) in items.iter().enumerate() {
@@ -416,11 +419,47 @@ fn sort_priority(value: &Value) -> u8 {
         None => match value {
             Value::Map(_) => 3,
             Value::List(_) => 4,
+            Value::Json(text) | Value::JsonB(text) => json_sort_priority(text),
             Value::Str(_) | Value::FixedChar(_) | Value::Bytes(_) | Value::Temporal(_) => 5,
             Value::Bool(_) => 6,
             Value::Int(_) | Value::Float(_) | Value::Decimal(_) => 7,
             Value::Null => 8,
         },
+    }
+}
+
+fn json_type_ordinal(text: &str) -> u8 {
+    match serde_json::from_str::<serde_json::Value>(text) {
+        Ok(serde_json::Value::Null) => 0,
+        Ok(serde_json::Value::String(_)) | Err(_) => 1,
+        Ok(serde_json::Value::Number(number)) if number.is_i64() || number.is_u64() => 3,
+        Ok(serde_json::Value::Number(_)) => 4,
+        Ok(serde_json::Value::Bool(_)) => 5,
+        Ok(serde_json::Value::Array(_)) => 9,
+        Ok(serde_json::Value::Object(_)) => 10,
+    }
+}
+
+fn json_type_name(text: &str) -> &'static str {
+    match serde_json::from_str::<serde_json::Value>(text) {
+        Ok(serde_json::Value::Null) => "null",
+        Ok(serde_json::Value::Bool(_)) => "boolean",
+        Ok(serde_json::Value::Number(number)) if number.is_i64() || number.is_u64() => "integer",
+        Ok(serde_json::Value::Number(_)) => "float",
+        Ok(serde_json::Value::String(_)) | Err(_) => "string",
+        Ok(serde_json::Value::Array(_)) => "list",
+        Ok(serde_json::Value::Object(_)) => "map",
+    }
+}
+
+fn json_sort_priority(text: &str) -> u8 {
+    match serde_json::from_str::<serde_json::Value>(text) {
+        Ok(serde_json::Value::Object(_)) => 3,
+        Ok(serde_json::Value::Array(_)) => 4,
+        Ok(serde_json::Value::String(_)) | Err(_) => 5,
+        Ok(serde_json::Value::Bool(_)) => 6,
+        Ok(serde_json::Value::Number(_)) => 7,
+        Ok(serde_json::Value::Null) => 8,
     }
 }
 

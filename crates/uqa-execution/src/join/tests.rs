@@ -277,6 +277,39 @@ fn hash_join_keeps_fitting_build_state_in_memory() {
 }
 
 #[test]
+fn spilled_hash_join_preserves_a_projected_build_layout() {
+    let left = TableScan::from_rows(vec!["l.k".into()], vec![row(&[("l.k", Value::Int(1))])]);
+    let right = crate::Project::appending(
+        Box::new(TableScan::from_rows(
+            vec!["r.k".into(), "r.payload".into()],
+            vec![row(&[
+                ("r.k", Value::Int(1)),
+                ("r.payload", Value::Str("kept".into())),
+            ])],
+        )),
+        vec![("r.k".into(), ScalarExpr::Column("r.k".into()))],
+        Vec::new(),
+    );
+    let mut join = HashJoin::new_with_work_mem(
+        Box::new(left),
+        Box::new(right),
+        JoinKind::Inner,
+        vec![ScalarExpr::Column("l.k".into())],
+        vec![ScalarExpr::Column("r.k".into())],
+        evaluator(),
+        ResultRow::new(),
+        ResultRow::new(),
+        1,
+    );
+
+    let (_, rows) = run_to_rows(&mut join).unwrap();
+    assert!(join.right_input_has_spilled());
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["r.k"], Value::Int(1));
+    assert_eq!(rows[0]["r.payload"], Value::Str("kept".into()));
+}
+
+#[test]
 fn unique_inner_hash_join_streams_probe_batches_after_open() {
     struct CountingProbe {
         schema: Vec<String>,

@@ -211,6 +211,41 @@ fn bigint_overflow_errors() {
     assert!(scalar_err(&eng, "SELECT 9223372036854775807 * 2").contains("bigint out of range"));
 }
 
+#[test]
+fn integer_arithmetic_preserves_postgresql_width() {
+    let eng = engine();
+    assert!(scalar_err(&eng, "SELECT 2147483647 + 1").contains("integer out of range"));
+    assert!(
+        scalar_err(&eng, "SELECT 32767::smallint + 1::smallint").contains("smallint out of range")
+    );
+    assert!(scalar_err(&eng, "SELECT (2147483646 + 1) + 1").contains("integer out of range"));
+    assert_eq!(
+        scalar(&eng, "SELECT 2147483647::bigint + 1"),
+        Value::Int(2_147_483_648)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 32767::smallint + 1"),
+        Value::Int(32_768)
+    );
+}
+
+#[test]
+fn array_concatenation_stays_a_sql_array() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT ARRAY[1,2] || ARRAY[3]"),
+        Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)])
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT ARRAY[1,2] || 3"),
+        Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)])
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 0 || ARRAY[1,2]"),
+        Value::List(vec![Value::Int(0), Value::Int(1), Value::Int(2)])
+    );
+}
+
 // ---------------------------------------------------------------------
 // Casts
 // ---------------------------------------------------------------------

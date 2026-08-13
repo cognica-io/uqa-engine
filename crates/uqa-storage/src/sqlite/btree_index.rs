@@ -49,6 +49,8 @@ enum StoredValue {
     Bytes(Vec<u8>),
     Temporal(TemporalValue),
     Decimal(DecimalValue),
+    Json(String),
+    JsonB(String),
     List(Vec<StoredValue>),
     Map(BTreeMap<String, StoredValue>),
 }
@@ -65,6 +67,8 @@ impl From<&Value> for StoredValue {
             Value::Bytes(value) => Self::Bytes(value.clone()),
             Value::Temporal(value) => Self::Temporal(value.clone()),
             Value::Decimal(value) => Self::Decimal(value.clone()),
+            Value::Json(value) => Self::Json(value.clone()),
+            Value::JsonB(value) => Self::JsonB(value.clone()),
             Value::List(values) => Self::List(values.iter().map(Self::from).collect()),
             Value::Map(values) => Self::Map(
                 values
@@ -88,6 +92,8 @@ impl StoredValue {
             Self::Bytes(value) => Value::Bytes(value),
             Self::Temporal(value) => Value::Temporal(value),
             Self::Decimal(value) => Value::Decimal(value),
+            Self::Json(value) => Value::Json(value),
+            Self::JsonB(value) => Value::JsonB(value),
             Self::List(values) => Value::List(values.into_iter().map(Self::into_value).collect()),
             Self::Map(values) => Value::Map(
                 values
@@ -402,6 +408,8 @@ mod tests {
             Value::Str("seven".into()),
             Value::FixedChar("seven   ".into()),
             Value::Bytes(vec![1, 2, 3]),
+            Value::Json("{\"b\":2,\"a\":1}".into()),
+            Value::JsonB("{\"a\": 1, \"b\": 2}".into()),
             Value::List(vec![Value::Int(1), Value::Int(2)]),
             Value::Map(BTreeMap::from([("k".into(), Value::Str("v".into()))])),
         ];

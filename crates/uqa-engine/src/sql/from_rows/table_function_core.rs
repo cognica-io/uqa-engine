@@ -8,8 +8,8 @@
 
 use super::{
     build_table_function_rows_with_row, eval_call_arguments, generate_series_values,
-    is_json_array_table_function, json_array_values, json_each_row_stream, prefix_row,
-    regexp_split_values, registered_table_function_row_stream,
+    is_json_array_table_function, json_array_values, json_each_row_stream, json_object_key_values,
+    prefix_row, regexp_split_values, registered_table_function_row_stream,
     scalar_table_function_default_column, string_to_table_values, Engine, PhysicalSubqueryRunner,
     PlanSubqueryArena, QueryPlan, ResultRow, SQLError, SQLParam, ScalarEvalContext, ScalarExpr,
     Value,
@@ -107,6 +107,8 @@ pub(in crate::sql) fn build_table_function_row_stream_with_row(
             | "jsonb_array_elements"
             | "json_array_elements_text"
             | "jsonb_array_elements_text"
+            | "json_object_keys"
+            | "jsonb_object_keys"
             | "json_each"
             | "jsonb_each"
             | "json_each_text"
@@ -145,6 +147,7 @@ pub(in crate::sql) fn build_table_function_row_stream_with_row(
             | "jsonb_array_elements"
             | "json_array_elements_text"
             | "jsonb_array_elements_text" => json_array_values(&lower, evaluated)?,
+            "json_object_keys" | "jsonb_object_keys" => json_object_key_values(&lower, evaluated)?,
             "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
                 return json_each_row_stream(&lower, evaluated, alias, column_aliases);
             }

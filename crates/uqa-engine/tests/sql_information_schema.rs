@@ -291,9 +291,7 @@ fn postgresql_18_constraint_catalog_reports_names_and_enforcement() {
     assert_eq!(info.rows[2]["enforced"], Value::Str("NO".into()));
 }
 
-#[test]
-fn postgresql_18_constraint_catalog_preserves_table_and_composite_structure() {
-    let eng = Engine::new();
+fn create_constraint_catalog_fixture(eng: &Engine) {
     eng.sql(
         "CREATE TABLE parent (\
              p INTEGER PRIMARY KEY, \
@@ -320,7 +318,9 @@ fn postgresql_18_constraint_catalog_preserves_table_and_composite_structure() {
         &[],
     )
     .unwrap();
+}
 
+fn assert_pg_constraint_structure(eng: &Engine) -> Vec<String> {
     let constraints = eng
         .sql(
             "SELECT conname, contype, conkey, confrelid, confkey, \
@@ -331,26 +331,26 @@ fn postgresql_18_constraint_catalog_preserves_table_and_composite_structure() {
             &[],
         )
         .unwrap();
-    let names: Vec<&str> = constraints
+    let names: Vec<String> = constraints
         .rows
         .iter()
         .map(|row| match &row["conname"] {
-            Value::Str(name) => name.as_str(),
+            Value::Str(name) => name.clone(),
             value => panic!("expected constraint name, got {value:?}"),
         })
         .collect();
     assert_eq!(
         names,
         vec![
-            "child_a_b_fkey",
-            "child_a_b_key",
-            "child_check",
-            "child_ck_check",
-            "child_fk_fkey",
-            "child_id_not_null",
-            "child_nn_not_null",
-            "child_pkey",
-            "child_u_key",
+            "child_a_b_fkey".to_string(),
+            "child_a_b_key".to_string(),
+            "child_check".to_string(),
+            "child_ck_check".to_string(),
+            "child_fk_fkey".to_string(),
+            "child_id_not_null".to_string(),
+            "child_nn_not_null".to_string(),
+            "child_pkey".to_string(),
+            "child_u_key".to_string(),
         ]
     );
     let row = |name: &str| {
@@ -381,7 +381,10 @@ fn postgresql_18_constraint_catalog_preserves_table_and_composite_structure() {
     );
     assert_eq!(row("child_check")["connoinherit"], Value::Bool(false));
     assert_eq!(row("child_pkey")["connoinherit"], Value::Bool(true));
+    names
+}
 
+fn assert_information_schema_constraint_structure(eng: &Engine) {
     let table_constraints = eng
         .sql(
             "SELECT constraint_name, constraint_type, nulls_distinct \
@@ -443,6 +446,14 @@ fn postgresql_18_constraint_catalog_preserves_table_and_composite_structure() {
         .find(|row| row["constraint_name"] == Value::Str("child_u_key".into()))
         .expect("scalar UNIQUE constraint");
     assert_eq!(scalar_unique["ordinal_position"], Value::Int(1));
+}
+
+#[test]
+fn postgresql_18_constraint_catalog_preserves_table_and_composite_structure() {
+    let eng = Engine::new();
+    create_constraint_catalog_fixture(&eng);
+    let names = assert_pg_constraint_structure(&eng);
+    assert_information_schema_constraint_structure(&eng);
 
     eng.sql("ALTER TABLE child RENAME TO renamed_child", &[])
         .unwrap();
@@ -454,11 +465,11 @@ fn postgresql_18_constraint_catalog_preserves_table_and_composite_structure() {
             &[],
         )
         .unwrap();
-    let renamed_names: Vec<&str> = renamed
+    let renamed_names: Vec<String> = renamed
         .rows
         .iter()
         .map(|row| match &row["conname"] {
-            Value::Str(name) => name.as_str(),
+            Value::Str(name) => name.clone(),
             value => panic!("expected constraint name, got {value:?}"),
         })
         .collect();
@@ -639,4 +650,33 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
         assert_eq!(row["is_deterministic"], Value::Str("NO".into()));
         assert_eq!(row["external_language"], Value::Str("INTERNAL".into()));
     }
+}
+
+#[test]
+fn postgresql_18_database_catalog_matches_builtin_unicode_behavior() {
+    let engine = Engine::new();
+    let database = engine
+        .sql(
+            "SELECT datlocprovider, datcollate, datctype, datlocale, daticurules, \
+                    datcollversion, dathasloginevt \
+             FROM pg_catalog.pg_database WHERE datname = 'uqa'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(database.rows.len(), 1);
+    assert_eq!(database.rows[0]["datlocprovider"], Value::Str("b".into()));
+    assert_eq!(database.rows[0]["datcollate"], Value::Str("C".into()));
+    assert_eq!(database.rows[0]["datctype"], Value::Str("C".into()));
+    assert_eq!(
+        database.rows[0]["datlocale"],
+        Value::Str("PG_UNICODE_FAST".into())
+    );
+    assert_eq!(database.rows[0]["daticurules"], Value::Null);
+    assert_eq!(database.rows[0]["datcollversion"], Value::Str("1".into()));
+    assert_eq!(database.rows[0]["dathasloginevt"], Value::Bool(false));
+
+    let folded = engine
+        .sql("SELECT casefold('Straße') AS folded", &[])
+        .unwrap();
+    assert_eq!(folded.rows[0]["folded"], Value::Str("strasse".into()));
 }

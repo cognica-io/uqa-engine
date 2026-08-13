@@ -61,6 +61,15 @@ pub fn quote_literal(value: &Value) -> Result<String, ArrowFlightPrepareError> {
             let escaped = s.replace('\'', "''");
             format!("'{escaped}'")
         }
+        Value::Json(text) | Value::JsonB(text) => {
+            let escaped = text.replace('\'', "''");
+            let type_name = if matches!(value, Value::Json(_)) {
+                "JSON"
+            } else {
+                "JSONB"
+            };
+            format!("CAST('{escaped}' AS {type_name})")
+        }
         Value::Bytes(b) => {
             let capacity = b.len().checked_mul(2).ok_or_else(|| {
                 ArrowFlightPrepareError::UnsupportedLiteral(

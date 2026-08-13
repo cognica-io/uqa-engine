@@ -28,6 +28,12 @@ pub enum Value {
     Bytes(Vec<u8>),
     Temporal(TemporalValue),
     Decimal(DecimalValue),
+    /// Validated `PostgreSQL` `json` text. Unlike `jsonb`, the original
+    /// whitespace and object-key order are preserved.
+    Json(String),
+    /// Canonical `PostgreSQL` `jsonb` text. Keeping a distinct carrier
+    /// preserves JSON scalars and arrays across SQL, storage, and bindings.
+    JsonB(String),
     List(Vec<Value>),
     Map(BTreeMap<String, Value>),
 }
@@ -90,6 +96,24 @@ impl Serialize for Value {
             }
             Self::Temporal(value) => value.serialize(serializer),
             Self::Decimal(value) => value.serialize(serializer),
+            Self::Json(value) | Self::JsonB(value) => {
+                #[derive(Serialize)]
+                struct TaggedJson<'a> {
+                    #[serde(rename = "$uqa_type")]
+                    kind: &'static str,
+                    value: &'a str,
+                }
+
+                TaggedJson {
+                    kind: if matches!(self, Self::Json(_)) {
+                        "json"
+                    } else {
+                        "jsonb"
+                    },
+                    value,
+                }
+                .serialize(serializer)
+            }
             Self::List(value) => value.serialize(serializer),
             Self::Map(value) => value.serialize(serializer),
         }
@@ -183,6 +207,16 @@ fn value_from_tagged_map(
                 return Ok(None);
             };
             return decode_hex_bytes(hex).map(|bytes| bytes.map(Value::Bytes));
+        }
+        "json" | "jsonb" if map.len() == 2 => {
+            let Some(Value::Str(text)) = map.get("value") else {
+                return Ok(None);
+            };
+            return Ok(Some(if tag == "json" {
+                Value::Json(text.clone())
+            } else {
+                Value::JsonB(text.clone())
+            }));
         }
         _ => return Ok(None),
     };
@@ -469,7 +503,9 @@ impl Ord for Value {
             (Value::Float(a), Value::Bool(b)) => compare_integer_float(i64::from(*b), *a).reverse(),
             (Value::Bool(a), Value::Decimal(b)) => DecimalValue::from_bool(*a).cmp(b),
             (Value::Decimal(a), Value::Bool(b)) => a.cmp(&DecimalValue::from_bool(*b)),
-            (Value::Str(a), Value::Str(b)) => a.cmp(b),
+            (Value::Str(a), Value::Str(b))
+            | (Value::Json(a), Value::Json(b))
+            | (Value::JsonB(a), Value::JsonB(b)) => a.cmp(b),
             (Value::FixedChar(a), Value::FixedChar(b)) => {
                 fixed_char_text(a).cmp(fixed_char_text(b))
             }
@@ -490,8 +526,10 @@ fn discriminant(v: &Value) -> u8 {
         Value::FixedChar(_) => 3,
         Value::Bytes(_) => 4,
         Value::Temporal(_) => 5,
-        Value::List(_) => 6,
-        Value::Map(_) => 7,
+        Value::Json(_) => 6,
+        Value::JsonB(_) => 7,
+        Value::List(_) => 8,
+        Value::Map(_) => 9,
     }
 }
 

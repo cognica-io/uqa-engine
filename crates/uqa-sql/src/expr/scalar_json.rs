@@ -7,10 +7,10 @@
 //! JSON and `JSONPath` built-ins.
 
 use super::{
-    json_build_array, json_build_object, json_contained_by, json_contains, json_delete_path,
-    json_extract_path, json_has_key, json_has_keys, json_to_value, json_typeof, jsonb_insert,
-    jsonb_set, jsonpath_exists, jsonpath_match, parse_json, strip_nulls, value_to_json,
-    value_to_string, Result, SQLError, Value,
+    json_build_array_value, json_build_object_value, json_contained_by, json_contains,
+    json_delete_path, json_extract_path, json_has_key, json_has_keys, json_typeof, jsonb_insert,
+    jsonb_set, jsonpath_exists, jsonpath_match, parse_json, strip_nulls, typed_json_value,
+    value_to_json_text, value_to_string, Result, SQLError, Value,
 };
 
 pub(super) fn eval_json_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
@@ -56,8 +56,12 @@ pub(super) fn eval_json_functions(name: &str, args: &[Value]) -> Option<Result<V
             // -------------------------------------------------------------
             // JSON functions
             // -------------------------------------------------------------
-            "json_build_object" | "jsonb_build_object" => json_build_object(args),
-            "json_build_array" | "jsonb_build_array" => Ok(json_build_array(args)),
+            "json_build_object" | "jsonb_build_object" => {
+                json_build_object_value(args, name.starts_with("jsonb"))
+            }
+            "json_build_array" | "jsonb_build_array" => {
+                json_build_array_value(args, name.starts_with("jsonb"))
+            }
             "json_typeof" | "jsonb_typeof" => {
                 if args.len() != 1 {
                     return Err(SQLError::TypeMismatch("json_typeof takes 1 arg".into()));
@@ -69,6 +73,7 @@ pub(super) fn eval_json_functions(name: &str, args: &[Value]) -> Option<Result<V
                     Value::Null => "null",
                     Value::Bool(_) => "boolean",
                     Value::Int(_) | Value::Float(_) | Value::Decimal(_) => "number",
+                    Value::Json(text) | Value::JsonB(text) => json_typeof(&parse_json(text)?),
                     Value::List(_) => "array",
                     Value::Map(_) => "object",
                     Value::Str(s) => match parse_json(s) {
@@ -97,8 +102,12 @@ pub(super) fn eval_json_functions(name: &str, args: &[Value]) -> Option<Result<V
                     )),
                 }
             }
-            "json_extract_path" | "jsonb_extract_path" => json_extract_path(args, false),
-            "json_extract_path_text" | "jsonb_extract_path_text" => json_extract_path(args, true),
+            "json_extract_path" | "jsonb_extract_path" => {
+                json_extract_path(args, false, name.starts_with("jsonb"))
+            }
+            "json_extract_path_text" | "jsonb_extract_path_text" => {
+                json_extract_path(args, true, name.starts_with("jsonb"))
+            }
             "json_contains" => json_contains(args),
             "json_contained_by" => json_contained_by(args),
             "json_delete_path" => json_delete_path(args),
@@ -107,16 +116,16 @@ pub(super) fn eval_json_functions(name: &str, args: &[Value]) -> Option<Result<V
             "json_has_all_keys" => json_has_keys(args, true),
             "jsonb_path_exists" | "jsonpath_exists" => jsonpath_exists(args),
             "jsonb_path_match" | "jsonpath_match" => jsonpath_match(args),
-            // Documented divergence: `to_jsonb('text')` produces the JSON
-            // string as a plain engine string, which renders unquoted at
-            // the SQL boundary (PostgreSQL shows `"text"`). The Value model
-            // has no jsonb-scalar tag to preserve the distinction.
             "to_json" | "to_jsonb" | "row_to_json" => {
                 if args.len() != 1 {
                     return Err(SQLError::TypeMismatch("to_json takes 1 arg".into()));
                 }
-                let json = value_to_json(&args[0]);
-                Ok(json_to_value(&json))
+                let text = value_to_json_text(&args[0]);
+                if name == "to_jsonb" {
+                    Ok(typed_json_value(&parse_json(&text)?, true))
+                } else {
+                    Ok(Value::Json(text))
+                }
             }
             "jsonb_set" => jsonb_set(args),
             "jsonb_insert" => jsonb_insert(args),
@@ -149,7 +158,7 @@ pub(super) fn eval_json_functions(name: &str, args: &[Value]) -> Option<Result<V
                 };
                 let mut parsed = parse_json(&value_to_string(&args[0]))?;
                 strip_nulls(&mut parsed, strip_in_arrays);
-                Ok(json_to_value(&parsed))
+                Ok(typed_json_value(&parsed, name.starts_with("jsonb")))
             }
             "json_object_keys" | "jsonb_object_keys" => {
                 if args.len() != 1 {

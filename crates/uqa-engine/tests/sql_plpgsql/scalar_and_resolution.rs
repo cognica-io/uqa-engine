@@ -41,7 +41,7 @@ fn strict_function_returns_null_on_null_input() {
          BEGIN RETURN a + b; END;
          $$ LANGUAGE plpgsql STRICT",
     );
-    // PG17: strict_add(1, NULL) IS NULL => t
+    // PG18: strict_add(1, NULL) IS NULL => t
     assert_eq!(
         scalar(&eng, "SELECT strict_add(1, NULL) IS NULL AS is_null"),
         Value::Bool(true)
@@ -75,7 +75,7 @@ fn named_arguments() {
         scalar(&eng, "SELECT named_sub(b => 3, a => 10) AS v"),
         Value::Int(7)
     );
-    // Mixed positional + named (PG17: positional first).
+    // Mixed positional + named (PG18: positional first).
     assert_eq!(
         scalar(&eng, "SELECT named_sub(10, b => 4) AS v"),
         Value::Int(6)
@@ -190,7 +190,7 @@ fn out_parameters_shape_result() {
          BEGIN s := a + 1; p := a * 2; END;
          $$ LANGUAGE plpgsql",
     );
-    // PG17: SELECT * FROM f_out(5) => s = 6, p = 10.
+    // PG18: SELECT * FROM f_out(5) => s = 6, p = 10.
     let result = exec(&eng, "SELECT * FROM f_out(5)");
     assert_eq!(result.rows.len(), 1);
     let row = &result.rows[0];
@@ -220,7 +220,7 @@ fn out_parameters_shape_result() {
 fn unknown_function_error_matches_postgres_shape() {
     let eng = engine();
     let err = exec_err(&eng, "SELECT no_such_fn(1)");
-    // PG17: function no_such_fn(integer) does not exist (42883)
+    // PG18: function no_such_fn(integer) does not exist (42883)
     assert!(
         err.to_string()
             .contains("function no_such_fn(integer) does not exist"),
@@ -242,7 +242,7 @@ fn overload_resolution_by_arity() {
     );
     assert_eq!(scalar(&eng, "SELECT ovl(0) AS v"), Value::Int(1));
     assert_eq!(scalar(&eng, "SELECT ovl(0, 0) AS v"), Value::Int(2));
-    // Same (name, arity) without OR REPLACE: PG17 error text.
+    // Same (name, arity) without OR REPLACE: PG18 error text.
     let err = exec_err(
         &eng,
         "CREATE FUNCTION ovl(x int) RETURNS int AS $$ BEGIN RETURN 3; END; $$ LANGUAGE plpgsql",
@@ -267,7 +267,7 @@ fn create_or_replace_replaces_body() {
         "CREATE OR REPLACE FUNCTION rep() RETURNS int AS $$ BEGIN RETURN 2; END; $$ LANGUAGE plpgsql",
     );
     assert_eq!(scalar(&eng, "SELECT rep() AS v"), Value::Int(2));
-    // PG17: OR REPLACE cannot change the return type.
+    // PG18: OR REPLACE cannot change the return type.
     let err = exec_err(
         &eng,
         "CREATE OR REPLACE FUNCTION rep() RETURNS text AS $$ BEGIN RETURN 'x'; END; $$ LANGUAGE plpgsql",
@@ -277,7 +277,7 @@ fn create_or_replace_replaces_body() {
             .contains("cannot change return type of existing function"),
         "got: {err}"
     );
-    // PG17: OR REPLACE cannot change the routine kind.
+    // PG18: OR REPLACE cannot change the routine kind.
     let err = exec_err(
         &eng,
         "CREATE OR REPLACE PROCEDURE rep() AS $$ BEGIN NULL; END; $$ LANGUAGE plpgsql",

@@ -151,7 +151,12 @@ fn run_cli(args: CliArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let mut session = match Session::new(args.db_path.clone(), key.as_deref()) {
+    let session = if args.command.is_some() {
+        Session::new_without_history(args.db_path.clone(), key.as_deref())
+    } else {
+        Session::new(args.db_path.clone(), key.as_deref())
+    };
+    let mut session = match session {
         Ok(session) => session,
         Err(err) => {
             eprintln!("{err}");
@@ -163,7 +168,7 @@ fn run_cli(args: CliArgs) -> ExitCode {
     let mut out = TrackedWriter::new(stdout.lock());
 
     let exit = if let Some(command) = args.command {
-        match session.execute_text(&command, &mut out) {
+        match session.execute_text_with_history(&command, &mut out, false) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 let _ = writeln!(out, "ERROR: {err}");

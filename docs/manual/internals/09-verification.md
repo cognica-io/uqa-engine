@@ -43,8 +43,8 @@ The workspace declares `unsafe_code = "deny"` and `unused_must_use = "deny"`. Cl
 Integration domains can be selected by test harness and module path:
 
 ```sh
-cargo test -p uqa-engine --test engine_queries sql_joins::
-cargo test -p uqa-engine --test sql_tpch
+cargo test -p uqa-engine --test integration engine_queries::sql_joins::
+cargo test -p uqa-engine --test integration sql_tpch::
 cargo test -p uqa-scoring --test wand_exactness
 cargo test -p uqa-graph --test rpq
 cargo test -p uqa-sql --test integration parser_fuzz::
@@ -76,7 +76,7 @@ An optimization may reduce work only after its result is compared with the exact
 The TPC-H-derived fixture runs all 22 queries and compares exact columns, row order, NULLs, text bytes, and type-aware canonical numeric values with checked-in PostgreSQL 18.4 output:
 
 ```sh
-cargo test -p uqa-engine --test sql_tpch
+cargo test -p uqa-engine --test integration sql_tpch::
 ```
 
 Graph compatibility tests exercise AGE-shaped `cypher` calls and `agtype` behavior. SQL golden fixtures cover deterministic engine output. The [parity design](../../design/parity.md) records fixture provenance and update rules.

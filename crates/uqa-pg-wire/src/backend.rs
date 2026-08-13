@@ -280,6 +280,7 @@ pub mod sqlstate {
     pub const PROTOCOL_VIOLATION: &str = "08P01";
     pub const FEATURE_NOT_SUPPORTED: &str = "0A000";
     pub const INVALID_PARAMETER_VALUE: &str = "22023";
+    pub const QUERY_CANCELED: &str = "57014";
     pub const SYNTAX_ERROR: &str = "42601";
     pub const UNDEFINED_TABLE: &str = "42P01";
     pub const INTERNAL_ERROR: &str = "XX000";

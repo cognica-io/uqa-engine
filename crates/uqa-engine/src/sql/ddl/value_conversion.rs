@@ -31,15 +31,8 @@ pub(in crate::sql) fn coerce_to_column_type(
     convert_value_to_column_type(value, &def.ty)
 }
 
-pub(super) fn coerce_json_value(value: Value) -> Result<Value, SQLError> {
-    match value {
-        Value::Str(s) => serde_json::from_str::<serde_json::Value>(&s)
-            .map(json_to_core_value)
-            .map_err(|error| {
-                SQLError::TypeMismatch(format!("cannot cast string to JSON: {error}"))
-            }),
-        other => Ok(other),
-    }
+pub(super) fn coerce_json_value(value: Value, jsonb: bool) -> Result<Value, SQLError> {
+    uqa_sql::expr::cast_value(&value, if jsonb { "jsonb" } else { "json" })
 }
 
 pub(super) fn float_to_integer(value: f64) -> Result<i64, SQLError> {
@@ -188,7 +181,8 @@ pub(crate) fn convert_value_to_column_type(
             }
             Ok(Value::Decimal(rounded))
         }
-        ColumnType::Json | ColumnType::JsonB => coerce_json_value(value),
+        ColumnType::Json => coerce_json_value(value, false),
+        ColumnType::JsonB => coerce_json_value(value, true),
         ColumnType::Bytea => Ok(match value {
             Value::Bytes(_) => value,
             Value::Str(s) => Value::Bytes(s.into_bytes()),
@@ -350,6 +344,7 @@ pub(in crate::sql) fn value_to_text(value: &Value) -> String {
         Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
         Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
         Value::Temporal(t) => t.to_sql_string(),
+        Value::Json(text) | Value::JsonB(text) => text.clone(),
         Value::List(_) | Value::Map(_) => serde_json::to_string(&core_value_to_json(value))
             .unwrap_or_else(|_| format!("{value:?}")),
     }
@@ -419,6 +414,9 @@ pub(in crate::sql) fn core_value_to_json(value: &Value) -> serde_json::Value {
         Value::FixedChar(s) => serde_json::Value::String(s.trim_end_matches(' ').to_string()),
         Value::Bytes(bytes) => serde_json::Value::String(String::from_utf8_lossy(bytes).into()),
         Value::Temporal(t) => serde_json::Value::String(t.to_sql_string()),
+        Value::Json(text) | Value::JsonB(text) => {
+            serde_json::from_str(text).unwrap_or_else(|_| serde_json::Value::String(text.clone()))
+        }
         Value::List(items) => {
             serde_json::Value::Array(items.iter().map(core_value_to_json).collect())
         }
@@ -445,8 +443,10 @@ pub(in crate::sql) fn json_table_arg(
     name: &str,
 ) -> Result<serde_json::Value, SQLError> {
     match value {
-        Value::Str(s) => serde_json::from_str::<serde_json::Value>(s)
-            .map_err(|e| SQLError::TypeMismatch(format!("{name}: invalid JSON: {e}"))),
+        Value::Json(s) | Value::JsonB(s) | Value::Str(s) => {
+            serde_json::from_str::<serde_json::Value>(s)
+                .map_err(|e| SQLError::TypeMismatch(format!("{name}: invalid JSON: {e}")))
+        }
         other => Ok(core_value_to_json(other)),
     }
 }

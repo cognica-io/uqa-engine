@@ -109,10 +109,10 @@ impl HybridRowStore {
 
     fn push(&mut self, row: PhysicalRow) -> ExecResult<()> {
         if let Some(disk) = self.disk.as_mut() {
-            return disk.push(&self.schema.view(&row).to_result_row());
+            return disk.push(&row);
         }
 
-        let row_bytes = SpillBuffer::encoded_single_row_size(&self.schema, &row)?;
+        let row_bytes = IndexedSpill::encoded_row_size(&self.schema, &row)?;
         let next_rows = self
             .rows
             .checked_add(1)
@@ -131,11 +131,11 @@ impl HybridRowStore {
         // Build the complete disk representation before publishing it. If any
         // append fails, the original in-memory rows remain available and the
         // operator aborts without exposing a partial positional store.
-        let mut disk = IndexedSpill::new()?;
+        let mut disk = IndexedSpill::new(self.schema.clone())?;
         for existing in &self.memory {
-            disk.push(&self.schema.view(existing).to_result_row())?;
+            disk.push(existing)?;
         }
-        disk.push(&self.schema.view(&row).to_result_row())?;
+        disk.push(&row)?;
         self.memory.clear();
         self.rows = disk.len();
         self.memory_bytes = 0;
@@ -150,7 +150,6 @@ impl HybridRowStore {
     ) -> ExecResult<T> {
         if let Some(disk) = self.disk.as_mut() {
             let row = disk.get(index)?;
-            let row = PhysicalRow::from_result_row(&self.schema, row);
             return visitor(&row);
         }
 

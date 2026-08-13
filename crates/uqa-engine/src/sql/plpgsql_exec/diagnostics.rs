@@ -175,6 +175,7 @@ pub(super) fn raise_text(value: &Value) -> String {
         Value::Str(s) => s.clone(),
         Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
         Value::Temporal(t) => t.to_sql_string(),
+        Value::Json(text) | Value::JsonB(text) => text.clone(),
         Value::Bytes(b) => {
             use std::fmt::Write as _;
             let mut out = String::with_capacity(2 + b.len() * 2);

@@ -9,10 +9,13 @@
 use uqa_core::Value;
 use uqa_sql::ast::{BinaryOp, FrameMode, NullsOrder};
 use uqa_sql::expr::{
-    cast_value_from, eval_binary_values, eval_function_call, truthy, EngineHook, EvalContext,
-    RowLookup, NAMED_ARG_FUNCTION,
+    cast_value_from, eval_binary_values, eval_binary_values_with_integer_width, eval_function_call,
+    integer_width_for_literal, integer_width_for_type, truthy, EngineHook, EvalContext,
+    IntegerWidth, RowLookup, NAMED_ARG_FUNCTION,
 };
 use uqa_sql::{ResultRow, SQLError, SQLParam};
+
+use crate::batch::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 
 /// Index into the query children owned by the enclosing expression plan.
 pub type SubqueryId = usize;
@@ -481,14 +484,20 @@ pub trait ScalarSubqueryRunner {
 /// at most two rows, one row, or one row at a time.
 pub struct SubqueryResult {
     pub columns: Vec<String>,
-    pub rows: Box<dyn Iterator<Item = Result<ResultRow, SQLError>> + Send>,
+    pub rows: Box<dyn Iterator<Item = Result<OwnedPhysicalRow, SQLError>> + Send>,
 }
 
 impl SubqueryResult {
     pub fn from_rows(columns: Vec<String>, rows: Vec<ResultRow>) -> Self {
+        let schema = RowSchema::new(columns.clone());
         Self {
             columns,
-            rows: Box::new(rows.into_iter().map(Ok)),
+            rows: Box::new(rows.into_iter().map(move |row| {
+                Ok(OwnedPhysicalRow::new(
+                    schema.clone(),
+                    PhysicalRow::from_result_row(&schema, row),
+                ))
+            })),
         }
     }
 
@@ -501,11 +510,15 @@ impl SubqueryResult {
                 "scalar subquery returned more than one row".into(),
             ));
         }
-        let first_column = self
-            .columns
-            .first()
-            .ok_or_else(|| SQLError::TypeMismatch("scalar subquery returned no columns".into()))?;
-        Ok(first_row.get(first_column).cloned().unwrap_or(Value::Null))
+        if self.columns.is_empty() {
+            return Err(SQLError::TypeMismatch(
+                "scalar subquery returned no columns".into(),
+            ));
+        }
+        Ok(first_row
+            .positional_column(0)
+            .cloned()
+            .unwrap_or(Value::Null))
     }
 
     pub fn into_exists(mut self) -> Result<bool, SQLError> {
@@ -513,15 +526,15 @@ impl SubqueryResult {
     }
 
     pub fn contains(self, needle: &Value) -> Result<Option<bool>, SQLError> {
-        let Some(first_column) = self.columns.first() else {
+        if self.columns.is_empty() {
             return Ok(Some(false));
-        };
+        }
         let mut saw_row = false;
         let mut saw_null = false;
         for row in self.rows {
             let row = row?;
             saw_row = true;
-            match row.get(first_column) {
+            match row.positional_column(0) {
                 Some(Value::Null) | None => saw_null = true,
                 Some(value) if !matches!(needle, Value::Null) && value == needle => {
                     return Ok(Some(true));
@@ -628,7 +641,12 @@ pub fn eval_scalar(
         ScalarExpr::Binary { op, lhs, rhs } => {
             let left = eval_scalar(lhs, context)?;
             let right = eval_scalar(rhs, context)?;
-            eval_binary_values(*op, &left, &right)
+            eval_binary_values_with_integer_width(
+                *op,
+                &left,
+                &right,
+                scalar_integer_binary_width(lhs, rhs),
+            )
         }
         ScalarExpr::Not(inner) => {
             let value = eval_scalar(inner, context)?;
@@ -876,10 +894,31 @@ fn execute_in_subquery(
 fn scalar_source_type(expression: &ScalarExpr) -> Option<&str> {
     match expression {
         ScalarExpr::Cast { ty, .. } => Some(ty),
-        ScalarExpr::Literal(Value::Int(_)) => Some("integer"),
+        ScalarExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => Some("integer"),
+        ScalarExpr::Literal(Value::Int(_)) => Some("bigint"),
         ScalarExpr::Literal(Value::Bytes(_)) => Some("bytea"),
         _ => None,
     }
+}
+
+fn scalar_integer_width(expression: &ScalarExpr) -> Option<IntegerWidth> {
+    match expression {
+        ScalarExpr::Literal(Value::Int(value)) => Some(integer_width_for_literal(*value)),
+        ScalarExpr::Cast { ty, .. } => integer_width_for_type(ty),
+        ScalarExpr::Binary {
+            op: BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide,
+            lhs,
+            rhs,
+        } => Some(scalar_integer_width(lhs)?.max(scalar_integer_width(rhs)?)),
+        _ => None,
+    }
+}
+
+pub(crate) fn scalar_integer_binary_width(
+    lhs: &ScalarExpr,
+    rhs: &ScalarExpr,
+) -> Option<IntegerWidth> {
+    Some(scalar_integer_width(lhs)?.max(scalar_integer_width(rhs)?))
 }
 
 #[cfg(test)]

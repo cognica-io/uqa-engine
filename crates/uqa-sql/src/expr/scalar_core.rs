@@ -168,13 +168,34 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
                 Ok(Value::Str(buf))
             }
             "concat_op" => {
-                // SQL `||` operator: NULL propagates. Argument count is
-                // always two because the parser only emits this when
-                // rewriting a binary expression.
-                for a in args {
-                    if matches!(a, Value::Null) {
-                        return Ok(Value::Null);
+                // SQL `||` is overloaded for arrays, jsonb, and text. Typed
+                // JSON carriers keep JSON arrays distinct from SQL arrays.
+                if let [left, right] = args {
+                    match (left, right) {
+                        (Value::List(left), Value::List(right)) => {
+                            let mut values = left.clone();
+                            values.extend(right.iter().cloned());
+                            return Ok(Value::List(values));
+                        }
+                        (Value::List(values), Value::Null) | (Value::Null, Value::List(values)) => {
+                            return Ok(Value::List(values.clone()));
+                        }
+                        (Value::List(left), right) => {
+                            let mut values = left.clone();
+                            values.push(right.clone());
+                            return Ok(Value::List(values));
+                        }
+                        (left, Value::List(right)) => {
+                            let mut values = Vec::with_capacity(right.len().saturating_add(1));
+                            values.push(left.clone());
+                            values.extend(right.iter().cloned());
+                            return Ok(Value::List(values));
+                        }
+                        _ => {}
                     }
+                }
+                if args.iter().any(|value| matches!(value, Value::Null)) {
+                    return Ok(Value::Null);
                 }
                 if let Some(value) = json_concat(args)? {
                     return Ok(value);
@@ -549,7 +570,7 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
                 let (start, occurrence, flags) = match args {
                     [_, _, _] => (1, 1, String::new()),
                     [_, _, _, Value::Str(flags) | Value::FixedChar(flags)] => {
-                        (1, if flags.contains('g') { 0 } else { 1 }, flags.clone())
+                        (1, usize::from(!flags.contains('g')), flags.clone())
                     }
                     [_, _, _, start] => (
                         positive_regexp_replace_parameter(start, "start")?,

@@ -4,15 +4,15 @@
 
 - `engine-error`: PostgreSQL answers, the engine rejects (missing feature).
 - `engine-accepts`: PostgreSQL rejects, the engine answers (missing guard, e.g. division by zero).
-- `value-mismatch`: both answer, values differ after normalization (booleans, float formatting, jsonb spacing are normalized away).
+- `value-mismatch`: both answer, values differ after normalization (boolean display and numerically equivalent float formatting are normalized; JSON and JSONB output text is compared exactly).
 
 ## Prerequisites
 
-- A PostgreSQL 18 container named `uqa-pg18` with user `postgres`, database `uqa_compat`:
+- A PostgreSQL 18 container named `uqa-pg18` with user `postgres`, database `uqa`:
 
   ```sh
   docker run -d --name uqa-pg18 \
-    -e POSTGRES_PASSWORD=uqa -e POSTGRES_DB=uqa_compat \
+    -e POSTGRES_PASSWORD=uqa -e POSTGRES_DB=uqa \
     -p 15432:5432 postgres:18
   ```
 
@@ -24,4 +24,4 @@
 python3 tests/parity/pg18/run_diff.py
 ```
 
-The summary line reports `total/match/diff`. Error-vs-error rows count as matches (message text is not compared). Update `probes.sql` freely: one probe per line, `--` comments skipped; probes must be side-effect-free single statements.
+The summary line reports `total/match/diff`, and any difference makes the runner exit nonzero. Error-vs-error rows count as matches (message text is not compared). Update `probes.sql` freely: one probe per line, `--` comments skipped; probes must be side-effect-free single statements. Set `UQA_PG_CONTAINER`, `UQA_PG_DATABASE`, or `UQA_USQL` to override the defaults while keeping both systems under test in equivalent contexts.

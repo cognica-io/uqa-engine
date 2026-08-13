@@ -18,6 +18,7 @@ pub(super) fn value_to_string(v: &Value) -> String {
         Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
         Value::Bool(b) => (if *b { "true" } else { "false" }).into(),
         Value::Temporal(t) => t.to_sql_string(),
+        Value::Json(text) | Value::JsonB(text) => text.clone(),
         Value::List(_) | Value::Map(_) => value_to_json(v).to_string(),
         // bytea renders as PostgreSQL hex output in text contexts.
         Value::Bytes(b) => format!("\\x{}", hex_encode(b)),

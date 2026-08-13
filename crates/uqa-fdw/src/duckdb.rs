@@ -331,6 +331,7 @@ fn uqa_value_to_duck_value(value: &Value) -> Result<::duckdb::types::Value, FDWE
                 "TIME WITH TIME ZONE cannot be bound losslessly to DuckDB".into(),
             ));
         }
+        Value::Json(value) | Value::JsonB(value) => DuckValue::Text(value.clone()),
         Value::List(items) => DuckValue::List(
             items
                 .iter()

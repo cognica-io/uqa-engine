@@ -326,7 +326,9 @@ fn group_entry_bytes(map_key: &[Value], state: &GroupState) -> usize {
 
 fn value_retained_bytes(value: &Value) -> usize {
     std::mem::size_of::<Value>().saturating_add(match value {
-        Value::Str(value) | Value::FixedChar(value) => value.capacity(),
+        Value::Str(value) | Value::FixedChar(value) | Value::Json(value) | Value::JsonB(value) => {
+            value.capacity()
+        }
         Value::Bytes(value) => value.capacity(),
         Value::List(values) => values
             .capacity()

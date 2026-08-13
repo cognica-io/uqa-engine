@@ -74,13 +74,23 @@ impl StartupMessage {
         self.get("application_name")
     }
 
-    /// Negotiate a PostgreSQL 3.x minor version and report every `_pq_.`
+    /// Negotiate a `PostgreSQL` 3.x minor version and report every `_pq_.`
     /// startup option the embedding server has not implemented.
     pub fn negotiate(
         &self,
         supported_protocol_options: &[&str],
     ) -> Result<StartupNegotiation, PgWireError> {
-        let negotiated_version = self.version.negotiate()?;
+        self.negotiate_with_max(ProtocolVersion::LATEST, supported_protocol_options)
+    }
+
+    /// Negotiate against the newest protocol version implemented by the
+    /// embedding server.
+    pub fn negotiate_with_max(
+        &self,
+        newest_supported: ProtocolVersion,
+        supported_protocol_options: &[&str],
+    ) -> Result<StartupNegotiation, PgWireError> {
+        let negotiated_version = self.version.negotiate_with_max(newest_supported)?;
         let unrecognized_options = self
             .parameter_pairs
             .iter()

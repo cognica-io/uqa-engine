@@ -9,17 +9,58 @@
 use std::fs::File;
 use std::io::{BufWriter, Seek, SeekFrom, Write};
 
-use uqa_core::{TemporalValue, Value};
-use uqa_sql::ResultRow;
-
 use crate::batch::{Batch, PhysicalRow, RowSchema};
 use crate::physical::ExecResult;
 use crate::spill::format::{spill_error, RECORD_PREFIX_BYTES};
+use uqa_core::{TemporalValue, Value};
 
 use super::MAX_VALUE_DEPTH;
 
 pub(crate) fn encoded_batch_size(batch: &Batch) -> ExecResult<usize> {
     encoded_rows_size(&batch.schema, &batch.rows)
+}
+
+pub(crate) fn encode_physical_row_record(
+    row: &PhysicalRow,
+    physical_width: usize,
+) -> ExecResult<Vec<u8>> {
+    let bytes = encoded_physical_row_record_size(row, physical_width)?;
+    let mut record = Vec::new();
+    record
+        .try_reserve_exact(bytes)
+        .map_err(|error| spill_error(format!("cannot allocate spill row record: {error}")))?;
+    write_u64(&mut record, physical_width)?;
+    for slot in 0..physical_width {
+        let value = row.value(slot).ok_or_else(|| {
+            spill_error(format!(
+                "physical row is missing slot {slot} of {physical_width}"
+            ))
+        })?;
+        encode_value(&mut record, value, 0)?;
+    }
+    debug_assert_eq!(record.len(), bytes);
+    Ok(record)
+}
+
+pub(crate) fn encoded_physical_row_record_size(
+    row: &PhysicalRow,
+    physical_width: usize,
+) -> ExecResult<usize> {
+    let mut bytes = 8_usize;
+    for slot in 0..physical_width {
+        let value = row.value(slot).ok_or_else(|| {
+            spill_error(format!(
+                "physical row is missing slot {slot} of {physical_width}"
+            ))
+        })?;
+        add_value_size(&mut bytes, value, 0)?;
+    }
+    if row.value(physical_width).is_some() {
+        return Err(spill_error(format!(
+            "physical row has more than {physical_width} slots"
+        )));
+    }
+    Ok(bytes)
 }
 
 pub(crate) fn encoded_single_row_batch_size(
@@ -29,27 +70,42 @@ pub(crate) fn encoded_single_row_batch_size(
     encoded_rows_size(schema, std::slice::from_ref(row))
 }
 
-pub(crate) fn encoded_named_single_row_batch_size(
-    schema: &RowSchema,
-    row: &ResultRow,
-) -> ExecResult<usize> {
-    let row = PhysicalRow::from_result_row(schema, row.clone());
-    encoded_single_row_batch_size(schema, &row)
-}
-
 fn encoded_rows_size(schema: &RowSchema, rows: &[PhysicalRow]) -> ExecResult<usize> {
     let mut bytes = RECORD_PREFIX_BYTES;
+    add_size(&mut bytes, 8, "schema physical width")?;
     add_size(&mut bytes, 8, "schema column count")?;
-    for column in schema.columns() {
+    for (logical, column) in schema.columns().iter().enumerate() {
         add_string_size(&mut bytes, column, "schema column")?;
+        add_size(&mut bytes, 8, "schema logical slot")?;
+        if schema
+            .slot(logical)
+            .is_some_and(|slot| slot >= schema.physical_width())
+        {
+            return Err(spill_error(format!(
+                "schema logical slot {logical} is outside physical width {}",
+                schema.physical_width()
+            )));
+        }
+    }
+    let aliases = schema.lookup_aliases();
+    add_size(&mut bytes, 8, "schema alias count")?;
+    for (name, slot) in aliases {
+        add_string_size(&mut bytes, name, "schema alias")?;
+        add_size(&mut bytes, 8, "schema alias slot")?;
+        if slot.is_some_and(|slot| slot >= schema.physical_width()) {
+            return Err(spill_error(format!(
+                "schema alias `{name}` is outside physical width {}",
+                schema.physical_width()
+            )));
+        }
     }
     add_size(&mut bytes, 8, "batch row count")?;
     for row in rows {
-        add_size(&mut bytes, 8, "row field count")?;
-        for (name, value) in schema.view(row).iter() {
-            add_string_size(&mut bytes, name, "row field name")?;
-            add_value_size(&mut bytes, value, 0)?;
-        }
+        add_size(
+            &mut bytes,
+            encoded_physical_row_record_size(row, schema.physical_width())?,
+            "physical row record",
+        )?;
     }
     Ok(bytes)
 }
@@ -86,6 +142,7 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
             add_size(total, 8, "decimal value length")?;
             add_size(total, value.sql_string_len(), "decimal value")
         }
+        Value::Json(value) | Value::JsonB(value) => add_string_size(total, value, "JSON value"),
         Value::List(values) => {
             add_size(total, 8, "list length")?;
             for value in values {
@@ -154,19 +211,39 @@ pub(crate) fn append_batches(file: &mut File, batches: &[Batch]) -> ExecResult<(
 }
 
 fn encode_batch(writer: &mut impl Write, batch: &Batch) -> ExecResult<()> {
+    write_u64(writer, batch.schema.physical_width())?;
     write_u64(writer, batch.schema.columns().len())?;
-    for column in batch.schema.columns() {
+    for (logical, column) in batch.schema.columns().iter().enumerate() {
         write_bytes(writer, column.as_bytes())?;
+        write_slot(writer, batch.schema.slot(logical))?;
+    }
+    let aliases = batch.schema.lookup_aliases();
+    write_u64(writer, aliases.len())?;
+    for (name, slot) in aliases {
+        write_bytes(writer, name.as_bytes())?;
+        write_slot(writer, slot)?;
     }
     write_u64(writer, batch.rows.len())?;
     for row in &batch.rows {
-        write_u64(writer, batch.schema.len())?;
-        for (name, value) in batch.schema.view(row).iter() {
-            write_bytes(writer, name.as_bytes())?;
+        write_u64(writer, batch.schema.physical_width())?;
+        for slot in 0..batch.schema.physical_width() {
+            let value = row.value(slot).ok_or_else(|| {
+                spill_error(format!(
+                    "physical row is missing slot {slot} of {}",
+                    batch.schema.physical_width()
+                ))
+            })?;
             encode_value(writer, value, 0)?;
         }
     }
     Ok(())
+}
+
+fn write_slot(writer: &mut impl Write, slot: Option<usize>) -> ExecResult<()> {
+    match slot {
+        Some(slot) => write_u64(writer, slot),
+        None => write_raw(writer, &u64::MAX.to_le_bytes(), "absent schema slot"),
+    }
 }
 
 fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecResult<()> {
@@ -208,6 +285,14 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
         Value::Decimal(value) => {
             write_tag(writer, 7)?;
             write_bytes(writer, value.to_sql_string().as_bytes())
+        }
+        Value::Json(value) => {
+            write_tag(writer, 11)?;
+            write_bytes(writer, value.as_bytes())
+        }
+        Value::JsonB(value) => {
+            write_tag(writer, 12)?;
+            write_bytes(writer, value.as_bytes())
         }
         Value::List(values) => {
             write_tag(writer, 8)?;

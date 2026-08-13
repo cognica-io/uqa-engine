@@ -30,6 +30,8 @@ pub(super) fn typeof_value(v: &Value) -> String {
             TemporalValue::TimestampTz { .. } => "timestamp with time zone".into(),
             TemporalValue::Interval { .. } => "interval".into(),
         },
+        Value::Json(_) => "json".into(),
+        Value::JsonB(_) => "jsonb".into(),
         Value::List(_) => "array".into(),
         Value::Map(_) => "jsonb".into(),
     }

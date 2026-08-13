@@ -24,6 +24,8 @@ pub(super) enum StoredValue {
     Bytes(Vec<u8>),
     Temporal(TemporalValue),
     Decimal(DecimalValue),
+    Json(String),
+    JsonB(String),
     List(Vec<StoredValue>),
     Map(BTreeMap<String, StoredValue>),
 }
@@ -40,6 +42,8 @@ impl StoredValue {
             Value::Bytes(value) => Self::Bytes(value),
             Value::Temporal(value) => Self::Temporal(value),
             Value::Decimal(value) => Self::Decimal(value),
+            Value::Json(value) => Self::Json(value),
+            Value::JsonB(value) => Self::JsonB(value),
             Value::List(values) => Self::List(values.into_iter().map(Self::from_value).collect()),
             Value::Map(values) => Self::Map(
                 values
@@ -61,6 +65,8 @@ impl StoredValue {
             Self::Bytes(value) => Value::Bytes(value),
             Self::Temporal(value) => Value::Temporal(value),
             Self::Decimal(value) => Value::Decimal(value),
+            Self::Json(value) => Value::Json(value),
+            Self::JsonB(value) => Value::JsonB(value),
             Self::List(values) => Value::List(values.into_iter().map(Self::into_value).collect()),
             Self::Map(values) => Value::Map(
                 values
@@ -85,7 +91,7 @@ pub(super) fn value_requires_typed_encoding(value: &Value) -> bool {
                 || items.iter().any(value_requires_typed_encoding)
         }
         Value::Map(values) => values.values().any(value_requires_typed_encoding),
-        Value::Bytes(_) => true,
+        Value::Bytes(_) | Value::Json(_) | Value::JsonB(_) => true,
         _ => false,
     }
 }

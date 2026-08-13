@@ -207,7 +207,21 @@ pub(super) struct Session {
 
 impl Session {
     pub(super) fn new(db_path: Option<PathBuf>, key: Option<&str>) -> Result<Self, String> {
-        let history_path = history_path();
+        Self::new_with_history_path(db_path, key, history_path())
+    }
+
+    pub(super) fn new_without_history(
+        db_path: Option<PathBuf>,
+        key: Option<&str>,
+    ) -> Result<Self, String> {
+        Self::new_with_history_path(db_path, key, None)
+    }
+
+    fn new_with_history_path(
+        db_path: Option<PathBuf>,
+        key: Option<&str>,
+        history_path: Option<PathBuf>,
+    ) -> Result<Self, String> {
         let history = match history_path.as_ref() {
             Some(path) => match std::fs::read_to_string(path) {
                 Ok(text) => text

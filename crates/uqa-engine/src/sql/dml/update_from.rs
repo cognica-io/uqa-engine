@@ -48,8 +48,8 @@ pub(in crate::sql) fn run_update_from(
                 joined.insert(k.clone(), v.clone());
                 joined.insert(format!("{target}.{k}"), v.clone());
             }
-            for (k, v) in &from_row {
-                joined.insert(k.clone(), v.clone());
+            for (k, v) in from_row.view().iter() {
+                joined.insert(k.to_string(), v.clone());
             }
             if let Some(filter) = stmt.predicate.as_ref() {
                 if !uqa_sql::expr::truthy(&eval_mutation_expr(

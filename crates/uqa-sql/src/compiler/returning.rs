@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL 18 `RETURNING` clause and row-image alias lowering.
+//! `PostgreSQL` 18 `RETURNING` clause and row-image alias lowering.
 
 use crate::ast::{Projection, ReturningAliases};
 

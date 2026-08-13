@@ -56,14 +56,36 @@ def verify_crate(crate_dir: pathlib.Path) -> tuple[int, int]:
     manifest_path = crate_dir / "Cargo.toml"
     manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
     package = manifest.get("package")
-    if not isinstance(package, dict) or package.get("autotests") is not False:
+    if not isinstance(package, dict):
         return (0, 0)
 
     tests_dir = crate_dir / "tests"
     direct_sources = {path.resolve() for path in tests_dir.glob("*.rs")}
-    roots = test_roots(manifest, crate_dir)
-    if not roots:
-        raise RuntimeError(f"{manifest_path} disables autotests but declares no [[test]] targets")
+    explicit_roots = test_roots(manifest, crate_dir)
+    if package.get("autotests") is False:
+        if not explicit_roots:
+            raise RuntimeError(
+                f"{manifest_path} disables autotests but declares no [[test]] targets"
+            )
+        if len(explicit_roots) != 1:
+            raise RuntimeError(
+                f"{manifest_path} must declare exactly one [[test]] target, "
+                f"found {len(explicit_roots)}"
+            )
+        roots = explicit_roots
+    else:
+        if explicit_roots:
+            raise RuntimeError(
+                f"{manifest_path} declares [[test]] without disabling automatic test discovery"
+            )
+        if not direct_sources:
+            return (0, 0)
+        if len(direct_sources) != 1:
+            raise RuntimeError(
+                f"{manifest_path} must expose exactly one automatically discovered integration "
+                f"test target, found {len(direct_sources)}"
+            )
+        roots = sorted(direct_sources)
 
     included = included_sources(roots)
     missing = sorted(direct_sources - set(included))

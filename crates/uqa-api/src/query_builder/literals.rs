@@ -19,6 +19,8 @@ pub(super) fn render_value(value: &Value) -> Result<String, SQLError> {
         }
         Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) | Value::FixedChar(s) => quote_str(s),
+        Value::Json(text) => format!("{}::json", quote_str(text)),
+        Value::JsonB(text) => format!("{}::jsonb", quote_str(text)),
         Value::Bytes(bytes) => format!("decode('{}', 'hex')", hex_encode(bytes)?),
         Value::Temporal(t) => quote_str(&t.to_sql_string()),
         Value::List(items) => {

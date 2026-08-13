@@ -597,6 +597,9 @@ fn value_to_json(value: Value) -> Result<JSON, String> {
         Value::Float(value) => json_number(value, "SQL float"),
         Value::Decimal(value) => Ok(json!(value.to_sql_string())),
         Value::Str(value) | Value::FixedChar(value) => Ok(json!(value)),
+        Value::Json(value) | Value::JsonB(value) => {
+            serde_json::from_str(&value).map_err(|error| format!("invalid SQL JSON value: {error}"))
+        }
         Value::Bytes(value) => Ok(json!({ "$bytes": BASE64.encode(value) })),
         Value::Temporal(value) => Ok(json!(value.to_sql_string())),
         Value::List(values) => values

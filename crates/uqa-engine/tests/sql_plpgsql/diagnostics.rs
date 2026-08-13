@@ -27,7 +27,7 @@ fn select_into_strict_errors() {
          END;
          $$ LANGUAGE plpgsql",
     );
-    // PG17: "query returned no rows" (P0002)
+    // PG18: "query returned no rows" (P0002)
     let err = exec_err(&eng, "SELECT pick(0) AS v");
     assert!(
         err.to_string().contains("query returned no rows"),
@@ -35,7 +35,7 @@ fn select_into_strict_errors() {
     );
     assert_eq!(err.sqlstate(), Some("P0002"));
     assert_eq!(scalar(&eng, "SELECT pick(1) AS v"), Value::Int(1));
-    // PG17: "query returned more than one row" (P0003)
+    // PG18: "query returned more than one row" (P0003)
     let err = exec_err(&eng, "SELECT pick(2) AS v");
     assert!(
         err.to_string().contains("query returned more than one row"),
@@ -82,7 +82,7 @@ fn select_into_non_strict_and_found() {
            IF FOUND THEN
              RETURN 'found:' || x;
            ELSE
-             -- PG17: non-strict INTO with no rows leaves NULLs.
+             -- PG18: non-strict INTO with no rows leaves NULLs.
              RETURN 'missing:' || COALESCE(x, -1);
            END IF;
          END;

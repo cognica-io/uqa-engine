@@ -21,11 +21,12 @@ mod json;
 mod time;
 
 use encoding::{base64_decode, base64_encode, md5_hex};
+pub use json::value_to_json_text;
 use json::{
-    json_build_array, json_build_object, json_concat, json_contained_by, json_contains,
-    json_delete, json_delete_path, json_extract_path, json_has_key, json_has_keys, json_to_value,
-    json_typeof, jsonb_insert, jsonb_set, jsonpath_candidate, jsonpath_exists, jsonpath_match,
-    parse_json, strip_nulls, value_to_json,
+    json_build_array_value, json_build_object_value, json_concat, json_contained_by, json_contains,
+    json_delete, json_delete_path, json_extract_path, json_has_key, json_has_keys, json_typeof,
+    jsonb_insert, jsonb_set, jsonpath_candidate, jsonpath_exists, jsonpath_match, parse_json,
+    strip_nulls, typed_json_value, value_to_json,
 };
 use time::{
     age_between, coerce_temporal, date_trunc_value, extract_from_value, format_pg_number,
@@ -50,7 +51,10 @@ use binary::{
     values_equal_nullable,
 };
 pub(crate) use binary::{division_by_zero, out_of_range};
-pub use binary::{eval_binary_values, eval_comparison_truth, truthy};
+pub use binary::{
+    eval_binary_values, eval_binary_values_with_integer_width, eval_comparison_truth,
+    integer_width_for_literal, integer_width_for_type, truthy, IntegerWidth,
+};
 pub use casting::{array_dimensions, cast_value, cast_value_from, parse_pg_array_literal};
 pub(crate) use conversion::to_f64;
 use conversion::{
@@ -421,7 +425,8 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
 fn explicit_expr_type(expr: &Expr) -> Option<&str> {
     match expr {
         Expr::Cast { ty, .. } => Some(ty),
-        Expr::Literal(Value::Int(_)) => Some("integer"),
+        Expr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => Some("integer"),
+        Expr::Literal(Value::Int(_)) => Some("bigint"),
         Expr::Literal(Value::Bytes(_)) => Some("bytea"),
         _ => None,
     }
@@ -725,19 +730,16 @@ fn make_interval_named_args(call_args: &[(Option<String>, Value)]) -> Option<Vec
     let mut saw_named = false;
     let mut assigned = [false; NAMES.len()];
     for (name, value) in call_args {
-        let slot = match name {
-            Some(name) => {
-                saw_named = true;
-                NAMES.iter().position(|candidate| candidate == name)?
+        let slot = if let Some(name) = name {
+            saw_named = true;
+            NAMES.iter().position(|candidate| candidate == name)?
+        } else {
+            if saw_named {
+                return None;
             }
-            None => {
-                if saw_named {
-                    return None;
-                }
-                let slot = positional_index;
-                positional_index += 1;
-                slot
-            }
+            let slot = positional_index;
+            positional_index += 1;
+            slot
         };
         if slot >= NAMES.len() || assigned[slot] {
             return None;
@@ -761,6 +763,8 @@ pub fn value_type_name(v: &Value) -> &'static str {
         Value::Temporal(TemporalValue::Interval { .. }) => "interval",
         Value::Temporal(_) => "timestamp",
         Value::Decimal(_) => "numeric",
+        Value::Json(_) => "json",
+        Value::JsonB(_) => "jsonb",
         Value::List(_) => "anyarray",
         Value::Map(_) => "record",
     }

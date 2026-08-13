@@ -10,9 +10,9 @@ use super::{
     execute_query_block_operator_output, expand_from_star_columns, expr_contains_subquery,
     expr_contains_volatile_function, final_filter_after_qualifier_pushdown, has_window,
     projection_columns, qualifier_filters_for_stmt, run_select_without_from_output,
-    run_single_foreign_select_output, run_single_table_select_output, BTreeSet, ColumnPrune,
-    ComputePlan, CteScope, Engine, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError,
-    SQLParam, ScalarExpr, SourcePlan,
+    run_single_foreign_select_output, run_single_table_select_output, validate_query_set_contexts,
+    BTreeSet, ColumnPrune, ComputePlan, CteScope, Engine, QueryBlockPlan, QueryOutput,
+    QueryOutputMode, SQLError, SQLParam, ScalarExpr, SourcePlan,
 };
 
 pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
@@ -23,6 +23,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
     ctes: &mut CteScope,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
+    validate_query_set_contexts(engine, stmt)?;
     let Some(from) = stmt.from.as_ref() else {
         return run_select_without_from_output(engine, block, stmt, params, ctes, output_mode);
     };
