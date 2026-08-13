@@ -332,6 +332,11 @@ pub(in crate::compiler) fn compile_column_def(
                     default = Some(compile_expr(raw)?);
                     last_enforceable = None;
                 }
+                pg_query::protobuf::ConstrType::ConstrGenerated => {
+                    return Err(SQLError::Unsupported(
+                        "generated columns are not implemented".into(),
+                    ));
+                }
                 pg_query::protobuf::ConstrType::ConstrCheck => {
                     let raw = cstr
                         .raw_expr

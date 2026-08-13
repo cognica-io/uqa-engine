@@ -200,6 +200,46 @@ fn generated_identity_insert_returning_reports_generated_id() {
 }
 
 #[test]
+fn unsupported_pg18_generated_column_is_failure_atomic() {
+    let eng = Engine::new();
+    let error = eng
+        .sql(
+            "CREATE TABLE generated_probe (
+                 source INTEGER,
+                 derived INTEGER GENERATED ALWAYS AS (source + 1) VIRTUAL
+             )",
+            &[],
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("generated columns are not implemented"),
+        "{error}"
+    );
+    assert!(!eng.has_table("generated_probe").unwrap());
+}
+
+#[test]
+fn unsupported_pg18_temporal_constraint_is_failure_atomic() {
+    let eng = Engine::new();
+    let error = eng
+        .sql(
+            "CREATE TABLE temporal_probe (
+                 valid_at INTEGER,
+                 UNIQUE (valid_at WITHOUT OVERLAPS)
+             )",
+            &[],
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("WITHOUT OVERLAPS is not implemented"),
+        "{error}"
+    );
+    assert!(!eng.has_table("temporal_probe").unwrap());
+}
+
+#[test]
 fn alter_table_drop_column_removes_visibility() {
     let eng = Engine::new();
     eng.sql(

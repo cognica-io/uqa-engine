@@ -20,7 +20,7 @@ This plan distinguishes a PostgreSQL 18 baseline from complete compatibility. Th
 
 The historical starting point used `pg_query` 6.1.1 with PostgreSQL 17 grammar, reported `server_version` as `17.0-uqa`, stored the active TPC-H-derived oracle in `expected/pg17.json`, and accepted only frontend/backend protocol 3.0 primitives. Active assets now use `pg18`, session metadata reports `18.0-uqa`, and the checked-in 22-query oracle records PostgreSQL 18.4 server and platform provenance.
 
-The PostgreSQL 18 parser migration replaces the four DML `returning_list` fields with complete `returning_clause` handling. PostgreSQL 18's PL/pgSQL JSON producer also needs to serialize `retvarno` for datum-backed `RETURN` and `RETURN NEXT`; UQA-RS consumes those slots directly and does not rewrite routine source. The reproducible parser chain is pinned by full revision to `jaepil/pg_query.rs@eeae6a8c765d907ef8038670951ff45498856fd2`, whose submodule points to `jaepil/libpg_query@06b90e992b6ea9668906452e47f7d84d7cbee5f0`; the latter contains the PostgreSQL 18 parser, the corrected PL/pgSQL datum serialization, trigger-promise and type-cache fixes, and their regression samples.
+The PostgreSQL 18 parser migration replaces the four DML `returning_list` fields with complete `returning_clause` handling. PostgreSQL 18's PL/pgSQL JSON producer also needs to serialize `retvarno` for datum-backed `RETURN` and `RETURN NEXT`; UQA-RS consumes those slots directly and does not rewrite routine source. The reproducible parser chain is pinned by full revision to `jaepil/pg_query.rs@7f020727f9fcdefa434b944bbe9a8f0ef029bef7`, whose submodule points to `jaepil/libpg_query@55a99be3294f0392e4123a983e3eb18e57ec938b`; the latter contains the PostgreSQL 18 parser, the corrected PL/pgSQL datum serialization, trigger-promise and type-cache fixes, and a process-wide pthread exit key with a `PTHREAD_KEYS_MAX + 1` regression test so one integration-test executable can safely create parser threads throughout its lifetime.
 
 | Area | Current status | Remaining gate |
 | --- | --- | --- |
@@ -38,7 +38,7 @@ The PostgreSQL 18 parser migration replaces the four DML `returning_list` fields
 
 ### 1. PostgreSQL 18 parser and AST safety
 
-Use the reviewed PostgreSQL 18 parser chain pinned by full revision: `jaepil/pg_query.rs@eeae6a8c765d907ef8038670951ff45498856fd2` and its `jaepil/libpg_query@06b90e992b6ea9668906452e47f7d84d7cbee5f0` submodule. The wrapper exposes PostgreSQL's raw parser modes directly, so PL/pgSQL expressions and one-, two-, and three-part assignments are parsed structurally without rewriting input text. Any future parser update must be reviewed, tested in both repositories, pushed first, and then adopted through a new full revision and regenerated `Cargo.lock`; native, Python, Node.js, Browser WASM, and supported-platform builds remain required because the dependency contains C code and generated protobuf types.
+Use the reviewed PostgreSQL 18 parser chain pinned by full revision: `jaepil/pg_query.rs@7f020727f9fcdefa434b944bbe9a8f0ef029bef7` and its `jaepil/libpg_query@55a99be3294f0392e4123a983e3eb18e57ec938b` submodule. The wrapper exposes PostgreSQL's raw parser modes directly, so PL/pgSQL expressions and one-, two-, and three-part assignments are parsed structurally without rewriting input text. The C library creates its pthread destructor key exactly once per process and associates each thread's parser memory context with that shared key, preventing key exhaustion without splitting test executables or pre-initializing unrelated libraries. Any future parser update must be reviewed, tested in both repositories, pushed first, and then adopted through a new full revision and regenerated `Cargo.lock`; native, Python, Node.js, Browser WASM, and supported-platform builds remain required because the dependency contains C code and generated protobuf types.
 
 Replace all four DML `returning_list` accesses with a compiler that consumes the complete `ReturningClause`, including its options. Audit every changed protobuf message and field between PostgreSQL 17 and 18, especially constraint enforcement, generated-column kind, temporal key flags, MERGE variants, COPY options, and utility statements. Add compiler tests proving each unsupported field fails before catalog or storage mutation.
 
@@ -133,6 +133,7 @@ cargo test --workspace --all-targets --locked
 cargo test -p uqa-engine --test integration engine_queries::manual_sql_examples::manual_sql_examples_compile_or_execute
 cargo test -p uqa-engine --test integration sql_tpch::
 UQA_PG18_DOCKER_HOST=container-reachable-host cargo test -p uqa-pg-wire --test protocol libpq_interop:: -- --ignored
+python3 tests/parity/pg18/run_diff.py --validate-manifest
 python3 tests/parity/pg18/run_diff.py
 python3 scripts/run-tpch-pg18.py --iterations 3
 ```
@@ -143,6 +144,6 @@ Run repository policy scripts, binding builds and examples, and supported-platfo
 
 ## Completion accounting
 
-Maintain a machine-readable PostgreSQL 18 compatibility manifest alongside the differential harness. Each item records the PostgreSQL reference section or regression test, UQA-RS test, supported version, status, and any open issue. Milestone completion requires positive evidence for every row; absence of a failing test is not evidence.
+Maintain the machine-readable PostgreSQL 18 compatibility manifest at `tests/parity/pg18/manifest.json` alongside the differential harness. Each item records the PostgreSQL reference section or regression test, UQA-RS test, supported version, status, and any open issue. `run_diff.py` validates the manifest independently of the live oracle and refuses a complete-compatibility claim while an item or milestone remains incomplete. Milestone completion requires positive evidence for every row; absence of a failing test is not evidence.
 
 The final complete-compatibility audit must inspect the current parser revision, manifest, test results, live server provenance, protocol traces, client matrix, catalog diffs, persistent reopen behavior, and manual. The project must not declare complete PostgreSQL 18 compatibility while any item is missing, explicitly rejected, silently approximated, or supported only by an indirect test.

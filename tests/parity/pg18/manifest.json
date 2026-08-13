@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "scope": "PostgreSQL 18 compatibility evidence and remaining gates",
+  "complete_compatibility_claim": false,
+  "oracle": {
+    "major": 18,
+    "verified_patch": "18.4",
+    "differential_probes": "tests/parity/pg18/probes.sql",
+    "tpch_fixture": "benchmarks/tpch/expected/pg18.json"
+  },
+  "parser_chain": {
+    "wrapper_repository": "https://github.com/jaepil/pg_query.rs",
+    "wrapper_revision": "7f020727f9fcdefa434b944bbe9a8f0ef029bef7",
+    "library_repository": "https://github.com/jaepil/libpg_query",
+    "library_revision": "55a99be3294f0392e4123a983e3eb18e57ec938b"
+  },
+  "milestones": {
+    "M0": "in_progress",
+    "M1": "in_progress",
+    "M2": "in_progress",
+    "M3": "not_started",
+    "M4": "not_started",
+    "M5": "not_started",
+    "M6": "not_started"
+  },
+  "items": [
+    {
+      "id": "baseline.pg18-differential-probes",
+      "postgresql_reference": "PostgreSQL 18.4 results for tests/parity/pg18/probes.sql",
+      "uqa_test": "python3 tests/parity/pg18/run_diff.py",
+      "supported_version": "PostgreSQL 18.4",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "baseline.tpch-derived-queries",
+      "postgresql_reference": "PostgreSQL 18.4 provenance in benchmarks/tpch/expected/pg18.json",
+      "uqa_test": "python3 scripts/run-tpch-pg18.py --iterations 3",
+      "supported_version": "PostgreSQL 18.4",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "parser.pg18-chain",
+      "postgresql_reference": "PostgreSQL 18 parser sources pinned by parser_chain",
+      "uqa_test": "cargo test -p uqa-sql --test integration",
+      "supported_version": "PostgreSQL 18",
+      "status": "partial",
+      "open_issue": "The top-level statement and semantically relevant option inventory is not complete."
+    },
+    {
+      "id": "dml.returning-row-images",
+      "postgresql_reference": "PostgreSQL 18 SQL DML RETURNING documentation",
+      "uqa_test": "crates/uqa-engine/tests/sql_update_delete.rs",
+      "supported_version": "PostgreSQL 18",
+      "status": "partial",
+      "open_issue": "Trigger, partition, and complete MERGE-action differential coverage remains."
+    },
+    {
+      "id": "ddl.constraint-metadata",
+      "postgresql_reference": "PostgreSQL 18 CREATE TABLE constraint grammar and catalogs",
+      "uqa_test": "crates/uqa-engine/tests/sql_check_fk_default.rs; crates/uqa-engine/tests/sql_information_schema.rs",
+      "supported_version": "PostgreSQL 18",
+      "status": "partial",
+      "open_issue": "NOT VALID, ALTER CONSTRAINT, and complete dump/reopen coverage remain."
+    },
+    {
+      "id": "functions.identified-pg18-additions",
+      "postgresql_reference": "PostgreSQL 18 functions and operators covered by the PG18 semantic suite",
+      "uqa_test": "crates/uqa-engine/tests/pg18_semantics.rs; tests/parity/pg18/probes.sql",
+      "supported_version": "PostgreSQL 18.4",
+      "status": "partial",
+      "open_issue": "The complete PostgreSQL 18 function, type, overload, and catalog matrix remains."
+    },
+    {
+      "id": "catalog.pg-database-locale",
+      "postgresql_reference": "PostgreSQL 18 pg_database catalog",
+      "uqa_test": "crates/uqa-engine/tests/sql_information_schema.rs",
+      "supported_version": "PostgreSQL 18",
+      "status": "partial",
+      "open_issue": "Complete collation, locale-provider, ownership, ACL, and database lifecycle behavior remains."
+    },
+    {
+      "id": "plpgsql.datum-slots-and-bound-cursors",
+      "postgresql_reference": "PostgreSQL 18 PL/pgSQL statements and cursor documentation",
+      "uqa_test": "crates/uqa-engine/tests/sql_plpgsql/scalar_and_resolution.rs",
+      "supported_version": "PostgreSQL 18",
+      "status": "partial",
+      "open_issue": "Session portal state is required for refcursor parameters, returns, and cursors surviving routine exit."
+    },
+    {
+      "id": "protocol.frontend-backend-3.2",
+      "postgresql_reference": "PostgreSQL 18 frontend/backend protocol 3.2 message formats and flow",
+      "uqa_test": "crates/uqa-pg-wire/tests/protocol.rs",
+      "supported_version": "PostgreSQL 18.4",
+      "status": "partial",
+      "open_issue": "Credentialed GSS, non-trust authentication, extended-query, binary-format, and broader live-driver coverage remain."
+    },
+    {
+      "id": "ddl.virtual-generated-columns",
+      "postgresql_reference": "PostgreSQL 18 CREATE TABLE generated columns",
+      "uqa_test": "crates/uqa-engine/tests/sql_ddl_extensions.rs",
+      "supported_version": "PostgreSQL 18",
+      "status": "explicitly_rejected",
+      "open_issue": "Definition, dependency, catalog, read, DML, dump, and reopen behavior are not implemented."
+    },
+    {
+      "id": "ddl.temporal-constraints",
+      "postgresql_reference": "PostgreSQL 18 CREATE TABLE WITHOUT OVERLAPS and PERIOD constraints",
+      "uqa_test": "crates/uqa-engine/tests/sql_ddl_extensions.rs",
+      "supported_version": "PostgreSQL 18",
+      "status": "explicitly_rejected",
+      "open_issue": "Range and multirange carriers, operators, indexes, and temporal constraint enforcement are not implemented."
+    },
+    {
+      "id": "regression.core-and-isolation",
+      "postgresql_reference": "PostgreSQL 18 core regression and isolation schedules",
+      "uqa_test": "No complete harness yet",
+      "supported_version": "PostgreSQL 18",
+      "status": "not_audited",
+      "open_issue": "The complete core regression and isolation schedules have not been imported and classified."
+    },
+    {
+      "id": "clients.driver-and-operations-matrix",
+      "postgresql_reference": "PostgreSQL 18 client-visible SQL, protocol, dump/restore, and operational behavior",
+      "uqa_test": "crates/uqa-pg-wire/tests/protocol/libpq_interop.rs",
+      "supported_version": "PostgreSQL 18.4 libpq subset",
+      "status": "partial",
+      "open_issue": "JDBC, Npgsql, psycopg, pgx, node-postgres, migration, introspection, dump/restore, pooling, recovery, and administration coverage remain."
+    }
+  ]
+}
