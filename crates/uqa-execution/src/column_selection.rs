@@ -60,6 +60,36 @@ impl<'a> ColumnSelection<'a> {
             ordering,
         }
     }
+
+    /// Select and rename logical input positions without resolving them by
+    /// name. SQL result shaping uses this when repeated public labels must
+    /// remain distinct even though their qualified input names differ.
+    pub fn with_positions(
+        child: Box<dyn PhysicalOperator + 'a>,
+        columns: Vec<(String, usize)>,
+    ) -> Self {
+        let ordering = child
+            .output_ordering()
+            .iter()
+            .map_while(|order| {
+                let output = columns
+                    .iter()
+                    .find(|(_, position)| child.row_schema().columns()[*position] == order.column)?
+                    .0
+                    .clone();
+                Some(PhysicalOrder {
+                    column: output,
+                    ..order.clone()
+                })
+            })
+            .collect();
+        let schema = RowSchema::remap_positions(child.row_schema(), &columns, &[]);
+        Self {
+            child,
+            schema,
+            ordering,
+        }
+    }
 }
 
 impl PhysicalOperator for ColumnSelection<'_> {
@@ -131,5 +161,25 @@ mod tests {
         let (schema, rows) = run_to_rows(&mut selection).unwrap();
         assert_eq!(schema, vec!["source"]);
         assert_eq!(rows[0], BTreeMap::from([("source".into(), Value::Int(2))]));
+    }
+
+    #[test]
+    fn renames_repeated_columns_by_position() {
+        let scan = TableScan::from_rows(
+            vec!["left.value".into(), "right.value".into()],
+            vec![BTreeMap::from([
+                ("left.value".into(), Value::Int(1)),
+                ("right.value".into(), Value::Int(2)),
+            ])],
+        );
+        let mut selection = ColumnSelection::with_positions(
+            Box::new(scan),
+            vec![("value".into(), 0), ("value".into(), 1)],
+        );
+        let batches = crate::physical::run_to_batches(&mut selection).unwrap();
+        assert_eq!(batches[0].schema.columns(), ["value", "value"]);
+        let row = batches[0].schema.view(&batches[0].rows[0]);
+        assert_eq!(row.value_at(0), Some(&Value::Int(1)));
+        assert_eq!(row.value_at(1), Some(&Value::Int(2)));
     }
 }

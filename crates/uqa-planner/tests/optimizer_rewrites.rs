@@ -42,6 +42,7 @@ fn select_with_where(filter: Expr) -> SelectStmt {
             alias: None,
             expr: col("id"),
         }],
+        values: Vec::new(),
         from: None,
         r#where: Some(filter),
         group_by: Vec::new(),

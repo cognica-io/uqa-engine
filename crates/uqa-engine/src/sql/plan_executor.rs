@@ -111,6 +111,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         Ok(SQLResult {
             columns: vec![name.to_string()],
             rows: vec![row],
+            positional_rows: None,
             affected_rows: 0,
         })
     }

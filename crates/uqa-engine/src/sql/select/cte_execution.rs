@@ -137,6 +137,7 @@ pub(in crate::sql) fn run_explain(
         return Ok(SQLResult {
             columns: vec!["plan".to_string()],
             rows: vec![row],
+            positional_rows: None,
             affected_rows: 0,
         });
     }
@@ -154,6 +155,7 @@ pub(in crate::sql) fn run_explain(
     Ok(SQLResult {
         columns: vec!["plan".to_string()],
         rows,
+        positional_rows: None,
         affected_rows: 0,
     })
 }

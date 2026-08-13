@@ -108,6 +108,38 @@ fn correlated_scalar_subquery_resolves_unaliased_outer_table_name() {
     );
 }
 
+#[test]
+fn correlated_subquery_rejects_an_ambiguous_current_scope_column() {
+    let engine = seeded();
+    let error = engine
+        .sql(
+            "SELECT id FROM papers
+             WHERE (
+                 SELECT id
+                 FROM allowed a JOIN allowed b ON a.id = b.id
+                 WHERE papers.id > 0
+                 LIMIT 1
+             ) = papers.id",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42702"));
+}
+
+#[test]
+fn correlated_subquery_preserves_outer_scope_ambiguity() {
+    let engine = seeded();
+    let error = engine
+        .sql(
+            "SELECT 1
+             FROM papers p JOIN allowed a ON true
+             WHERE EXISTS (SELECT 1 WHERE id = 1)",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42702"));
+}
+
 /// The outer reference must bind to the outer row, not to the inner relation's
 /// identically named column. If `papers.id` bound to `allowed.id` this would
 /// return every row instead of only the seeded one.

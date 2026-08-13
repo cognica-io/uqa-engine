@@ -16,6 +16,8 @@ pub enum SQLError {
     UnknownTable(String),
     #[error("unknown column: {0}")]
     UnknownColumn(String),
+    #[error("column reference \"{0}\" is ambiguous")]
+    AmbiguousColumn(String),
     #[error("unknown function: {0}")]
     UnknownFunction(String),
     #[error("type mismatch: {0}")]
@@ -53,6 +55,7 @@ impl SQLError {
             SQLError::Unsupported(_) => Some("0A000"), // feature_not_supported
             SQLError::UnknownTable(_) => Some("42P01"), // undefined_table
             SQLError::UnknownColumn(_) => Some("42703"), // undefined_column
+            SQLError::AmbiguousColumn(_) => Some("42702"), // ambiguous_column
             SQLError::UnknownFunction(_) => Some("42883"), // undefined_function
             SQLError::TypeMismatch(_) => Some("42804"), // datatype_mismatch
             SQLError::BadArity { .. } => Some("42883"), // undefined_function (PG)

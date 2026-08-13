@@ -86,6 +86,7 @@ pub trait RowSource: Send {
 /// tests and for materialising CTE bodies.
 pub struct VecSource {
     schema: Vec<String>,
+    physical_schema: RowSchema,
     rows: std::vec::IntoIter<ResultRow>,
 }
 
@@ -151,8 +152,10 @@ impl PhysicalOperator for RowIteratorScan<'_> {
 
 impl VecSource {
     pub fn new(schema: Vec<String>, rows: Vec<ResultRow>) -> Self {
+        let physical_schema = RowSchema::from_named_columns(schema.clone());
         Self {
             schema,
+            physical_schema,
             rows: rows.into_iter(),
         }
     }
@@ -161,6 +164,10 @@ impl VecSource {
 impl RowSource for VecSource {
     fn schema(&self) -> &[String] {
         &self.schema
+    }
+
+    fn physical_schema(&self) -> Option<&RowSchema> {
+        Some(&self.physical_schema)
     }
 
     fn estimated_cardinality(&self) -> Option<u64> {

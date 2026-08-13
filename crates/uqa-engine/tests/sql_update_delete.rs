@@ -159,12 +159,13 @@ fn postgresql_18_returning_exposes_old_and_new_row_images() {
         .sql(
             "UPDATE items SET qty = qty + 1 WHERE id = 2 \
              RETURNING WITH (OLD AS before, NEW AS after) \
-             before.qty AS old_qty, after.qty AS new_qty",
+             id AS current_id, before.qty AS old_qty, after.qty AS new_qty",
             &[],
         )
         .unwrap();
     assert_eq!(updated.rows[0].get("old_qty"), Some(&Value::Int(7)));
     assert_eq!(updated.rows[0].get("new_qty"), Some(&Value::Int(8)));
+    assert_eq!(updated.rows[0].get("current_id"), Some(&Value::Int(2)));
 
     let deleted = eng
         .sql(

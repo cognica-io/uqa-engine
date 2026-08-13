@@ -93,7 +93,10 @@ pub(super) enum QueryOutputMode {
 }
 
 pub(super) enum QueryRows {
-    Rows(Vec<ResultRow>),
+    Rows {
+        named: Vec<ResultRow>,
+        positional: Option<Vec<Vec<Value>>>,
+    },
     SharedSpill(uqa_execution::SharedSpill),
     ExistsKeySet(uqa_execution::CanonicalRowHashSet),
 }
@@ -110,20 +113,23 @@ impl QueryOutput {
     pub(super) fn into_cursor(self) -> Result<super::SQLCursor, SQLError> {
         match self.rows {
             QueryRows::SharedSpill(rows) => super::SQLCursor::from_spill(self.columns, rows),
-            QueryRows::Rows(_) | QueryRows::ExistsKeySet(_) => Err(SQLError::Internal(
+            QueryRows::Rows { .. } | QueryRows::ExistsKeySet(_) => Err(SQLError::Internal(
                 "cursor query unexpectedly used unbounded row materialization".into(),
             )),
         }
     }
 
     pub(super) fn into_sql_result(self) -> Result<SQLResult, SQLError> {
-        let mut rows = match self.rows {
-            QueryRows::Rows(rows) => rows,
+        let (mut rows, positional_rows) = match self.rows {
+            QueryRows::Rows { named, positional } => (named, positional),
             QueryRows::SharedSpill(rows) => {
                 let mut scan = uqa_execution::SharedSpillScan::new(rows);
-                uqa_execution::physical::run_to_rows(&mut scan)
-                    .map_err(physical_exec_error)?
-                    .1
+                (
+                    uqa_execution::physical::run_to_rows(&mut scan)
+                        .map_err(physical_exec_error)?
+                        .1,
+                    None,
+                )
             }
             QueryRows::ExistsKeySet(_) => {
                 return Err(SQLError::Internal(
@@ -134,14 +140,18 @@ impl QueryOutput {
         for row in &mut rows {
             row.retain(|column, _| !is_score_provenance_column(column));
         }
-        Ok(SQLResult::from_rows(self.columns, rows))
+        Ok(SQLResult::from_rows_with_positions(
+            self.columns,
+            rows,
+            positional_rows,
+        ))
     }
 
     pub(super) fn into_operator<'a>(self) -> Box<dyn uqa_execution::PhysicalOperator + 'a> {
         match self.rows {
-            QueryRows::Rows(rows) => Box::new(uqa_execution::TableScan::from_rows(
+            QueryRows::Rows { named, .. } => Box::new(uqa_execution::TableScan::from_rows(
                 self.internal_columns,
-                rows,
+                named,
             )),
             QueryRows::SharedSpill(rows) => Box::new(uqa_execution::SharedSpillScan::new(rows)),
             QueryRows::ExistsKeySet(_) => {
@@ -159,9 +169,9 @@ impl QueryOutput {
         let rows: Box<
             dyn Iterator<Item = Result<uqa_execution::OwnedPhysicalRow, SQLError>> + Send,
         > = match rows {
-            QueryRows::Rows(rows) => {
+            QueryRows::Rows { named, .. } => {
                 let schema = uqa_execution::RowSchema::new(internal_columns);
-                Box::new(rows.into_iter().map(move |row| {
+                Box::new(named.into_iter().map(move |row| {
                     Ok(uqa_execution::OwnedPhysicalRow::new(
                         schema.clone(),
                         uqa_execution::PhysicalRow::from_result_row(&schema, row),
@@ -299,11 +309,35 @@ pub(super) fn collect_query_operator<'a>(
     let internal_schema = operator.row_schema().clone();
     let internal_columns = internal_schema.columns().to_vec();
     let rows = match output_mode {
-        QueryOutputMode::Rows => QueryRows::Rows(
-            uqa_execution::physical::run_to_rows(operator.as_mut())
-                .map_err(physical_exec_error)?
-                .1,
-        ),
+        QueryOutputMode::Rows => {
+            let has_duplicate_labels = {
+                let mut seen = std::collections::BTreeSet::new();
+                columns.iter().any(|column| !seen.insert(column))
+            };
+            if has_duplicate_labels {
+                let batches = uqa_execution::physical::run_to_batches(operator.as_mut())
+                    .map_err(physical_exec_error)?;
+                let mut named = Vec::new();
+                let mut positional = Vec::new();
+                for batch in batches {
+                    let columnar =
+                        uqa_execution::ColumnarBatch::from_batch(&columns, batch.clone());
+                    positional.extend(columnar.into_positional_rows());
+                    named.extend(batch.into_result_rows());
+                }
+                QueryRows::Rows {
+                    named,
+                    positional: Some(positional),
+                }
+            } else {
+                QueryRows::Rows {
+                    named: uqa_execution::physical::run_to_rows(operator.as_mut())
+                        .map_err(physical_exec_error)?
+                        .1,
+                    positional: None,
+                }
+            }
+        }
         QueryOutputMode::SharedSpill => {
             let mut buffer =
                 uqa_execution::SpillBuffer::new(physical_work_mem_bytes(engine)?.max(1));

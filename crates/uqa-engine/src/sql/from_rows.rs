@@ -261,23 +261,11 @@ fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> Result<Res
         }
         return Ok(out);
     }
-    // Emit NULLs for any column that ever appeared in the table; for an
-    // empty table we still know the keys via document_count, but the
-    // safe default is just an empty row - a missing key resolves to
-    // NULL through ScalarExpr::Column / QualifiedColumn lookup anyway.
-    let mut sample_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for id in engine.table_doc_ids(table)? {
-        if let Some(doc) = engine.get_document(table, id)? {
-            for k in doc.keys() {
-                sample_keys.insert(k.clone());
-            }
-        }
-        if sample_keys.len() > 16 {
-            break;
-        }
-    }
-    for k in sample_keys {
-        out.insert(qualified_key(&qual, &k), Value::Null);
+    for column in engine
+        .try_table_columns(table)
+        .map_err(|error| SQLError::Internal(format!("read table columns for `{table}`: {error}")))?
+    {
+        out.insert(qualified_key(&qual, &column), Value::Null);
     }
     Ok(out)
 }
@@ -289,6 +277,7 @@ fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> Result<Res
 mod cte_spill;
 mod engine_functions;
 mod join_predicates;
+mod join_using;
 mod lateral;
 mod local_table;
 mod source_qualification;
@@ -299,6 +288,7 @@ mod table_function_values;
 pub(in crate::sql) use cte_spill::*;
 pub(in crate::sql) use engine_functions::*;
 pub(in crate::sql) use join_predicates::*;
+pub(in crate::sql) use join_using::*;
 pub(in crate::sql) use lateral::*;
 pub(in crate::sql) use local_table::*;
 pub(in crate::sql) use source_qualification::*;

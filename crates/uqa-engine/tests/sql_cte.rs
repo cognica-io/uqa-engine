@@ -107,6 +107,30 @@ fn simple_cte() {
 }
 
 #[test]
+fn values_cte_preserves_declared_columns_rows_and_natural_join_keys() {
+    let engine = Engine::new();
+    let values = exec(
+        &engine,
+        "WITH rows(id, label) AS (VALUES (1, 'one'), (2, 'two'))
+         SELECT * FROM rows ORDER BY id",
+    );
+    assert_eq!(values.columns, ["id", "label"]);
+    assert_eq!(ints(&values, "id"), [1, 2]);
+    assert_eq!(names(&values, "label"), ["one", "two"]);
+
+    let joined = exec(
+        &engine,
+        "WITH left_cte(id, shared, lval) AS (
+             VALUES (1, 'same', 'l1'), (2, 'left', 'l2')
+         )
+         SELECT l.lval
+         FROM left_cte AS l
+         NATURAL JOIN (VALUES (1, 'same', 'r1'), (3, 'right', 'r3')) AS r(id, shared, rval)",
+    );
+    assert_eq!(names(&joined, "lval"), ["l1"]);
+}
+
+#[test]
 fn cte_with_filter() {
     let engine = engine();
     let r = exec(

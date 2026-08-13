@@ -910,7 +910,7 @@ Join enumeration uses DPccp [29] inside reorderable inner regions and retains th
 
 Relational execution uses a pull protocol over row-oriented batches in the Volcano style [13]. Blocking operators—sort, distinct, set operations, windows, grouping, and joins—must either account for memory and spill or document a bounded-input contract. A materialized SQL API and a streaming cursor API may expose different delivery mechanisms while preserving the same schema-ordered row observation.
 
-The current physical row representation is dynamic and map-backed. It is not claimed to be a fully vectorized typed-column engine. Columnar result batches are produced at a boundary, and duplicate labels remain representable there, while a future positional row carrier is required to preserve two distinct in-flight values under one map key throughout execution.
+The current physical row representation is dynamic and positional. It is not claimed to be a fully vectorized typed-column engine. Logical names and hidden `(qualifier, column)` identities map to physical slots at the schema level, duplicate labels retain distinct in-flight values, and columnar result batches are produced without converting intermediate rows to maps.
 
 ### 9.2 Exact top-$k$ as a physical refinement
 

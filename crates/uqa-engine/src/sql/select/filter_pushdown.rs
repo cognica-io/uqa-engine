@@ -1097,6 +1097,8 @@ mod tests {
             }),
             kind,
             on: Some(on),
+            using: None,
+            natural: false,
             lateral: false,
             strategy: JoinExecutionStrategy::Hash,
         }

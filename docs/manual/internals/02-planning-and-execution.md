@@ -121,7 +121,9 @@ Graph estimates bind live graph size, edge count, label distribution, average de
 
 `RowSchema` maps logical output identities and hidden qualified aliases to flattened slots. `PhysicalRow` stores a small vector of shared value fragments. Selection and renaming usually remap schema slots, while joins concatenate fragment handles instead of rebuilding string-keyed maps and cloning every value.
 
-Duplicate projected labels remain separate slots through execution and the columnar boundary. The compatibility `SQLResult` converts a row to `BTreeMap<String, Value>`, so repeated labels overwrite under the established map behavior. Consumers that need positional duplicates should use a cursor or columnar batches.
+Correlated subqueries use a positional `ScopeOverlay`: current-query columns remain visible, one shared outer-row fragment is addressable only through hidden lookup aliases, current names shadow outer names, and ambiguity remains scoped without rebuilding a merged map for every inner row.
+
+Duplicate projected labels remain separate slots through execution and the columnar boundary. `SQLResult` retains its named `BTreeMap<String, Value>` rows for existing callers and, only when labels repeat, also preserves the final positional row values; `SQLResult::value_at`, cursors, columnar batches, the CLI, and wire consumers distinguish those values without materializing maps between operators.
 
 ## Pull execution and blocking operators
 

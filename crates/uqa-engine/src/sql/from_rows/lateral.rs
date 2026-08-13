@@ -258,28 +258,12 @@ pub(in crate::sql) fn execute_lateral_query_block_output(
         if let Some(from) = stmt.from.as_ref() {
             let child =
                 build_join_operator_with_ctes(engine, from, params, &mut scoped_ctes, None, None)?;
-            let mut schema = outer_row.keys().cloned().collect::<Vec<_>>();
-            for column in child.schema() {
-                if !schema.contains(column) {
-                    schema.push(column.clone());
-                }
-                if let Some((_, unqualified)) = column.rsplit_once('.') {
-                    if !schema.iter().any(|existing| existing == unqualified) {
-                        schema.push(unqualified.to_string());
-                    }
-                }
-            }
-            let outer = outer_row.clone();
-            Box::new(uqa_execution::MapRows::new(
-                child,
-                schema,
-                std::sync::Arc::new(move |inner| Ok(merge_lateral_scope_rows(&outer, &inner))),
-            ))
+            Box::new(uqa_execution::ScopeOverlay::new(child, outer_row.clone()))
         } else {
-            Box::new(uqa_execution::TableScan::from_rows(
-                outer_row.keys().cloned().collect(),
-                vec![outer_row.clone()],
-            ))
+            let child: Box<dyn uqa_execution::PhysicalOperator + '_> = Box::new(
+                uqa_execution::TableScan::from_rows(Vec::new(), vec![ResultRow::new()]),
+            );
+            Box::new(uqa_execution::ScopeOverlay::new(child, outer_row.clone()))
         };
     let columns = projection_columns(&stmt.projections);
     crate::sql::select::execute_query_block_operator_output(
@@ -314,18 +298,4 @@ pub(in crate::sql) fn remap_subquery_row(
         Some(alias) => prefix_row(alias, &output),
         None => output,
     }
-}
-
-pub(in crate::sql) fn merge_lateral_scope_rows(
-    outer_row: &ResultRow,
-    inner_row: &ResultRow,
-) -> ResultRow {
-    let mut merged = outer_row.clone();
-    for (key, value) in inner_row {
-        merged.insert(key.clone(), value.clone());
-        if let Some((_, column)) = key.rsplit_once('.') {
-            merged.insert(column.to_string(), value.clone());
-        }
-    }
-    merged
 }

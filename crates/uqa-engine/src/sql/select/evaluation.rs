@@ -371,16 +371,9 @@ impl ExpressionEvaluator for EngineExpressionEvaluator<'_> {
         )?)
     }
 
-    fn project_star(&self, row: &dyn RowLookup) -> ExecResult<ResultRow> {
-        let mut output = ResultRow::new();
-        row.visit_columns(&mut |column, value| {
-            if !matches!(column, SCORE_COLUMN | DOC_ID_COLUMN | MERGE_ACTION_COLUMN)
-                && !is_score_provenance_column(column)
-            {
-                output.insert(column.to_string(), value.clone());
-            }
-        });
-        Ok(output)
+    fn star_column_visible(&self, column: &str) -> bool {
+        !matches!(column, SCORE_COLUMN | DOC_ID_COLUMN | MERGE_ACTION_COLUMN)
+            && !is_score_provenance_column(column)
     }
 }
 

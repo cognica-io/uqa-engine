@@ -37,8 +37,7 @@ These forms currently fail during compilation without creating a partial object.
 
 ## Open PostgreSQL 18 query-clause bugs
 
-- `NATURAL JOIN`
-- `JOIN ... USING`
+- Static equality-operator resolution and common-type coercion for `JOIN ... USING` columns with different declared types
 - Aliases on parenthesized join expressions
 - Multi-function `ROWS FROM`
 - Table functions `WITH ORDINALITY`

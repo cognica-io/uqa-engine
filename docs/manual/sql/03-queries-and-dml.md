@@ -44,7 +44,16 @@ LEFT JOIN departments AS d ON d.department_id = e.department_id
 ORDER BY e.employee_id;
 ```
 
-Join predicates use `ON`. `NATURAL JOIN` and `JOIN ... USING` are not implemented. Parenthesized join aliases are also outside the supported surface.
+Qualified joins accept `ON`, `USING (column, ...) [AS alias]`, or `NATURAL`, with exactly one qualification. `USING` emits the merged columns in list order, then the remaining left columns, then the remaining right columns; left, right, and full outer joins choose the merged value with PostgreSQL 18 semantics. The optional `USING` alias names only the merged columns and does not hide either input alias. `NATURAL` derives the `USING` list from common visible names in left-input order and becomes a cross join when there are no common names.
+
+```sql
+SELECT merged.id, l.left_value, r.right_value
+FROM (VALUES (1, 'left')) AS l(id, left_value)
+FULL JOIN (VALUES (1, 'right')) AS r(id, right_value)
+USING (id) AS merged;
+```
+
+Duplicate or missing `USING` names and ambiguous common input names are rejected with PostgreSQL SQLSTATEs. Static equality-operator resolution and common-type coercion for `USING` columns with different declared types remain an open PostgreSQL 18 compatibility bug. Parenthesized join aliases are also outside the supported surface.
 
 ## LATERAL
 

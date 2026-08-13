@@ -79,15 +79,15 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         column_prune.as_ref(),
         qualifier_filters.as_ref(),
     )?;
+    let source_columns = operator.schema().to_vec();
     let physical_filter =
         final_filter_after_qualifier_pushdown(engine, stmt, from, qualifier_filters.as_ref());
 
     let columns = if matches!(block.compute, ComputePlan::Project) {
         expand_from_star_columns(
-            engine,
             projection_columns(&stmt.projections),
             &stmt.projections,
-            from,
+            &source_columns,
         )
     } else {
         projection_columns(&stmt.projections)
@@ -149,6 +149,7 @@ pub(in crate::sql) fn column_prune_for_stmt_with_filter(
         .collect();
     let mut valid = true;
     collect_from_prune_columns(from, &qualifiers, &mut prune, &mut valid);
+    collect_join_binding_prune_columns(engine, from, &mut prune);
     for projection in &stmt.projections {
         collect_expr_prune_columns(&projection.expr, &qualifiers, &mut prune, &mut valid);
     }
@@ -176,6 +177,102 @@ pub(in crate::sql) fn column_prune_for_stmt_with_filter(
         return None;
     }
     Some(prune)
+}
+
+fn collect_join_binding_prune_columns(engine: &Engine, from: &SourcePlan, prune: &mut ColumnPrune) {
+    match from {
+        SourcePlan::Join {
+            left,
+            right,
+            using,
+            natural,
+            ..
+        } => {
+            collect_join_binding_prune_columns(engine, left, prune);
+            collect_join_binding_prune_columns(engine, right, prune);
+            if let Some(using) = using {
+                for column in &using.columns {
+                    add_column_to_source_prune(left, column, prune);
+                    add_column_to_source_prune(right, column, prune);
+                }
+            }
+            if *natural {
+                add_all_source_columns_to_prune(engine, left, prune);
+                add_all_source_columns_to_prune(engine, right, prune);
+            }
+        }
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::Subquery { .. } => {}
+    }
+}
+
+fn add_column_to_source_prune(source: &SourcePlan, column: &str, prune: &mut ColumnPrune) {
+    let mut qualifiers = Vec::new();
+    collect_from_qualifiers(source, &mut qualifiers);
+    for qualifier in qualifiers {
+        if let Some(columns) = prune.get_mut(&qualifier) {
+            columns.insert(column.to_string());
+        }
+    }
+}
+
+fn add_all_source_columns_to_prune(engine: &Engine, source: &SourcePlan, prune: &mut ColumnPrune) {
+    match source {
+        SourcePlan::Table { name, alias } => {
+            let qualifier = alias.as_deref().unwrap_or(name);
+            match engine.try_table_columns(name) {
+                Ok(table_columns) => {
+                    if let Some(columns) = prune.get_mut(qualifier) {
+                        columns.extend(table_columns);
+                    }
+                }
+                Err(_) => {
+                    // A CTE, view, or external relation owns its row type
+                    // outside the local table catalog. Omitting its prune
+                    // entry retains that source's complete schema.
+                    prune.remove(qualifier);
+                }
+            }
+        }
+        SourcePlan::Join { left, right, .. } => {
+            add_all_source_columns_to_prune(engine, left, prune);
+            add_all_source_columns_to_prune(engine, right, prune);
+        }
+        SourcePlan::Values {
+            rows,
+            alias,
+            column_aliases,
+        } => {
+            let Some(columns) = alias.as_ref().and_then(|alias| prune.get_mut(alias)) else {
+                return;
+            };
+            if column_aliases.is_empty() {
+                columns.extend(
+                    (0..rows.first().map_or(0, Vec::len))
+                        .map(|index| format!("column{}", index + 1)),
+                );
+            } else {
+                columns.extend(column_aliases.iter().cloned());
+            }
+        }
+        SourcePlan::Function { alias, .. } | SourcePlan::Subquery { alias, .. } => {
+            let Some(columns) = alias.as_ref().and_then(|alias| prune.get_mut(alias)) else {
+                return;
+            };
+            columns.extend(
+                super::from_clause_output_columns(engine, source)
+                    .into_iter()
+                    .map(|column| {
+                        column
+                            .rsplit_once('.')
+                            .map_or(column.as_str(), |(_, name)| name)
+                            .to_string()
+                    }),
+            );
+        }
+    }
 }
 
 pub(in crate::sql) fn collect_from_qualifiers(from: &SourcePlan, out: &mut Vec<String>) {

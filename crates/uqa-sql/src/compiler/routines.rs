@@ -319,6 +319,7 @@ pub(super) fn compile_sql_standard_body(node: &Node) -> Result<Vec<Statement>> {
 fn select_of_expr(expr: Expr) -> Statement {
     Statement::Select(Box::new(crate::ast::SelectStmt {
         projections: vec![crate::ast::Projection { expr, alias: None }],
+        values: Vec::new(),
         from: None,
         r#where: None,
         group_by: Vec::new(),

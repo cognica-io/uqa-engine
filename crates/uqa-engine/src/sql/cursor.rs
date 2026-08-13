@@ -26,9 +26,8 @@ pub struct SQLCursorSummary {
 }
 
 /// Iterator over schema-ordered column batches backed by a work-mem-bounded
-/// [`SharedSpill`]. Dropping the cursor releases its temporary file. The
-/// physical row carrier's duplicate-label limitation is documented by
-/// [`ColumnarBatch`].
+/// [`SharedSpill`]. Dropping the cursor releases its temporary file. Positional
+/// conversion preserves separately-valued duplicate labels in [`ColumnarBatch`].
 pub struct SQLCursor {
     summary: SQLCursorSummary,
     reader: SharedSpillReader,
@@ -74,10 +73,7 @@ impl Iterator for SQLCursor {
                 Err(error) => return Some(Err(super::select::physical_exec_error(error))),
             };
             if !batch.is_empty() {
-                return Some(Ok(ColumnarBatch::from_rows(
-                    &self.summary.columns,
-                    batch.into_result_rows(),
-                )));
+                return Some(Ok(ColumnarBatch::from_batch(&self.summary.columns, batch)));
             }
         }
     }

@@ -309,6 +309,8 @@ fn flatten_reorderable_inner_join(
             right,
             kind: uqa_sql::ast::JoinKind::Inner | uqa_sql::ast::JoinKind::Cross,
             on,
+            using: None,
+            natural: false,
             lateral: false,
             strategy: _,
         } => {
@@ -623,6 +625,8 @@ fn materialize_join_order(
             right: Box::new(materialize_join_order(*right, atoms)?),
             kind: uqa_sql::ast::JoinKind::Inner,
             on: None,
+            using: None,
+            natural: false,
             lateral: false,
             strategy: match algorithm {
                 JoinAlgorithm::Hash => JoinExecutionStrategy::Hash,
@@ -633,6 +637,8 @@ fn materialize_join_order(
             right: Box::new(materialize_join_order(*right, atoms)?),
             kind: uqa_sql::ast::JoinKind::Inner,
             on: None,
+            using: None,
+            natural: false,
             lateral: false,
             strategy: JoinExecutionStrategy::Auto,
         }),

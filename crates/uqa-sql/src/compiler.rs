@@ -52,8 +52,8 @@ pub(in crate::compiler) use returning::compile_returning_clause;
 
 use tree::{
     compile_column_def, compile_create_index, compile_create_table, compile_expr,
-    compile_from_node, compile_insert, compile_projections, compile_select, compile_with_clause,
-    extract_string,
+    compile_from_node, compile_insert, compile_projections, compile_select, compile_values_lists,
+    compile_with_clause, extract_string,
 };
 
 #[cfg(test)]

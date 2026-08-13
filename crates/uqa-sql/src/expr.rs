@@ -140,6 +140,13 @@ pub trait EngineHook {
 pub trait RowLookup {
     fn column(&self, name: &str) -> Option<&Value>;
 
+    /// Whether an unqualified name identifies more than one visible input
+    /// column. Callers must report SQLSTATE 42702 instead of selecting an
+    /// arbitrary suffix match.
+    fn column_is_ambiguous(&self, _name: &str) -> bool {
+        false
+    }
+
     fn qualified_column(&self, qualifier: &str, column: &str, key: &str) -> Option<&Value>;
 
     /// Return a value by the physical schema position used to construct this
@@ -175,6 +182,20 @@ pub trait RowLookup {
 impl RowLookup for ResultRow {
     fn column(&self, name: &str) -> Option<&Value> {
         row_column_value(self, name)
+    }
+
+    fn column_is_ambiguous(&self, name: &str) -> bool {
+        if self.contains_key(name) {
+            return false;
+        }
+        self.keys()
+            .filter(|key| {
+                key.rsplit_once('.')
+                    .is_some_and(|(_, column)| column == name)
+            })
+            .take(2)
+            .count()
+            > 1
     }
 
     fn qualified_column(&self, qualifier: &str, column: &str, key: &str) -> Option<&Value> {
@@ -241,6 +262,9 @@ impl<'a> EvalContext<'a> {
     /// the AST evaluator. Physical scalar IR evaluators call this instead of
     /// reconstructing an [`Expr::Column`] carrier.
     pub fn column_value(&self, name: &str) -> Result<Value> {
+        if self.row_lookup()?.column_is_ambiguous(name) {
+            return Err(SQLError::AmbiguousColumn(name.to_string()));
+        }
         Ok(self
             .row_lookup()?
             .column(name)

@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use crate::ast::{ColumnType, FromClause, TableKeyConstraintKind};
+use crate::ast::{ColumnType, FromClause, JoinKind, TableKeyConstraintKind};
 
 #[test]
 fn bundled_parser_is_postgresql_18_4() {
@@ -391,14 +391,6 @@ fn unsupported_select_clauses_fail_instead_of_losing_semantics() {
 fn unsupported_from_forms_fail_instead_of_becoming_cross_joins() {
     for (sql, expected) in [
         (
-            "SELECT * FROM left_table NATURAL JOIN right_table",
-            "NATURAL JOIN",
-        ),
-        (
-            "SELECT * FROM left_table JOIN right_table USING (id)",
-            "JOIN USING",
-        ),
-        (
             "SELECT * FROM ROWS FROM (generate_series(1, 2), generate_series(3, 4)) AS f(a, b)",
             "ROWS FROM",
         ),
@@ -413,6 +405,47 @@ fn unsupported_from_forms_fail_instead_of_becoming_cross_joins() {
             "unexpected error for {sql}: {error}"
         );
     }
+}
+
+#[test]
+fn join_using_and_natural_metadata_survive_compilation() {
+    let Statement::Select(using_select) =
+        first("SELECT * FROM left_table l FULL JOIN right_table r USING (id, tenant_id) AS joined")
+    else {
+        panic!("expected SELECT");
+    };
+    let Some(FromClause::Join {
+        kind,
+        on,
+        using,
+        natural,
+        ..
+    }) = using_select.from
+    else {
+        panic!("expected USING join");
+    };
+    assert_eq!(kind, JoinKind::Full);
+    assert!(on.is_none());
+    assert!(!natural);
+    let using = using.expect("USING metadata");
+    assert_eq!(using.columns, ["id", "tenant_id"]);
+    assert_eq!(using.alias.as_deref(), Some("joined"));
+
+    let Statement::Select(natural_select) =
+        first("SELECT * FROM left_table NATURAL LEFT JOIN right_table")
+    else {
+        panic!("expected SELECT");
+    };
+    assert!(matches!(
+        natural_select.from,
+        Some(FromClause::Join {
+            kind: JoinKind::Left,
+            on: None,
+            using: None,
+            natural: true,
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -502,6 +535,19 @@ fn unsupported_cte_control_clauses_fail_explicitly() {
         cycle,
         SQLError::Unsupported(message) if message.contains("CYCLE")
     ));
+}
+
+#[test]
+fn cte_values_body_is_preserved() {
+    let Statement::Select(select) =
+        first("WITH rows(id, label) AS (VALUES (1, 'one'), (2, 'two')) SELECT * FROM rows")
+    else {
+        panic!("expected SELECT");
+    };
+    let cte = &select.with[0];
+    assert_eq!(cte.columns, ["id", "label"]);
+    assert_eq!(cte.query.values.len(), 2);
+    assert!(cte.query.projections.is_empty());
 }
 
 #[test]

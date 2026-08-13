@@ -208,10 +208,15 @@ pub(super) fn eval_operand_borrowed<'a>(
             Some(SQLParam::Vector(_)) | Some(SQLParam::Tensor(_)) => Ok(None),
             None => Err(SQLError::MissingParam(*i)),
         },
-        Expr::Column(name) => Ok(Some(match ctx.row_lookup()?.column(name) {
-            Some(value) => EvalOperand::Borrowed(value),
-            None => EvalOperand::Owned(Value::Null),
-        })),
+        Expr::Column(name) => {
+            if ctx.row_lookup()?.column_is_ambiguous(name) {
+                return Err(SQLError::AmbiguousColumn(name.clone()));
+            }
+            Ok(Some(match ctx.row_lookup()?.column(name) {
+                Some(value) => EvalOperand::Borrowed(value),
+                None => EvalOperand::Owned(Value::Null),
+            }))
+        }
         Expr::QualifiedColumn {
             qualifier,
             column,

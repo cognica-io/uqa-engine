@@ -50,7 +50,7 @@ The earlier unoptimized artifact measured UQA at 234.015 ms for Q1, 96.089 ms fo
 
 1. Aggregation serialized every input row into a `SpillBuffer` and externally sorted the complete input even for one global group or six small groups, crossing the 4 MB budget into disk I/O. The adaptive executor now retains mergeable aggregate states and spills compact partial states only when the state budget is exceeded.
 2. The table source cloned complete document maps and repeatedly resolved string-keyed fields. It now fetches document IDs in batches, projects only required fields through interned layouts, and passes borrowed positional values into compiled aggregate inputs.
-3. Ordered scans sorted primary-key-ordered input again. Ordering metadata now crosses scan and project boundaries, allowing the redundant sort to be elided, while the cursor consumes column vectors directly instead of converting them back into map-backed rows.
+3. Ordered scans sorted primary-key-ordered input again. Ordering metadata now crosses scan and project boundaries, allowing the redundant sort to be elided, while the cursor converts positional batches directly into column vectors instead of converting them through map-backed rows.
 
 The separate indexed `tpch_style` path had another cost: its optimizer materialized each broad posting list to estimate cardinality and execution materialized it again. Cardinality now comes from value-bucket lengths, while membership-only intersections discard payloads and avoid graph-envelope decoding. That fix explains part of the indexed 100k-row result below; it does not explain the index-free external fixture in this section.
 
@@ -65,7 +65,7 @@ The cursor originally calculated exact encoded sizes, blocked until the complete
 | Q6: SQLite is 1.90x faster than UQA | Both plans are full scans, confirmed by SQLite `EXPLAIN QUERY PLAN`; SQLite's compact typed VM has less per-row dispatch. |
 | Q6: DuckDB is 5.54x faster than UQA | The simple filter-and-aggregate shape exposes DuckDB's vectorized predicate and aggregation advantage. |
 | Cursor: 1.018x materialized UQA | Moving uniquely owned batches removed the deep clone; exact-size accounting, blocking, and row-to-column conversion remain within run noise. |
-| Scan: external engines are 4.89-6.55x faster than the cursor | SQLite satisfies `ORDER BY id` through its primary-key auto-index, while UQA propagates document-ID order; dynamic map-backed rows and transfer stages remain the gap. |
+| Scan: external engines are 4.89-6.55x faster than the cursor | SQLite satisfies `ORDER BY id` through its primary-key auto-index, while UQA propagates document-ID order; dynamic positional values and transfer stages remain the gap. |
 
 The estimator correction was driven by ten retained Linux CI artifacts. Their Q6 UQA/SQLite ratios ranged from 1.596x to 3.390x when computed from sample medians and falsely failed the 3.0x ceiling five times; the slope ratios from the same measurements ranged from 1.608x to 2.751x and all passed. A later documentation-only commit then produced Q6 slope ratios of 3.169x and 3.140x on two hosted runners even though its executable inputs, runner image, and compiler matched a 1.827x passing run. That demonstrated a second flaw: an absolute cross-engine ceiling on heterogeneous hardware cannot identify a code regression. Tests now pin both corrections by supplying contradictory median/slope values and by proving that a repeatable paired head/base slowdown fails while an advisory external-ratio excursion does not.
 

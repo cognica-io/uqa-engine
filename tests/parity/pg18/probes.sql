@@ -347,6 +347,15 @@ SELECT pg_typeof('x'::text)
 SELECT pg_typeof(now())
 SELECT width_bucket(5.35, 0, 10, 5)
 SELECT setseed(0.5)
+-- qualified joins
+SELECT * FROM (VALUES (1, 'left-value')) AS l(id, shared) JOIN (VALUES (1, 'right-value')) AS r(id, shared) USING (id)
+SELECT * FROM (VALUES (1, 'l1'), (2, 'l2')) AS l(id, lval) FULL JOIN (VALUES (1, 'r1'), (3, 'r3')) AS r(id, rval) USING (id) ORDER BY id
+SELECT * FROM (VALUES (2, 'b', 'left')) AS l(id, shared, lval) NATURAL JOIN (VALUES ('b', 2, 'right')) AS r(shared, id, rval)
+SELECT merged.id, l.id, r.id FROM (VALUES (1), (2)) AS l(id) FULL JOIN (VALUES (1), (3)) AS r(id) USING (id) AS merged ORDER BY merged.id
+SELECT id, l.id, r.id, t.id FROM (VALUES (1), (2)) AS l(id) JOIN (VALUES (1), (3)) AS r(id) USING (id) JOIN (VALUES (1), (4)) AS t(id) USING (id)
+WITH left_cte(id, shared, lval) AS (VALUES (1, 'same', 'l1'), (2, 'left', 'l2')) SELECT l.lval FROM left_cte l NATURAL JOIN (VALUES (1, 'same', 'r1'), (3, 'right', 'r3')) AS r(id, shared, rval)
+SELECT * FROM (VALUES (1)) AS l(id) JOIN (VALUES (1)) AS r(id) USING (id, id)
+SELECT * FROM (VALUES (1)) AS l(id) JOIN (VALUES (1)) AS r(id) USING (missing)
 -- appended: PG18 semantics round (3VL edges, intervals, operators)
 SELECT interval '-1 day 3 hours'
 SELECT interval '1 day -3 hours'

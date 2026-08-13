@@ -35,10 +35,9 @@ fn projection_set_batch_size(statement: &QueryBlockPlan) -> usize {
 }
 
 pub(in crate::sql) fn expand_from_star_columns(
-    engine: &Engine,
     columns: Vec<String>,
     projections: &[ProjectionPlan],
-    from: &SourcePlan,
+    source_columns: &[String],
 ) -> Vec<String> {
     let has_star = projections
         .iter()
@@ -46,7 +45,16 @@ pub(in crate::sql) fn expand_from_star_columns(
     if !has_star {
         return columns;
     }
-    let source_cols = from_clause_output_columns(engine, from);
+    let source_cols = source_columns
+        .iter()
+        .filter(|column| visible_projection_source_column(column))
+        .map(|column| {
+            column
+                .rsplit_once('.')
+                .map_or(column.as_str(), |(_, name)| name)
+                .to_string()
+        })
+        .collect::<Vec<_>>();
     if source_cols.is_empty() {
         return columns;
     }
@@ -110,7 +118,10 @@ pub(in crate::sql) fn from_clause_output_columns(
             cols.extend(from_clause_output_columns(engine, right));
             cols
         }
-        SourcePlan::Table { .. } => Vec::new(),
+        SourcePlan::Table { name, alias } => engine
+            .try_table_columns(name)
+            .map(|columns| qualify_output_columns(Some(alias.as_deref().unwrap_or(name)), columns))
+            .unwrap_or_default(),
     }
 }
 
@@ -659,6 +670,29 @@ pub(in crate::sql) fn finish_query_block_operator_output<'a>(
             .cloned()
             .collect();
         operator = Box::new(ColumnSelection::new(operator, visible));
+    }
+    if operator.schema().len() < columns.len() {
+        return Err(SQLError::Internal(format!(
+            "query output schema width {} is smaller than public output width {}",
+            operator.schema().len(),
+            columns.len()
+        )));
+    }
+    if operator.schema()[..columns.len()] != columns {
+        let mut positions = columns
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(position, output)| (output, position))
+            .collect::<Vec<_>>();
+        positions.extend(
+            operator.schema()[columns.len()..]
+                .iter()
+                .cloned()
+                .enumerate()
+                .map(|(offset, output)| (output, columns.len() + offset)),
+        );
+        operator = Box::new(ColumnSelection::with_positions(operator, positions));
     }
     collect_query_operator(engine, columns, operator, output_mode)
 }

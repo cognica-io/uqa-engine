@@ -574,6 +574,11 @@ pub enum OnConflictAction {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SelectStmt {
     pub projections: Vec<Projection>,
+    /// Rows owned by a `VALUES` query body. `PostgreSQL` represents `VALUES`
+    /// through the same query node used for `SELECT`, so nested query bodies
+    /// such as CTEs and set-operation branches must retain them here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub values: Vec<Vec<Expr>>,
     pub from: Option<FromClause>,
     pub r#where: Option<Expr>,
     pub group_by: Vec<Expr>,
@@ -654,7 +659,18 @@ pub enum FromClause {
         left: Box<FromClause>,
         right: Box<FromClause>,
         kind: JoinKind,
+        /// Boolean qualification supplied by `ON`. This is mutually
+        /// exclusive with `using` and `natural` in parser-produced trees.
         on: Option<Expr>,
+        /// `PostgreSQL` `USING (column, ...) [AS alias]` metadata. The column
+        /// list must remain explicit until both input row types are known so
+        /// binding can validate each side and construct the merged output.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        using: Option<JoinUsing>,
+        /// `NATURAL` derives its `USING` list from the visible columns of both
+        /// input row types at binding time.
+        #[serde(default)]
+        natural: bool,
         #[allow(dead_code)]
         lateral: bool,
     },
@@ -693,6 +709,13 @@ pub enum FromClause {
         alias: Option<String>,
         column_aliases: Vec<String>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JoinUsing {
+    pub columns: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
 }
 
 impl FromClause {

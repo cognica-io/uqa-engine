@@ -6,18 +6,22 @@
 
 //! Expression-evaluation and row-predicate seams.
 
-use super::{
-    eval_scalar, Arc, ExecResult, ResultRow, SQLParam, ScalarEvalContext, ScalarExpr, Value,
-};
+use super::{eval_scalar, Arc, ExecResult, SQLParam, ScalarEvalContext, ScalarExpr, Value};
 use uqa_sql::expr::RowLookup;
 
 pub trait ExpressionEvaluator: Send + Sync {
     fn evaluate(&self, expression: &ScalarExpr, row: &dyn RowLookup) -> ExecResult<Value>;
 
-    fn project_star(&self, row: &dyn RowLookup) -> ExecResult<ResultRow> {
-        let mut output = ResultRow::new();
+    fn star_column_visible(&self, _column: &str) -> bool {
+        true
+    }
+
+    fn project_star(&self, row: &dyn RowLookup) -> ExecResult<Vec<(String, Value)>> {
+        let mut output = Vec::new();
         row.visit_columns(&mut |column, value| {
-            output.insert(column.to_string(), value.clone());
+            if self.star_column_visible(column) {
+                output.push((column.to_string(), value.clone()));
+            }
         });
         Ok(output)
     }

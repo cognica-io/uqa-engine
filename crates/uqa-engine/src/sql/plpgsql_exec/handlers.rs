@@ -96,6 +96,7 @@ pub(in crate::sql) fn run_call(
     Ok(SQLResult {
         columns,
         rows: vec![row],
+        positional_rows: None,
         affected_rows: 0,
     })
 }

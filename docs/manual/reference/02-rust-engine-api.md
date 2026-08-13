@@ -54,10 +54,11 @@ engine.sql(
 `SQLResult` contains:
 
 - `columns`: projected column labels in order
-- `rows`: rows represented as `BTreeMap<String, Value>`
+- `rows`: compatibility rows represented as `BTreeMap<String, Value>`
+- `value_at(row, column)`: positional access that distinguishes repeated labels
 - `affected_rows`: the DML row count
 
-Map-based rows cannot preserve two independently addressable values with the same projected label. Alias duplicate expressions, or use the cursor or columnar path when positional duplicate labels matter.
+When projected labels repeat, `SQLResult` retains the distinct final values in a positional carrier while keeping `rows` for existing named-map callers. Use `value_at`, a cursor, or the columnar path to address repeated labels by position.
 
 ## Stream results
 
@@ -68,7 +69,7 @@ Map-based rows cannot preserve two independently addressable values with the sam
 ```mermaid
 flowchart TD
     A[SQL text and parameters] --> B{Consumer shape}
-    B -->|Materialized maps| C[Engine::sql]
+    B -->|Materialized result| C[Engine::sql]
     B -->|Row stream| D[Engine::sql_cursor]
     B -->|Column batches| E[Engine::sql_columnar]
 ```

@@ -29,10 +29,10 @@ pub(super) fn print_result_expanded(result: &SQLResult, out: &mut (impl Write + 
         result.columns.clone()
     };
     let label_width = columns.iter().map(String::len).max().unwrap_or(0);
-    for (idx, row) in result.rows.iter().enumerate() {
+    for (idx, _) in result.rows.iter().enumerate() {
         let _ = writeln!(out, "-[ RECORD {} ]-", idx + 1);
-        for col in &columns {
-            let value = value_to_display(row.get(col));
+        for (column, col) in columns.iter().enumerate() {
+            let value = value_to_display(result.value_at(idx, column));
             let _ = writeln!(out, "{col:<label_width$} | {value}");
         }
     }
@@ -63,10 +63,12 @@ pub(super) fn print_result(result: &SQLResult, out: &mut (impl Write + ?Sized)) 
     let stringified_rows: Vec<Vec<String>> = result
         .rows
         .iter()
-        .map(|row| {
+        .enumerate()
+        .map(|(row_index, _)| {
             columns
                 .iter()
-                .map(|c| value_to_display(row.get(c)))
+                .enumerate()
+                .map(|(column_index, _)| value_to_display(result.value_at(row_index, column_index)))
                 .collect()
         })
         .collect();

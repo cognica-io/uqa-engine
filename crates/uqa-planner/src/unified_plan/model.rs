@@ -126,6 +126,10 @@ pub enum SourcePlan {
         right: Box<SourcePlan>,
         kind: uqa_sql::ast::JoinKind,
         on: Option<ScalarExpr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        using: Option<uqa_sql::ast::JoinUsing>,
+        #[serde(default)]
+        natural: bool,
         lateral: bool,
         #[serde(default)]
         strategy: JoinExecutionStrategy,

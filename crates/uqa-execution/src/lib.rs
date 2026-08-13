@@ -63,6 +63,7 @@ pub mod columnar_batch;
 pub mod distinct;
 pub mod external_sort;
 pub mod join;
+pub mod join_output;
 pub mod lateral_join;
 pub mod map_rows;
 pub mod physical;
@@ -71,6 +72,7 @@ pub mod projected_predicate;
 pub mod relational;
 pub mod scalar;
 pub mod scan;
+pub mod scope_overlay;
 pub mod set_operation;
 pub mod spill;
 pub mod spill_scan;
@@ -83,6 +85,7 @@ pub use columnar_batch::{ColumnVector, ColumnarBatch};
 pub use distinct::{hash_canonical_row, CanonicalRowHashSet, Distinct, ExactRowSet};
 pub use external_sort::{ExternalSort, EXTERNAL_SORT_MERGE_FAN_IN};
 pub use join::{HashJoin, NestedLoopJoin};
+pub use join_output::{JoinOutput, JoinOutputSource};
 pub use lateral_join::{LateralJoin, LateralRows, LateralSource};
 pub use map_rows::{MapRows, SharedRowMapper};
 pub use physical::{
@@ -100,6 +103,7 @@ pub use scalar::{
     ScalarSubqueryRunner, ScalarWindowFrame, ScalarWindowSpec, SubqueryId, SubqueryResult,
 };
 pub use scan::{RowIteratorScan, RowSource, TableScan};
+pub use scope_overlay::ScopeOverlay;
 pub use set_operation::ExternalSetOperation;
 pub use spill::{IndexedSpill, SharedSpill, SharedSpillReader, SpillBuffer};
 pub use spill_scan::{SharedSpillScan, SpillScan};

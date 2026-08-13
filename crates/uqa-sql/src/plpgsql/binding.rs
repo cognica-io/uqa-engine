@@ -212,6 +212,7 @@ pub(super) fn bind_rows(
 pub fn bind_select(stmt: &SelectStmt, r: &mut dyn VariableResolver) -> Result<SelectStmt> {
     Ok(SelectStmt {
         projections: bind_projections(&stmt.projections, r)?,
+        values: bind_rows(&stmt.values, r)?,
         from: match stmt.from.as_ref() {
             Some(f) => Some(bind_from(f, r)?),
             None => None,
@@ -257,12 +258,16 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             right,
             kind,
             on,
+            using,
+            natural,
             lateral,
         } => FromClause::Join {
             left: Box::new(bind_from(left, r)?),
             right: Box::new(bind_from(right, r)?),
             kind: *kind,
             on: bind_opt_expr(on.as_ref(), r)?,
+            using: using.clone(),
+            natural: *natural,
             lateral: *lateral,
         },
         FromClause::Values {

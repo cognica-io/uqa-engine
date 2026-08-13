@@ -207,8 +207,10 @@ pub(in crate::sql) fn returning_row_context(
     columns.insert(DOC_ID_COLUMN.into());
 
     for column in columns {
+        let current_value = row_image_value(Some(current), &column, &definitions)?;
         let old_value = row_image_value(images.old, &column, &definitions)?;
         let new_value = row_image_value(images.new, &column, &definitions)?;
+        row_doc.insert(column.clone(), current_value);
         row_doc.insert(format!("{}.{}", aliases.old, column), old_value);
         row_doc.insert(format!("{}.{}", aliases.new, column), new_value);
     }
@@ -224,6 +226,13 @@ fn row_image_value(
         return Ok(Value::Null);
     };
     if column == DOC_ID_COLUMN {
+        return doc_id_value(image.doc_id);
+    }
+    if definitions.iter().any(|definition| {
+        definition.name == column
+            && definition.primary_key
+            && matches!(definition.ty, uqa_sql::ast::ColumnType::Integer)
+    }) {
         return doc_id_value(image.doc_id);
     }
     let mut document = image.document.clone();
@@ -264,6 +273,7 @@ pub(in crate::sql) fn dml_returning_result(
             Some(table),
         )?,
         rows,
+        positional_rows: None,
         affected_rows,
     })
 }

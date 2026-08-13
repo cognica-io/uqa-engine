@@ -7,8 +7,8 @@
 //! Scalar projection and star expansion.
 
 use super::{
-    Batch, DefaultExpressionEvaluator, ExecResult, PhysicalOperator, ResultRow, RowSchema,
-    SQLParam, ScalarExpr, SharedExpressionEvaluator,
+    Batch, DefaultExpressionEvaluator, ExecResult, PhysicalOperator, RowSchema, SQLParam,
+    ScalarExpr, SharedExpressionEvaluator,
 };
 use crate::PhysicalRow;
 
@@ -65,7 +65,7 @@ impl<'a> Project<'a> {
         for (name, expression) in &projections {
             if matches!(expression, ScalarExpr::Star) {
                 for column in child.schema() {
-                    if !columns.contains(column) {
+                    if evaluator.star_column_visible(column) {
                         columns.push(column.clone());
                     }
                 }
@@ -153,15 +153,21 @@ impl PhysicalOperator for Project<'_> {
                 .iter()
                 .any(|(_, expression)| matches!(expression, ScalarExpr::Star))
             {
-                let mut new_row = ResultRow::new();
+                let mut values = Vec::with_capacity(self.schema.len());
                 for (name, expr) in &self.projections {
                     if matches!(expr, ScalarExpr::Star) {
-                        new_row.extend(self.evaluator.project_star(&view)?);
+                        values.extend(
+                            self.evaluator
+                                .project_star(&view)?
+                                .into_iter()
+                                .map(|(_, value)| value),
+                        );
                     } else {
-                        new_row.insert(name.clone(), self.evaluator.evaluate(expr, &view)?);
+                        let _ = name;
+                        values.push(self.evaluator.evaluate(expr, &view)?);
                     }
                 }
-                out.push(PhysicalRow::from_result_row(&self.schema, new_row));
+                out.push(PhysicalRow::from_values(values));
                 continue;
             }
             let values = self

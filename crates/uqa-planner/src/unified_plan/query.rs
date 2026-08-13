@@ -114,6 +114,19 @@ pub(super) fn lower_relational_root(
     mut statement: SelectStmt,
     aggregates: &dyn AggregateClassifier,
 ) -> RelationalPlan {
+    if statement.set_op.is_none() && !statement.values.is_empty() {
+        let mut subqueries = Vec::new();
+        let rows = statement
+            .values
+            .into_iter()
+            .map(|row| {
+                row.into_iter()
+                    .map(|expr| lower_scalar_expression(expr, aggregates, &mut subqueries))
+                    .collect()
+            })
+            .collect();
+        return RelationalPlan::Values { rows, subqueries };
+    }
     let Some(set_op) = statement.set_op.take() else {
         return RelationalPlan::QueryBlock(Box::new(QueryBlockPlan::lower_with(
             statement, aggregates,
@@ -275,12 +288,16 @@ impl SourcePlan {
                 right,
                 kind,
                 on,
+                using,
+                natural,
                 lateral,
             } => Self::Join {
                 left: Box::new(Self::lower_with(*left, aggregates, subqueries)),
                 right: Box::new(Self::lower_with(*right, aggregates, subqueries)),
                 kind,
                 on: on.map(|expr| lower_scalar_expression(expr, aggregates, subqueries)),
+                using,
+                natural,
                 lateral,
                 strategy: JoinExecutionStrategy::Auto,
             },

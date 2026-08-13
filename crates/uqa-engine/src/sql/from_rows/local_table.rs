@@ -11,15 +11,15 @@ use super::{
     build_table_function_row_stream, build_values_rows, combine_filters, decide_join_sides,
     execute_query_plan_output, execute_view_plan_output_with_parent_cache,
     has_filters_for_qualifier, is_score_provenance_column, join_conjuncts, join_schema_sample,
-    null_row_for_schema, pad_nulls_for_from, physical_work_mem_bytes, propagated_join_filters,
-    push_output_filter_into_query_plan, qualified_key, qualifier_filter, qualifier_for,
-    qualify_source_operator, qualify_source_operator_with_columns,
-    query_contains_volatile_function, query_cte_names, query_output_shared,
-    table_function_empty_schema, ColumnPrune, CteScope, Engine, EngineExpressionEvaluator,
-    EngineLateralSource, JoinExecutionStrategy, JoinKind, PlanSubqueryArena, QualifierFilters,
-    QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
-    ScoredDocumentSource, ScoredInput, SourcePlan, TableFunctionCall, TableFunctionEvalContext,
-    Value,
+    join_using_predicate, null_row_for_schema, pad_nulls_for_from, physical_work_mem_bytes,
+    propagated_join_filters, push_output_filter_into_query_plan, qualified_key, qualifier_filter,
+    qualifier_for, qualify_source_operator, qualify_source_operator_with_columns,
+    query_contains_volatile_function, query_cte_names, query_output_shared, resolve_join_using,
+    shape_join_using_output, table_function_empty_schema, ColumnPrune, CteScope, Engine,
+    EngineExpressionEvaluator, EngineLateralSource, JoinExecutionStrategy, JoinKind,
+    PlanSubqueryArena, QualifierFilters, QueryOutputMode, ResultRow, SQLError, SQLParam,
+    ScalarExpr, ScopedEngineHook, ScoredDocumentSource, ScoredInput, SourcePlan, TableFunctionCall,
+    TableFunctionEvalContext, Value,
 };
 
 use uqa_planner::{AccessPathPlan, ComputePlan, RelationalPlan};
@@ -533,6 +533,8 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             right,
             kind,
             on,
+            using,
+            natural,
             lateral,
             strategy,
         } => {
@@ -558,20 +560,34 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                 let left_nulls = null_row_for_schema(left_operator.schema());
                 let mut right_nulls = ResultRow::new();
                 pad_nulls_for_from(&mut right_nulls, right, engine)?;
+                let left_schema = left_operator.row_schema().clone();
+                let right_schema =
+                    uqa_execution::RowSchema::new(right_nulls.keys().cloned().collect::<Vec<_>>());
+                let resolved_using =
+                    resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
+                let effective_on = resolved_using
+                    .as_ref()
+                    .and_then(|using| join_using_predicate(using, &left_schema, &right_schema))
+                    .or_else(|| on.clone());
                 let source = EngineLateralSource {
                     engine,
                     right: (**right).clone(),
-                    on: on.clone(),
+                    on: effective_on,
                     params,
                     ctes: ctes.clone(),
                 };
-                return Ok(Box::new(LateralJoin::new(
+                let joined: Box<dyn PhysicalOperator + 'a> = Box::new(LateralJoin::new(
                     left_operator,
                     Box::new(source),
                     *kind,
                     left_nulls,
                     right_nulls,
-                )));
+                ));
+                return if let Some(using) = resolved_using.as_ref() {
+                    shape_join_using_output(joined, *kind, &left_schema, &right_schema, using)
+                } else {
+                    Ok(joined)
+                };
             }
 
             let right_filters = filters
@@ -586,11 +602,20 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                 right_filter_ref,
             )?;
 
+            let left_schema = left_operator.row_schema().clone();
+            let right_schema = right_operator.row_schema().clone();
+            let resolved_using =
+                resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
+            let effective_on = resolved_using
+                .as_ref()
+                .and_then(|using| join_using_predicate(using, &left_schema, &right_schema))
+                .or_else(|| on.clone());
+
             let evaluator = EngineExpressionEvaluator::shared(engine, params, ctes);
             let hash_plan = if matches!(kind, JoinKind::Cross) {
                 None
             } else {
-                on.as_ref().and_then(|predicate| {
+                effective_on.as_ref().and_then(|predicate| {
                     let conjuncts = join_conjuncts(predicate);
                     let scoped_hook = ScopedEngineHook::new(engine, ctes);
                     let subquery_arena =
@@ -641,11 +666,11 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             let left_nulls = null_row_for_schema(left_operator.schema());
             let right_nulls = null_row_for_schema(right_operator.schema());
             let work_mem = physical_work_mem_bytes(engine)?;
-            match (strategy, hash_plan) {
+            let joined: Box<dyn PhysicalOperator + 'a> = match (strategy, hash_plan) {
                 (
                     JoinExecutionStrategy::Auto | JoinExecutionStrategy::Hash,
                     Some((left_keys, right_keys, residual)),
-                ) => Ok(Box::new(
+                ) => Box::new(
                     HashJoin::try_new_with_work_mem_and_predicate(
                         left_operator,
                         right_operator,
@@ -660,22 +685,27 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                         params,
                     )
                     .map_err(crate::sql::select::physical_exec_error)?,
+                ),
+                (JoinExecutionStrategy::Auto, None) => Box::new(NestedLoopJoin::new_with_work_mem(
+                    left_operator,
+                    right_operator,
+                    *kind,
+                    effective_on,
+                    evaluator,
+                    left_nulls,
+                    right_nulls,
+                    work_mem,
                 )),
-                (JoinExecutionStrategy::Auto, None) => {
-                    Ok(Box::new(NestedLoopJoin::new_with_work_mem(
-                        left_operator,
-                        right_operator,
-                        *kind,
-                        on.clone(),
-                        evaluator,
-                        left_nulls,
-                        right_nulls,
-                        work_mem,
-                    )))
+                (JoinExecutionStrategy::Hash, None) => {
+                    return Err(SQLError::Internal(
+                        "DPccp hash-join strategy has no splittable equality predicate".into(),
+                    ));
                 }
-                (JoinExecutionStrategy::Hash, None) => Err(SQLError::Internal(
-                    "DPccp hash-join strategy has no splittable equality predicate".into(),
-                )),
+            };
+            if let Some(using) = resolved_using.as_ref() {
+                shape_join_using_output(joined, *kind, &left_schema, &right_schema, using)
+            } else {
+                Ok(joined)
             }
         }
         SourcePlan::Values {
@@ -683,6 +713,21 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             alias,
             column_aliases,
         } => {
+            let source_columns = if column_aliases.is_empty() {
+                (0..rows.first().map_or(0, Vec::len))
+                    .map(|index| format!("column{}", index + 1))
+                    .collect::<Vec<_>>()
+            } else {
+                column_aliases.clone()
+            };
+            let columns = source_columns
+                .into_iter()
+                .map(|column| {
+                    alias
+                        .as_deref()
+                        .map_or_else(|| column.clone(), |qual| qualified_key(qual, &column))
+                })
+                .collect();
             let hook = ScopedEngineHook::new(engine, ctes);
             let rows = build_values_rows(
                 rows,
@@ -693,19 +738,6 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                 &hook,
                 &ctes.scalar_subqueries,
             )?;
-            let columns = rows.first().map_or_else(
-                || {
-                    column_aliases
-                        .iter()
-                        .map(|column| {
-                            alias
-                                .as_deref()
-                                .map_or_else(|| column.clone(), |qual| qualified_key(qual, column))
-                        })
-                        .collect()
-                },
-                |row| row.keys().cloned().collect(),
-            );
             Ok(Box::new(uqa_execution::TableScan::from_rows(columns, rows)))
         }
         SourcePlan::Function {
@@ -737,10 +769,14 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                 .next()
                 .transpose()
                 .map_err(crate::sql::select::physical_exec_error)?;
-            let columns = first.as_ref().map_or_else(
-                || table_function_empty_schema(name, alias.as_deref(), column_aliases),
-                |row| row.keys().cloned().collect(),
-            );
+            let columns = if column_aliases.is_empty() {
+                first.as_ref().map_or_else(
+                    || table_function_empty_schema(name, alias.as_deref(), column_aliases),
+                    |row| row.keys().cloned().collect(),
+                )
+            } else {
+                table_function_empty_schema(name, alias.as_deref(), column_aliases)
+            };
             let rows = first.into_iter().map(Ok).chain(rows);
             Ok(Box::new(uqa_execution::RowIteratorScan::new(
                 columns,

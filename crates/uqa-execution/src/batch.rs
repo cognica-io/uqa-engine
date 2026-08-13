@@ -43,6 +43,8 @@ struct SchemaIndex {
     /// use this to expose `alias.column` without duplicating the value.
     aliases: HashMap<Box<str>, usize>,
     alias_qualified: HashMap<Box<str>, HashMap<Box<str>, usize>>,
+    /// Visible unqualified names with more than one logical owner.
+    ambiguous_unqualified: HashSet<Box<str>>,
 }
 
 /// Immutable column layout shared by an operator and all of its batches.
@@ -73,6 +75,22 @@ impl RowSchema {
         Self::from_parts(columns, (0..width).collect(), width)
     }
 
+    /// Build the lookup semantics of a named compatibility row. An exact bare
+    /// key in a map is authoritative even when qualified metadata keys share
+    /// its suffix; physical relational schemas continue to treat multiple
+    /// visible owners as ambiguous.
+    pub fn from_named_columns(columns: Vec<String>) -> Self {
+        let width = columns.len();
+        Self::from_parts_with_aliases_and_exact_precedence(
+            columns,
+            (0..width).collect(),
+            width,
+            HashMap::new(),
+            true,
+            HashSet::new(),
+        )
+    }
+
     fn from_parts(columns: Vec<String>, slots: Vec<usize>, physical_width: usize) -> Self {
         Self::from_parts_with_aliases(columns, slots, physical_width, HashMap::new())
     }
@@ -83,17 +101,42 @@ impl RowSchema {
         physical_width: usize,
         aliases: HashMap<Box<str>, usize>,
     ) -> Self {
+        Self::from_parts_with_aliases_and_exact_precedence(
+            columns,
+            slots,
+            physical_width,
+            aliases,
+            false,
+            HashSet::new(),
+        )
+    }
+
+    fn from_parts_with_aliases_and_exact_precedence(
+        columns: Vec<String>,
+        slots: Vec<usize>,
+        physical_width: usize,
+        aliases: HashMap<Box<str>, usize>,
+        exact_unqualified_precedence: bool,
+        extra_ambiguous_unqualified: HashSet<Box<str>>,
+    ) -> Self {
         debug_assert_eq!(columns.len(), slots.len());
         let mut exact = HashMap::with_capacity(columns.len());
         let mut qualified: HashMap<Box<str>, HashMap<Box<str>, usize>> = HashMap::new();
         let mut alias_qualified: HashMap<Box<str>, HashMap<Box<str>, usize>> = HashMap::new();
         let mut suffix_candidates: HashMap<Box<str>, (String, usize)> = HashMap::new();
+        let mut unqualified_counts: HashMap<Box<str>, usize> = HashMap::new();
         let mut qualified_owners = HashSet::new();
 
         for (logical, name) in columns.iter().enumerate() {
             // Later writes to the same named field replace the value in a
             // ResultRow. Schema transforms preserve that contract.
             exact.insert(Box::<str>::from(name.as_str()), logical);
+            let unqualified = name
+                .rsplit_once('.')
+                .map_or(name.as_str(), |(_, column)| column);
+            *unqualified_counts
+                .entry(Box::<str>::from(unqualified))
+                .or_default() += 1;
             if let Some((qualifier, column)) = name.rsplit_once('.') {
                 qualified
                     .entry(Box::<str>::from(qualifier))
@@ -126,6 +169,16 @@ impl RowSchema {
             .into_iter()
             .map(|(column, (_, logical))| (column, logical))
             .collect();
+        let mut ambiguous_unqualified: HashSet<Box<str>> = unqualified_counts
+            .into_iter()
+            .filter_map(|(column, count)| {
+                (count > 1
+                    && !(exact_unqualified_precedence
+                        && columns.iter().any(|name| name == column.as_ref())))
+                .then_some(column)
+            })
+            .collect();
+        ambiguous_unqualified.extend(extra_ambiguous_unqualified);
         Self {
             index: Arc::new(SchemaIndex {
                 columns: columns.into_boxed_slice(),
@@ -137,6 +190,7 @@ impl RowSchema {
                 qualified_owners,
                 aliases,
                 alias_qualified,
+                ambiguous_unqualified,
             }),
         }
     }
@@ -183,12 +237,19 @@ impl RowSchema {
     }
 
     fn column_slot(&self, name: &str) -> Option<usize> {
+        if !name.contains('.') && self.index.ambiguous_unqualified.contains(name) {
+            return None;
+        }
         self.exact_slot(name).or_else(|| {
             self.index
                 .suffix
                 .get(name)
                 .and_then(|logical| self.slot(*logical))
         })
+    }
+
+    pub fn column_is_ambiguous(&self, name: &str) -> bool {
+        !name.contains('.') && self.index.ambiguous_unqualified.contains(name)
     }
 
     fn qualified_slot(&self, qualifier: &str, column: &str, key: &str) -> Option<usize> {
@@ -363,6 +424,104 @@ impl RowSchema {
         )
     }
 
+    /// Select logical input positions and attach hidden lookup identities
+    /// without copying their physical values. Existing hidden aliases are
+    /// retained, so nested join qualification survives another remap.
+    pub(crate) fn remap_positions(
+        input: &Self,
+        columns: &[(String, usize)],
+        aliases: &[(String, usize)],
+    ) -> Self {
+        let output_names = columns
+            .iter()
+            .map(|(output, _)| output.clone())
+            .collect::<Vec<_>>();
+        let slots = columns
+            .iter()
+            .map(|(_, logical)| input.slot(*logical).unwrap_or(NULL_SLOT))
+            .collect();
+        let mut lookup_aliases = input.index.aliases.clone();
+        for (alias, logical) in aliases {
+            lookup_aliases.insert(
+                Box::<str>::from(alias.as_str()),
+                input.slot(*logical).unwrap_or(NULL_SLOT),
+            );
+        }
+        Self::from_parts_with_aliases(output_names, slots, input.physical_width(), lookup_aliases)
+    }
+
+    /// Overlay a correlated outer scope without exposing its columns to star expansion. Current-scope names and relation qualifiers shadow outer names, while an ambiguous outer unqualified name remains ambiguous when the current scope has no owner.
+    pub(crate) fn with_outer_scope(input: &Self, outer_columns: &[String]) -> Self {
+        let outer_base = input.physical_width();
+        let current_qualifiers = input
+            .index
+            .qualified
+            .keys()
+            .chain(input.index.alias_qualified.keys())
+            .map(std::convert::AsRef::as_ref)
+            .collect::<HashSet<_>>();
+        let mut current_unqualified = input
+            .columns()
+            .iter()
+            .map(|column| {
+                column
+                    .rsplit_once('.')
+                    .map_or(column.as_str(), |(_, name)| name)
+            })
+            .collect::<HashSet<_>>();
+        current_unqualified.extend(
+            input
+                .index
+                .aliases
+                .keys()
+                .filter(|name| !name.contains('.'))
+                .map(std::convert::AsRef::as_ref),
+        );
+
+        let mut aliases = input.index.aliases.clone();
+        let mut outer_exact = HashSet::<&str>::new();
+        let mut outer_qualified = HashMap::<&str, Vec<usize>>::new();
+        for (position, name) in outer_columns.iter().enumerate() {
+            let slot = outer_base + position;
+            if let Some((qualifier, column)) = name.rsplit_once('.') {
+                if !current_qualifiers.contains(qualifier) {
+                    aliases.insert(Box::<str>::from(name.as_str()), slot);
+                    outer_qualified.entry(column).or_default().push(position);
+                }
+            } else {
+                outer_exact.insert(name);
+                if !current_unqualified.contains(name.as_str()) {
+                    aliases.insert(Box::<str>::from(name.as_str()), slot);
+                }
+            }
+        }
+
+        let mut outer_ambiguous = HashSet::new();
+        for (column, positions) in outer_qualified {
+            if current_unqualified.contains(column) || outer_exact.contains(column) {
+                continue;
+            }
+            match positions.as_slice() {
+                [position] => {
+                    aliases.insert(Box::<str>::from(column), outer_base + position);
+                }
+                [_, _, ..] => {
+                    outer_ambiguous.insert(Box::<str>::from(column));
+                }
+                [] => {}
+            }
+        }
+
+        Self::from_parts_with_aliases_and_exact_precedence(
+            input.columns().to_vec(),
+            input.index.slots.to_vec(),
+            input.physical_width() + outer_columns.len(),
+            aliases,
+            false,
+            outer_ambiguous,
+        )
+    }
+
     /// Append freshly-computed values to an existing physical row. Reusing an
     /// existing output name replaces its logical slot just like map insertion.
     pub fn append(input: &Self, names: &[String]) -> Self {
@@ -386,9 +545,9 @@ impl RowSchema {
         )
     }
 
-    /// Compose two child layouts. The right side replaces duplicate field
-    /// names, matching `ResultRow::insert`, while all value fragments remain
-    /// shared.
+    /// Compose two child layouts while retaining duplicate logical labels.
+    /// Qualified and positional resolution can then distinguish both input
+    /// slots without copying either value fragment.
     pub fn join(
         left: &Self,
         right: &Self,
@@ -412,12 +571,8 @@ impl RowSchema {
             let slot = right
                 .slot(right_logical)
                 .map_or(NULL_SLOT, |slot| right_base + slot);
-            if let Some(position) = columns.iter().position(|existing| existing == column) {
-                slots[position] = slot;
-            } else {
-                columns.push(column.clone());
-                slots.push(slot);
-            }
+            columns.push(column.clone());
+            slots.push(slot);
         }
         for column in extra_columns {
             if !columns.contains(&column) {
@@ -687,6 +842,10 @@ impl RowLookup for PhysicalRowView<'_> {
             .and_then(|slot| self.row.value(slot))
     }
 
+    fn column_is_ambiguous(&self, name: &str) -> bool {
+        self.schema.column_is_ambiguous(name)
+    }
+
     fn qualified_column(&self, qualifier: &str, column: &str, key: &str) -> Option<&Value> {
         self.schema
             .qualified_slot(qualifier, column, key)
@@ -749,6 +908,10 @@ impl RowLookup for OwnedPhysicalRow {
         self.schema
             .column_slot(name)
             .and_then(|slot| self.row.value(slot))
+    }
+
+    fn column_is_ambiguous(&self, name: &str) -> bool {
+        self.schema.column_is_ambiguous(name)
     }
 
     fn qualified_column(&self, qualifier: &str, column: &str, key: &str) -> Option<&Value> {
@@ -861,6 +1024,19 @@ mod tests {
             view.qualified_column("customer", "id", "customer.id"),
             Some(&Value::Int(2))
         );
+    }
+
+    #[test]
+    fn named_map_exact_key_precedes_qualified_metadata_suffixes() {
+        let schema =
+            RowSchema::from_named_columns(vec!["id".into(), "old.id".into(), "new.id".into()]);
+        let row = PhysicalRow::from_values(vec![Value::Int(2), Value::Int(1), Value::Int(2)]);
+        let view = schema.view(&row);
+        assert!(!view.column_is_ambiguous("id"));
+        assert_eq!(view.column("id"), Some(&Value::Int(2)));
+
+        let relational = RowSchema::new(vec!["id".into(), "other.id".into()]);
+        assert!(relational.column_is_ambiguous("id"));
     }
 
     #[test]
