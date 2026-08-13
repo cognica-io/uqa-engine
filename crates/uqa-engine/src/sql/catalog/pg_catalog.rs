@@ -8,10 +8,10 @@
 
 use super::helpers::{
     all_schema_names, array_dimension_count, bool_value, catalog_name, catalog_ordinal,
-    catalog_usize, column_constraint_rows, current_user_name, current_user_oid, default_expr_text,
+    catalog_usize, constraint_catalog_rows, current_user_name, current_user_oid, default_expr_text,
     index_columns, indexdef, int_value, list_int, pg_type_len, pg_type_modifier, pg_type_oid,
     relation_oid, routine_type_oid, row, schema_oid, split_index_name, split_schema_name,
-    stable_oid, str_value, table_columns_for,
+    stable_oid, str_value, table_columns_for, PG18_BUILTIN_ROUTINES,
 };
 use super::{
     registered_names, routine_signature_types, value_to_text, ColumnType, Engine, ResultRow,
@@ -204,10 +204,14 @@ pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
                 ty: ColumnType::Text,
                 primary_key: false,
                 not_null: false,
+                not_null_explicit: false,
+                not_null_name: None,
                 auto_increment: false,
                 unique: false,
                 default: None,
                 check: None,
+                check_name: None,
+                check_enforced: true,
                 references: None,
             };
             out.push(pg_attribute_row(
@@ -298,40 +302,78 @@ pub(super) fn build_pg_attrdef(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
 }
 
 pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    Ok(column_constraint_rows(engine)?
+    Ok(constraint_catalog_rows(engine)?
         .into_iter()
-        .map(|(schema, table, _column, constraint, kind, ordinal)| {
-            let contype = match kind.as_str() {
-                "PRIMARY KEY" => "p",
-                "UNIQUE" => "u",
-                "FOREIGN KEY" => "f",
-                "CHECK" => "c",
-                _ => "c",
+        .map(|constraint| {
+            let foreign_key = constraint.foreign_key.as_ref();
+            let conkey: Vec<i64> = constraint
+                .columns
+                .iter()
+                .map(|column| column.table_ordinal)
+                .collect();
+            let conkey = if conkey.is_empty() {
+                Value::Null
+            } else {
+                list_int(&conkey)
             };
+            let confkey = foreign_key.map_or(Value::Null, |foreign_key| {
+                list_int(&foreign_key.column_ordinals)
+            });
             row([
                 (
                     "oid",
-                    int_value(stable_oid("constraint", &format!("{schema}.{constraint}"))),
+                    int_value(stable_oid(
+                        "constraint",
+                        &format!(
+                            "{}.{}.{}",
+                            constraint.schema, constraint.table, constraint.name
+                        ),
+                    )),
                 ),
-                ("conname", str_value(constraint)),
-                ("connamespace", int_value(schema_oid(&schema))),
-                ("contype", str_value(contype)),
+                ("conname", str_value(constraint.name)),
+                ("connamespace", int_value(schema_oid(&constraint.schema))),
+                ("contype", str_value(constraint.kind.pg_type())),
                 ("condeferrable", bool_value(false)),
                 ("condeferred", bool_value(false)),
-                ("convalidated", bool_value(true)),
-                ("conrelid", int_value(relation_oid("r", &schema, &table))),
+                ("conenforced", bool_value(constraint.enforced)),
+                ("convalidated", bool_value(constraint.enforced)),
+                (
+                    "conrelid",
+                    int_value(relation_oid("r", &constraint.schema, &constraint.table)),
+                ),
                 ("contypid", int_value(0)),
                 ("conindid", int_value(0)),
                 ("conparentid", int_value(0)),
-                ("confrelid", int_value(0)),
-                ("confupdtype", str_value("a")),
-                ("confdeltype", str_value("a")),
-                ("confmatchtype", str_value("s")),
+                (
+                    "confrelid",
+                    int_value(foreign_key.map_or(0, |foreign_key| {
+                        relation_oid("r", &foreign_key.schema, &foreign_key.table)
+                    })),
+                ),
+                (
+                    "confupdtype",
+                    str_value(foreign_key.map_or(" ", |foreign_key| {
+                        foreign_key_action_code(foreign_key.on_update)
+                    })),
+                ),
+                (
+                    "confdeltype",
+                    str_value(foreign_key.map_or(" ", |foreign_key| {
+                        foreign_key_action_code(foreign_key.on_delete)
+                    })),
+                ),
+                (
+                    "confmatchtype",
+                    str_value(foreign_key.map_or(" ", |foreign_key| {
+                        foreign_key_match_code(foreign_key.match_type)
+                    })),
+                ),
                 ("conislocal", bool_value(true)),
                 ("coninhcount", int_value(0)),
-                ("connoinherit", bool_value(true)),
-                ("conkey", list_int(&[ordinal])),
-                ("confkey", Value::Null),
+                ("connoinherit", bool_value(constraint.kind.no_inherit())),
+                ("conperiod", bool_value(false)),
+                ("conkey", conkey),
+                ("confkey", confkey),
                 ("conpfeqop", Value::Null),
                 ("conppeqop", Value::Null),
                 ("conffeqop", Value::Null),
@@ -340,6 +382,23 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
             ])
         })
         .collect())
+}
+
+const fn foreign_key_action_code(action: uqa_sql::ast::ForeignKeyAction) -> &'static str {
+    match action {
+        uqa_sql::ast::ForeignKeyAction::NoAction => "a",
+        uqa_sql::ast::ForeignKeyAction::Restrict => "r",
+        uqa_sql::ast::ForeignKeyAction::Cascade => "c",
+        uqa_sql::ast::ForeignKeyAction::SetNull => "n",
+        uqa_sql::ast::ForeignKeyAction::SetDefault => "d",
+    }
+}
+
+const fn foreign_key_match_code(match_type: uqa_sql::ast::ForeignKeyMatch) -> &'static str {
+    match match_type {
+        uqa_sql::ast::ForeignKeyMatch::Simple => "s",
+        uqa_sql::ast::ForeignKeyMatch::Full => "f",
+    }
 }
 
 pub(super) fn build_pg_index(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
@@ -498,43 +557,105 @@ pub(super) fn build_pg_type() -> Vec<ResultRow> {
 }
 
 pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    let mut rows: Vec<ResultRow> = registered_names()
-        .into_iter()
-        .map(|name| {
-            row([
-                ("oid", int_value(stable_oid("proc", name))),
-                ("proname", str_value(name)),
+    let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINES
+        .iter()
+        .map(|routine| {
+            Ok(row([
+                ("oid", int_value(routine.oid)),
+                ("proname", str_value(routine.name)),
                 ("pronamespace", int_value(schema_oid("pg_catalog"))),
                 ("proowner", int_value(current_user_oid())),
-                ("prolang", int_value(0)),
+                ("prolang", int_value(12)),
                 ("procost", Value::Float(1.0)),
                 ("prorows", Value::Float(0.0)),
                 ("provariadic", int_value(0)),
                 ("prosupport", str_value("-")),
-                ("prokind", str_value("f")),
+                ("prokind", str_value(routine.kind)),
                 ("prosecdef", bool_value(false)),
-                ("proleakproof", bool_value(false)),
-                ("proisstrict", bool_value(false)),
+                ("proleakproof", bool_value(routine.leakproof)),
+                ("proisstrict", bool_value(routine.strict)),
                 ("proretset", bool_value(false)),
-                ("provolatile", str_value("s")),
+                ("provolatile", str_value(routine.volatility)),
                 ("proparallel", str_value("s")),
-                ("pronargs", int_value(0)),
-                ("pronargdefaults", int_value(0)),
-                ("prorettype", int_value(25)),
-                ("proargtypes", Value::List(Vec::new())),
+                (
+                    "pronargs",
+                    int_value(catalog_usize(
+                        routine.argument_types.len(),
+                        "pg_proc built-in argument count",
+                    )?),
+                ),
+                (
+                    "pronargdefaults",
+                    int_value(catalog_usize(
+                        routine.default_arguments,
+                        "pg_proc built-in default argument count",
+                    )?),
+                ),
+                ("prorettype", int_value(routine.return_type)),
+                ("proargtypes", list_int(routine.argument_types)),
                 ("proallargtypes", Value::Null),
                 ("proargmodes", Value::Null),
-                ("proargnames", Value::Null),
-                ("proargdefaults", Value::Null),
+                (
+                    "proargnames",
+                    if routine.argument_names.is_empty() {
+                        Value::Null
+                    } else {
+                        Value::List(
+                            routine
+                                .argument_names
+                                .iter()
+                                .map(|name| str_value(*name))
+                                .collect(),
+                        )
+                    },
+                ),
+                (
+                    "proargdefaults",
+                    routine.argument_defaults.map_or(Value::Null, str_value),
+                ),
                 ("protrftypes", Value::Null),
-                ("prosrc", str_value(name)),
+                ("prosrc", str_value(routine.source)),
                 ("probin", Value::Null),
                 ("prosqlbody", Value::Null),
                 ("proconfig", Value::Null),
                 ("proacl", Value::Null),
-            ])
+            ]))
         })
-        .collect();
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    rows.extend(registered_names().into_iter().map(|name| {
+        row([
+            ("oid", int_value(stable_oid("proc", name))),
+            ("proname", str_value(name)),
+            ("pronamespace", int_value(schema_oid("pg_catalog"))),
+            ("proowner", int_value(current_user_oid())),
+            ("prolang", int_value(0)),
+            ("procost", Value::Float(1.0)),
+            ("prorows", Value::Float(0.0)),
+            ("provariadic", int_value(0)),
+            ("prosupport", str_value("-")),
+            ("prokind", str_value("f")),
+            ("prosecdef", bool_value(false)),
+            ("proleakproof", bool_value(false)),
+            ("proisstrict", bool_value(false)),
+            ("proretset", bool_value(false)),
+            ("provolatile", str_value("s")),
+            ("proparallel", str_value("s")),
+            ("pronargs", int_value(0)),
+            ("pronargdefaults", int_value(0)),
+            ("prorettype", int_value(25)),
+            ("proargtypes", Value::List(Vec::new())),
+            ("proallargtypes", Value::Null),
+            ("proargmodes", Value::Null),
+            ("proargnames", Value::Null),
+            ("proargdefaults", Value::Null),
+            ("protrftypes", Value::Null),
+            ("prosrc", str_value(name)),
+            ("probin", Value::Null),
+            ("prosqlbody", Value::Null),
+            ("proconfig", Value::Null),
+            ("proacl", Value::Null),
+        ])
+    }));
     for function in engine.list_sql_functions() {
         let def = &function.def;
         let (routine_schema, routine_name) = split_schema_name(&def.name)?;

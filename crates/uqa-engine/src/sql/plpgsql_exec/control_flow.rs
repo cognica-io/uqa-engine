@@ -8,7 +8,7 @@
 
 use super::{
     best_effort_cast, row_value, to_i64_value, Expr, Flow, FunctionReturns, Interpreter,
-    LoopSignal, PLpgSQLStmt, SQLError, SQLResult, Value,
+    LoopSignal, PLpgSQLReturnValue, PLpgSQLStmt, SQLError, SQLResult, Value,
 };
 
 impl Interpreter<'_> {
@@ -114,18 +114,24 @@ impl Interpreter<'_> {
         to_i64_value(&value)
     }
 
-    pub(super) fn exec_return(&mut self, expr: Option<&Expr>) -> Result<Flow, SQLError> {
-        if let Some(expr) = expr {
-            let context = if self.def.is_procedure {
+    pub(super) fn exec_return(
+        &mut self,
+        value: Option<&PLpgSQLReturnValue>,
+    ) -> Result<Flow, SQLError> {
+        if let Some(value) = value {
+            let is_expression = matches!(value, PLpgSQLReturnValue::Expr(_));
+            let context = if is_expression && self.def.is_procedure {
                 Some("RETURN cannot have a parameter in a procedure")
-            } else if self.is_set {
+            } else if is_expression && self.is_set {
                 Some("RETURN cannot have a parameter in function returning set")
-            } else if !self.out_datums.is_empty() {
+            } else if is_expression && !self.out_datums.is_empty() {
                 Some("RETURN cannot have a parameter in function with OUT parameters")
-            } else if matches!(
+            } else if is_expression
+                && matches!(
                 &self.def.returns,
                 FunctionReturns::Scalar { type_name } if type_name == "void"
-            ) {
+                )
+            {
                 Some("RETURN cannot have a parameter in function returning void")
             } else {
                 None
@@ -136,7 +142,10 @@ impl Interpreter<'_> {
                     message: message.into(),
                 });
             }
-            let value = self.eval_expr(expr)?;
+            if self.def.is_procedure || self.is_set || !self.out_datums.is_empty() {
+                return Ok(Flow::Return);
+            }
+            let value = self.eval_return_value(value)?;
             self.ret = match &self.def.returns {
                 FunctionReturns::Scalar { type_name } => best_effort_cast(&value, type_name)?,
                 _ => value,
@@ -164,7 +173,10 @@ impl Interpreter<'_> {
         Ok(Flow::Return)
     }
 
-    pub(super) fn exec_return_next(&mut self, expr: Option<&Expr>) -> Result<Flow, SQLError> {
+    pub(super) fn exec_return_next(
+        &mut self,
+        value: Option<&PLpgSQLReturnValue>,
+    ) -> Result<Flow, SQLError> {
         if !self.is_set {
             return Err(SQLError::Routine {
                 sqlstate: "42601".into(),
@@ -172,7 +184,7 @@ impl Interpreter<'_> {
             });
         }
         if !self.out_datums.is_empty() {
-            if expr.is_some() {
+            if matches!(value, Some(PLpgSQLReturnValue::Expr(_))) {
                 return Err(SQLError::Routine {
                     sqlstate: "42601".into(),
                     message: "RETURN NEXT cannot have a parameter in function with OUT parameters"
@@ -187,19 +199,62 @@ impl Interpreter<'_> {
             self.set_rows.push(row);
             return Ok(Flow::Normal);
         }
-        let Some(expr) = expr else {
+        let Some(value) = value else {
             return Err(SQLError::Routine {
                 sqlstate: "42601".into(),
                 message: "RETURN NEXT must have a parameter".into(),
             });
         };
-        let value = self.eval_expr(expr)?;
+        let value = self.eval_return_value(value)?;
         let value = match &self.def.returns {
             FunctionReturns::SetOf { type_name } => best_effort_cast(&value, type_name)?,
             _ => value,
         };
         self.set_rows.push(vec![value]);
         Ok(Flow::Normal)
+    }
+
+    fn eval_return_value(&self, value: &PLpgSQLReturnValue) -> Result<Value, SQLError> {
+        match value {
+            PLpgSQLReturnValue::Expr(expr) => self.eval_expr(expr),
+            PLpgSQLReturnValue::Datum(index) => match self.datums.get(*index) {
+                Some(uqa_sql::plpgsql::PLpgSQLDatum::Var(variable))
+                    if variable.name.eq_ignore_ascii_case("sqlstate") =>
+                {
+                    Ok(self
+                        .err_stack
+                        .last()
+                        .map(|(state, _)| Value::Str(state.clone()))
+                        .unwrap_or_else(|| self.values[*index].clone()))
+                }
+                Some(uqa_sql::plpgsql::PLpgSQLDatum::Var(variable))
+                    if variable.name.eq_ignore_ascii_case("sqlerrm") =>
+                {
+                    Ok(self
+                        .err_stack
+                        .last()
+                        .map(|(_, message)| Value::Str(message.clone()))
+                        .unwrap_or_else(|| self.values[*index].clone()))
+                }
+                Some(
+                    uqa_sql::plpgsql::PLpgSQLDatum::Var(_)
+                    | uqa_sql::plpgsql::PLpgSQLDatum::Rec { .. },
+                ) => Ok(self.values[*index].clone()),
+                Some(uqa_sql::plpgsql::PLpgSQLDatum::Row { fields }) => {
+                    let mut row = std::collections::BTreeMap::new();
+                    for field in fields {
+                        row.insert(field.name.clone(), self.values[field.varno].clone());
+                    }
+                    Ok(Value::Map(row))
+                }
+                Some(_) => Err(SQLError::Internal(format!(
+                    "PL/pgSQL retvarno {index} is not a returnable datum"
+                ))),
+                None => Err(SQLError::Internal(format!(
+                    "PL/pgSQL RETURN references missing datum {index}"
+                ))),
+            },
+        }
     }
 
     pub(super) fn append_query_rows(&mut self, result: &SQLResult) -> Result<(), SQLError> {

@@ -12,9 +12,10 @@ use super::{
     dml_returning_result, dml_storage_error, doc_id_value, document_supplied_id, encode_merge_pair,
     eval_mutation_expr, insert_document_with_constraints, insert_identity_columns,
     merge_pair_schema, merge_source_index_row, missing_document_error, prefix_row,
-    rewrite_document_with_referential_actions, validate_mutation_columns, BTreeSet, CteScope,
-    DocId, Document, Engine, MergePlan, MergeWhenPlan, ProjectionPlan, ResultRow, SQLError,
-    SQLParam, SQLResult, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
+    returning_row_context, rewrite_document_with_referential_actions, validate_mutation_columns,
+    BTreeSet, CteScope, Document, Engine, MergePlan, MergeWhenPlan, ProjectionPlan, ResultRow,
+    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
+    MERGE_ACTION_COLUMN,
 };
 
 #[allow(clippy::too_many_lines)]
@@ -261,8 +262,17 @@ pub(in crate::sql) fn run_merge_inner(
                                 MergeReturningRow {
                                     target_table: &target_table,
                                     target_qual: &target_qual,
-                                    doc_id: rewritten_doc_id,
-                                    document: &doc,
+                                    images: ReturningRowImages {
+                                        old: Some(ReturningRowImage {
+                                            doc_id,
+                                            document: &original_doc,
+                                        }),
+                                        new: Some(ReturningRowImage {
+                                            doc_id: rewritten_doc_id,
+                                            document: &doc,
+                                        }),
+                                    },
+                                    returning_aliases: &stmt.returning_aliases,
                                     source_row: pair.source_row.as_ref(),
                                     action: "UPDATE",
                                 },
@@ -303,8 +313,14 @@ pub(in crate::sql) fn run_merge_inner(
                                 MergeReturningRow {
                                     target_table: &target_table,
                                     target_qual: &target_qual,
-                                    doc_id,
-                                    document: doc,
+                                    images: ReturningRowImages {
+                                        old: Some(ReturningRowImage {
+                                            doc_id,
+                                            document: doc,
+                                        }),
+                                        new: None,
+                                    },
+                                    returning_aliases: &stmt.returning_aliases,
                                     source_row: pair.source_row.as_ref(),
                                     action: "DELETE",
                                 },
@@ -370,8 +386,14 @@ pub(in crate::sql) fn run_merge_inner(
                             MergeReturningRow {
                                 target_table: &target_table,
                                 target_qual: &target_qual,
-                                doc_id,
-                                document: &inserted,
+                                images: ReturningRowImages {
+                                    old: None,
+                                    new: Some(ReturningRowImage {
+                                        doc_id,
+                                        document: &inserted,
+                                    }),
+                                },
+                                returning_aliases: &stmt.returning_aliases,
                                 source_row: pair.source_row.as_ref(),
                                 action: "INSERT",
                             },
@@ -402,8 +424,8 @@ pub(in crate::sql) fn run_merge_inner(
 pub(in crate::sql) struct MergeReturningRow<'a> {
     target_table: &'a str,
     target_qual: &'a str,
-    doc_id: DocId,
-    document: &'a Document,
+    images: ReturningRowImages<'a>,
+    returning_aliases: &'a uqa_sql::ast::ReturningAliases,
     source_row: Option<&'a ResultRow>,
     action: &'a str,
 }
@@ -415,10 +437,19 @@ pub(in crate::sql) fn build_merge_returning_row(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<ResultRow, SQLError> {
-    let mut row_doc = input.document.clone();
-    row_doc.insert(DOC_ID_COLUMN.into(), doc_id_value(input.doc_id)?);
+    let current = input
+        .images
+        .new
+        .or(input.images.old)
+        .ok_or_else(|| SQLError::Internal("MERGE RETURNING has no target row image".into()))?;
+    let mut row_doc = returning_row_context(
+        engine,
+        input.target_table,
+        input.images,
+        input.returning_aliases,
+    )?;
     row_doc.insert(MERGE_ACTION_COLUMN.into(), Value::Str(input.action.into()));
-    for (key, value) in prefix_row(input.target_qual, input.document) {
+    for (key, value) in prefix_row(input.target_qual, current.document) {
         row_doc.insert(key, value);
     }
     if let Some(source) = input.source_row {
@@ -429,7 +460,7 @@ pub(in crate::sql) fn build_merge_returning_row(
     build_projection_row_with_ctes(engine, &row_doc, returning, params, ctes).map_err(|err| {
         SQLError::Internal(format!(
             "MERGE RETURNING projection failed for table `{}` doc {}: {err}",
-            input.target_table, input.doc_id
+            input.target_table, current.doc_id
         ))
     })
 }

@@ -143,8 +143,8 @@ impl Interpreter<'_> {
                     Ok(Flow::Continue(label.clone()))
                 }
             }
-            PLpgSQLStmt::Return { expr } => self.exec_return(expr.as_ref()),
-            PLpgSQLStmt::ReturnNext { expr } => self.exec_return_next(expr.as_ref()),
+            PLpgSQLStmt::Return { value } => self.exec_return(value.as_ref()),
+            PLpgSQLStmt::ReturnNext { value } => self.exec_return_next(value.as_ref()),
             PLpgSQLStmt::ReturnQuery { query } => {
                 if !self.is_set {
                     return Err(return_query_context_error());
@@ -198,6 +198,23 @@ impl Interpreter<'_> {
                 let row_count = result_row_count(&result)?;
                 self.last_row_count = row_count;
                 self.set_found(row_count > 0);
+                Ok(Flow::Normal)
+            }
+            PLpgSQLStmt::OpenCursor { cursor, arguments } => {
+                self.exec_open_cursor(*cursor, arguments)?;
+                Ok(Flow::Normal)
+            }
+            PLpgSQLStmt::FetchCursor {
+                cursor,
+                target,
+                direction,
+                count,
+            } => {
+                self.exec_fetch_cursor(*cursor, target, *direction, *count)?;
+                Ok(Flow::Normal)
+            }
+            PLpgSQLStmt::CloseCursor { cursor } => {
+                self.exec_close_cursor(*cursor)?;
                 Ok(Flow::Normal)
             }
             PLpgSQLStmt::GetDiagnostics { items } => {

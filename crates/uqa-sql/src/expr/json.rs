@@ -807,17 +807,20 @@ fn json_set_path(
         _ => false,
     }
 }
-pub(super) fn strip_nulls(value: &mut serde_json::Value) {
+pub(super) fn strip_nulls(value: &mut serde_json::Value, strip_in_arrays: bool) {
     match value {
         serde_json::Value::Object(obj) => {
             obj.retain(|_, v| !v.is_null());
             for v in obj.values_mut() {
-                strip_nulls(v);
+                strip_nulls(v, strip_in_arrays);
             }
         }
         serde_json::Value::Array(arr) => {
+            if strip_in_arrays {
+                arr.retain(|value| !value.is_null());
+            }
             for v in arr.iter_mut() {
-                strip_nulls(v);
+                strip_nulls(v, strip_in_arrays);
             }
         }
         _ => {}

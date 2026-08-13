@@ -5,12 +5,13 @@ UQA-RS deliberately uses PostgreSQL-oriented syntax and behavior while remaining
 ## Compatibility baseline
 
 - SQL parsing uses PostgreSQL grammar through `libpg_query`.
-- Session metadata reports `server_version` as `17.0-uqa`.
-- The repository checks all 22 deterministic TPC-H-derived scale-factor `0.001` query results against PostgreSQL 17.10 fixtures.
+- Session metadata reports `server_version` as `18.0-uqa`.
+- The repository checks all 22 deterministic TPC-H-derived scale-factor `0.001` query results against PostgreSQL 18.4 fixtures.
+- The optional wire crate implements PostgreSQL protocol 3.0 through 3.2 codec primitives, minor-version negotiation, reserved startup-option reporting, and protocol-specific cancellation-key validation.
 - PostgreSQL-shaped `information_schema` and `pg_catalog` virtual relations support common inspection paths.
 - Apache AGE-shaped `cypher(...) AS (...)` integrates graph results into SQL.
 
-The fixture coverage is evidence for those queries and types, not a claim of complete PostgreSQL 17 compatibility.
+The fixture coverage is evidence for those queries and types, not a claim of complete PostgreSQL 18 compatibility.
 
 ## Embedded runtime differences
 
@@ -54,6 +55,8 @@ Use an equivalent implemented shape only when it preserves the application's sem
 
 ## DDL limits
 
+- Virtual and stored generated columns are not implemented.
+- `WITHOUT OVERLAPS` keys and `PERIOD` foreign keys are not implemented because range and multirange column types are not yet available.
 - Expression indexes are not implemented.
 - SQL index access methods are B-tree, GIN, IVF, and HNSW.
 - `DROP ... CASCADE` is rejected for implemented catalog objects.
@@ -83,7 +86,7 @@ Known mutable settings are `search_path`, `client_encoding`, `datestyle`, `timez
 
 ## Routine limits
 
-SQL and PL/pgSQL routines cover a broad tested subset, including overloads, defaults, set returns, procedures, control flow, dynamic SQL, recursion limits, diagnostics, and exception handling. They do not claim the full PL/pgSQL language, PostgreSQL extension languages, security-definer ecosystem, or server privilege model.
+SQL and PL/pgSQL routines cover a broad tested subset, including overloads, defaults, set returns, procedures, control flow, dynamic SQL, recursion limits, diagnostics, exception handling, and bound cursors used entirely within one routine activation. Dynamic cursor queries, `MOVE`, non-`NEXT` fetch directions, `refcursor` parameters and returns, and cursors that survive routine exit are not implemented because session portal state is not available. The routine surface does not claim the full PL/pgSQL language, PostgreSQL extension languages, security-definer ecosystem, or server privilege model.
 
 Volatility affects planning, but UQA-RS does not reproduce every PostgreSQL catalog and privilege consequence of routine declarations.
 

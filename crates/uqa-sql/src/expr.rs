@@ -29,8 +29,8 @@ use json::{
 };
 use time::{
     age_between, coerce_temporal, date_trunc_value, extract_from_value, format_pg_number,
-    format_temporal, generate_random_uuid, hex_encode, make_timestamp, parse_timestamp,
-    pg_to_chrono_fmt,
+    format_temporal, generate_random_uuid, generate_uuid_v7, hex_encode, make_timestamp,
+    parse_timestamp, pg_to_chrono_fmt,
 };
 mod binary;
 mod casting;
@@ -51,7 +51,7 @@ use binary::{
 };
 pub(crate) use binary::{division_by_zero, out_of_range};
 pub use binary::{eval_binary_values, eval_comparison_truth, truthy};
-pub use casting::{array_dimensions, cast_value, parse_pg_array_literal};
+pub use casting::{array_dimensions, cast_value, cast_value_from, parse_pg_array_literal};
 pub(crate) use conversion::to_f64;
 use conversion::{
     allocation_error, coerce_i64, expect_str, float1, float_to_i64_rounded, float_to_i64_trunc,
@@ -331,8 +331,9 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             }
         }
         Expr::Cast { expr, ty } => {
+            let source_ty = explicit_expr_type(expr);
             let v = eval(expr, ctx)?;
-            cast_value(&v, ty)
+            cast_value_from(&v, ty, source_ty)
         }
         Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => {
             Err(SQLError::Unsupported(
@@ -414,6 +415,15 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             }
             Ok(Value::Bool(*negated))
         }
+    }
+}
+
+fn explicit_expr_type(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Cast { ty, .. } => Some(ty),
+        Expr::Literal(Value::Int(_)) => Some("integer"),
+        Expr::Literal(Value::Bytes(_)) => Some("bytea"),
+        _ => None,
     }
 }
 
@@ -580,12 +590,8 @@ pub fn eval_function_call(
     }
 
     if call_args.iter().any(|(name, _)| name.is_some()) {
-        // `make_interval` is the one built-in that accepts named
-        // arguments; PostgreSQL declares defaults for every parameter.
-        if lower == "make_interval" {
-            if let Some(positional) = make_interval_named_args(&call_args) {
-                return eval_scalar_function(lower, &positional);
-            }
+        if let Some(positional) = builtin_named_args(lower, &call_args) {
+            return eval_scalar_function(lower, &positional);
         }
         if let Some(engine) = ctx.engine {
             if let Some(result) = engine.call_user_function(lower, &call_args) {
@@ -620,17 +626,123 @@ pub fn eval_function_call(
     }
 }
 
+fn builtin_named_args(function: &str, call_args: &[(Option<String>, Value)]) -> Option<Vec<Value>> {
+    let names: &[&str] = match function {
+        "regexp_count" => match call_args.len() {
+            2 => &["string", "pattern"],
+            3 => &["string", "pattern", "start"],
+            4 => &["string", "pattern", "start", "flags"],
+            _ => return None,
+        },
+        "regexp_like" => match call_args.len() {
+            2 => &["string", "pattern"],
+            3 => &["string", "pattern", "flags"],
+            _ => return None,
+        },
+        "regexp_substr" => match call_args.len() {
+            2 => &["string", "pattern"],
+            3 => &["string", "pattern", "start"],
+            4 => &["string", "pattern", "start", "n"],
+            5 => &["string", "pattern", "start", "n", "flags"],
+            6 => &["string", "pattern", "start", "n", "flags", "subexpr"],
+            _ => return None,
+        },
+        "regexp_instr" => match call_args.len() {
+            2 => &["string", "pattern"],
+            3 => &["string", "pattern", "start"],
+            4 => &["string", "pattern", "start", "n"],
+            5 => &["string", "pattern", "start", "n", "endoption"],
+            6 => &["string", "pattern", "start", "n", "endoption", "flags"],
+            7 => &[
+                "string",
+                "pattern",
+                "start",
+                "n",
+                "endoption",
+                "flags",
+                "subexpr",
+            ],
+            _ => return None,
+        },
+        "regexp_replace" => match call_args.len() {
+            3 => &["string", "pattern", "replacement"],
+            4 if call_args
+                .iter()
+                .any(|(name, _)| name.as_deref() == Some("flags")) =>
+            {
+                &["string", "pattern", "replacement", "flags"]
+            }
+            4 => &["string", "pattern", "replacement", "start"],
+            5 => &["string", "pattern", "replacement", "start", "n"],
+            6 => &["string", "pattern", "replacement", "start", "n", "flags"],
+            _ => return None,
+        },
+        "make_interval" => return make_interval_named_args(call_args),
+        _ => return None,
+    };
+    reorder_named_args(call_args, names)
+}
+
+fn reorder_named_args(
+    call_args: &[(Option<String>, Value)],
+    parameter_names: &[&str],
+) -> Option<Vec<Value>> {
+    if call_args.len() != parameter_names.len() {
+        return None;
+    }
+    let mut slots = vec![None; parameter_names.len()];
+    let mut positional_index = 0;
+    let mut saw_named = false;
+    for (name, value) in call_args {
+        let slot = if let Some(name) = name {
+            saw_named = true;
+            parameter_names
+                .iter()
+                .position(|candidate| candidate == name)?
+        } else {
+            if saw_named {
+                return None;
+            }
+            let slot = positional_index;
+            positional_index += 1;
+            slot
+        };
+        if slots.get(slot)?.is_some() {
+            return None;
+        }
+        slots[slot] = Some(value.clone());
+    }
+    slots.into_iter().collect()
+}
+
 /// Map `make_interval(name => value, ...)` onto the positional
 /// `(years, months, weeks, days, hours, mins, secs)` argument list.
 /// Returns `None` when an unknown parameter name appears.
 fn make_interval_named_args(call_args: &[(Option<String>, Value)]) -> Option<Vec<Value>> {
     const NAMES: [&str; 7] = ["years", "months", "weeks", "days", "hours", "mins", "secs"];
     let mut positional = vec![Value::Int(0); NAMES.len()];
-    for (idx, (name, value)) in call_args.iter().enumerate() {
+    let mut positional_index = 0;
+    let mut saw_named = false;
+    let mut assigned = [false; NAMES.len()];
+    for (name, value) in call_args {
         let slot = match name {
-            Some(name) => NAMES.iter().position(|n| n == name)?,
-            None => idx,
+            Some(name) => {
+                saw_named = true;
+                NAMES.iter().position(|candidate| candidate == name)?
+            }
+            None => {
+                if saw_named {
+                    return None;
+                }
+                let slot = positional_index;
+                positional_index += 1;
+                slot
+            }
         };
+        if slot >= NAMES.len() || assigned[slot] {
+            return None;
+        }
+        assigned[slot] = true;
         positional[slot] = value.clone();
     }
     Some(positional)

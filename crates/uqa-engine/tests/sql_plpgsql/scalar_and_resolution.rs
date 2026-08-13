@@ -83,6 +83,105 @@ fn named_arguments() {
 }
 
 #[test]
+fn pg18_bound_cursor_accepts_named_arguments() {
+    let eng = engine();
+    exec(
+        &eng,
+        "CREATE FUNCTION cursor_named(seed integer) RETURNS integer AS $$
+         DECLARE
+           c CURSOR (a integer, b integer) FOR SELECT a * 10 + b AS value;
+           out_value integer;
+         BEGIN
+           OPEN c(b => seed + 2, a => seed + 1);
+           FETCH c INTO out_value;
+           CLOSE c;
+           RETURN out_value;
+         END;
+         $$ LANGUAGE plpgsql",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT cursor_named(3) AS value"),
+        Value::Int(45)
+    );
+}
+
+#[test]
+fn pg18_bound_cursor_tracks_position_and_found() {
+    let eng = engine();
+    exec(&eng, "CREATE TABLE cursor_items (id integer PRIMARY KEY)");
+    exec(&eng, "INSERT INTO cursor_items VALUES (1), (2)");
+    exec(
+        &eng,
+        "CREATE FUNCTION cursor_walk() RETURNS integer AS $$
+         DECLARE
+           c CURSOR FOR SELECT id FROM cursor_items ORDER BY id;
+           first_value integer;
+           second_value integer;
+           exhausted_value integer := -1;
+         BEGIN
+           OPEN c;
+           FETCH c INTO first_value;
+           FETCH c INTO second_value;
+           FETCH c INTO exhausted_value;
+           IF FOUND THEN
+             CLOSE c;
+             RETURN -1;
+           END IF;
+           CLOSE c;
+           IF exhausted_value IS NOT NULL THEN
+             RETURN -2;
+           END IF;
+           RETURN first_value * 10 + second_value;
+         END;
+         $$ LANGUAGE plpgsql",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT cursor_walk() AS value"),
+        Value::Int(12)
+    );
+}
+
+#[test]
+fn cursor_contracts_requiring_session_portals_fail_explicitly() {
+    let eng = engine();
+    let returns_cursor = exec_err(
+        &eng,
+        "CREATE FUNCTION cursor_return() RETURNS refcursor AS $$ BEGIN RETURN NULL; END; $$ LANGUAGE plpgsql",
+    );
+    assert!(
+        returns_cursor
+            .to_string()
+            .contains("refcursor returns require session portal state"),
+        "got: {returns_cursor}"
+    );
+    let cursor_parameter = exec_err(
+        &eng,
+        "CREATE FUNCTION cursor_input(c refcursor) RETURNS integer AS $$ BEGIN RETURN 1; END; $$ LANGUAGE plpgsql",
+    );
+    assert!(
+        cursor_parameter
+            .to_string()
+            .contains("refcursor parameters require session portal state"),
+        "got: {cursor_parameter}"
+    );
+
+    exec(
+        &eng,
+        "CREATE FUNCTION cursor_leak() RETURNS integer AS $$
+         DECLARE c CURSOR FOR SELECT 1 AS value;
+         BEGIN OPEN c; RETURN 1; END;
+         $$ LANGUAGE plpgsql",
+    );
+    let open_cursor = exec_err(&eng, "SELECT cursor_leak()");
+    assert!(
+        open_cursor
+            .to_string()
+            .contains("cursors that remain open after routine exit require session portal state"),
+        "got: {open_cursor}"
+    );
+}
+
+#[test]
 fn out_parameters_shape_result() {
     let eng = engine();
     exec(

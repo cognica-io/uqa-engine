@@ -121,10 +121,14 @@ fn run_analyze_populates_column_stats() {
             ty: uqa_sql::ast::ColumnType::Text,
             primary_key: false,
             not_null: false,
+            not_null_explicit: false,
+            not_null_name: None,
             auto_increment: false,
             unique: false,
             default: None,
             check: None,
+            check_name: None,
+            check_enforced: true,
             references: None,
         }];
     }

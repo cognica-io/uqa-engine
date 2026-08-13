@@ -137,3 +137,45 @@ fn dml_scalar_subqueries_execute_query_plan_children() {
         .iter()
         .all(|row| row.get("qty") == Some(&Value::Int(7))));
 }
+
+#[test]
+fn postgresql_18_returning_exposes_old_and_new_row_images() {
+    let eng = corpus();
+
+    let inserted = eng
+        .sql(
+            "INSERT INTO items (id, label, qty) VALUES (5, 'elderberry', 11) \
+             RETURNING old.id IS NULL AS old_missing, new.id AS inserted_id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        inserted.rows[0].get("old_missing"),
+        Some(&Value::Bool(true))
+    );
+    assert_eq!(inserted.rows[0].get("inserted_id"), Some(&Value::Int(5)));
+
+    let updated = eng
+        .sql(
+            "UPDATE items SET qty = qty + 1 WHERE id = 2 \
+             RETURNING WITH (OLD AS before, NEW AS after) \
+             before.qty AS old_qty, after.qty AS new_qty",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(updated.rows[0].get("old_qty"), Some(&Value::Int(7)));
+    assert_eq!(updated.rows[0].get("new_qty"), Some(&Value::Int(8)));
+
+    let deleted = eng
+        .sql(
+            "DELETE FROM items WHERE id = 3 \
+             RETURNING old.label AS deleted_label, new.id IS NULL AS new_missing",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        deleted.rows[0].get("deleted_label"),
+        Some(&Value::Str("cherry".into()))
+    );
+    assert_eq!(deleted.rows[0].get("new_missing"), Some(&Value::Bool(true)));
+}

@@ -194,6 +194,7 @@ pub struct InsertPlan {
     pub source: Option<Box<QueryPlan>>,
     pub on_conflict: Option<ConflictPlan>,
     pub returning: Vec<ProjectionPlan>,
+    pub returning_aliases: uqa_sql::ast::ReturningAliases,
     pub subqueries: Vec<QueryPlan>,
 }
 
@@ -220,6 +221,7 @@ pub struct UpdatePlan {
     pub ctes: Vec<CtePlan>,
     pub source: Option<Box<SourcePlan>>,
     pub returning: Vec<ProjectionPlan>,
+    pub returning_aliases: uqa_sql::ast::ReturningAliases,
     pub subqueries: Vec<QueryPlan>,
 }
 
@@ -230,6 +232,7 @@ pub struct DeletePlan {
     pub ctes: Vec<CtePlan>,
     pub source: Option<Box<SourcePlan>>,
     pub returning: Vec<ProjectionPlan>,
+    pub returning_aliases: uqa_sql::ast::ReturningAliases,
     pub subqueries: Vec<QueryPlan>,
 }
 
@@ -241,6 +244,7 @@ pub struct MergePlan {
     pub join_condition: ScalarExpr,
     pub when_clauses: Vec<MergeWhenPlan>,
     pub returning: Vec<ProjectionPlan>,
+    pub returning_aliases: uqa_sql::ast::ReturningAliases,
     pub subqueries: Vec<QueryPlan>,
 }
 

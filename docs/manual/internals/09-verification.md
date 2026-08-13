@@ -24,7 +24,7 @@ flowchart TD
 | Storage tests | Catalog round trips, document stores, B-tree indexes, clustered postings, SQLite and redb parity |
 | Atomicity tests | Catalog, document, schema, graph, index, callback, transaction, and savepoint failure paths |
 | Reopen tests | SQLite DML, vector indexes, graph path indexes, analyzers, scoring parameters, routines |
-| Compatibility fixtures | PostgreSQL AGE shapes, TPC-H-derived PostgreSQL 17 results, SQL golden files |
+| Compatibility fixtures | PostgreSQL AGE shapes, TPC-H-derived PostgreSQL 18 results, SQL golden files |
 | Binding tests | CLI integration and parity, Python, Node.js, and WASM package checks in their build workflows |
 
 ## Standard workspace gates
@@ -73,7 +73,7 @@ An optimization may reduce work only after its result is compared with the exact
 
 ## Compatibility evidence
 
-The TPC-H-derived fixture runs all 22 queries and compares exact columns, row order, NULLs, text bytes, and type-aware canonical numeric values with checked-in PostgreSQL 17.10 output:
+The TPC-H-derived fixture runs all 22 queries and compares exact columns, row order, NULLs, text bytes, and type-aware canonical numeric values with checked-in PostgreSQL 18.4 output:
 
 ```sh
 cargo test -p uqa-engine --test sql_tpch

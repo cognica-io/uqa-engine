@@ -27,6 +27,7 @@ mod drop_alter;
 mod merge;
 mod names;
 mod relations;
+mod returning;
 mod routines;
 mod sequences;
 mod tree;
@@ -34,11 +35,20 @@ mod types;
 
 pub use dispatch::{compile, plan_only_for_test};
 
+pub(crate) fn compile_pg_expression(node: &Node) -> Result<Expr> {
+    compile_expr(node)
+}
+
+pub(crate) fn compile_pg_projections(nodes: &[Node]) -> Result<Vec<crate::ast::Projection>> {
+    compile_projections(nodes)
+}
+
 use names::render_relation_component;
 pub(super) use names::{
     compile_qualified_name, range_var_name, validate_create_table_envelope,
     validate_durable_create_relation,
 };
+pub(in crate::compiler) use returning::compile_returning_clause;
 
 use tree::{
     compile_column_def, compile_create_index, compile_create_table, compile_expr,

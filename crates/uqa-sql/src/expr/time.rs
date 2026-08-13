@@ -5,12 +5,14 @@
 //
 
 //! Temporal arithmetic, formatting, UUID, and hex helpers for scalar
-//! functions. Mirrors `PostgreSQL` 17 semantics: `date + int` stays a
+//! functions. Mirrors `PostgreSQL` 18 semantics: `date + int` stays a
 //! date, `date - date` counts days, intervals use the
 //! months/days/micros model, and `age()` produces the symbolic
 //! year/month decomposition.
 
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Timelike, Utc};
+use std::sync::atomic::{AtomicI64, Ordering as AtomicOrdering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use uqa_core::{DecimalValue, TemporalValue, Value};
 
 use crate::ast::BinaryOp;
@@ -22,6 +24,19 @@ const MICROS_PER_SECOND: i64 = 1_000_000;
 const MICROS_PER_MINUTE: i64 = 60 * MICROS_PER_SECOND;
 const MICROS_PER_HOUR: i64 = 3_600 * MICROS_PER_SECOND;
 const MICROS_PER_DAY: i64 = 86_400 * MICROS_PER_SECOND;
+const NANOS_PER_MICROSECOND: i64 = 1_000;
+const NANOS_PER_MILLISECOND: i64 = 1_000_000;
+const UUID_V7_SUBMILLISECOND_BITS: u32 = 12;
+const UUID_V7_MAX_UNIX_MILLISECONDS: i64 = 0x0000_ffff_ffff_ffff;
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+const UUID_V7_CLOCK_PRECISION_BITS: u32 = 10;
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const UUID_V7_CLOCK_PRECISION_BITS: u32 = 12;
+
+const UUID_V7_MINIMUM_STEP_NANOS: i64 =
+    NANOS_PER_MILLISECOND / (1_i64 << UUID_V7_CLOCK_PRECISION_BITS) + 1;
+static UUID_V7_PREVIOUS_NANOS: AtomicI64 = AtomicI64::new(0);
 
 fn epoch_date() -> NaiveDate {
     DateTime::<Utc>::UNIX_EPOCH.date_naive()
@@ -437,7 +452,15 @@ pub(super) fn extract_from_value(field: &str, value: &Value, as_numeric: bool) -
                     Ok(Value::Float(total as f64 / 1e6))
                 }
             }
-            "quarter" => int_result(i64::from((months % 12) / 3 + 1)),
+            "quarter" => {
+                let quarter = if *months < 0 {
+                    (months % 12) / 3 - 1
+                } else {
+                    (months % 12) / 3 + 1
+                };
+                int_result(i64::from(quarter))
+            }
+            "week" | "weeks" => int_result(i64::from(days / 7)),
             other => Err(SQLError::Unsupported(format!("EXTRACT field `{other}`"))),
         };
     }
@@ -654,20 +677,99 @@ pub(super) fn format_temporal(value: &TemporalValue, fmt: &str) -> Result<String
     Ok(naive.format(&pg_to_chrono_fmt(fmt)).to_string())
 }
 
-pub(super) fn generate_random_uuid() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let now_ns = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+pub(super) fn generate_random_uuid() -> Result<String> {
     let mut bytes = [0u8; 16];
-    bytes[..8].copy_from_slice(&now_ns.to_be_bytes());
-    bytes[8..].copy_from_slice(&counter.to_be_bytes());
-    // Set version 4 + variant per RFC 4122.
+    getrandom::fill(&mut bytes)
+        .map_err(|error| SQLError::Internal(format!("failed to obtain random bytes: {error}")))?;
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Ok(format_uuid(bytes))
+}
+
+pub(super) fn generate_uuid_v7(shift: Option<&TemporalValue>) -> Result<String> {
+    let now_nanos = real_time_nanos_ascending()?;
+    let now_micros = now_nanos.div_euclid(NANOS_PER_MICROSECOND);
+    let sub_microsecond_nanos = now_nanos.rem_euclid(NANOS_PER_MICROSECOND);
+    let timestamp_micros = match shift {
+        None => now_micros,
+        Some(TemporalValue::Interval {
+            months,
+            days,
+            micros,
+        }) => timestamp_plus_interval(now_micros, *months, *days, *micros)?,
+        Some(other) => {
+            return Err(SQLError::TypeMismatch(format!(
+                "uuidv7: expected interval, got {other:?}"
+            )));
+        }
+    };
+    let unix_millis = timestamp_micros.div_euclid(1_000);
+    if !(0..=UUID_V7_MAX_UNIX_MILLISECONDS).contains(&unix_millis) {
+        return Err(out_of_range("uuidv7 timestamp"));
+    }
+    let sub_millisecond_nanos = timestamp_micros
+        .rem_euclid(1_000)
+        .checked_mul(NANOS_PER_MICROSECOND)
+        .and_then(|nanos| nanos.checked_add(sub_microsecond_nanos))
+        .ok_or_else(|| out_of_range("uuidv7 timestamp"))?;
+    let sub_millisecond_nanos =
+        u32::try_from(sub_millisecond_nanos).map_err(|_| out_of_range("uuidv7 timestamp"))?;
+    generate_uuid_v7_at(unix_millis as u64, sub_millisecond_nanos)
+}
+
+fn real_time_nanos_ascending() -> Result<i64> {
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| out_of_range("uuidv7 timestamp"))?;
+    let actual = i64::try_from(elapsed.as_nanos()).map_err(|_| out_of_range("uuidv7 timestamp"))?;
+    loop {
+        let previous = UUID_V7_PREVIOUS_NANOS.load(AtomicOrdering::Relaxed);
+        let minimum = previous
+            .checked_add(UUID_V7_MINIMUM_STEP_NANOS)
+            .ok_or_else(|| out_of_range("uuidv7 timestamp"))?;
+        let candidate = if minimum >= actual { minimum } else { actual };
+        if UUID_V7_PREVIOUS_NANOS
+            .compare_exchange_weak(
+                previous,
+                candidate,
+                AtomicOrdering::Relaxed,
+                AtomicOrdering::Relaxed,
+            )
+            .is_ok()
+        {
+            return Ok(candidate);
+        }
+    }
+}
+
+fn generate_uuid_v7_at(unix_millis: u64, sub_millisecond_nanos: u32) -> Result<String> {
+    if unix_millis > UUID_V7_MAX_UNIX_MILLISECONDS as u64
+        || sub_millisecond_nanos >= NANOS_PER_MILLISECOND as u32
+    {
+        return Err(out_of_range("uuidv7 timestamp"));
+    }
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes[8..])
+        .map_err(|error| SQLError::Internal(format!("failed to obtain random bytes: {error}")))?;
+    let timestamp = unix_millis.to_be_bytes();
+    bytes[..6].copy_from_slice(&timestamp[2..]);
+    let increased_clock_precision = (u64::from(sub_millisecond_nanos)
+        * (1_u64 << UUID_V7_SUBMILLISECOND_BITS))
+        / NANOS_PER_MILLISECOND as u64;
+    bytes[6] = (increased_clock_precision >> 8) as u8;
+    bytes[7] = increased_clock_precision as u8;
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        bytes[7] ^= bytes[8] >> 6;
+    }
+
+    bytes[6] = (bytes[6] & 0x0f) | 0x70;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Ok(format_uuid(bytes))
+}
+
+fn format_uuid(bytes: [u8; 16]) -> String {
     format!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
         bytes[0], bytes[1], bytes[2], bytes[3],

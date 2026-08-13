@@ -48,13 +48,16 @@ pub(in crate::sql) fn validate_document_non_key_constraints(
         }
     }
 
-    for (cname, expr) in engine
-        .try_check_constraints(table)
+    for constraint in engine
+        .try_check_constraint_definitions(table)
         .map_err(|err| dml_storage_error("constraint validation", err))?
     {
-        let result = eval_lowered_expression(engine, &expr, Some(document), params)?;
+        if !constraint.enforced {
+            continue;
+        }
+        let result = eval_lowered_expression(engine, &constraint.expr, Some(document), params)?;
         if !uqa_sql::expr::truthy(&result) {
-            let label = cname.unwrap_or_else(|| "<unnamed>".into());
+            let label = constraint.name.unwrap_or_else(|| "<unnamed>".into());
             return Err(SQLError::TypeMismatch(format!(
                 "CHECK constraint `{label}` violated in table `{table}`"
             )));
@@ -65,6 +68,9 @@ pub(in crate::sql) fn validate_document_non_key_constraints(
         .try_foreign_keys(table)
         .map_err(|err| dml_storage_error("constraint validation", err))?
     {
+        if !fk.enforced {
+            continue;
+        }
         let Some(local_values) = foreign_key_lookup_values(&fk, document)? else {
             continue;
         };

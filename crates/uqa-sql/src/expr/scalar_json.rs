@@ -130,13 +130,25 @@ pub(super) fn eval_json_functions(name: &str, args: &[Value]) -> Option<Result<V
                 )?))
             }
             "json_strip_nulls" | "jsonb_strip_nulls" => {
-                if args.len() != 1 {
+                if !(1..=2).contains(&args.len()) {
                     return Err(SQLError::TypeMismatch(
-                        "json_strip_nulls takes 1 arg".into(),
+                        "json_strip_nulls takes 1 or 2 args".into(),
                     ));
                 }
+                if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                    return Ok(Value::Null);
+                }
+                let strip_in_arrays = match args.get(1) {
+                    None => false,
+                    Some(Value::Bool(value)) => *value,
+                    Some(other) => {
+                        return Err(SQLError::TypeMismatch(format!(
+                            "json_strip_nulls: strip_in_arrays must be boolean, got {other:?}"
+                        )));
+                    }
+                };
                 let mut parsed = parse_json(&value_to_string(&args[0]))?;
-                strip_nulls(&mut parsed);
+                strip_nulls(&mut parsed, strip_in_arrays);
                 Ok(json_to_value(&parsed))
             }
             "json_object_keys" | "jsonb_object_keys" => {

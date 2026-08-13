@@ -8,10 +8,11 @@
 
 use super::{
     condition_sqlstate, ensure_single_tag, expect_tag, json_bool_or_false, json_kind,
-    json_optional_i64, json_usize_or_zero, lower_block, lower_expr, normalize_plpgsql_type,
-    optional_array, require, require_nonempty_str, validate_assignable_datum, CreateFunction,
-    FunctionBody, FunctionParamMode, FunctionReturns, JSONValue, PLpgSQLDatum, PLpgSQLFunction,
-    PLpgSQLRowField, PLpgSQLVar, Result, SQLError,
+    json_optional_i64, json_usize_or_zero, lower_block, lower_expr, lower_full_statement,
+    normalize_plpgsql_type, optional_array, require, require_nonempty_str,
+    validate_assignable_datum, CreateFunction, FunctionBody, FunctionParamMode, FunctionReturns,
+    JSONValue, PLpgSQLCursor, PLpgSQLDatum, PLpgSQLFunction, PLpgSQLRowField, PLpgSQLVar, Result,
+    SQLError,
 };
 
 pub fn parse_function(def: &CreateFunction) -> Result<PLpgSQLFunction> {
@@ -187,12 +188,39 @@ pub(super) fn lower_datum(raw: &JSONValue) -> Result<PLpgSQLDatum> {
             Some(node) => Some(lower_expr(node)?),
             None => None,
         };
+        let cursor = match var.get("cursor_explicit_expr") {
+            Some(query) => Some(PLpgSQLCursor {
+                query: lower_full_statement(query)?,
+                argument_row: match json_optional_i64(var, "cursor_explicit_argrow")? {
+                    None | Some(-1) => None,
+                    Some(index) if index >= 0 => Some(usize::try_from(index).map_err(|_| {
+                        SQLError::Internal(format!(
+                            "PL/pgSQL cursor `{name}` argument row {index} does not fit this platform"
+                        ))
+                    })?),
+                    Some(index) => {
+                        return Err(SQLError::Internal(format!(
+                            "PL/pgSQL cursor `{name}` has invalid argument row {index}"
+                        )));
+                    }
+                },
+            }),
+            None => {
+                if var.get("cursor_explicit_argrow").is_some() {
+                    return Err(SQLError::Internal(format!(
+                        "PL/pgSQL cursor variable `{name}` has arguments but no query"
+                    )));
+                }
+                None
+            }
+        };
         return Ok(PLpgSQLDatum::Var(PLpgSQLVar {
             name,
             type_name,
             default,
             constant: json_bool_or_false(var, "isconst")?,
             not_null: json_bool_or_false(var, "notnull")?,
+            cursor,
             lineno: json_optional_i64(var, "lineno")?,
         }));
     }
@@ -259,7 +287,25 @@ pub(super) fn validate_datums(datums: &[PLpgSQLDatum]) -> Result<()> {
                     validate_assignable_datum(datums, field.varno, "row target field")?;
                 }
             }
-            PLpgSQLDatum::Var(_) | PLpgSQLDatum::Rec { .. } => {}
+            PLpgSQLDatum::Var(var) => {
+                if let Some(cursor) = &var.cursor {
+                    if var.type_name != "refcursor" {
+                        return Err(SQLError::Internal(format!(
+                            "PL/pgSQL bound cursor `{}` is not a refcursor datum",
+                            var.name
+                        )));
+                    }
+                    if let Some(argument_row) = cursor.argument_row {
+                        if !matches!(datums.get(argument_row), Some(PLpgSQLDatum::Row { .. })) {
+                            return Err(SQLError::Internal(format!(
+                                "PL/pgSQL cursor `{}` references invalid argument row {argument_row}",
+                                var.name
+                            )));
+                        }
+                    }
+                }
+            }
+            PLpgSQLDatum::Rec { .. } => {}
         }
     }
     Ok(())

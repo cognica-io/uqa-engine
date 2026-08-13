@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Differential PG17-vs-uqa probe runner.
+"""Differential PG18-vs-uqa probe runner.
 
-Runs each probe from probes.sql against real PostgreSQL 17 (docker
-container uqa-pg17-age via psql) and against usql (uqa-rs release
+Runs each probe from probes.sql against real PostgreSQL 18 (docker
+container uqa-pg18 via psql) and against usql (uqa-rs release
 binary), normalizes both outputs, and reports mismatches by category.
 """
 
@@ -15,7 +15,7 @@ from pathlib import Path
 HERE = Path(__file__).parent
 REPO_ROOT = HERE.parent.parent.parent
 USQL = os.environ.get("UQA_USQL", str(REPO_ROOT / "target" / "release" / "usql"))
-PG_CONTAINER = os.environ.get("UQA_PG_CONTAINER", "uqa-pg17-age")
+PG_CONTAINER = os.environ.get("UQA_PG_CONTAINER", "uqa-pg18")
 PSQL = [
     "docker", "exec", "-i", PG_CONTAINER,
     "psql", "-U", "postgres", "-d", "uqa_compat",

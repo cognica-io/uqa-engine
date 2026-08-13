@@ -168,6 +168,8 @@ pub(super) fn column_to_rust(col: &PythonColumnDef) -> Result<ColumnDef, PythonM
         ty,
         primary_key: col.primary_key,
         not_null: col.not_null,
+        not_null_explicit: col.not_null,
+        not_null_name: None,
         auto_increment: col.auto_increment,
         unique: col.unique,
         default: col
@@ -178,6 +180,8 @@ pub(super) fn column_to_rust(col: &PythonColumnDef) -> Result<ColumnDef, PythonM
             .transpose()?
             .map(Expr::Literal),
         check: None,
+        check_name: None,
+        check_enforced: true,
         references: None,
     })
 }

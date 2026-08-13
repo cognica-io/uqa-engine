@@ -8,9 +8,9 @@
 
 use super::{
     age_between, coerce_temporal, date_trunc_value, extract_from_value, float_to_i64_rounded,
-    format_pg_number, format_temporal, generate_random_uuid, make_timestamp, out_of_range,
-    pg_to_chrono_fmt, to_f64, to_i64, typeof_value, value_to_string, DecimalValue, Result,
-    SQLError, TemporalValue, Value,
+    format_pg_number, format_temporal, generate_random_uuid, generate_uuid_v7, make_timestamp,
+    out_of_range, pg_to_chrono_fmt, to_f64, to_i64, typeof_value, value_to_string, DecimalValue,
+    Result, SQLError, TemporalValue, Value,
 };
 
 pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
@@ -37,6 +37,8 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
         "typeof",
         "pg_typeof",
         "gen_random_uuid",
+        "uuidv4",
+        "uuidv7",
     ];
     if !NAMES.contains(&name) {
         return None;
@@ -241,6 +243,12 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                     return Err(SQLError::TypeMismatch("to_number takes 2 args".into()));
                 }
                 let s = value_to_string(&args[0]);
+                if value_to_string(&args[1]).trim().eq_ignore_ascii_case("RN") {
+                    return parse_roman_numeral(&s)
+                        .map(DecimalValue::from_i64)
+                        .map(Value::Decimal)
+                        .ok_or_else(|| SQLError::TypeMismatch(format!("to_number: {s:?}")));
+                }
                 let cleaned: String = s
                     .chars()
                     .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '-' || *c == '+')
@@ -277,13 +285,82 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                     .to_string(),
             )),
             "typeof" | "pg_typeof" => Ok(Value::Str(typeof_value(&args[0]))),
-            "gen_random_uuid" => {
-                // Time + counter-based UUIDv4-like (not RFC 4122 cryptographically
-                // strong, but unique per call within a process). Used for
-                // expression-time UUID generation only.
-                Ok(Value::Str(generate_random_uuid()))
+            "gen_random_uuid" | "uuidv4" => {
+                if !args.is_empty() {
+                    return Err(SQLError::TypeMismatch(format!("{name} takes no args")));
+                }
+                generate_random_uuid().map(Value::Str)
             }
+            "uuidv7" => match args {
+                [] => generate_uuid_v7(None).map(Value::Str),
+                [Value::Temporal(interval @ TemporalValue::Interval { .. })] => {
+                    generate_uuid_v7(Some(interval)).map(Value::Str)
+                }
+                [Value::Null] => Ok(Value::Null),
+                [_] => Err(SQLError::TypeMismatch(
+                    "uuidv7 shift must be an interval".into(),
+                )),
+                _ => Err(SQLError::TypeMismatch("uuidv7 takes 0 or 1 args".into())),
+            },
             _ => unreachable!("function family membership was checked before dispatch"),
         }
     })())
+}
+
+fn parse_roman_numeral(input: &str) -> Option<i64> {
+    let roman = input.trim().to_ascii_uppercase();
+    if roman.is_empty() {
+        return None;
+    }
+    let mut total = 0_i64;
+    let mut previous = 0_i64;
+    for character in roman.chars().rev() {
+        let value = match character {
+            'I' => 1,
+            'V' => 5,
+            'X' => 10,
+            'L' => 50,
+            'C' => 100,
+            'D' => 500,
+            'M' => 1_000,
+            _ => return None,
+        };
+        if value < previous {
+            total -= value;
+        } else {
+            total += value;
+            previous = value;
+        }
+    }
+    (1..=3_999)
+        .contains(&total)
+        .then(|| roman_numeral(total))
+        .filter(|canonical| canonical == &roman)
+        .map(|_| total)
+}
+
+fn roman_numeral(mut value: i64) -> String {
+    const DIGITS: &[(i64, &str)] = &[
+        (1_000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ];
+    let mut output = String::new();
+    for (unit, token) in DIGITS {
+        while value >= *unit {
+            output.push_str(token);
+            value -= unit;
+        }
+    }
+    output
 }

@@ -15,6 +15,7 @@ The research-level foundation is developed separately in [A Typed Carrier Algebr
 | [Key/Value storage backends](kv-storage-backends.md) | Provider/session ownership, clustered posting layout and migration, redb transactions, compatibility limits, and third-party conformance | Storage contributors and integrators |
 | [Parity fixtures](parity.md) | SQL golden data, relevance fixtures, vector calibration gates, versioning, and CI use | Test and compatibility contributors |
 | [Performance](performance.md) | Benchmark provenance, regression gates, measured bottlenecks, PostgreSQL 17 TPC-H-derived evidence, optimizations, and limitations | Performance contributors and evaluators |
+| [PostgreSQL 18 compatibility plan](../plans/0003-postgresql-18-compatibility.md) | Long-term SQL, catalog, transaction, client, and wire protocol 3.2 parity milestones and gates | Compatibility contributors and reviewers |
 
 ## Reading paths
 

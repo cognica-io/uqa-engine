@@ -7,6 +7,12 @@
 use super::*;
 use crate::ast::{ColumnType, FromClause, TableKeyConstraintKind};
 
+#[test]
+fn bundled_parser_is_postgresql_18_4() {
+    let parsed = pg_query::parse("SELECT 1").expect("parser accepts a scalar query");
+    assert_eq!(parsed.protobuf.version, 180_004);
+}
+
 fn first(sql: &str) -> Statement {
     let mut v = compile(sql).unwrap();
     assert_eq!(v.len(), 1, "expected 1 stmt");

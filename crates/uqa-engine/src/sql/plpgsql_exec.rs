@@ -18,7 +18,8 @@ use uqa_sql::ast::{CreateFunction, DropFunctionStmt, Expr, FunctionReturns, Stat
 use uqa_sql::expr::{cast_value, truthy, value_type_name};
 use uqa_sql::plpgsql::{
     bind_expr, bind_statement, condition_sqlstate, condition_sqlstates, IntoTarget, PLpgSQLBlock,
-    PLpgSQLDatum, PLpgSQLFunction, PLpgSQLStmt, RaiseLevel, VariableResolver,
+    PLpgSQLCursorArgument, PLpgSQLDatum, PLpgSQLFunction, PLpgSQLReturnValue, PLpgSQLRowField,
+    PLpgSQLStmt, RaiseLevel, VariableResolver,
 };
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 
@@ -33,6 +34,7 @@ use super::scalar::eval_lowered_expression;
 
 mod blocks;
 mod control_flow;
+mod cursors;
 mod datum;
 mod diagnostics;
 mod handlers;
@@ -78,6 +80,12 @@ struct RoutineOutcome {
     set_rows: Vec<Vec<Value>>,
 }
 
+#[derive(Clone)]
+struct PLpgSQLCursorState {
+    result: SQLResult,
+    position: usize,
+}
+
 /// Mutable activation record for one PL/pgSQL invocation.
 struct Interpreter<'a> {
     engine: &'a Engine,
@@ -92,6 +100,8 @@ struct Interpreter<'a> {
     found: Option<usize>,
     last_row_count: i64,
     is_set: bool,
+    cursors: HashMap<String, PLpgSQLCursorState>,
+    next_cursor_id: usize,
 }
 
 /// Maps variable names and positional parameters onto an activation record.

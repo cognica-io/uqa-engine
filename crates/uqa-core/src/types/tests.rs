@@ -88,6 +88,17 @@ fn value_ordering_within_variant() {
 }
 
 #[test]
+fn container_ordering_uses_postgresql_nulls_high_semantics() {
+    let non_null = Value::List(vec![Value::Int(1), Value::Int(2)]);
+    let with_null = Value::List(vec![Value::Int(1), Value::Null]);
+    assert!(non_null < with_null);
+
+    let nested_non_null = Value::List(vec![non_null]);
+    let nested_with_null = Value::List(vec![with_null]);
+    assert!(nested_non_null < nested_with_null);
+}
+
+#[test]
 fn value_ordering_across_variants_is_stable() {
     assert!(Value::Null < Value::Bool(false));
     // Numeric coercion: Bool(true) == 1 > Int(0).

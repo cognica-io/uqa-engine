@@ -30,6 +30,10 @@ pub(super) fn eval_math_functions(name: &str, args: &[Value]) -> Option<Result<V
         "log10",
         "log2",
         "cbrt",
+        "gamma",
+        "lgamma",
+        "crc32",
+        "crc32c",
         "sign",
         "trunc",
         "pi",
@@ -107,6 +111,27 @@ pub(super) fn eval_math_functions(name: &str, args: &[Value]) -> Option<Result<V
                     x.signum() * (x.abs().ln() / 3.0).exp()
                 }
             }),
+            "gamma" => gamma(args),
+            "lgamma" => lgamma(args),
+            "crc32" | "crc32c" => {
+                if args.len() != 1 {
+                    return Err(SQLError::TypeMismatch(format!("{name} takes 1 arg")));
+                }
+                match &args[0] {
+                    Value::Bytes(bytes) => {
+                        let checksum = if name == "crc32" {
+                            crc32fast::hash(bytes)
+                        } else {
+                            crc32c(bytes)
+                        };
+                        Ok(Value::Int(i64::from(checksum)))
+                    }
+                    Value::Null => Ok(Value::Null),
+                    other => Err(SQLError::TypeMismatch(format!(
+                        "{name}: expected bytea, got {other:?}"
+                    ))),
+                }
+            }
             "sign" => {
                 if args.len() != 1 {
                     return Err(SQLError::TypeMismatch("sign takes 1 arg".into()));
@@ -464,4 +489,53 @@ pub(super) fn eval_math_functions(name: &str, args: &[Value]) -> Option<Result<V
             _ => unreachable!("function family membership was checked before dispatch"),
         }
     })())
+}
+
+fn gamma(args: &[Value]) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(SQLError::TypeMismatch("gamma takes 1 arg".into()));
+    }
+    if matches!(args[0], Value::Null) {
+        return Ok(Value::Null);
+    }
+    let input = to_f64(&args[0])?;
+    if input.is_nan() || input == f64::INFINITY {
+        return Ok(Value::Float(input));
+    }
+    if input == f64::NEG_INFINITY {
+        return Err(out_of_range("double precision"));
+    }
+    let result = libm::tgamma(input);
+    if !result.is_finite() || result == 0.0 {
+        return Err(out_of_range("double precision"));
+    }
+    Ok(Value::Float(result))
+}
+
+fn lgamma(args: &[Value]) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(SQLError::TypeMismatch("lgamma takes 1 arg".into()));
+    }
+    if matches!(args[0], Value::Null) {
+        return Ok(Value::Null);
+    }
+    let input = to_f64(&args[0])?;
+    let result = libm::lgamma(input);
+    if input.is_finite() && !result.is_finite() {
+        return Err(out_of_range("double precision"));
+    }
+    Ok(Value::Float(result))
+}
+
+fn crc32c(bytes: &[u8]) -> u32 {
+    const CASTAGNOLI_REVERSED: u32 = 0x82f6_3b78;
+    let mut crc = u32::MAX;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            let mask = 0_u32.wrapping_sub(crc & 1);
+            crc = (crc >> 1) ^ (CASTAGNOLI_REVERSED & mask);
+        }
+    }
+    !crc
 }

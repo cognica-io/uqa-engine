@@ -10,8 +10,8 @@ use super::{
     apply_set_action_to_child, build_join_spill_with_ctes, build_returning_row,
     dml_returning_result, eval_mutation_expr, missing_document_error, referencing_rows,
     referrers_to_for_actions, rewrite_document_with_referential_actions, BTreeSet, CteScope,
-    DeletePlan, DocId, Document, Engine, ForeignKey, ForeignKeyAction, ResultRow, SQLError,
-    SQLParam, SQLResult, Value,
+    DeletePlan, DocId, Document, Engine, ForeignKey, ForeignKeyAction, ResultRow,
+    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
 };
 
 pub(in crate::sql) fn run_delete(
@@ -135,8 +135,14 @@ pub(in crate::sql) fn run_delete_inner(
                 build_returning_row(
                     engine,
                     &stmt.table,
-                    doc_id,
-                    &doc,
+                    ReturningRowImages {
+                        old: Some(ReturningRowImage {
+                            doc_id,
+                            document: &doc,
+                        }),
+                        new: None,
+                    },
+                    &stmt.returning_aliases,
                     &stmt.returning,
                     params,
                     &ctes,

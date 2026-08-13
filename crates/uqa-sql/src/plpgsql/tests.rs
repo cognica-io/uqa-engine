@@ -4,10 +4,104 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::lowering_expression::strip_assignment_target;
 use super::lowering_statement::{lower_stmt, lower_stmt_list};
 use super::parsing::{lower_datum, parse_plpgsql_text, validate_datums};
 use super::*;
+
+#[test]
+fn pg18_bound_cursor_named_arguments_lower_in_declaration_order() {
+    let parsed = parse_plpgsql_text(
+        "CREATE FUNCTION cursor_probe() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE c CURSOR (a integer, b integer) FOR SELECT a + b AS value; out_value integer; BEGIN OPEN c(b => 2, a => 1); FETCH c INTO out_value; CLOSE c; RETURN out_value; END $$;",
+    )
+    .unwrap();
+
+    let cursor_index = parsed
+        .datums
+        .iter()
+        .position(|datum| matches!(datum, PLpgSQLDatum::Var(var) if var.name == "c"))
+        .unwrap();
+    let PLpgSQLDatum::Var(cursor) = &parsed.datums[cursor_index] else {
+        unreachable!();
+    };
+    let definition = cursor.cursor.as_ref().expect("bound cursor definition");
+    assert!(definition.argument_row.is_some());
+    assert!(matches!(definition.query, Statement::Select(_)));
+
+    let PLpgSQLStmt::OpenCursor { cursor, arguments } = &parsed.action.body[0] else {
+        panic!("expected OPEN as the first statement");
+    };
+    assert_eq!(*cursor, cursor_index);
+    assert_eq!(
+        arguments
+            .iter()
+            .map(|argument| argument.name.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("a"), Some("b")]
+    );
+    assert!(matches!(arguments[0].expr, Expr::Literal(Value::Int(1))));
+    assert!(matches!(arguments[1].expr, Expr::Literal(Value::Int(2))));
+    assert!(matches!(
+        parsed.action.body[1],
+        PLpgSQLStmt::FetchCursor {
+            cursor,
+            direction: 0,
+            count: 1,
+            ..
+        } if cursor == cursor_index
+    ));
+    assert!(matches!(
+        parsed.action.body[2],
+        PLpgSQLStmt::CloseCursor { cursor } if cursor == cursor_index
+    ));
+    assert!(matches!(
+        parsed.action.body[3],
+        PLpgSQLStmt::Return {
+            value: Some(PLpgSQLReturnValue::Datum(index))
+        } if index == 5
+    ));
+}
+
+#[test]
+fn pg18_return_slots_and_cursor_minus_one_sentinel_lower_directly() {
+    let scalar = parse_plpgsql_text(
+        "CREATE FUNCTION return_slot(x integer) RETURNS integer AS $$ BEGIN RETURN x; END $$ LANGUAGE plpgsql;",
+    )
+    .unwrap();
+    assert!(matches!(
+        scalar.action.body[0],
+        PLpgSQLStmt::Return {
+            value: Some(PLpgSQLReturnValue::Datum(0))
+        }
+    ));
+
+    let set = parse_plpgsql_text(
+        "CREATE FUNCTION return_next_slot(x integer) RETURNS SETOF integer AS $$ BEGIN RETURN NEXT x; RETURN; END $$ LANGUAGE plpgsql;",
+    )
+    .unwrap();
+    assert!(matches!(
+        set.action.body[0],
+        PLpgSQLStmt::ReturnNext {
+            value: Some(PLpgSQLReturnValue::Datum(0))
+        }
+    ));
+
+    let cursor = parse_plpgsql_text(
+        "CREATE FUNCTION cursor_no_args() RETURNS integer AS $$ DECLARE c CURSOR FOR SELECT 1 AS value; out_value integer; BEGIN OPEN c; FETCH c INTO out_value; CLOSE c; RETURN out_value; END $$ LANGUAGE plpgsql;",
+    )
+    .unwrap();
+    assert!(cursor.datums.iter().any(|datum| {
+        matches!(
+            datum,
+            PLpgSQLDatum::Var(PLpgSQLVar {
+                cursor: Some(PLpgSQLCursor {
+                    argument_row: None,
+                    ..
+                }),
+                ..
+            })
+        )
+    }));
+}
 
 fn scalar_datum(name: &str) -> PLpgSQLDatum {
     PLpgSQLDatum::Var(PLpgSQLVar {
@@ -16,6 +110,7 @@ fn scalar_datum(name: &str) -> PLpgSQLDatum {
         default: None,
         constant: false,
         not_null: false,
+        cursor: None,
         lineno: None,
     })
 }
@@ -256,38 +351,5 @@ fn malformed_into_diagnostics_and_expression_modes_fail_at_lowering() {
     assert!(matches!(
         lower_full_statement(&json_expr("SELECT 1", 2)),
         Err(SQLError::Internal(message)) if message.contains("parse mode 2")
-    ));
-}
-
-#[test]
-fn strip_assignment_single_name() {
-    assert_eq!(
-        strip_assignment_target("total := a + b", 1).unwrap().trim(),
-        "a + b"
-    );
-    assert_eq!(strip_assignment_target("x = 1", 1).unwrap().trim(), "1");
-}
-
-#[test]
-fn strip_assignment_quoted_and_dotted() {
-    assert_eq!(
-        strip_assignment_target("\"my var\" := 7", 1)
-            .unwrap()
-            .trim(),
-        "7"
-    );
-    assert_eq!(
-        strip_assignment_target("rec.fld := rec.fld + 1", 2)
-            .unwrap()
-            .trim(),
-        "rec.fld + 1"
-    );
-}
-
-#[test]
-fn array_element_assignment_is_unsupported() {
-    assert!(matches!(
-        strip_assignment_target("arr[1] := 2", 1),
-        Err(SQLError::Unsupported(_))
     ));
 }

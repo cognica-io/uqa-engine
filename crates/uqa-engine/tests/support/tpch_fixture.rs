@@ -175,7 +175,7 @@ struct ExpectedQuery {
 }
 
 pub fn load_expected_results() -> Vec<CanonicalResult> {
-    let path = fixture_root().join("expected/pg17.json");
+    let path = fixture_root().join("expected/pg18.json");
     let fixture: ExpectedFixture = serde_json::from_str(
         &std::fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("read {}: {error}", path.display())),

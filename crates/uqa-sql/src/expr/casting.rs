@@ -16,6 +16,13 @@ use super::{
 /// [`SQLError::Unsupported`]; callers doing best-effort typing (the
 /// `PL/pgSQL` interpreter) treat that as "leave the value as-is".
 pub fn cast_value(v: &Value, ty: &str) -> Result<Value> {
+    cast_value_from(v, ty, None)
+}
+
+/// Cast a value while preserving an explicitly declared source type when the
+/// runtime carrier erases it. PostgreSQL 18 integer/`bytea` casts require this
+/// for the source integer's two-, four-, or eight-byte representation.
+pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<Value> {
     if matches!(v, Value::Null) {
         return Ok(Value::Null);
     }
@@ -33,7 +40,7 @@ pub fn cast_value(v: &Value, ty: &str) -> Result<Value> {
         };
         return items
             .iter()
-            .map(|item| cast_value(item, elem_ty))
+            .map(|item| cast_value_from(item, elem_ty, None))
             .collect::<Result<Vec<_>>>()
             .map(Value::List);
     }
@@ -131,6 +138,7 @@ pub fn cast_value(v: &Value, ty: &str) -> Result<Value> {
         "json" | "jsonb" => Ok(json_to_value(&parse_json(&value_to_string(v))?)),
         "bytea" => match v {
             Value::Bytes(bytes) => Ok(Value::Bytes(bytes.clone())),
+            Value::Int(value) => integer_to_bytea(*value, source_ty),
             // PostgreSQL reads `\x...` hex input for bytea.
             Value::Str(s) if s.starts_with("\\x") => {
                 let hex = &s[2..];
@@ -155,6 +163,34 @@ pub fn cast_value(v: &Value, ty: &str) -> Result<Value> {
         "boolean" | "bool" => cast_boolean(v),
         other => Err(SQLError::Unsupported(format!("CAST AS {other}"))),
     }
+}
+
+fn integer_to_bytea(value: i64, source_ty: Option<&str>) -> Result<Value> {
+    let source = source_ty
+        .map(split_type_modifier)
+        .map(|(base, _)| base)
+        .unwrap_or("integer");
+    let bytes = match source {
+        "smallint" | "int2" | "pg_catalog.int2" => i16::try_from(value)
+            .map(i16::to_be_bytes)
+            .map(|bytes| bytes.to_vec())
+            .map_err(|_| out_of_range("smallint"))?,
+        "bigint" | "int8" | "bigserial" | "serial8" | "pg_catalog.int8" => {
+            value.to_be_bytes().to_vec()
+        }
+        "integer" | "int" | "int4" | "serial" | "serial4" | "pg_catalog.int4" => {
+            i32::try_from(value)
+                .map(i32::to_be_bytes)
+                .map(|bytes| bytes.to_vec())
+                .map_err(|_| out_of_range("integer"))?
+        }
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "cannot cast {other} to bytea"
+            )));
+        }
+    };
+    Ok(Value::Bytes(bytes))
 }
 
 /// Split `varchar(10)` / `numeric(10,2)` into `("varchar", Some("10"))`.
@@ -198,6 +234,7 @@ pub(super) fn cast_integer(v: &Value, target: &str) -> Result<Value> {
                 message: format!("invalid input syntax for type {target}: \"{s}\""),
             })?
         }
+        Value::Bytes(bytes) => bytea_to_integer(bytes, target)?,
         other => {
             return Err(SQLError::TypeMismatch(format!(
                 "cannot cast {other:?} to {target}"
@@ -213,6 +250,30 @@ pub(super) fn cast_integer(v: &Value, target: &str) -> Result<Value> {
         return Err(out_of_range(target));
     }
     Ok(Value::Int(n))
+}
+
+fn bytea_to_integer(bytes: &[u8], target: &str) -> Result<i64> {
+    let width = match target {
+        "smallint" => 2,
+        "integer" => 4,
+        _ => 8,
+    };
+    if bytes.len() > width {
+        return Err(out_of_range(target));
+    }
+    let mut extended = [0_u8; 8];
+    let offset = width - bytes.len();
+    extended[8 - width + offset..].copy_from_slice(bytes);
+    Ok(match width {
+        2 => i64::from(i16::from_be_bytes([extended[6], extended[7]])),
+        4 => i64::from(i32::from_be_bytes([
+            extended[4],
+            extended[5],
+            extended[6],
+            extended[7],
+        ])),
+        _ => i64::from_be_bytes(extended),
+    })
 }
 
 /// CAST to boolean: strings follow `PostgreSQL`'s `parse_bool`

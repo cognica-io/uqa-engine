@@ -7,8 +7,8 @@
 //! Embedded SQL expression and assignment-target lowering.
 
 use super::{
-    expect_tag, json_i64_or_zero, require_nonempty_str, Expr, JSONValue, Result, SQLError,
-    Statement,
+    expect_tag, json_i64_or_zero, require_nonempty_str, Expr, JSONValue, PLpgSQLCursorArgument,
+    Result, SQLError, Statement,
 };
 
 pub(super) fn lower_expr_list(raw: Option<&JSONValue>) -> Result<Vec<Expr>> {
@@ -29,16 +29,45 @@ pub(super) fn lower_expr_list(raw: Option<&JSONValue>) -> Result<Vec<Expr>> {
 /// (parse modes 2 = expression, 3/4/5 = assignment source).
 pub(super) fn lower_expr(raw: &JSONValue) -> Result<Expr> {
     let (query, mode) = expr_text(raw)?;
-    let text = match mode {
-        3..=5 => strip_assignment_target(&query, (mode - 2) as usize)?,
-        2 => query,
+    let parse_mode = match mode {
+        2 => pg_query::ParseMode::PlPgSqlExpr,
+        3 => pg_query::ParseMode::PlPgSqlAssign1,
+        4 => pg_query::ParseMode::PlPgSqlAssign2,
+        5 => pg_query::ParseMode::PlPgSqlAssign3,
         other => {
             return Err(SQLError::Internal(format!(
                 "PL/pgSQL scalar expression has invalid parse mode {other}"
             )));
         }
     };
-    compile_expression_text(&text)
+    let node = parse_one_raw_node(&query, parse_mode)?;
+    match (mode, node.node.as_ref()) {
+        (2, Some(pg_query::NodeEnum::SelectStmt(select))) => {
+            compile_single_select_expression(select, &query)
+        }
+        (3..=5, Some(pg_query::NodeEnum::PlassignStmt(assign))) => {
+            let expected_names = i32::try_from(mode - 2).map_err(|_| {
+                SQLError::Internal(format!("invalid PL/pgSQL assignment parse mode {mode}"))
+            })?;
+            if assign.nnames != expected_names {
+                return Err(SQLError::Internal(format!(
+                    "PL/pgSQL assignment parser returned {} target names for parse mode {mode}",
+                    assign.nnames
+                )));
+            }
+            let value = assign
+                .val
+                .as_deref()
+                .ok_or_else(|| SQLError::Internal("PL/pgSQL assignment has no value".into()))?;
+            compile_single_select_expression(value, &query)
+        }
+        (_, Some(other)) => Err(SQLError::Internal(format!(
+            "PL/pgSQL parse mode {mode} returned unexpected node {other:?}"
+        ))),
+        (_, None) => Err(SQLError::Internal(
+            "PL/pgSQL expression parser returned an empty node".into(),
+        )),
+    }
 }
 
 /// Lower a `PLpgSQL_expr` node holding a complete SQL statement
@@ -59,6 +88,34 @@ pub(super) fn lower_full_statement(raw: &JSONValue) -> Result<Statement> {
     }
 }
 
+pub(super) fn lower_cursor_arguments(
+    raw: Option<&JSONValue>,
+) -> Result<Vec<PLpgSQLCursorArgument>> {
+    let Some(raw) = raw else {
+        return Ok(Vec::new());
+    };
+    let (query, mode) = expr_text(raw)?;
+    if mode != 2 {
+        return Err(SQLError::Internal(format!(
+            "PL/pgSQL cursor arguments have invalid parse mode {mode}"
+        )));
+    }
+    let node = parse_one_raw_node(&query, pg_query::ParseMode::PlPgSqlExpr)?;
+    let Some(pg_query::NodeEnum::SelectStmt(select)) = node.node.as_ref() else {
+        return Err(SQLError::Internal(format!(
+            "PL/pgSQL cursor arguments did not parse as a SELECT target list: {query}"
+        )));
+    };
+    let projections = crate::compiler::compile_pg_projections(&select.target_list)?;
+    Ok(projections
+        .into_iter()
+        .map(|projection| PLpgSQLCursorArgument {
+            name: projection.alias.map(|name| name.to_ascii_lowercase()),
+            expr: projection.expr,
+        })
+        .collect())
+}
+
 pub(super) fn expr_text(raw: &JSONValue) -> Result<(String, i64)> {
     let expr = expect_tag(raw, "PLpgSQL_expr", "expression")?;
     let query = require_nonempty_str(expr, "query", "PLpgSQL expression")?;
@@ -68,98 +125,60 @@ pub(super) fn expr_text(raw: &JSONValue) -> Result<(String, i64)> {
     Ok((query, mode))
 }
 
-/// Compile a bare expression by wrapping it into `SELECT <expr>`.
+/// Compile a bare expression through PostgreSQL's PL/pgSQL expression parser.
 pub fn compile_expression_text(text: &str) -> Result<Expr> {
-    let stmts = crate::compile(&format!("SELECT {text}"))?;
-    let mut stmts = stmts;
-    let stmt = match stmts.len() {
-        1 => stmts.remove(0),
-        n => {
-            return Err(SQLError::Parse(format!(
-                "expression compiled to {n} statements: {text}"
-            )));
-        }
-    };
-    let Statement::Select(select) = stmt else {
+    let node = parse_one_raw_node(text, pg_query::ParseMode::PlPgSqlExpr)?;
+    let Some(pg_query::NodeEnum::SelectStmt(select)) = node.node.as_ref() else {
         return Err(SQLError::Parse(format!("not an expression: {text}")));
     };
-    let mut select = *select;
-    if select.projections.len() != 1 || select.from.is_some() {
-        return Err(SQLError::Parse(format!("not a single expression: {text}")));
-    }
-    Ok(select.projections.remove(0).expr)
+    compile_single_select_expression(select, text)
 }
 
-/// Strip the leading `name[.name[.name]] :=` (or `=`) target of an
-/// assignment-mode expression, returning the source text.
-pub(super) fn strip_assignment_target(text: &str, name_parts: usize) -> Result<String> {
-    let bytes = text.as_bytes();
-    let mut pos = 0usize;
-    let skip_ws = |pos: &mut usize| {
-        while *pos < bytes.len() && bytes[*pos].is_ascii_whitespace() {
-            *pos += 1;
-        }
-    };
-    for part in 0..name_parts {
-        skip_ws(&mut pos);
-        if pos < bytes.len() && bytes[pos] == b'"' {
-            pos += 1;
-            loop {
-                if pos >= bytes.len() {
-                    return Err(SQLError::Parse(format!(
-                        "unterminated quoted identifier in assignment: {text}"
-                    )));
-                }
-                if bytes[pos] == b'"' {
-                    if pos + 1 < bytes.len() && bytes[pos + 1] == b'"' {
-                        pos += 2;
-                        continue;
-                    }
-                    pos += 1;
-                    break;
-                }
-                pos += 1;
-            }
-        } else {
-            let start = pos;
-            while pos < bytes.len()
-                && (bytes[pos].is_ascii_alphanumeric()
-                    || bytes[pos] == b'_'
-                    || bytes[pos] == b'$'
-                    || bytes[pos] >= 0x80)
-            {
-                pos += 1;
-            }
-            if pos == start {
-                return Err(SQLError::Parse(format!(
-                    "malformed assignment target: {text}"
-                )));
-            }
-        }
-        if part + 1 < name_parts {
-            skip_ws(&mut pos);
-            if pos >= bytes.len() || bytes[pos] != b'.' {
-                return Err(SQLError::Parse(format!(
-                    "malformed assignment target: {text}"
-                )));
-            }
-            pos += 1;
-        }
-    }
-    skip_ws(&mut pos);
-    if pos < bytes.len() && bytes[pos] == b'[' {
-        return Err(SQLError::Unsupported(
-            "assignment to an array element".into(),
-        ));
-    }
-    if pos + 1 < bytes.len() && bytes[pos] == b':' && bytes[pos + 1] == b'=' {
-        pos += 2;
-    } else if pos < bytes.len() && bytes[pos] == b'=' {
-        pos += 1;
-    } else {
+fn parse_one_raw_node(text: &str, mode: pg_query::ParseMode) -> Result<pg_query::protobuf::Node> {
+    let parsed = pg_query::parse_with_mode(text, mode)?;
+    let mut statements = parsed.protobuf.stmts;
+    if statements.len() != 1 {
         return Err(SQLError::Parse(format!(
-            "assignment operator not found: {text}"
+            "PL/pgSQL fragment parsed to {} statements: {text}",
+            statements.len()
         )));
     }
-    Ok(text[pos..].to_string())
+    statements
+        .remove(0)
+        .stmt
+        .map(|node| *node)
+        .ok_or_else(|| SQLError::Internal("PL/pgSQL parser returned an empty statement".into()))
+}
+
+fn compile_single_select_expression(
+    select: &pg_query::protobuf::SelectStmt,
+    text: &str,
+) -> Result<Expr> {
+    if select.target_list.len() != 1
+        || !select.from_clause.is_empty()
+        || select.where_clause.is_some()
+        || !select.group_clause.is_empty()
+        || select.having_clause.is_some()
+        || !select.window_clause.is_empty()
+        || !select.values_lists.is_empty()
+        || !select.sort_clause.is_empty()
+        || select.limit_offset.is_some()
+        || select.limit_count.is_some()
+        || !select.locking_clause.is_empty()
+        || select.with_clause.is_some()
+        || select.larg.is_some()
+        || select.rarg.is_some()
+    {
+        return Err(SQLError::Parse(format!("not a single expression: {text}")));
+    }
+    let Some(pg_query::NodeEnum::ResTarget(target)) = select.target_list[0].node.as_ref() else {
+        return Err(SQLError::Internal(
+            "PL/pgSQL expression target is not a ResTarget".into(),
+        ));
+    };
+    let value = target
+        .val
+        .as_deref()
+        .ok_or_else(|| SQLError::Internal("PL/pgSQL expression target has no value".into()))?;
+    crate::compiler::compile_pg_expression(value)
 }

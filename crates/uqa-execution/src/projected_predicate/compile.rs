@@ -99,6 +99,10 @@ pub(super) fn compile(
                 // A typed SQL literal is represented as CAST(literal AS type).
                 // Evaluate it once while preparing the predicate instead of
                 // reparsing (notably DATE/TIMESTAMP text) for every input row.
+                ProjectedExpr::Literal(value) if is_integer_type(ty) => ProjectedExpr::Cast {
+                    expression: Box::new(ProjectedExpr::Literal(value)),
+                    ty: ty.clone(),
+                },
                 ProjectedExpr::Literal(value) => ProjectedExpr::Literal(cast_value(&value, ty)?),
                 expression => ProjectedExpr::Cast {
                     expression: Box::new(expression),
@@ -116,6 +120,26 @@ pub(super) fn compile(
         | ScalarExpr::InSubquery { .. } => return Ok(None),
     };
     Ok(Some(compiled))
+}
+
+fn is_integer_type(ty: &str) -> bool {
+    matches!(
+        ty,
+        "smallint"
+            | "int2"
+            | "pg_catalog.int2"
+            | "integer"
+            | "int"
+            | "int4"
+            | "serial"
+            | "serial4"
+            | "pg_catalog.int4"
+            | "bigint"
+            | "int8"
+            | "bigserial"
+            | "serial8"
+            | "pg_catalog.int8"
+    )
 }
 
 fn resolve_unqualified_field(column: &str, fields: &[String]) -> Option<usize> {

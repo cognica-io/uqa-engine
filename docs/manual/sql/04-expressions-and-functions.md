@@ -29,23 +29,25 @@ Explicit `ESCAPE` clauses for `LIKE`, `ILIKE`, and `SIMILAR TO` are not implemen
 
 | Group | Functions |
 | --- | --- |
-| Case and shape | `upper`, `lower`, `initcap`, `reverse` |
+| Case and shape | `upper`, `lower`, `casefold`, `initcap`, `reverse` |
 | Length | `length`, `char_length`, `character_length`, `octet_length`, `bit_length` |
 | Trim and pad | `trim`, `btrim`, `ltrim`, `rtrim`, `lpad`, `rpad` |
 | Composition | `concat`, `concat_ws`, `replace`, `repeat`, `translate`, `overlay`, `format` |
 | Slicing and location | `substring`, `substr`, `left`, `right`, `position`, `strpos`, `starts_with`, `split_part` |
-| Pattern and regular expression | `like`, `ilike`, `similar_to`, `regexp_match`, `regexp_matches`, `regexp_replace`, `regexp_count`, `regexp_like` |
+| Pattern and regular expression | `like`, `ilike`, `similar_to`, `regexp_match`, `regexp_matches`, `regexp_replace`, `regexp_count`, `regexp_instr`, `regexp_like`, `regexp_substr` |
 | Quoting | `quote_ident`, `quote_literal`, `quote_nullable` |
 | Character conversion | `ascii`, `chr` |
 | Arrays and tables | `string_to_array`, `array_to_string`, `string_to_table`, `regexp_split_to_table` |
-| Hash and encoding | `md5`, `encode`, `decode` |
+| Hash and encoding | `md5`, `crc32`, `crc32c`, `encode`, `decode` |
+
+`casefold` uses the Unicode 16 full default case-fold mapping. The regular-expression functions accept PostgreSQL 18 named argument notation; `regexp_replace` also implements its `start` and `N` overloads.
 
 ## Numeric functions
 
 | Group | Functions |
 | --- | --- |
 | Basic | `abs`, `sign`, `round`, `trunc`, `ceil`, `ceiling`, `floor` |
-| Powers and roots | `power`, `pow`, `sqrt`, `cbrt`, `exp`, `ln`, `log`, `log10`, `log2` |
+| Powers and roots | `power`, `pow`, `sqrt`, `cbrt`, `gamma`, `lgamma`, `exp`, `ln`, `log`, `log10`, `log2` |
 | Division and number theory | `mod`, `div`, `gcd`, `lcm`, `factorial` |
 | Trigonometric | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2` |
 | Hyperbolic | `sinh`, `cosh`, `tanh` |
@@ -54,7 +56,7 @@ Explicit `ESCAPE` clauses for `LIKE`, `ILIKE`, and `SIMILAR TO` are not implemen
 | Random | `random`, `setseed` |
 | Formatting | `to_hex`, `to_number` |
 
-Random state is session-local. Use `setseed` for deterministic test input, not for cryptographic randomness; `gen_random_uuid` is the UUID-generation function.
+`to_number(text, 'RN')` accepts canonical Roman numerals from 1 through 3999. Random state is session-local. Use `setseed` for deterministic test input, not for cryptographic randomness; `gen_random_uuid` and `uuidv4` produce random version 4 UUIDs, while `uuidv7([shift interval])` produces time-ordered version 7 UUIDs.
 
 ## Array functions
 
@@ -62,7 +64,7 @@ Random state is session-local. Use `setseed` for deterministic test input, not f
 | --- | --- |
 | `array_length`, `array_lower`, `array_upper`, `cardinality` | Dimensions and bounds |
 | `array_cat`, `array_append`, `array_prepend` | Construction |
-| `array_remove`, `array_replace`, `array_trim`, `array_sample` | Transformation |
+| `array_remove`, `array_replace`, `array_trim`, `array_sample`, `array_sort`, `array_reverse` | Transformation |
 | `array_position`, `array_positions`, `array_overlap` | Search and overlap |
 | `array_to_string`, `array_fill` | Conversion and construction |
 | `unnest` | Expand values as a table function |
@@ -81,6 +83,8 @@ Random state is session-local. Use `setseed` for deterministic test input, not f
 | Expansion | `json_each`, `jsonb_each`, `json_each_text`, `jsonb_each_text`, `json_array_elements`, `jsonb_array_elements`, `json_array_elements_text`, `jsonb_array_elements_text`, `json_object_keys`, `jsonb_object_keys` |
 
 JSON expansion functions are table functions when used in `FROM`.
+
+`json_strip_nulls` and `jsonb_strip_nulls` accept PostgreSQL 18's optional `strip_in_arrays` Boolean argument. The default removes object fields whose value is JSON null while retaining null array elements; `true` removes both.
 
 ## Temporal functions
 
@@ -115,7 +119,7 @@ Implemented helpers include `current_database`, `current_catalog`, `current_user
 | Ordered set | `percentile_cont`, `percentile_disc`, `mode` |
 | JSON | `json_agg`, `jsonb_agg`, `json_object_agg`, `jsonb_object_agg` |
 
-Aggregates support `DISTINCT`, aggregate-local `ORDER BY`, and `FILTER` where the function shape permits it.
+Aggregates support `DISTINCT`, aggregate-local `ORDER BY`, and `FILTER` where the function shape permits it. `min` and `max` compare arrays and record-like map values lexicographically in addition to their scalar inputs.
 
 ```sql
 SELECT department,

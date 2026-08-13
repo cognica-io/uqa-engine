@@ -103,6 +103,7 @@ impl UnifiedPlan {
                     source,
                     on_conflict,
                     returning,
+                    returning_aliases: statement.returning_aliases,
                     subqueries,
                 }))))
             }
@@ -131,6 +132,7 @@ impl UnifiedPlan {
                     ctes,
                     source: source.map(Box::new),
                     returning,
+                    returning_aliases: statement.returning_aliases,
                     subqueries,
                 }))))
             }
@@ -156,6 +158,7 @@ impl UnifiedPlan {
                     ctes,
                     source: source.map(Box::new),
                     returning,
+                    returning_aliases: statement.returning_aliases,
                     subqueries,
                 }))))
             }
@@ -268,6 +271,7 @@ impl UnifiedPlan {
                     join_condition,
                     when_clauses,
                     returning,
+                    returning_aliases: statement.returning_aliases,
                     subqueries,
                 }))))
             }

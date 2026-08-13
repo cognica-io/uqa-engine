@@ -95,11 +95,11 @@ Object key order and formatting are not an application contract for JSONB. Use J
 
 ## BYTEA
 
-`BYTEA` carries arbitrary bytes. `encode` and `decode` convert supported textual encodings. Language bindings map byte values to their native byte container, such as Python `bytes` or Node.js `Buffer` and `Uint8Array`.
+`BYTEA` carries arbitrary bytes. `encode` and `decode` convert supported textual encodings. When an integer expression has an explicit `SMALLINT`, `INTEGER`, or `BIGINT` source type, its PostgreSQL 18 cast to `BYTEA` emits a signed two-, four-, or eight-byte network-order representation; an unannotated integer expression defaults to `INTEGER`. `BYTEA`-to-integer casts zero-extend shorter inputs before interpreting the target-width sign bit. Language bindings map byte values to their native byte container, such as Python `bytes` or Node.js `Buffer` and `Uint8Array`.
 
 ## Arrays
 
-Create arrays with `ARRAY[...]` and inspect them with `array_length`, `array_lower`, `array_upper`, and `cardinality`. Functions also concatenate, append, prepend, remove, replace, search, format, fill, trim, sample, and unnest arrays.
+Create arrays with `ARRAY[...]` and inspect them with `array_length`, `array_lower`, `array_upper`, and `cardinality`. Functions also concatenate, append, prepend, remove, replace, sort, reverse, search, format, fill, trim, sample, and unnest arrays.
 
 ```sql
 SELECT array_length(ARRAY[10, 20, 30], 1) AS length;

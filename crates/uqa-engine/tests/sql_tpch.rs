@@ -10,7 +10,7 @@
 mod tpch_fixture;
 
 #[test]
-fn all_tpch_queries_match_postgresql_17() {
+fn all_tpch_queries_match_postgresql_18() {
     let engine = tpch_fixture::load_engine();
     let queries = tpch_fixture::load_queries();
     let expected = tpch_fixture::load_expected_results();
@@ -22,7 +22,7 @@ fn all_tpch_queries_match_postgresql_17() {
         assert_eq!(
             tpch_fixture::canonical_result(&actual),
             expected,
-            "TPC-H Q{:02} differs from PostgreSQL 17",
+            "TPC-H Q{:02} differs from PostgreSQL 18",
             index + 1
         );
     }

@@ -10,8 +10,9 @@ use super::{
     build_returning_row, coerce_to_column_type, dml_returning_result, dml_storage_error,
     eval_mutation_expr, index_vectors_for_type, missing_document_error, referrers_to_for_actions,
     rewrite_document_with_referential_actions, run_update_from, validate_mutation_columns,
-    BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope, Engine, RowIndependentUpdateValues,
-    SQLError, SQLParam, SQLResult, ScalarExpr, UpdatePlan, Value,
+    BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope, Engine, ReturningRowImage,
+    ReturningRowImages, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, ScalarExpr,
+    UpdatePlan, Value,
 };
 
 pub(in crate::sql) fn run_update(
@@ -106,8 +107,17 @@ pub(in crate::sql) fn run_update_inner(
             returning_rows.push(build_returning_row(
                 engine,
                 &stmt.table,
-                rewritten_doc_id,
-                &doc,
+                ReturningRowImages {
+                    old: Some(ReturningRowImage {
+                        doc_id,
+                        document: &original_doc,
+                    }),
+                    new: Some(ReturningRowImage {
+                        doc_id: rewritten_doc_id,
+                        document: &doc,
+                    }),
+                },
+                &stmt.returning_aliases,
                 &stmt.returning,
                 params,
                 &ctes,
@@ -281,9 +291,10 @@ pub(in crate::sql) fn can_patch_update_without_full_row(
     updates: &BTreeMap<String, Value>,
 ) -> Result<bool, SQLError> {
     if !engine
-        .try_check_constraints(table)
+        .try_check_constraint_definitions(table)
         .map_err(|err| dml_storage_error("UPDATE", err))?
-        .is_empty()
+        .iter()
+        .any(|constraint| constraint.enforced)
     {
         return Ok(false);
     }
@@ -318,6 +329,7 @@ pub(in crate::sql) fn can_patch_update_without_full_row(
         .try_foreign_keys(table)
         .map_err(|err| dml_storage_error("UPDATE", err))?
         .iter()
+        .filter(|fk| fk.enforced)
         .any(|fk| {
             fk.local_columns
                 .iter()

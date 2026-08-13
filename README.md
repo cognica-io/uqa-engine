@@ -222,9 +222,9 @@ cargo test -p uqa-engine --test engine_queries sql_joins::
 cargo test -p uqa-sql --test integration parser_fuzz::
 ```
 
-## PostgreSQL 17 compatibility
+## PostgreSQL 18 compatibility
 
-The repository includes a deterministic TPC-H-derived scale-factor `0.001` fixture with all 22 default queries. The self-contained correctness gate compares exact columns, row order, NULLs, text bytes, and type-aware canonical numeric values with checked-in PostgreSQL 17.10 results:
+The repository includes a deterministic TPC-H-derived scale-factor `0.001` fixture with all 22 default queries. The self-contained correctness gate compares exact columns, row order, NULLs, text bytes, and type-aware canonical numeric values with checked-in PostgreSQL 18.4 results:
 
 ```sh
 cargo test -p uqa-engine --test sql_tpch

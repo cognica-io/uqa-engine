@@ -146,6 +146,21 @@ pub(super) fn compile_create_function(
         }
     };
 
+    if params.iter().any(|param| param.type_name == "refcursor") {
+        return Err(SQLError::Unsupported(format!(
+            "{keyword}: refcursor parameters require session portal state"
+        )));
+    }
+    if matches!(
+        &returns,
+        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }
+            if type_name == "refcursor"
+    ) {
+        return Err(SQLError::Unsupported(format!(
+            "{keyword}: refcursor returns require session portal state"
+        )));
+    }
+
     let mut language = String::new();
     let mut volatility = FunctionVolatility::Volatile;
     let mut strict = false;

@@ -13,6 +13,7 @@ use super::{
     ConflictPlan, CteScope, DocId, Document, Engine, ProjectionPlan, ResultRow, SQLError, SQLParam,
     SQLResult, Value, DOC_ID_COLUMN,
 };
+use uqa_sql::ast::ReturningAliases;
 
 pub(in crate::sql) fn find_insert_conflict(
     engine: &Engine,
@@ -72,7 +73,12 @@ pub(in crate::sql) fn find_insert_conflict(
 pub(in crate::sql) enum InsertConflictResolution {
     Insert,
     Skip,
-    Updated { doc_id: DocId, document: Document },
+    Updated {
+        old_doc_id: DocId,
+        doc_id: DocId,
+        old_document: Document,
+        document: Document,
+    },
 }
 
 pub(in crate::sql) fn resolve_insert_conflict(
@@ -134,24 +140,84 @@ pub(in crate::sql) fn resolve_insert_conflict(
                 params,
             )?;
             Ok(InsertConflictResolution::Updated {
+                old_doc_id: existing_id,
                 doc_id: rewritten_doc_id,
+                old_document: existing_doc,
                 document: updated_doc,
             })
         }
     }
 }
 
+#[derive(Clone, Copy)]
+pub(in crate::sql) struct ReturningRowImage<'a> {
+    pub doc_id: DocId,
+    pub document: &'a Document,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::sql) struct ReturningRowImages<'a> {
+    pub old: Option<ReturningRowImage<'a>>,
+    pub new: Option<ReturningRowImage<'a>>,
+}
+
+pub(in crate::sql) fn returning_row_context(
+    engine: &Engine,
+    table: &str,
+    images: ReturningRowImages<'_>,
+    aliases: &ReturningAliases,
+) -> Result<ResultRow, SQLError> {
+    let current = images.new.or(images.old).ok_or_else(|| {
+        SQLError::Internal(format!(
+            "RETURNING for table `{table}` has neither an old nor a new row image"
+        ))
+    })?;
+    let mut row_doc = current.document.clone();
+    row_doc.insert(DOC_ID_COLUMN.into(), doc_id_value(current.doc_id)?);
+
+    let mut columns = engine
+        .try_table_columns(table)
+        .map_err(|err| dml_storage_error("RETURNING schema lookup", err))?
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    if let Some(image) = images.old {
+        columns.extend(image.document.keys().cloned());
+    }
+    if let Some(image) = images.new {
+        columns.extend(image.document.keys().cloned());
+    }
+    columns.insert(DOC_ID_COLUMN.into());
+
+    for column in columns {
+        let old_value = row_image_value(images.old, &column)?;
+        let new_value = row_image_value(images.new, &column)?;
+        row_doc.insert(format!("{}.{}", aliases.old, column), old_value);
+        row_doc.insert(format!("{}.{}", aliases.new, column), new_value);
+    }
+    Ok(row_doc)
+}
+
+fn row_image_value(image: Option<ReturningRowImage<'_>>, column: &str) -> Result<Value, SQLError> {
+    let Some(image) = image else {
+        return Ok(Value::Null);
+    };
+    if column == DOC_ID_COLUMN {
+        return doc_id_value(image.doc_id);
+    }
+    Ok(image.document.get(column).cloned().unwrap_or(Value::Null))
+}
+
 pub(in crate::sql) fn build_returning_row(
     engine: &Engine,
     table: &str,
-    doc_id: DocId,
-    document: &Document,
+    images: ReturningRowImages<'_>,
+    aliases: &ReturningAliases,
     returning: &[ProjectionPlan],
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<ResultRow, SQLError> {
-    let mut row_doc = document.clone();
-    row_doc.insert(DOC_ID_COLUMN.into(), doc_id_value(doc_id)?);
+    let row_doc = returning_row_context(engine, table, images, aliases)?;
+    let doc_id = images.new.or(images.old).map_or(0, |image| image.doc_id);
     build_projection_row_with_ctes(engine, &row_doc, returning, params, ctes).map_err(|err| {
         SQLError::Internal(format!(
             "RETURNING projection failed for table `{table}` doc {doc_id}: {err}"

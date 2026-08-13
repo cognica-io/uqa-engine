@@ -320,10 +320,10 @@ fn validate_added_key_constraint(
         .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
     if let Some(name) = constraint.name.as_deref() {
         let check_name_exists = engine
-            .try_check_constraints(table)
+            .try_check_constraint_definitions(table)
             .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
             .iter()
-            .any(|(existing, _)| existing.as_deref() == Some(name));
+            .any(|existing| existing.name.as_deref() == Some(name));
         let foreign_name_exists = engine
             .try_foreign_keys(table)
             .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?

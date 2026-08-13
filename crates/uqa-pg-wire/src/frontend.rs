@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 
 use crate::codec::{message_total_len, DecodeLen, Reader, MESSAGE_HEADER_LEN};
 use crate::protocol::{
-    DecodeOutcome, FormatCode, PgWireError, ProtocolVersion, CANCEL_REQUEST_CODE,
-    GSSENC_REQUEST_CODE, PROTOCOL_VERSION_3_0, SSL_REQUEST_CODE,
+    CancelKey, DecodeOutcome, FormatCode, PgWireError, ProtocolVersion, CANCEL_REQUEST_CODE,
+    GSSENC_REQUEST_CODE, SSL_REQUEST_CODE,
 };
 
 pub const DEFAULT_MAX_MESSAGE_LEN: usize = 16 * 1024 * 1024;
@@ -17,7 +17,10 @@ pub const DEFAULT_MAX_MESSAGE_LEN: usize = 16 * 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartupFrame {
     Startup(StartupMessage),
-    CancelRequest { process_id: i32, secret_key: i32 },
+    CancelRequest {
+        process_id: i32,
+        secret_key: CancelKey,
+    },
     SSLRequest,
     GSSEncRequest,
 }
@@ -26,6 +29,32 @@ pub enum StartupFrame {
 pub struct StartupMessage {
     pub version: ProtocolVersion,
     pub parameters: BTreeMap<String, String>,
+    /// Startup parameter pairs in wire order, including duplicate names.
+    pub parameter_pairs: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartupNegotiation {
+    pub requested_version: ProtocolVersion,
+    pub negotiated_version: ProtocolVersion,
+    pub unrecognized_options: Vec<String>,
+}
+
+impl StartupNegotiation {
+    #[must_use]
+    pub fn requires_response(&self) -> bool {
+        self.requested_version != self.negotiated_version || !self.unrecognized_options.is_empty()
+    }
+
+    #[must_use]
+    pub fn response(&self) -> Option<crate::backend::BackendMessage> {
+        self.requires_response().then(
+            || crate::backend::BackendMessage::NegotiateProtocolVersion {
+                newest_protocol_version: self.negotiated_version,
+                unrecognized_options: self.unrecognized_options.clone(),
+            },
+        )
+    }
 }
 
 impl StartupMessage {
@@ -43,6 +72,29 @@ impl StartupMessage {
 
     pub fn application_name(&self) -> Option<&str> {
         self.get("application_name")
+    }
+
+    /// Negotiate a PostgreSQL 3.x minor version and report every `_pq_.`
+    /// startup option the embedding server has not implemented.
+    pub fn negotiate(
+        &self,
+        supported_protocol_options: &[&str],
+    ) -> Result<StartupNegotiation, PgWireError> {
+        let negotiated_version = self.version.negotiate()?;
+        let unrecognized_options = self
+            .parameter_pairs
+            .iter()
+            .map(|(name, _)| name)
+            .filter(|name| {
+                name.starts_with("_pq_.") && !supported_protocol_options.contains(&name.as_str())
+            })
+            .cloned()
+            .collect();
+        Ok(StartupNegotiation {
+            requested_version: self.version,
+            negotiated_version,
+            unrecognized_options,
+        })
     }
 }
 
@@ -123,18 +175,23 @@ pub fn decode_startup_with_max(input: &[u8], max_len: usize) -> DecodeOutcome<St
         }
         CANCEL_REQUEST_CODE => {
             let process_id = reader.read_i32("cancel request process id")?;
-            let secret_key = reader.read_i32("cancel request secret key")?;
+            let key_length = reader.remaining();
+            let secret_key = CancelKey::new(
+                reader
+                    .read_exact(key_length, "cancel request secret key")?
+                    .to_vec(),
+            )?;
             reader.ensure_empty("cancel request")?;
             StartupFrame::CancelRequest {
                 process_id,
                 secret_key,
             }
         }
-        PROTOCOL_VERSION_3_0 => StartupFrame::Startup(parse_startup_message(
-            ProtocolVersion::from_raw(version_or_code),
-            reader,
-        )?),
-        other => return Err(PgWireError::UnsupportedProtocolVersion(other)),
+        other => {
+            let version = ProtocolVersion::from_raw(other);
+            version.negotiate()?;
+            StartupFrame::Startup(parse_startup_message(version, reader)?)
+        }
     };
     Ok(Some((frame, total)))
 }
@@ -161,6 +218,7 @@ fn parse_startup_message(
     mut reader: Reader<'_>,
 ) -> Result<StartupMessage, PgWireError> {
     let mut parameters = BTreeMap::new();
+    let mut parameter_pairs = Vec::new();
     loop {
         if reader.remaining() == 0 {
             return Err(PgWireError::MissingNul {
@@ -183,11 +241,13 @@ fn parse_startup_message(
             break;
         }
         let value = reader.read_cstring("startup parameter value")?;
+        parameter_pairs.push((key.clone(), value.clone()));
         parameters.insert(key, value);
     }
     Ok(StartupMessage {
         version,
         parameters,
+        parameter_pairs,
     })
 }
 

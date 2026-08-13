@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `PostgreSQL` v3 wire protocol primitives for UQA-compatible servers.
+//! PostgreSQL wire protocol 3.0 through 3.2 primitives for UQA-compatible servers.
 //!
 //! This crate intentionally stops at protocol parsing and message encoding.
 //! It does not own sockets, tasks, TLS, authentication storage, query
@@ -24,14 +24,17 @@ pub mod frontend;
 pub mod protocol;
 
 pub use backend::{
-    encode_all, Authentication, BackendKeyData, BackendMessage, CopyResponse, ErrorOrNotice,
-    FieldDescription, GSSEncResponse, NoticeSeverity, SSLResponse,
+    encode_all, encode_all_for_protocol, Authentication, BackendKeyData, BackendMessage,
+    CopyResponse, ErrorOrNotice, FieldDescription, GSSEncResponse, NoticeSeverity, SSLResponse,
 };
 pub use frontend::{
     decode_frontend, decode_frontend_with_max, decode_startup, decode_startup_with_max, Bind,
     CloseTarget, DescribeTarget, Execute, FrontendMessage, Parse, StartupFrame, StartupMessage,
+    StartupNegotiation,
 };
 pub use protocol::{
-    DecodeError, DecodeOutcome, FormatCode, PgWireError, ProtocolVersion, TransactionStatus,
-    CANCEL_REQUEST_CODE, GSSENC_REQUEST_CODE, PROTOCOL_VERSION_3_0, SSL_REQUEST_CODE,
+    CancelKey, DecodeError, DecodeOutcome, FormatCode, PgWireError, ProtocolVersion,
+    TransactionStatus, CANCEL_REQUEST_CODE, GSSENC_REQUEST_CODE, MAX_CANCEL_KEY_LEN,
+    MIN_BACKEND_KEY_DATA_KEY_LEN, MIN_CANCEL_REQUEST_KEY_LEN, PROTOCOL_VERSION_3_0,
+    PROTOCOL_VERSION_3_2, SSL_REQUEST_CODE,
 };

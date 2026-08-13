@@ -80,7 +80,7 @@ regex = "1.11"
 unicode-normalization = "0.1"
 rust_decimal = "1.42"
 rusqlite = { version = "0.39", default-features = false, features = ["bundled-sqlcipher-vendored-openssl", "blob", "cache"] }
-pg_query = "6.1"
+pg_query = { git = "https://github.com/jaepil/pg_query.rs", rev = "eeae6a8c765d907ef8038670951ff45498856fd2" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 argon2 = { version = "0.5", default-features = false }
 chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
@@ -90,6 +90,8 @@ crc32fast = "1.4"
 fs2 = "0.4"
 lz4_flex = "0.13"
 getrandom = "0.3"
+icu_casemap = "=2.0.0"
+libm = "0.2"
 redb = "4.1"
 zstd = "0.13"
 arrow-array = "58"

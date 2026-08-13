@@ -19,6 +19,8 @@ pub(super) fn eval_array_functions(name: &str, args: &[Value]) -> Option<Result<
         "array_prepend",
         "array_remove",
         "array_position",
+        "array_reverse",
+        "array_sort",
         "unnest",
     ];
     if !NAMES.contains(&name) {
@@ -187,6 +189,78 @@ pub(super) fn eval_array_functions(name: &str, args: &[Value]) -> Option<Result<
                     Value::Null => Ok(Value::Null),
                     other => Err(SQLError::TypeMismatch(format!(
                         "array_position: not an array {other:?}"
+                    ))),
+                }
+            }
+            "array_reverse" => {
+                if args.len() != 1 {
+                    return Err(SQLError::TypeMismatch("array_reverse takes 1 arg".into()));
+                }
+                match &args[0] {
+                    Value::List(items) => {
+                        let mut out = items.clone();
+                        out.reverse();
+                        Ok(Value::List(out))
+                    }
+                    Value::Null => Ok(Value::Null),
+                    other => Err(SQLError::TypeMismatch(format!(
+                        "array_reverse: not an array {other:?}"
+                    ))),
+                }
+            }
+            "array_sort" => {
+                if !(1..=3).contains(&args.len()) {
+                    return Err(SQLError::TypeMismatch(
+                        "array_sort takes 1 to 3 args".into(),
+                    ));
+                }
+                if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                    return Ok(Value::Null);
+                }
+                let descending = match args.get(1) {
+                    None => false,
+                    Some(Value::Bool(value)) => *value,
+                    Some(other) => {
+                        return Err(SQLError::TypeMismatch(format!(
+                            "array_sort: descending must be boolean, got {other:?}"
+                        )));
+                    }
+                };
+                let nulls_first = match args.get(2) {
+                    None => descending,
+                    Some(Value::Bool(value)) => *value,
+                    Some(other) => {
+                        return Err(SQLError::TypeMismatch(format!(
+                            "array_sort: nulls_first must be boolean, got {other:?}"
+                        )));
+                    }
+                };
+                match &args[0] {
+                    Value::List(items) => {
+                        let mut out = items.clone();
+                        out.sort_by(|left, right| match (left, right) {
+                            (Value::Null, Value::Null) => std::cmp::Ordering::Equal,
+                            (Value::Null, _) => {
+                                if nulls_first {
+                                    std::cmp::Ordering::Less
+                                } else {
+                                    std::cmp::Ordering::Greater
+                                }
+                            }
+                            (_, Value::Null) => {
+                                if nulls_first {
+                                    std::cmp::Ordering::Greater
+                                } else {
+                                    std::cmp::Ordering::Less
+                                }
+                            }
+                            (left, right) if descending => right.cmp(left),
+                            (left, right) => left.cmp(right),
+                        });
+                        Ok(Value::List(out))
+                    }
+                    other => Err(SQLError::TypeMismatch(format!(
+                        "array_sort: not an array {other:?}"
                     ))),
                 }
             }

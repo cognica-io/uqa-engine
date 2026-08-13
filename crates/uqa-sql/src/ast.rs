@@ -69,6 +69,15 @@ pub struct ColumnDef {
     pub ty: ColumnType,
     pub primary_key: bool,
     pub not_null: bool,
+    /// Whether `NOT NULL` was declared as its own constraint instead of being
+    /// implied by `PRIMARY KEY` or an auto-incrementing identity.
+    #[serde(default)]
+    pub not_null_explicit: bool,
+    /// Durable PostgreSQL 18 `NOT NULL` constraint name. Parsing leaves an
+    /// unnamed declaration as `None`; table registration assigns and persists
+    /// PostgreSQL's generated name before the constraint becomes visible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_null_name: Option<String>,
     /// `SERIAL` / `BIGSERIAL` columns auto-allocate from a per-table
     /// monotonic counter when the value is omitted from `INSERT`.
     #[serde(default)]
@@ -86,6 +95,10 @@ pub struct ColumnDef {
     /// (and UPDATE-replace) time against the row being written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_name: Option<String>,
+    #[serde(default = "default_true")]
+    pub check_enforced: bool,
     /// `REFERENCES parent(col)` column-level FOREIGN KEY. The engine
     /// rejects INSERT / UPDATE whose value is not present in the
     /// referenced (table, column) pair.
@@ -96,6 +109,8 @@ pub struct ColumnDef {
 /// `REFERENCES table(column)` reference target.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignKeyRef {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub table: String,
     pub column: String,
     #[serde(default)]
@@ -104,6 +119,8 @@ pub struct ForeignKeyRef {
     pub on_delete: ForeignKeyAction,
     #[serde(default)]
     pub match_type: ForeignKeyMatch,
+    #[serde(default = "default_true")]
+    pub enforced: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,6 +182,8 @@ pub struct TableConstraintSet {
 pub struct TableCheck {
     pub name: Option<String>,
     pub expr: Expr,
+    #[serde(default = "default_true")]
+    pub enforced: bool,
 }
 
 /// Table-level foreign key. `local_columns.len()` matches
@@ -187,6 +206,12 @@ pub struct ForeignKey {
     pub on_delete_set_columns: Vec<String>,
     #[serde(default)]
     pub match_type: ForeignKeyMatch,
+    #[serde(default = "default_true")]
+    pub enforced: bool,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -470,6 +495,24 @@ pub struct InsertStmt {
     pub on_conflict: Option<OnConflict>,
     /// `RETURNING ...` projection list. Empty when absent.
     pub returning: Vec<Projection>,
+    /// PostgreSQL 18 names for the old and new row images visible to
+    /// `RETURNING`. The defaults are `old` and `new`.
+    pub returning_aliases: ReturningAliases,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReturningAliases {
+    pub old: String,
+    pub new: String,
+}
+
+impl Default for ReturningAliases {
+    fn default() -> Self {
+        Self {
+            old: "old".into(),
+            new: "new".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -669,6 +712,7 @@ pub struct UpdateStmt {
     pub from: Option<FromClause>,
     /// `RETURNING ...` projection list. Empty when absent.
     pub returning: Vec<Projection>,
+    pub returning_aliases: ReturningAliases,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -683,6 +727,7 @@ pub struct DeleteStmt {
     pub using: Option<FromClause>,
     /// `RETURNING ...` projection list. Empty when absent.
     pub returning: Vec<Projection>,
+    pub returning_aliases: ReturningAliases,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -816,6 +861,7 @@ pub struct MergeStmt {
     pub when_clauses: Vec<MergeWhen>,
     /// `MERGE ... RETURNING ...` projection list. Empty when absent.
     pub returning: Vec<Projection>,
+    pub returning_aliases: ReturningAliases,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

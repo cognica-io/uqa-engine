@@ -19,6 +19,10 @@ pg_query = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
+crc32fast = { workspace = true }
+getrandom = { workspace = true }
+icu_casemap = { workspace = true }
+libm = { workspace = true }
 regex = { workspace = true }
 thiserror = { workspace = true }
 

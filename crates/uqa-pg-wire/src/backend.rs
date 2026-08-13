@@ -5,7 +5,7 @@
 //
 
 use crate::codec::{i16_len, i32_len, Writer};
-use crate::protocol::{FormatCode, PgWireError, TransactionStatus};
+use crate::protocol::{CancelKey, FormatCode, PgWireError, ProtocolVersion, TransactionStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Authentication {
@@ -48,17 +48,34 @@ impl GSSEncResponse {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendKeyData {
     pub process_id: i32,
-    pub secret_key: i32,
+    pub secret_key: CancelKey,
+}
+
+impl BackendKeyData {
+    #[must_use]
+    pub fn legacy(process_id: i32, secret_key: i32) -> Self {
+        Self {
+            process_id,
+            secret_key: CancelKey::from_i32(secret_key),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendMessage {
     Authentication(Authentication),
     BackendKeyData(BackendKeyData),
-    ParameterStatus { name: String, value: String },
+    NegotiateProtocolVersion {
+        newest_protocol_version: ProtocolVersion,
+        unrecognized_options: Vec<String>,
+    },
+    ParameterStatus {
+        name: String,
+        value: String,
+    },
     ReadyForQuery(TransactionStatus),
     RowDescription(Vec<FieldDescription>),
     DataRow(Vec<Option<Vec<u8>>>),
@@ -181,9 +198,20 @@ impl ErrorOrNotice {
 
 impl BackendMessage {
     pub fn encode(&self) -> Result<Vec<u8>, PgWireError> {
+        self.encode_for_protocol(ProtocolVersion::LATEST)
+    }
+
+    pub fn encode_for_protocol(
+        &self,
+        protocol_version: ProtocolVersion,
+    ) -> Result<Vec<u8>, PgWireError> {
         match self {
             Self::Authentication(auth) => encode_authentication(auth),
-            Self::BackendKeyData(data) => encode_backend_key_data(*data),
+            Self::BackendKeyData(data) => encode_backend_key_data(data, protocol_version),
+            Self::NegotiateProtocolVersion {
+                newest_protocol_version,
+                unrecognized_options,
+            } => encode_negotiate_protocol_version(*newest_protocol_version, unrecognized_options),
             Self::ParameterStatus { name, value } => encode_parameter_status(name, value),
             Self::ReadyForQuery(status) => encode_ready_for_query(*status),
             Self::RowDescription(fields) => encode_row_description(fields),
@@ -209,9 +237,16 @@ impl BackendMessage {
 }
 
 pub fn encode_all(messages: &[BackendMessage]) -> Result<Vec<u8>, PgWireError> {
+    encode_all_for_protocol(messages, ProtocolVersion::LATEST)
+}
+
+pub fn encode_all_for_protocol(
+    messages: &[BackendMessage],
+    protocol_version: ProtocolVersion,
+) -> Result<Vec<u8>, PgWireError> {
     let mut out = Vec::new();
     for message in messages {
-        out.extend(message.encode()?);
+        out.extend(message.encode_for_protocol(protocol_version)?);
     }
     Ok(out)
 }
@@ -279,11 +314,37 @@ fn encode_authentication(auth: &Authentication) -> Result<Vec<u8>, PgWireError> 
     Writer::frame(b'R', &body.into_inner())
 }
 
-fn encode_backend_key_data(data: BackendKeyData) -> Result<Vec<u8>, PgWireError> {
+fn encode_backend_key_data(
+    data: &BackendKeyData,
+    protocol_version: ProtocolVersion,
+) -> Result<Vec<u8>, PgWireError> {
+    data.secret_key
+        .validate_for_backend_key_data(protocol_version)?;
     let mut body = Writer::new();
     body.write_i32(data.process_id);
-    body.write_i32(data.secret_key);
+    body.write_bytes(data.secret_key.as_bytes());
     Writer::frame(b'K', &body.into_inner())
+}
+
+fn encode_negotiate_protocol_version(
+    newest_protocol_version: ProtocolVersion,
+    unrecognized_options: &[String],
+) -> Result<Vec<u8>, PgWireError> {
+    if newest_protocol_version.negotiate()? != newest_protocol_version {
+        return Err(PgWireError::UnsupportedProtocolVersion(
+            newest_protocol_version.raw(),
+        ));
+    }
+    let mut body = Writer::new();
+    body.write_i32(newest_protocol_version.raw());
+    body.write_i32(i32_len(
+        unrecognized_options.len(),
+        "NegotiateProtocolVersion option count",
+    )?);
+    for option in unrecognized_options {
+        body.write_cstring(option, "NegotiateProtocolVersion option")?;
+    }
+    Writer::frame(b'v', &body.into_inner())
 }
 
 fn encode_parameter_status(name: &str, value: &str) -> Result<Vec<u8>, PgWireError> {

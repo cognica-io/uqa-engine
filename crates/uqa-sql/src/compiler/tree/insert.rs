@@ -7,8 +7,8 @@
 //! INSERT and ON CONFLICT lowering.
 
 use super::{
-    compile_expr, compile_projections, compile_select, compile_with_clause, range_var_name, Expr,
-    InsertStmt, NodeEnum, Result, SQLError,
+    compile_expr, compile_returning_clause, compile_select, compile_with_clause, range_var_name,
+    Expr, InsertStmt, NodeEnum, Result, SQLError,
 };
 
 pub(in crate::compiler) fn compile_insert(
@@ -76,7 +76,7 @@ pub(in crate::compiler) fn compile_insert(
         .as_ref()
         .map(|c| compile_on_conflict(c.as_ref()))
         .transpose()?;
-    let returning = compile_projections(&stmt.returning_list)?;
+    let (returning, returning_aliases) = compile_returning_clause(stmt.returning_clause.as_ref())?;
     let with = match stmt.with_clause.as_ref() {
         Some(wc) => compile_with_clause(wc)?,
         None => Vec::new(),
@@ -89,6 +89,7 @@ pub(in crate::compiler) fn compile_insert(
         select_source,
         on_conflict,
         returning,
+        returning_aliases,
     })
 }
 

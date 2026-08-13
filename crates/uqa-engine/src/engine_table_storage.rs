@@ -284,6 +284,7 @@ fn rename_schema_expr_qualified_column(
 
 mod columns;
 mod constraints;
+pub(crate) use constraints::materialize_constraint_names;
 mod dependencies;
 mod documents;
 mod fts;

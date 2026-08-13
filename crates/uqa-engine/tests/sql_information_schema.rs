@@ -223,6 +223,292 @@ fn pg_catalog_exposes_namespace_class_and_attribute_rows() {
 }
 
 #[test]
+fn postgresql_18_constraint_catalog_reports_names_and_enforcement() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE parent (id INTEGER PRIMARY KEY)", &[])
+        .unwrap();
+    eng.sql(
+        "CREATE TABLE child (\
+             id INTEGER PRIMARY KEY, \
+             label TEXT CONSTRAINT label_nn NOT NULL, \
+             score INTEGER CONSTRAINT score_positive CHECK (score > 0) NOT ENFORCED, \
+             parent_id INTEGER CONSTRAINT parent_ref REFERENCES parent(id) NOT ENFORCED\
+         )",
+        &[],
+    )
+    .unwrap();
+
+    let constraints = eng
+        .sql(
+            "SELECT conname, contype, conenforced, convalidated \
+             FROM pg_catalog.pg_constraint \
+             WHERE conname IN ('label_nn', 'score_positive', 'parent_ref') \
+             ORDER BY conname",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(constraints.rows.len(), 3);
+    assert_eq!(
+        constraints.rows[0]["conname"],
+        Value::Str("label_nn".into())
+    );
+    assert_eq!(constraints.rows[0]["contype"], Value::Str("n".into()));
+    assert_eq!(constraints.rows[0]["conenforced"], Value::Bool(true));
+    assert_eq!(constraints.rows[0]["convalidated"], Value::Bool(true));
+    assert_eq!(
+        constraints.rows[1]["conname"],
+        Value::Str("parent_ref".into())
+    );
+    assert_eq!(constraints.rows[1]["contype"], Value::Str("f".into()));
+    assert_eq!(constraints.rows[1]["conenforced"], Value::Bool(false));
+    assert_eq!(constraints.rows[1]["convalidated"], Value::Bool(false));
+    assert_eq!(
+        constraints.rows[2]["conname"],
+        Value::Str("score_positive".into())
+    );
+    assert_eq!(constraints.rows[2]["contype"], Value::Str("c".into()));
+    assert_eq!(constraints.rows[2]["conenforced"], Value::Bool(false));
+    assert_eq!(constraints.rows[2]["convalidated"], Value::Bool(false));
+
+    let info = eng
+        .sql(
+            "SELECT constraint_name, constraint_type, enforced \
+             FROM information_schema.table_constraints \
+             WHERE table_name = 'child' \
+               AND constraint_name IN ('label_nn', 'score_positive', 'parent_ref') \
+             ORDER BY constraint_name",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(info.rows[0]["constraint_type"], Value::Str("CHECK".into()));
+    assert_eq!(info.rows[0]["enforced"], Value::Str("YES".into()));
+    assert_eq!(
+        info.rows[1]["constraint_type"],
+        Value::Str("FOREIGN KEY".into())
+    );
+    assert_eq!(info.rows[1]["enforced"], Value::Str("NO".into()));
+    assert_eq!(info.rows[2]["constraint_type"], Value::Str("CHECK".into()));
+    assert_eq!(info.rows[2]["enforced"], Value::Str("NO".into()));
+}
+
+#[test]
+fn postgresql_18_constraint_catalog_preserves_table_and_composite_structure() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE parent (\
+             p INTEGER PRIMARY KEY, \
+             q INTEGER UNIQUE, \
+             r INTEGER, \
+             UNIQUE (r, q)\
+         )",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "CREATE TABLE child (\
+             id INTEGER PRIMARY KEY, \
+             u INTEGER UNIQUE, \
+             nn INTEGER NOT NULL, \
+             ck INTEGER CHECK (ck > 0), \
+             fk INTEGER REFERENCES parent(p) ON UPDATE CASCADE ON DELETE SET NULL, \
+             a INTEGER, \
+             b INTEGER, \
+             CHECK (a < b), \
+             UNIQUE NULLS NOT DISTINCT (a, b), \
+             FOREIGN KEY (a, b) REFERENCES parent(q, r) MATCH FULL ON UPDATE RESTRICT ON DELETE CASCADE\
+         )",
+        &[],
+    )
+    .unwrap();
+
+    let constraints = eng
+        .sql(
+            "SELECT conname, contype, conkey, confrelid, confkey, \
+                    confupdtype, confdeltype, confmatchtype, connoinherit \
+             FROM pg_catalog.pg_constraint \
+             WHERE conrelid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'child') \
+             ORDER BY conname",
+            &[],
+        )
+        .unwrap();
+    let names: Vec<&str> = constraints
+        .rows
+        .iter()
+        .map(|row| match &row["conname"] {
+            Value::Str(name) => name.as_str(),
+            value => panic!("expected constraint name, got {value:?}"),
+        })
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "child_a_b_fkey",
+            "child_a_b_key",
+            "child_check",
+            "child_ck_check",
+            "child_fk_fkey",
+            "child_id_not_null",
+            "child_nn_not_null",
+            "child_pkey",
+            "child_u_key",
+        ]
+    );
+    let row = |name: &str| {
+        constraints
+            .rows
+            .iter()
+            .find(|row| row["conname"] == Value::Str(name.into()))
+            .unwrap_or_else(|| panic!("missing constraint `{name}`"))
+    };
+    assert_eq!(
+        row("child_check")["conkey"],
+        Value::List(vec![Value::Int(6), Value::Int(7)])
+    );
+    assert_eq!(
+        row("child_a_b_key")["conkey"],
+        Value::List(vec![Value::Int(6), Value::Int(7)])
+    );
+    assert_eq!(
+        row("child_a_b_fkey")["confkey"],
+        Value::List(vec![Value::Int(2), Value::Int(3)])
+    );
+    assert_ne!(row("child_a_b_fkey")["confrelid"], Value::Int(0));
+    assert_eq!(row("child_a_b_fkey")["confupdtype"], Value::Str("r".into()));
+    assert_eq!(row("child_a_b_fkey")["confdeltype"], Value::Str("c".into()));
+    assert_eq!(
+        row("child_a_b_fkey")["confmatchtype"],
+        Value::Str("f".into())
+    );
+    assert_eq!(row("child_check")["connoinherit"], Value::Bool(false));
+    assert_eq!(row("child_pkey")["connoinherit"], Value::Bool(true));
+
+    let table_constraints = eng
+        .sql(
+            "SELECT constraint_name, constraint_type, nulls_distinct \
+             FROM information_schema.table_constraints \
+             WHERE table_name = 'child' \
+             ORDER BY constraint_name",
+            &[],
+        )
+        .unwrap();
+    let composite_unique = table_constraints
+        .rows
+        .iter()
+        .find(|row| row["constraint_name"] == Value::Str("child_a_b_key".into()))
+        .expect("composite UNIQUE constraint");
+    assert_eq!(
+        composite_unique["constraint_type"],
+        Value::Str("UNIQUE".into())
+    );
+    assert_eq!(composite_unique["nulls_distinct"], Value::Str("NO".into()));
+    assert_eq!(
+        table_constraints
+            .rows
+            .iter()
+            .find(|row| row["constraint_name"] == Value::Str("child_pkey".into()))
+            .expect("primary key")["nulls_distinct"],
+        Value::Null
+    );
+
+    let key_columns = eng
+        .sql(
+            "SELECT constraint_name, column_name, ordinal_position, position_in_unique_constraint \
+             FROM information_schema.key_column_usage \
+             WHERE table_name = 'child' \
+             ORDER BY constraint_name, ordinal_position",
+            &[],
+        )
+        .unwrap();
+    let composite_fk: Vec<_> = key_columns
+        .rows
+        .iter()
+        .filter(|row| row["constraint_name"] == Value::Str("child_a_b_fkey".into()))
+        .collect();
+    assert_eq!(composite_fk.len(), 2);
+    assert_eq!(composite_fk[0]["column_name"], Value::Str("a".into()));
+    assert_eq!(composite_fk[0]["ordinal_position"], Value::Int(1));
+    assert_eq!(
+        composite_fk[0]["position_in_unique_constraint"],
+        Value::Int(2)
+    );
+    assert_eq!(composite_fk[1]["column_name"], Value::Str("b".into()));
+    assert_eq!(composite_fk[1]["ordinal_position"], Value::Int(2));
+    assert_eq!(
+        composite_fk[1]["position_in_unique_constraint"],
+        Value::Int(1)
+    );
+    let scalar_unique = key_columns
+        .rows
+        .iter()
+        .find(|row| row["constraint_name"] == Value::Str("child_u_key".into()))
+        .expect("scalar UNIQUE constraint");
+    assert_eq!(scalar_unique["ordinal_position"], Value::Int(1));
+
+    eng.sql("ALTER TABLE child RENAME TO renamed_child", &[])
+        .unwrap();
+    let renamed = eng
+        .sql(
+            "SELECT conname FROM pg_catalog.pg_constraint \
+             WHERE conrelid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'renamed_child') \
+             ORDER BY conname",
+            &[],
+        )
+        .unwrap();
+    let renamed_names: Vec<&str> = renamed
+        .rows
+        .iter()
+        .map(|row| match &row["conname"] {
+            Value::Str(name) => name.as_str(),
+            value => panic!("expected constraint name, got {value:?}"),
+        })
+        .collect();
+    assert_eq!(renamed_names, names);
+}
+
+#[test]
+fn generated_constraint_names_survive_table_rename_and_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("constraint-names.db");
+    let expected = vec![
+        "durable_a_check".to_string(),
+        "durable_a_key".to_string(),
+        "durable_a_not_null".to_string(),
+        "durable_id_not_null".to_string(),
+        "durable_pkey".to_string(),
+    ];
+    {
+        let engine = Engine::open(&path).unwrap();
+        engine
+            .sql(
+                "CREATE TABLE durable (id INTEGER PRIMARY KEY, a INTEGER NOT NULL CHECK (a > 0), UNIQUE (a))",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql("ALTER TABLE durable RENAME TO renamed_durable", &[])
+            .unwrap();
+    }
+    let engine = Engine::open(&path).unwrap();
+    let result = engine
+        .sql(
+            "SELECT conname FROM pg_catalog.pg_constraint \
+             WHERE conrelid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'renamed_durable') \
+             ORDER BY conname",
+            &[],
+        )
+        .unwrap();
+    let names: Vec<String> = result
+        .rows
+        .iter()
+        .map(|row| match &row["conname"] {
+            Value::Str(name) => name.clone(),
+            value => panic!("expected constraint name, got {value:?}"),
+        })
+        .collect();
+    assert_eq!(names, expected);
+}
+
+#[test]
 fn pg_catalog_exposes_indexes_types_functions_and_roles() {
     let eng = Engine::new();
     eng.sql("CREATE TABLE docs (id INTEGER PRIMARY KEY, body TEXT)", &[])
@@ -287,4 +573,70 @@ fn pg_catalog_exposes_indexes_types_functions_and_roles() {
         )
         .unwrap();
     assert_eq!(settings.rows[0]["setting"], Value::Str("public".into()));
+}
+
+#[test]
+fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
+    let engine = Engine::new();
+    let routines = engine
+        .sql(
+            "SELECT oid, proname, prokind, proisstrict, proleakproof, provolatile, \
+                    pronargs, pronargdefaults, prorettype, proargtypes, proargnames, prosrc \
+             FROM pg_catalog.pg_proc \
+             WHERE oid IN (3261, 6364, 6383, 6389, 6390, 6429, 6430) \
+             ORDER BY oid",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(routines.rows.len(), 7);
+    let row = |oid: i64| {
+        routines
+            .rows
+            .iter()
+            .find(|row| row["oid"] == Value::Int(oid))
+            .unwrap_or_else(|| panic!("missing pg_proc row {oid}"))
+    };
+    assert_eq!(row(3261)["pronargs"], Value::Int(2));
+    assert_eq!(row(3261)["pronargdefaults"], Value::Int(1));
+    assert_eq!(row(3261)["prorettype"], Value::Int(114));
+    assert_eq!(
+        row(3261)["proargnames"],
+        Value::List(vec![
+            Value::Str("target".into()),
+            Value::Str("strip_in_arrays".into()),
+        ])
+    );
+    assert_eq!(row(6364)["proleakproof"], Value::Bool(true));
+    assert_eq!(row(6383)["prosrc"], Value::Str("dgamma".into()));
+    assert_eq!(
+        row(6389)["proargtypes"],
+        Value::List(vec![Value::Int(2277), Value::Int(16)])
+    );
+    assert_eq!(row(6390)["pronargs"], Value::Int(3));
+    assert_eq!(row(6429)["provolatile"], Value::Str("v".into()));
+    assert_eq!(row(6430)["prorettype"], Value::Int(2950));
+
+    let information_schema = engine
+        .sql(
+            "SELECT specific_name, data_type, is_deterministic, external_language \
+             FROM information_schema.routines \
+             WHERE routine_name = 'uuidv7' \
+             ORDER BY specific_name",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(information_schema.rows.len(), 2);
+    assert_eq!(
+        information_schema.rows[0]["specific_name"],
+        Value::Str("uuidv7_6429".into())
+    );
+    assert_eq!(
+        information_schema.rows[1]["specific_name"],
+        Value::Str("uuidv7_6430".into())
+    );
+    for row in information_schema.rows {
+        assert_eq!(row["data_type"], Value::Str("uuid".into()));
+        assert_eq!(row["is_deterministic"], Value::Str("NO".into()));
+        assert_eq!(row["external_language"], Value::Str("INTERNAL".into()));
+    }
 }

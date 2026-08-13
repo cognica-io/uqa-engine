@@ -23,7 +23,9 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
         "quote_literal",
         "quote_nullable",
         "regexp_count",
+        "regexp_instr",
         "regexp_like",
+        "regexp_substr",
         "similar_to",
         "num_nulls",
         "num_nonnulls",
@@ -162,14 +164,53 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
                 }
                 let s = value_to_string(&args[0]);
                 let pat = value_to_string(&args[1]);
-                let start =
-                    usize::try_from(args.get(2).map(to_i64).transpose()?.unwrap_or(1).max(1))
-                        .unwrap_or(usize::MAX);
+                let start = positive_regex_parameter(args.get(2), 1, "start")?;
                 let flags = args.get(3).map(value_to_string).unwrap_or_default();
                 let re = compile_pg_regex(&pat, &flags)?;
-                let chars: Vec<char> = s.chars().collect();
-                let tail: String = chars[(start - 1).min(chars.len())..].iter().collect();
-                Ok(Value::Int(re.find_iter(&tail).count() as i64))
+                let Some((tail, _)) = regex_tail(&s, start) else {
+                    return Ok(Value::Int(0));
+                };
+                Ok(Value::Int(re.find_iter(tail).count() as i64))
+            }
+            "regexp_instr" => {
+                if args.len() < 2 || args.len() > 7 {
+                    return Err(SQLError::TypeMismatch("regexp_instr takes 2-7 args".into()));
+                }
+                if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                    return Ok(Value::Null);
+                }
+                let string = value_to_string(&args[0]);
+                let pattern = value_to_string(&args[1]);
+                let start = positive_regex_parameter(args.get(2), 1, "start")?;
+                let occurrence = positive_regex_parameter(args.get(3), 1, "n")?;
+                let end_option = args.get(4).map(to_i64).transpose()?.unwrap_or(0);
+                if !matches!(end_option, 0 | 1) {
+                    return Err(invalid_regex_parameter("endoption", end_option));
+                }
+                let flags = args.get(5).map(value_to_string).unwrap_or_default();
+                let subexpression = nonnegative_regex_parameter(args.get(6), 0, "subexpr")?;
+                let re = compile_pg_regex(&pattern, &flags)?;
+                let Some((tail, base_chars)) = regex_tail(&string, start) else {
+                    return Ok(Value::Int(0));
+                };
+                let Some(captures) = re.captures_iter(tail).nth(occurrence - 1) else {
+                    return Ok(Value::Int(0));
+                };
+                let Some(selected) = captures.get(subexpression) else {
+                    return Ok(Value::Int(0));
+                };
+                let byte_offset = if end_option == 0 {
+                    selected.start()
+                } else {
+                    selected.end()
+                };
+                let position = base_chars
+                    .checked_add(tail[..byte_offset].chars().count())
+                    .and_then(|position| position.checked_add(1))
+                    .ok_or_else(|| out_of_range("integer"))?;
+                Ok(Value::Int(
+                    i64::try_from(position).map_err(|_| out_of_range("integer"))?,
+                ))
             }
             "regexp_like" => {
                 if args.len() < 2 || args.len() > 3 {
@@ -183,6 +224,33 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
                 let flags = args.get(2).map(value_to_string).unwrap_or_default();
                 let re = compile_pg_regex(&pat, &flags)?;
                 Ok(Value::Bool(re.is_match(&s)))
+            }
+            "regexp_substr" => {
+                if args.len() < 2 || args.len() > 6 {
+                    return Err(SQLError::TypeMismatch(
+                        "regexp_substr takes 2-6 args".into(),
+                    ));
+                }
+                if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                    return Ok(Value::Null);
+                }
+                let string = value_to_string(&args[0]);
+                let pattern = value_to_string(&args[1]);
+                let start = positive_regex_parameter(args.get(2), 1, "start")?;
+                let occurrence = positive_regex_parameter(args.get(3), 1, "n")?;
+                let flags = args.get(4).map(value_to_string).unwrap_or_default();
+                let subexpression = nonnegative_regex_parameter(args.get(5), 0, "subexpr")?;
+                let re = compile_pg_regex(&pattern, &flags)?;
+                let Some((tail, _)) = regex_tail(&string, start) else {
+                    return Ok(Value::Null);
+                };
+                let Some(captures) = re.captures_iter(tail).nth(occurrence - 1) else {
+                    return Ok(Value::Null);
+                };
+                Ok(captures
+                    .get(subexpression)
+                    .map(|matched| Value::Str(matched.as_str().to_string()))
+                    .unwrap_or(Value::Null))
             }
             "similar_to" => {
                 // SIMILAR TO: SQL regex anchored over the whole string.
@@ -510,4 +578,39 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
             _ => unreachable!("function family membership was checked before dispatch"),
         }
     })())
+}
+
+fn invalid_regex_parameter(name: &str, value: i64) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22023".into(),
+        message: format!("invalid value for parameter \"{name}\": {value}"),
+    }
+}
+
+fn positive_regex_parameter(value: Option<&Value>, default: usize, name: &str) -> Result<usize> {
+    let value = value.map(to_i64).transpose()?.unwrap_or(default as i64);
+    if value <= 0 {
+        return Err(invalid_regex_parameter(name, value));
+    }
+    Ok(usize::try_from(value).unwrap_or(usize::MAX))
+}
+
+fn nonnegative_regex_parameter(value: Option<&Value>, default: usize, name: &str) -> Result<usize> {
+    let value = value.map(to_i64).transpose()?.unwrap_or(default as i64);
+    if value < 0 {
+        return Err(invalid_regex_parameter(name, value));
+    }
+    Ok(usize::try_from(value).unwrap_or(usize::MAX))
+}
+
+fn regex_tail(string: &str, start: usize) -> Option<(&str, usize)> {
+    let base_chars = start.checked_sub(1)?;
+    if base_chars == 0 {
+        return Some((string, 0));
+    }
+    let byte_index = string
+        .char_indices()
+        .nth(base_chars)
+        .map(|(index, _)| index)?;
+    Some((&string[byte_index..], base_chars))
 }

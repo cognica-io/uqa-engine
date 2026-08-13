@@ -6,10 +6,12 @@
 
 //! Core control, string, regex, and basic numeric built-ins.
 
+use icu_casemap::CaseMapper;
+
 use super::{
-    compare, division_by_zero, expect_str, float1, gcd_i64, initcap_str, json_concat, like_match,
-    out_of_range, string1, to_decimal, to_f64, to_i64, trim_chars, value_to_string, values_equal,
-    Result, SQLError, Value,
+    compare, compile_pg_regex, division_by_zero, expect_str, float1, gcd_i64, initcap_str,
+    json_concat, like_match, out_of_range, string1, to_decimal, to_f64, to_i64, trim_chars,
+    value_to_string, values_equal, Result, SQLError, Value,
 };
 
 pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
@@ -20,6 +22,7 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
         "least",
         "upper",
         "lower",
+        "casefold",
         "length",
         "char_length",
         "character_length",
@@ -124,6 +127,7 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
             }
             "upper" => string1(args, |s| s.to_uppercase()),
             "lower" => string1(args, |s| s.to_lowercase()),
+            "casefold" => string1(args, |s| CaseMapper::new().fold_string(s).into_owned()),
             "length" | "char_length" | "character_length" => {
                 if matches!(args.first(), Some(Value::Null)) {
                     return Ok(Value::Null);
@@ -144,7 +148,14 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
             "ltrim" => trim_chars(args, true, false),
             "rtrim" => trim_chars(args, false, true),
             "initcap" => string1(args, initcap_str),
-            "reverse" => string1(args, |s| s.chars().rev().collect()),
+            "reverse" => match args {
+                [Value::Bytes(bytes)] => {
+                    let mut reversed = bytes.clone();
+                    reversed.reverse();
+                    Ok(Value::Bytes(reversed))
+                }
+                _ => string1(args, |s| s.chars().rev().collect()),
+            },
             "concat" => {
                 // PostgreSQL `CONCAT()` skips NULLs.
                 let mut buf = String::new();
@@ -524,33 +535,136 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
                 }
             }
             "regexp_replace" => {
-                if args.len() < 3 {
+                if !(3..=6).contains(&args.len()) {
                     return Err(SQLError::TypeMismatch(
-                        "regexp_replace takes 3 or 4 args".into(),
+                        "regexp_replace takes 3 to 6 args".into(),
                     ));
+                }
+                if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                    return Ok(Value::Null);
                 }
                 let s = value_to_string(&args[0]);
                 let pat = value_to_string(&args[1]);
                 let repl = value_to_string(&args[2]);
-                let flags = args.get(3).map(|v| value_to_string(v)).unwrap_or_default();
-                let global = flags.contains('g');
-                let pat = if flags.contains('i') {
-                    format!("(?i){pat}")
-                } else {
-                    pat
+                let (start, occurrence, flags) = match args {
+                    [_, _, _] => (1, 1, String::new()),
+                    [_, _, _, Value::Str(flags) | Value::FixedChar(flags)] => {
+                        (1, if flags.contains('g') { 0 } else { 1 }, flags.clone())
+                    }
+                    [_, _, _, start] => (
+                        positive_regexp_replace_parameter(start, "start")?,
+                        1,
+                        String::new(),
+                    ),
+                    [_, _, _, start, occurrence] => (
+                        positive_regexp_replace_parameter(start, "start")?,
+                        nonnegative_regexp_replace_parameter(occurrence, "N")?,
+                        String::new(),
+                    ),
+                    [_, _, _, start, occurrence, flags] => (
+                        positive_regexp_replace_parameter(start, "start")?,
+                        nonnegative_regexp_replace_parameter(occurrence, "N")?,
+                        value_to_string(flags),
+                    ),
+                    _ => unreachable!("regexp_replace arity was checked"),
                 };
-                let re = regex::Regex::new(&pat)
-                    .map_err(|e| SQLError::TypeMismatch(format!("regex: {e}")))?;
-                let out = if global {
-                    re.replace_all(&s, repl.as_str()).into_owned()
-                } else {
-                    re.replace(&s, repl.as_str()).into_owned()
-                };
-                Ok(Value::Str(out))
+                regexp_replace(&s, &pat, &repl, start, occurrence, &flags).map(Value::Str)
             }
             _ => unreachable!("function family membership was checked before dispatch"),
         }
     })())
+}
+
+fn invalid_regexp_replace_parameter(name: &str, value: i64) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22023".into(),
+        message: format!("invalid value for parameter \"{name}\": {value}"),
+    }
+}
+
+fn positive_regexp_replace_parameter(value: &Value, name: &str) -> Result<usize> {
+    let value = to_i64(value)?;
+    if value <= 0 {
+        return Err(invalid_regexp_replace_parameter(name, value));
+    }
+    Ok(usize::try_from(value).unwrap_or(usize::MAX))
+}
+
+fn nonnegative_regexp_replace_parameter(value: &Value, name: &str) -> Result<usize> {
+    let value = to_i64(value)?;
+    if value < 0 {
+        return Err(invalid_regexp_replace_parameter(name, value));
+    }
+    Ok(usize::try_from(value).unwrap_or(usize::MAX))
+}
+
+fn regexp_replace(
+    string: &str,
+    pattern: &str,
+    replacement: &str,
+    start: usize,
+    occurrence: usize,
+    flags: &str,
+) -> Result<String> {
+    let base_chars = start - 1;
+    let char_count = string.chars().count();
+    if base_chars > char_count {
+        return Ok(string.to_string());
+    }
+    let byte_start = if base_chars == char_count {
+        string.len()
+    } else {
+        string
+            .char_indices()
+            .nth(base_chars)
+            .map(|(index, _)| index)
+            .unwrap_or(string.len())
+    };
+    let (prefix, tail) = string.split_at(byte_start);
+    let regex = compile_pg_regex(pattern, flags)?;
+    let replacement = postgres_regex_replacement(replacement);
+    let replaced = if occurrence == 0 {
+        regex.replace_all(tail, replacement.as_str()).into_owned()
+    } else if let Some(captures) = regex.captures_iter(tail).nth(occurrence - 1) {
+        let matched = captures.get(0).ok_or_else(|| {
+            SQLError::Internal("regex capture set omitted its mandatory full match".into())
+        })?;
+        let mut expanded = String::new();
+        captures.expand(&replacement, &mut expanded);
+        let mut output = String::with_capacity(tail.len() + expanded.len());
+        output.push_str(&tail[..matched.start()]);
+        output.push_str(&expanded);
+        output.push_str(&tail[matched.end()..]);
+        output
+    } else {
+        tail.to_string()
+    };
+    Ok(format!("{prefix}{replaced}"))
+}
+
+fn postgres_regex_replacement(replacement: &str) -> String {
+    let mut output = String::with_capacity(replacement.len());
+    let mut characters = replacement.chars();
+    while let Some(character) = characters.next() {
+        match character {
+            '$' => output.push_str("$$"),
+            '\\' => match characters.next() {
+                Some(digit @ '1'..='9') => {
+                    output.push('$');
+                    output.push(digit);
+                }
+                Some('&') => output.push_str("$0"),
+                Some('\\') => output.push('\\'),
+                Some(other) => {
+                    output.push('\\');
+                    output.push(other);
+                }
+                None => output.push('\\'),
+            },
+            other => output.push(other),
+        }
+    }
+    output
 }
 
 #[cfg(test)]

@@ -7,7 +7,7 @@
 //! UPDATE and DELETE statement lowering.
 
 use super::{
-    compile_expr, compile_from_node, compile_projections, compile_with_clause, range_var_name,
+    compile_expr, compile_from_node, compile_returning_clause, compile_with_clause, range_var_name,
     DeleteStmt, NodeEnum, Result, SQLError, UpdateStmt,
 };
 
@@ -43,7 +43,7 @@ pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<Up
         Some(node) => Some(compile_from_node(node)?),
         None => None,
     };
-    let returning = compile_projections(&stmt.returning_list)?;
+    let (returning, returning_aliases) = compile_returning_clause(stmt.returning_clause.as_ref())?;
     let with = match stmt.with_clause.as_ref() {
         Some(wc) => compile_with_clause(wc)?,
         None => Vec::new(),
@@ -55,6 +55,7 @@ pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<Up
         with,
         from,
         returning,
+        returning_aliases,
     })
 }
 
@@ -73,7 +74,7 @@ pub(super) fn compile_delete(stmt: &pg_query::protobuf::DeleteStmt) -> Result<De
         Some(node) => Some(compile_from_node(node)?),
         None => None,
     };
-    let returning = compile_projections(&stmt.returning_list)?;
+    let (returning, returning_aliases) = compile_returning_clause(stmt.returning_clause.as_ref())?;
     let with = match stmt.with_clause.as_ref() {
         Some(wc) => compile_with_clause(wc)?,
         None => Vec::new(),
@@ -84,5 +85,6 @@ pub(super) fn compile_delete(stmt: &pg_query::protobuf::DeleteStmt) -> Result<De
         with,
         using,
         returning,
+        returning_aliases,
     })
 }

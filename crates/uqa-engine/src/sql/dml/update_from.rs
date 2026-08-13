@@ -9,7 +9,8 @@
 use super::{
     build_join_spill_with_ctes, build_returning_row, coerce_to_column_type, dml_returning_result,
     eval_mutation_expr, missing_document_error, rewrite_document_with_referential_actions,
-    CteScope, Engine, ResultRow, SQLError, SQLParam, SQLResult, SourcePlan, UpdatePlan,
+    CteScope, Engine, ResultRow, ReturningRowImage, ReturningRowImages, SQLError, SQLParam,
+    SQLResult, SourcePlan, UpdatePlan,
 };
 
 pub(in crate::sql) fn run_update_from(
@@ -84,8 +85,17 @@ pub(in crate::sql) fn run_update_from(
                 returning_rows.push(build_returning_row(
                     engine,
                     &target,
-                    rewritten_doc_id,
-                    &doc,
+                    ReturningRowImages {
+                        old: Some(ReturningRowImage {
+                            doc_id,
+                            document: &original_doc,
+                        }),
+                        new: Some(ReturningRowImage {
+                            doc_id: rewritten_doc_id,
+                            document: &doc,
+                        }),
+                    },
+                    &stmt.returning_aliases,
                     &stmt.returning,
                     params,
                     ctes,

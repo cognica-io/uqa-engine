@@ -9,8 +9,8 @@
 use uqa_core::Value;
 use uqa_sql::ast::{BinaryOp, FrameMode, NullsOrder};
 use uqa_sql::expr::{
-    cast_value, eval_binary_values, eval_function_call, truthy, EngineHook, EvalContext, RowLookup,
-    NAMED_ARG_FUNCTION,
+    cast_value_from, eval_binary_values, eval_function_call, truthy, EngineHook, EvalContext,
+    RowLookup, NAMED_ARG_FUNCTION,
 };
 use uqa_sql::{ResultRow, SQLError, SQLParam};
 
@@ -659,8 +659,9 @@ pub fn eval_scalar(
             else_branch,
         } => eval_case(base.as_deref(), when, else_branch.as_deref(), context),
         ScalarExpr::Cast { expr, ty } => {
+            let source_ty = scalar_source_type(expr);
             let value = eval_scalar(expr, context)?;
-            cast_value(&value, ty)
+            cast_value_from(&value, ty, source_ty)
         }
         ScalarExpr::ScalarSubquery(subquery) => execute_scalar_subquery(*subquery, context),
         ScalarExpr::Exists { subquery, negated } => {
@@ -870,6 +871,15 @@ fn execute_in_subquery(
         .subquery_runner
         .ok_or_else(|| SQLError::Unsupported("physical subquery requires a plan runner".into()))?;
     runner.subquery_contains(subquery, needle, context.outer_row(), context.params)
+}
+
+fn scalar_source_type(expression: &ScalarExpr) -> Option<&str> {
+    match expression {
+        ScalarExpr::Cast { ty, .. } => Some(ty),
+        ScalarExpr::Literal(Value::Int(_)) => Some("integer"),
+        ScalarExpr::Literal(Value::Bytes(_)) => Some("bytea"),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

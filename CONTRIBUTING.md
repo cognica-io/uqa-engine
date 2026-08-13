@@ -82,7 +82,7 @@ Do not add a new Cargo test target merely to isolate a module during development
 
 ### Performance changes
 
-Performance work must preserve an exact correctness gate and measure an optimized package-scoped executable. For the PostgreSQL 17 TPC-H-derived fixture, run:
+Performance work must preserve an exact correctness gate and measure an optimized package-scoped executable. For the PostgreSQL 18 TPC-H-derived fixture, run:
 
 ```sh
 cargo test -p uqa-engine --test sql_tpch

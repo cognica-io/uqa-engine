@@ -408,10 +408,28 @@ fn compare_float_decimal(float: f64, decimal: &DecimalValue) -> std::cmp::Orderi
     }
 }
 
+fn compare_postgres_container_values(left: &[Value], right: &[Value]) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    for (left, right) in left.iter().zip(right) {
+        let ordering = match (left, right) {
+            (Value::Null, Value::Null) => Ordering::Equal,
+            (Value::Null, _) => Ordering::Greater,
+            (_, Value::Null) => Ordering::Less,
+            _ => left.cmp(right),
+        };
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+    }
+    left.len().cmp(&right.len())
+}
+
 // `Value` carries `f64`, so equality and ordering are implemented together.
 // NaN compares equal to NaN and greater than finite values, signed zeroes are
 // equal, and cross-numeric variants use numeric rather than discriminant order.
-// This keeps `Eq`/`Ord` consistent for BTree keys used by joins and DISTINCT.
+// PostgreSQL's B-tree ordering for array/composite fields considers NULL equal
+// to NULL and greater than a non-NULL field. This keeps `Eq`/`Ord` consistent
+// for BTree keys used by joins, DISTINCT, array_sort, and MIN/MAX.
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == std::cmp::Ordering::Equal
@@ -457,7 +475,7 @@ impl Ord for Value {
             }
             (Value::Bytes(a), Value::Bytes(b)) => a.cmp(b),
             (Value::Temporal(a), Value::Temporal(b)) => a.cmp(b),
-            (Value::List(a), Value::List(b)) => a.cmp(b),
+            (Value::List(a), Value::List(b)) => compare_postgres_container_values(a, b),
             (Value::Map(a), Value::Map(b)) => a.cmp(b),
             _ => discriminant(self).cmp(&discriminant(other)),
         }

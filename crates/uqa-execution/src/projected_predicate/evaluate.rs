@@ -8,7 +8,7 @@
 
 use uqa_core::Value;
 use uqa_sql::ast::BinaryOp;
-use uqa_sql::expr::{cast_value, eval_binary_values, eval_comparison_truth, truthy};
+use uqa_sql::expr::{cast_value_from, eval_binary_values, eval_comparison_truth, truthy};
 use uqa_sql::SQLError;
 
 use super::ProjectedExpr;
@@ -197,8 +197,14 @@ fn evaluate<'a, F: FieldValues + ?Sized>(
             })
         }
         ProjectedExpr::Cast { expression, ty } => {
+            let source_ty = match expression.as_ref() {
+                ProjectedExpr::Cast { ty, .. } => Some(ty.as_str()),
+                ProjectedExpr::Literal(Value::Int(_)) => Some("integer"),
+                ProjectedExpr::Literal(Value::Bytes(_)) => Some("bytea"),
+                _ => None,
+            };
             let value = evaluate(expression, fields)?;
-            ProjectedValue::Owned(cast_value(value.as_value(), ty)?)
+            ProjectedValue::Owned(cast_value_from(value.as_value(), ty, source_ty)?)
         }
     };
     Ok(value)

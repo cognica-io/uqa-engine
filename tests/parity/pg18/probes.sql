@@ -1,4 +1,4 @@
--- PG17 differential probes: one SELECT per line, no DDL required.
+-- PG18 differential probes: one SELECT per line, no DDL required.
 -- Lines starting with -- are skipped.
 -- arithmetic
 SELECT 7 / 2
@@ -321,7 +321,7 @@ SELECT pg_typeof('x'::text)
 SELECT pg_typeof(now())
 SELECT width_bucket(5.35, 0, 10, 5)
 SELECT setseed(0.5)
--- appended: PG17 semantics round (3VL edges, intervals, operators)
+-- appended: PG18 semantics round (3VL edges, intervals, operators)
 SELECT interval '-1 day 3 hours'
 SELECT interval '1 day -3 hours'
 SELECT interval '1.5 mons'

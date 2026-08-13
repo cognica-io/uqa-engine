@@ -196,6 +196,10 @@ fn optimize_scalar(expression: ScalarExpr, config: &OptimizerConfig) -> ScalarEx
 fn fold_literal_expression(expression: ScalarExpr) -> ScalarExpr {
     match expression {
         ScalarExpr::Cast { expr, ty } => match *expr {
+            ScalarExpr::Literal(value) if is_integer_type(&ty) => ScalarExpr::Cast {
+                expr: Box::new(ScalarExpr::Literal(value)),
+                ty,
+            },
             ScalarExpr::Literal(value) => cast_value(&value, &ty)
                 .map(ScalarExpr::Literal)
                 .unwrap_or_else(|_| ScalarExpr::Cast {
@@ -255,6 +259,26 @@ fn fold_literal_expression(expression: ScalarExpr) -> ScalarExpr {
         }
         other => other,
     }
+}
+
+fn is_integer_type(ty: &str) -> bool {
+    matches!(
+        ty,
+        "smallint"
+            | "int2"
+            | "pg_catalog.int2"
+            | "integer"
+            | "int"
+            | "int4"
+            | "serial"
+            | "serial4"
+            | "pg_catalog.int4"
+            | "bigint"
+            | "int8"
+            | "bigserial"
+            | "serial8"
+            | "pg_catalog.int8"
+    )
 }
 
 fn optimize_frame_bound(bound: &mut ScalarFrameBound, config: &OptimizerConfig) {

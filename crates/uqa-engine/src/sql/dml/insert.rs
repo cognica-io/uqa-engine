@@ -12,7 +12,8 @@ use super::{
     index_vectors_for_type, insert_identity_columns, resolve_insert_conflict,
     validate_document_constraints, validate_document_non_key_constraints, validate_key_constraints,
     validate_mutation_columns, BTreeMap, ColumnType, ConflictActionPlan, ConflictPlan, CteScope,
-    DocId, Document, Engine, InsertConflictResolution, InsertPlan, SQLError, SQLParam, SQLResult,
+    DocId, Document, Engine, InsertConflictResolution, InsertPlan, ReturningRowImage,
+    ReturningRowImages, SQLError, SQLParam, SQLResult,
 };
 
 pub(in crate::sql) fn run_insert(
@@ -119,13 +120,27 @@ pub(in crate::sql) fn run_insert_inner(
                 )? {
                     InsertConflictResolution::Insert => {}
                     InsertConflictResolution::Skip => continue,
-                    InsertConflictResolution::Updated { doc_id, document } => {
+                    InsertConflictResolution::Updated {
+                        old_doc_id,
+                        doc_id,
+                        old_document,
+                        document,
+                    } => {
                         if !stmt.returning.is_empty() {
                             returning_rows.push(build_returning_row(
                                 engine,
                                 &stmt.table,
-                                doc_id,
-                                &document,
+                                ReturningRowImages {
+                                    old: Some(ReturningRowImage {
+                                        doc_id: old_doc_id,
+                                        document: &old_document,
+                                    }),
+                                    new: Some(ReturningRowImage {
+                                        doc_id,
+                                        document: &document,
+                                    }),
+                                },
+                                &stmt.returning_aliases,
                                 &stmt.returning,
                                 params,
                                 &scope,
@@ -164,8 +179,14 @@ pub(in crate::sql) fn run_insert_inner(
                 returning_rows.push(build_returning_row(
                     engine,
                     &stmt.table,
-                    doc_id,
-                    &document,
+                    ReturningRowImages {
+                        old: None,
+                        new: Some(ReturningRowImage {
+                            doc_id,
+                            document: &document,
+                        }),
+                    },
+                    &stmt.returning_aliases,
                     &stmt.returning,
                     params,
                     &scope,
@@ -274,13 +295,27 @@ pub(in crate::sql) fn run_insert_inner(
             )? {
                 InsertConflictResolution::Insert => {}
                 InsertConflictResolution::Skip => continue,
-                InsertConflictResolution::Updated { doc_id, document } => {
+                InsertConflictResolution::Updated {
+                    old_doc_id,
+                    doc_id,
+                    old_document,
+                    document,
+                } => {
                     if !stmt.returning.is_empty() {
                         returning_rows.push(build_returning_row(
                             engine,
                             &stmt.table,
-                            doc_id,
-                            &document,
+                            ReturningRowImages {
+                                old: Some(ReturningRowImage {
+                                    doc_id: old_doc_id,
+                                    document: &old_document,
+                                }),
+                                new: Some(ReturningRowImage {
+                                    doc_id,
+                                    document: &document,
+                                }),
+                            },
+                            &stmt.returning_aliases,
                             &stmt.returning,
                             params,
                             &scope,
@@ -330,8 +365,14 @@ pub(in crate::sql) fn run_insert_inner(
             returning_rows.push(build_returning_row(
                 engine,
                 &stmt.table,
-                doc_id,
-                &document,
+                ReturningRowImages {
+                    old: None,
+                    new: Some(ReturningRowImage {
+                        doc_id,
+                        document: &document,
+                    }),
+                },
+                &stmt.returning_aliases,
                 &stmt.returning,
                 params,
                 &scope,

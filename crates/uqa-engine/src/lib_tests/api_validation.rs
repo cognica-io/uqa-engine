@@ -143,10 +143,14 @@ fn direct_schema_mutations_reject_missing_relations_columns_and_duplicates() {
         ty: uqa_sql::ast::ColumnType::Integer,
         primary_key: false,
         not_null: false,
+        not_null_explicit: false,
+        not_null_name: None,
         auto_increment: false,
         unique: false,
         default: None,
         check: None,
+        check_name: None,
+        check_enforced: true,
         references: None,
     };
 
@@ -273,10 +277,14 @@ fn tensor_backfill_reports_inner_dimension_mismatch_and_allows_null() {
         ty: uqa_sql::ast::ColumnType::Tensor(2),
         primary_key: false,
         not_null: false,
+        not_null_explicit: false,
+        not_null_name: None,
         auto_increment: false,
         unique: false,
         default: None,
         check: None,
+        check_name: None,
+        check_enforced: true,
         references: None,
     };
 
