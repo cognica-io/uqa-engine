@@ -50,7 +50,6 @@ pub struct ExternalSort<'a> {
     spill_directory: Option<PathBuf>,
     schema: RowSchema,
     input_slots: Vec<usize>,
-    output_slots: Vec<usize>,
     run_schema: RowSchema,
     ordering: Vec<PhysicalOrder>,
     output: Option<SpillDrain>,
@@ -67,7 +66,6 @@ impl<'a> ExternalSort<'a> {
         work_mem_bytes: usize,
     ) -> Self {
         let (schema, input_slots) = child.row_schema().canonical_projection();
-        let output_slots = (0..input_slots.len()).collect::<Vec<_>>();
         let run_schema = run_schema(input_slots.len(), keys.len());
         let ordering = keys
             .iter()
@@ -91,7 +89,6 @@ impl<'a> ExternalSort<'a> {
             spill_directory: None,
             schema,
             input_slots,
-            output_slots,
             run_schema,
             ordering,
             output: None,
@@ -280,7 +277,7 @@ impl PhysicalOperator for ExternalSort<'_> {
             let rows = batch
                 .rows
                 .into_iter()
-                .map(|row| row.project_slots(&self.output_slots))
+                .map(|row| row.into_prefix(self.input_slots.len()))
                 .collect();
             return Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)));
         }

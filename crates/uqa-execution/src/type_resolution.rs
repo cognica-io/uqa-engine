@@ -629,20 +629,28 @@ pub fn bind_type_introspection(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> ScalarExpr {
+    if !requires_type_introspection_binding(&expression) {
+        return expression;
+    }
     match expression {
         ScalarExpr::Func {
             name,
             binding,
-            args,
+            mut args,
             distinct,
-            order_by,
-            filter,
+            mut order_by,
+            mut filter,
         } => {
-            let args = args
-                .into_iter()
-                .map(|argument| bind_type_introspection(argument, schema, params))
-                .collect::<Vec<_>>();
-            if name.eq_ignore_ascii_case("pg_typeof") && args.len() == 1 {
+            for argument in &mut args {
+                bind_type_introspection_in_place(argument, schema, params);
+            }
+            for order in &mut order_by {
+                bind_type_introspection_in_place(&mut order.expr, schema, params);
+            }
+            if let Some(filter) = filter.as_deref_mut() {
+                bind_type_introspection_in_place(filter, schema, params);
+            }
+            if is_pg_typeof(&name) && args.len() == 1 {
                 let name = scalar_type(&args[0], schema, params)
                     .ok()
                     .flatten()
@@ -657,162 +665,268 @@ pub fn bind_type_introspection(
                 binding,
                 args,
                 distinct,
-                order_by: order_by
-                    .into_iter()
-                    .map(|mut order| {
-                        order.expr = bind_type_introspection(order.expr, schema, params);
-                        order
-                    })
-                    .collect(),
-                filter: filter
-                    .map(|filter| Box::new(bind_type_introspection(*filter, schema, params))),
+                order_by,
+                filter,
             }
         }
-        ScalarExpr::Array(items) => ScalarExpr::Array(
-            items
-                .into_iter()
-                .map(|item| bind_type_introspection(item, schema, params))
-                .collect(),
-        ),
-        ScalarExpr::Binary { op, lhs, rhs } => ScalarExpr::Binary {
+        ScalarExpr::Array(mut items) => {
+            bind_type_introspection_items(&mut items, schema, params);
+            ScalarExpr::Array(items)
+        }
+        ScalarExpr::Binary {
             op,
-            lhs: Box::new(bind_type_introspection(*lhs, schema, params)),
-            rhs: Box::new(bind_type_introspection(*rhs, schema, params)),
-        },
-        ScalarExpr::UnaryMinus(expr) => {
+            mut lhs,
+            mut rhs,
+        } => {
+            bind_type_introspection_in_place(lhs.as_mut(), schema, params);
+            bind_type_introspection_in_place(rhs.as_mut(), schema, params);
+            ScalarExpr::Binary { op, lhs, rhs }
+        }
+        ScalarExpr::UnaryMinus(mut expr) => {
             let source_type = scalar_type(&expr, schema, params)
                 .ok()
                 .flatten()
                 .and_then(|ty| unary_minus_result_type(&ty).ok());
-            let mut expr = bind_type_introspection(*expr, schema, params);
+            bind_type_introspection_in_place(expr.as_mut(), schema, params);
             if let Some(source_type) = source_type {
                 let source_name = source_type.sql_name();
-                if !matches!(&expr, ScalarExpr::Cast { ty, .. } if ty.eq_ignore_ascii_case(&source_name))
+                if !matches!(expr.as_ref(), ScalarExpr::Cast { ty, .. } if ty.eq_ignore_ascii_case(&source_name))
                 {
-                    expr = ScalarExpr::Cast {
-                        expr: Box::new(expr),
+                    let inner = std::mem::replace(expr.as_mut(), ScalarExpr::Literal(Value::Null));
+                    *expr = ScalarExpr::Cast {
+                        expr: Box::new(inner),
                         ty: source_name,
                     };
                 }
             }
-            ScalarExpr::UnaryMinus(Box::new(expr))
+            ScalarExpr::UnaryMinus(expr)
         }
-        ScalarExpr::Not(inner) => {
-            ScalarExpr::Not(Box::new(bind_type_introspection(*inner, schema, params)))
+        ScalarExpr::Not(mut inner) => {
+            bind_type_introspection_in_place(inner.as_mut(), schema, params);
+            ScalarExpr::Not(inner)
         }
-        ScalarExpr::And(items) => ScalarExpr::And(
-            items
-                .into_iter()
-                .map(|item| bind_type_introspection(item, schema, params))
-                .collect(),
-        ),
-        ScalarExpr::Or(items) => ScalarExpr::Or(
-            items
-                .into_iter()
-                .map(|item| bind_type_introspection(item, schema, params))
-                .collect(),
-        ),
-        ScalarExpr::IsNull { expr, negated } => ScalarExpr::IsNull {
-            expr: Box::new(bind_type_introspection(*expr, schema, params)),
-            negated,
-        },
-        ScalarExpr::Between { expr, low, high } => ScalarExpr::Between {
-            expr: Box::new(bind_type_introspection(*expr, schema, params)),
-            low: Box::new(bind_type_introspection(*low, schema, params)),
-            high: Box::new(bind_type_introspection(*high, schema, params)),
-        },
+        ScalarExpr::And(mut items) => {
+            bind_type_introspection_items(&mut items, schema, params);
+            ScalarExpr::And(items)
+        }
+        ScalarExpr::Or(mut items) => {
+            bind_type_introspection_items(&mut items, schema, params);
+            ScalarExpr::Or(items)
+        }
+        ScalarExpr::IsNull { mut expr, negated } => {
+            bind_type_introspection_in_place(expr.as_mut(), schema, params);
+            ScalarExpr::IsNull { expr, negated }
+        }
+        ScalarExpr::Between {
+            mut expr,
+            mut low,
+            mut high,
+        } => {
+            bind_type_introspection_in_place(expr.as_mut(), schema, params);
+            bind_type_introspection_in_place(low.as_mut(), schema, params);
+            bind_type_introspection_in_place(high.as_mut(), schema, params);
+            ScalarExpr::Between { expr, low, high }
+        }
         ScalarExpr::InList {
-            expr,
-            list,
+            mut expr,
+            mut list,
             negated,
-        } => ScalarExpr::InList {
-            expr: Box::new(bind_type_introspection(*expr, schema, params)),
-            list: list
-                .into_iter()
-                .map(|item| bind_type_introspection(item, schema, params))
-                .collect(),
-            negated,
-        },
+        } => {
+            bind_type_introspection_in_place(expr.as_mut(), schema, params);
+            bind_type_introspection_items(&mut list, schema, params);
+            ScalarExpr::InList {
+                expr,
+                list,
+                negated,
+            }
+        }
         ScalarExpr::WindowCall {
             name,
-            args,
+            mut args,
             mut spec,
         } => {
-            spec.partition_by = spec
-                .partition_by
-                .into_iter()
-                .map(|item| bind_type_introspection(item, schema, params))
-                .collect();
-            spec.order_by = spec
-                .order_by
-                .into_iter()
-                .map(|mut order| {
-                    order.expr = bind_type_introspection(order.expr, schema, params);
-                    order
-                })
-                .collect();
+            bind_type_introspection_items(&mut args, schema, params);
+            bind_type_introspection_items(&mut spec.partition_by, schema, params);
+            for order in &mut spec.order_by {
+                bind_type_introspection_in_place(&mut order.expr, schema, params);
+            }
             if let Some(frame) = spec.frame.as_mut() {
                 bind_frame_bound(&mut frame.start, schema, params);
                 bind_frame_bound(&mut frame.end, schema, params);
             }
-            ScalarExpr::WindowCall {
-                name,
-                args: args
-                    .into_iter()
-                    .map(|item| bind_type_introspection(item, schema, params))
-                    .collect(),
-                spec,
+            ScalarExpr::WindowCall { name, args, spec }
+        }
+        ScalarExpr::Case {
+            mut base,
+            mut when,
+            mut else_branch,
+        } => {
+            if let Some(base) = base.as_deref_mut() {
+                bind_type_introspection_in_place(base, schema, params);
             }
+            for (condition, result) in &mut when {
+                bind_type_introspection_in_place(condition, schema, params);
+                bind_type_introspection_in_place(result, schema, params);
+            }
+            if let Some(else_branch) = else_branch.as_deref_mut() {
+                bind_type_introspection_in_place(else_branch, schema, params);
+            }
+            ScalarExpr::Case {
+                base,
+                when,
+                else_branch,
+            }
+        }
+        ScalarExpr::Cast { mut expr, ty } => {
+            let source_type = cast_requires_declared_source(&ty)
+                .then(|| scalar_type(&expr, schema, params).ok().flatten())
+                .flatten();
+            bind_type_introspection_in_place(expr.as_mut(), schema, params);
+            if let Some(source_type) = source_type {
+                let source_name = source_type.sql_name();
+                if !matches!(expr.as_ref(), ScalarExpr::Cast { ty, .. } if ty.eq_ignore_ascii_case(&source_name))
+                {
+                    let inner = std::mem::replace(expr.as_mut(), ScalarExpr::Literal(Value::Null));
+                    *expr = ScalarExpr::Cast {
+                        expr: Box::new(inner),
+                        ty: source_name,
+                    };
+                }
+            }
+            ScalarExpr::Cast { expr, ty }
+        }
+        ScalarExpr::InSubquery {
+            mut expr,
+            subquery,
+            negated,
+        } => {
+            bind_type_introspection_in_place(expr.as_mut(), schema, params);
+            ScalarExpr::InSubquery {
+                expr,
+                subquery,
+                negated,
+            }
+        }
+        other => other,
+    }
+}
+
+fn requires_type_introspection_binding(expression: &ScalarExpr) -> bool {
+    match expression {
+        ScalarExpr::Func {
+            name,
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            is_pg_typeof(name)
+                || args.iter().any(requires_type_introspection_binding)
+                || order_by
+                    .iter()
+                    .any(|order| requires_type_introspection_binding(&order.expr))
+                || filter
+                    .as_deref()
+                    .is_some_and(requires_type_introspection_binding)
+        }
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
+            items.iter().any(requires_type_introspection_binding)
+        }
+        ScalarExpr::Binary { lhs, rhs, .. } => {
+            requires_type_introspection_binding(lhs) || requires_type_introspection_binding(rhs)
+        }
+        ScalarExpr::UnaryMinus(_) => true,
+        ScalarExpr::Not(expression)
+        | ScalarExpr::IsNull {
+            expr: expression, ..
+        } => requires_type_introspection_binding(expression),
+        ScalarExpr::Between { expr, low, high } => {
+            requires_type_introspection_binding(expr)
+                || requires_type_introspection_binding(low)
+                || requires_type_introspection_binding(high)
+        }
+        ScalarExpr::InList { expr, list, .. } => {
+            requires_type_introspection_binding(expr)
+                || list.iter().any(requires_type_introspection_binding)
+        }
+        ScalarExpr::WindowCall { args, spec, .. } => {
+            args.iter().any(requires_type_introspection_binding)
+                || spec
+                    .partition_by
+                    .iter()
+                    .any(requires_type_introspection_binding)
+                || spec
+                    .order_by
+                    .iter()
+                    .any(|order| requires_type_introspection_binding(&order.expr))
+                || spec.frame.as_ref().is_some_and(|frame| {
+                    frame_bound_requires_type_introspection_binding(&frame.start)
+                        || frame_bound_requires_type_introspection_binding(&frame.end)
+                })
         }
         ScalarExpr::Case {
             base,
             when,
             else_branch,
-        } => ScalarExpr::Case {
-            base: base.map(|base| Box::new(bind_type_introspection(*base, schema, params))),
-            when: when
-                .into_iter()
-                .map(|(condition, result)| {
-                    (
-                        bind_type_introspection(condition, schema, params),
-                        bind_type_introspection(result, schema, params),
-                    )
+        } => {
+            base.as_deref()
+                .is_some_and(requires_type_introspection_binding)
+                || when.iter().any(|(condition, result)| {
+                    requires_type_introspection_binding(condition)
+                        || requires_type_introspection_binding(result)
                 })
-                .collect(),
-            else_branch: else_branch
-                .map(|branch| Box::new(bind_type_introspection(*branch, schema, params))),
-        },
-        ScalarExpr::Cast { expr, ty } => {
-            let source_type = cast_requires_declared_source(&ty)
-                .then(|| scalar_type(&expr, schema, params).ok().flatten())
-                .flatten();
-            let mut expr = bind_type_introspection(*expr, schema, params);
-            if let Some(source_type) = source_type {
-                let source_name = source_type.sql_name();
-                if !matches!(&expr, ScalarExpr::Cast { ty, .. } if ty.eq_ignore_ascii_case(&source_name))
-                {
-                    expr = ScalarExpr::Cast {
-                        expr: Box::new(expr),
-                        ty: source_name,
-                    };
-                }
-            }
-            ScalarExpr::Cast {
-                expr: Box::new(expr),
-                ty,
-            }
+                || else_branch
+                    .as_deref()
+                    .is_some_and(requires_type_introspection_binding)
         }
-        ScalarExpr::InSubquery {
-            expr,
-            subquery,
-            negated,
-        } => ScalarExpr::InSubquery {
-            expr: Box::new(bind_type_introspection(*expr, schema, params)),
-            subquery,
-            negated,
-        },
-        other => other,
+        ScalarExpr::Cast { expr, ty } => {
+            cast_requires_declared_source(ty) || requires_type_introspection_binding(expr)
+        }
+        ScalarExpr::InSubquery { expr, .. } => requires_type_introspection_binding(expr),
+        ScalarExpr::Star
+        | ScalarExpr::Default
+        | ScalarExpr::Column(_)
+        | ScalarExpr::QualifiedColumn { .. }
+        | ScalarExpr::Literal(_)
+        | ScalarExpr::Param(_)
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. } => false,
     }
+}
+
+fn frame_bound_requires_type_introspection_binding(bound: &crate::ScalarFrameBound) -> bool {
+    match bound {
+        crate::ScalarFrameBound::Preceding(expression)
+        | crate::ScalarFrameBound::Following(expression) => {
+            requires_type_introspection_binding(expression)
+        }
+        crate::ScalarFrameBound::UnboundedPreceding
+        | crate::ScalarFrameBound::UnboundedFollowing
+        | crate::ScalarFrameBound::CurrentRow => false,
+    }
+}
+
+fn is_pg_typeof(name: &str) -> bool {
+    name.eq_ignore_ascii_case("pg_typeof") || name.eq_ignore_ascii_case("pg_catalog.pg_typeof")
+}
+
+fn bind_type_introspection_items(
+    expressions: &mut [ScalarExpr],
+    schema: &RowSchema,
+    params: &[SQLParam],
+) {
+    for expression in expressions {
+        bind_type_introspection_in_place(expression, schema, params);
+    }
+}
+
+fn bind_type_introspection_in_place(
+    expression: &mut ScalarExpr,
+    schema: &RowSchema,
+    params: &[SQLParam],
+) {
+    let owned = std::mem::replace(expression, ScalarExpr::Literal(Value::Null));
+    *expression = bind_type_introspection(owned, schema, params);
 }
 
 fn cast_requires_declared_source(target: &str) -> bool {
@@ -826,8 +940,7 @@ fn bind_frame_bound(bound: &mut crate::ScalarFrameBound, schema: &RowSchema, par
     match bound {
         crate::ScalarFrameBound::Preceding(expression)
         | crate::ScalarFrameBound::Following(expression) => {
-            let bound = std::mem::replace(expression, Box::new(ScalarExpr::Literal(Value::Null)));
-            *expression = Box::new(bind_type_introspection(*bound, schema, params));
+            bind_type_introspection_in_place(expression.as_mut(), schema, params);
         }
         crate::ScalarFrameBound::UnboundedPreceding
         | crate::ScalarFrameBound::UnboundedFollowing
@@ -1098,6 +1211,63 @@ mod tests {
                 expr: Box::new(ScalarExpr::Literal(Value::Str("smallint".into()))),
                 ty: "regtype".into(),
             }
+        );
+    }
+
+    #[test]
+    fn qualified_type_introspection_binds_inside_an_expression() {
+        let schema = RowSchema::with_types(vec!["v".into()], vec![Some(ColumnType::Real)]);
+        let expression = ScalarExpr::IsNull {
+            expr: Box::new(ScalarExpr::Func {
+                name: "PG_CATALOG.PG_TYPEOF".into(),
+                binding: None,
+                args: vec![ScalarExpr::Column("v".into())],
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+            }),
+            negated: false,
+        };
+        assert_eq!(
+            bind_type_introspection(expression, &schema, &[]),
+            ScalarExpr::IsNull {
+                expr: Box::new(ScalarExpr::Cast {
+                    expr: Box::new(ScalarExpr::Literal(Value::Str("real".into()))),
+                    ty: "regtype".into(),
+                }),
+                negated: false,
+            }
+        );
+    }
+
+    #[test]
+    fn type_binding_reuses_existing_expression_storage() {
+        let expression = ScalarExpr::And(vec![ScalarExpr::Between {
+            expr: Box::new(ScalarExpr::Column("v".into())),
+            low: Box::new(ScalarExpr::Literal(Value::Int(1))),
+            high: Box::new(ScalarExpr::Literal(Value::Int(9))),
+        }]);
+        let ScalarExpr::And(items) = &expression else {
+            unreachable!();
+        };
+        let items_address = items.as_ptr();
+        let ScalarExpr::Between { expr, .. } = &items[0] else {
+            unreachable!();
+        };
+        let expression_address = std::ptr::from_ref::<ScalarExpr>(expr.as_ref());
+
+        let bound = bind_type_introspection(expression, &RowSchema::default(), &[]);
+
+        let ScalarExpr::And(items) = &bound else {
+            panic!("bound expression must preserve the conjunction");
+        };
+        let ScalarExpr::Between { expr, .. } = &items[0] else {
+            panic!("bound expression must preserve the range predicate");
+        };
+        assert_eq!(items.as_ptr(), items_address);
+        assert_eq!(
+            std::ptr::from_ref::<ScalarExpr>(expr.as_ref()),
+            expression_address
         );
     }
 }
