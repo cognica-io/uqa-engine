@@ -42,14 +42,27 @@ impl PreparedWindowPlan {
         &self.projections
     }
 
-    pub(super) fn output_columns(&self, input_columns: &[String]) -> Vec<String> {
-        let mut columns = input_columns.to_vec();
+    pub(super) fn output_schema(
+        &self,
+        engine: &Engine,
+        input: &RowSchema,
+        params: &[SQLParam],
+    ) -> Result<RowSchema, SQLError> {
+        let mut schema = input.clone();
         for slot in &self.slots {
-            if !columns.contains(&slot.key) {
-                columns.push(slot.key.clone());
+            if schema.position(&slot.key).is_some() {
+                continue;
             }
+            let expression = ScalarExpr::WindowCall {
+                name: slot.name.clone(),
+                args: slot.args.clone(),
+                spec: slot.spec.clone(),
+            };
+            let ty =
+                uqa_execution::scalar_type_with_resolver(&expression, &schema, params, engine)?;
+            schema = RowSchema::append_typed(&schema, &[(slot.key.clone(), ty)]);
         }
-        columns
+        Ok(schema)
     }
 }
 
@@ -58,7 +71,7 @@ pub(super) struct PhysicalWindowExecutor<'a> {
     plan: PreparedWindowPlan,
     params: &'a [SQLParam],
     ctes: &'a CteScope,
-    schema: Vec<String>,
+    schema: RowSchema,
     work_mem_bytes: usize,
     input: Option<SpillBuffer>,
 }
@@ -69,7 +82,7 @@ impl<'a> PhysicalWindowExecutor<'a> {
         plan: PreparedWindowPlan,
         params: &'a [SQLParam],
         ctes: &'a CteScope,
-        schema: Vec<String>,
+        schema: RowSchema,
         work_mem_bytes: usize,
     ) -> Self {
         Self {
@@ -139,24 +152,32 @@ fn execute_window_plan(
     engine: &Engine,
     plan: &PreparedWindowPlan,
     mut input: SpillBuffer,
-    input_schema: &[String],
+    input_schema: &RowSchema,
     work_mem_bytes: usize,
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<SpillBuffer, SQLError> {
-    let mut schema = input_schema.to_vec();
+    let mut schema = input_schema.clone();
     for slot in &plan.slots {
+        let expression = ScalarExpr::WindowCall {
+            name: slot.name.clone(),
+            args: slot.args.clone(),
+            spec: slot.spec.clone(),
+        };
+        let slot_type =
+            uqa_execution::scalar_type_with_resolver(&expression, &schema, params, engine)?;
         input = execute_spilled_window_slot(
             engine,
             slot,
             input,
             &schema,
+            slot_type.clone(),
             work_mem_bytes,
             params,
             ctes,
         )?;
-        if !schema.contains(&slot.key) {
-            schema.push(slot.key.clone());
+        if schema.position(&slot.key).is_none() {
+            schema = RowSchema::append_typed(&schema, &[(slot.key.clone(), slot_type)]);
         }
     }
 
@@ -168,14 +189,15 @@ fn execute_spilled_window_slot(
     engine: &Engine,
     slot: &WindowSlot,
     input: SpillBuffer,
-    schema: &[String],
+    schema: &RowSchema,
+    slot_type: Option<uqa_sql::ColumnType>,
     work_mem_bytes: usize,
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<SpillBuffer, SQLError> {
     use super::select::EngineExpressionEvaluator;
 
-    let scan: Box<dyn PhysicalOperator + '_> = Box::new(SpillScan::new(schema.to_vec(), input));
+    let scan: Box<dyn PhysicalOperator + '_> = Box::new(SpillScan::new(schema.clone(), input));
     let mut keys = slot
         .spec
         .partition_by
@@ -207,9 +229,10 @@ fn execute_spilled_window_slot(
     let mut partition = IndexedSpill::new(partition_schema.clone()).map_err(exec_to_sql_error)?;
     let mut partition_key: Option<Vec<Value>> = None;
     let mut output = SpillBuffer::new(phase_budget);
-    let output_schema = RowSchema::append(&partition_schema, std::slice::from_ref(&slot.key));
+    let output_schema =
+        RowSchema::append_typed(&partition_schema, &[(slot.key.clone(), slot_type)]);
     let expected_columns = {
-        let mut columns = schema.to_vec();
+        let mut columns = schema.columns().to_vec();
         if !columns.contains(&slot.key) {
             columns.push(slot.key.clone());
         }
@@ -311,13 +334,15 @@ fn emit_window_partition(
         return Ok(());
     }
     let partition_schema = partition.row_schema().clone();
-    let physical_output_schema =
-        RowSchema::append(&partition_schema, std::slice::from_ref(&slot.key));
-    if &physical_output_schema != schema {
+    let mut expected_columns = partition_schema.columns().to_vec();
+    if !expected_columns.contains(&slot.key) {
+        expected_columns.push(slot.key.clone());
+    }
+    if schema.columns() != expected_columns {
         return Err(SQLError::Internal(format!(
             "window output schema mismatch: expected {:?}, got {:?}",
             schema.columns(),
-            physical_output_schema.columns()
+            expected_columns
         )));
     }
     let name = slot.name.to_ascii_lowercase();

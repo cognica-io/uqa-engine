@@ -74,7 +74,10 @@ fn walk_schema_expr_mut(
             walk_schema_expr_mut(lhs, visit)?;
             walk_schema_expr_mut(rhs, visit)?;
         }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+        Expr::Not(inner)
+        | Expr::UnaryMinus(inner)
+        | Expr::IsNull { expr: inner, .. }
+        | Expr::Cast { expr: inner, .. } => {
             walk_schema_expr_mut(inner, visit)?;
         }
         Expr::Between { expr, low, high } => {

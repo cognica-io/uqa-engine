@@ -77,6 +77,11 @@ fn encoded_rows_size(schema: &RowSchema, rows: &[PhysicalRow]) -> ExecResult<usi
     for (logical, column) in schema.columns().iter().enumerate() {
         add_string_size(&mut bytes, column, "schema column")?;
         add_size(&mut bytes, 8, "schema logical slot")?;
+        add_string_size(
+            &mut bytes,
+            &encoded_column_type(schema.column_type(logical))?,
+            "schema column type",
+        )?;
         if schema
             .slot(logical)
             .is_some_and(|slot| slot >= schema.physical_width())
@@ -87,11 +92,12 @@ fn encoded_rows_size(schema: &RowSchema, rows: &[PhysicalRow]) -> ExecResult<usi
             )));
         }
     }
-    let aliases = schema.lookup_aliases();
+    let aliases = schema.lookup_aliases_with_types();
     add_size(&mut bytes, 8, "schema alias count")?;
-    for (name, slot) in aliases {
+    for (name, slot, ty) in aliases {
         add_string_size(&mut bytes, name, "schema alias")?;
         add_size(&mut bytes, 8, "schema alias slot")?;
+        add_string_size(&mut bytes, &encoded_column_type(ty)?, "schema alias type")?;
         if slot.is_some_and(|slot| slot >= schema.physical_width()) {
             return Err(spill_error(format!(
                 "schema alias `{name}` is outside physical width {}",
@@ -120,6 +126,16 @@ fn add_size(total: &mut usize, bytes: usize, description: &str) -> ExecResult<()
 fn add_string_size(total: &mut usize, value: &str, description: &str) -> ExecResult<()> {
     add_size(total, 8, description)?;
     add_size(total, value.len(), description)
+}
+
+fn encoded_column_type(ty: Option<&uqa_sql::ast::ColumnType>) -> ExecResult<String> {
+    ty.map_or_else(
+        || Ok(String::new()),
+        |ty| {
+            serde_json::to_string(ty)
+                .map_err(|error| spill_error(format!("cannot encode spill column type: {error}")))
+        },
+    )
 }
 
 fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<()> {
@@ -216,12 +232,17 @@ fn encode_batch(writer: &mut impl Write, batch: &Batch) -> ExecResult<()> {
     for (logical, column) in batch.schema.columns().iter().enumerate() {
         write_bytes(writer, column.as_bytes())?;
         write_slot(writer, batch.schema.slot(logical))?;
+        write_bytes(
+            writer,
+            encoded_column_type(batch.schema.column_type(logical))?.as_bytes(),
+        )?;
     }
-    let aliases = batch.schema.lookup_aliases();
+    let aliases = batch.schema.lookup_aliases_with_types();
     write_u64(writer, aliases.len())?;
-    for (name, slot) in aliases {
+    for (name, slot, ty) in aliases {
         write_bytes(writer, name.as_bytes())?;
         write_slot(writer, slot)?;
+        write_bytes(writer, encoded_column_type(ty)?.as_bytes())?;
     }
     write_u64(writer, batch.rows.len())?;
     for row in &batch.rows {

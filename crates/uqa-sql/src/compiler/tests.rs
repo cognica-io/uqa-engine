@@ -83,6 +83,21 @@ fn malformed_operator_name_is_not_silently_discarded() {
 }
 
 #[test]
+fn prefix_minus_preserves_the_cast_operand() {
+    let Statement::Select(select) = first("SELECT -1::smallint") else {
+        panic!("expected SELECT");
+    };
+    let [projection] = select.projections.as_slice() else {
+        panic!("expected one projection");
+    };
+    assert!(matches!(
+        &projection.expr,
+        Expr::UnaryMinus(inner)
+            if matches!(inner.as_ref(), Expr::Cast { ty, .. } if ty == "smallint")
+    ));
+}
+
+#[test]
 fn sequence_options_do_not_truncate_or_ignore_values() {
     assert!(compile("CREATE SEQUENCE s START 1.5").is_err());
     let error = compile("CREATE SEQUENCE s CACHE 10").unwrap_err();
@@ -120,6 +135,70 @@ fn create_table_preserves_fixed_character_length() {
 }
 
 #[test]
+fn create_table_preserves_postgresql_scalar_type_identity() {
+    let Statement::CreateTable(table) = first(
+        "CREATE TABLE typed_values (
+            small_value SMALLINT,
+            integer_value INTEGER,
+            big_value BIGINT,
+            oid_value OID,
+            xid_value XID,
+            real_value REAL,
+            double_value DOUBLE PRECISION,
+            text_value TEXT,
+            name_value NAME,
+            uuid_value UUID,
+            varying_value VARCHAR(12),
+            interval_value INTERVAL
+        )",
+    ) else {
+        panic!("not CREATE TABLE");
+    };
+    assert_eq!(
+        table
+            .columns
+            .iter()
+            .map(|column| column.ty.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            ColumnType::SmallInteger,
+            ColumnType::Integer,
+            ColumnType::BigInteger,
+            ColumnType::Oid,
+            ColumnType::Xid,
+            ColumnType::Real,
+            ColumnType::DoublePrecision,
+            ColumnType::Text,
+            ColumnType::Name,
+            ColumnType::Uuid,
+            ColumnType::Varchar(Some(12)),
+            ColumnType::Interval,
+        ]
+    );
+}
+
+#[test]
+fn serial_family_preserves_width_and_sequence_semantics() {
+    let Statement::CreateTable(table) =
+        first("CREATE TABLE generated_ids (small_id SMALLSERIAL, id SERIAL4, big_id SERIAL8)")
+    else {
+        panic!("not CREATE TABLE");
+    };
+    assert_eq!(
+        table
+            .columns
+            .iter()
+            .map(|column| (column.ty.clone(), column.auto_increment))
+            .collect::<Vec<_>>(),
+        vec![
+            (ColumnType::SmallInteger, true),
+            (ColumnType::Integer, true),
+            (ColumnType::BigInteger, true),
+        ]
+    );
+}
+
+#[test]
 fn create_table_preserves_array_element_types_and_dimensions() {
     let Statement::CreateTable(table) =
         first("CREATE TABLE arrays (tags TEXT[], matrix INTEGER[][])")
@@ -134,6 +213,23 @@ fn create_table_preserves_array_element_types_and_dimensions() {
         table.columns[1].ty,
         ColumnType::Array(Box::new(ColumnType::Array(Box::new(ColumnType::Integer))))
     );
+}
+
+#[test]
+fn routine_type_names_preserve_percent_type_and_named_type_qualification() {
+    let Statement::CreateFunction(function) = first(
+        "CREATE FUNCTION typed_value(v app.items.value%TYPE, d app.amount_domain)
+         RETURNS app.items.id%TYPE LANGUAGE sql AS $$ SELECT 1 $$",
+    ) else {
+        panic!("not CREATE FUNCTION");
+    };
+    assert_eq!(function.params[0].type_name, "app.items.value%type");
+    assert_eq!(function.params[1].type_name, "app.amount_domain");
+    assert!(matches!(
+        function.returns,
+        crate::ast::FunctionReturns::Scalar { type_name }
+            if type_name == "app.items.id%type"
+    ));
 }
 
 #[test]
@@ -307,6 +403,21 @@ fn table_commands_preserve_qualified_relation_names() {
         panic!("not INSERT");
     };
     assert_eq!(insert.table, "app.docs");
+}
+
+#[test]
+fn alter_column_type_preserves_the_using_expression() {
+    let Statement::AlterTable(alter) =
+        first("ALTER TABLE metrics ALTER COLUMN value TYPE text USING (value + delta)::text")
+    else {
+        panic!("not ALTER TABLE ALTER COLUMN TYPE");
+    };
+    let crate::ast::AlterTableAction::AlterColumnType { name, ty, using } = alter.action else {
+        panic!("not ALTER COLUMN TYPE");
+    };
+    assert_eq!(name, "value");
+    assert_eq!(ty, ColumnType::Text);
+    assert!(matches!(using, Some(Expr::Cast { ty, .. }) if ty == "text"));
 }
 
 #[test]

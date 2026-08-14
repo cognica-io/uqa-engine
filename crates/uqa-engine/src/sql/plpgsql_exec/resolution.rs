@@ -80,9 +80,9 @@ fn argument_type_cost(value: &Value, declared_type: &str) -> Option<u32> {
         "int2" | "int4" | "int8" | "float4" | "float8" | "numeric"
     );
     if actual_is_numeric && declared_is_numeric {
-        return best_effort_cast(value, declared_type).ok().map(|_| 1);
+        return coerce_routine_value(value, declared_type).ok().map(|_| 1);
     }
-    best_effort_cast(value, declared_type).ok().map(|_| 2)
+    coerce_routine_value(value, declared_type).ok().map(|_| 2)
 }
 
 fn overload_match_cost(def: &CreateFunction, slots: &[ArgSlot]) -> Option<u32> {
@@ -236,17 +236,42 @@ fn materialize_arguments(
                 eval_lowered_expression(engine, default, None, &[])?
             }
         };
-        bound.push(best_effort_cast(&value, &signature[idx].type_name)?);
+        bound.push(coerce_routine_value(&value, &signature[idx].type_name)?);
     }
     Ok(bound)
 }
 
-/// Cast through the SQL value layer; unknown target types keep the
-/// value unchanged (`%TYPE`, `record`, domain names, ...).
-pub(super) fn best_effort_cast(value: &Value, type_name: &str) -> Result<Value, SQLError> {
-    match cast_value(value, type_name) {
-        Ok(value) => Ok(value),
-        Err(SQLError::Unsupported(_)) => Ok(value.clone()),
-        Err(e) => Err(e),
+/// Apply a routine declaration's already-resolved SQL type. Pseudo-types use
+/// their own carrier validation; every scalar type goes through the SQL cast
+/// layer and an unsupported declaration remains an error.
+pub(super) fn coerce_routine_value(value: &Value, type_name: &str) -> Result<Value, SQLError> {
+    match canonical_routine_type_name(type_name).as_str() {
+        "record" => match value {
+            Value::Map(_) | Value::Null => Ok(value.clone()),
+            _ => Err(SQLError::Routine {
+                sqlstate: "42804".into(),
+                message: "cannot cast non-composite value to type record".into(),
+            }),
+        },
+        "anyarray" => match value {
+            Value::List(_) | Value::Null => Ok(value.clone()),
+            _ => Err(SQLError::Routine {
+                sqlstate: "42804".into(),
+                message: "cannot cast non-array value to type anyarray".into(),
+            }),
+        },
+        "refcursor" => match value {
+            Value::Str(_) | Value::Null => Ok(value.clone()),
+            _ => Err(SQLError::Routine {
+                sqlstate: "42804".into(),
+                message: "cannot cast value to type refcursor".into(),
+            }),
+        },
+        "void" if matches!(value, Value::Null) => Ok(Value::Null),
+        "void" => Err(SQLError::Routine {
+            sqlstate: "42804".into(),
+            message: "cannot cast non-null value to type void".into(),
+        }),
+        _ => cast_value(value, type_name),
     }
 }

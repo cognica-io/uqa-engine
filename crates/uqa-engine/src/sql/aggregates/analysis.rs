@@ -78,7 +78,8 @@ pub(in crate::sql) fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
         (ScalarExpr::And(a), ScalarExpr::And(b)) | (ScalarExpr::Or(a), ScalarExpr::Or(b)) => {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| exprs_match(x, y))
         }
-        (ScalarExpr::Not(a), ScalarExpr::Not(b)) => exprs_match(a, b),
+        (ScalarExpr::Not(a), ScalarExpr::Not(b))
+        | (ScalarExpr::UnaryMinus(a), ScalarExpr::UnaryMinus(b)) => exprs_match(a, b),
         (ScalarExpr::Cast { expr: a, ty: at }, ScalarExpr::Cast { expr: b, ty: bt }) => {
             at == bt && exprs_match(a, b)
         }
@@ -197,7 +198,9 @@ pub(in crate::sql) fn collect_aggregate_exprs<'a>(
             collect_aggregate_exprs(engine, lhs, out);
             collect_aggregate_exprs(engine, rhs, out);
         }
-        ScalarExpr::Not(inner) | ScalarExpr::Cast { expr: inner, .. } => {
+        ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
+        | ScalarExpr::Cast { expr: inner, .. } => {
             collect_aggregate_exprs(engine, inner, out);
         }
         ScalarExpr::IsNull { expr, .. } => collect_aggregate_exprs(engine, expr, out),
@@ -264,9 +267,9 @@ pub(in crate::sql) fn expr_references_columns(expr: &ScalarExpr) -> bool {
         ScalarExpr::Binary { lhs, rhs, .. } => {
             expr_references_columns(lhs) || expr_references_columns(rhs)
         }
-        ScalarExpr::Not(inner) | ScalarExpr::Cast { expr: inner, .. } => {
-            expr_references_columns(inner)
-        }
+        ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
+        | ScalarExpr::Cast { expr: inner, .. } => expr_references_columns(inner),
         ScalarExpr::IsNull { expr, .. } => expr_references_columns(expr),
         ScalarExpr::Between { expr, low, high } => {
             expr_references_columns(expr)

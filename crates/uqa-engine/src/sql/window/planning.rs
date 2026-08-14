@@ -24,6 +24,7 @@ pub(super) fn expr_has_window(expr: &ScalarExpr) -> bool {
         }
         ScalarExpr::Binary { lhs, rhs, .. } => expr_has_window(lhs) || expr_has_window(rhs),
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => expr_has_window(inner),
         ScalarExpr::Between { expr, low, high } => {
@@ -125,6 +126,10 @@ pub(super) fn rewrite_window_expr(
         ScalarExpr::Not(inner) => {
             let (inner, changed) = rewrite_window_expr(inner, projection_index, counter, slots);
             (ScalarExpr::Not(Box::new(inner)), changed)
+        }
+        ScalarExpr::UnaryMinus(inner) => {
+            let (inner, changed) = rewrite_window_expr(inner, projection_index, counter, slots);
+            (ScalarExpr::UnaryMinus(Box::new(inner)), changed)
         }
         ScalarExpr::And(items) => {
             let (items, changed) = rewrite_window_exprs(items, projection_index, counter, slots);

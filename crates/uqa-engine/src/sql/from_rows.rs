@@ -245,31 +245,6 @@ fn collect_from_qualifiers(from: &SourcePlan, out: &mut BTreeSet<String>) {
     }
 }
 
-fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> Result<ResultRow, SQLError> {
-    let qual = qualifier_for(table, alias);
-    let mut out = ResultRow::new();
-    if engine
-        .try_table(table)
-        .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
-        .is_none()
-    {
-        for column in engine
-            .foreign_table_columns(table)
-            .map_err(SQLError::Unsupported)?
-        {
-            out.insert(qualified_key(&qual, &column), Value::Null);
-        }
-        return Ok(out);
-    }
-    for column in engine
-        .try_table_columns(table)
-        .map_err(|error| SQLError::Internal(format!("read table columns for `{table}`: {error}")))?
-    {
-        out.insert(qualified_key(&qual, &column), Value::Null);
-    }
-    Ok(out)
-}
-
 /// Pull-based local-table source used by join leaves. It advances through the
 /// document store with `next_doc_id`, so neither ids nor documents are copied
 /// into a cardinality-sized staging vector before the physical join sees its

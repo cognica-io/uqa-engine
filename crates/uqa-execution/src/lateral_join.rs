@@ -25,14 +25,33 @@ pub trait LateralSource: Send {
     fn matches(&mut self, joined: &ResultRow) -> ExecResult<bool>;
 }
 
-fn output_schema(left: &[String], left_nulls: &ResultRow, right_nulls: &ResultRow) -> RowSchema {
-    let mut columns = left.to_vec();
-    for column in left_nulls.keys().chain(right_nulls.keys()) {
+fn output_schema(
+    left: &RowSchema,
+    right: &RowSchema,
+    left_nulls: &ResultRow,
+    right_nulls: &ResultRow,
+) -> RowSchema {
+    let mut columns = left.columns().to_vec();
+    let mut types = left.column_types().to_vec();
+    for column in left_nulls.keys() {
         if !columns.contains(column) {
             columns.push(column.clone());
+            types.push(None);
         }
     }
-    RowSchema::new(columns)
+    for (position, column) in right.columns().iter().enumerate() {
+        if !columns.contains(column) {
+            columns.push(column.clone());
+            types.push(right.column_type(position).cloned());
+        }
+    }
+    for column in right_nulls.keys() {
+        if !columns.contains(column) {
+            columns.push(column.clone());
+            types.push(None);
+        }
+    }
+    RowSchema::with_types(columns, types)
 }
 
 fn merge_rows(left: &ResultRow, right: &ResultRow) -> ResultRow {
@@ -72,7 +91,19 @@ impl<'a> LateralJoin<'a> {
         left_nulls: ResultRow,
         right_nulls: ResultRow,
     ) -> Self {
-        let schema = output_schema(left.schema(), &left_nulls, &right_nulls);
+        let right_schema = RowSchema::new(right_nulls.keys().cloned().collect());
+        Self::new_with_right_schema(left, source, kind, left_nulls, right_nulls, right_schema)
+    }
+
+    pub fn new_with_right_schema(
+        left: Box<dyn PhysicalOperator + 'a>,
+        source: Box<dyn LateralSource + 'a>,
+        kind: JoinKind,
+        left_nulls: ResultRow,
+        right_nulls: ResultRow,
+        right_schema: RowSchema,
+    ) -> Self {
+        let schema = output_schema(left.row_schema(), &right_schema, &left_nulls, &right_nulls);
         Self {
             left,
             source,

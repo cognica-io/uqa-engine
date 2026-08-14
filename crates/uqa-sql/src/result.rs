@@ -10,12 +10,18 @@ use std::collections::BTreeMap;
 
 use uqa_core::Value;
 
+use crate::ast::ColumnType;
+
 pub type ResultRow = BTreeMap<String, Value>;
 
 #[derive(Debug, Clone, Default)]
 pub struct SQLResult {
     /// Column order as the SELECT clause specified.
     pub columns: Vec<String>,
+    /// Statically bound SQL type for each output position. A missing entry
+    /// represents a type that has not yet been resolved, never a type inferred
+    /// from the first runtime value.
+    pub column_types: Vec<Option<ColumnType>>,
     /// One row per result document, with the named columns in
     /// `columns`. Extra columns from `_score` etc. are included here
     /// too.
@@ -35,8 +41,10 @@ impl SQLResult {
     }
 
     pub fn from_rows(columns: Vec<String>, rows: Vec<ResultRow>) -> Self {
+        let column_types = vec![None; columns.len()];
         Self {
             columns,
+            column_types,
             rows,
             positional_rows: None,
             affected_rows: 0,
@@ -48,11 +56,23 @@ impl SQLResult {
         rows: Vec<ResultRow>,
         positional_rows: Option<Vec<Vec<Value>>>,
     ) -> Self {
+        let column_types = vec![None; columns.len()];
+        Self::from_typed_rows_with_positions(columns, column_types, rows, positional_rows)
+    }
+
+    pub fn from_typed_rows_with_positions(
+        columns: Vec<String>,
+        column_types: Vec<Option<ColumnType>>,
+        rows: Vec<ResultRow>,
+        positional_rows: Option<Vec<Vec<Value>>>,
+    ) -> Self {
+        debug_assert_eq!(columns.len(), column_types.len());
         debug_assert!(positional_rows.as_ref().is_none_or(|values| {
             values.len() == rows.len() && values.iter().all(|row| row.len() == columns.len())
         }));
         Self {
             columns,
+            column_types,
             rows,
             positional_rows,
             affected_rows: 0,

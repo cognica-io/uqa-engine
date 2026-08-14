@@ -76,6 +76,7 @@ pub mod scope_overlay;
 pub mod set_operation;
 pub mod spill;
 pub mod spill_scan;
+pub mod type_resolution;
 
 pub use batch::{
     Batch, OwnedPhysicalRow, PhysicalRow, PhysicalRowView, RowSchema, DEFAULT_BATCH_SIZE,
@@ -107,3 +108,7 @@ pub use scope_overlay::ScopeOverlay;
 pub use set_operation::ExternalSetOperation;
 pub use spill::{IndexedSpill, SharedSpill, SharedSpillReader, SpillBuffer};
 pub use spill_scan::{SharedSpillScan, SpillScan};
+pub use type_resolution::{
+    bind_type_introspection, common_type, equality_operand_type, scalar_type,
+    scalar_type_with_resolver, values_column_types, FunctionTypeResolver,
+};

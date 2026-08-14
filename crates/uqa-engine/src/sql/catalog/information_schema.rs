@@ -17,6 +17,10 @@ use super::{
     registered_names, routine_signature_types, value_to_text, Engine, ResultRow, SQLError, Value,
 };
 
+pub(super) fn build_info_catalog_name() -> Vec<ResultRow> {
+    vec![row([("catalog_name", catalog_name())])]
+}
+
 pub(super) fn build_info_schemata(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     Ok(all_schema_names(engine)?
         .into_iter()
@@ -282,7 +286,6 @@ pub(super) fn build_info_routines(engine: &Engine) -> Result<Vec<ResultRow>, SQL
                 ("schema_level_routine", str_value("YES")),
                 ("max_dynamic_result_sets", Value::Int(0)),
                 ("is_udt_dependent", str_value("NO")),
-                ("result_cast_from_null", str_value("NO")),
             ])
         })
         .collect();
@@ -312,7 +315,6 @@ pub(super) fn build_info_routines(engine: &Engine) -> Result<Vec<ResultRow>, SQL
             ("schema_level_routine", str_value("YES")),
             ("max_dynamic_result_sets", Value::Int(0)),
             ("is_udt_dependent", str_value("NO")),
-            ("result_cast_from_null", str_value("NO")),
         ])
     }));
     for function in engine.list_sql_functions() {
@@ -393,7 +395,6 @@ pub(super) fn build_info_routines(engine: &Engine) -> Result<Vec<ResultRow>, SQL
             ("schema_level_routine", str_value("YES")),
             ("max_dynamic_result_sets", Value::Int(0)),
             ("is_udt_dependent", str_value("NO")),
-            ("result_cast_from_null", Value::Null),
         ]));
     }
     Ok(rows)

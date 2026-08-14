@@ -8,9 +8,10 @@ use uqa_pg_wire::backend::{sqlstate, TYPE_INT4, TYPE_TEXT};
 use uqa_pg_wire::{
     decode_frontend, decode_startup, encode_all, Authentication, BackendKeyData, BackendMessage,
     Bind, CancelKey, CloseTarget, CopyResponse, DescribeTarget, ErrorOrNotice, FieldDescription,
-    FormatCode, FrontendMessage, GSSEncResponse, Parse, PgWireError, ProtocolVersion, SSLResponse,
-    StartupFrame, TransactionStatus, CANCEL_REQUEST_CODE, GSSENC_REQUEST_CODE,
-    PROTOCOL_VERSION_3_0, PROTOCOL_VERSION_3_2, SSL_REQUEST_CODE,
+    FormatCode, FrontendMessage, FunctionCall, GSSEncResponse, NotificationResponse, Parse,
+    PgWireError, ProtocolVersion, SSLResponse, StartupFrame, TransactionStatus,
+    CANCEL_REQUEST_CODE, GSSENC_REQUEST_CODE, PROTOCOL_VERSION_3_0, PROTOCOL_VERSION_3_2,
+    SSL_REQUEST_CODE,
 };
 
 #[path = "protocol/libpq_interop.rs"]
@@ -444,6 +445,59 @@ fn decodes_extended_query_messages() {
 }
 
 #[test]
+fn decodes_function_call_fields_and_formats() {
+    let body = {
+        let mut body = Vec::new();
+        body.extend_from_slice(&42_u32.to_be_bytes());
+        body.extend_from_slice(&1_i16.to_be_bytes());
+        body.extend_from_slice(&1_i16.to_be_bytes());
+        body.extend_from_slice(&2_i16.to_be_bytes());
+        body.extend_from_slice(&4_i32.to_be_bytes());
+        body.extend_from_slice(&7_i32.to_be_bytes());
+        body.extend_from_slice(&(-1_i32).to_be_bytes());
+        body.extend_from_slice(&0_i16.to_be_bytes());
+        body
+    };
+    let Some((FrontendMessage::FunctionCall(call), consumed)) =
+        decode_frontend(&frontend_packet(b'F', &body)).expect("function call decodes")
+    else {
+        panic!("expected function call");
+    };
+
+    assert_eq!(consumed, body.len() + 5);
+    assert_eq!(
+        call,
+        FunctionCall {
+            function_oid: 42,
+            argument_formats: vec![FormatCode::Binary],
+            arguments: vec![Some(7_i32.to_be_bytes().to_vec()), None],
+            result_format: FormatCode::Text,
+        }
+    );
+}
+
+#[test]
+fn rejects_mismatched_function_call_argument_formats() {
+    let body = {
+        let mut body = Vec::new();
+        body.extend_from_slice(&42_u32.to_be_bytes());
+        body.extend_from_slice(&2_i16.to_be_bytes());
+        body.extend_from_slice(&0_i16.to_be_bytes());
+        body.extend_from_slice(&1_i16.to_be_bytes());
+        body.extend_from_slice(&1_i16.to_be_bytes());
+        body
+    };
+
+    assert_eq!(
+        decode_frontend(&frontend_packet(b'F', &body)),
+        Err(PgWireError::FunctionArgumentFormatCountMismatch {
+            format_count: 2,
+            argument_count: 1,
+        })
+    );
+}
+
+#[test]
 fn rejects_malformed_frontend_lengths() {
     let mut packet = Vec::new();
     packet.push(b'Q');
@@ -504,6 +558,28 @@ fn encodes_startup_backend_messages() {
             b'R', 0, 0, 0, 8, 0, 0, 0, 0, b'K', 0, 0, 0, 12, 0, 0, 0, 12, 0, 0, 0, 34, b'Z', 0, 0,
             0, 5, b'I',
         ]
+    );
+}
+
+#[test]
+fn encodes_gss_and_sspi_authentication_requests() {
+    assert_eq!(
+        BackendMessage::Authentication(Authentication::Gss)
+            .encode()
+            .expect("GSS authentication request encodes"),
+        [b'R', 0, 0, 0, 8, 0, 0, 0, 7]
+    );
+    assert_eq!(
+        BackendMessage::Authentication(Authentication::GssContinue(vec![1, 2, 3]))
+            .encode()
+            .expect("GSS continuation encodes"),
+        [b'R', 0, 0, 0, 11, 0, 0, 0, 8, 1, 2, 3]
+    );
+    assert_eq!(
+        BackendMessage::Authentication(Authentication::Sspi)
+            .encode()
+            .expect("SSPI authentication request encodes"),
+        [b'R', 0, 0, 0, 8, 0, 0, 0, 9]
     );
 }
 
@@ -601,4 +677,42 @@ fn encodes_copy_responses_without_io_runtime() {
     .expect("copy response encodes");
 
     assert_eq!(encoded, [b'H', 0, 0, 0, 11, 1, 0, 2, 0, 0, 0, 1]);
+
+    assert_eq!(
+        BackendMessage::CopyOutResponse(CopyResponse {
+            overall_format: FormatCode::Text,
+            column_formats: vec![FormatCode::Text, FormatCode::Binary],
+        })
+        .encode(),
+        Err(PgWireError::BinaryColumnInTextCopy { column: 2 })
+    );
+}
+
+#[test]
+fn encodes_function_call_and_notification_responses() {
+    assert_eq!(
+        BackendMessage::FunctionCallResponse(Some(vec![1, 2]))
+            .encode()
+            .expect("function result encodes"),
+        [b'V', 0, 0, 0, 10, 0, 0, 0, 2, 1, 2]
+    );
+    assert_eq!(
+        BackendMessage::FunctionCallResponse(None)
+            .encode()
+            .expect("NULL function result encodes"),
+        [b'V', 0, 0, 0, 8, 255, 255, 255, 255]
+    );
+    assert_eq!(
+        BackendMessage::NotificationResponse(NotificationResponse {
+            process_id: 12,
+            channel: "events".to_owned(),
+            payload: "ready".to_owned(),
+        })
+        .encode()
+        .expect("notification encodes"),
+        [
+            b'A', 0, 0, 0, 21, 0, 0, 0, 12, b'e', b'v', b'e', b'n', b't', b's', 0, b'r', b'e',
+            b'a', b'd', b'y', 0,
+        ]
+    );
 }

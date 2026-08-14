@@ -10,9 +10,10 @@ use super::{
     build_returning_row, coerce_to_column_type, dml_returning_result, dml_storage_error,
     eval_mutation_assignment, eval_mutation_expr, index_vectors_for_type, missing_document_error,
     referrers_to_for_actions, rewrite_document_with_referential_actions, run_update_from,
-    validate_mutation_columns, BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope, Engine,
-    MutationAssignmentTarget, ReturningRowImage, ReturningRowImages, RowIndependentUpdateValues,
-    SQLError, SQLParam, SQLResult, ScalarExpr, UpdatePlan, Value,
+    validate_mutation_columns, BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope,
+    DmlReturningShape, Engine, MutationAssignmentTarget, ReturningProjectionRow, ReturningRowImage,
+    ReturningRowImages, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, ScalarExpr,
+    UpdatePlan, Value,
 };
 
 pub(in crate::sql) fn run_update(
@@ -116,18 +117,21 @@ pub(in crate::sql) fn run_update_inner(
         if !stmt.returning.is_empty() {
             returning_rows.push(build_returning_row(
                 engine,
-                &stmt.table,
-                ReturningRowImages {
-                    old: Some(ReturningRowImage {
-                        doc_id,
-                        document: &original_doc,
-                    }),
-                    new: Some(ReturningRowImage {
-                        doc_id: rewritten_doc_id,
-                        document: &doc,
-                    }),
+                ReturningProjectionRow {
+                    table: &stmt.table,
+                    images: ReturningRowImages {
+                        old: Some(ReturningRowImage {
+                            doc_id,
+                            document: &original_doc,
+                        }),
+                        new: Some(ReturningRowImage {
+                            doc_id: rewritten_doc_id,
+                            document: &doc,
+                        }),
+                    },
+                    aliases: &stmt.returning_aliases,
+                    context: None,
                 },
-                &stmt.returning_aliases,
                 &stmt.returning,
                 params,
                 &ctes,
@@ -138,8 +142,15 @@ pub(in crate::sql) fn run_update_inner(
     if !stmt.returning.is_empty() {
         return dml_returning_result(
             engine,
-            &stmt.table,
-            &stmt.returning,
+            DmlReturningShape {
+                table: &stmt.table,
+                target_qualifier: None,
+                aliases: &stmt.returning_aliases,
+                returning: &stmt.returning,
+                params,
+                ctes: &ctes,
+                supplemental_schema: None,
+            },
             returning_rows,
             affected,
         );
@@ -269,7 +280,7 @@ pub(in crate::sql) fn expr_is_row_independent(expr: &ScalarExpr) -> bool {
         ScalarExpr::Binary { lhs, rhs, .. } => {
             expr_is_row_independent(lhs) && expr_is_row_independent(rhs)
         }
-        ScalarExpr::Not(inner) => expr_is_row_independent(inner),
+        ScalarExpr::Not(inner) | ScalarExpr::UnaryMinus(inner) => expr_is_row_independent(inner),
         ScalarExpr::IsNull { expr, .. } => expr_is_row_independent(expr),
         ScalarExpr::Between { expr, low, high } => {
             expr_is_row_independent(expr)

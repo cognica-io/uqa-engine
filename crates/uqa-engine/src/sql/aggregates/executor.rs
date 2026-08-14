@@ -6,9 +6,7 @@
 
 //! Engine adapter selecting adaptive or sort aggregation per grouping set.
 
-use super::{
-    projection_columns, CteScope, Engine, QueryBlockPlan, SQLError, SQLParam, SpillBuffer,
-};
+use super::{CteScope, Engine, QueryBlockPlan, SQLError, SQLParam, SpillBuffer};
 use uqa_execution::{AggregateExecutor, Batch, ExecResult, RowSchema};
 use uqa_sql::expr::RowLookup;
 
@@ -27,7 +25,7 @@ pub(in crate::sql) struct PhysicalAggregateExecutor<'a> {
     engine: &'a Engine,
     params: &'a [SQLParam],
     ctes: &'a CteScope,
-    input_schema: Vec<String>,
+    input_row_schema: RowSchema,
     output_schema: RowSchema,
     output_budget: usize,
     sets: Vec<AggregateSet>,
@@ -39,9 +37,11 @@ impl<'a> PhysicalAggregateExecutor<'a> {
         statement: &QueryBlockPlan,
         params: &'a [SQLParam],
         ctes: &'a CteScope,
-        input_schema: Vec<String>,
+        input_schema: RowSchema,
+        output_schema: RowSchema,
         work_mem_bytes: usize,
     ) -> Result<Self, SQLError> {
+        let input_columns = input_schema.columns().to_vec();
         let statements = grouping_set_statements(statement);
         let set_budget = (work_mem_bytes / statements.len().max(1)).max(1);
         let sets = statements
@@ -53,7 +53,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
                         statement,
                         relaxed,
                         set_budget,
-                        &input_schema,
+                        &input_columns,
                     )
                     .map(|set| AggregateSet::Adaptive(Box::new(set)));
                 }
@@ -67,7 +67,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
                                 relaxed,
                                 (set_budget / 2).max(1),
                                 phase_budget,
-                                &input_schema,
+                                &input_columns,
                             )?,
                         ))
                     } else {
@@ -91,8 +91,8 @@ impl<'a> PhysicalAggregateExecutor<'a> {
             engine,
             params,
             ctes,
-            input_schema,
-            output_schema: RowSchema::new(projection_columns(&statement.projections)),
+            input_row_schema: input_schema,
+            output_schema,
             output_budget: (work_mem_bytes / 3).max(1),
             sets,
         })
@@ -124,7 +124,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
                     self.engine,
                     &statement,
                     input,
-                    &self.input_schema,
+                    &self.input_row_schema,
                     &self.output_schema,
                     self.params,
                     self.ctes,

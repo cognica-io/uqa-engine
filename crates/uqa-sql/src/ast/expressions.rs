@@ -108,6 +108,9 @@ pub enum Expr {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
+    /// `PostgreSQL` prefix `-`, kept distinct from binary subtraction so the
+    /// operand's declared numeric width and overflow behavior survive lowering.
+    UnaryMinus(Box<Expr>),
     /// `NOT expr`.
     Not(Box<Expr>),
     /// `cond_1 AND cond_2 AND ...` (n-ary).

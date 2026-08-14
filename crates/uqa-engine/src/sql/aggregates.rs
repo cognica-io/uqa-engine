@@ -21,7 +21,7 @@ use uqa_sql::{ResultRow, SQLError, SQLParam};
 use crate::{Engine, SQLAggregateFunction, SQLAggregateState};
 
 use super::scalar::PlanSubqueryArena;
-use super::{core_value_to_json, projection_columns, CteScope, ScopedEngineHook};
+use super::{core_value_to_json, CteScope, ScopedEngineHook};
 
 const AGGREGATE_MERGE_FAN_IN: usize = 16;
 

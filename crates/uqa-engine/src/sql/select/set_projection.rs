@@ -171,6 +171,7 @@ pub(in crate::sql) fn expression_may_return_set(engine: &Engine, expression: &Sc
             expression_may_return_set(engine, lhs) || expression_may_return_set(engine, rhs)
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => expression_may_return_set(engine, inner),
         ScalarExpr::Between { expr, low, high } => {
@@ -344,6 +345,13 @@ fn validate_set_context(engine: &Engine, expression: &ScalarExpr) -> Result<(), 
                 engine,
                 [inner.as_ref()],
                 "argument of NOT must not return a set",
+            )?;
+        }
+        ScalarExpr::UnaryMinus(inner) => {
+            reject_set_descendant(
+                engine,
+                [inner.as_ref()],
+                "argument of unary minus must not return a set",
             )?;
         }
         ScalarExpr::And(items) => {
@@ -527,6 +535,7 @@ fn rewrite_set_calls(
             **rhs = rewrite_set_calls(engine, (**rhs).clone(), calls);
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => {
             **inner = rewrite_set_calls(engine, (**inner).clone(), calls);
@@ -655,6 +664,7 @@ fn replace_group_set_expression(expression: &mut ScalarExpr, mappings: &[(Scalar
             replace_group_set_expression(rhs, mappings);
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => {
             replace_group_set_expression(inner, mappings);
@@ -877,6 +887,9 @@ fn rewrite_aggregate_dependencies(
             inner,
             dependencies,
         ))),
+        ScalarExpr::UnaryMinus(inner) => ScalarExpr::UnaryMinus(Box::new(
+            rewrite_aggregate_dependencies(engine, group_by, inner, dependencies),
+        )),
         ScalarExpr::And(items) => ScalarExpr::And(
             items
                 .iter()

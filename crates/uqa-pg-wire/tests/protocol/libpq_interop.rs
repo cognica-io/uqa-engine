@@ -22,8 +22,9 @@ use std::time::{Duration, Instant};
 use uqa_pg_wire::backend::{encode_gssenc_response, encode_ssl_response, sqlstate, TYPE_INT4};
 use uqa_pg_wire::{
     decode_frontend, decode_startup, encode_all_for_protocol, Authentication, BackendKeyData,
-    BackendMessage, CancelKey, ErrorOrNotice, FieldDescription, FrontendMessage, GSSEncResponse,
-    ProtocolVersion, SSLResponse, StartupFrame, StartupMessage, TransactionStatus,
+    BackendMessage, CancelKey, DescribeTarget, ErrorOrNotice, FieldDescription, FormatCode,
+    FrontendMessage, GSSEncResponse, ProtocolVersion, SSLResponse, StartupFrame, StartupMessage,
+    TransactionStatus,
 };
 
 const ACCEPT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -50,6 +51,14 @@ struct CancellationObservation {
     process_id: i32,
     secret_key: CancelKey,
     cancel_pre_startup: Vec<PreStartupRequest>,
+}
+
+#[derive(Debug)]
+struct ExtendedQueryObservation {
+    startup: StartupMessage,
+    negotiated: ProtocolVersion,
+    query: String,
+    parameter: Vec<u8>,
 }
 
 fn container_name() -> String {
@@ -274,6 +283,15 @@ fn write_select_one(stream: &mut TcpStream, version: ProtocolVersion) {
     stream.write_all(&bytes).expect("write SELECT 1 response");
 }
 
+fn write_backend_messages(
+    stream: &mut TcpStream,
+    version: ProtocolVersion,
+    messages: &[BackendMessage],
+) {
+    let bytes = encode_all_for_protocol(messages, version).expect("encode backend messages");
+    stream.write_all(&bytes).expect("write backend messages");
+}
+
 fn serve_select_one(
     listener: &TcpListener,
     newest_supported: ProtocolVersion,
@@ -386,6 +404,151 @@ fn requested_version(value: &str) -> ProtocolVersion {
         "3.2" | "latest" => ProtocolVersion::V3_2,
         other => panic!("unsupported live-test protocol version {other}"),
     }
+}
+
+fn serve_extended_query(
+    listener: &TcpListener,
+    newest_supported: ProtocolVersion,
+) -> ExtendedQueryObservation {
+    let (mut stream, startup, negotiated, _, _) = accept_authenticated(listener, newest_supported);
+
+    let FrontendMessage::Parse(parse) = read_frontend_message(&mut stream) else {
+        panic!("psql did not begin the extended query with Parse");
+    };
+    assert_eq!(
+        parse.query.trim().trim_end_matches(';'),
+        "SELECT $1::int4 + 1"
+    );
+    write_backend_messages(&mut stream, negotiated, &[BackendMessage::ParseComplete]);
+
+    let FrontendMessage::Bind(bind) = read_frontend_message(&mut stream) else {
+        panic!("psql did not send Bind after Parse");
+    };
+    assert_eq!(bind.statement, parse.statement);
+    assert_eq!(bind.parameters.len(), 1);
+    let parameter = bind.parameters[0]
+        .clone()
+        .expect("psql sent a non-NULL parameter");
+    assert_eq!(parameter, b"41");
+    assert!(matches!(
+        bind.parameter_formats.as_slice(),
+        [] | [FormatCode::Text]
+    ));
+    write_backend_messages(&mut stream, negotiated, &[BackendMessage::BindComplete]);
+
+    let FrontendMessage::Describe(DescribeTarget::Portal(portal)) =
+        read_frontend_message(&mut stream)
+    else {
+        panic!("psql did not describe the bound portal");
+    };
+    assert_eq!(portal, bind.portal);
+    let result_format = match bind.result_formats.as_slice() {
+        [] | [FormatCode::Text] => FormatCode::Text,
+        [FormatCode::Binary] => FormatCode::Binary,
+        formats => panic!("unexpected one-column result formats: {formats:?}"),
+    };
+    let mut field = FieldDescription::text("?column?", TYPE_INT4, 4);
+    field.format = result_format;
+    write_backend_messages(
+        &mut stream,
+        negotiated,
+        &[BackendMessage::RowDescription(vec![field])],
+    );
+
+    let FrontendMessage::Execute(execute) = read_frontend_message(&mut stream) else {
+        panic!("psql did not execute the bound portal");
+    };
+    assert_eq!(execute.portal, bind.portal);
+    assert_eq!(execute.max_rows, 0);
+    let value = match result_format {
+        FormatCode::Text => b"42".to_vec(),
+        FormatCode::Binary => 42_i32.to_be_bytes().to_vec(),
+    };
+    write_backend_messages(
+        &mut stream,
+        negotiated,
+        &[
+            BackendMessage::DataRow(vec![Some(value)]),
+            BackendMessage::CommandComplete("SELECT 1".to_owned()),
+        ],
+    );
+
+    assert_eq!(read_frontend_message(&mut stream), FrontendMessage::Sync);
+    write_backend_messages(
+        &mut stream,
+        negotiated,
+        &[BackendMessage::ReadyForQuery(TransactionStatus::Idle)],
+    );
+    assert_eq!(
+        read_frontend_message(&mut stream),
+        FrontendMessage::Terminate
+    );
+
+    ExtendedQueryObservation {
+        startup,
+        negotiated,
+        query: parse.query,
+        parameter,
+    }
+}
+
+fn run_extended_psql(port: u16, max_protocol_version: &str) -> Output {
+    let conninfo = format!(
+        "host={} port={port} user=uqa dbname=uqa connect_timeout=5 max_protocol_version={max_protocol_version} gssencmode=disable sslmode=disable",
+        docker_host()
+    );
+    let mut child = Command::new("docker")
+        .args([
+            "exec",
+            "-i",
+            &container_name(),
+            "psql",
+            "-X",
+            "-Atq",
+            &conninfo,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn PostgreSQL 18 psql extended-query client");
+    child
+        .stdin
+        .take()
+        .expect("psql stdin is piped")
+        .write_all(b"SELECT $1::int4 + 1 \\bind 41 \\g\n\\q\n")
+        .expect("write psql extended-query script");
+    child
+        .wait_with_output()
+        .expect("wait for PostgreSQL 18 psql extended-query client")
+}
+
+#[test]
+#[ignore = "requires UQA_PG18_DOCKER_HOST and UQA_PG18_WIRE_CONTAINER (default: pg-parity) with PostgreSQL 18 psql/libpq"]
+fn postgresql_18_libpq_executes_extended_query_over_protocol_32() {
+    assert_postgresql_18_libpq();
+    let (listener, port) = bind_test_listener();
+    let server = thread::spawn(move || serve_extended_query(&listener, ProtocolVersion::V3_2));
+    let output = run_extended_psql(port, "3.2");
+    let observation = server.join().expect("extended-query server completed");
+
+    assert!(
+        output.status.success(),
+        "psql extended query failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .any(|line| line.trim() == "42"),
+        "unexpected psql output: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(observation.startup.version, ProtocolVersion::V3_2);
+    assert_eq!(observation.negotiated, ProtocolVersion::V3_2);
+    assert_eq!(observation.query.trim(), "SELECT $1::int4 + 1");
+    assert_eq!(observation.parameter, b"41");
 }
 
 #[test]

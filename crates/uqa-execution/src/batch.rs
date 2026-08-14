@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use smallvec::SmallVec;
 use uqa_core::Value;
+use uqa_sql::ast::ColumnType;
 use uqa_sql::expr::RowLookup;
 use uqa_sql::ResultRow;
 
@@ -31,6 +32,9 @@ static NULL_VALUE: Value = Value::Null;
 #[derive(Debug, PartialEq, Eq)]
 struct SchemaIndex {
     columns: Box<[String]>,
+    /// Static SQL type of each logical output column. `None` is an as-yet
+    /// unresolved type, not a runtime NULL value.
+    types: Box<[Option<ColumnType>]>,
     /// Logical column position -> flattened physical value position.
     slots: Box<[usize]>,
     physical_width: usize,
@@ -42,6 +46,7 @@ struct SchemaIndex {
     /// physical slot without becoming output columns. Correlated table aliases
     /// use this to expose `alias.column` without duplicating the value.
     aliases: HashMap<Box<str>, usize>,
+    alias_types: HashMap<Box<str>, Option<ColumnType>>,
     alias_qualified: HashMap<Box<str>, HashMap<Box<str>, usize>>,
     /// Visible unqualified names with more than one logical owner.
     ambiguous_unqualified: HashSet<Box<str>>,
@@ -73,6 +78,22 @@ impl RowSchema {
     pub fn new(columns: Vec<String>) -> Self {
         let width = columns.len();
         Self::from_parts(columns, (0..width).collect(), width)
+    }
+
+    /// Build a positional schema with statically bound SQL types.
+    pub fn with_types(columns: Vec<String>, types: Vec<Option<ColumnType>>) -> Self {
+        let width = columns.len();
+        assert_eq!(width, types.len(), "row schema column/type width mismatch");
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
+            columns,
+            types,
+            (0..width).collect(),
+            width,
+            HashMap::new(),
+            HashMap::new(),
+            false,
+            HashSet::new(),
+        )
     }
 
     /// Build the lookup semantics of a named compatibility row. An exact bare
@@ -111,6 +132,26 @@ impl RowSchema {
         )
     }
 
+    fn from_typed_parts_with_aliases(
+        columns: Vec<String>,
+        types: Vec<Option<ColumnType>>,
+        slots: Vec<usize>,
+        physical_width: usize,
+        aliases: HashMap<Box<str>, usize>,
+        alias_types: HashMap<Box<str>, Option<ColumnType>>,
+    ) -> Self {
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
+            columns,
+            types,
+            slots,
+            physical_width,
+            aliases,
+            alias_types,
+            false,
+            HashSet::new(),
+        )
+    }
+
     fn from_parts_with_aliases_and_exact_precedence(
         columns: Vec<String>,
         slots: Vec<usize>,
@@ -119,7 +160,32 @@ impl RowSchema {
         exact_unqualified_precedence: bool,
         extra_ambiguous_unqualified: HashSet<Box<str>>,
     ) -> Self {
+        let types = vec![None; columns.len()];
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
+            columns,
+            types,
+            slots,
+            physical_width,
+            aliases,
+            HashMap::new(),
+            exact_unqualified_precedence,
+            extra_ambiguous_unqualified,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn from_typed_parts_with_aliases_and_exact_precedence(
+        columns: Vec<String>,
+        types: Vec<Option<ColumnType>>,
+        slots: Vec<usize>,
+        physical_width: usize,
+        aliases: HashMap<Box<str>, usize>,
+        alias_types: HashMap<Box<str>, Option<ColumnType>>,
+        exact_unqualified_precedence: bool,
+        extra_ambiguous_unqualified: HashSet<Box<str>>,
+    ) -> Self {
         debug_assert_eq!(columns.len(), slots.len());
+        debug_assert_eq!(columns.len(), types.len());
         let mut exact = HashMap::with_capacity(columns.len());
         let mut qualified: HashMap<Box<str>, HashMap<Box<str>, usize>> = HashMap::new();
         let mut alias_qualified: HashMap<Box<str>, HashMap<Box<str>, usize>> = HashMap::new();
@@ -182,6 +248,7 @@ impl RowSchema {
         Self {
             index: Arc::new(SchemaIndex {
                 columns: columns.into_boxed_slice(),
+                types: types.into_boxed_slice(),
                 slots: slots.into_boxed_slice(),
                 physical_width,
                 exact,
@@ -189,6 +256,7 @@ impl RowSchema {
                 suffix,
                 qualified_owners,
                 aliases,
+                alias_types,
                 alias_qualified,
                 ambiguous_unqualified,
             }),
@@ -209,6 +277,16 @@ impl RowSchema {
 
     pub fn iter(&self) -> std::slice::Iter<'_, String> {
         self.index.columns.iter()
+    }
+
+    /// Static SQL type at one logical output position.
+    pub fn column_type(&self, logical: usize) -> Option<&ColumnType> {
+        self.index.types.get(logical).and_then(Option::as_ref)
+    }
+
+    /// Static SQL types aligned with [`Self::columns`].
+    pub fn column_types(&self) -> &[Option<ColumnType>] {
+        &self.index.types
     }
 
     pub fn position(&self, name: &str) -> Option<usize> {
@@ -248,6 +326,47 @@ impl RowSchema {
         })
     }
 
+    /// Resolve an unqualified or exact logical identity to its static type.
+    pub fn type_of(&self, name: &str) -> Option<&ColumnType> {
+        if !name.contains('.') && self.index.ambiguous_unqualified.contains(name) {
+            return None;
+        }
+        self.index
+            .exact
+            .get(name)
+            .and_then(|logical| self.column_type(*logical))
+            .or_else(|| self.index.alias_types.get(name).and_then(Option::as_ref))
+            .or_else(|| {
+                self.index
+                    .suffix
+                    .get(name)
+                    .and_then(|logical| self.column_type(*logical))
+            })
+    }
+
+    /// Resolve a qualified logical identity to its static type using the same
+    /// ownership and shadowing rules as value lookup.
+    pub fn qualified_type(&self, qualifier: &str, column: &str, key: &str) -> Option<&ColumnType> {
+        let exact = self
+            .index
+            .qualified
+            .get(qualifier)
+            .and_then(|columns| columns.get(column))
+            .and_then(|logical| self.column_type(*logical))
+            .or_else(|| {
+                let alias = format!("{qualifier}.{column}");
+                self.index
+                    .alias_types
+                    .get(alias.as_str())
+                    .and_then(Option::as_ref)
+            })
+            .or_else(|| (!key.is_empty()).then(|| self.type_of(key)).flatten());
+        if exact.is_some() || self.index.qualified_owners.contains(column) {
+            return exact;
+        }
+        self.type_of(column)
+    }
+
     pub fn column_is_ambiguous(&self, name: &str) -> bool {
         !name.contains('.') && self.index.ambiguous_unqualified.contains(name)
     }
@@ -284,7 +403,18 @@ impl RowSchema {
             .iter()
             .map(|(_, source)| input.exact_slot(source).unwrap_or(NULL_SLOT))
             .collect();
-        Self::from_parts(output_names, slots, input.physical_width())
+        let types = columns
+            .iter()
+            .map(|(_, source)| input.type_of(source).cloned())
+            .collect();
+        Self::from_typed_parts_with_aliases(
+            output_names,
+            types,
+            slots,
+            input.physical_width(),
+            HashMap::new(),
+            HashMap::new(),
+        )
     }
 
     /// Build a compact positional layout for a blocking or spill boundary.
@@ -329,11 +459,13 @@ impl RowSchema {
             })
             .collect();
         (
-            Self::from_parts_with_aliases(
+            Self::from_typed_parts_with_aliases(
                 self.columns().to_vec(),
+                self.column_types().to_vec(),
                 slots,
                 source_slots.len(),
                 aliases,
+                self.index.alias_types.clone(),
             ),
             source_slots,
         )
@@ -346,15 +478,23 @@ impl RowSchema {
     /// before the derived lookup indexes are constructed.
     pub(crate) fn from_physical_layout(
         columns: Vec<String>,
+        types: Vec<Option<ColumnType>>,
         slots: Vec<Option<usize>>,
         physical_width: usize,
-        aliases: Vec<(String, Option<usize>)>,
+        aliases: Vec<(String, Option<usize>, Option<ColumnType>)>,
     ) -> ExecResult<Self> {
         if columns.len() != slots.len() {
             return Err(ExecError::Other(format!(
                 "physical schema has {} columns but {} logical slots",
                 columns.len(),
                 slots.len()
+            )));
+        }
+        if columns.len() != types.len() {
+            return Err(ExecError::Other(format!(
+                "physical schema has {} columns but {} logical types",
+                columns.len(),
+                types.len()
             )));
         }
         let slots = slots
@@ -368,7 +508,8 @@ impl RowSchema {
             })
             .collect::<ExecResult<Vec<_>>>()?;
         let mut lookup_aliases = HashMap::with_capacity(aliases.len());
-        for (name, slot) in aliases {
+        let mut alias_types = HashMap::with_capacity(aliases.len());
+        for (name, slot, ty) in aliases {
             let slot = match slot {
                 Some(slot) if slot < physical_width => slot,
                 Some(slot) => {
@@ -386,12 +527,15 @@ impl RowSchema {
                     "physical schema contains duplicate alias `{name}`"
                 )));
             }
+            alias_types.insert(Box::<str>::from(name.as_str()), ty);
         }
-        Ok(Self::from_parts_with_aliases(
+        Ok(Self::from_typed_parts_with_aliases(
             columns,
+            types,
             slots,
             physical_width,
             lookup_aliases,
+            alias_types,
         ))
     }
 
@@ -406,21 +550,43 @@ impl RowSchema {
         aliases
     }
 
+    pub(crate) fn lookup_aliases_with_types(
+        &self,
+    ) -> Vec<(&str, Option<usize>, Option<&ColumnType>)> {
+        self.lookup_aliases()
+            .into_iter()
+            .map(|(name, slot)| {
+                (
+                    name,
+                    slot,
+                    self.index.alias_types.get(name).and_then(Option::as_ref),
+                )
+            })
+            .collect()
+    }
+
     /// Add hidden lookup names for existing slots. These aliases participate
     /// in column resolution but not schema iteration or final materialization.
     pub fn with_lookup_aliases(input: &Self, aliases: &[(String, String)]) -> Self {
         let mut lookup_aliases = input.index.aliases.clone();
+        let mut alias_types = input.index.alias_types.clone();
         for (alias, source) in aliases {
             lookup_aliases.insert(
                 Box::<str>::from(alias.as_str()),
                 input.exact_slot(source).unwrap_or(NULL_SLOT),
             );
+            alias_types.insert(
+                Box::<str>::from(alias.as_str()),
+                input.type_of(source).cloned(),
+            );
         }
-        Self::from_parts_with_aliases(
+        Self::from_typed_parts_with_aliases(
             input.columns().to_vec(),
+            input.column_types().to_vec(),
             input.index.slots.to_vec(),
             input.physical_width(),
             lookup_aliases,
+            alias_types,
         )
     }
 
@@ -432,26 +598,70 @@ impl RowSchema {
         columns: &[(String, usize)],
         aliases: &[(String, usize)],
     ) -> Self {
+        let columns = columns
+            .iter()
+            .map(|(name, logical)| (name.clone(), *logical, input.column_type(*logical).cloned()))
+            .collect::<Vec<_>>();
+        Self::remap_typed_positions(input, &columns, aliases)
+    }
+
+    /// Select logical positions with explicit output types. This is used when
+    /// a binder inserts an implicit coercion and the output identity no longer
+    /// has the input slot's declared type.
+    pub(crate) fn remap_typed_positions(
+        input: &Self,
+        columns: &[(String, usize, Option<ColumnType>)],
+        aliases: &[(String, usize)],
+    ) -> Self {
         let output_names = columns
             .iter()
-            .map(|(output, _)| output.clone())
+            .map(|(output, _, _)| output.clone())
             .collect::<Vec<_>>();
         let slots = columns
             .iter()
-            .map(|(_, logical)| input.slot(*logical).unwrap_or(NULL_SLOT))
+            .map(|(_, logical, _)| input.slot(*logical).unwrap_or(NULL_SLOT))
             .collect();
+        let types = columns.iter().map(|(_, _, ty)| ty.clone()).collect();
         let mut lookup_aliases = input.index.aliases.clone();
+        let mut alias_types = input.index.alias_types.clone();
         for (alias, logical) in aliases {
             lookup_aliases.insert(
                 Box::<str>::from(alias.as_str()),
                 input.slot(*logical).unwrap_or(NULL_SLOT),
             );
+            alias_types.insert(
+                Box::<str>::from(alias.as_str()),
+                input.column_type(*logical).cloned(),
+            );
         }
-        Self::from_parts_with_aliases(output_names, slots, input.physical_width(), lookup_aliases)
+        Self::from_typed_parts_with_aliases(
+            output_names,
+            types,
+            slots,
+            input.physical_width(),
+            lookup_aliases,
+            alias_types,
+        )
     }
 
     /// Overlay a correlated outer scope without exposing its columns to star expansion. Current-scope names and relation qualifiers shadow outer names, while an ambiguous outer unqualified name remains ambiguous when the current scope has no owner.
     pub(crate) fn with_outer_scope(input: &Self, outer_columns: &[String]) -> Self {
+        let columns = outer_columns
+            .iter()
+            .cloned()
+            .map(|column| (column, None))
+            .collect::<Vec<_>>();
+        Self::with_typed_outer_scope(input, &columns)
+    }
+
+    /// Overlay a statically typed correlated outer scope. The outer columns
+    /// remain hidden from schema iteration and star expansion, but both
+    /// qualified and unqualified lookup aliases retain their declared SQL
+    /// types for expression binding.
+    pub fn with_typed_outer_scope(
+        input: &Self,
+        outer_columns: &[(String, Option<ColumnType>)],
+    ) -> Self {
         let outer_base = input.physical_width();
         let current_qualifiers = input
             .index
@@ -479,19 +689,22 @@ impl RowSchema {
         );
 
         let mut aliases = input.index.aliases.clone();
+        let mut alias_types = input.index.alias_types.clone();
         let mut outer_exact = HashSet::<&str>::new();
         let mut outer_qualified = HashMap::<&str, Vec<usize>>::new();
-        for (position, name) in outer_columns.iter().enumerate() {
+        for (position, (name, ty)) in outer_columns.iter().enumerate() {
             let slot = outer_base + position;
             if let Some((qualifier, column)) = name.rsplit_once('.') {
                 if !current_qualifiers.contains(qualifier) {
                     aliases.insert(Box::<str>::from(name.as_str()), slot);
+                    alias_types.insert(Box::<str>::from(name.as_str()), ty.clone());
                     outer_qualified.entry(column).or_default().push(position);
                 }
             } else {
                 outer_exact.insert(name);
                 if !current_unqualified.contains(name.as_str()) {
                     aliases.insert(Box::<str>::from(name.as_str()), slot);
+                    alias_types.insert(Box::<str>::from(name.as_str()), ty.clone());
                 }
             }
         }
@@ -504,6 +717,8 @@ impl RowSchema {
             match positions.as_slice() {
                 [position] => {
                     aliases.insert(Box::<str>::from(column), outer_base + position);
+                    alias_types
+                        .insert(Box::<str>::from(column), outer_columns[*position].1.clone());
                 }
                 [_, _, ..] => {
                     outer_ambiguous.insert(Box::<str>::from(column));
@@ -512,11 +727,13 @@ impl RowSchema {
             }
         }
 
-        Self::from_parts_with_aliases_and_exact_precedence(
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
             input.columns().to_vec(),
+            input.column_types().to_vec(),
             input.index.slots.to_vec(),
             input.physical_width() + outer_columns.len(),
             aliases,
+            alias_types,
             false,
             outer_ambiguous,
         )
@@ -525,23 +742,38 @@ impl RowSchema {
     /// Append freshly-computed values to an existing physical row. Reusing an
     /// existing output name replaces its logical slot just like map insertion.
     pub fn append(input: &Self, names: &[String]) -> Self {
+        let columns = names
+            .iter()
+            .cloned()
+            .map(|name| (name, None))
+            .collect::<Vec<_>>();
+        Self::append_typed(input, &columns)
+    }
+
+    /// Append freshly computed values with static SQL output types.
+    pub fn append_typed(input: &Self, names: &[(String, Option<ColumnType>)]) -> Self {
         let mut columns = input.columns().to_vec();
+        let mut types = input.column_types().to_vec();
         let mut slots = input.index.slots.to_vec();
         let base = input.physical_width();
-        for (offset, name) in names.iter().enumerate() {
+        for (offset, (name, ty)) in names.iter().enumerate() {
             let slot = base + offset;
             if let Some(position) = columns.iter().position(|column| column == name) {
                 slots[position] = slot;
+                types[position].clone_from(ty);
             } else {
                 columns.push(name.clone());
+                types.push(ty.clone());
                 slots.push(slot);
             }
         }
-        Self::from_parts_with_aliases(
+        Self::from_typed_parts_with_aliases(
             columns,
+            types,
             slots,
             base + names.len(),
             input.index.aliases.clone(),
+            input.index.alias_types.clone(),
         )
     }
 
@@ -554,9 +786,11 @@ impl RowSchema {
         extra_columns: impl IntoIterator<Item = String>,
     ) -> Self {
         let mut columns = left.columns().to_vec();
+        let mut types = left.column_types().to_vec();
         let mut slots = left.index.slots.to_vec();
         let right_base = left.physical_width();
         let mut aliases = left.index.aliases.clone();
+        let mut alias_types = left.index.alias_types.clone();
         aliases.extend(right.index.aliases.iter().map(|(name, slot)| {
             (
                 name.clone(),
@@ -567,24 +801,35 @@ impl RowSchema {
                 },
             )
         }));
+        alias_types.extend(
+            right
+                .index
+                .alias_types
+                .iter()
+                .map(|(name, ty)| (name.clone(), ty.clone())),
+        );
         for (right_logical, column) in right.columns().iter().enumerate() {
             let slot = right
                 .slot(right_logical)
                 .map_or(NULL_SLOT, |slot| right_base + slot);
             columns.push(column.clone());
+            types.push(right.column_type(right_logical).cloned());
             slots.push(slot);
         }
         for column in extra_columns {
             if !columns.contains(&column) {
                 columns.push(column);
+                types.push(None);
                 slots.push(NULL_SLOT);
             }
         }
-        Self::from_parts_with_aliases(
+        Self::from_typed_parts_with_aliases(
             columns,
+            types,
             slots,
             left.physical_width() + right.physical_width(),
             aliases,
+            alias_types,
         )
     }
 

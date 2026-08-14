@@ -165,6 +165,16 @@ SELECT '{1,2,3}'::int[]
 SELECT '2024-01-15'::date
 SELECT '15:30:00'::time
 SELECT '2024-01-15 10:30:00'::timestamp
+SELECT (-1::smallint)::oid
+SELECT (-1::integer)::oid
+SELECT (-1::bigint)::oid
+SELECT '-1'::xid
+SELECT 1::xid
+SELECT encode((-1::smallint)::bytea, 'hex')
+SELECT encode((-1::integer)::bytea, 'hex')
+SELECT encode((-1::bigint)::bytea, 'hex')
+SELECT true::bytea
+SELECT encode('\\x6162'::bytea, 'hex')
 -- date and time
 SELECT date '2024-01-31' + 1
 SELECT date '2024-03-01' - date '2024-02-01'

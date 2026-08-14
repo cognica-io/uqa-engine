@@ -277,8 +277,23 @@ impl ScoredDocumentSource {
             .cloned()
             .collect::<Vec<_>>();
         let projected_slots = ProjectedValueSlot::compile(&schema, &projected_fields);
-        let schema = uqa_execution::RowSchema::new(schema);
         let column_definitions = table.columns.read().clone();
+        let column_types = schema
+            .iter()
+            .map(|column| {
+                column_definitions
+                    .iter()
+                    .find(|definition| definition.name == *column)
+                    .map(|definition| definition.ty.clone())
+                    .or(match column.as_str() {
+                        DOC_ID_COLUMN => Some(uqa_sql::ast::ColumnType::BigInteger),
+                        SCORE_COLUMN => Some(uqa_sql::ast::ColumnType::DoublePrecision),
+                        SCORE_PROVENANCE_COLUMN => Some(uqa_sql::ast::ColumnType::Text),
+                        _ => None,
+                    })
+            })
+            .collect();
+        let schema = uqa_execution::RowSchema::with_types(schema, column_types);
         Self {
             table_name: table_name.to_string(),
             outer_qualifier: None,

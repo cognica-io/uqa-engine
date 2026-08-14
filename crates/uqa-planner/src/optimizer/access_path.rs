@@ -91,7 +91,8 @@ pub fn contains_retrieval(expression: &ScalarExpr) -> bool {
             items.iter().any(contains_retrieval)
         }
         ScalarExpr::Binary { lhs, rhs, .. } => contains_retrieval(lhs) || contains_retrieval(rhs),
-        ScalarExpr::Not(inner)
+        ScalarExpr::UnaryMinus(inner)
+        | ScalarExpr::Not(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => contains_retrieval(inner),
         ScalarExpr::Between { expr, low, high } => {

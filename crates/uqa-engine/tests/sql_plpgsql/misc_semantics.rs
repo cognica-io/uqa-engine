@@ -191,11 +191,10 @@ fn default_arguments_make_overloads_ambiguous() {
 }
 
 #[test]
-fn percent_type_declarations_are_best_effort() {
+fn percent_type_declarations_resolve_and_enforce_the_referenced_column_type() {
     let eng = engine();
-    exec(&eng, "CREATE TABLE typed (id INTEGER, name TEXT)");
+    exec(&eng, "CREATE TABLE typed (id SMALLINT, name TEXT)");
     exec(&eng, "INSERT INTO typed VALUES (7, 'seven')");
-    // %TYPE resolves to no cast (best effort); values pass through.
     exec(
         &eng,
         "CREATE FUNCTION typed_lookup(which int) RETURNS text AS $$
@@ -210,6 +209,20 @@ fn percent_type_declarations_are_best_effort() {
         scalar(&eng, "SELECT typed_lookup(7) AS v"),
         Value::Str("seven".into())
     );
+
+    exec(
+        &eng,
+        "CREATE FUNCTION typed_overflow() RETURNS typed.id%TYPE AS $$
+         DECLARE v typed.id%TYPE;
+         BEGIN
+           v := 40000;
+           RETURN v;
+         END;
+         $$ LANGUAGE plpgsql",
+    );
+    let error = exec_err(&eng, "SELECT typed_overflow() AS v");
+    assert_eq!(error.sqlstate(), Some("22003"));
+    assert!(error.to_string().contains("smallint out of range"));
 }
 
 #[test]

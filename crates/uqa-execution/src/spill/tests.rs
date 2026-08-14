@@ -117,6 +117,34 @@ fn positional_spill_preserves_hidden_alias_layout() {
 }
 
 #[test]
+fn positional_spill_preserves_logical_and_alias_types() {
+    let input = RowSchema::with_types(
+        vec!["source.id".into()],
+        vec![Some(uqa_sql::ast::ColumnType::SmallInteger)],
+    );
+    let projected = RowSchema::select(&input, &[("id".into(), "source.id".into())]);
+    let schema = RowSchema::with_lookup_aliases(&projected, &[("source.id".into(), "id".into())]);
+    let mut buffer = SpillBuffer::new(0);
+    buffer
+        .push(Batch::from_physical_rows(
+            schema,
+            vec![PhysicalRow::from_values(vec![Value::Int(42)])],
+        ))
+        .unwrap();
+
+    let restored = buffer.drain_all().unwrap();
+    let schema = &restored[0].schema;
+    assert_eq!(
+        schema.type_of("id"),
+        Some(&uqa_sql::ast::ColumnType::SmallInteger)
+    );
+    assert_eq!(
+        schema.qualified_type("source", "id", "source.id"),
+        Some(&uqa_sql::ast::ColumnType::SmallInteger)
+    );
+}
+
+#[test]
 fn multiple_spills_preserve_batch_order() {
     let mut buffer = SpillBuffer::new(1);
     buffer.push(dummy_batch(0, 3)).unwrap();

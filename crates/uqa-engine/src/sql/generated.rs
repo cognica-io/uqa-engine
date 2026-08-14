@@ -191,7 +191,10 @@ fn validate_generation_expression(
             validate_generation_expression(engine, table, columns, lhs, kind)?;
             validate_generation_expression(engine, table, columns, rhs, kind)
         }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+        Expr::Not(inner)
+        | Expr::UnaryMinus(inner)
+        | Expr::IsNull { expr: inner, .. }
+        | Expr::Cast { expr: inner, .. } => {
             validate_generation_expression(engine, table, columns, inner, kind)
         }
         Expr::Between { expr, low, high } => {

@@ -586,6 +586,94 @@ fn join_using_reports_postgresql_column_errors() {
 }
 
 #[test]
+fn join_using_resolves_postgresql_common_types_before_execution() {
+    let engine = Engine::new();
+    let result = query(
+        &engine,
+        "SELECT pg_typeof(id) AS ty, id
+         FROM (VALUES (1::smallint)) AS l(id)
+         FULL JOIN (VALUES (1::bigint)) AS r(id) USING (id)",
+    );
+    assert_eq!(result.rows[0]["ty"], Value::Str("bigint".into()));
+    assert_eq!(result.rows[0]["id"], Value::Int(1));
+
+    let varchar_left = query(
+        &engine,
+        "SELECT pg_typeof(id) AS ty
+         FROM (VALUES ('x'::varchar)) AS l(id)
+         FULL JOIN (VALUES ('x'::text)) AS r(id) USING (id)",
+    );
+    assert_eq!(
+        varchar_left.rows[0]["ty"],
+        Value::Str("character varying".into())
+    );
+
+    let text_left = query(
+        &engine,
+        "SELECT pg_typeof(id) AS ty
+         FROM (VALUES ('x'::text)) AS l(id)
+         FULL JOIN (VALUES ('x'::varchar)) AS r(id) USING (id)",
+    );
+    assert_eq!(text_left.rows[0]["ty"], Value::Str("text".into()));
+}
+
+#[test]
+fn join_using_preserves_types_through_tables_subqueries_and_cte_spill() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE typed_left (id SMALLINT)");
+    exec(&engine, "CREATE TABLE typed_right (id BIGINT)");
+    exec(&engine, "INSERT INTO typed_left VALUES (1)");
+    exec(&engine, "INSERT INTO typed_right VALUES (1)");
+
+    for sql in [
+        "SELECT pg_typeof(id) AS ty FROM typed_left FULL JOIN typed_right USING (id)",
+        "SELECT pg_typeof(id) AS ty
+         FROM (SELECT id FROM typed_left) l
+         FULL JOIN (SELECT id FROM typed_right) r USING (id)",
+        "WITH l AS (SELECT id FROM typed_left), r AS (SELECT id FROM typed_right)
+         SELECT pg_typeof(id) AS ty FROM l FULL JOIN r USING (id)",
+    ] {
+        let result = query(&engine, sql);
+        assert_eq!(result.rows[0]["ty"], Value::Str("bigint".into()), "{sql}");
+    }
+}
+
+#[test]
+fn join_using_resolves_static_table_function_types() {
+    let engine = Engine::new();
+    let result = query(
+        &engine,
+        "SELECT pg_typeof(id) AS ty, id
+         FROM (VALUES (1::smallint)) AS l(id)
+         JOIN generate_series(1::bigint, 1::bigint) AS r(id) USING (id)",
+    );
+    assert_eq!(result.rows[0]["ty"], Value::Str("bigint".into()));
+    assert_eq!(result.rows[0]["id"], Value::Int(1));
+
+    let json = query(
+        &engine,
+        "SELECT pg_typeof(key) AS key_type, pg_typeof(value) AS value_type
+         FROM json_each('{\"a\": 1}'::json)",
+    );
+    assert_eq!(json.rows[0]["key_type"], Value::Str("text".into()));
+    assert_eq!(json.rows[0]["value_type"], Value::Str("json".into()));
+}
+
+#[test]
+fn join_using_rejects_undefined_postgresql_equality_operators() {
+    let engine = Engine::new();
+    for sql in [
+        "SELECT * FROM (VALUES (true)) l(id) JOIN (VALUES (1)) r(id) USING (id)",
+        "SELECT * FROM (VALUES ('{}'::json)) l(id) JOIN (VALUES ('{}'::json)) r(id) USING (id)",
+        "SELECT * FROM (VALUES (ARRAY[1]::integer[])) l(id)
+         JOIN (VALUES (ARRAY[1]::bigint[])) r(id) USING (id)",
+    ] {
+        let error = engine.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42883"), "{sql}: {error}");
+    }
+}
+
+#[test]
 fn ordinary_join_rejects_an_ambiguous_unqualified_column() {
     let engine = using_engine();
     let error = engine
@@ -757,4 +845,74 @@ fn lateral_with_count() {
     assert_eq!(result.rows[0]["emp_count"], Value::Int(2));
     assert_eq!(result.rows[1]["dept_name"], Value::Str("Sales".into()));
     assert_eq!(result.rows[1]["emp_count"], Value::Int(2));
+}
+
+#[test]
+fn lateral_subqueries_preserve_outer_and_output_type_identity() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE lateral_types (v SMALLINT, label VARCHAR(7), score REAL)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO lateral_types VALUES (7, 'seven', 1.5)",
+    );
+
+    let outer_types = query(
+        &engine,
+        "SELECT s.v_type, s.label_type, s.score_type
+         FROM lateral_types AS l
+         CROSS JOIN LATERAL (
+             SELECT pg_typeof(l.v) AS v_type,
+                    pg_typeof(l.label) AS label_type,
+                    pg_typeof(l.score) AS score_type
+         ) AS s",
+    );
+    assert_eq!(outer_types.rows[0]["v_type"], Value::Str("smallint".into()));
+    assert_eq!(
+        outer_types.rows[0]["label_type"],
+        Value::Str("character varying".into())
+    );
+    assert_eq!(outer_types.rows[0]["score_type"], Value::Str("real".into()));
+
+    let output_types = query(
+        &engine,
+        "SELECT s.v, s.label, s.score
+         FROM lateral_types AS l
+         CROSS JOIN LATERAL (
+             SELECT l.v::bigint AS v,
+                    l.label::varchar(3) AS label,
+                    l.score::double precision AS score
+         ) AS s",
+    );
+    assert_eq!(
+        output_types.column_types,
+        [
+            Some(uqa_sql::ColumnType::BigInteger),
+            Some(uqa_sql::ColumnType::Varchar(Some(3))),
+            Some(uqa_sql::ColumnType::DoublePrecision),
+        ]
+    );
+}
+
+#[test]
+fn empty_cte_lateral_source_keeps_its_declared_type() {
+    let engine = Engine::new();
+    let result = query(
+        &engine,
+        "WITH c AS (SELECT 1::smallint AS v WHERE false)
+         SELECT pg_typeof(s.v) AS ty, s.v
+         FROM (VALUES (1)) AS seed(n)
+         LEFT JOIN LATERAL (SELECT v FROM c) AS s ON true",
+    );
+    assert_eq!(result.rows[0]["ty"], Value::Str("smallint".into()));
+    assert_eq!(result.rows[0]["v"], Value::Null);
+    assert_eq!(
+        result.column_types,
+        [
+            Some(uqa_sql::ColumnType::Regtype),
+            Some(uqa_sql::ColumnType::SmallInteger),
+        ]
+    );
 }

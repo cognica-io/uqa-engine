@@ -7,11 +7,11 @@
 //! SQL DML execution, constraints, referential actions, and RETURNING rows.
 
 use super::{
-    build_join_spill_with_ctes, build_projection_row_with_ctes, coerce_to_column_type,
-    column_type_name, doc_id_value, expand_star_columns, prefix_row, projection_columns,
-    validate_vector_dimensions, value_to_tensor, value_to_vector, BTreeMap, BTreeSet, BinaryOp,
-    ColumnType, CteScope, DocId, Document, Engine, ForeignKey, ForeignKeyAction, ForeignKeyMatch,
-    ResultRow, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN,
+    bind_projection_output_schema, build_join_spill_with_ctes, build_projection_row_with_ctes,
+    coerce_to_column_type, column_type_name, doc_id_value, prefix_row, validate_vector_dimensions,
+    value_to_tensor, value_to_vector, BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope, DocId,
+    Document, Engine, ForeignKey, ForeignKeyAction, ForeignKeyMatch, ResultRow,
+    RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN,
     MERGE_ACTION_COLUMN,
 };
 use uqa_execution::ScalarExpr;

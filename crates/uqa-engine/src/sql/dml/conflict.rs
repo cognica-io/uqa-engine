@@ -7,13 +7,15 @@
 //! INSERT conflict resolution, identity extraction, and RETURNING assembly.
 
 use super::{
-    build_projection_row_with_ctes, dml_storage_error, doc_id_value, eval_mutation_assignment,
-    eval_mutation_expr, expand_star_columns, key_constraint_values, missing_document_error,
-    projection_columns, rewrite_document_with_referential_actions, BTreeSet, ConflictActionPlan,
-    ConflictPlan, CteScope, DocId, Document, Engine, MutationAssignmentTarget, ProjectionPlan,
-    ResultRow, SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN,
+    bind_projection_output_schema, build_projection_row_with_ctes, dml_storage_error, doc_id_value,
+    eval_mutation_assignment, eval_mutation_expr, key_constraint_values, missing_document_error,
+    rewrite_document_with_referential_actions, BTreeSet, ConflictActionPlan, ConflictPlan,
+    CteScope, DocId, Document, Engine, MutationAssignmentTarget, ProjectionPlan, ResultRow,
+    SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN,
 };
+use uqa_execution::RowSchema;
 use uqa_sql::ast::ReturningAliases;
+use uqa_sql::expr::RowLookup;
 
 pub(in crate::sql) fn find_insert_conflict(
     engine: &Engine,
@@ -206,11 +208,14 @@ pub(in crate::sql) fn returning_row_context(
     }
     columns.insert(DOC_ID_COLUMN.into());
 
+    let local_table = table.rsplit_once('.').map_or(table, |(_, name)| name);
     for column in columns {
         let current_value = row_image_value(Some(current), &column, &definitions)?;
         let old_value = row_image_value(images.old, &column, &definitions)?;
         let new_value = row_image_value(images.new, &column, &definitions)?;
-        row_doc.insert(column.clone(), current_value);
+        row_doc.insert(column.clone(), current_value.clone());
+        row_doc.insert(format!("{table}.{column}"), current_value.clone());
+        row_doc.insert(format!("{local_table}.{column}"), current_value);
         row_doc.insert(format!("{}.{}", aliases.old, column), old_value);
         row_doc.insert(format!("{}.{}", aliases.new, column), new_value);
     }
@@ -229,9 +234,7 @@ fn row_image_value(
         return doc_id_value(image.doc_id);
     }
     if definitions.iter().any(|definition| {
-        definition.name == column
-            && definition.primary_key
-            && matches!(definition.ty, uqa_sql::ast::ColumnType::Integer)
+        definition.name == column && definition.primary_key && definition.ty.is_integer()
     }) {
         return doc_id_value(image.doc_id);
     }
@@ -240,42 +243,166 @@ fn row_image_value(
     Ok(document.get(column).cloned().unwrap_or(Value::Null))
 }
 
+pub(in crate::sql) struct ReturningProjectionRow<'a> {
+    pub table: &'a str,
+    pub images: ReturningRowImages<'a>,
+    pub aliases: &'a ReturningAliases,
+    pub context: Option<&'a dyn RowLookup>,
+}
+
 pub(in crate::sql) fn build_returning_row(
     engine: &Engine,
-    table: &str,
-    images: ReturningRowImages<'_>,
-    aliases: &ReturningAliases,
+    input: ReturningProjectionRow<'_>,
     returning: &[ProjectionPlan],
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<ResultRow, SQLError> {
-    let row_doc = returning_row_context(engine, table, images, aliases)?;
-    let doc_id = images.new.or(images.old).map_or(0, |image| image.doc_id);
-    build_projection_row_with_ctes(engine, &row_doc, returning, params, ctes).map_err(|err| {
+    let mut row_doc = returning_row_context(engine, input.table, input.images, input.aliases)?;
+    if let Some(context) = input.context {
+        context.visit_lookup_columns(&mut |column, value| {
+            row_doc
+                .entry(column.to_string())
+                .or_insert_with(|| value.clone());
+        });
+    }
+    let projections = expanded_returning_projections(engine, input.table, returning)?;
+    let doc_id = input
+        .images
+        .new
+        .or(input.images.old)
+        .map_or(0, |image| image.doc_id);
+    build_projection_row_with_ctes(engine, &row_doc, &projections, params, ctes).map_err(|err| {
         SQLError::Internal(format!(
-            "RETURNING projection failed for table `{table}` doc {doc_id}: {err}"
+            "RETURNING projection failed for table `{}` doc {doc_id}: {err}",
+            input.table
         ))
     })
 }
 
+pub(in crate::sql) struct DmlReturningShape<'a> {
+    pub table: &'a str,
+    pub target_qualifier: Option<&'a str>,
+    pub aliases: &'a ReturningAliases,
+    pub returning: &'a [ProjectionPlan],
+    pub params: &'a [SQLParam],
+    pub ctes: &'a CteScope,
+    pub supplemental_schema: Option<&'a RowSchema>,
+}
+
 pub(in crate::sql) fn dml_returning_result(
     engine: &Engine,
-    table: &str,
-    returning: &[ProjectionPlan],
+    shape: DmlReturningShape<'_>,
     rows: Vec<ResultRow>,
     affected_rows: u64,
 ) -> Result<SQLResult, SQLError> {
+    let star_schema = returning_target_schema(engine, shape.table)?;
+    let expression_schema = returning_expression_schema(
+        &star_schema,
+        shape.table,
+        shape.target_qualifier,
+        shape.aliases,
+        shape.supplemental_schema,
+    );
+    let output = bind_projection_output_schema(
+        engine,
+        shape.returning,
+        &expression_schema,
+        &star_schema,
+        &shape.ctes.scalar_subqueries,
+        shape.params,
+        shape.ctes,
+    )?;
     Ok(SQLResult {
-        columns: expand_star_columns(
-            projection_columns(returning),
-            returning,
-            engine,
-            Some(table),
-        )?,
+        columns: output.columns().to_vec(),
+        column_types: output.column_types().to_vec(),
         rows,
         positional_rows: None,
         affected_rows,
     })
+}
+
+fn returning_target_schema(engine: &Engine, table: &str) -> Result<RowSchema, SQLError> {
+    let definitions = engine
+        .try_describe_table(table)
+        .map_err(|error| dml_storage_error("RETURNING schema lookup", error))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    if definitions.is_empty() {
+        let columns = engine
+            .try_table_columns(table)
+            .map_err(|error| dml_storage_error("RETURNING schema lookup", error))?;
+        let width = columns.len();
+        return Ok(RowSchema::with_types(columns, vec![None; width]));
+    }
+    let columns = definitions
+        .iter()
+        .map(|definition| definition.name.clone())
+        .collect();
+    let types = definitions
+        .into_iter()
+        .map(|definition| Some(definition.ty))
+        .collect();
+    Ok(RowSchema::with_types(columns, types))
+}
+
+fn returning_expression_schema(
+    target: &RowSchema,
+    table: &str,
+    target_qualifier: Option<&str>,
+    aliases: &ReturningAliases,
+    supplemental: Option<&RowSchema>,
+) -> RowSchema {
+    let with_doc_id = RowSchema::append_typed(
+        target,
+        &[(
+            DOC_ID_COLUMN.into(),
+            Some(uqa_sql::ast::ColumnType::BigInteger),
+        )],
+    );
+    let local_table = table.rsplit_once('.').map_or(table, |(_, name)| name);
+    let mut qualifiers = vec![
+        table,
+        local_table,
+        aliases.old.as_str(),
+        aliases.new.as_str(),
+    ];
+    if let Some(target_qualifier) = target_qualifier {
+        qualifiers.push(target_qualifier);
+    }
+    qualifiers.sort_unstable();
+    qualifiers.dedup();
+    let aliases = qualifiers
+        .into_iter()
+        .flat_map(|qualifier| {
+            with_doc_id
+                .columns()
+                .iter()
+                .map(move |column| (format!("{qualifier}.{column}"), column.clone()))
+        })
+        .collect::<Vec<_>>();
+    let target = RowSchema::with_lookup_aliases(&with_doc_id, &aliases);
+    supplemental.map_or(target.clone(), |source| {
+        RowSchema::join(&target, source, std::iter::empty())
+    })
+}
+
+pub(in crate::sql) fn expanded_returning_projections(
+    engine: &Engine,
+    table: &str,
+    returning: &[ProjectionPlan],
+) -> Result<Vec<ProjectionPlan>, SQLError> {
+    let columns = returning_target_schema(engine, table)?.columns().to_vec();
+    let mut projections = Vec::with_capacity(returning.len().max(columns.len()));
+    for projection in returning {
+        if matches!(projection.expr, uqa_execution::ScalarExpr::Star) {
+            projections.extend(columns.iter().map(|column| ProjectionPlan {
+                expr: uqa_execution::ScalarExpr::Column(column.clone()),
+                alias: Some(column.clone()),
+            }));
+        } else {
+            projections.push(projection.clone());
+        }
+    }
+    Ok(projections)
 }
 
 pub(in crate::sql) fn document_supplied_id(

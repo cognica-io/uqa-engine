@@ -9,9 +9,9 @@
 use super::{
     build_join_spill_with_ctes, build_returning_row, dml_returning_result,
     eval_mutation_assignment, eval_mutation_expr, missing_document_error,
-    rewrite_document_with_referential_actions, CteScope, Engine, MutationAssignmentTarget,
-    ResultRow, ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, SourcePlan,
-    UpdatePlan,
+    rewrite_document_with_referential_actions, CteScope, DmlReturningShape, Engine,
+    MutationAssignmentTarget, ResultRow, ReturningProjectionRow, ReturningRowImage,
+    ReturningRowImages, SQLError, SQLParam, SQLResult, SourcePlan, UpdatePlan,
 };
 
 pub(in crate::sql) fn run_update_from(
@@ -39,6 +39,11 @@ pub(in crate::sql) fn run_update_from(
             .map_err(crate::sql::select::physical_exec_error)?;
         for from_row in from_reader {
             let from_row = from_row.map_err(crate::sql::select::physical_exec_error)?;
+            let source_context = from_row
+                .view()
+                .iter()
+                .map(|(column, value)| (column.to_string(), value.clone()))
+                .collect::<ResultRow>();
             // Build a joined row: target columns are exposed both
             // unqualified and prefixed (`<table>.<col>`) so the
             // WHERE / RHS expressions can use either spelling.
@@ -49,8 +54,8 @@ pub(in crate::sql) fn run_update_from(
                 joined.insert(k.clone(), v.clone());
                 joined.insert(format!("{target}.{k}"), v.clone());
             }
-            for (k, v) in from_row.view().iter() {
-                joined.insert(k.to_string(), v.clone());
+            for (k, v) in &source_context {
+                joined.insert(k.clone(), v.clone());
             }
             if let Some(filter) = stmt.predicate.as_ref() {
                 if !uqa_sql::expr::truthy(&eval_mutation_expr(
@@ -95,18 +100,21 @@ pub(in crate::sql) fn run_update_from(
             if !stmt.returning.is_empty() {
                 returning_rows.push(build_returning_row(
                     engine,
-                    &target,
-                    ReturningRowImages {
-                        old: Some(ReturningRowImage {
-                            doc_id,
-                            document: &original_doc,
-                        }),
-                        new: Some(ReturningRowImage {
-                            doc_id: rewritten_doc_id,
-                            document: &doc,
-                        }),
+                    ReturningProjectionRow {
+                        table: &target,
+                        images: ReturningRowImages {
+                            old: Some(ReturningRowImage {
+                                doc_id,
+                                document: &original_doc,
+                            }),
+                            new: Some(ReturningRowImage {
+                                doc_id: rewritten_doc_id,
+                                document: &doc,
+                            }),
+                        },
+                        aliases: &stmt.returning_aliases,
+                        context: Some(&source_context),
                     },
-                    &stmt.returning_aliases,
                     &stmt.returning,
                     params,
                     ctes,
@@ -120,7 +128,20 @@ pub(in crate::sql) fn run_update_from(
         }
     }
     if !stmt.returning.is_empty() {
-        return dml_returning_result(engine, &target, &stmt.returning, returning_rows, affected);
+        return dml_returning_result(
+            engine,
+            DmlReturningShape {
+                table: &target,
+                target_qualifier: None,
+                aliases: &stmt.returning_aliases,
+                returning: &stmt.returning,
+                params,
+                ctes,
+                supplemental_schema: Some(from_rows.row_schema()),
+            },
+            returning_rows,
+            affected,
+        );
     }
     Ok(SQLResult::from_affected(affected))
 }

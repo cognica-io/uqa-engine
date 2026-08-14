@@ -610,6 +610,72 @@ fn alter_column_type_change_type() {
 }
 
 #[test]
+fn alter_column_type_evaluates_using_against_each_old_row() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE metrics (id INTEGER PRIMARY KEY, value INTEGER, delta INTEGER)",
+    );
+    exec(&engine, "INSERT INTO metrics VALUES (1, 10, 2), (2, 20, 3)");
+    exec(
+        &engine,
+        "ALTER TABLE metrics ALTER COLUMN value TYPE TEXT USING (value + delta)::text",
+    );
+    let result = query(&engine, "SELECT value FROM metrics ORDER BY id");
+    assert_eq!(result.rows[0]["value"], Value::Str("12".into()));
+    assert_eq!(result.rows[1]["value"], Value::Str("23".into()));
+}
+
+#[test]
+fn alter_column_type_preserves_oid_source_width_and_cast_context() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE type_sources (id INTEGER PRIMARY KEY, small_value SMALLINT, big_value BIGINT, text_value TEXT)",
+    );
+    exec(&engine, "INSERT INTO type_sources VALUES (1, -1, -1, '42')");
+
+    exec(
+        &engine,
+        "ALTER TABLE type_sources ALTER COLUMN small_value TYPE OID",
+    );
+    let row = query(
+        &engine,
+        "SELECT small_value, pg_typeof(small_value) AS small_type FROM type_sources",
+    );
+    assert_eq!(row.rows[0]["small_value"], Value::Int(i64::from(u32::MAX)));
+    assert_eq!(row.rows[0]["small_type"], Value::Str("oid".into()));
+
+    let error = engine
+        .sql(
+            "ALTER TABLE type_sources ALTER COLUMN big_value TYPE OID",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22003"));
+    let unchanged = query(
+        &engine,
+        "SELECT big_value, pg_typeof(big_value) AS big_type FROM type_sources",
+    );
+    assert_eq!(unchanged.rows[0]["big_value"], Value::Int(-1));
+    assert_eq!(unchanged.rows[0]["big_type"], Value::Str("bigint".into()));
+
+    let error = engine
+        .sql(
+            "ALTER TABLE type_sources ALTER COLUMN text_value TYPE OID",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42804"));
+    exec(
+        &engine,
+        "ALTER TABLE type_sources ALTER COLUMN text_value TYPE OID USING text_value::oid",
+    );
+    let converted = query(&engine, "SELECT text_value FROM type_sources");
+    assert_eq!(converted.rows[0]["text_value"], Value::Int(42));
+}
+
+#[test]
 fn foreign_key_basic_insert() {
     let engine = engine_with_parents();
     create_children(&engine);

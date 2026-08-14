@@ -375,6 +375,18 @@ impl ExpressionEvaluator for EngineExpressionEvaluator<'_> {
         !matches!(column, SCORE_COLUMN | DOC_ID_COLUMN | MERGE_ACTION_COLUMN)
             && !is_score_provenance_column(column)
     }
+
+    fn parameters(&self) -> &[SQLParam] {
+        self.params
+    }
+
+    fn expression_type(
+        &self,
+        expression: &ScalarExpr,
+        schema: &uqa_execution::RowSchema,
+    ) -> Result<Option<uqa_sql::ast::ColumnType>, SQLError> {
+        uqa_execution::scalar_type_with_resolver(expression, schema, self.params, self.engine)
+    }
 }
 
 impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
@@ -814,6 +826,7 @@ pub(in crate::sql) fn expr_contains_subquery(expr: &ScalarExpr) -> bool {
             expr_contains_subquery(lhs) || expr_contains_subquery(rhs)
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => expr_contains_subquery(inner),
         ScalarExpr::Between { expr, low, high } => {

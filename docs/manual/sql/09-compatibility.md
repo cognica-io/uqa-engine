@@ -7,8 +7,8 @@ UQA-RS deliberately uses PostgreSQL-oriented syntax and behavior while remaining
 - SQL parsing uses PostgreSQL grammar through `libpg_query`.
 - Session metadata reports `server_version` as `18.0-uqa`.
 - The repository checks all 22 deterministic TPC-H-derived scale-factor `0.001` query results against PostgreSQL 18.4 fixtures.
-- The optional wire crate implements PostgreSQL protocol 3.0 through 3.2 codec primitives, minor-version negotiation, reserved startup-option reporting, and protocol-specific cancellation-key validation. PostgreSQL 18.4 `psql`/libpq tests verify 3.0, 3.2, and `latest` startup, 3.2-to-3.0 downgrade, authentication ordering, SSL rejection and retry, and legacy and 256-byte cancellation keys.
-- PostgreSQL-shaped `information_schema` and `pg_catalog` virtual relations support common inspection paths.
+- The optional wire crate implements PostgreSQL protocol 3.0 through 3.2 codec primitives, minor-version negotiation, reserved startup-option reporting, protocol-specific cancellation-key validation, FunctionCall, GSS/SSPI message shapes, notifications, and COPY format validation. PostgreSQL 18.4 `psql`/libpq tests verify 3.0, 3.2, and `latest` startup, 3.2-to-3.0 downgrade, authentication ordering, SSL rejection and retry, legacy and 256-byte cancellation keys, and extended Parse/Bind/Describe/Execute/Sync flow.
+- PostgreSQL-shaped `information_schema` and `pg_catalog` virtual relations carry declared PostgreSQL 18 row types even when empty; implemented `pg_type` rows expose exact scalar, array, information-schema domain, pseudo-type, and `information_schema_catalog_name` metadata.
 - Apache AGE-shaped `cypher(...) AS (...)` integrates graph results into SQL.
 
 The fixture coverage is evidence for those queries and types, not a claim of complete PostgreSQL 18 compatibility.
@@ -17,7 +17,9 @@ The fixture coverage is evidence for those queries and types, not a claim of com
 
 UQA-RS does not yet implement PostgreSQL processes, network protocol semantics as its core API, MVCC storage pages, roles, grants, extensions, background workers, replication, WAL administration, or server configuration. The optional PostgreSQL wire and FDW crates are adapters around the engine. Every externally visible difference caused by this architecture remains an open compatibility bug rather than an accepted alternative behavior.
 
-Integer aliases currently share a signed 64-bit storage carrier. Floating aliases share a 64-bit carrier. Text-like declarations can share one text carrier. Any resulting difference in PostgreSQL 18 overflow, storage, collation, or display behavior is an open compatibility bug.
+Some declared SQL types share an internal runtime carrier, but scans and relational plans retain the declared `ColumnType`, integer writes and casts enforce `int2`/`int4`/`int8` ranges, source-sensitive OID/XID/bytea casts retain source width, and result schemas do not infer identity from values. Any remaining PostgreSQL 18 overflow, cast, storage, collation, binary-format, or display difference is an open compatibility bug.
+
+Relational operators keep static row schemas until the final consumer. Spill format version 1 records the declared schema and logical `(alias, column)` identity directly; spilling is not a reason to materialize rows or flatten qualification early, and there is no legacy spill compatibility reader.
 
 ## Open PostgreSQL 18 relation-feature bugs
 
@@ -37,7 +39,7 @@ These forms currently fail during compilation without creating a partial object.
 
 ## Open PostgreSQL 18 query-clause bugs
 
-- Static equality-operator resolution and common-type coercion for `JOIN ... USING` columns with different declared types
+- Collations, domains, user-defined equality operators, and the complete common-type matrix for `JOIN ... USING` columns with different declared types
 - Aliases on parenthesized join expressions
 - Multi-function `ROWS FROM`
 - Table functions `WITH ORDINALITY`
@@ -60,6 +62,7 @@ Each missing clause above must be implemented with PostgreSQL 18 semantics; sour
 - SQL index access methods are B-tree, GIN, IVF, and HNSW.
 - `DROP ... CASCADE` is rejected for implemented catalog objects.
 - `ALTER TABLE DROP COLUMN CASCADE` is rejected.
+- `ALTER COLUMN TYPE USING` is preserved structurally and evaluated once per old row inside the atomic ALTER transaction; the complete PostgreSQL assignment-cast matrix, dependency and collation rewrites, domain checks, and upstream ALTER regression cases remain open.
 - `CREATE SCHEMA AUTHORIZATION` and embedded schema elements are not implemented.
 - Sequence minimum, maximum, cycle, cache, ownership, and identity-owned sequence options are not implemented.
 - `VACUUM` is not implemented.
@@ -68,16 +71,18 @@ Each missing clause above must be implemented with PostgreSQL 18 semantics; sour
 
 ## Open PostgreSQL 18 type bugs
 
-- `INTERVAL` can be an expression value but is not a table column declaration.
-- `VARCHAR(n)` should not be used as the sole enforcement of a length invariant; add a check.
-- Declared integer widths do not imply PostgreSQL's distinct `int2`, `int4`, and `int8` overflow ranges.
+Supported declarations retain distinct `SMALLINT`, `INTEGER`, `BIGINT`, `OID`, `XID`, `REAL`, `DOUBLE PRECISION`, `TEXT`, `NAME`, `UUID`, `VARCHAR(n)`, `CHAR(n)`, `INTERVAL`, array, and information-schema domain identities. Character lengths, numeric precision/scale, integer ranges, source-sensitive OID/XID/bytea casts, `ALTER TYPE USING`, foreign-table schemas, and supported migration types are enforced by the implemented paths; unknown migration types fail instead of becoming text.
+
+- The complete implicit, assignment, and explicit cast-context matrix is not implemented for every source and target pair.
+- User-defined domains, enums, composite declarations, ranges, and multiranges are not implemented completely.
 - Large declared `NUMERIC` precision is bounded by the engine decimal carrier in actual values.
 - Collation and locale behavior is not a complete PostgreSQL collation implementation.
+- Type I/O routine OIDs are present in implemented `pg_type` rows, but the complete corresponding `pg_proc`, typmod, binary I/O, and extension-type catalog surface remains open.
 - `VECTOR(n)` and `TENSOR(n)` are UQA-RS retrieval types rather than PostgreSQL core types.
 
 ## Open PostgreSQL 18 catalog and administration bugs
 
-The virtual catalogs expose engine metadata needed by supported clients and tests. OIDs, ownership, ACLs, server processes, WAL, statistics views, and extension catalogs are not complete PostgreSQL implementations.
+The virtual catalogs expose engine metadata needed by supported clients and tests. Implemented PostgreSQL 18 identities include catalog row schemas, information-schema domain OIDs, core/system type layout and I/O routine OIDs, `record`, `_record`, `void`, and the `information_schema_catalog_name` view/composite/array with its `pg_class` and `pg_attribute` rows. The complete OID graph, every `pg_proc` row, ownership, ACLs, server processes, WAL, statistics views, and extension catalogs remain open.
 
 Known mutable settings are `search_path`, `client_encoding`, `datestyle`, `timezone`, and `work_mem`. Unknown or unsupported settings return an error rather than becoming ignored server configuration.
 
@@ -85,7 +90,7 @@ Known mutable settings are `search_path`, `client_encoding`, `datestyle`, `timez
 
 ## Open PostgreSQL 18 routine bugs
 
-SQL and PL/pgSQL routines cover a broad tested subset, including overloads, defaults, set returns, procedures, control flow, dynamic SQL, recursion limits, diagnostics, exception handling, and bound cursors used entirely within one routine activation. Dynamic cursor queries, `MOVE`, non-`NEXT` fetch directions, `refcursor` parameters and returns, and cursors that survive routine exit are not implemented because session portal state is not available. The routine surface does not claim the full PL/pgSQL language, PostgreSQL extension languages, security-definer ecosystem, or server privilege model.
+SQL and PL/pgSQL routines cover a broad tested subset, including overloads, defaults, set returns, procedures, control flow, dynamic SQL, recursion limits, diagnostics, exception handling, qualified named types, table-backed `%TYPE`, strict assignment/return casts, and bound cursors used entirely within one routine activation. Dynamic cursor queries, `MOVE`, non-`NEXT` fetch directions, `refcursor` parameters and returns, and cursors that survive routine exit are not implemented because session portal state is not available. The routine surface does not claim the full PL/pgSQL language, PostgreSQL extension languages, security-definer ecosystem, or server privilege model.
 
 Volatility affects planning, but UQA-RS does not reproduce every PostgreSQL catalog and privilege consequence of routine declarations.
 

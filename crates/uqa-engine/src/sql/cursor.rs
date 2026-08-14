@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use uqa_execution::{ColumnarBatch, SharedSpill, SharedSpillReader};
 use uqa_planner::UnifiedPlan;
-use uqa_sql::{compile, SQLError, SQLParam};
+use uqa_sql::{compile, ColumnType, SQLError, SQLParam};
 
 use super::driver::{rollback_after_statement_error, rollback_implicit_statement};
 use super::{
@@ -21,6 +21,7 @@ use super::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SQLCursorSummary {
     pub columns: Vec<String>,
+    pub column_types: Vec<Option<ColumnType>>,
     pub row_count: usize,
     pub spilled_to_disk: bool,
 }
@@ -34,9 +35,15 @@ pub struct SQLCursor {
 }
 
 impl SQLCursor {
-    pub(super) fn from_spill(columns: Vec<String>, spill: SharedSpill) -> Result<Self, SQLError> {
+    pub(super) fn from_spill(
+        columns: Vec<String>,
+        column_types: Vec<Option<ColumnType>>,
+        spill: SharedSpill,
+    ) -> Result<Self, SQLError> {
+        debug_assert_eq!(columns.len(), column_types.len());
         let summary = SQLCursorSummary {
             columns,
+            column_types,
             row_count: spill.rows(),
             spilled_to_disk: spill.has_spilled(),
         };
@@ -48,6 +55,10 @@ impl SQLCursor {
 
     pub fn columns(&self) -> &[String] {
         &self.summary.columns
+    }
+
+    pub fn column_types(&self) -> &[Option<ColumnType>] {
+        &self.summary.column_types
     }
 
     pub fn row_count(&self) -> usize {

@@ -386,6 +386,7 @@ pub(in crate::sql) fn collect_expr_prune_columns(
             collect_expr_prune_columns(rhs, qualifiers, prune, valid);
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => {
             collect_expr_prune_columns(inner, qualifiers, prune, valid);

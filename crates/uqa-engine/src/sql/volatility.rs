@@ -155,6 +155,7 @@ pub(super) fn expr_contains_volatile_function(engine: &Engine, expr: &ScalarExpr
                 || expr_contains_volatile_function(engine, rhs)
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => expr_contains_volatile_function(engine, inner),
         ScalarExpr::Between { expr, low, high } => {

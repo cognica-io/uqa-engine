@@ -10,8 +10,8 @@ use uqa_core::Value;
 use uqa_sql::ast::{BinaryOp, FrameMode, FunctionBinding, NullsOrder};
 use uqa_sql::expr::{
     cast_value_from, eval_binary_values, eval_binary_values_with_integer_width, eval_function_call,
-    integer_width_for_literal, integer_width_for_type, truthy, EngineHook, EvalContext,
-    IntegerWidth, RowLookup, NAMED_ARG_FUNCTION,
+    integer_width_for_literal, integer_width_for_type, negate_value, truthy, EngineHook,
+    EvalContext, IntegerWidth, RowLookup, NAMED_ARG_FUNCTION,
 };
 use uqa_sql::{ResultRow, SQLError, SQLParam};
 
@@ -47,6 +47,7 @@ pub enum ScalarExpr {
         lhs: Box<Self>,
         rhs: Box<Self>,
     },
+    UnaryMinus(Box<Self>),
     Not(Box<Self>),
     And(Vec<Self>),
     Or(Vec<Self>),
@@ -163,9 +164,10 @@ impl ScalarExpr {
             Self::Binary { lhs, rhs, .. } => {
                 lhs.collect_columns(output) && rhs.collect_columns(output)
             }
-            Self::Not(expr) | Self::IsNull { expr, .. } | Self::Cast { expr, .. } => {
-                expr.collect_columns(output)
-            }
+            Self::UnaryMinus(expr)
+            | Self::Not(expr)
+            | Self::IsNull { expr, .. }
+            | Self::Cast { expr, .. } => expr.collect_columns(output),
             Self::Between { expr, low, high } => {
                 expr.collect_columns(output)
                     && low.collect_columns(output)
@@ -215,9 +217,11 @@ impl ScalarExpr {
                 items.iter().any(Self::contains_window)
             }
             Self::Binary { lhs, rhs, .. } => lhs.contains_window() || rhs.contains_window(),
-            Self::Not(expr) | Self::IsNull { expr, .. } | Self::Cast { expr, .. } => {
-                expr.contains_window()
-            }
+            Self::UnaryMinus(expr)
+            | Self::Not(expr)
+            | Self::IsNull { expr, .. }
+            | Self::Cast { expr, .. }
+            | Self::InSubquery { expr, .. } => expr.contains_window(),
             Self::Between { expr, low, high } => {
                 expr.contains_window() || low.contains_window() || high.contains_window()
             }
@@ -235,7 +239,6 @@ impl ScalarExpr {
                     })
                     || else_branch.as_deref().is_some_and(Self::contains_window)
             }
-            Self::InSubquery { expr, .. } => expr.contains_window(),
             Self::Default
             | Self::Star
             | Self::Column(_)
@@ -265,9 +268,10 @@ impl ScalarExpr {
                 items.iter().any(Self::contains_subquery)
             }
             Self::Binary { lhs, rhs, .. } => lhs.contains_subquery() || rhs.contains_subquery(),
-            Self::Not(expr) | Self::IsNull { expr, .. } | Self::Cast { expr, .. } => {
-                expr.contains_subquery()
-            }
+            Self::UnaryMinus(expr)
+            | Self::Not(expr)
+            | Self::IsNull { expr, .. }
+            | Self::Cast { expr, .. } => expr.contains_subquery(),
             Self::Between { expr, low, high } => {
                 expr.contains_subquery() || low.contains_subquery() || high.contains_subquery()
             }
@@ -320,9 +324,11 @@ impl ScalarExpr {
                 items.iter().any(Self::contains_parameter)
             }
             Self::Binary { lhs, rhs, .. } => lhs.contains_parameter() || rhs.contains_parameter(),
-            Self::Not(expr) | Self::IsNull { expr, .. } | Self::Cast { expr, .. } => {
-                expr.contains_parameter()
-            }
+            Self::UnaryMinus(expr)
+            | Self::Not(expr)
+            | Self::IsNull { expr, .. }
+            | Self::Cast { expr, .. }
+            | Self::InSubquery { expr, .. } => expr.contains_parameter(),
             Self::Between { expr, low, high } => {
                 expr.contains_parameter() || low.contains_parameter() || high.contains_parameter()
             }
@@ -352,7 +358,6 @@ impl ScalarExpr {
                     })
                     || else_branch.as_deref().is_some_and(Self::contains_parameter)
             }
-            Self::InSubquery { expr, .. } => expr.contains_parameter(),
             Self::Default
             | Self::Star
             | Self::Column(_)
@@ -390,9 +395,11 @@ impl ScalarExpr {
             Self::Binary { lhs, rhs, .. } => {
                 lhs.contains_aggregate(is_aggregate) || rhs.contains_aggregate(is_aggregate)
             }
-            Self::Not(expr) | Self::IsNull { expr, .. } | Self::Cast { expr, .. } => {
-                expr.contains_aggregate(is_aggregate)
-            }
+            Self::UnaryMinus(expr)
+            | Self::Not(expr)
+            | Self::IsNull { expr, .. }
+            | Self::Cast { expr, .. }
+            | Self::InSubquery { expr, .. } => expr.contains_aggregate(is_aggregate),
             Self::Between { expr, low, high } => {
                 expr.contains_aggregate(is_aggregate)
                     || low.contains_aggregate(is_aggregate)
@@ -419,7 +426,6 @@ impl ScalarExpr {
                         .as_deref()
                         .is_some_and(|expression| expression.contains_aggregate(is_aggregate))
             }
-            Self::InSubquery { expr, .. } => expr.contains_aggregate(is_aggregate),
             Self::Default
             | Self::Star
             | Self::Column(_)
@@ -676,6 +682,11 @@ pub fn eval_scalar(
                 scalar_integer_binary_width(lhs, rhs),
             )
         }
+        ScalarExpr::UnaryMinus(inner) => {
+            let source_ty = scalar_source_type(inner);
+            let value = eval_scalar(inner, context)?;
+            negate_value(&value, source_ty)
+        }
         ScalarExpr::Not(inner) => {
             let value = eval_scalar(inner, context)?;
             if matches!(value, Value::Null) {
@@ -922,6 +933,7 @@ fn execute_in_subquery(
 fn scalar_source_type(expression: &ScalarExpr) -> Option<&str> {
     match expression {
         ScalarExpr::Cast { ty, .. } => Some(ty),
+        ScalarExpr::UnaryMinus(inner) => scalar_source_type(inner),
         ScalarExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => Some("integer"),
         ScalarExpr::Literal(Value::Int(_)) => Some("bigint"),
         ScalarExpr::Literal(Value::Bytes(_)) => Some("bytea"),
@@ -933,6 +945,7 @@ fn scalar_integer_width(expression: &ScalarExpr) -> Option<IntegerWidth> {
     match expression {
         ScalarExpr::Literal(Value::Int(value)) => Some(integer_width_for_literal(*value)),
         ScalarExpr::Cast { ty, .. } => integer_width_for_type(ty),
+        ScalarExpr::UnaryMinus(inner) => scalar_integer_width(inner),
         ScalarExpr::Binary {
             op: BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide,
             lhs,

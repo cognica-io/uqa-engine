@@ -11,25 +11,114 @@ pub(crate) fn sql_column_type_to_fdw(
 ) -> uqa_fdw::ColumnType {
     match column_type {
         uqa_sql::ast::ColumnType::Boolean => uqa_fdw::ColumnType::Bool,
+        uqa_sql::ast::ColumnType::SmallInteger => uqa_fdw::ColumnType::SmallInteger,
         uqa_sql::ast::ColumnType::Integer => uqa_fdw::ColumnType::Integer,
-        uqa_sql::ast::ColumnType::Real | uqa_sql::ast::ColumnType::Numeric { .. } => {
-            uqa_fdw::ColumnType::Real
-        }
-        uqa_sql::ast::ColumnType::Text
-        | uqa_sql::ast::ColumnType::Character(_)
-        | uqa_sql::ast::ColumnType::Json
-        | uqa_sql::ast::ColumnType::JsonB
-        | uqa_sql::ast::ColumnType::Date
-        | uqa_sql::ast::ColumnType::Time
-        | uqa_sql::ast::ColumnType::TimeTz
-        | uqa_sql::ast::ColumnType::Timestamp
-        | uqa_sql::ast::ColumnType::TimestampTz => uqa_fdw::ColumnType::Text,
-        uqa_sql::ast::ColumnType::Bytea
-        | uqa_sql::ast::ColumnType::Vector(_)
-        | uqa_sql::ast::ColumnType::Tensor(_) => uqa_fdw::ColumnType::Bytes,
+        uqa_sql::ast::ColumnType::BigInteger => uqa_fdw::ColumnType::BigInteger,
+        uqa_sql::ast::ColumnType::Oid => uqa_fdw::ColumnType::Oid,
+        uqa_sql::ast::ColumnType::Xid => uqa_fdw::ColumnType::Xid,
+        uqa_sql::ast::ColumnType::Real => uqa_fdw::ColumnType::Real,
+        uqa_sql::ast::ColumnType::DoublePrecision => uqa_fdw::ColumnType::DoublePrecision,
+        uqa_sql::ast::ColumnType::Numeric { precision, scale } => uqa_fdw::ColumnType::Numeric {
+            precision: *precision,
+            scale: *scale,
+        },
+        uqa_sql::ast::ColumnType::Text => uqa_fdw::ColumnType::Text,
+        uqa_sql::ast::ColumnType::Name => uqa_fdw::ColumnType::Name,
+        uqa_sql::ast::ColumnType::Uuid => uqa_fdw::ColumnType::Uuid,
+        uqa_sql::ast::ColumnType::Varchar(length) => uqa_fdw::ColumnType::Varchar(*length),
+        uqa_sql::ast::ColumnType::Bpchar => uqa_fdw::ColumnType::Bpchar,
+        uqa_sql::ast::ColumnType::Character(length) => uqa_fdw::ColumnType::Character(*length),
+        uqa_sql::ast::ColumnType::Json => uqa_fdw::ColumnType::Json,
+        uqa_sql::ast::ColumnType::JsonB => uqa_fdw::ColumnType::JsonB,
+        uqa_sql::ast::ColumnType::Date => uqa_fdw::ColumnType::Date,
+        uqa_sql::ast::ColumnType::Time => uqa_fdw::ColumnType::Time,
+        uqa_sql::ast::ColumnType::TimeTz => uqa_fdw::ColumnType::TimeTz,
+        uqa_sql::ast::ColumnType::Timestamp => uqa_fdw::ColumnType::Timestamp,
+        uqa_sql::ast::ColumnType::TimestampTz => uqa_fdw::ColumnType::TimestampTz,
+        uqa_sql::ast::ColumnType::Interval => uqa_fdw::ColumnType::Interval,
+        uqa_sql::ast::ColumnType::Bytea => uqa_fdw::ColumnType::Bytes,
+        uqa_sql::ast::ColumnType::InternalChar => uqa_fdw::ColumnType::InternalChar,
+        uqa_sql::ast::ColumnType::Regproc => uqa_fdw::ColumnType::Regproc,
+        uqa_sql::ast::ColumnType::Regtype => uqa_fdw::ColumnType::Regtype,
+        uqa_sql::ast::ColumnType::PgNodeTree => uqa_fdw::ColumnType::PgNodeTree,
+        uqa_sql::ast::ColumnType::AclItem => uqa_fdw::ColumnType::AclItem,
+        uqa_sql::ast::ColumnType::Int2Vector => uqa_fdw::ColumnType::Int2Vector,
+        uqa_sql::ast::ColumnType::OidVector => uqa_fdw::ColumnType::OidVector,
+        uqa_sql::ast::ColumnType::AnyArray => uqa_fdw::ColumnType::AnyArray,
+        uqa_sql::ast::ColumnType::Vector(dimension) => uqa_fdw::ColumnType::Vector(*dimension),
+        uqa_sql::ast::ColumnType::Tensor(dimension) => uqa_fdw::ColumnType::Tensor(*dimension),
         uqa_sql::ast::ColumnType::Array(element) => {
             uqa_fdw::ColumnType::Array(Box::new(sql_column_type_to_fdw(element)))
         }
+        uqa_sql::ast::ColumnType::Domain {
+            schema,
+            name,
+            oid,
+            base,
+        } => uqa_fdw::ColumnType::Domain {
+            schema: schema.clone(),
+            name: name.clone(),
+            oid: *oid,
+            base: Box::new(sql_column_type_to_fdw(base)),
+        },
+    }
+}
+
+pub(crate) fn fdw_column_type_to_sql(
+    column_type: &uqa_fdw::ColumnType,
+) -> uqa_sql::ast::ColumnType {
+    match column_type {
+        uqa_fdw::ColumnType::SmallInteger => uqa_sql::ast::ColumnType::SmallInteger,
+        uqa_fdw::ColumnType::Integer => uqa_sql::ast::ColumnType::Integer,
+        uqa_fdw::ColumnType::BigInteger => uqa_sql::ast::ColumnType::BigInteger,
+        uqa_fdw::ColumnType::Oid => uqa_sql::ast::ColumnType::Oid,
+        uqa_fdw::ColumnType::Xid => uqa_sql::ast::ColumnType::Xid,
+        uqa_fdw::ColumnType::Real => uqa_sql::ast::ColumnType::Real,
+        uqa_fdw::ColumnType::DoublePrecision => uqa_sql::ast::ColumnType::DoublePrecision,
+        uqa_fdw::ColumnType::Numeric { precision, scale } => uqa_sql::ast::ColumnType::Numeric {
+            precision: *precision,
+            scale: *scale,
+        },
+        uqa_fdw::ColumnType::Text => uqa_sql::ast::ColumnType::Text,
+        uqa_fdw::ColumnType::Name => uqa_sql::ast::ColumnType::Name,
+        uqa_fdw::ColumnType::Uuid => uqa_sql::ast::ColumnType::Uuid,
+        uqa_fdw::ColumnType::Varchar(length) => uqa_sql::ast::ColumnType::Varchar(*length),
+        uqa_fdw::ColumnType::Bpchar => uqa_sql::ast::ColumnType::Bpchar,
+        uqa_fdw::ColumnType::Character(length) => uqa_sql::ast::ColumnType::Character(*length),
+        uqa_fdw::ColumnType::Bool => uqa_sql::ast::ColumnType::Boolean,
+        uqa_fdw::ColumnType::Bytes => uqa_sql::ast::ColumnType::Bytea,
+        uqa_fdw::ColumnType::InternalChar => uqa_sql::ast::ColumnType::InternalChar,
+        uqa_fdw::ColumnType::Regproc => uqa_sql::ast::ColumnType::Regproc,
+        uqa_fdw::ColumnType::Regtype => uqa_sql::ast::ColumnType::Regtype,
+        uqa_fdw::ColumnType::PgNodeTree => uqa_sql::ast::ColumnType::PgNodeTree,
+        uqa_fdw::ColumnType::AclItem => uqa_sql::ast::ColumnType::AclItem,
+        uqa_fdw::ColumnType::Int2Vector => uqa_sql::ast::ColumnType::Int2Vector,
+        uqa_fdw::ColumnType::OidVector => uqa_sql::ast::ColumnType::OidVector,
+        uqa_fdw::ColumnType::AnyArray => uqa_sql::ast::ColumnType::AnyArray,
+        uqa_fdw::ColumnType::Json => uqa_sql::ast::ColumnType::Json,
+        uqa_fdw::ColumnType::JsonB => uqa_sql::ast::ColumnType::JsonB,
+        uqa_fdw::ColumnType::Date => uqa_sql::ast::ColumnType::Date,
+        uqa_fdw::ColumnType::Time => uqa_sql::ast::ColumnType::Time,
+        uqa_fdw::ColumnType::TimeTz => uqa_sql::ast::ColumnType::TimeTz,
+        uqa_fdw::ColumnType::Timestamp => uqa_sql::ast::ColumnType::Timestamp,
+        uqa_fdw::ColumnType::TimestampTz => uqa_sql::ast::ColumnType::TimestampTz,
+        uqa_fdw::ColumnType::Interval => uqa_sql::ast::ColumnType::Interval,
+        uqa_fdw::ColumnType::Vector(dimension) => uqa_sql::ast::ColumnType::Vector(*dimension),
+        uqa_fdw::ColumnType::Tensor(dimension) => uqa_sql::ast::ColumnType::Tensor(*dimension),
+        uqa_fdw::ColumnType::Array(element) => {
+            uqa_sql::ast::ColumnType::Array(Box::new(fdw_column_type_to_sql(element)))
+        }
+        uqa_fdw::ColumnType::Domain {
+            schema,
+            name,
+            oid,
+            base,
+        } => uqa_sql::ast::ColumnType::Domain {
+            schema: schema.clone(),
+            name: name.clone(),
+            oid: *oid,
+            base: Box::new(fdw_column_type_to_sql(base)),
+        },
     }
 }
 
@@ -346,6 +435,20 @@ impl Engine {
             .columns
             .iter()
             .map(|column| column.name.clone())
+            .collect())
+    }
+
+    pub(crate) fn foreign_table_typed_columns(
+        &self,
+        table: &str,
+    ) -> Result<Vec<(String, uqa_sql::ast::ColumnType)>, String> {
+        let table = self
+            .foreign_table(table)?
+            .ok_or_else(|| format!("Foreign table `{table}` does not exist"))?;
+        Ok(table
+            .columns
+            .iter()
+            .map(|column| (column.name.clone(), fdw_column_type_to_sql(&column.ty)))
             .collect())
     }
 

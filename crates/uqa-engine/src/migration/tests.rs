@@ -165,3 +165,43 @@ fn python_array_types_preserve_elements_and_dimensions() {
         Value::List(vec![Value::Int(3), Value::Int(4)])
     );
 }
+
+#[test]
+fn python_schema_migration_preserves_postgresql_scalar_type_identity() {
+    let mut column = PythonColumnDef {
+        name: "value".into(),
+        type_name: String::new(),
+        primary_key: false,
+        not_null: false,
+        auto_increment: false,
+        default: None,
+        vector_dimensions: None,
+        unique: false,
+        numeric_precision: None,
+        numeric_scale: None,
+    };
+    for (name, expected) in [
+        ("smallint", ColumnType::SmallInteger),
+        ("integer", ColumnType::Integer),
+        ("bigint", ColumnType::BigInteger),
+        ("oid", ColumnType::Oid),
+        ("xid", ColumnType::Xid),
+        ("real", ColumnType::Real),
+        ("double precision", ColumnType::DoublePrecision),
+        ("text", ColumnType::Text),
+        ("name", ColumnType::Name),
+        ("uuid", ColumnType::Uuid),
+        ("varchar", ColumnType::Varchar(None)),
+        ("bpchar", ColumnType::Bpchar),
+        ("interval", ColumnType::Interval),
+    ] {
+        column.type_name = name.into();
+        assert_eq!(rust_column_type(&column).unwrap(), expected, "{name}");
+    }
+
+    column.type_name = "vendor_specific_type".into();
+    let error = rust_column_type(&column).expect_err("unknown types must not become text");
+    let message = error.to_string();
+    assert!(message.contains("vendor_specific_type"), "{message}");
+    assert!(message.contains("value"), "{message}");
+}

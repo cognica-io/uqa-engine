@@ -187,7 +187,10 @@ fn collect_constraint_columns(expression: &uqa_sql::ast::Expr, output: &mut Vec<
             collect_constraint_columns(lhs, output);
             collect_constraint_columns(rhs, output);
         }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+        Expr::Not(inner)
+        | Expr::UnaryMinus(inner)
+        | Expr::IsNull { expr: inner, .. }
+        | Expr::Cast { expr: inner, .. } => {
             collect_constraint_columns(inner, output);
         }
         Expr::Between { expr, low, high } => {

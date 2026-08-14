@@ -32,6 +32,7 @@ pub(super) enum ProjectedExpr {
         rhs: Box<Self>,
         integer_width: Option<IntegerWidth>,
     },
+    UnaryMinus(Box<Self>),
     IntFieldComparison {
         field: usize,
         op: BinaryOp,
@@ -283,6 +284,27 @@ mod tests {
             rhs.as_ref(),
             ProjectedExpr::Literal(Value::Temporal(_))
         ));
+    }
+
+    #[test]
+    fn projected_predicate_preserves_unary_minus_integer_width() {
+        let expression = ScalarExpr::Binary {
+            op: BinaryOp::Equal,
+            lhs: Box::new(ScalarExpr::UnaryMinus(Box::new(ScalarExpr::Cast {
+                expr: Box::new(ScalarExpr::Column("x".into())),
+                ty: "smallint".into(),
+            }))),
+            rhs: Box::new(ScalarExpr::Literal(Value::Int(-1))),
+        };
+        let predicate = ProjectedPredicate::compile(&expression, &["x".into()], &[])
+            .unwrap()
+            .unwrap();
+
+        assert!(predicate.keep(&[&Value::Int(1)]).unwrap());
+        let error = predicate
+            .keep(&[&Value::Int(i64::from(i16::MIN))])
+            .expect_err("negating smallint minimum must overflow");
+        assert_eq!(error.sqlstate(), Some("22003"));
     }
 
     fn assert_projected_parity(

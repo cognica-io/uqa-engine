@@ -7,7 +7,7 @@
 //! PL/pgSQL datum and `INTO` assignment semantics.
 
 use super::{
-    best_effort_cast, row_value, BTreeMap, Interpreter, IntoTarget, PLpgSQLDatum, ResultRow,
+    coerce_routine_value, row_value, BTreeMap, Interpreter, IntoTarget, PLpgSQLDatum, ResultRow,
     SQLError, Value,
 };
 
@@ -33,7 +33,7 @@ impl Interpreter<'_> {
                         message: format!("variable \"{}\" is declared CONSTANT", var.name),
                     });
                 }
-                let value = best_effort_cast(&value, &var.type_name)?;
+                let value = coerce_routine_value(&value, &var.type_name)?;
                 if var.not_null && matches!(value, Value::Null) {
                     return Err(SQLError::Routine {
                         sqlstate: "22004".into(),

@@ -36,12 +36,18 @@ pub(in crate::sql) fn run_single_foreign_select_output(
     } else {
         projection_columns(&stmt.projections)
     };
-    let source_columns = engine
-        .foreign_table_columns(table)
+    let typed_columns = engine
+        .foreign_table_typed_columns(table)
         .map_err(SQLError::Unsupported)?;
+    let source_columns = typed_columns
+        .iter()
+        .map(|(column, _)| column.clone())
+        .collect();
+    let source_types = typed_columns.into_iter().map(|(_, ty)| Some(ty)).collect();
     let source: Box<dyn uqa_execution::PhysicalOperator + '_> =
-        Box::new(uqa_execution::RowIteratorScan::new(
+        Box::new(uqa_execution::RowIteratorScan::with_types(
             source_columns,
+            source_types,
             Box::new(scanned.map(|row| {
                 row.map_err(SQLError::Unsupported)
                     .map_err(uqa_execution::ExecError::from)

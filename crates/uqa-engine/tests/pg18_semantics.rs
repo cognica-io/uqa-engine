@@ -399,6 +399,90 @@ fn integer_range_checks() {
     );
 }
 
+#[test]
+fn unary_minus_preserves_postgresql_18_operand_type_and_overflow() {
+    let eng = engine();
+    assert_eq!(text(&eng, "SELECT pg_typeof(-(1::smallint))"), "smallint");
+    assert_eq!(text(&eng, "SELECT pg_typeof(-(1::integer))"), "integer");
+    assert_eq!(text(&eng, "SELECT pg_typeof(-(1::bigint))"), "bigint");
+    assert_eq!(
+        text(&eng, "SELECT encode((-1::smallint)::bytea, 'hex')"),
+        "ffff"
+    );
+    for sql in [
+        "SELECT -('-32768'::smallint)",
+        "SELECT -('-2147483648'::integer)",
+        "SELECT -('-9223372036854775808'::bigint)",
+    ] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("22003"), "{sql}: {error}");
+    }
+}
+
+#[test]
+fn oid_and_xid_casts_preserve_postgresql_18_source_type_rules() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT '-1'::oid"),
+        Value::Int(i64::from(u32::MAX))
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT '-2147483648'::xid"),
+        Value::Int(i64::from(i32::MIN as u32))
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT (-1::smallint)::oid"),
+        Value::Int(i64::from(u32::MAX))
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT (-1::integer)::oid"),
+        Value::Int(i64::from(u32::MAX))
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT (4294967295::bigint)::oid"),
+        Value::Int(i64::from(u32::MAX))
+    );
+    let error = eng.sql("SELECT (-1::bigint)::oid", &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22003"));
+    assert_eq!(error.to_string(), "OID out of range");
+    for sql in [
+        "SELECT true::oid",
+        "SELECT (1.0::numeric)::oid",
+        "SELECT (1.0::double precision)::oid",
+        "SELECT (1::integer)::xid",
+        "SELECT ('1'::oid)::xid",
+        "SELECT ('1'::xid)::oid",
+    ] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42846"), "{sql}: {error}");
+    }
+    for sql in ["SELECT '-2147483649'::oid", "SELECT '4294967296'::xid"] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("22003"), "{sql}: {error}");
+    }
+
+    eng.sql(
+        "CREATE TABLE oid_cast_sources (s SMALLINT, i INTEGER, b BIGINT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql("INSERT INTO oid_cast_sources VALUES (-1, -1, -1)", &[])
+        .unwrap();
+    let row = eng
+        .sql("SELECT s::oid AS s, i::oid AS i FROM oid_cast_sources", &[])
+        .unwrap();
+    assert_eq!(row.rows[0].get("s"), Some(&Value::Int(i64::from(u32::MAX))));
+    assert_eq!(row.rows[0].get("i"), Some(&Value::Int(i64::from(u32::MAX))));
+    let error = eng
+        .sql("SELECT b::oid FROM oid_cast_sources", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22003"));
+    let error = eng
+        .sql("SELECT i::xid FROM oid_cast_sources", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42846"));
+}
+
 // ---------------------------------------------------------------------
 // String functions
 // ---------------------------------------------------------------------

@@ -13,15 +13,12 @@ use super::{
 
 /// Cast a value to the named SQL type, mirroring `CAST(expr AS ty)`.
 /// Types outside the engine's coercion surface return
-/// [`SQLError::Unsupported`]; callers doing best-effort typing (the
-/// `PL/pgSQL` interpreter) treat that as "leave the value as-is".
+/// [`SQLError::Unsupported`].
 pub fn cast_value(v: &Value, ty: &str) -> Result<Value> {
     cast_value_from(v, ty, None)
 }
 
-/// Cast a value while preserving an explicitly declared source type when the
-/// runtime carrier erases it. `PostgreSQL` 18 integer/`bytea` casts require this
-/// for the source integer's two-, four-, or eight-byte representation.
+/// Cast a value while preserving an explicitly declared source type when the runtime carrier erases it. `PostgreSQL` 18 integer-to-`bytea`/`oid` casts and `xid` cast rejection require the source's declared identity.
 pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<Value> {
     if matches!(v, Value::Null) {
         return Ok(Value::Null);
@@ -81,7 +78,25 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
             }
             Ok(Value::Decimal(value))
         }
-        "text" | "name" | "uuid" => Ok(Value::Str(value_to_string(v))),
+        "text" | "name" | "regproc" | "regtype" | "pg_node_tree" | "aclitem" => {
+            Ok(Value::Str(value_to_string(v)))
+        }
+        "oid" | "pg_catalog.oid" => cast_oid(v, source_ty),
+        "xid" | "pg_catalog.xid" => cast_xid(v, source_ty),
+        "\"char\"" => {
+            let text = value_to_string(v);
+            let mut characters = text.chars();
+            let Some(character) = characters.next() else {
+                return Ok(Value::Str(String::new()));
+            };
+            if characters.next().is_some() || !character.is_ascii() {
+                return Err(SQLError::TypeMismatch(format!(
+                    "value too long for type character(1): {text:?}"
+                )));
+            }
+            Ok(Value::Str(character.to_string()))
+        }
+        "uuid" => cast_uuid(v),
         // varchar(n): an explicit cast truncates to the declared length.
         "varchar" | "character varying" => {
             let text = value_to_string(v);
@@ -96,6 +111,7 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
         }
         // bpchar is physically blank-padded. Its implicit text coercion strips
         // those spaces, while a direct result retains them.
+        "bpchar" if modifier.is_none() => Ok(Value::FixedChar(value_to_string(v))),
         "character" | "char" | "bpchar" => {
             let text = value_to_string(v);
             let limit: usize = match modifier {
@@ -150,32 +166,245 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
             };
             Ok(typed_json_value(&parsed, true))
         }
-        "bytea" => match v {
-            Value::Bytes(bytes) => Ok(Value::Bytes(bytes.clone())),
-            Value::Int(value) => integer_to_bytea(*value, source_ty),
-            // PostgreSQL reads `\x...` hex input for bytea.
-            Value::Str(s) if s.starts_with("\\x") => {
-                let hex = &s[2..];
-                let mut out = Vec::with_capacity(hex.len() / 2);
-                let bytes = hex.as_bytes();
-                let mut i = 0;
-                while i + 1 < bytes.len() {
-                    let hi = (bytes[i] as char)
-                        .to_digit(16)
-                        .ok_or_else(|| SQLError::TypeMismatch("invalid hex in bytea".into()))?;
-                    let lo = (bytes[i + 1] as char)
-                        .to_digit(16)
-                        .ok_or_else(|| SQLError::TypeMismatch("invalid hex in bytea".into()))?;
-                    out.push((hi * 16 + lo) as u8);
-                    i += 2;
-                }
-                Ok(Value::Bytes(out))
-            }
-            Value::Str(s) => Ok(Value::Bytes(s.as_bytes().to_vec())),
-            other => Ok(Value::Bytes(value_to_string(other).into_bytes())),
-        },
+        "bytea" => cast_bytea(v, source_ty),
         "boolean" | "bool" => cast_boolean(v),
         other => Err(SQLError::Unsupported(format!("CAST AS {other}"))),
+    }
+}
+
+/// Apply `PostgreSQL` prefix `-` while retaining the operand's declared type.
+pub fn negate_value(value: &Value, source_ty: Option<&str>) -> Result<Value> {
+    if matches!(value, Value::Null) {
+        return Ok(Value::Null);
+    }
+    let source = canonical_cast_source(source_ty, value);
+    match (source.as_str(), value) {
+        ("int2", Value::Int(value)) => i16::try_from(*value)
+            .ok()
+            .and_then(i16::checked_neg)
+            .map(|value| Value::Int(i64::from(value)))
+            .ok_or_else(|| out_of_range("smallint")),
+        ("int4", Value::Int(value)) => i32::try_from(*value)
+            .ok()
+            .and_then(i32::checked_neg)
+            .map(|value| Value::Int(i64::from(value)))
+            .ok_or_else(|| out_of_range("integer")),
+        ("int8", Value::Int(value)) => value
+            .checked_neg()
+            .map(Value::Int)
+            .ok_or_else(|| out_of_range("bigint")),
+        ("float4" | "float8", Value::Float(value)) => Ok(Value::Float(-value)),
+        ("numeric", Value::Decimal(value)) => uqa_core::DecimalValue::from_i64(0)
+            .checked_sub(value)
+            .map(Value::Decimal)
+            .ok_or_else(|| out_of_range("numeric")),
+        (
+            "interval",
+            Value::Temporal(TemporalValue::Interval {
+                months,
+                days,
+                micros,
+            }),
+        ) => Ok(Value::Temporal(TemporalValue::Interval {
+            months: months
+                .checked_neg()
+                .ok_or_else(|| out_of_range("interval"))?,
+            days: days.checked_neg().ok_or_else(|| out_of_range("interval"))?,
+            micros: micros
+                .checked_neg()
+                .ok_or_else(|| out_of_range("interval"))?,
+        })),
+        _ => Err(SQLError::TypeMismatch(format!(
+            "operator does not exist: - {source}"
+        ))),
+    }
+}
+
+fn canonical_cast_source(source_ty: Option<&str>, value: &Value) -> String {
+    let source = source_ty.unwrap_or(match value {
+        Value::Str(_) | Value::FixedChar(_) => "unknown",
+        Value::Int(_) => "integer",
+        Value::Bool(_) => "boolean",
+        Value::Float(_) => "double precision",
+        Value::Decimal(_) => "numeric",
+        Value::Bytes(_) => "bytea",
+        Value::Temporal(TemporalValue::Interval { .. }) => "interval",
+        Value::Temporal(_) => "timestamp",
+        Value::Json(_) => "json",
+        Value::JsonB(_) => "jsonb",
+        Value::List(_) => "anyarray",
+        Value::Map(_) => "record",
+        Value::Null => "unknown",
+    });
+    let (source, _) = split_type_modifier(source);
+    let source = source
+        .trim()
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let source = source.strip_prefix("pg_catalog.").unwrap_or(&source);
+    match source {
+        "smallint" | "int2" => "int2".into(),
+        "integer" | "int" | "int4" | "serial" | "serial4" => "int4".into(),
+        "bigint" | "int8" | "bigserial" | "serial8" => "int8".into(),
+        "character varying" | "varchar" => "varchar".into(),
+        "character" | "char" | "bpchar" => "bpchar".into(),
+        "boolean" | "bool" => "bool".into(),
+        "double" | "double precision" | "float8" => "float8".into(),
+        "real" | "float4" => "float4".into(),
+        other => other.into(),
+    }
+}
+
+fn cast_oid(value: &Value, source_ty: Option<&str>) -> Result<Value> {
+    let source = canonical_cast_source(source_ty, value);
+    match (source.as_str(), value) {
+        (
+            "unknown" | "text" | "varchar" | "bpchar" | "name",
+            Value::Str(text) | Value::FixedChar(text),
+        ) => parse_uint32_input(text, "oid"),
+        ("int2", Value::Int(value)) => {
+            let value = i16::try_from(*value).map_err(|_| out_of_range("smallint"))?;
+            Ok(Value::Int(i64::from(i32::from(value) as u32)))
+        }
+        ("int4", Value::Int(value)) => {
+            let value = i32::try_from(*value).map_err(|_| out_of_range("integer"))?;
+            Ok(Value::Int(i64::from(value as u32)))
+        }
+        ("int8", Value::Int(value)) => u32::try_from(*value)
+            .map(|value| Value::Int(i64::from(value)))
+            .map_err(|_| SQLError::Routine {
+                sqlstate: "22003".into(),
+                message: "OID out of range".into(),
+            }),
+        (
+            "oid" | "regclass" | "regcollation" | "regconfig" | "regdictionary" | "regnamespace"
+            | "regoper" | "regoperator" | "regproc" | "regprocedure" | "regrole" | "regtype",
+            Value::Int(value),
+        ) => u32::try_from(*value)
+            .map(|value| Value::Int(i64::from(value)))
+            .map_err(|_| out_of_range("oid")),
+        _ => Err(undefined_cast(&source, "oid")),
+    }
+}
+
+fn cast_xid(value: &Value, source_ty: Option<&str>) -> Result<Value> {
+    let source = canonical_cast_source(source_ty, value);
+    match (source.as_str(), value) {
+        (
+            "unknown" | "text" | "varchar" | "bpchar" | "name",
+            Value::Str(text) | Value::FixedChar(text),
+        ) => parse_uint32_input(text, "xid"),
+        ("xid", Value::Int(value)) => u32::try_from(*value)
+            .map(|value| Value::Int(i64::from(value)))
+            .map_err(|_| out_of_range("xid")),
+        _ => Err(undefined_cast(&source, "xid")),
+    }
+}
+
+fn cast_bytea(value: &Value, source_ty: Option<&str>) -> Result<Value> {
+    let source = canonical_cast_source(source_ty, value);
+    match (source.as_str(), value) {
+        ("bytea", Value::Bytes(bytes)) => Ok(Value::Bytes(bytes.clone())),
+        ("int2" | "int4" | "int8", Value::Int(value)) => integer_to_bytea(*value, Some(&source)),
+        (
+            "unknown" | "text" | "varchar" | "bpchar" | "name",
+            Value::Str(text) | Value::FixedChar(text),
+        ) => parse_bytea_input(text),
+        _ => Err(undefined_cast(&source, "bytea")),
+    }
+}
+
+fn parse_bytea_input(text: &str) -> Result<Value> {
+    if let Some(hex) = text.strip_prefix("\\x") {
+        if !hex.len().is_multiple_of(2) {
+            return Err(invalid_bytea(
+                "invalid hexadecimal data: odd number of digits",
+            ));
+        }
+        let mut bytes = Vec::with_capacity(hex.len() / 2);
+        for pair in hex.as_bytes().chunks_exact(2) {
+            let hi = (pair[0] as char)
+                .to_digit(16)
+                .ok_or_else(|| invalid_bytea("invalid hexadecimal digit"))?;
+            let lo = (pair[1] as char)
+                .to_digit(16)
+                .ok_or_else(|| invalid_bytea("invalid hexadecimal digit"))?;
+            bytes.push((hi * 16 + lo) as u8);
+        }
+        return Ok(Value::Bytes(bytes));
+    }
+
+    let input = text.as_bytes();
+    let mut output = Vec::with_capacity(input.len());
+    let mut index = 0;
+    while index < input.len() {
+        if input[index] != b'\\' {
+            output.push(input[index]);
+            index += 1;
+            continue;
+        }
+        if input.get(index + 1) == Some(&b'\\') {
+            output.push(b'\\');
+            index += 2;
+            continue;
+        }
+        let Some(octal) = input.get(index + 1..index + 4) else {
+            return Err(invalid_bytea("invalid input syntax for type bytea"));
+        };
+        if !matches!(octal[0], b'0'..=b'3')
+            || !octal[1..].iter().all(|byte| matches!(byte, b'0'..=b'7'))
+        {
+            return Err(invalid_bytea("invalid input syntax for type bytea"));
+        }
+        output.push((octal[0] - b'0') * 64 + (octal[1] - b'0') * 8 + (octal[2] - b'0'));
+        index += 4;
+    }
+    Ok(Value::Bytes(output))
+}
+
+fn invalid_bytea(message: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22023".into(),
+        message: message.into(),
+    }
+}
+
+fn parse_uint32_input(text: &str, target: &str) -> Result<Value> {
+    let trimmed = text.trim();
+    let digits = trimmed
+        .strip_prefix('+')
+        .or_else(|| trimmed.strip_prefix('-'))
+        .unwrap_or(trimmed);
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(SQLError::Routine {
+            sqlstate: "22P02".into(),
+            message: format!("invalid input syntax for type {target}: \"{text}\""),
+        });
+    }
+    let parsed = trimmed.parse::<i128>().map_err(|_| SQLError::Routine {
+        sqlstate: "22003".into(),
+        message: format!("value \"{text}\" is out of range for type {target}"),
+    })?;
+    if !((i128::from(i32::MIN))..=i128::from(u32::MAX)).contains(&parsed) {
+        return Err(SQLError::Routine {
+            sqlstate: "22003".into(),
+            message: format!("value \"{text}\" is out of range for type {target}"),
+        });
+    }
+    let value = if parsed < 0 {
+        u32::from_ne_bytes((parsed as i32).to_ne_bytes())
+    } else {
+        parsed as u32
+    };
+    Ok(Value::Int(i64::from(value)))
+}
+
+fn undefined_cast(source: &str, target: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42846".into(),
+        message: format!("cannot cast type {source} to {target}"),
     }
 }
 
@@ -205,6 +434,58 @@ fn integer_to_bytea(value: i64, source_ty: Option<&str>) -> Result<Value> {
         }
     };
     Ok(Value::Bytes(bytes))
+}
+
+fn cast_uuid(value: &Value) -> Result<Value> {
+    let text = match value {
+        Value::Str(text) | Value::FixedChar(text) => text,
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "cannot cast {other:?} to uuid"
+            )))
+        }
+    };
+    let digits = text
+        .strip_prefix('{')
+        .and_then(|text| text.strip_suffix('}'))
+        .unwrap_or(text);
+    if digits.starts_with('{') || digits.ends_with('}') {
+        return Err(invalid_uuid(text));
+    }
+    let mut normalized = String::with_capacity(32);
+    let mut group_digits = 0_usize;
+    for character in digits.chars() {
+        if character == '-' {
+            if group_digits == 0 || !group_digits.is_multiple_of(4) {
+                return Err(invalid_uuid(text));
+            }
+            group_digits = 0;
+            continue;
+        }
+        if !character.is_ascii_hexdigit() {
+            return Err(invalid_uuid(text));
+        }
+        normalized.push(character.to_ascii_lowercase());
+        group_digits += 1;
+    }
+    if normalized.len() != 32 || group_digits == 0 {
+        return Err(invalid_uuid(text));
+    }
+    Ok(Value::Str(format!(
+        "{}-{}-{}-{}-{}",
+        &normalized[0..8],
+        &normalized[8..12],
+        &normalized[12..16],
+        &normalized[16..20],
+        &normalized[20..32]
+    )))
+}
+
+fn invalid_uuid(text: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22P02".into(),
+        message: format!("invalid input syntax for type uuid: \"{text}\""),
+    }
 }
 
 /// Split `varchar(10)` / `numeric(10,2)` into `("varchar", Some("10"))`.
@@ -531,5 +812,176 @@ pub(super) fn cast_temporal(
         other => parse(&value_to_string(other))
             .map(Value::Temporal)
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to {ty}"))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uqa_core::DecimalValue;
+
+    #[test]
+    fn uuid_cast_matches_postgresql_input_and_canonical_output() {
+        for input in [
+            "A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11",
+            "a0eebc999c0b4ef8bb6d6bb9bd380a11",
+            "{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}",
+            "a0ee-bc99-9c0b-4ef8-bb6d-6bb9-bd38-0a11",
+        ] {
+            assert_eq!(
+                cast_value(&Value::Str(input.into()), "uuid").unwrap(),
+                Value::Str("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11".into())
+            );
+        }
+    }
+
+    #[test]
+    fn uuid_cast_rejects_postgresql_invalid_forms() {
+        for input in [
+            " a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11 ",
+            "a0e-ebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+            "not-a-uuid",
+        ] {
+            let error = cast_value(&Value::Str(input.into()), "uuid").unwrap_err();
+            assert_eq!(error.sqlstate(), Some("22P02"));
+        }
+    }
+
+    #[test]
+    fn oid_cast_preserves_postgresql_source_type_rules() {
+        assert_eq!(
+            cast_value_from(&Value::Int(-1), "oid", Some("smallint")).unwrap(),
+            Value::Int(i64::from(u32::MAX))
+        );
+        assert_eq!(
+            cast_value_from(&Value::Int(-1), "oid", Some("integer")).unwrap(),
+            Value::Int(i64::from(u32::MAX))
+        );
+        assert_eq!(
+            cast_value_from(&Value::Int(i64::from(u32::MAX)), "oid", Some("bigint")).unwrap(),
+            Value::Int(i64::from(u32::MAX))
+        );
+        let error = cast_value_from(&Value::Int(-1), "oid", Some("bigint")).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("22003"));
+        assert_eq!(error.to_string(), "OID out of range");
+        for source in ["boolean", "numeric", "double precision"] {
+            let value = match source {
+                "boolean" => Value::Bool(true),
+                "numeric" => Value::Decimal(DecimalValue::from_i64(1)),
+                _ => Value::Float(1.0),
+            };
+            let error = cast_value_from(&value, "oid", Some(source)).unwrap_err();
+            assert_eq!(error.sqlstate(), Some("42846"));
+        }
+    }
+
+    #[test]
+    fn oid_and_xid_text_input_use_postgresql_uint32_syntax() {
+        for target in ["oid", "xid"] {
+            assert_eq!(
+                cast_value(&Value::Str("-1".into()), target).unwrap(),
+                Value::Int(i64::from(u32::MAX))
+            );
+            assert_eq!(
+                cast_value(&Value::Str(i32::MIN.to_string()), target).unwrap(),
+                Value::Int(i64::from(i32::MIN as u32))
+            );
+            assert_eq!(
+                cast_value(&Value::Str(u32::MAX.to_string()), target).unwrap(),
+                Value::Int(i64::from(u32::MAX))
+            );
+            for input in ["-2147483649", "4294967296"] {
+                let error = cast_value(&Value::Str(input.into()), target).unwrap_err();
+                assert_eq!(error.sqlstate(), Some("22003"));
+            }
+            let error = cast_value(&Value::Str("1.0".into()), target).unwrap_err();
+            assert_eq!(error.sqlstate(), Some("22P02"));
+        }
+    }
+
+    #[test]
+    fn xid_rejects_integer_and_oid_cast_sources() {
+        for source in ["smallint", "integer", "bigint", "oid"] {
+            let error = cast_value_from(&Value::Int(1), "xid", Some(source)).unwrap_err();
+            assert_eq!(error.sqlstate(), Some("42846"));
+        }
+    }
+
+    #[test]
+    fn bytea_cast_preserves_postgresql_source_type_and_input_rules() {
+        assert_eq!(
+            cast_value_from(&Value::Int(-1), "bytea", Some("smallint")).unwrap(),
+            Value::Bytes(vec![0xff, 0xff])
+        );
+        assert_eq!(
+            cast_value_from(&Value::Int(-1), "bytea", Some("integer")).unwrap(),
+            Value::Bytes(vec![0xff; 4])
+        );
+        assert_eq!(
+            cast_value_from(&Value::Int(-1), "bytea", Some("bigint")).unwrap(),
+            Value::Bytes(vec![0xff; 8])
+        );
+        assert_eq!(
+            cast_value_from(&Value::Str("\\x6162".into()), "bytea", Some("text")).unwrap(),
+            Value::Bytes(b"ab".to_vec())
+        );
+        assert_eq!(
+            cast_value_from(&Value::Str("a\\\\b\\141".into()), "bytea", Some("text")).unwrap(),
+            Value::Bytes(b"a\\ba".to_vec())
+        );
+        for (value, source) in [
+            (Value::Bool(true), "boolean"),
+            (Value::Decimal(DecimalValue::from_i64(1)), "numeric"),
+            (Value::Float(1.0), "double precision"),
+        ] {
+            let error = cast_value_from(&value, "bytea", Some(source)).unwrap_err();
+            assert_eq!(error.sqlstate(), Some("42846"));
+        }
+        for input in ["\\x1", "\\xzz", "\\9"] {
+            let error = cast_value(&Value::Str(input.into()), "bytea").unwrap_err();
+            assert_eq!(error.sqlstate(), Some("22023"));
+        }
+    }
+
+    #[test]
+    fn unary_minus_preserves_integer_width_and_overflow() {
+        for (source, input, expected) in [
+            ("smallint", 1_i64, -1_i64),
+            ("integer", 1_i64, -1_i64),
+            ("bigint", 1_i64, -1_i64),
+        ] {
+            assert_eq!(
+                negate_value(&Value::Int(input), Some(source)).unwrap(),
+                Value::Int(expected)
+            );
+        }
+        for (source, minimum) in [
+            ("smallint", i64::from(i16::MIN)),
+            ("integer", i64::from(i32::MIN)),
+            ("bigint", i64::MIN),
+        ] {
+            let error = negate_value(&Value::Int(minimum), Some(source)).unwrap_err();
+            assert_eq!(error.sqlstate(), Some("22003"));
+        }
+    }
+
+    #[test]
+    fn unary_minus_preserves_interval_fields() {
+        assert_eq!(
+            negate_value(
+                &Value::Temporal(TemporalValue::Interval {
+                    months: 2,
+                    days: -3,
+                    micros: 4,
+                }),
+                Some("interval"),
+            )
+            .unwrap(),
+            Value::Temporal(TemporalValue::Interval {
+                months: -2,
+                days: 3,
+                micros: -4,
+            })
+        );
     }
 }

@@ -7,7 +7,7 @@
 //! Interpreter activation state, expression binding, and routine lifecycle.
 
 use super::{
-    best_effort_cast, bind_expr, bind_statement, eval_lowered_expression,
+    bind_expr, bind_statement, coerce_routine_value, eval_lowered_expression,
     execute_compiled_statement, BTreeSet, CreateFunction, DatumResolver, Engine, Expr, Flow,
     FunctionReturns, HashMap, Interpreter, PLpgSQLBlock, PLpgSQLDatum, PLpgSQLFunction,
     RoutineOutcome, SQLError, SQLResult, Statement, Value,
@@ -121,7 +121,7 @@ impl<'a> Interpreter<'a> {
             }
             if let Some(default) = &var.default {
                 let value = interpreter.eval_expr(default)?;
-                let value = best_effort_cast(&value, &var.type_name)?;
+                let value = coerce_routine_value(&value, &var.type_name)?;
                 interpreter.values[idx] = value;
             }
             if var.not_null && matches!(interpreter.values[idx], Value::Null) {

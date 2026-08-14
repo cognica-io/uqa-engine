@@ -18,6 +18,7 @@ pub(in crate::sql) fn expr_contains_function(expression: &ScalarExpr) -> bool {
             expr_contains_function(lhs) || expr_contains_function(rhs)
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => expr_contains_function(inner),
         ScalarExpr::Between { expr, low, high } => {
@@ -104,6 +105,7 @@ pub(in crate::sql) fn collect_expr_qualifiers(
             collect_expr_qualifiers(rhs, qualifiers);
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => {
             collect_expr_qualifiers(inner, qualifiers);
@@ -181,6 +183,7 @@ pub(in crate::sql) fn expr_has_unqualified_column(expr: &ScalarExpr) -> bool {
             expr_has_unqualified_column(lhs) || expr_has_unqualified_column(rhs)
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => expr_has_unqualified_column(inner),
         ScalarExpr::Between { expr, low, high } => {
@@ -260,6 +263,9 @@ pub(in crate::sql) fn qualify_unqualified_columns(
         },
         ScalarExpr::Not(inner) => {
             ScalarExpr::Not(Box::new(qualify_unqualified_columns(inner, qualifier)))
+        }
+        ScalarExpr::UnaryMinus(inner) => {
+            ScalarExpr::UnaryMinus(Box::new(qualify_unqualified_columns(inner, qualifier)))
         }
         ScalarExpr::IsNull { expr, negated } => ScalarExpr::IsNull {
             expr: Box::new(qualify_unqualified_columns(expr, qualifier)),

@@ -7,7 +7,7 @@
 //! Routine execution, recursion limits, and `LANGUAGE sql` result shaping.
 
 use super::{
-    best_effort_cast, row_value, Cell, CompiledFunctionBody, CreateFunction, Engine,
+    coerce_routine_value, row_value, Cell, CompiledFunctionBody, CreateFunction, Engine,
     FunctionReturns, Interpreter, ResultRow, RoutineOutcome, SQLError, SQLParam, SQLResult,
     SQLUserFunction, UnifiedPlanExecutor, Value,
 };
@@ -128,7 +128,7 @@ fn execute_sql_language(
             }
             if out_params.is_empty() {
                 if let FunctionReturns::SetOf { type_name } = &def.returns {
-                    values[0] = best_effort_cast(&values[0], type_name)?;
+                    values[0] = coerce_routine_value(&values[0], type_name)?;
                 }
             }
             set_rows.push(values);
@@ -161,7 +161,9 @@ fn execute_sql_language(
             } else {
                 let value = values.remove(0);
                 match &def.returns {
-                    FunctionReturns::Scalar { type_name } => best_effort_cast(&value, type_name)?,
+                    FunctionReturns::Scalar { type_name } => {
+                        coerce_routine_value(&value, type_name)?
+                    }
                     _ => value,
                 }
             }

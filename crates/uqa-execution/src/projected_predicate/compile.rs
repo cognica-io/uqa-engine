@@ -47,6 +47,9 @@ pub(super) fn compile(
                 integer_width,
             )
         }
+        ScalarExpr::UnaryMinus(expression) => {
+            ProjectedExpr::UnaryMinus(Box::new(require(expression, fields, params)?))
+        }
         ScalarExpr::Not(expression) => {
             ProjectedExpr::Not(Box::new(require(expression, fields, params)?))
         }
@@ -146,6 +149,10 @@ fn is_integer_type(ty: &str) -> bool {
             | "bigserial"
             | "serial8"
             | "pg_catalog.int8"
+            | "oid"
+            | "pg_catalog.oid"
+            | "xid"
+            | "pg_catalog.xid"
     )
 }
 

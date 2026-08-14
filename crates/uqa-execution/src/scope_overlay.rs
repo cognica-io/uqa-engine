@@ -27,6 +27,28 @@ impl<'a> ScopeOverlay<'a> {
             outer: PhysicalRow::from_values(values),
         }
     }
+
+    /// Attach an outer row together with the statically bound schema that
+    /// produced it. This preserves declared identities such as `smallint`,
+    /// `varchar`, and `real` even though their runtime values use wider core
+    /// carriers.
+    pub fn new_with_outer_schema(
+        child: Box<dyn PhysicalOperator + 'a>,
+        outer: ResultRow,
+        outer_schema: &RowSchema,
+    ) -> Self {
+        let (columns, values): (Vec<_>, Vec<_>) = outer.into_iter().unzip();
+        let typed_columns = columns
+            .iter()
+            .map(|column| (column.clone(), outer_schema.type_of(column).cloned()))
+            .collect::<Vec<_>>();
+        let schema = RowSchema::with_typed_outer_scope(child.row_schema(), &typed_columns);
+        Self {
+            child,
+            schema,
+            outer: PhysicalRow::from_values(values),
+        }
+    }
 }
 
 impl PhysicalOperator for ScopeOverlay<'_> {
@@ -120,5 +142,24 @@ mod tests {
         overlay.open().unwrap();
         let batch = overlay.next().unwrap().unwrap();
         assert!(batch.schema.view(&batch.rows[0]).column_is_ambiguous("id"));
+    }
+
+    #[test]
+    fn typed_outer_scope_preserves_declared_sql_identity() {
+        let child = one_row(&["inner.id"], &[1]);
+        let outer = BTreeMap::from([("outer.value".into(), Value::Int(7))]);
+        let outer_schema = RowSchema::with_types(
+            vec!["outer.value".into()],
+            vec![Some(uqa_sql::ast::ColumnType::SmallInteger)],
+        );
+        let overlay = ScopeOverlay::new_with_outer_schema(child, outer, &outer_schema);
+        assert_eq!(
+            overlay.row_schema().type_of("outer.value"),
+            Some(&uqa_sql::ast::ColumnType::SmallInteger)
+        );
+        assert_eq!(
+            overlay.row_schema().type_of("value"),
+            Some(&uqa_sql::ast::ColumnType::SmallInteger)
+        );
     }
 }

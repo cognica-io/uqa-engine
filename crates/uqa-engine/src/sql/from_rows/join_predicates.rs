@@ -7,10 +7,8 @@
 //! Join conjunct analysis, side selection, and null padding.
 
 use super::{
-    eval_scalar, null_row_for, Engine, ResultRow, SQLError, SQLParam, ScalarEvalContext,
-    ScalarExpr, ScalarSubqueryRunner, SourcePlan, Value,
+    eval_scalar, ResultRow, SQLParam, ScalarEvalContext, ScalarExpr, ScalarSubqueryRunner, Value,
 };
-use crate::sql::select::from_clause_output_columns;
 
 pub(in crate::sql) fn join_conjuncts(expr: &ScalarExpr) -> Vec<&ScalarExpr> {
     match expr {
@@ -118,30 +116,6 @@ pub(in crate::sql) fn eval_yields_value(
         .with_function_hook(eval_hook)
         .with_subquery_runner(subquery_runner);
     matches!(eval_scalar(expr, &ctx), Ok(v) if v != uqa_core::Value::Null)
-}
-
-pub(in crate::sql) fn pad_nulls_for_from(
-    row: &mut ResultRow,
-    from: &SourcePlan,
-    engine: &Engine,
-) -> Result<(), SQLError> {
-    match from {
-        SourcePlan::Table { name, alias } => {
-            for (column, value) in null_row_for(name, alias.as_deref(), engine)? {
-                row.entry(column).or_insert(value);
-            }
-        }
-        SourcePlan::Join { left, right, .. } => {
-            pad_nulls_for_from(row, left, engine)?;
-            pad_nulls_for_from(row, right, engine)?;
-        }
-        SourcePlan::Values { .. } | SourcePlan::Function { .. } | SourcePlan::Subquery { .. } => {
-            for column in from_clause_output_columns(engine, from) {
-                row.entry(column).or_insert(Value::Null);
-            }
-        }
-    }
-    Ok(())
 }
 
 pub(in crate::sql) fn join_schema_sample(columns: &[String]) -> ResultRow {

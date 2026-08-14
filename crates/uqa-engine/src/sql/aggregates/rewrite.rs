@@ -95,6 +95,9 @@ fn rewrite_aggregates(
         ScalarExpr::Not(inner) => Ok(ScalarExpr::Not(Box::new(rewrite_aggregates(
             engine, inner, replace,
         )?))),
+        ScalarExpr::UnaryMinus(inner) => Ok(ScalarExpr::UnaryMinus(Box::new(rewrite_aggregates(
+            engine, inner, replace,
+        )?))),
         ScalarExpr::And(parts) => Ok(ScalarExpr::And(
             parts
                 .iter()

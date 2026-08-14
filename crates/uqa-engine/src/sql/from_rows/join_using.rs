@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_execution::{JoinOutput, JoinOutputSource, PhysicalOperator, RowSchema, ScalarExpr};
-use uqa_sql::ast::{BinaryOp, JoinKind, JoinUsing};
+use uqa_sql::ast::{BinaryOp, ColumnType, JoinKind, JoinUsing};
 use uqa_sql::SQLError;
 
 use super::is_score_provenance_column;
@@ -20,11 +20,18 @@ pub(in crate::sql) struct ResolvedJoinUsing {
     alias: Option<String>,
 }
 
+type JoinUsingLayout = (
+    Vec<(String, JoinOutputSource)>,
+    Vec<(String, JoinOutputSource)>,
+);
+
 #[derive(Debug, Clone)]
 struct ResolvedJoinColumn {
     name: String,
     left: usize,
     right: usize,
+    comparison_type: Option<ColumnType>,
+    output_type: Option<ColumnType>,
 }
 
 fn visible_columns(schema: &RowSchema) -> Vec<(&str, usize)> {
@@ -125,10 +132,24 @@ pub(in crate::sql) fn resolve_join_using(
 
     let mut columns = Vec::with_capacity(names.len());
     for name in names {
+        let left_position = unique_position(&left_positions, &name, "left")?;
+        let right_position = unique_position(&right_positions, &name, "right")?;
+        let (comparison_type, output_type) = match (
+            left.column_type(left_position),
+            right.column_type(right_position),
+        ) {
+            (Some(left_type), Some(right_type)) => (
+                Some(uqa_execution::equality_operand_type(left_type, right_type)?),
+                Some(uqa_execution::common_type(left_type, right_type)?),
+            ),
+            _ => (None, None),
+        };
         columns.push(ResolvedJoinColumn {
-            left: unique_position(&left_positions, &name, "left")?,
-            right: unique_position(&right_positions, &name, "right")?,
+            left: left_position,
+            right: right_position,
             name,
+            comparison_type,
+            output_type,
         });
     }
     Ok(Some(ResolvedJoinUsing { columns, alias }))
@@ -142,16 +163,42 @@ pub(in crate::sql) fn join_using_predicate(
     let mut predicates = using
         .columns
         .iter()
-        .map(|column| ScalarExpr::Binary {
-            op: BinaryOp::Equal,
-            lhs: Box::new(ScalarExpr::Column(left.columns()[column.left].clone())),
-            rhs: Box::new(ScalarExpr::Column(right.columns()[column.right].clone())),
+        .map(|column| {
+            let lhs = coerced_join_column(
+                ScalarExpr::Column(left.columns()[column.left].clone()),
+                left.column_type(column.left),
+                column.comparison_type.as_ref(),
+            );
+            let rhs = coerced_join_column(
+                ScalarExpr::Column(right.columns()[column.right].clone()),
+                right.column_type(column.right),
+                column.comparison_type.as_ref(),
+            );
+            ScalarExpr::Binary {
+                op: BinaryOp::Equal,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            }
         })
         .collect::<Vec<_>>();
     match predicates.len() {
         0 => None,
         1 => predicates.pop(),
         _ => Some(ScalarExpr::And(predicates)),
+    }
+}
+
+fn coerced_join_column(
+    expression: ScalarExpr,
+    source: Option<&ColumnType>,
+    target: Option<&ColumnType>,
+) -> ScalarExpr {
+    match (source, target) {
+        (Some(source), Some(target)) if source != target => ScalarExpr::Cast {
+            expr: Box::new(expression),
+            ty: target.sql_name(),
+        },
+        _ => expression,
     }
 }
 
@@ -172,6 +219,34 @@ pub(in crate::sql) fn shape_join_using_output<'a>(
     right: &RowSchema,
     using: &ResolvedJoinUsing,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
+    let (columns, aliases) = join_using_layout(kind, left, right, using)?;
+    JoinOutput::try_new(operator, columns, aliases)
+        .map(|output| Box::new(output) as Box<dyn PhysicalOperator + 'a>)
+        .map_err(super::super::select::physical_exec_error)
+}
+
+/// Bind the visible and hidden output identities of a qualified join without
+/// constructing or executing the join. Static source-schema binding and the
+/// physical operator share this layout so an empty or correlated right side
+/// cannot lose its declared types.
+pub(in crate::sql) fn join_using_output_schema(
+    kind: JoinKind,
+    left: &RowSchema,
+    right: &RowSchema,
+    using: &ResolvedJoinUsing,
+) -> Result<RowSchema, SQLError> {
+    let input = RowSchema::join(left, right, std::iter::empty());
+    let (columns, aliases) = join_using_layout(kind, left, right, using)?;
+    JoinOutput::try_schema(&input, &columns, &aliases)
+        .map_err(super::super::select::physical_exec_error)
+}
+
+fn join_using_layout(
+    kind: JoinKind,
+    left: &RowSchema,
+    right: &RowSchema,
+    using: &ResolvedJoinUsing,
+) -> Result<JoinUsingLayout, SQLError> {
     let right_offset = left.len();
     let mut left_used = vec![false; left.len()];
     let mut right_used = vec![false; right.len()];
@@ -182,19 +257,35 @@ pub(in crate::sql) fn shape_join_using_output<'a>(
         left_used[column.left] = true;
         right_used[column.right] = true;
         let source = match kind {
-            JoinKind::Inner | JoinKind::Left => JoinOutputSource::Input(column.left),
-            JoinKind::Right => JoinOutputSource::Input(right_offset + column.right),
-            JoinKind::Full => JoinOutputSource::Coalesce {
-                left: column.left,
-                right: right_offset + column.right,
-            },
+            JoinKind::Inner | JoinKind::Left => coerced_output_source(
+                column.left,
+                left.column_type(column.left),
+                column.output_type.as_ref(),
+            ),
+            JoinKind::Right => coerced_output_source(
+                right_offset + column.right,
+                right.column_type(column.right),
+                column.output_type.as_ref(),
+            ),
+            JoinKind::Full => {
+                column
+                    .output_type
+                    .as_ref()
+                    .map_or(JoinOutputSource::Input(column.left), |ty| {
+                        JoinOutputSource::Coalesce {
+                            left: column.left,
+                            right: right_offset + column.right,
+                            ty: ty.clone(),
+                        }
+                    })
+            }
             JoinKind::Cross => {
                 return Err(SQLError::Internal(
                     "CROSS JOIN cannot carry a USING qualification".into(),
                 ));
             }
         };
-        columns.push((column.name.clone(), source));
+        columns.push((column.name.clone(), source.clone()));
         merged_sources.push((column.name.clone(), source));
     }
     for (position, column) in left.columns().iter().enumerate() {
@@ -236,9 +327,21 @@ pub(in crate::sql) fn shape_join_using_output<'a>(
         );
     }
 
-    JoinOutput::try_new(operator, columns, aliases)
-        .map(|output| Box::new(output) as Box<dyn PhysicalOperator + 'a>)
-        .map_err(super::super::select::physical_exec_error)
+    Ok((columns, aliases))
+}
+
+fn coerced_output_source(
+    input: usize,
+    source: Option<&ColumnType>,
+    target: Option<&ColumnType>,
+) -> JoinOutputSource {
+    match (source, target) {
+        (Some(source), Some(target)) if source != target => JoinOutputSource::Cast {
+            input,
+            ty: target.clone(),
+        },
+        _ => JoinOutputSource::Input(input),
+    }
 }
 
 #[cfg(test)]

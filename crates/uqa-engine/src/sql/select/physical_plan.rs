@@ -18,6 +18,7 @@ use super::{
     SharedExpressionEvaluator, SourcePlan, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN, SCORE_COLUMN,
 };
 use crate::sql::from_rows::table_function_empty_schema;
+use crate::sql::virtual_relation_schema;
 
 const ORDER_SET_COLUMN_PREFIX: &str = "\0uqa.order_set_value.";
 const DISTINCT_SET_COLUMN_PREFIX: &str = "\0uqa.distinct_set_value.";
@@ -118,10 +119,20 @@ pub(in crate::sql) fn from_clause_output_columns(
             cols.extend(from_clause_output_columns(engine, right));
             cols
         }
-        SourcePlan::Table { name, alias } => engine
-            .try_table_columns(name)
-            .map(|columns| qualify_output_columns(Some(alias.as_deref().unwrap_or(name)), columns))
-            .unwrap_or_default(),
+        SourcePlan::Table { name, alias } => {
+            let qualifier = alias.as_deref().unwrap_or(name);
+            engine.try_table_columns(name).map_or_else(
+                |_| {
+                    virtual_relation_schema(name).map_or_else(Vec::new, |schema| {
+                        qualify_output_columns(
+                            Some(qualifier),
+                            schema.into_iter().map(|(column, _)| column).collect(),
+                        )
+                    })
+                },
+                |columns| qualify_output_columns(Some(qualifier), columns),
+            )
+        }
     }
 }
 
@@ -831,21 +842,38 @@ pub(in crate::sql) fn build_relational_operator<'a>(
             let set_key_statement = prepare_aggregate_set_key_statement(engine, statement)?;
             let statement = set_key_statement.as_ref().unwrap_or(statement);
             let schema = projection_columns(&statement.projections);
-            let input_schema = operator.schema().to_vec();
+            let input_schema = operator.row_schema().clone();
             let work_mem_bytes = physical_work_mem_bytes(engine)?;
             if let Some(set_plan) = prepare_aggregate_set_projection(engine, statement) {
                 let aggregate_schema = projection_columns(&set_plan.statement.projections);
+                let aggregate_types = set_plan
+                    .statement
+                    .projections
+                    .iter()
+                    .map(|projection| {
+                        evaluator
+                            .expression_type(&projection.expr, &input_schema)
+                            .ok()
+                            .flatten()
+                    })
+                    .collect::<Vec<_>>();
+                let aggregate_row_schema = uqa_execution::RowSchema::with_types(
+                    aggregate_schema.clone(),
+                    aggregate_types.clone(),
+                );
                 let aggregate_executor = PhysicalAggregateExecutor::new(
                     engine,
                     &set_plan.statement,
                     params,
                     ctes,
-                    input_schema,
+                    input_schema.clone(),
+                    aggregate_row_schema,
                     work_mem_bytes,
                 )?;
-                operator = Box::new(HashAggregate::with_executor(
+                operator = Box::new(HashAggregate::with_typed_executor(
                     operator,
                     aggregate_schema,
+                    aggregate_types,
                     Box::new(aggregate_executor),
                 ));
                 operator = build_set_projection(
@@ -859,15 +887,29 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                     projection_set_batch_size(statement),
                 );
             } else {
-                operator = Box::new(HashAggregate::with_executor(
+                let aggregate_types = statement
+                    .projections
+                    .iter()
+                    .map(|projection| {
+                        evaluator
+                            .expression_type(&projection.expr, &input_schema)
+                            .ok()
+                            .flatten()
+                    })
+                    .collect::<Vec<_>>();
+                let aggregate_row_schema =
+                    uqa_execution::RowSchema::with_types(schema.clone(), aggregate_types.clone());
+                operator = Box::new(HashAggregate::with_typed_executor(
                     operator,
                     schema.clone(),
+                    aggregate_types,
                     Box::new(PhysicalAggregateExecutor::new(
                         engine,
                         statement,
                         params,
                         ctes,
                         input_schema,
+                        aggregate_row_schema,
                         work_mem_bytes,
                     )?),
                 ));
@@ -887,6 +929,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
             }
         }
         ComputePlan::Window => {
+            let source_row_schema = operator.row_schema().clone();
             let source_schema = operator.schema().to_vec();
             let work_mem_bytes = physical_work_mem_bytes(engine)?;
             let window_plan = prepare_window_plan(&statement.projections);
@@ -903,16 +946,17 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                 &mut projections,
             )?;
             append_distinct_set_projections(engine, statement, &output_columns, &mut projections)?;
-            let schema = window_plan.output_columns(operator.schema());
-            operator = Box::new(Window::with_executor(
+            let schema = window_plan.output_schema(engine, &source_row_schema, params)?;
+            operator = Box::new(Window::with_typed_executor(
                 operator,
-                schema,
+                schema.columns().to_vec(),
+                schema.column_types().to_vec(),
                 Box::new(PhysicalWindowExecutor::new(
                     engine,
                     window_plan,
                     params,
                     ctes,
-                    source_schema.clone(),
+                    source_row_schema,
                     work_mem_bytes,
                 )),
             ));
@@ -967,7 +1011,7 @@ pub(in crate::sql) fn walk_expr<F: FnMut(&ScalarExpr)>(expr: &ScalarExpr, f: &mu
                 walk_expr(p, f);
             }
         }
-        ScalarExpr::Not(inner) => walk_expr(inner, f),
+        ScalarExpr::Not(inner) | ScalarExpr::UnaryMinus(inner) => walk_expr(inner, f),
         ScalarExpr::Binary { lhs, rhs, .. } => {
             walk_expr(lhs, f);
             walk_expr(rhs, f);

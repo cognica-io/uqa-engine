@@ -33,11 +33,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 };
                 return match op_name.as_str() {
                     "+" => Ok(rhs),
-                    "-" => Ok(Expr::Binary {
-                        op: BinaryOp::Subtract,
-                        lhs: Box::new(Expr::Literal(Value::Int(0))),
-                        rhs: Box::new(rhs),
-                    }),
+                    "-" => Ok(Expr::UnaryMinus(Box::new(rhs))),
                     // |/ square root, ||/ cube root, @ absolute value.
                     "|/" => Ok(unary_func("sqrt", rhs)),
                     "||/" => Ok(unary_func("cbrt", rhs)),

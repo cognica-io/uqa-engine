@@ -9,9 +9,11 @@
 use super::helpers::{
     all_schema_names, array_dimension_count, bool_value, catalog_name, catalog_ordinal,
     catalog_usize, constraint_catalog_rows, current_user_name, current_user_oid, default_expr_text,
-    index_columns, indexdef, int_value, list_int, pg_type_len, pg_type_modifier, pg_type_oid,
-    relation_oid, routine_type_oid, row, schema_oid, split_index_name, split_schema_name,
-    stable_oid, str_value, table_columns_for, PG18_BUILTIN_ROUTINES,
+    index_columns, indexdef, int_value, list_int, pg_type_align, pg_type_array_oid,
+    pg_type_by_value, pg_type_collation_oid, pg_type_element_oid, pg_type_len, pg_type_modifier,
+    pg_type_oid, pg_type_routine_oids, pg_type_storage, pg_type_subscript_handler, relation_oid,
+    routine_type_oid, row, schema_oid, split_index_name, split_schema_name, stable_oid, str_value,
+    table_columns_for, PgTypeRoutineOids, PG18_BUILTIN_ROUTINES,
 };
 use super::{
     registered_names, routine_signature_types, value_to_text, ColumnType, Engine, ResultRow,
@@ -67,7 +69,16 @@ pub(super) fn build_pg_namespace(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
 }
 
 pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    let mut out = Vec::new();
+    let mut out = vec![pg_class_catalog_row(
+        13_313,
+        13_315,
+        "information_schema",
+        "information_schema_catalog_name",
+        "v",
+        1,
+        -1.0,
+        false,
+    )];
     for name in engine
         .table_names()
         .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
@@ -134,14 +145,33 @@ pub(super) fn pg_class_row(
     tuples: f64,
     has_index: bool,
 ) -> ResultRow {
+    let oid = relation_oid(relkind, schema, name);
+    let reltype = if matches!(relkind, "r" | "v" | "m" | "c" | "f" | "p") {
+        stable_oid("rowtype", &format!("{schema}.{name}"))
+    } else {
+        0
+    };
+    pg_class_catalog_row(
+        oid, reltype, schema, name, relkind, natts, tuples, has_index,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pg_class_catalog_row(
+    oid: i64,
+    reltype: i64,
+    schema: &str,
+    name: &str,
+    relkind: &str,
+    natts: i64,
+    tuples: f64,
+    has_index: bool,
+) -> ResultRow {
     row([
-        ("oid", int_value(relation_oid(relkind, schema, name))),
+        ("oid", int_value(oid)),
         ("relname", str_value(name)),
         ("relnamespace", int_value(schema_oid(schema))),
-        (
-            "reltype",
-            int_value(stable_oid("rowtype", &format!("{schema}.{name}"))),
-        ),
+        ("reltype", int_value(reltype)),
         ("reloftype", int_value(0)),
         ("relowner", int_value(current_user_oid())),
         ("relam", int_value(0)),
@@ -150,6 +180,7 @@ pub(super) fn pg_class_row(
         ("relpages", int_value(0)),
         ("reltuples", Value::Float(tuples)),
         ("relallvisible", int_value(0)),
+        ("relallfrozen", int_value(0)),
         ("reltoastrelid", int_value(0)),
         ("relhasindex", bool_value(has_index)),
         ("relisshared", bool_value(false)),
@@ -163,7 +194,14 @@ pub(super) fn pg_class_row(
         ("relrowsecurity", bool_value(false)),
         ("relforcerowsecurity", bool_value(false)),
         ("relispopulated", bool_value(true)),
-        ("relreplident", str_value("d")),
+        (
+            "relreplident",
+            str_value(if matches!(relkind, "r" | "m" | "p") {
+                "d"
+            } else {
+                "n"
+            }),
+        ),
         ("relispartition", bool_value(false)),
         ("relrewrite", int_value(0)),
         ("relfrozenxid", int_value(0)),
@@ -175,7 +213,33 @@ pub(super) fn pg_class_row(
 }
 
 pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    let mut out = Vec::new();
+    let mut out = vec![row([
+        ("attrelid", int_value(13_313)),
+        ("attname", str_value("catalog_name")),
+        ("atttypid", int_value(13_312)),
+        ("attstattarget", Value::Null),
+        ("attlen", int_value(64)),
+        ("attnum", int_value(1)),
+        ("attndims", int_value(0)),
+        ("atttypmod", int_value(-1)),
+        ("attbyval", bool_value(false)),
+        ("attalign", str_value("c")),
+        ("attstorage", str_value("p")),
+        ("attcompression", str_value("")),
+        ("attnotnull", bool_value(false)),
+        ("atthasdef", bool_value(false)),
+        ("atthasmissing", bool_value(false)),
+        ("attidentity", str_value("")),
+        ("attgenerated", str_value("")),
+        ("attisdropped", bool_value(false)),
+        ("attislocal", bool_value(true)),
+        ("attinhcount", int_value(0)),
+        ("attcollation", int_value(950)),
+        ("attacl", Value::Null),
+        ("attoptions", Value::Null),
+        ("attfdwoptions", Value::Null),
+        ("attmissingval", Value::Null),
+    ])];
     for table_name in engine
         .table_names()
         .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
@@ -193,15 +257,15 @@ pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
     for table_name in engine.list_foreign_tables().map_err(SQLError::Internal)? {
         let (schema, table) = split_schema_name(&table_name)?;
         let relid = relation_oid("f", &schema, &table);
-        for (idx, col) in engine
-            .foreign_table_columns(&table_name)
+        for (idx, (name, ty)) in engine
+            .foreign_table_typed_columns(&table_name)
             .map_err(SQLError::Internal)?
-            .iter()
+            .into_iter()
             .enumerate()
         {
             let col = SQLColumnDef {
-                name: col.clone(),
-                ty: ColumnType::Text,
+                name,
+                ty,
                 primary_key: false,
                 not_null: false,
                 not_null_explicit: false,
@@ -234,17 +298,10 @@ pub(super) fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> R
         ("attlen", int_value(pg_type_len(&col.ty))),
         ("attnum", int_value(attnum)),
         ("attndims", int_value(array_dimension_count(&col.ty))),
-        ("attcacheoff", int_value(-1)),
         ("atttypmod", int_value(pg_type_modifier(&col.ty))),
-        (
-            "attbyval",
-            bool_value(matches!(
-                col.ty,
-                ColumnType::Integer | ColumnType::Boolean | ColumnType::Real
-            )),
-        ),
-        ("attalign", str_value("i")),
-        ("attstorage", str_value("x")),
+        ("attbyval", bool_value(pg_type_by_value(&col.ty))),
+        ("attalign", str_value(pg_type_align(&col.ty))),
+        ("attstorage", str_value(pg_type_storage(&col.ty))),
         ("attcompression", str_value("")),
         ("attnotnull", bool_value(col.not_null || col.primary_key)),
         (
@@ -270,10 +327,11 @@ pub(super) fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> R
         ("attisdropped", bool_value(false)),
         ("attislocal", bool_value(true)),
         ("attinhcount", int_value(0)),
-        ("attcollation", int_value(0)),
+        ("attcollation", int_value(pg_type_collation_oid(&col.ty))),
         ("attacl", Value::Null),
         ("attoptions", Value::Null),
         ("attfdwoptions", Value::Null),
+        ("attmissingval", Value::Null),
     ])
 }
 
@@ -306,8 +364,7 @@ pub(super) fn build_pg_attrdef(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
                     "adnum",
                     int_value(catalog_ordinal(idx, "pg_attrdef column")?),
                 ),
-                ("adbin", str_value(default.clone())),
-                ("adsrc", str_value(default)),
+                ("adbin", str_value(default)),
             ]));
         }
     }
@@ -507,66 +564,337 @@ pub(super) fn build_pg_indexes(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
 }
 
 pub(super) fn build_pg_type() -> Vec<ResultRow> {
-    let types = [
-        (16_i64, "bool", 1_i64, "B"),
-        (17, "bytea", -1, "U"),
-        (20, "int8", 8, "N"),
-        (21, "int2", 2, "N"),
-        (23, "int4", 4, "N"),
-        (25, "text", -1, "S"),
-        (700, "float4", 4, "N"),
-        (701, "float8", 8, "N"),
-        (1043, "varchar", -1, "S"),
-        (1082, "date", 4, "D"),
-        (1083, "time", 8, "D"),
-        (1114, "timestamp", 8, "D"),
-        (1184, "timestamptz", 8, "D"),
-        (1266, "timetz", 8, "D"),
-        (114, "json", -1, "U"),
-        (3802, "jsonb", -1, "U"),
-        (1700, "numeric", -1, "N"),
-        (2278, "void", 4, "P"),
-        (380_000, "vector", -1, "U"),
+    let catalog_types = [
+        (ColumnType::Boolean, "B", true, "b"),
+        (ColumnType::Bytea, "U", false, "b"),
+        (ColumnType::InternalChar, "Z", false, "b"),
+        (ColumnType::Name, "S", false, "b"),
+        (ColumnType::BigInteger, "N", false, "b"),
+        (ColumnType::Int2Vector, "A", false, "b"),
+        (ColumnType::SmallInteger, "N", false, "b"),
+        (ColumnType::Integer, "N", false, "b"),
+        (ColumnType::Regproc, "N", false, "b"),
+        (ColumnType::Text, "S", true, "b"),
+        (ColumnType::Oid, "N", true, "b"),
+        (ColumnType::Xid, "U", false, "b"),
+        (ColumnType::OidVector, "A", false, "b"),
+        (ColumnType::Json, "U", false, "b"),
+        (ColumnType::PgNodeTree, "Z", false, "b"),
+        (ColumnType::Real, "N", false, "b"),
+        (ColumnType::DoublePrecision, "N", true, "b"),
+        (ColumnType::AclItem, "U", false, "b"),
+        (ColumnType::Bpchar, "S", false, "b"),
+        (ColumnType::Varchar(None), "S", false, "b"),
+        (ColumnType::Date, "D", false, "b"),
+        (ColumnType::Time, "D", false, "b"),
+        (ColumnType::Timestamp, "D", false, "b"),
+        (ColumnType::TimestampTz, "D", true, "b"),
+        (ColumnType::Interval, "T", true, "b"),
+        (ColumnType::TimeTz, "D", false, "b"),
+        (
+            ColumnType::Numeric {
+                precision: None,
+                scale: None,
+            },
+            "N",
+            false,
+            "b",
+        ),
+        (ColumnType::Regtype, "N", false, "b"),
+        (ColumnType::AnyArray, "P", false, "p"),
+        (ColumnType::Uuid, "U", false, "b"),
+        (ColumnType::JsonB, "U", false, "b"),
+        (ColumnType::Vector(0), "U", false, "b"),
+        (ColumnType::Tensor(0), "U", false, "b"),
     ];
-    types
-        .into_iter()
-        .map(|(oid, name, len, category)| {
-            row([
-                ("oid", int_value(oid)),
-                ("typname", str_value(name)),
-                ("typnamespace", int_value(schema_oid("pg_catalog"))),
-                ("typowner", int_value(current_user_oid())),
-                ("typlen", int_value(len)),
-                ("typbyval", bool_value(len > 0 && len <= 8)),
-                ("typtype", str_value("b")),
-                ("typcategory", str_value(category)),
-                ("typispreferred", bool_value(false)),
-                ("typisdefined", bool_value(true)),
-                ("typdelim", str_value(",")),
-                ("typrelid", int_value(0)),
-                ("typsubscript", str_value("-")),
-                ("typelem", int_value(0)),
-                ("typarray", int_value(0)),
-                ("typinput", int_value(0)),
-                ("typoutput", int_value(0)),
-                ("typreceive", int_value(0)),
-                ("typsend", int_value(0)),
-                ("typmodin", int_value(0)),
-                ("typmodout", int_value(0)),
-                ("typanalyze", int_value(0)),
-                ("typalign", str_value("i")),
-                ("typstorage", str_value("x")),
-                ("typnotnull", bool_value(false)),
-                ("typbasetype", int_value(0)),
-                ("typtypmod", int_value(-1)),
-                ("typndims", int_value(0)),
-                ("typcollation", int_value(0)),
-                ("typdefaultbin", Value::Null),
-                ("typdefault", Value::Null),
-                ("typacl", Value::Null),
-            ])
+    let mut types = catalog_types
+        .iter()
+        .cloned()
+        .chain(
+            catalog_types
+                .iter()
+                .filter(|&(ty, _, _, kind)| *kind == "b" && pg_type_array_oid(ty) != 0)
+                .cloned()
+                .map(|(ty, _, _, _)| (ColumnType::Array(Box::new(ty)), "A", false, "b")),
+        )
+        .map(|(ty, category, preferred, kind)| {
+            pg_type_catalog_row(
+                &ty,
+                schema_oid("pg_catalog"),
+                kind,
+                category,
+                preferred,
+                0,
+                -1,
+            )
         })
-        .collect()
+        .collect::<Vec<_>>();
+    for domain in super::schema::information_schema_domains() {
+        let ColumnType::Domain { oid, base, .. } = &domain else {
+            unreachable!("information schema type constructor returned a non-domain")
+        };
+        let (category, type_modifier) = match *oid {
+            13_307 => ("N", -1),
+            13_310 | 13_312 => ("S", -1),
+            13_318 => ("D", 2),
+            13_320 => ("S", 7),
+            _ => unreachable!("unknown PostgreSQL 18 information schema domain {oid}"),
+        };
+        types.push(pg_type_catalog_row(
+            &domain,
+            schema_oid("information_schema"),
+            "d",
+            category,
+            false,
+            pg_type_oid(base),
+            type_modifier,
+        ));
+        types.push(pg_type_catalog_row(
+            &ColumnType::Array(Box::new(domain)),
+            schema_oid("information_schema"),
+            "b",
+            "A",
+            false,
+            0,
+            -1,
+        ));
+    }
+    types.extend([
+        special_pg_type_catalog_row(PgTypeCatalogMetadata {
+            oid: 2249,
+            name: "record".into(),
+            namespace_oid: schema_oid("pg_catalog"),
+            len: -1,
+            by_value: false,
+            kind: "p",
+            category: "P",
+            preferred: false,
+            relation_oid: 0,
+            subscript: "-",
+            element_oid: 0,
+            array_oid: 2287,
+            routines: PgTypeRoutineOids {
+                input: 2290,
+                output: 2291,
+                receive: 2402,
+                send: 2403,
+                modifier_input: 0,
+                modifier_output: 0,
+                analyze: 0,
+            },
+            align: "d",
+            storage: "x",
+            base_oid: 0,
+            type_modifier: -1,
+            collation_oid: 0,
+        }),
+        special_pg_type_catalog_row(PgTypeCatalogMetadata {
+            oid: 2278,
+            name: "void".into(),
+            namespace_oid: schema_oid("pg_catalog"),
+            len: 4,
+            by_value: true,
+            kind: "p",
+            category: "P",
+            preferred: false,
+            relation_oid: 0,
+            subscript: "-",
+            element_oid: 0,
+            array_oid: 0,
+            routines: PgTypeRoutineOids {
+                input: 2298,
+                output: 2299,
+                receive: 3120,
+                send: 3121,
+                modifier_input: 0,
+                modifier_output: 0,
+                analyze: 0,
+            },
+            align: "i",
+            storage: "p",
+            base_oid: 0,
+            type_modifier: -1,
+            collation_oid: 0,
+        }),
+        special_pg_type_catalog_row(PgTypeCatalogMetadata {
+            oid: 2287,
+            name: "_record".into(),
+            namespace_oid: schema_oid("pg_catalog"),
+            len: -1,
+            by_value: false,
+            kind: "p",
+            category: "P",
+            preferred: false,
+            relation_oid: 0,
+            subscript: "array_subscript_handler",
+            element_oid: 2249,
+            array_oid: 0,
+            routines: PgTypeRoutineOids {
+                input: 750,
+                output: 751,
+                receive: 2400,
+                send: 2401,
+                modifier_input: 0,
+                modifier_output: 0,
+                analyze: 3816,
+            },
+            align: "d",
+            storage: "x",
+            base_oid: 0,
+            type_modifier: -1,
+            collation_oid: 0,
+        }),
+        special_pg_type_catalog_row(PgTypeCatalogMetadata {
+            oid: 13_314,
+            name: "_information_schema_catalog_name".into(),
+            namespace_oid: schema_oid("information_schema"),
+            len: -1,
+            by_value: false,
+            kind: "b",
+            category: "A",
+            preferred: false,
+            relation_oid: 0,
+            subscript: "array_subscript_handler",
+            element_oid: 13_315,
+            array_oid: 0,
+            routines: PgTypeRoutineOids {
+                input: 750,
+                output: 751,
+                receive: 2400,
+                send: 2401,
+                modifier_input: 0,
+                modifier_output: 0,
+                analyze: 3816,
+            },
+            align: "d",
+            storage: "x",
+            base_oid: 0,
+            type_modifier: -1,
+            collation_oid: 0,
+        }),
+        special_pg_type_catalog_row(PgTypeCatalogMetadata {
+            oid: 13_315,
+            name: "information_schema_catalog_name".into(),
+            namespace_oid: schema_oid("information_schema"),
+            len: -1,
+            by_value: false,
+            kind: "c",
+            category: "C",
+            preferred: false,
+            relation_oid: 13_313,
+            subscript: "-",
+            element_oid: 0,
+            array_oid: 13_314,
+            routines: PgTypeRoutineOids {
+                input: 2290,
+                output: 2291,
+                receive: 2402,
+                send: 2403,
+                modifier_input: 0,
+                modifier_output: 0,
+                analyze: 0,
+            },
+            align: "d",
+            storage: "x",
+            base_oid: 0,
+            type_modifier: -1,
+            collation_oid: 0,
+        }),
+    ]);
+    types.sort_by_key(|entry| match entry.get("oid") {
+        Some(Value::Int(oid)) => *oid,
+        _ => i64::MAX,
+    });
+    types
+}
+
+struct PgTypeCatalogMetadata<'a> {
+    oid: i64,
+    name: String,
+    namespace_oid: i64,
+    len: i64,
+    by_value: bool,
+    kind: &'a str,
+    category: &'a str,
+    preferred: bool,
+    relation_oid: i64,
+    subscript: &'a str,
+    element_oid: i64,
+    array_oid: i64,
+    routines: PgTypeRoutineOids,
+    align: &'a str,
+    storage: &'a str,
+    base_oid: i64,
+    type_modifier: i64,
+    collation_oid: i64,
+}
+
+fn pg_type_catalog_row(
+    ty: &ColumnType,
+    namespace_oid: i64,
+    kind: &str,
+    category: &str,
+    preferred: bool,
+    base_oid: i64,
+    type_modifier: i64,
+) -> ResultRow {
+    special_pg_type_catalog_row(PgTypeCatalogMetadata {
+        oid: pg_type_oid(ty),
+        name: super::helpers::info_udt_name(ty),
+        namespace_oid,
+        len: pg_type_len(ty),
+        by_value: pg_type_by_value(ty),
+        kind,
+        category,
+        preferred,
+        relation_oid: 0,
+        subscript: pg_type_subscript_handler(ty),
+        element_oid: pg_type_element_oid(ty),
+        array_oid: pg_type_array_oid(ty),
+        routines: pg_type_routine_oids(ty),
+        align: pg_type_align(ty),
+        storage: pg_type_storage(ty),
+        base_oid,
+        type_modifier,
+        collation_oid: pg_type_collation_oid(ty),
+    })
+}
+
+fn special_pg_type_catalog_row(metadata: PgTypeCatalogMetadata<'_>) -> ResultRow {
+    row([
+        ("oid", int_value(metadata.oid)),
+        ("typname", str_value(metadata.name)),
+        ("typnamespace", int_value(metadata.namespace_oid)),
+        ("typowner", int_value(current_user_oid())),
+        ("typlen", int_value(metadata.len)),
+        ("typbyval", bool_value(metadata.by_value)),
+        ("typtype", str_value(metadata.kind)),
+        ("typcategory", str_value(metadata.category)),
+        ("typispreferred", bool_value(metadata.preferred)),
+        ("typisdefined", bool_value(true)),
+        ("typdelim", str_value(",")),
+        ("typrelid", int_value(metadata.relation_oid)),
+        ("typsubscript", str_value(metadata.subscript)),
+        ("typelem", int_value(metadata.element_oid)),
+        ("typarray", int_value(metadata.array_oid)),
+        ("typinput", int_value(metadata.routines.input)),
+        ("typoutput", int_value(metadata.routines.output)),
+        ("typreceive", int_value(metadata.routines.receive)),
+        ("typsend", int_value(metadata.routines.send)),
+        ("typmodin", int_value(metadata.routines.modifier_input)),
+        ("typmodout", int_value(metadata.routines.modifier_output)),
+        ("typanalyze", int_value(metadata.routines.analyze)),
+        ("typalign", str_value(metadata.align)),
+        ("typstorage", str_value(metadata.storage)),
+        ("typnotnull", bool_value(false)),
+        ("typbasetype", int_value(metadata.base_oid)),
+        ("typtypmod", int_value(metadata.type_modifier)),
+        ("typndims", int_value(0)),
+        ("typcollation", int_value(metadata.collation_oid)),
+        ("typdefaultbin", Value::Null),
+        ("typdefault", Value::Null),
+        ("typacl", Value::Null),
+    ])
 }
 
 pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {

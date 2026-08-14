@@ -18,7 +18,7 @@ pub(super) fn aggregate_sorted_input(
     engine: &Engine,
     statement: &QueryBlockPlan,
     input: SpillBuffer,
-    input_schema: &[String],
+    input_schema: &RowSchema,
     output_schema: &RowSchema,
     params: &[SQLParam],
     ctes: &CteScope,
@@ -28,7 +28,7 @@ pub(super) fn aggregate_sorted_input(
     use super::super::select::EngineExpressionEvaluator;
 
     let scan: Box<dyn PhysicalOperator + '_> =
-        Box::new(SpillScan::new(input_schema.to_vec(), input));
+        Box::new(SpillScan::new(input_schema.clone(), input));
     let keys = statement
         .group_by
         .iter()

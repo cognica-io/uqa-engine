@@ -268,9 +268,9 @@ fn references_external_row(expression: &ScalarExpr) -> bool {
         ScalarExpr::Binary { lhs, rhs, .. } => {
             references_external_row(lhs) || references_external_row(rhs)
         }
-        ScalarExpr::Not(inner) | ScalarExpr::Cast { expr: inner, .. } => {
-            references_external_row(inner)
-        }
+        ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
+        | ScalarExpr::Cast { expr: inner, .. } => references_external_row(inner),
         ScalarExpr::IsNull { expr, .. } => references_external_row(expr),
         ScalarExpr::Between { expr, low, high } => {
             references_external_row(expr)

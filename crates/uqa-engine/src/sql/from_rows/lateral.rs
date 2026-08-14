@@ -20,6 +20,7 @@ pub(in crate::sql) struct EngineLateralSource<'a> {
     pub(super) on: Option<ScalarExpr>,
     pub(super) params: &'a [SQLParam],
     pub(super) ctes: CteScope,
+    pub(super) outer_schema: uqa_execution::RowSchema,
 }
 
 impl uqa_execution::LateralSource for EngineLateralSource<'_> {
@@ -64,12 +65,13 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
                 alias,
                 column_aliases,
             } => {
-                let output = execute_lateral_subquery_output(
+                let output = execute_lateral_subquery_output_with_outer_schema(
                     self.engine,
                     body,
                     left_row,
                     self.params,
                     &self.ctes,
+                    &self.outer_schema,
                 )?;
                 let source_columns = output.internal_columns.clone();
                 let rows = query_output_shared(output, "lateral subquery")?;
@@ -137,9 +139,38 @@ pub(in crate::sql) fn execute_lateral_subquery_output(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<QueryOutput, SQLError> {
+    execute_lateral_subquery_output_inner(engine, plan, outer_row, params, ctes, None)
+}
+
+pub(in crate::sql) fn execute_lateral_subquery_output_with_outer_schema(
+    engine: &Engine,
+    plan: &QueryPlan,
+    outer_row: &ResultRow,
+    params: &[SQLParam],
+    ctes: &CteScope,
+    outer_schema: &uqa_execution::RowSchema,
+) -> Result<QueryOutput, SQLError> {
+    execute_lateral_subquery_output_inner(engine, plan, outer_row, params, ctes, Some(outer_schema))
+}
+
+fn execute_lateral_subquery_output_inner(
+    engine: &Engine,
+    plan: &QueryPlan,
+    outer_row: &ResultRow,
+    params: &[SQLParam],
+    ctes: &CteScope,
+    outer_schema: Option<&uqa_execution::RowSchema>,
+) -> Result<QueryOutput, SQLError> {
     let mut scoped_ctes = ctes.clone();
     crate::sql::select::materialize_plan_ctes(engine, &plan.ctes, params, &mut scoped_ctes)?;
-    execute_lateral_relational_root_output(engine, &plan.root, outer_row, params, &mut scoped_ctes)
+    execute_lateral_relational_root_output(
+        engine,
+        &plan.root,
+        outer_row,
+        params,
+        &mut scoped_ctes,
+        outer_schema,
+    )
 }
 
 pub(in crate::sql) fn execute_lateral_relational_root_output(
@@ -148,10 +179,11 @@ pub(in crate::sql) fn execute_lateral_relational_root_output(
     outer_row: &ResultRow,
     params: &[SQLParam],
     ctes: &mut CteScope,
+    outer_schema: Option<&uqa_execution::RowSchema>,
 ) -> Result<QueryOutput, SQLError> {
     match root {
         RelationalPlan::QueryBlock(block) => {
-            execute_lateral_query_block_output(engine, block, outer_row, params, ctes)
+            execute_lateral_query_block_output(engine, block, outer_row, params, ctes, outer_schema)
         }
         RelationalPlan::SetOp {
             kind,
@@ -164,12 +196,24 @@ pub(in crate::sql) fn execute_lateral_relational_root_output(
             subqueries,
         } => {
             let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
-            let lhs =
-                execute_lateral_subquery_output(engine, left, outer_row, params, &scoped_ctes)?;
+            let lhs = execute_lateral_subquery_output_inner(
+                engine,
+                left,
+                outer_row,
+                params,
+                &scoped_ctes,
+                outer_schema,
+            )?;
             let columns = lhs.columns.clone();
             let lhs = query_output_shared(lhs, "lateral set left")?;
-            let rhs =
-                execute_lateral_subquery_output(engine, right, outer_row, params, &scoped_ctes)?;
+            let rhs = execute_lateral_subquery_output_inner(
+                engine,
+                right,
+                outer_row,
+                params,
+                &scoped_ctes,
+                outer_schema,
+            )?;
             let rhs = query_output_shared(rhs, "lateral set right")?;
             let order_plan =
                 (!order_by.is_empty() || limit.is_some() || offset.is_some()).then(|| {
@@ -252,18 +296,33 @@ pub(in crate::sql) fn execute_lateral_query_block_output(
     outer_row: &ResultRow,
     params: &[SQLParam],
     scoped_ctes: &mut CteScope,
+    outer_schema: Option<&uqa_execution::RowSchema>,
 ) -> Result<QueryOutput, SQLError> {
     let mut scoped_ctes = scoped_ctes.enter_scalar_subqueries(&stmt.subqueries);
     let operator: Box<dyn uqa_execution::PhysicalOperator + '_> =
         if let Some(from) = stmt.from.as_ref() {
             let child =
                 build_join_operator_with_ctes(engine, from, params, &mut scoped_ctes, None, None)?;
-            Box::new(uqa_execution::ScopeOverlay::new(child, outer_row.clone()))
+            match outer_schema {
+                Some(outer_schema) => Box::new(uqa_execution::ScopeOverlay::new_with_outer_schema(
+                    child,
+                    outer_row.clone(),
+                    outer_schema,
+                )),
+                None => Box::new(uqa_execution::ScopeOverlay::new(child, outer_row.clone())),
+            }
         } else {
             let child: Box<dyn uqa_execution::PhysicalOperator + '_> = Box::new(
                 uqa_execution::TableScan::from_rows(Vec::new(), vec![ResultRow::new()]),
             );
-            Box::new(uqa_execution::ScopeOverlay::new(child, outer_row.clone()))
+            match outer_schema {
+                Some(outer_schema) => Box::new(uqa_execution::ScopeOverlay::new_with_outer_schema(
+                    child,
+                    outer_row.clone(),
+                    outer_schema,
+                )),
+                None => Box::new(uqa_execution::ScopeOverlay::new(child, outer_row.clone())),
+            }
         };
     let columns = projection_columns(&stmt.projections);
     crate::sql::select::execute_query_block_operator_output(

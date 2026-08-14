@@ -283,7 +283,10 @@ pub(in crate::compiler) fn compile_column_def(
     let name = col.colname.clone();
     let raw_type = raw_type_name(col)?;
     let ty = compile_type_name(col)?;
-    let mut auto_increment = matches!(raw_type.as_deref(), Some("serial" | "bigserial"));
+    let mut auto_increment = matches!(
+        raw_type.as_deref(),
+        Some("smallserial" | "serial2" | "serial" | "serial4" | "bigserial" | "serial8")
+    );
     let mut primary_key = false;
     let mut not_null = false;
     let mut not_null_explicit = false;

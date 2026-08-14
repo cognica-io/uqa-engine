@@ -380,6 +380,7 @@ fn outer_expression_contains_volatile_function(engine: &Engine, expression: &Sca
                 || outer_expression_contains_volatile_function(engine, rhs)
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => {
             outer_expression_contains_volatile_function(engine, inner)
@@ -490,6 +491,7 @@ fn collect_subquery_ids(expression: &ScalarExpr, output: &mut BTreeSet<usize>) {
             collect_subquery_ids(rhs, output);
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => collect_subquery_ids(inner, output),
         ScalarExpr::Between { expr, low, high } => {
@@ -596,6 +598,7 @@ fn collect_pushdown_outer_columns(expression: &ScalarExpr, output: &mut BTreeSet
                 && collect_pushdown_outer_columns(rhs, output)
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => collect_pushdown_outer_columns(inner, output),
         ScalarExpr::Between { expr, low, high } => {
@@ -1004,6 +1007,7 @@ pub(in crate::sql) fn rewrite_output_filter(
             rhs: Box::new(recur(rhs, used)?),
         },
         ScalarExpr::Not(inner) => ScalarExpr::Not(Box::new(recur(inner, used)?)),
+        ScalarExpr::UnaryMinus(inner) => ScalarExpr::UnaryMinus(Box::new(recur(inner, used)?)),
         ScalarExpr::And(items) => ScalarExpr::And(
             items
                 .iter()

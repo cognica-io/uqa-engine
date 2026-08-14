@@ -76,6 +76,7 @@ use aggregates::{
     PhysicalAggregateExecutor,
 };
 use catalog::build_info_schema_rows;
+pub(in crate::sql) use catalog::virtual_relation_schema;
 use ddl::{
     coerce_to_column_type, column_type_name, core_value_to_json, json_table_arg,
     json_table_value_to_text, json_to_core_value, run_alter_sequence, run_alter_table,
@@ -103,7 +104,7 @@ pub(crate) use row_functions::{
 };
 pub(crate) use select::CteScope;
 use select::{
-    build_projection_row_with_ctes, expand_star_columns, projection_columns, run_explain,
+    bind_projection_output_schema, build_projection_row_with_ctes, projection_columns, run_explain,
     ScopedEngineHook,
 };
 use where_eval::execute_mixed_where;

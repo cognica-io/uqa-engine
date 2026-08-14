@@ -234,11 +234,9 @@ impl Engine {
             return None;
         }
         let columns = table.columns.read();
-        let maps_to_doc_id = columns.iter().any(|col| {
-            col.name == column
-                && col.primary_key
-                && matches!(col.ty, uqa_sql::ast::ColumnType::Integer)
-        });
+        let maps_to_doc_id = columns
+            .iter()
+            .any(|col| col.name == column && col.primary_key && col.ty.is_integer());
         if !maps_to_doc_id {
             return None;
         }

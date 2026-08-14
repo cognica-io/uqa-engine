@@ -6,12 +6,14 @@ UQA-RS has PostgreSQL-oriented type names mapped to the value carriers implement
 
 | SQL declaration | UQA-RS representation and notes |
 | --- | --- |
-| `SMALLINT`, `INTEGER`, `BIGINT` | Signed 64-bit integer carrier |
-| `INT2`, `INT4`, `INT8`, `INT` | Aliases of the integer carrier |
-| `SERIAL`, `SERIAL4`, `BIGSERIAL`, `SERIAL8` | Integer column with generated sequence behavior |
-| `REAL`, `FLOAT4`, `FLOAT8`, `DOUBLE PRECISION` | 64-bit floating-point carrier |
+| `SMALLINT`, `INTEGER`, `BIGINT` | Distinct declared widths with checked PostgreSQL ranges over a signed 64-bit runtime carrier |
+| `INT2`, `INT4`, `INT8`, `INT` | PostgreSQL aliases preserving the corresponding declared width |
+| `SMALLSERIAL`, `SERIAL2`, `SERIAL`, `SERIAL4`, `BIGSERIAL`, `SERIAL8` | Width-preserving integer column with generated sequence behavior |
+| `OID`, `XID` | Distinct unsigned 32-bit PostgreSQL identities over the integer carrier |
+| `REAL`, `FLOAT4` | Distinct single-precision declaration over the floating runtime carrier |
+| `FLOAT8`, `DOUBLE PRECISION` | Double-precision declaration over the floating runtime carrier |
 | `NUMERIC(p,s)`, `DECIMAL(p,s)` | Exact decimal carrier with declared precision and scale checks |
-| `TEXT`, `VARCHAR`, `NAME`, `UUID` | Text carrier |
+| `TEXT`, `VARCHAR(n)`, `NAME`, `UUID` | Distinct declared identities over text-compatible carriers; length and UUID input are validated |
 | `CHARACTER(n)`, `CHAR(n)` | Blank-padded fixed-length character value; default length is 1 |
 | `BOOLEAN`, `BOOL` | Boolean carrier |
 | `DATE` | Calendar date |
@@ -19,6 +21,7 @@ UQA-RS has PostgreSQL-oriented type names mapped to the value carriers implement
 | `TIMETZ`, `TIME WITH TIME ZONE` | Time with timezone |
 | `TIMESTAMP` | Timestamp without timezone |
 | `TIMESTAMPTZ`, `TIMESTAMP WITH TIME ZONE` | Timestamp with timezone semantics |
+| `INTERVAL` | Calendar/time interval |
 | `JSON` | Validated JSON value |
 | `JSONB` | Canonical JSON value with JSONB operations |
 | `BYTEA` | Byte string |
@@ -26,11 +29,9 @@ UQA-RS has PostgreSQL-oriented type names mapped to the value carriers implement
 | `VECTOR(n)` | One finite fixed-dimensional numeric vector |
 | `TENSOR(n)` | A row-level list of finite vectors with fixed element dimension |
 
-`INTERVAL` values are supported by temporal expressions and functions, but `INTERVAL` is not an implemented table column declaration.
-
 ## Integer and serial behavior
 
-All implemented integer aliases use the signed 64-bit value carrier. Do not rely on PostgreSQL's narrower overflow boundary for `SMALLINT` or `INTEGER`; declare application checks when a narrower domain is required.
+`SMALLINT`, `INTEGER`, and `BIGINT` retain distinct declared identities and enforce PostgreSQL's signed 16-bit, 32-bit, and 64-bit ranges at casts, writes, schema rewrites, and supported migration boundaries. `OID` casts preserve the source integer width, including PostgreSQL's sign-extension behavior for negative `SMALLINT` and `INTEGER`, while negative `BIGINT` to `OID` raises `22003`; `XID` accepts its PostgreSQL text input but rejects integer and OID cast sources with `42846`.
 
 Serial declarations allocate generated integer identities. Sequence functions `nextval`, `currval`, and `setval` are available, and standalone sequences can be created explicitly. Identity-owned sequence syntax is not implemented.
 
@@ -53,7 +54,7 @@ Use exact decimal for financial values. Do not substitute floating point where e
 
 ## Text and character types
 
-`TEXT`, `VARCHAR`, `NAME`, and `UUID` use the text carrier. A `VARCHAR(n)` declaration does not provide a portable length-enforcement contract in UQA-RS; add `CHECK (char_length(value) <= n)` when the limit is required.
+`TEXT`, `VARCHAR(n)`, `NAME`, and `UUID` retain distinct declared identities while using text-compatible carriers. `VARCHAR(n)` rejects overlength assignment except for discarded trailing spaces, explicit casts follow PostgreSQL truncation behavior, `NAME` preserves its catalog identity, and UUID input is validated and emitted canonically.
 
 `CHARACTER(n)` pads shorter values with ASCII spaces to its fixed width. Comparisons follow the implemented character coercion behavior; normalize at application boundaries when exchanging data with another database.
 
@@ -95,7 +96,7 @@ Object key order and formatting are not an application contract for JSONB. Use J
 
 ## BYTEA
 
-`BYTEA` carries arbitrary bytes. `encode` and `decode` convert supported textual encodings. When an integer expression has an explicit `SMALLINT`, `INTEGER`, or `BIGINT` source type, its PostgreSQL 18 cast to `BYTEA` emits a signed two-, four-, or eight-byte network-order representation; an unannotated integer expression defaults to `INTEGER`. `BYTEA`-to-integer casts zero-extend shorter inputs before interpreting the target-width sign bit. Language bindings map byte values to their native byte container, such as Python `bytes` or Node.js `Buffer` and `Uint8Array`.
+`BYTEA` carries arbitrary bytes. `encode` and `decode` convert supported textual encodings, and bytea text input validates hexadecimal digit pairs and legacy escape/octal sequences. When an integer expression has an explicit `SMALLINT`, `INTEGER`, or `BIGINT` source type, its PostgreSQL 18 cast to `BYTEA` emits a signed two-, four-, or eight-byte network-order representation; an unannotated integer expression defaults to `INTEGER`, while boolean, numeric, and floating sources are rejected with PostgreSQL cast SQLSTATEs. `BYTEA`-to-integer casts zero-extend shorter inputs before interpreting the target-width sign bit. Language bindings map byte values to their native byte container, such as Python `bytes` or Node.js `Buffer` and `Uint8Array`.
 
 ## Arrays
 

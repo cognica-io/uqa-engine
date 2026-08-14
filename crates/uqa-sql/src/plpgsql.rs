@@ -159,9 +159,8 @@ impl PLpgSQLDatum {
 #[derive(Debug, Clone)]
 pub struct PLpgSQLVar {
     pub name: String,
-    /// Normalized type name (`integer`, `text`, ...). Types the value
-    /// layer cannot cast (e.g. `%type`, `record`) are kept verbatim
-    /// and skipped at assignment time.
+    /// Normalized type name (`integer`, `text`, ...). The engine resolves
+    /// catalog-backed references such as `%TYPE` before execution.
     pub type_name: String,
     pub default: Option<Expr>,
     pub constant: bool,

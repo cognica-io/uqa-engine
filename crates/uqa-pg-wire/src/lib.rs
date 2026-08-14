@@ -25,12 +25,13 @@ pub mod protocol;
 
 pub use backend::{
     encode_all, encode_all_for_protocol, Authentication, BackendKeyData, BackendMessage,
-    CopyResponse, ErrorOrNotice, FieldDescription, GSSEncResponse, NoticeSeverity, SSLResponse,
+    CopyResponse, ErrorOrNotice, FieldDescription, GSSEncResponse, NoticeSeverity,
+    NotificationResponse, SSLResponse,
 };
 pub use frontend::{
     decode_frontend, decode_frontend_with_max, decode_startup, decode_startup_with_max, Bind,
-    CloseTarget, DescribeTarget, Execute, FrontendMessage, Parse, StartupFrame, StartupMessage,
-    StartupNegotiation,
+    CloseTarget, DescribeTarget, Execute, FrontendMessage, FunctionCall, Parse, StartupFrame,
+    StartupMessage, StartupNegotiation,
 };
 pub use protocol::{
     CancelKey, DecodeError, DecodeOutcome, FormatCode, PgWireError, ProtocolVersion,

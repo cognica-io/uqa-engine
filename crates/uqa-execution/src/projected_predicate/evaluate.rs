@@ -10,7 +10,7 @@ use uqa_core::Value;
 use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::{
     cast_value_from, eval_binary_values, eval_binary_values_with_integer_width,
-    eval_comparison_truth, truthy,
+    eval_comparison_truth, negate_value, truthy,
 };
 use uqa_sql::SQLError;
 
@@ -159,6 +159,11 @@ fn evaluate<'a, F: FieldValues + ?Sized>(
                 *integer_width,
             )?)
         }
+        ProjectedExpr::UnaryMinus(expression) => {
+            let source_ty = projected_source_type(expression);
+            let value = evaluate(expression, fields)?;
+            ProjectedValue::Owned(negate_value(value.as_value(), source_ty)?)
+        }
         ProjectedExpr::IntFieldComparison {
             field,
             op,
@@ -221,6 +226,19 @@ fn evaluate<'a, F: FieldValues + ?Sized>(
         }
     };
     Ok(value)
+}
+
+fn projected_source_type(expression: &ProjectedExpr) -> Option<&str> {
+    match expression {
+        ProjectedExpr::Cast { ty, .. } => Some(ty),
+        ProjectedExpr::UnaryMinus(inner) => projected_source_type(inner),
+        ProjectedExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => {
+            Some("integer")
+        }
+        ProjectedExpr::Literal(Value::Int(_)) => Some("bigint"),
+        ProjectedExpr::Literal(Value::Bytes(_)) => Some("bytea"),
+        _ => None,
+    }
 }
 
 fn evaluate_int_comparison(

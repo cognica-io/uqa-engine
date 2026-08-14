@@ -12,8 +12,9 @@ use super::{
     index_vectors_for_type, insert_identity_columns, resolve_insert_conflict,
     validate_document_constraints, validate_document_non_key_constraints, validate_key_constraints,
     validate_mutation_columns, BTreeMap, ColumnType, ConflictActionPlan, ConflictPlan, CteScope,
-    DocId, Document, Engine, InsertConflictResolution, InsertPlan, MutationAssignmentTarget,
-    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult,
+    DmlReturningShape, DocId, Document, Engine, InsertConflictResolution, InsertPlan,
+    MutationAssignmentTarget, ReturningProjectionRow, ReturningRowImage, ReturningRowImages,
+    SQLError, SQLParam, SQLResult,
 };
 
 pub(in crate::sql) fn run_insert(
@@ -143,18 +144,21 @@ pub(in crate::sql) fn run_insert_inner(
                         if !stmt.returning.is_empty() {
                             returning_rows.push(build_returning_row(
                                 engine,
-                                &stmt.table,
-                                ReturningRowImages {
-                                    old: Some(ReturningRowImage {
-                                        doc_id: old_doc_id,
-                                        document: &old_document,
-                                    }),
-                                    new: Some(ReturningRowImage {
-                                        doc_id,
-                                        document: &document,
-                                    }),
+                                ReturningProjectionRow {
+                                    table: &stmt.table,
+                                    images: ReturningRowImages {
+                                        old: Some(ReturningRowImage {
+                                            doc_id: old_doc_id,
+                                            document: &old_document,
+                                        }),
+                                        new: Some(ReturningRowImage {
+                                            doc_id,
+                                            document: &document,
+                                        }),
+                                    },
+                                    aliases: &stmt.returning_aliases,
+                                    context: None,
                                 },
-                                &stmt.returning_aliases,
                                 &stmt.returning,
                                 params,
                                 &scope,
@@ -192,15 +196,18 @@ pub(in crate::sql) fn run_insert_inner(
             if !stmt.returning.is_empty() {
                 returning_rows.push(build_returning_row(
                     engine,
-                    &stmt.table,
-                    ReturningRowImages {
-                        old: None,
-                        new: Some(ReturningRowImage {
-                            doc_id,
-                            document: &document,
-                        }),
+                    ReturningProjectionRow {
+                        table: &stmt.table,
+                        images: ReturningRowImages {
+                            old: None,
+                            new: Some(ReturningRowImage {
+                                doc_id,
+                                document: &document,
+                            }),
+                        },
+                        aliases: &stmt.returning_aliases,
+                        context: None,
                     },
-                    &stmt.returning_aliases,
                     &stmt.returning,
                     params,
                     &scope,
@@ -211,8 +218,15 @@ pub(in crate::sql) fn run_insert_inner(
         if !stmt.returning.is_empty() {
             return dml_returning_result(
                 engine,
-                &stmt.table,
-                &stmt.returning,
+                DmlReturningShape {
+                    table: &stmt.table,
+                    target_qualifier: None,
+                    aliases: &stmt.returning_aliases,
+                    returning: &stmt.returning,
+                    params,
+                    ctes: &scope,
+                    supplemental_schema: None,
+                },
                 returning_rows,
                 affected,
             );
@@ -335,18 +349,21 @@ pub(in crate::sql) fn run_insert_inner(
                     if !stmt.returning.is_empty() {
                         returning_rows.push(build_returning_row(
                             engine,
-                            &stmt.table,
-                            ReturningRowImages {
-                                old: Some(ReturningRowImage {
-                                    doc_id: old_doc_id,
-                                    document: &old_document,
-                                }),
-                                new: Some(ReturningRowImage {
-                                    doc_id,
-                                    document: &document,
-                                }),
+                            ReturningProjectionRow {
+                                table: &stmt.table,
+                                images: ReturningRowImages {
+                                    old: Some(ReturningRowImage {
+                                        doc_id: old_doc_id,
+                                        document: &old_document,
+                                    }),
+                                    new: Some(ReturningRowImage {
+                                        doc_id,
+                                        document: &document,
+                                    }),
+                                },
+                                aliases: &stmt.returning_aliases,
+                                context: None,
                             },
-                            &stmt.returning_aliases,
                             &stmt.returning,
                             params,
                             &scope,
@@ -395,15 +412,18 @@ pub(in crate::sql) fn run_insert_inner(
         if !stmt.returning.is_empty() {
             returning_rows.push(build_returning_row(
                 engine,
-                &stmt.table,
-                ReturningRowImages {
-                    old: None,
-                    new: Some(ReturningRowImage {
-                        doc_id,
-                        document: &document,
-                    }),
+                ReturningProjectionRow {
+                    table: &stmt.table,
+                    images: ReturningRowImages {
+                        old: None,
+                        new: Some(ReturningRowImage {
+                            doc_id,
+                            document: &document,
+                        }),
+                    },
+                    aliases: &stmt.returning_aliases,
+                    context: None,
                 },
-                &stmt.returning_aliases,
                 &stmt.returning,
                 params,
                 &scope,
@@ -414,8 +434,15 @@ pub(in crate::sql) fn run_insert_inner(
     if !stmt.returning.is_empty() {
         return dml_returning_result(
             engine,
-            &stmt.table,
-            &stmt.returning,
+            DmlReturningShape {
+                table: &stmt.table,
+                target_qualifier: None,
+                aliases: &stmt.returning_aliases,
+                returning: &stmt.returning,
+                params,
+                ctes: &scope,
+                supplemental_schema: None,
+            },
             returning_rows,
             affected,
         );

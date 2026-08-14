@@ -118,7 +118,10 @@ fn bind_function_calls(
             bind_function_calls(engine, columns, lhs, dependencies)?;
             bind_function_calls(engine, columns, rhs, dependencies)
         }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+        Expr::Not(inner)
+        | Expr::UnaryMinus(inner)
+        | Expr::IsNull { expr: inner, .. }
+        | Expr::Cast { expr: inner, .. } => {
             bind_function_calls(engine, columns, inner, dependencies)
         }
         Expr::Between { expr, low, high } => {
@@ -165,14 +168,33 @@ fn bind_function_calls(
 
 pub(super) fn column_generation_type(ty: &ColumnType) -> GenerationType {
     match ty {
-        ColumnType::Integer => GenerationType::Integer,
+        ColumnType::SmallInteger
+        | ColumnType::Integer
+        | ColumnType::BigInteger
+        | ColumnType::Oid
+        | ColumnType::Xid => GenerationType::Integer,
         ColumnType::Boolean => GenerationType::Boolean,
-        ColumnType::Text | ColumnType::Character(_) => GenerationType::Text,
-        ColumnType::Real => GenerationType::Real,
+        ColumnType::Text
+        | ColumnType::Name
+        | ColumnType::Uuid
+        | ColumnType::Varchar(_)
+        | ColumnType::Bpchar
+        | ColumnType::Character(_)
+        | ColumnType::InternalChar
+        | ColumnType::Regproc
+        | ColumnType::Regtype
+        | ColumnType::PgNodeTree
+        | ColumnType::AclItem => GenerationType::Text,
+        ColumnType::Real | ColumnType::DoublePrecision => GenerationType::Real,
         ColumnType::Numeric { .. } => GenerationType::Numeric,
         ColumnType::Json => GenerationType::Json,
         ColumnType::JsonB => GenerationType::JsonB,
         ColumnType::Bytea => GenerationType::Bytea,
+        ColumnType::Int2Vector => GenerationType::Array(Box::new(GenerationType::Integer)),
+        ColumnType::OidVector => GenerationType::Array(Box::new(GenerationType::Integer)),
+        ColumnType::AnyArray => {
+            GenerationType::Array(Box::new(GenerationType::UnknownLiteral("unknown".into())))
+        }
         ColumnType::Array(element) => {
             GenerationType::Array(Box::new(column_generation_type(element)))
         }
@@ -181,8 +203,10 @@ pub(super) fn column_generation_type(ty: &ColumnType) -> GenerationType {
         ColumnType::TimeTz => GenerationType::TimeTz,
         ColumnType::Timestamp => GenerationType::Timestamp,
         ColumnType::TimestampTz => GenerationType::TimestampTz,
+        ColumnType::Interval => GenerationType::Interval,
         ColumnType::Vector(_) => GenerationType::Vector,
         ColumnType::Tensor(_) => GenerationType::Tensor,
+        ColumnType::Domain { base, .. } => column_generation_type(base),
     }
 }
 
@@ -247,6 +271,19 @@ fn infer_expression(
             let ty = infer_expression(engine, columns, inner, dependencies)?;
             require_class("NOT", std::slice::from_ref(&ty), TypeClass::Boolean)?;
             Ok(GenerationType::Boolean)
+        }
+        Expr::UnaryMinus(inner) => {
+            let ty = infer_expression(engine, columns, inner, dependencies)?;
+            match ty {
+                GenerationType::Integer
+                | GenerationType::Real
+                | GenerationType::Numeric
+                | GenerationType::Interval => Ok(ty),
+                _ => Err(SQLError::TypeMismatch(format!(
+                    "operator does not exist: - {}",
+                    generation_type_name(&ty)
+                ))),
+            }
         }
         Expr::And(items) | Expr::Or(items) => {
             let types = items

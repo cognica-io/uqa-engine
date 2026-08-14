@@ -109,9 +109,28 @@ pub(super) fn compile_pg_type_name(
         })?
         .to_lowercase();
     let base = match raw.as_str() {
-        "int" | "int4" | "integer" | "bigint" | "int8" | "smallint" | "int2" | "serial"
-        | "bigserial" | "serial4" | "serial8" => Ok(ColumnType::Integer),
-        "text" | "varchar" | "name" | "uuid" => Ok(ColumnType::Text),
+        "smallint" | "int2" | "smallserial" | "serial2" => Ok(ColumnType::SmallInteger),
+        "int" | "int4" | "integer" | "serial" | "serial4" => Ok(ColumnType::Integer),
+        "bigint" | "int8" | "bigserial" | "serial8" => Ok(ColumnType::BigInteger),
+        "oid" => Ok(ColumnType::Oid),
+        "xid" => Ok(ColumnType::Xid),
+        "text" => Ok(ColumnType::Text),
+        "name" => Ok(ColumnType::Name),
+        "uuid" => Ok(ColumnType::Uuid),
+        "varchar" | "character varying" => {
+            if type_name.typmods.len() > 1 {
+                return Err(SQLError::TypeMismatch(format!(
+                    "CHARACTER VARYING accepts at most one length modifier, got {}",
+                    type_name.typmods.len()
+                )));
+            }
+            let length = type_name
+                .typmods
+                .first()
+                .map(expect_positive_character_length)
+                .transpose()?;
+            Ok(ColumnType::Varchar(length))
+        }
         "character" | "char" | "bpchar" => {
             if type_name.typmods.len() > 1 {
                 return Err(SQLError::TypeMismatch(format!(
@@ -122,21 +141,14 @@ pub(super) fn compile_pg_type_name(
             let length = type_name
                 .typmods
                 .first()
-                .map(expect_integer_const)
+                .map(expect_positive_character_length)
                 .transpose()?
                 .unwrap_or(1);
-            let length = u32::try_from(length)
-                .ok()
-                .filter(|length| *length > 0)
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(format!(
-                        "CHARACTER length must be greater than zero, got {length}"
-                    ))
-                })?;
             Ok(ColumnType::Character(length))
         }
         "bool" | "boolean" => Ok(ColumnType::Boolean),
-        "real" | "float4" | "float8" | "double" | "double precision" => Ok(ColumnType::Real),
+        "real" | "float4" => Ok(ColumnType::Real),
+        "float8" | "double" | "double precision" => Ok(ColumnType::DoublePrecision),
         "numeric" | "decimal" => {
             if type_name.typmods.len() > 2 {
                 return Err(SQLError::TypeMismatch(format!(
@@ -179,9 +191,16 @@ pub(super) fn compile_pg_type_name(
         "timetz" | "time with time zone" => Ok(ColumnType::TimeTz),
         "timestamp" | "datetime" | "timestamp without time zone" => Ok(ColumnType::Timestamp),
         "timestamptz" | "timestamp with time zone" => Ok(ColumnType::TimestampTz),
+        "interval" => Ok(ColumnType::Interval),
         "json" => Ok(ColumnType::Json),
         "jsonb" => Ok(ColumnType::JsonB),
         "bytea" => Ok(ColumnType::Bytea),
+        "regproc" => Ok(ColumnType::Regproc),
+        "regtype" => Ok(ColumnType::Regtype),
+        "pg_node_tree" => Ok(ColumnType::PgNodeTree),
+        "aclitem" => Ok(ColumnType::AclItem),
+        "int2vector" => Ok(ColumnType::Int2Vector),
+        "oidvector" => Ok(ColumnType::OidVector),
         "vector" => {
             // VECTOR(N): the dimension is the only typmod argument.
             let [arg] = type_name.typmods.as_slice() else {
@@ -232,6 +251,18 @@ pub(super) fn compile_pg_type_name(
         .array_bounds
         .iter()
         .fold(base, |element, _| ColumnType::Array(Box::new(element))))
+}
+
+fn expect_positive_character_length(node: &Node) -> Result<u32> {
+    let length = expect_integer_const(node)?;
+    u32::try_from(length)
+        .ok()
+        .filter(|length| *length > 0)
+        .ok_or_else(|| {
+            SQLError::TypeMismatch(format!(
+                "character length must be greater than zero, got {length}"
+            ))
+        })
 }
 
 fn expect_integer_const(node: &Node) -> Result<i64> {

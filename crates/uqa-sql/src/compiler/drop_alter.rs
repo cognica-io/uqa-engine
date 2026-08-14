@@ -223,9 +223,18 @@ pub(super) fn compile_alter_table(
                 .as_ref()
                 .and_then(|d| d.node.as_ref())
                 .ok_or_else(|| SQLError::Internal("ALTER COLUMN TYPE without type".into()))?;
-            let ty = match def_inner {
-                NodeEnum::ColumnDef(c) => compile_column_def(c)?.ty,
-                NodeEnum::TypeName(t) => compile_pg_type_name(t, &cmd.name)?,
+            let (ty, using) = match def_inner {
+                NodeEnum::ColumnDef(column) => (
+                    compile_column_def(column)?.ty,
+                    column
+                        .raw_default
+                        .as_deref()
+                        .map(compile_expr)
+                        .transpose()?,
+                ),
+                NodeEnum::TypeName(type_name) => {
+                    (compile_pg_type_name(type_name, &cmd.name)?, None)
+                }
                 other => {
                     return Err(SQLError::Internal(format!(
                         "ALTER COLUMN TYPE expected ColumnDef/TypeName, got {other:?}"
@@ -235,6 +244,7 @@ pub(super) fn compile_alter_table(
             AlterTableAction::AlterColumnType {
                 name: cmd.name.clone(),
                 ty,
+                using,
             }
         }
         other => {

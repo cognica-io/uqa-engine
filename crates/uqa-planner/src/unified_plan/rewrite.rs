@@ -299,7 +299,8 @@ pub(super) fn rewrite_scalar(
             rewrite_scalar(lhs, rewrite);
             rewrite_scalar(rhs, rewrite);
         }
-        ScalarExpr::Not(inner)
+        ScalarExpr::UnaryMinus(inner)
+        | ScalarExpr::Not(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => rewrite_scalar(inner, rewrite),
         ScalarExpr::Between { expr, low, high } => {

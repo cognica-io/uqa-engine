@@ -52,9 +52,9 @@
       "id": "query.join-using-natural",
       "postgresql_reference": "PostgreSQL 18.4 SELECT and table-expression documentation plus live qualified-join results and SQLSTATEs",
       "uqa_test": "cargo test -p uqa-engine --test integration engine_queries::sql_joins::; tests/parity/pg18/probes.sql",
-      "supported_version": "PostgreSQL 18.4 binding, output-shape, qualification, and outer-join semantics for carrier-compatible columns",
+      "supported_version": "PostgreSQL 18.4 binding, common-type coercion for implemented scalar types, output shape, qualification, and outer-join semantics",
       "status": "partial",
-      "open_issue": "Static equality-operator resolution and PostgreSQL common-type coercion for differently declared USING columns remain."
+      "open_issue": "Collations, domains, user-defined equality operators, and the complete PostgreSQL common-type matrix remain."
     },
     {
       "id": "dml.returning-row-images",
@@ -81,6 +81,30 @@
       "open_issue": "The complete PostgreSQL 18 function, type, overload, and catalog matrix remains."
     },
     {
+      "id": "execution.static-row-schema-and-spill-v1",
+      "postgresql_reference": "PostgreSQL 18 declared row descriptions and name-resolution behavior across relational operators",
+      "uqa_test": "cargo test -p uqa-execution --lib; cargo test -p uqa-engine --test integration engine_queries::sql_joins::; cargo test -p uqa-engine --test integration engine_queries::sql_prepared::",
+      "supported_version": "Static declared schemas through implemented scans, projections, filters, joins, CTEs, aggregates, windows, DML RETURNING, cursors, foreign tables, and spill format version 1 logical identities",
+      "status": "partial",
+      "open_issue": "Every remaining expression/operator and persistent relation kind must retain exact declared metadata, and the complete wire row-description matrix remains."
+    },
+    {
+      "id": "types.declared-identity-casts-and-catalog",
+      "postgresql_reference": "PostgreSQL 18.4 pg_cast, pg_type, pg_class, pg_attribute, scalar cast results, errors, and SQLSTATEs",
+      "uqa_test": "cargo test -p uqa-sql expr::casting::tests; cargo test -p uqa-engine --test integration engine_functions::pg18_semantics::; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::",
+      "supported_version": "Implemented scalar width identities, source-sensitive OID/XID/bytea casts, built-in/domain/pseudo/composite pg_type metadata, and information_schema_catalog_name identity",
+      "status": "partial",
+      "open_issue": "The full assignment-cast matrix, pg_proc rows for every type I/O routine, collations, user composites, enums, ranges, typmods, domain constraints, and binary formats remain."
+    },
+    {
+      "id": "ddl.alter-type-and-migration",
+      "postgresql_reference": "PostgreSQL 18.4 ALTER TABLE ALTER COLUMN TYPE and type conversion behavior",
+      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::alter_column_type_preserves_the_using_expression; cargo test -p uqa-engine --test integration engine_catalog::sql_ddl::alter_column_type_; cargo test -p uqa-engine --lib migration::tests",
+      "supported_version": "Structural USING expressions evaluated per old row, atomic rollback, source-sensitive OID widths, supported migration type identity, and explicit rejection of unknown migration types",
+      "status": "partial",
+      "open_issue": "The complete PostgreSQL assignment-cast matrix, dependency and collation rewrites, domain checks, and upstream ALTER TYPE regression cases remain."
+    },
+    {
       "id": "catalog.pg-database-locale",
       "postgresql_reference": "PostgreSQL 18 pg_database catalog",
       "uqa_test": "crates/uqa-engine/tests/sql_information_schema.rs",
@@ -91,8 +115,8 @@
     {
       "id": "plpgsql.datum-slots-and-bound-cursors",
       "postgresql_reference": "PostgreSQL 18 PL/pgSQL statements and cursor documentation",
-      "uqa_test": "crates/uqa-engine/tests/sql_plpgsql/scalar_and_resolution.rs",
-      "supported_version": "PostgreSQL 18",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::",
+      "supported_version": "PostgreSQL 18 datum slots, qualified named types, table-backed %TYPE resolution, strict scalar coercion, and bound cursor subset",
       "status": "partial",
       "open_issue": "Session portal state is required for refcursor parameters, returns, and cursors surviving routine exit."
     },
@@ -100,9 +124,9 @@
       "id": "protocol.frontend-backend-3.2",
       "postgresql_reference": "PostgreSQL 18 frontend/backend protocol 3.2 message formats and flow",
       "uqa_test": "crates/uqa-pg-wire/tests/protocol.rs",
-      "supported_version": "PostgreSQL 18.4",
+      "supported_version": "PostgreSQL 18.4 byte-exact messages, negotiation, cancellation, COPY validation, FunctionCall, GSS/SSPI message shapes, notifications, and live extended-query flow",
       "status": "partial",
-      "open_issue": "Credentialed GSS, non-trust authentication, extended-query, binary-format, and broader live-driver coverage remain."
+      "open_issue": "Credentialed GSS, non-trust authentication, extended-query binary formats, and broader live-driver coverage remain."
     },
     {
       "id": "ddl.generated-columns",

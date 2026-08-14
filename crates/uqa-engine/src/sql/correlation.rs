@@ -511,6 +511,7 @@ fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -
                 || expression_has_external_reference(rhs, scopes)
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => expression_has_external_reference(inner, scopes),
         ScalarExpr::Between { expr, low, high } => {

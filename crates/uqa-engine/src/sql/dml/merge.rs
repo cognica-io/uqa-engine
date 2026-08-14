@@ -10,13 +10,13 @@ use super::{
     apply_missing_column_defaults, build_join_spill_with_ctes, build_projection_row_with_ctes,
     decode_merge_pair, delete_document_with_referential_actions, dml_returning_result,
     dml_storage_error, doc_id_value, document_supplied_id, encode_merge_pair,
-    eval_mutation_assignment, eval_mutation_expr, insert_identity_columns,
-    insert_prepared_document_with_constraints, merge_pair_schema, merge_source_index_value,
-    missing_document_error, prefix_row, returning_row_context,
+    eval_mutation_assignment, eval_mutation_expr, expanded_returning_projections,
+    insert_identity_columns, insert_prepared_document_with_constraints, merge_pair_schema,
+    merge_source_index_value, missing_document_error, prefix_row, returning_row_context,
     rewrite_document_with_referential_actions, validate_mutation_columns, BTreeSet, CteScope,
-    Document, Engine, MergePlan, MergeWhenPlan, MutationAssignmentTarget, ProjectionPlan,
-    ResultRow, ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
-    MERGE_ACTION_COLUMN,
+    DmlReturningShape, Document, Engine, MergePlan, MergeWhenPlan, MutationAssignmentTarget,
+    ProjectionPlan, ResultRow, ReturningRowImage, ReturningRowImages, SQLError, SQLParam,
+    SQLResult, Value, MERGE_ACTION_COLUMN,
 };
 
 #[allow(clippy::too_many_lines)]
@@ -442,8 +442,15 @@ pub(in crate::sql) fn run_merge_inner(
     if !stmt.returning.is_empty() {
         return dml_returning_result(
             engine,
-            &target_table,
-            &stmt.returning,
+            DmlReturningShape {
+                table: &target_table,
+                target_qualifier: Some(&target_qual),
+                aliases: &stmt.returning_aliases,
+                returning: &stmt.returning,
+                params,
+                ctes: &ctes,
+                supplemental_schema: Some(source_rows.row_schema()),
+            },
             returning_rows,
             affected,
         );
@@ -487,7 +494,8 @@ pub(in crate::sql) fn build_merge_returning_row(
             row_doc.entry(key.clone()).or_insert_with(|| value.clone());
         }
     }
-    build_projection_row_with_ctes(engine, &row_doc, returning, params, ctes).map_err(|err| {
+    let projections = expanded_returning_projections(engine, input.target_table, returning)?;
+    build_projection_row_with_ctes(engine, &row_doc, &projections, params, ctes).map_err(|err| {
         SQLError::Internal(format!(
             "MERGE RETURNING projection failed for table `{}` doc {}: {err}",
             input.target_table, current.doc_id

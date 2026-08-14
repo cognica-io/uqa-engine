@@ -63,6 +63,7 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
             lhs: Box::new(bind_expr(lhs, r)?),
             rhs: Box::new(bind_expr(rhs, r)?),
         },
+        Expr::UnaryMinus(inner) => Expr::UnaryMinus(Box::new(bind_expr(inner, r)?)),
         Expr::Not(inner) => Expr::Not(Box::new(bind_expr(inner, r)?)),
         Expr::And(items) => Expr::And(bind_exprs(items, r)?),
         Expr::Or(items) => Expr::Or(bind_exprs(items, r)?),

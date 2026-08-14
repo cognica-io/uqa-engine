@@ -53,7 +53,7 @@ FULL JOIN (VALUES (1, 'right')) AS r(id, right_value)
 USING (id) AS merged;
 ```
 
-Duplicate or missing `USING` names and ambiguous common input names are rejected with PostgreSQL SQLSTATEs. Static equality-operator resolution and common-type coercion for `USING` columns with different declared types remain an open PostgreSQL 18 compatibility bug. Parenthesized join aliases are also outside the supported surface.
+Duplicate or missing `USING` names, ambiguous common input names, and unsupported equality/common-type pairs are rejected with PostgreSQL SQLSTATEs before execution. Differently declared columns use the implemented PostgreSQL 18 common-type coercion matrix; collations, domains, user-defined equality operators, and the complete common-type matrix remain open. Parenthesized join aliases are also outside the supported surface.
 
 ## LATERAL
 

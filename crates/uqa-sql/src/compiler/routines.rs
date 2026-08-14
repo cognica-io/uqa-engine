@@ -12,26 +12,36 @@ use super::{
     Statement,
 };
 
-/// Last non-`pg_catalog` segment of a `TypeName`, lower-cased, with
-/// `%TYPE` and array-bound suffixes preserved so the executor can
-/// treat them as uncastable (best-effort) types.
+/// Canonical spelling of a routine `TypeName`. A leading `pg_catalog`
+/// qualifier is redundant, while relation qualification on `%TYPE` and
+/// schema qualification on named types must survive compilation for catalog
+/// resolution by the engine.
 pub(super) fn compile_function_type_name(t: &pg_query::protobuf::TypeName) -> Result<String> {
-    let mut last = String::new();
-    for n in &t.names {
-        let name = extract_string(n)?;
-        if name != "pg_catalog" {
-            last = name;
-        }
+    let mut components = t
+        .names
+        .iter()
+        .map(extract_string)
+        .collect::<Result<Vec<_>>>()?;
+    if components
+        .first()
+        .is_some_and(|component| component.eq_ignore_ascii_case("pg_catalog"))
+    {
+        components.remove(0);
     }
-    if last.is_empty() {
+    if components.is_empty() {
         return Err(SQLError::Internal(
             "function type has no name components".into(),
         ));
     }
     // `setof` is inspected separately by the caller; the name itself
     // stays scalar.
-    let mut name = last.trim().to_ascii_lowercase();
+    let mut name = components.join(".").trim().to_ascii_lowercase();
     if t.pct_type {
+        if components.len() < 2 {
+            return Err(SQLError::TypeMismatch(
+                "%TYPE requires a relation and column reference".into(),
+            ));
+        }
         name.push_str("%type");
     }
     for _ in &t.array_bounds {

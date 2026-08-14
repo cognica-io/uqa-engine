@@ -110,6 +110,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         );
         Ok(SQLResult {
             columns: vec![name.to_string()],
+            column_types: vec![Some(uqa_sql::ColumnType::Text)],
             rows: vec![row],
             positional_rows: None,
             affected_rows: 0,

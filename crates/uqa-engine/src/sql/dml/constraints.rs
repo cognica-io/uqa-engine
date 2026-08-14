@@ -255,10 +255,7 @@ pub(in crate::sql) fn integer_primary_key_doc_id(
     else {
         return Ok(None);
     };
-    let Some(pk) = cols
-        .iter()
-        .find(|c| c.primary_key && matches!(c.ty, uqa_sql::ast::ColumnType::Integer))
-    else {
+    let Some(pk) = cols.iter().find(|c| c.primary_key && c.ty.is_integer()) else {
         return Ok(None);
     };
     Ok(match doc.get(&pk.name) {

@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 
 use uqa_core::{DecimalValue, TemporalValue, Value};
+use uqa_sql::ast::ColumnType;
 
 use crate::batch::{Batch, PhysicalRow, RowSchema};
 use crate::physical::ExecResult;
@@ -21,6 +22,7 @@ pub(crate) fn decode_batch(record: &[u8]) -> ExecResult<Batch> {
     let physical_width = reader.read_count("schema physical width", 1)?;
     let column_count = reader.read_count("schema column count", 16)?;
     let mut columns = Vec::new();
+    let mut types = Vec::new();
     let mut slots = Vec::new();
     columns
         .try_reserve_exact(column_count)
@@ -28,9 +30,13 @@ pub(crate) fn decode_batch(record: &[u8]) -> ExecResult<Batch> {
     slots
         .try_reserve_exact(column_count)
         .map_err(|error| spill_error(format!("cannot allocate spill schema slots: {error}")))?;
+    types
+        .try_reserve_exact(column_count)
+        .map_err(|error| spill_error(format!("cannot allocate spill schema types: {error}")))?;
     for _ in 0..column_count {
         columns.push(reader.read_string("schema column")?);
         slots.push(reader.read_slot("schema logical slot", physical_width)?);
+        types.push(reader.read_column_type("schema column type")?);
     }
     let alias_count = reader.read_count("schema alias count", 16)?;
     let mut aliases = Vec::new();
@@ -41,9 +47,10 @@ pub(crate) fn decode_batch(record: &[u8]) -> ExecResult<Batch> {
         aliases.push((
             reader.read_string("schema alias")?,
             reader.read_slot("schema alias slot", physical_width)?,
+            reader.read_column_type("schema alias type")?,
         ));
     }
-    let schema = RowSchema::from_physical_layout(columns, slots, physical_width, aliases)
+    let schema = RowSchema::from_physical_layout(columns, types, slots, physical_width, aliases)
         .map_err(|error| spill_error(format!("invalid spill schema: {error}")))?;
     let row_count = reader.read_count("batch row count", 8)?;
     let mut rows = Vec::new();
@@ -139,6 +146,16 @@ impl<'a> BinaryReader<'a> {
         let bytes = self.read_bytes(description)?;
         String::from_utf8(bytes.to_vec())
             .map_err(|error| spill_error(format!("invalid UTF-8 in {description}: {error}")))
+    }
+
+    fn read_column_type(&mut self, description: &str) -> ExecResult<Option<ColumnType>> {
+        let encoded = self.read_string(description)?;
+        if encoded.is_empty() {
+            return Ok(None);
+        }
+        serde_json::from_str(&encoded)
+            .map(Some)
+            .map_err(|error| spill_error(format!("invalid {description}: {error}")))
     }
 
     fn read_slot(&mut self, description: &str, physical_width: usize) -> ExecResult<Option<usize>> {

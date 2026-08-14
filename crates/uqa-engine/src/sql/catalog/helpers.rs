@@ -10,10 +10,11 @@ use super::{
     canonical_routine_type_name, column_type_name, ColumnType, Engine, Expr, RelationIdentity,
     ResultRow, SQLColumnDef, SQLError, Value,
 };
-use std::fmt::Write as _;
 use uqa_sql::ast::{
     ForeignKey, ForeignKeyAction, ForeignKeyMatch, TableKeyConstraintKind, WindowFrame, WindowSpec,
 };
+
+pub(super) use super::expression_text::{default_expr_text, schema_expr_text};
 
 pub(super) fn catalog_name() -> Value {
     Value::Str("uqa".into())
@@ -434,7 +435,7 @@ pub(super) fn schema_oid(schema: &str) -> i64 {
     match schema {
         "pg_catalog" => 11,
         "public" => 2200,
-        "information_schema" => 13_377,
+        "information_schema" => 13_293,
         other => stable_oid("namespace", other),
     }
 }
@@ -475,32 +476,66 @@ pub(super) fn table_columns_for(
 
 pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
     match ty {
+        ColumnType::SmallInteger => 21,
         ColumnType::Integer => 23,
+        ColumnType::BigInteger => 20,
+        ColumnType::Oid => 26,
+        ColumnType::Xid => 28,
         ColumnType::Boolean => 16,
         ColumnType::Text => 25,
-        ColumnType::Character(_) => 1042,
-        ColumnType::Real => 701,
+        ColumnType::Name => 19,
+        ColumnType::Uuid => 2950,
+        ColumnType::Varchar(_) => 1043,
+        ColumnType::Bpchar | ColumnType::Character(_) => 1042,
+        ColumnType::Real => 700,
+        ColumnType::DoublePrecision => 701,
         ColumnType::Numeric { .. } => 1700,
         ColumnType::Json => 114,
         ColumnType::JsonB => 3802,
         ColumnType::Bytea => 17,
+        ColumnType::InternalChar => 18,
+        ColumnType::Regproc => 24,
+        ColumnType::Regtype => 2206,
+        ColumnType::PgNodeTree => 194,
+        ColumnType::AclItem => 1033,
+        ColumnType::Int2Vector => 22,
+        ColumnType::OidVector => 30,
+        ColumnType::AnyArray => 2277,
         ColumnType::Array(element) => match element.as_ref() {
+            ColumnType::SmallInteger => 1005,
             ColumnType::Integer => 1007,
+            ColumnType::BigInteger => 1016,
+            ColumnType::Oid => 1028,
+            ColumnType::Xid => 1011,
             ColumnType::Boolean => 1000,
             ColumnType::Text => 1009,
-            ColumnType::Character(_) => 1014,
-            ColumnType::Real => 1022,
+            ColumnType::Name => 1003,
+            ColumnType::Uuid => 2951,
+            ColumnType::Varchar(_) => 1015,
+            ColumnType::Bpchar | ColumnType::Character(_) => 1014,
+            ColumnType::Real => 1021,
+            ColumnType::DoublePrecision => 1022,
             ColumnType::Numeric { .. } => 1231,
             ColumnType::Json => 199,
             ColumnType::JsonB => 3807,
             ColumnType::Bytea => 1001,
+            ColumnType::InternalChar => 1002,
+            ColumnType::Regproc => 1008,
+            ColumnType::Regtype => 2211,
+            ColumnType::PgNodeTree => 0,
+            ColumnType::AclItem => 1034,
+            ColumnType::Int2Vector => 1006,
+            ColumnType::OidVector => 1013,
+            ColumnType::AnyArray => 0,
             ColumnType::Date => 1182,
             ColumnType::Time => 1183,
             ColumnType::TimeTz => 1270,
             ColumnType::Timestamp => 1115,
             ColumnType::TimestampTz => 1185,
+            ColumnType::Interval => 1187,
             ColumnType::Vector(_) => 380_002,
             ColumnType::Tensor(_) => 380_003,
+            ColumnType::Domain { oid, .. } => pg_domain_array_oid(*oid),
             ColumnType::Array(_) => pg_type_oid(element),
         },
         ColumnType::Date => 1082,
@@ -508,8 +543,10 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::TimeTz => 1266,
         ColumnType::Timestamp => 1114,
         ColumnType::TimestampTz => 1184,
+        ColumnType::Interval => 1186,
         ColumnType::Vector(_) => 380_000,
         ColumnType::Tensor(_) => 380_001,
+        ColumnType::Domain { oid, .. } => i64::from(*oid),
     }
 }
 
@@ -542,20 +579,251 @@ pub(super) fn routine_type_oid(type_name: &str) -> i64 {
 
 pub(super) fn pg_type_len(ty: &ColumnType) -> i64 {
     match ty {
-        ColumnType::Integer => 4,
-        ColumnType::Boolean => 1,
-        ColumnType::Real | ColumnType::Timestamp | ColumnType::TimestampTz => 8,
+        ColumnType::SmallInteger => 2,
+        ColumnType::Integer
+        | ColumnType::Oid
+        | ColumnType::Xid
+        | ColumnType::Regproc
+        | ColumnType::Regtype => 4,
+        ColumnType::BigInteger => 8,
+        ColumnType::Boolean | ColumnType::InternalChar => 1,
+        ColumnType::Name => 64,
+        ColumnType::Uuid | ColumnType::Interval | ColumnType::AclItem => 16,
+        ColumnType::Real => 4,
+        ColumnType::DoublePrecision | ColumnType::Timestamp | ColumnType::TimestampTz => 8,
         ColumnType::Date => 4,
-        ColumnType::Time | ColumnType::TimeTz => 8,
+        ColumnType::Time => 8,
+        ColumnType::TimeTz => 12,
+        ColumnType::Domain { base, .. } => pg_type_len(base),
         _ => -1,
+    }
+}
+
+pub(super) fn pg_type_by_value(ty: &ColumnType) -> bool {
+    matches!(
+        ty,
+        ColumnType::SmallInteger
+            | ColumnType::Integer
+            | ColumnType::BigInteger
+            | ColumnType::Oid
+            | ColumnType::Xid
+            | ColumnType::Boolean
+            | ColumnType::InternalChar
+            | ColumnType::Regproc
+            | ColumnType::Regtype
+            | ColumnType::Real
+            | ColumnType::DoublePrecision
+            | ColumnType::Date
+            | ColumnType::Time
+            | ColumnType::Timestamp
+            | ColumnType::TimestampTz
+    ) || matches!(ty, ColumnType::Domain { base, .. } if pg_type_by_value(base))
+}
+
+pub(super) fn pg_type_align(ty: &ColumnType) -> &'static str {
+    match ty {
+        ColumnType::Boolean | ColumnType::InternalChar | ColumnType::Name | ColumnType::Uuid => "c",
+        ColumnType::SmallInteger => "s",
+        ColumnType::BigInteger
+        | ColumnType::DoublePrecision
+        | ColumnType::AclItem
+        | ColumnType::AnyArray
+        | ColumnType::Time
+        | ColumnType::TimeTz
+        | ColumnType::Timestamp
+        | ColumnType::TimestampTz
+        | ColumnType::Interval => "d",
+        ColumnType::Array(element) if matches!(pg_type_align(element), "d") => "d",
+        ColumnType::Domain { base, .. } => pg_type_align(base),
+        _ => "i",
+    }
+}
+
+pub(super) fn pg_type_storage(ty: &ColumnType) -> &'static str {
+    match ty {
+        ColumnType::Numeric { .. } => "m",
+        ColumnType::Text
+        | ColumnType::Varchar(_)
+        | ColumnType::Bpchar
+        | ColumnType::Character(_)
+        | ColumnType::Json
+        | ColumnType::JsonB
+        | ColumnType::Bytea
+        | ColumnType::PgNodeTree
+        | ColumnType::AnyArray
+        | ColumnType::Array(_)
+        | ColumnType::Vector(_)
+        | ColumnType::Tensor(_) => "x",
+        ColumnType::Domain { base, .. } => pg_type_storage(base),
+        _ => "p",
+    }
+}
+
+pub(super) fn pg_type_array_oid(ty: &ColumnType) -> i64 {
+    match ty {
+        ColumnType::Array(_) => 0,
+        ColumnType::Domain { oid, .. } => pg_domain_array_oid(*oid),
+        other => pg_type_oid(&ColumnType::Array(Box::new(other.clone()))),
+    }
+}
+
+fn pg_domain_array_oid(domain_oid: u32) -> i64 {
+    match domain_oid {
+        13_307 => 13_306,
+        13_310 => 13_309,
+        13_312 => 13_311,
+        13_318 => 13_317,
+        13_320 => 13_319,
+        _ => 0,
+    }
+}
+
+pub(super) fn pg_type_element_oid(ty: &ColumnType) -> i64 {
+    match ty {
+        ColumnType::Name => 18,
+        ColumnType::Int2Vector => 21,
+        ColumnType::OidVector => 26,
+        ColumnType::Array(element) => pg_type_oid(element),
+        _ => 0,
+    }
+}
+
+pub(super) fn pg_type_collation_oid(ty: &ColumnType) -> i64 {
+    let scalar = match ty {
+        ColumnType::Array(element) => element.as_ref(),
+        other => other,
+    };
+    match scalar {
+        ColumnType::Name => 950,
+        ColumnType::PgNodeTree => 100,
+        ColumnType::Text
+        | ColumnType::Varchar(_)
+        | ColumnType::Bpchar
+        | ColumnType::Character(_) => 100,
+        ColumnType::Domain { oid, base, .. } => match oid {
+            13_310 | 13_312 | 13_320 => 950,
+            _ => pg_type_collation_oid(base),
+        },
+        _ => 0,
+    }
+}
+
+pub(super) fn pg_type_subscript_handler(ty: &ColumnType) -> &'static str {
+    match ty {
+        ColumnType::Array(_) => "array_subscript_handler",
+        ColumnType::Int2Vector | ColumnType::OidVector => "array_subscript_handler",
+        ColumnType::Name => "raw_array_subscript_handler",
+        ColumnType::JsonB => "jsonb_subscript_handler",
+        _ => "-",
     }
 }
 
 pub(super) fn pg_type_modifier(ty: &ColumnType) -> i64 {
     match ty {
         // PostgreSQL stores varlena type modifiers with a four-byte header.
-        ColumnType::Character(length) => i64::from(*length) + 4,
+        ColumnType::Character(length) | ColumnType::Varchar(Some(length)) => i64::from(*length) + 4,
         _ => -1,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PgTypeRoutineOids {
+    pub(super) input: i64,
+    pub(super) output: i64,
+    pub(super) receive: i64,
+    pub(super) send: i64,
+    pub(super) modifier_input: i64,
+    pub(super) modifier_output: i64,
+    pub(super) analyze: i64,
+}
+
+impl PgTypeRoutineOids {
+    const fn new(input: i64, output: i64, receive: i64, send: i64) -> Self {
+        Self {
+            input,
+            output,
+            receive,
+            send,
+            modifier_input: 0,
+            modifier_output: 0,
+            analyze: 0,
+        }
+    }
+
+    const fn with_modifier(mut self, input: i64, output: i64) -> Self {
+        self.modifier_input = input;
+        self.modifier_output = output;
+        self
+    }
+}
+
+pub(super) fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRoutineOids {
+    if let ColumnType::Array(element) = ty {
+        let mut routines = PgTypeRoutineOids::new(750, 751, 2400, 2401);
+        routines.analyze = 3816;
+        if !matches!(element.as_ref(), ColumnType::Domain { .. }) {
+            let element_routines = pg_type_routine_oids(element);
+            routines.modifier_input = element_routines.modifier_input;
+            routines.modifier_output = element_routines.modifier_output;
+        }
+        return routines;
+    }
+    if let ColumnType::Domain { base, .. } = ty {
+        let base = pg_type_routine_oids(base);
+        return PgTypeRoutineOids::new(2597, base.output, 2598, base.send);
+    }
+    match ty {
+        ColumnType::Boolean => PgTypeRoutineOids::new(1242, 1243, 2436, 2437),
+        ColumnType::Bytea => PgTypeRoutineOids::new(1244, 31, 2412, 2413),
+        ColumnType::InternalChar => PgTypeRoutineOids::new(1245, 33, 2434, 2435),
+        ColumnType::Name => PgTypeRoutineOids::new(34, 35, 2422, 2423),
+        ColumnType::BigInteger => PgTypeRoutineOids::new(460, 461, 2408, 2409),
+        ColumnType::SmallInteger => PgTypeRoutineOids::new(38, 39, 2404, 2405),
+        ColumnType::Int2Vector => PgTypeRoutineOids::new(40, 41, 2410, 2411),
+        ColumnType::Integer => PgTypeRoutineOids::new(42, 43, 2406, 2407),
+        ColumnType::Regproc => PgTypeRoutineOids::new(44, 45, 2444, 2445),
+        ColumnType::Text => PgTypeRoutineOids::new(46, 47, 2414, 2415),
+        ColumnType::Oid => PgTypeRoutineOids::new(1798, 1799, 2418, 2419),
+        ColumnType::Xid => PgTypeRoutineOids::new(50, 51, 2440, 2441),
+        ColumnType::OidVector => PgTypeRoutineOids::new(54, 55, 2420, 2421),
+        ColumnType::Json => PgTypeRoutineOids::new(321, 322, 323, 324),
+        ColumnType::PgNodeTree => PgTypeRoutineOids::new(195, 196, 197, 198),
+        ColumnType::Real => PgTypeRoutineOids::new(200, 201, 2424, 2425),
+        ColumnType::DoublePrecision => PgTypeRoutineOids::new(214, 215, 2426, 2427),
+        ColumnType::AclItem => PgTypeRoutineOids::new(1031, 1032, 0, 0),
+        ColumnType::Bpchar | ColumnType::Character(_) => {
+            PgTypeRoutineOids::new(1044, 1045, 2430, 2431).with_modifier(2913, 2914)
+        }
+        ColumnType::Varchar(_) => {
+            PgTypeRoutineOids::new(1046, 1047, 2432, 2433).with_modifier(2915, 2916)
+        }
+        ColumnType::Date => PgTypeRoutineOids::new(1084, 1085, 2468, 2469),
+        ColumnType::Time => {
+            PgTypeRoutineOids::new(1143, 1144, 2470, 2471).with_modifier(2909, 2910)
+        }
+        ColumnType::Timestamp => {
+            PgTypeRoutineOids::new(1312, 1313, 2474, 2475).with_modifier(2905, 2906)
+        }
+        ColumnType::TimestampTz => {
+            PgTypeRoutineOids::new(1150, 1151, 2476, 2477).with_modifier(2907, 2908)
+        }
+        ColumnType::Interval => {
+            PgTypeRoutineOids::new(1160, 1161, 2478, 2479).with_modifier(2903, 2904)
+        }
+        ColumnType::TimeTz => {
+            PgTypeRoutineOids::new(1350, 1351, 2472, 2473).with_modifier(2911, 2912)
+        }
+        ColumnType::Numeric { .. } => {
+            PgTypeRoutineOids::new(1701, 1702, 2460, 2461).with_modifier(2917, 2918)
+        }
+        ColumnType::Regtype => PgTypeRoutineOids::new(2220, 2221, 2454, 2455),
+        ColumnType::AnyArray => PgTypeRoutineOids::new(2296, 2297, 2502, 2503),
+        ColumnType::Uuid => PgTypeRoutineOids::new(2952, 2953, 2961, 2962),
+        ColumnType::JsonB => PgTypeRoutineOids::new(3806, 3804, 3805, 3803),
+        ColumnType::Vector(_) | ColumnType::Tensor(_) => PgTypeRoutineOids::new(0, 0, 0, 0),
+        ColumnType::Array(_) | ColumnType::Domain { .. } => {
+            unreachable!("array and domain type routines are handled before scalar dispatch")
+        }
     }
 }
 
@@ -570,7 +838,9 @@ pub(super) fn info_datetime_precision(ty: &ColumnType) -> Value {
 
 pub(super) fn info_character_maximum_length(ty: &ColumnType) -> Value {
     match ty {
-        ColumnType::Character(length) => Value::Int(i64::from(*length)),
+        ColumnType::Character(length) | ColumnType::Varchar(Some(length)) => {
+            Value::Int(i64::from(*length))
+        }
         _ => Value::Null,
     }
 }
@@ -579,15 +849,20 @@ pub(super) fn info_character_octet_length(ty: &ColumnType) -> Value {
     match ty {
         // The engine catalog advertises UTF8, whose maximum encoded scalar
         // width is four bytes, matching PostgreSQL's information_schema.
-        ColumnType::Character(length) => Value::Int(i64::from(*length) * 4),
+        ColumnType::Character(length) | ColumnType::Varchar(Some(length)) => {
+            Value::Int(i64::from(*length) * 4)
+        }
         _ => Value::Null,
     }
 }
 
 pub(super) fn info_numeric_precision(ty: &ColumnType) -> Value {
     match ty {
+        ColumnType::SmallInteger => Value::Int(16),
         ColumnType::Integer => Value::Int(32),
-        ColumnType::Real => Value::Int(53),
+        ColumnType::BigInteger => Value::Int(64),
+        ColumnType::Real => Value::Int(24),
+        ColumnType::DoublePrecision => Value::Int(53),
         ColumnType::Numeric {
             precision: Some(precision),
             ..
@@ -605,47 +880,83 @@ pub(super) fn info_numeric_scale(ty: &ColumnType) -> Value {
     }
 }
 
-pub(super) fn info_udt_name(ty: &ColumnType) -> &'static str {
+pub(super) fn info_udt_name(ty: &ColumnType) -> String {
     match ty {
-        ColumnType::Integer => "int4",
-        ColumnType::Boolean => "bool",
-        ColumnType::Text => "text",
-        ColumnType::Character(_) => "bpchar",
-        ColumnType::Real => "float8",
-        ColumnType::Numeric { .. } => "numeric",
-        ColumnType::Json => "json",
-        ColumnType::JsonB => "jsonb",
-        ColumnType::Bytea => "bytea",
+        ColumnType::SmallInteger => "int2".into(),
+        ColumnType::Integer => "int4".into(),
+        ColumnType::BigInteger => "int8".into(),
+        ColumnType::Oid => "oid".into(),
+        ColumnType::Xid => "xid".into(),
+        ColumnType::Boolean => "bool".into(),
+        ColumnType::Text => "text".into(),
+        ColumnType::Name => "name".into(),
+        ColumnType::Uuid => "uuid".into(),
+        ColumnType::Varchar(_) => "varchar".into(),
+        ColumnType::Bpchar | ColumnType::Character(_) => "bpchar".into(),
+        ColumnType::Real => "float4".into(),
+        ColumnType::DoublePrecision => "float8".into(),
+        ColumnType::Numeric { .. } => "numeric".into(),
+        ColumnType::Json => "json".into(),
+        ColumnType::JsonB => "jsonb".into(),
+        ColumnType::Bytea => "bytea".into(),
+        ColumnType::InternalChar => "char".into(),
+        ColumnType::Regproc => "regproc".into(),
+        ColumnType::Regtype => "regtype".into(),
+        ColumnType::PgNodeTree => "pg_node_tree".into(),
+        ColumnType::AclItem => "aclitem".into(),
+        ColumnType::Int2Vector => "int2vector".into(),
+        ColumnType::OidVector => "oidvector".into(),
+        ColumnType::AnyArray => "anyarray".into(),
         ColumnType::Array(element) => match element.as_ref() {
-            ColumnType::Integer => "_int4",
-            ColumnType::Boolean => "_bool",
-            ColumnType::Text => "_text",
-            ColumnType::Character(_) => "_bpchar",
-            ColumnType::Real => "_float8",
-            ColumnType::Numeric { .. } => "_numeric",
-            ColumnType::Json => "_json",
-            ColumnType::JsonB => "_jsonb",
-            ColumnType::Bytea => "_bytea",
-            ColumnType::Date => "_date",
-            ColumnType::Time => "_time",
-            ColumnType::TimeTz => "_timetz",
-            ColumnType::Timestamp => "_timestamp",
-            ColumnType::TimestampTz => "_timestamptz",
-            ColumnType::Vector(_) => "_vector",
-            ColumnType::Tensor(_) => "_tensor",
+            ColumnType::SmallInteger => "_int2".into(),
+            ColumnType::Integer => "_int4".into(),
+            ColumnType::BigInteger => "_int8".into(),
+            ColumnType::Oid => "_oid".into(),
+            ColumnType::Xid => "_xid".into(),
+            ColumnType::Boolean => "_bool".into(),
+            ColumnType::Text => "_text".into(),
+            ColumnType::Name => "_name".into(),
+            ColumnType::Uuid => "_uuid".into(),
+            ColumnType::Varchar(_) => "_varchar".into(),
+            ColumnType::Bpchar | ColumnType::Character(_) => "_bpchar".into(),
+            ColumnType::Real => "_float4".into(),
+            ColumnType::DoublePrecision => "_float8".into(),
+            ColumnType::Numeric { .. } => "_numeric".into(),
+            ColumnType::Json => "_json".into(),
+            ColumnType::JsonB => "_jsonb".into(),
+            ColumnType::Bytea => "_bytea".into(),
+            ColumnType::InternalChar => "_char".into(),
+            ColumnType::Regproc => "_regproc".into(),
+            ColumnType::Regtype => "_regtype".into(),
+            ColumnType::PgNodeTree => "_pg_node_tree".into(),
+            ColumnType::AclItem => "_aclitem".into(),
+            ColumnType::Int2Vector => "_int2vector".into(),
+            ColumnType::OidVector => "_oidvector".into(),
+            ColumnType::AnyArray => "_anyarray".into(),
+            ColumnType::Date => "_date".into(),
+            ColumnType::Time => "_time".into(),
+            ColumnType::TimeTz => "_timetz".into(),
+            ColumnType::Timestamp => "_timestamp".into(),
+            ColumnType::TimestampTz => "_timestamptz".into(),
+            ColumnType::Interval => "_interval".into(),
+            ColumnType::Vector(_) => "_vector".into(),
+            ColumnType::Tensor(_) => "_tensor".into(),
+            ColumnType::Domain { name, .. } => format!("_{name}"),
             ColumnType::Array(_) => info_udt_name(element),
         },
-        ColumnType::Date => "date",
-        ColumnType::Time => "time",
-        ColumnType::TimeTz => "timetz",
-        ColumnType::Timestamp => "timestamp",
-        ColumnType::TimestampTz => "timestamptz",
-        ColumnType::Vector(_) => "vector",
-        ColumnType::Tensor(_) => "tensor",
+        ColumnType::Date => "date".into(),
+        ColumnType::Time => "time".into(),
+        ColumnType::TimeTz => "timetz".into(),
+        ColumnType::Timestamp => "timestamp".into(),
+        ColumnType::TimestampTz => "timestamptz".into(),
+        ColumnType::Interval => "interval".into(),
+        ColumnType::Vector(_) => "vector".into(),
+        ColumnType::Tensor(_) => "tensor".into(),
+        ColumnType::Domain { name, .. } => name.clone(),
     }
 }
 
-pub(super) fn info_data_type(ty: &ColumnType) -> &'static str {
+pub(super) fn info_data_type(ty: &ColumnType) -> &str {
     if matches!(ty, ColumnType::Array(_)) {
         "ARRAY"
     } else {
@@ -661,222 +972,6 @@ pub(super) fn array_dimension_count(ty: &ColumnType) -> i64 {
         current = element;
     }
     dimensions
-}
-
-pub(super) fn default_expr_text(expr: Option<&Expr>) -> Value {
-    expr.map_or(Value::Null, |expr| Value::Str(schema_expr_text(expr)))
-}
-
-pub(super) fn schema_expr_text(expr: &Expr) -> String {
-    match expr {
-        Expr::Star => "*".into(),
-        Expr::Default => "DEFAULT".into(),
-        Expr::Column(name) => name.clone(),
-        Expr::QualifiedColumn {
-            qualifier, column, ..
-        } => format!("{qualifier}.{column}"),
-        Expr::Literal(value) => schema_literal_text(value),
-        Expr::Param(index) => format!("${index}"),
-        Expr::Func {
-            name,
-            args,
-            distinct,
-            order_by,
-            filter,
-            ..
-        } => {
-            let mut rendered_args = args
-                .iter()
-                .map(schema_expr_text)
-                .collect::<Vec<_>>()
-                .join(", ");
-            if *distinct {
-                rendered_args = format!("DISTINCT {rendered_args}");
-            }
-            if !order_by.is_empty() {
-                let order = order_by
-                    .iter()
-                    .map(|order| {
-                        let direction = if order.descending { " DESC" } else { "" };
-                        let nulls = match order.nulls {
-                            Some(uqa_sql::ast::NullsOrder::First) => " NULLS FIRST",
-                            Some(uqa_sql::ast::NullsOrder::Last) => " NULLS LAST",
-                            None => "",
-                        };
-                        format!("{}{direction}{nulls}", schema_expr_text(&order.expr))
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                if !rendered_args.is_empty() {
-                    rendered_args.push(' ');
-                }
-                rendered_args.push_str("ORDER BY ");
-                rendered_args.push_str(&order);
-            }
-            let mut rendered = format!("{name}({rendered_args})");
-            if let Some(filter) = filter {
-                write!(
-                    &mut rendered,
-                    " FILTER (WHERE {})",
-                    schema_expr_text(filter)
-                )
-                .expect("writing to a String cannot fail");
-            }
-            rendered
-        }
-        Expr::Array(items) => format!(
-            "ARRAY[{}]",
-            items
-                .iter()
-                .map(schema_expr_text)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Expr::Binary { op, lhs, rhs } => format!(
-            "({} {} {})",
-            schema_expr_text(lhs),
-            match op {
-                uqa_sql::ast::BinaryOp::Equal => "=",
-                uqa_sql::ast::BinaryOp::NotEqual => "<>",
-                uqa_sql::ast::BinaryOp::Less => "<",
-                uqa_sql::ast::BinaryOp::LessEqual => "<=",
-                uqa_sql::ast::BinaryOp::Greater => ">",
-                uqa_sql::ast::BinaryOp::GreaterEqual => ">=",
-                uqa_sql::ast::BinaryOp::Add => "+",
-                uqa_sql::ast::BinaryOp::Subtract => "-",
-                uqa_sql::ast::BinaryOp::Multiply => "*",
-                uqa_sql::ast::BinaryOp::Divide => "/",
-            },
-            schema_expr_text(rhs)
-        ),
-        Expr::Not(inner) => format!("(NOT {})", schema_expr_text(inner)),
-        Expr::And(items) => format!(
-            "({})",
-            items
-                .iter()
-                .map(schema_expr_text)
-                .collect::<Vec<_>>()
-                .join(" AND ")
-        ),
-        Expr::Or(items) => format!(
-            "({})",
-            items
-                .iter()
-                .map(schema_expr_text)
-                .collect::<Vec<_>>()
-                .join(" OR ")
-        ),
-        Expr::IsNull { expr, negated } => format!(
-            "({} IS {}NULL)",
-            schema_expr_text(expr),
-            if *negated { "NOT " } else { "" }
-        ),
-        Expr::Between { expr, low, high } => format!(
-            "({} BETWEEN {} AND {})",
-            schema_expr_text(expr),
-            schema_expr_text(low),
-            schema_expr_text(high)
-        ),
-        Expr::InList {
-            expr,
-            list,
-            negated,
-        } => format!(
-            "({} {}IN ({}))",
-            schema_expr_text(expr),
-            if *negated { "NOT " } else { "" },
-            list.iter()
-                .map(schema_expr_text)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Expr::WindowCall { name, args, .. } => format!(
-            "{}({}) OVER (...)",
-            name,
-            args.iter()
-                .map(schema_expr_text)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Expr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            let mut rendered = "CASE".to_string();
-            if let Some(base) = base {
-                rendered.push(' ');
-                rendered.push_str(&schema_expr_text(base));
-            }
-            for (condition, result) in when {
-                write!(
-                    &mut rendered,
-                    " WHEN {} THEN {}",
-                    schema_expr_text(condition),
-                    schema_expr_text(result)
-                )
-                .expect("writing to a String cannot fail");
-            }
-            if let Some(else_branch) = else_branch {
-                write!(&mut rendered, " ELSE {}", schema_expr_text(else_branch))
-                    .expect("writing to a String cannot fail");
-            }
-            rendered.push_str(" END");
-            rendered
-        }
-        Expr::Cast { expr, ty } => format!("({})::{ty}", schema_expr_text(expr)),
-        Expr::ScalarSubquery(body) => format!("({body:?})"),
-        Expr::Exists { body, negated } => {
-            format!("{}EXISTS ({body:?})", if *negated { "NOT " } else { "" })
-        }
-        Expr::InSubquery {
-            expr,
-            body,
-            negated,
-        } => format!(
-            "({} {}IN ({body:?}))",
-            schema_expr_text(expr),
-            if *negated { "NOT " } else { "" }
-        ),
-    }
-}
-
-fn schema_literal_text(value: &Value) -> String {
-    match value {
-        Value::Null => "NULL".into(),
-        Value::Bool(value) => if *value { "true" } else { "false" }.into(),
-        Value::Int(value) => value.to_string(),
-        Value::Float(value) if value.is_finite() => value.to_string(),
-        Value::Float(value) => format!("'{value}'::double precision"),
-        Value::Str(value) | Value::FixedChar(value) => {
-            format!("'{}'", value.replace('\'', "''"))
-        }
-        Value::Bytes(value) => {
-            let mut hex = String::new();
-            for byte in value {
-                write!(&mut hex, "{byte:02x}").expect("writing to a String cannot fail");
-            }
-            format!("'\\x{hex}'::bytea")
-        }
-        Value::Temporal(value) => format!("'{value:?}'"),
-        Value::Decimal(value) => format!("{value:?}"),
-        Value::Json(value) => format!("'{}'::json", value.replace('\'', "''")),
-        Value::JsonB(value) => format!("'{}'::jsonb", value.replace('\'', "''")),
-        Value::List(values) => format!(
-            "ARRAY[{}]",
-            values
-                .iter()
-                .map(schema_literal_text)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Value::Map(value) => format!(
-            "'{}'::jsonb",
-            serde_json::to_string(value)
-                .expect("serializing an in-memory Value map cannot fail")
-                .replace('\'', "''")
-        ),
-    }
 }
 
 pub(super) fn index_columns(columns_json: &str) -> Result<Vec<String>, SQLError> {
@@ -1175,7 +1270,10 @@ fn collect_expression_columns(expression: &Expr, output: &mut Vec<String>) {
             collect_expression_columns(lhs, output);
             collect_expression_columns(rhs, output);
         }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+        Expr::Not(inner)
+        | Expr::UnaryMinus(inner)
+        | Expr::IsNull { expr: inner, .. }
+        | Expr::Cast { expr: inner, .. } => {
             collect_expression_columns(inner, output);
         }
         Expr::Between { expr, low, high } => {

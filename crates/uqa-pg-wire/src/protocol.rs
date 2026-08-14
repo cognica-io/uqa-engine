@@ -71,6 +71,15 @@ pub enum PgWireError {
         format_count: usize,
         parameter_count: usize,
     },
+    #[error(
+        "FunctionCall argument format count {format_count} must be zero, one, or match argument count {argument_count}"
+    )]
+    FunctionArgumentFormatCountMismatch {
+        format_count: usize,
+        argument_count: usize,
+    },
+    #[error("text COPY response column {column} uses the binary format")]
+    BinaryColumnInTextCopy { column: usize },
     #[error("{context} count {count} exceeds representable PostgreSQL i16")]
     CountTooLarge { context: &'static str, count: usize },
     #[error("{context} length {length} exceeds representable PostgreSQL i32")]

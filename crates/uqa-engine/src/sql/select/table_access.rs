@@ -150,9 +150,7 @@ pub(in crate::sql) fn run_single_table_select_output(
         .and_then(|columns| {
             columns
                 .into_iter()
-                .find(|column| {
-                    column.primary_key && matches!(column.ty, uqa_sql::ast::ColumnType::Integer)
-                })
+                .find(|column| column.primary_key && column.ty.is_integer())
                 .map(|column| column.name)
         });
     let (pushed_predicate, residual_filter) =

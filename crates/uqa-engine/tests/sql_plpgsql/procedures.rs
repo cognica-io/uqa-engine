@@ -19,6 +19,7 @@ fn procedure_with_inout_via_call() {
     let result = exec(&eng, "CALL p_inout(10, 5)");
     assert_eq!(result.rows.len(), 1);
     assert_eq!(result.rows[0].get("x"), Some(&Value::Int(15)));
+    assert_eq!(result.column_types, [Some(ColumnType::Integer)]);
     // Procedure with OUT parameter: PG14+ requires a placeholder
     // argument in CALL.
     exec(
@@ -29,6 +30,7 @@ fn procedure_with_inout_via_call() {
     );
     let result = exec(&eng, "CALL p_out(21, NULL)");
     assert_eq!(result.rows[0].get("doubled"), Some(&Value::Int(42)));
+    assert_eq!(result.column_types, [Some(ColumnType::Integer)]);
     // PG18 error shapes for kind confusion.
     let err = exec_err(&eng, "SELECT p_inout(1, 2) AS v");
     assert!(err.to_string().contains("is a procedure"), "got: {err}");

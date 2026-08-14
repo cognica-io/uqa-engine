@@ -11,9 +11,12 @@
 
 use std::collections::BTreeMap;
 
-use uqa_execution::ScalarExpr;
+use uqa_execution::{FunctionTypeResolver, ScalarExpr};
 use uqa_planner::UnifiedPlan;
-use uqa_sql::ast::{CreateFunction, DropFunctionItem, DropFunctionStmt, FunctionBody, Statement};
+use uqa_sql::ast::{
+    ColumnType, CreateFunction, DropFunctionItem, DropFunctionStmt, FunctionBinding, FunctionBody,
+    FunctionReturns, Statement,
+};
 use uqa_sql::SQLError;
 
 use super::{
@@ -79,6 +82,319 @@ pub(crate) fn routine_signature_types(def: &CreateFunction) -> Vec<String> {
         .collect()
 }
 
+struct StaticFunctionMatch {
+    function: Arc<SQLUserFunction>,
+    argument_types: Vec<String>,
+    exact_matches: usize,
+    preferred_matches: usize,
+}
+
+impl FunctionTypeResolver for Engine {
+    fn resolve_function_type(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+    ) -> Result<Option<ColumnType>, SQLError> {
+        let function = if let Some(binding) = binding {
+            self.lookup_sql_functions(&binding.name)
+                .and_then(|overloads| {
+                    overloads.into_iter().find(|function| {
+                        routine_signature_types(&function.def) == binding.argument_types
+                    })
+                })
+                .ok_or_else(|| SQLError::Routine {
+                    sqlstate: "42883".into(),
+                    message: format!(
+                        "bound function {}({}) does not exist",
+                        binding.name,
+                        binding.argument_types.join(", ")
+                    ),
+                })?
+        } else {
+            let Some(overloads) = self.lookup_sql_functions(name) else {
+                return Ok(None);
+            };
+            resolve_static_function_overload(name, overloads, argument_names, argument_types)?
+        };
+        static_function_return_type(name, &function.def).map(Some)
+    }
+}
+
+fn resolve_static_function_overload(
+    name: &str,
+    overloads: Vec<Arc<SQLUserFunction>>,
+    argument_names: &[Option<String>],
+    argument_types: &[Option<ColumnType>],
+) -> Result<Arc<SQLUserFunction>, SQLError> {
+    let mut candidates = overloads
+        .into_iter()
+        .filter(|function| !function.def.is_procedure)
+        .filter_map(|function| static_function_match(function, argument_names, argument_types))
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return Err(static_function_resolution_error(
+            "42883",
+            name,
+            argument_types,
+            "does not exist",
+        ));
+    }
+
+    let most_exact = candidates
+        .iter()
+        .map(|candidate| candidate.exact_matches)
+        .max()
+        .unwrap_or(0);
+    candidates.retain(|candidate| candidate.exact_matches == most_exact);
+    let most_preferred = candidates
+        .iter()
+        .map(|candidate| candidate.preferred_matches)
+        .max()
+        .unwrap_or(0);
+    candidates.retain(|candidate| candidate.preferred_matches == most_preferred);
+
+    for (index, actual) in argument_types.iter().enumerate() {
+        if actual.is_some() || candidates.len() <= 1 {
+            continue;
+        }
+        let mut categories = candidates
+            .iter()
+            .map(|candidate| routine_type_category(&candidate.argument_types[index]))
+            .collect::<Vec<_>>();
+        categories.sort_unstable();
+        categories.dedup();
+        let selected = if categories.contains(&'S') {
+            Some('S')
+        } else if categories.len() == 1 {
+            categories.first().copied()
+        } else {
+            None
+        };
+        if let Some(selected) = selected {
+            candidates.retain(|candidate| {
+                routine_type_category(&candidate.argument_types[index]) == selected
+            });
+            if candidates
+                .iter()
+                .any(|candidate| routine_type_is_preferred(&candidate.argument_types[index]))
+            {
+                candidates.retain(|candidate| {
+                    routine_type_is_preferred(&candidate.argument_types[index])
+                });
+            }
+        }
+    }
+
+    if candidates.len() > 1 {
+        let mut known = argument_types.iter().flatten();
+        if let Some(first) = known.next() {
+            let identity = canonical_column_type_name(first);
+            if known.all(|ty| canonical_column_type_name(ty) == identity) {
+                let narrowed = candidates
+                    .into_iter()
+                    .filter(|candidate| {
+                        argument_types.iter().enumerate().all(|(index, actual)| {
+                            actual.is_some()
+                                || routine_type_accepts_implicit_cast(
+                                    &identity,
+                                    &candidate.argument_types[index],
+                                )
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                if narrowed.len() == 1 {
+                    return narrowed
+                        .into_iter()
+                        .next()
+                        .map(|candidate| candidate.function)
+                        .ok_or_else(|| {
+                            SQLError::Internal("resolved function candidate disappeared".into())
+                        });
+                }
+                candidates = narrowed;
+            }
+        }
+    }
+
+    if candidates.len() != 1 {
+        return Err(static_function_resolution_error(
+            "42725",
+            name,
+            argument_types,
+            "is not unique",
+        ));
+    }
+    candidates
+        .pop()
+        .map(|candidate| candidate.function)
+        .ok_or_else(|| SQLError::Internal("resolved function candidate disappeared".into()))
+}
+
+fn static_function_match(
+    function: Arc<SQLUserFunction>,
+    argument_names: &[Option<String>],
+    argument_types: &[Option<ColumnType>],
+) -> Option<StaticFunctionMatch> {
+    let signature = function.def.signature_params();
+    if argument_types.len() > signature.len() || argument_names.len() != argument_types.len() {
+        return None;
+    }
+    let mut slots = vec![None; signature.len()];
+    let mut matched_argument_types = Vec::with_capacity(argument_types.len());
+    let mut positional = 0usize;
+    let mut saw_named = false;
+    for (argument_name, argument_type) in argument_names.iter().zip(argument_types) {
+        let index = if let Some(argument_name) = argument_name {
+            saw_named = true;
+            signature
+                .iter()
+                .position(|parameter| parameter.name.eq_ignore_ascii_case(argument_name))?
+        } else {
+            if saw_named || positional >= signature.len() {
+                return None;
+            }
+            let index = positional;
+            positional += 1;
+            index
+        };
+        if slots[index].replace(argument_type.as_ref()).is_some() {
+            return None;
+        }
+        matched_argument_types.push(canonical_routine_type_name(&signature[index].type_name));
+    }
+
+    let mut exact_matches = 0usize;
+    let mut preferred_matches = 0usize;
+    for (index, parameter) in signature.iter().enumerate() {
+        let Some(actual) = slots[index] else {
+            parameter.default.as_ref()?;
+            continue;
+        };
+        let Some(actual_type) = actual else {
+            continue;
+        };
+        let declared = canonical_routine_type_name(&parameter.type_name);
+        let actual = canonical_column_type_name(actual_type);
+        if actual == declared {
+            exact_matches += 1;
+        } else if routine_type_accepts_implicit_cast(&actual, &declared) {
+            preferred_matches += usize::from(routine_type_is_preferred(&declared));
+        } else if let ColumnType::Domain { base, .. } = actual_type {
+            let base = canonical_column_type_name(base);
+            if !routine_type_accepts_implicit_cast(&base, &declared) {
+                return None;
+            }
+            preferred_matches += usize::from(routine_type_is_preferred(&declared));
+        } else {
+            return None;
+        }
+    }
+    Some(StaticFunctionMatch {
+        function,
+        argument_types: matched_argument_types,
+        exact_matches,
+        preferred_matches,
+    })
+}
+
+fn canonical_column_type_name(ty: &ColumnType) -> String {
+    canonical_routine_type_name(&ty.sql_name())
+}
+
+fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool {
+    if actual == declared {
+        return true;
+    }
+    if let (Some(actual), Some(declared)) = (actual.strip_suffix("[]"), declared.strip_suffix("[]"))
+    {
+        return routine_type_accepts_implicit_cast(actual, declared);
+    }
+    matches!(
+        (actual, declared),
+        (
+            "int2",
+            "int4" | "int8" | "float4" | "float8" | "numeric" | "oid"
+        ) | ("int4", "int8" | "float4" | "float8" | "numeric" | "oid")
+            | ("int8", "float4" | "float8" | "numeric" | "oid")
+            | ("numeric", "float4" | "float8")
+            | ("float4", "float8")
+            | ("bpchar", "varchar" | "name" | "text")
+            | ("varchar", "bpchar" | "name" | "text")
+            | ("text", "bpchar" | "varchar" | "name")
+            | ("name", "text")
+            | ("date", "timestamp" | "timestamptz")
+            | ("timestamp", "timestamptz")
+            | ("time", "timetz" | "interval")
+    )
+}
+
+fn routine_type_category(type_name: &str) -> char {
+    let canonical = canonical_routine_type_name(type_name);
+    if canonical.ends_with("[]") {
+        return 'A';
+    }
+    match canonical.as_str() {
+        "bool" => 'B',
+        "date" | "time" | "timetz" | "timestamp" | "timestamptz" => 'D',
+        "int2" | "int4" | "int8" | "float4" | "float8" | "numeric" | "oid" | "regproc"
+        | "regtype" => 'N',
+        "bpchar" | "name" | "text" | "varchar" => 'S',
+        "interval" => 'T',
+        "\"char\"" => 'Z',
+        _ => 'U',
+    }
+}
+
+fn routine_type_is_preferred(type_name: &str) -> bool {
+    matches!(
+        canonical_routine_type_name(type_name).as_str(),
+        "bool" | "float8" | "oid" | "text" | "timestamptz" | "interval"
+    )
+}
+
+fn static_function_return_type(name: &str, def: &CreateFunction) -> Result<ColumnType, SQLError> {
+    let type_name = match &def.returns {
+        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => type_name,
+        FunctionReturns::None => {
+            let outputs = def.output_params();
+            if outputs.len() != 1 {
+                return Err(SQLError::TypeMismatch(format!(
+                    "function `{name}` does not return one scalar value"
+                )));
+            }
+            &outputs[0].type_name
+        }
+        FunctionReturns::Table => {
+            return Err(SQLError::TypeMismatch(format!(
+                "function `{name}` returns a record, not one scalar value"
+            )));
+        }
+    };
+    ColumnType::from_sql_name(type_name)
+}
+
+fn static_function_resolution_error(
+    sqlstate: &str,
+    name: &str,
+    argument_types: &[Option<ColumnType>],
+    suffix: &str,
+) -> SQLError {
+    let arguments = argument_types
+        .iter()
+        .map(|ty| {
+            ty.as_ref()
+                .map_or_else(|| "unknown".into(), ColumnType::sql_name)
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    SQLError::Routine {
+        sqlstate: sqlstate.into(),
+        message: format!("function {name}({arguments}) {suffix}"),
+    }
+}
+
 fn routine_kind(def: &CreateFunction) -> &'static str {
     if def.is_procedure {
         "procedure"
@@ -117,6 +433,94 @@ fn wrong_routine_kind_error(
     }
 }
 
+fn resolve_routine_type_references(
+    engine: &Engine,
+    def: &mut CreateFunction,
+) -> Result<(), SQLError> {
+    for parameter in &mut def.params {
+        parameter.type_name =
+            resolve_routine_type_name(engine, &parameter.type_name, &["record", "anyarray"])?;
+    }
+    match &mut def.returns {
+        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
+            *type_name =
+                resolve_routine_type_name(engine, type_name, &["void", "record", "anyarray"])?;
+        }
+        FunctionReturns::None | FunctionReturns::Table => {}
+    }
+    Ok(())
+}
+
+fn resolve_routine_type_name(
+    engine: &Engine,
+    type_name: &str,
+    allowed_pseudo_types: &[&str],
+) -> Result<String, SQLError> {
+    let mut base = type_name.trim();
+    let mut array_dimensions = 0usize;
+    while let Some(element) = base.strip_suffix("[]") {
+        base = element.trim_end();
+        array_dimensions += 1;
+    }
+    let resolved = if let Some(reference) = base.strip_suffix("%type") {
+        let (table, column) = reference.rsplit_once('.').ok_or_else(|| {
+            SQLError::TypeMismatch(format!(
+                "type reference `{type_name}` must identify a relation column"
+            ))
+        })?;
+        let columns = engine
+            .try_describe_table(table)
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "resolve routine type reference `{type_name}`: {error}"
+                ))
+            })?
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        columns
+            .into_iter()
+            .find(|definition| definition.name.eq_ignore_ascii_case(column))
+            .map(|definition| definition.ty)
+            .ok_or_else(|| SQLError::UnknownColumn(format!("{table}.{column}")))?
+    } else {
+        let canonical = canonical_routine_type_name(base);
+        if allowed_pseudo_types.contains(&canonical.as_str()) {
+            let mut resolved = canonical;
+            for _ in 0..array_dimensions {
+                resolved.push_str("[]");
+            }
+            return Ok(resolved);
+        }
+        ColumnType::from_sql_name(base).map_err(|error| match error {
+            SQLError::Unsupported(_) => {
+                SQLError::Unsupported(format!("routine type `{type_name}` is not implemented"))
+            }
+            other => other,
+        })?
+    };
+    let mut resolved = resolved;
+    for _ in 0..array_dimensions {
+        resolved = ColumnType::Array(Box::new(resolved));
+    }
+    Ok(resolved.sql_name())
+}
+
+fn resolve_plpgsql_datum_types(
+    engine: &Engine,
+    function: &mut uqa_sql::plpgsql::PLpgSQLFunction,
+) -> Result<(), SQLError> {
+    for datum in &mut function.datums {
+        let uqa_sql::plpgsql::PLpgSQLDatum::Var(variable) = datum else {
+            continue;
+        };
+        variable.type_name = resolve_routine_type_name(
+            engine,
+            &variable.type_name,
+            &["record", "anyarray", "refcursor"],
+        )?;
+    }
+    Ok(())
+}
+
 /// Compile a routine body per its language. Shared by DDL
 /// registration and restore-from-catalog.
 pub(crate) fn compile_function_body(
@@ -130,9 +534,9 @@ pub(crate) fn compile_function_body(
                     "LANGUAGE plpgsql with a SQL-standard body".into(),
                 ));
             }
-            Ok(CompiledFunctionBody::PLpgSQL(
-                uqa_sql::plpgsql::parse_function(def)?,
-            ))
+            let mut function = uqa_sql::plpgsql::parse_function(def)?;
+            resolve_plpgsql_datum_types(engine, &mut function)?;
+            Ok(CompiledFunctionBody::PLpgSQL(function))
         }
         "sql" => {
             let statements = match &def.body {
@@ -202,6 +606,7 @@ impl Engine {
                 sqlstate: "3F000".into(),
                 message: error,
             })?;
+        resolve_routine_type_references(self, &mut def)?;
         let compiled = compile_function_body(self, &def)?;
         let name = def.name.clone();
         let signature = routine_signature_types(&def);

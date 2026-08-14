@@ -123,7 +123,7 @@ pub enum FrontendMessage {
     CopyData(Vec<u8>),
     CopyDone,
     CopyFail(String),
-    FunctionCall(Vec<u8>),
+    FunctionCall(FunctionCall),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,6 +158,14 @@ pub struct Execute {
 pub enum CloseTarget {
     Statement(String),
     Portal(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionCall {
+    pub function_oid: u32,
+    pub argument_formats: Vec<FormatCode>,
+    pub arguments: Vec<Option<Vec<u8>>>,
+    pub result_format: FormatCode,
 }
 
 pub fn decode_startup(input: &[u8]) -> DecodeOutcome<StartupFrame> {
@@ -289,7 +297,7 @@ fn parse_frontend_message(tag: u8, body: &[u8]) -> Result<FrontendMessage, PgWir
             FrontendMessage::CopyDone
         }
         b'f' => FrontendMessage::CopyFail(parse_single_cstring(&mut reader, "CopyFail")?),
-        b'F' => FrontendMessage::FunctionCall(body.to_vec()),
+        b'F' => FrontendMessage::FunctionCall(parse_function_call(&mut reader)?),
         other => return Err(PgWireError::UnknownFrontendTag(other)),
     };
     Ok(message)
@@ -387,6 +395,46 @@ fn parse_close(reader: &mut Reader<'_>) -> Result<CloseTarget, PgWireError> {
         b'P' => Ok(CloseTarget::Portal(name)),
         other => Err(PgWireError::UnknownFrontendTag(other)),
     }
+}
+
+fn parse_function_call(reader: &mut Reader<'_>) -> Result<FunctionCall, PgWireError> {
+    let function_oid = reader.read_u32("FunctionCall function oid")?;
+    let argument_format_count = read_count(reader, "FunctionCall argument format count")?;
+    let mut argument_formats = Vec::with_capacity(argument_format_count);
+    for _ in 0..argument_format_count {
+        argument_formats.push(FormatCode::from_i16(
+            reader.read_i16("FunctionCall argument format code")?,
+        )?);
+    }
+
+    let argument_count = read_count(reader, "FunctionCall argument count")?;
+    if argument_format_count > 1 && argument_format_count != argument_count {
+        return Err(PgWireError::FunctionArgumentFormatCountMismatch {
+            format_count: argument_format_count,
+            argument_count,
+        });
+    }
+    let mut arguments = Vec::with_capacity(argument_count);
+    for _ in 0..argument_count {
+        let value = match reader.read_len_i32("FunctionCall argument value length")? {
+            Some(length) => Some(
+                reader
+                    .read_exact(length, "FunctionCall argument value")?
+                    .to_vec(),
+            ),
+            None => None,
+        };
+        arguments.push(value);
+    }
+
+    let result_format = FormatCode::from_i16(reader.read_i16("FunctionCall result format code")?)?;
+    reader.ensure_empty("FunctionCall")?;
+    Ok(FunctionCall {
+        function_oid,
+        argument_formats,
+        arguments,
+        result_format,
+    })
 }
 
 fn parse_single_cstring(

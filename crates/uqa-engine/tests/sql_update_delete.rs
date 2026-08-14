@@ -8,6 +8,7 @@
 
 use uqa_core::Value;
 use uqa_engine::Engine;
+use uqa_sql::ColumnType;
 
 fn corpus() -> Engine {
     let eng = Engine::new();
@@ -179,4 +180,62 @@ fn postgresql_18_returning_exposes_old_and_new_row_images() {
         Some(&Value::Str("cherry".into()))
     );
     assert_eq!(deleted.rows[0].get("new_missing"), Some(&Value::Bool(true)));
+}
+
+#[test]
+fn returning_preserves_declared_types_for_rows_and_empty_results() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE typed_dml (
+            id SMALLINT PRIMARY KEY,
+            label VARCHAR(7),
+            amount REAL
+        )",
+        &[],
+    )
+    .unwrap();
+
+    let inserted = eng
+        .sql(
+            "INSERT INTO typed_dml VALUES (1, 'one', 1.5)
+             RETURNING *",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(inserted.columns, ["id", "label", "amount"]);
+    assert_eq!(
+        inserted.column_types,
+        [
+            Some(ColumnType::SmallInteger),
+            Some(ColumnType::Varchar(Some(7))),
+            Some(ColumnType::Real),
+        ]
+    );
+    assert_eq!(inserted.rows[0].len(), 3);
+
+    let updated = eng
+        .sql(
+            "UPDATE typed_dml SET amount = amount WHERE FALSE
+             RETURNING old.label AS old_label, new.amount AS new_amount",
+            &[],
+        )
+        .unwrap();
+    assert!(updated.rows.is_empty());
+    assert_eq!(
+        updated.column_types,
+        [Some(ColumnType::Varchar(Some(7))), Some(ColumnType::Real),]
+    );
+
+    let deleted = eng
+        .sql(
+            "DELETE FROM typed_dml WHERE FALSE
+             RETURNING old.id AS old_id, new.id IS NULL AS new_missing",
+            &[],
+        )
+        .unwrap();
+    assert!(deleted.rows.is_empty());
+    assert_eq!(
+        deleted.column_types,
+        [Some(ColumnType::SmallInteger), Some(ColumnType::Boolean),]
+    );
 }

@@ -64,6 +64,11 @@ pub(super) fn lower_scalar_expression(
             lhs: Box::new(lower_scalar_expression(*lhs, aggregates, subqueries)),
             rhs: Box::new(lower_scalar_expression(*rhs, aggregates, subqueries)),
         },
+        Expr::UnaryMinus(expression) => ScalarExpr::UnaryMinus(Box::new(lower_scalar_expression(
+            *expression,
+            aggregates,
+            subqueries,
+        ))),
         Expr::Not(expression) => ScalarExpr::Not(Box::new(lower_scalar_expression(
             *expression,
             aggregates,

@@ -60,7 +60,9 @@ fn walk_text_match_fields(
             }
             Ok(())
         }
-        ScalarExpr::Not(inner) => walk_text_match_fields(inner, validate),
+        ScalarExpr::Not(inner) | ScalarExpr::UnaryMinus(inner) => {
+            walk_text_match_fields(inner, validate)
+        }
         ScalarExpr::Binary { lhs, rhs, .. } => {
             walk_text_match_fields(lhs, validate)?;
             walk_text_match_fields(rhs, validate)

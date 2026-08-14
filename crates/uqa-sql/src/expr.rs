@@ -55,7 +55,9 @@ pub use binary::{
     eval_binary_values, eval_binary_values_with_integer_width, eval_comparison_truth,
     integer_width_for_literal, integer_width_for_type, truthy, IntegerWidth,
 };
-pub use casting::{array_dimensions, cast_value, cast_value_from, parse_pg_array_literal};
+pub use casting::{
+    array_dimensions, cast_value, cast_value_from, negate_value, parse_pg_array_literal,
+};
 pub(crate) use conversion::to_f64;
 use conversion::{
     allocation_error, coerce_i64, expect_str, float1, float_to_i64_rounded, float_to_i64_trunc,
@@ -397,6 +399,11 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             ))
         }
         Expr::Binary { op, lhs, rhs } => eval_binary(*op, lhs, rhs, ctx),
+        Expr::UnaryMinus(inner) => {
+            let source_ty = explicit_expr_type(inner);
+            let value = eval(inner, ctx)?;
+            negate_value(&value, source_ty)
+        }
         Expr::Not(inner) => {
             // SQL three-valued logic: NOT NULL -> NULL.
             let v = eval(inner, ctx)?;

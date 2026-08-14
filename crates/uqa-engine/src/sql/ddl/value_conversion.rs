@@ -7,9 +7,11 @@
 //! Declared-column coercion, temporal conversion, and JSON bridges.
 
 use super::{
-    ddl_storage_error, index_vectors_for_type, value_to_tensor, value_to_vector, BTreeMap,
-    ColumnType, DecimalValue, Engine, RowUpdateVectors, SQLError, TemporalValue, Value,
+    ddl_storage_error, eval_lowered_expression, index_vectors_for_type, value_to_tensor,
+    value_to_vector, BTreeMap, ColumnType, DecimalValue, Engine, RowUpdateVectors, SQLError,
+    TemporalValue, Value,
 };
+use uqa_sql::ast::Expr;
 
 /// Coerce a write value to fit the column's declared type.
 pub(in crate::sql) fn coerce_to_column_type(
@@ -35,41 +37,90 @@ pub(super) fn coerce_json_value(value: Value, jsonb: bool) -> Result<Value, SQLE
     uqa_sql::expr::cast_value(&value, if jsonb { "jsonb" } else { "json" })
 }
 
-pub(super) fn float_to_integer(value: f64) -> Result<i64, SQLError> {
-    // `i64::MAX as f64` rounds to 2^63, which itself is outside the range.
-    const I64_UPPER_EXCLUSIVE: f64 = 9_223_372_036_854_775_808.0;
-    const I64_LOWER_INCLUSIVE: f64 = -9_223_372_036_854_775_808.0;
-    if !value.is_finite() || !(I64_LOWER_INCLUSIVE..I64_UPPER_EXCLUSIVE).contains(&value) {
-        return Err(SQLError::TypeMismatch(format!(
-            "cannot cast {value:?} to integer: value is outside BIGINT range"
-        )));
-    }
-    Ok(value as i64)
-}
-
 pub(super) fn rewrite_column_values_to_type(
     engine: &Engine,
     table: &str,
     column: &str,
-    ty: &ColumnType,
+    source_ty: &ColumnType,
+    target_ty: &ColumnType,
+    using: Option<&Expr>,
 ) -> Result<(), SQLError> {
     for doc_id in engine.table_doc_ids(table)? {
         let Some(doc) = engine.get_document(table, doc_id)? else {
             continue;
         };
-        let Some(value) = doc.get(column).cloned() else {
-            continue;
+        let converted = if let Some(expression) = using {
+            let value = eval_lowered_expression(engine, expression, Some(&doc), &[])?;
+            convert_value_to_column_type(value, target_ty)?
+        } else {
+            let Some(value) = doc.get(column).cloned() else {
+                continue;
+            };
+            convert_declared_value_to_column_type(value, source_ty, target_ty)?
         };
-        let converted = convert_value_to_column_type(value, ty)?;
         let mut updates: BTreeMap<String, Value> = BTreeMap::new();
         updates.insert(column.to_string(), converted.clone());
         let mut vectors: RowUpdateVectors = BTreeMap::new();
-        if matches!(ty, ColumnType::Vector(_) | ColumnType::Tensor(_)) {
-            vectors.insert(column.to_string(), index_vectors_for_type(&converted, ty)?);
+        if matches!(target_ty, ColumnType::Vector(_) | ColumnType::Tensor(_)) {
+            vectors.insert(
+                column.to_string(),
+                index_vectors_for_type(&converted, target_ty)?,
+            );
         }
         engine.update_document_fields_with_vector_values(table, doc_id, updates, vectors)?;
     }
     Ok(())
+}
+
+fn convert_declared_value_to_column_type(
+    value: Value,
+    source_ty: &ColumnType,
+    target_ty: &ColumnType,
+) -> Result<Value, SQLError> {
+    match (source_ty, target_ty) {
+        (ColumnType::Domain { base, .. }, target) => {
+            convert_declared_value_to_column_type(value, base, target)
+        }
+        (source, ColumnType::Domain { base, .. }) => {
+            convert_declared_value_to_column_type(value, source, base)
+        }
+        (ColumnType::Array(source), ColumnType::Array(target)) => {
+            let Value::List(values) = value else {
+                return Err(SQLError::TypeMismatch(format!(
+                    "cannot cast a non-array value to {}[]",
+                    column_type_name(target)
+                )));
+            };
+            values
+                .into_iter()
+                .map(|value| convert_declared_value_to_column_type(value, source, target))
+                .collect::<Result<Vec<_>, _>>()
+                .map(Value::List)
+        }
+        (source, ColumnType::Oid)
+            if matches!(
+                source,
+                ColumnType::SmallInteger
+                    | ColumnType::Integer
+                    | ColumnType::BigInteger
+                    | ColumnType::Oid
+                    | ColumnType::Regproc
+                    | ColumnType::Regtype
+            ) =>
+        {
+            uqa_sql::expr::cast_value_from(&value, "oid", Some(column_type_name(source)))
+        }
+        (ColumnType::Xid, ColumnType::Xid) => Ok(value),
+        (ColumnType::Bytea, ColumnType::Bytea) => Ok(value),
+        (_, ColumnType::Oid | ColumnType::Xid | ColumnType::Bytea) => {
+            Err(SQLError::TypeMismatch(format!(
+                "column cannot be cast automatically from type {} to type {}",
+                column_type_name(source_ty),
+                column_type_name(target_ty)
+            )))
+        }
+        _ => convert_value_to_column_type(value, target_ty),
+    }
 }
 
 pub(crate) fn convert_value_to_column_type(
@@ -80,22 +131,22 @@ pub(crate) fn convert_value_to_column_type(
         return Ok(Value::Null);
     }
     match ty {
-        ColumnType::Integer => match value {
-            Value::Int(_) => Ok(value),
-            Value::Float(f) => float_to_integer(f).map(Value::Int),
-            Value::Decimal(d) => d
-                .to_i64_trunc()
-                .map(Value::Int)
-                .ok_or_else(|| SQLError::TypeMismatch("cannot cast decimal to integer".into())),
-            Value::Bool(b) => Ok(Value::Int(i64::from(b))),
-            Value::Str(s) => s
-                .parse::<i64>()
-                .map(Value::Int)
-                .map_err(|e| SQLError::TypeMismatch(format!("cannot cast `{s}` to integer: {e}"))),
-            other => Err(SQLError::TypeMismatch(format!(
-                "cannot cast {other:?} to integer"
-            ))),
-        },
+        ColumnType::SmallInteger => uqa_sql::expr::cast_value(&value, "smallint"),
+        ColumnType::Integer => uqa_sql::expr::cast_value(&value, "integer"),
+        ColumnType::BigInteger => uqa_sql::expr::cast_value(&value, "bigint"),
+        ColumnType::Oid | ColumnType::Xid => {
+            let Value::Int(value) = uqa_sql::expr::cast_value(&value, "bigint")? else {
+                unreachable!("bigint cast returned a non-integer value")
+            };
+            u32::try_from(value)
+                .map(|value| Value::Int(i64::from(value)))
+                .map_err(|_| {
+                    SQLError::TypeMismatch(format!(
+                        "value {value} is out of range for type {}",
+                        column_type_name(ty)
+                    ))
+                })
+        }
         ColumnType::Boolean => match value {
             Value::Bool(_) => Ok(value),
             Value::Str(text) => parse_boolean_text(&text)
@@ -106,6 +157,11 @@ pub(crate) fn convert_value_to_column_type(
             ))),
         },
         ColumnType::Text => Ok(Value::Str(value_to_text(&value))),
+        ColumnType::Name => uqa_sql::expr::cast_value(&value, "name"),
+        ColumnType::Uuid => uqa_sql::expr::cast_value(&value, "uuid"),
+        ColumnType::Varchar(None) => Ok(Value::Str(value_to_text(&value))),
+        ColumnType::Varchar(Some(length)) => convert_varying_character(value, *length),
+        ColumnType::Bpchar => Ok(Value::FixedChar(value_to_text(&value))),
         ColumnType::Character(length) => {
             let length = usize::try_from(*length).map_err(|_| {
                 SQLError::TypeMismatch(format!(
@@ -131,7 +187,7 @@ pub(crate) fn convert_value_to_column_type(
             padded.extend(std::iter::repeat_n(' ', padding));
             Ok(Value::FixedChar(padded))
         }
-        ColumnType::Real => match value {
+        ColumnType::Real | ColumnType::DoublePrecision => match value {
             Value::Float(_) => Ok(value),
             Value::Int(i) => Ok(Value::Float(i as f64)),
             Value::Decimal(d) => d
@@ -188,6 +244,36 @@ pub(crate) fn convert_value_to_column_type(
             Value::Str(s) => Value::Bytes(s.into_bytes()),
             other => Value::Bytes(value_to_text(&other).into_bytes()),
         }),
+        ColumnType::InternalChar => {
+            let text = value_to_text(&value);
+            if text.len() == 1 {
+                Ok(Value::Str(text))
+            } else {
+                Err(SQLError::TypeMismatch(format!(
+                    "value `{text}` must be exactly one byte for type \"char\""
+                )))
+            }
+        }
+        ColumnType::Regproc
+        | ColumnType::Regtype
+        | ColumnType::PgNodeTree
+        | ColumnType::AclItem => Ok(match value {
+            Value::Int(_) | Value::Str(_) => value,
+            other => Value::Str(value_to_text(&other)),
+        }),
+        ColumnType::Int2Vector => convert_value_to_column_type(
+            value,
+            &ColumnType::Array(Box::new(ColumnType::SmallInteger)),
+        ),
+        ColumnType::OidVector => {
+            convert_value_to_column_type(value, &ColumnType::Array(Box::new(ColumnType::Oid)))
+        }
+        ColumnType::AnyArray => match value {
+            Value::List(_) => Ok(value),
+            other => Err(SQLError::TypeMismatch(format!(
+                "cannot cast {other:?} to anyarray"
+            ))),
+        },
         ColumnType::Array(element_type) => {
             let items = match value {
                 Value::List(items) => items,
@@ -210,7 +296,8 @@ pub(crate) fn convert_value_to_column_type(
         | ColumnType::Time
         | ColumnType::TimeTz
         | ColumnType::Timestamp
-        | ColumnType::TimestampTz => convert_temporal_value(value, ty),
+        | ColumnType::TimestampTz
+        | ColumnType::Interval => convert_temporal_value(value, ty),
         ColumnType::Vector(dim) => {
             let vector = value_to_vector(&value)?;
             validate_vector_dimensions(*dim, vector.len())?;
@@ -225,6 +312,28 @@ pub(crate) fn convert_value_to_column_type(
                 tensor.into_iter().map(vector_to_value).collect(),
             ))
         }
+        ColumnType::Domain { base, .. } => convert_value_to_column_type(value, base),
+    }
+}
+
+fn convert_varying_character(value: Value, length: u32) -> Result<Value, SQLError> {
+    let length = usize::try_from(length).map_err(|_| {
+        SQLError::TypeMismatch(format!(
+            "character varying length {length} exceeds the platform addressable range"
+        ))
+    })?;
+    let text = value_to_text(&value);
+    if text.chars().count() <= length {
+        return Ok(Value::Str(text));
+    }
+    let retained = text.chars().take(length).collect::<String>();
+    let discarded = text.chars().skip(length).collect::<String>();
+    if discarded.chars().all(|character| character == ' ') {
+        Ok(Value::Str(retained))
+    } else {
+        Err(SQLError::TypeMismatch(format!(
+            "value too long for type character varying({length})"
+        )))
     }
 }
 
@@ -250,25 +359,44 @@ pub(crate) fn validate_vector_dimensions(expected: u32, actual: usize) -> Result
     }
 }
 
-pub(in crate::sql) fn column_type_name(ty: &ColumnType) -> &'static str {
+pub(in crate::sql) fn column_type_name(ty: &ColumnType) -> &str {
     match ty {
+        ColumnType::SmallInteger => "smallint",
         ColumnType::Integer => "integer",
+        ColumnType::BigInteger => "bigint",
+        ColumnType::Oid => "oid",
+        ColumnType::Xid => "xid",
         ColumnType::Boolean => "boolean",
         ColumnType::Text => "text",
+        ColumnType::Name => "name",
+        ColumnType::Uuid => "uuid",
+        ColumnType::Varchar(_) => "character varying",
+        ColumnType::Bpchar => "character",
         ColumnType::Character(_) => "character",
         ColumnType::Real => "real",
+        ColumnType::DoublePrecision => "double precision",
         ColumnType::Numeric { .. } => "numeric",
         ColumnType::Json => "json",
         ColumnType::JsonB => "jsonb",
         ColumnType::Bytea => "bytea",
+        ColumnType::InternalChar => "\"char\"",
+        ColumnType::Regproc => "regproc",
+        ColumnType::Regtype => "regtype",
+        ColumnType::PgNodeTree => "pg_node_tree",
+        ColumnType::AclItem => "aclitem",
+        ColumnType::Int2Vector => "int2vector",
+        ColumnType::OidVector => "oidvector",
+        ColumnType::AnyArray => "anyarray",
         ColumnType::Array(_) => "array",
         ColumnType::Date => "date",
         ColumnType::Time => "time",
         ColumnType::TimeTz => "time with time zone",
         ColumnType::Timestamp => "timestamp",
         ColumnType::TimestampTz => "timestamp with time zone",
+        ColumnType::Interval => "interval",
         ColumnType::Vector(_) => "vector",
         ColumnType::Tensor(_) => "tensor",
+        ColumnType::Domain { name, .. } => name,
     }
 }
 
@@ -306,7 +434,8 @@ fn coerce_temporal_kind(value: TemporalValue, ty: &ColumnType) -> Option<Tempora
         | (ColumnType::Time, value @ TemporalValue::Time { .. })
         | (ColumnType::TimeTz, value @ TemporalValue::TimeTz { .. })
         | (ColumnType::Timestamp, value @ TemporalValue::Timestamp { .. })
-        | (ColumnType::TimestampTz, value @ TemporalValue::TimestampTz { .. }) => Some(value),
+        | (ColumnType::TimestampTz, value @ TemporalValue::TimestampTz { .. })
+        | (ColumnType::Interval, value @ TemporalValue::Interval { .. }) => Some(value),
         (ColumnType::Timestamp, TemporalValue::TimestampTz { micros }) => {
             Some(TemporalValue::Timestamp { micros })
         }
@@ -329,6 +458,7 @@ fn parse_temporal_text_for_type(text: &str, ty: &ColumnType) -> Option<TemporalV
             })
         }),
         ColumnType::TimestampTz => TemporalValue::parse_timestamp_tz(text),
+        ColumnType::Interval => TemporalValue::parse_interval(text),
         _ => None,
     }
 }

@@ -89,11 +89,16 @@ pub(in crate::sql) fn run_call(
         return Ok(SQLResult::empty());
     }
     let columns = output_column_names(&function.def);
+    let column_types = out_params
+        .iter()
+        .map(|parameter| uqa_sql::ast::ColumnType::from_sql_name(&parameter.type_name).map(Some))
+        .collect::<Result<Vec<_>, _>>()?;
     let mut row = ResultRow::new();
     for (column, value) in columns.iter().zip(outcome.out_values.iter()) {
         row.insert(column.clone(), value.clone());
     }
     Ok(SQLResult {
+        column_types,
         columns,
         rows: vec![row],
         positional_rows: None,

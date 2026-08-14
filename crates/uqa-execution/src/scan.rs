@@ -15,6 +15,7 @@
 
 use crate::batch::{Batch, PhysicalRow, RowSchema, DEFAULT_BATCH_SIZE};
 use crate::physical::{ExecResult, PhysicalOperator, PhysicalOrder};
+use uqa_sql::ast::ColumnType;
 use uqa_sql::ResultRow;
 
 /// Source of rows feeding a [`TableScan`]. Implementors typically own
@@ -110,6 +111,18 @@ impl<'a> RowIteratorScan<'a> {
             exhausted: false,
         }
     }
+
+    pub fn with_types(
+        schema: Vec<String>,
+        types: Vec<Option<ColumnType>>,
+        rows: Box<dyn Iterator<Item = ExecResult<ResultRow>> + Send + 'a>,
+    ) -> Self {
+        Self {
+            schema: RowSchema::with_types(schema, types),
+            rows,
+            exhausted: false,
+        }
+    }
 }
 
 impl PhysicalOperator for RowIteratorScan<'_> {
@@ -153,6 +166,19 @@ impl PhysicalOperator for RowIteratorScan<'_> {
 impl VecSource {
     pub fn new(schema: Vec<String>, rows: Vec<ResultRow>) -> Self {
         let physical_schema = RowSchema::from_named_columns(schema.clone());
+        Self {
+            schema,
+            physical_schema,
+            rows: rows.into_iter(),
+        }
+    }
+
+    pub fn with_types(
+        schema: Vec<String>,
+        types: Vec<Option<ColumnType>>,
+        rows: Vec<ResultRow>,
+    ) -> Self {
+        let physical_schema = RowSchema::with_types(schema.clone(), types);
         Self {
             schema,
             physical_schema,
@@ -210,6 +236,14 @@ impl TableScan {
 
     pub fn from_rows(schema: Vec<String>, rows: Vec<ResultRow>) -> Self {
         Self::new(Box::new(VecSource::new(schema, rows)))
+    }
+
+    pub fn from_typed_rows(
+        schema: Vec<String>,
+        types: Vec<Option<ColumnType>>,
+        rows: Vec<ResultRow>,
+    ) -> Self {
+        Self::new(Box::new(VecSource::with_types(schema, types, rows)))
     }
 }
 

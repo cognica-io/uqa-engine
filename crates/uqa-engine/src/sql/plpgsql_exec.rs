@@ -59,8 +59,8 @@ use diagnostics::{
     return_query_context_error, routine_message, row_value, strict_into_check, to_i64_value,
 };
 use resolution::{
-    best_effort_cast, call_signature, output_column_names, resolve_bound_routine, resolve_routine,
-    routine_resolution_error,
+    call_signature, coerce_routine_value, output_column_names, resolve_bound_routine,
+    resolve_routine, routine_resolution_error,
 };
 use routine::{execute_routine, DepthGuard};
 

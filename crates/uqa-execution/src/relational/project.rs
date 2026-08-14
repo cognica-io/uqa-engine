@@ -61,19 +61,37 @@ impl<'a> Project<'a> {
         projections: Vec<(String, ScalarExpr)>,
         evaluator: SharedExpressionEvaluator<'a>,
     ) -> Self {
+        let params = evaluator.parameters();
+        let projections = projections
+            .into_iter()
+            .map(|(name, expression)| {
+                (
+                    name,
+                    crate::bind_type_introspection(expression, child.row_schema(), params),
+                )
+            })
+            .collect::<Vec<_>>();
         let mut columns = Vec::new();
+        let mut types = Vec::new();
         for (name, expression) in &projections {
             if matches!(expression, ScalarExpr::Star) {
-                for column in child.schema() {
+                for (position, column) in child.schema().iter().enumerate() {
                     if evaluator.star_column_visible(column) {
                         columns.push(column.clone());
+                        types.push(child.row_schema().column_type(position).cloned());
                     }
                 }
             } else {
                 columns.push(name.clone());
+                types.push(
+                    evaluator
+                        .expression_type(expression, child.row_schema())
+                        .ok()
+                        .flatten(),
+                );
             }
         }
-        let schema = RowSchema::new(columns);
+        let schema = RowSchema::with_types(columns, types);
         Self {
             child,
             projections,
@@ -89,6 +107,16 @@ impl<'a> Project<'a> {
         projections: Vec<(String, ScalarExpr)>,
         evaluator: SharedExpressionEvaluator<'a>,
     ) -> Self {
+        let params = evaluator.parameters();
+        let projections = projections
+            .into_iter()
+            .map(|(name, expression)| {
+                (
+                    name,
+                    crate::bind_type_introspection(expression, child.row_schema(), params),
+                )
+            })
+            .collect::<Vec<_>>();
         let ordering = child
             .output_ordering()
             .iter()
@@ -104,9 +132,17 @@ impl<'a> Project<'a> {
         let appended = projections
             .iter()
             .filter(|(_, expression)| !matches!(expression, ScalarExpr::Star))
-            .map(|(name, _)| name.clone())
+            .map(|(name, expression)| {
+                (
+                    name.clone(),
+                    evaluator
+                        .expression_type(expression, child.row_schema())
+                        .ok()
+                        .flatten(),
+                )
+            })
             .collect::<Vec<_>>();
-        let schema = RowSchema::append(child.row_schema(), &appended);
+        let schema = RowSchema::append_typed(child.row_schema(), &appended);
         Self {
             child,
             projections,

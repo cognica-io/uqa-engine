@@ -44,6 +44,7 @@ mod foreign_access;
 mod physical_plan;
 mod query_block;
 mod recursive_cte;
+mod schema_binding;
 mod scored_input;
 mod set_projection;
 mod table_access;
@@ -61,6 +62,7 @@ pub(in crate::sql) use foreign_access::*;
 pub(in crate::sql) use physical_plan::*;
 pub(in crate::sql) use query_block::*;
 pub(in crate::sql) use recursive_cte::*;
+pub(in crate::sql) use schema_binding::*;
 pub(in crate::sql) use scored_input::*;
 pub(in crate::sql) use set_projection::*;
 pub(in crate::sql) use table_access::*;
@@ -103,16 +105,20 @@ pub(super) enum QueryRows {
 
 pub(super) struct QueryOutput {
     pub(super) columns: Vec<String>,
+    pub(super) column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
     /// Physical columns include internal row metadata that is available to a
     /// parent query block but never exposed through [`SQLResult`].
     pub(super) internal_columns: Vec<String>,
+    pub(super) internal_types: Vec<Option<uqa_sql::ast::ColumnType>>,
     pub(super) rows: QueryRows,
 }
 
 impl QueryOutput {
     pub(super) fn into_cursor(self) -> Result<super::SQLCursor, SQLError> {
         match self.rows {
-            QueryRows::SharedSpill(rows) => super::SQLCursor::from_spill(self.columns, rows),
+            QueryRows::SharedSpill(rows) => {
+                super::SQLCursor::from_spill(self.columns, self.column_types, rows)
+            }
             QueryRows::Rows { .. } | QueryRows::ExistsKeySet(_) => Err(SQLError::Internal(
                 "cursor query unexpectedly used unbounded row materialization".into(),
             )),
@@ -140,8 +146,9 @@ impl QueryOutput {
         for row in &mut rows {
             row.retain(|column, _| !is_score_provenance_column(column));
         }
-        Ok(SQLResult::from_rows_with_positions(
+        Ok(SQLResult::from_typed_rows_with_positions(
             self.columns,
+            self.column_types,
             rows,
             positional_rows,
         ))
@@ -149,8 +156,9 @@ impl QueryOutput {
 
     pub(super) fn into_operator<'a>(self) -> Box<dyn uqa_execution::PhysicalOperator + 'a> {
         match self.rows {
-            QueryRows::Rows { named, .. } => Box::new(uqa_execution::TableScan::from_rows(
+            QueryRows::Rows { named, .. } => Box::new(uqa_execution::TableScan::from_typed_rows(
                 self.internal_columns,
+                self.internal_types,
                 named,
             )),
             QueryRows::SharedSpill(rows) => Box::new(uqa_execution::SharedSpillScan::new(rows)),
@@ -163,14 +171,16 @@ impl QueryOutput {
     fn into_subquery_result(self) -> Result<uqa_execution::SubqueryResult, SQLError> {
         let QueryOutput {
             columns,
+            column_types: _,
             internal_columns,
+            internal_types,
             rows,
         } = self;
         let rows: Box<
             dyn Iterator<Item = Result<uqa_execution::OwnedPhysicalRow, SQLError>> + Send,
         > = match rows {
             QueryRows::Rows { named, .. } => {
-                let schema = uqa_execution::RowSchema::new(internal_columns);
+                let schema = uqa_execution::RowSchema::with_types(internal_columns, internal_types);
                 Box::new(named.into_iter().map(move |row| {
                     Ok(uqa_execution::OwnedPhysicalRow::new(
                         schema.clone(),
@@ -308,6 +318,20 @@ pub(super) fn collect_query_operator<'a>(
 ) -> Result<QueryOutput, SQLError> {
     let internal_schema = operator.row_schema().clone();
     let internal_columns = internal_schema.columns().to_vec();
+    let internal_types = internal_schema.column_types().to_vec();
+    let column_types = columns
+        .iter()
+        .enumerate()
+        .map(|(index, column)| {
+            if internal_schema.columns().get(index) == Some(column) {
+                internal_schema.column_type(index).cloned()
+            } else {
+                internal_schema
+                    .position(column)
+                    .and_then(|position| internal_schema.column_type(position).cloned())
+            }
+        })
+        .collect();
     let rows = match output_mode {
         QueryOutputMode::Rows => {
             let has_duplicate_labels = {
@@ -442,7 +466,9 @@ pub(super) fn collect_query_operator<'a>(
     };
     Ok(QueryOutput {
         columns,
+        column_types,
         internal_columns,
+        internal_types,
         rows,
     })
 }
@@ -457,6 +483,20 @@ pub(in crate::sql) fn collect_exists_key_operator<'a>(
     projections: &[ProjectionPlan],
     evaluator: SharedExpressionEvaluator<'a>,
 ) -> Result<QueryOutput, SQLError> {
+    let internal_columns = operator.schema().to_vec();
+    let internal_types = operator.row_schema().column_types().to_vec();
+    let column_types = projections
+        .iter()
+        .map(|projection| {
+            uqa_execution::scalar_type(
+                &projection.expr,
+                operator.row_schema(),
+                evaluator.parameters(),
+            )
+            .ok()
+            .flatten()
+        })
+        .collect();
     let direct_columns = projections
         .iter()
         .map(|projection| DirectColumnKey::compile(&projection.expr))
@@ -541,7 +581,9 @@ pub(in crate::sql) fn collect_exists_key_operator<'a>(
     }
     operator.close().map_err(physical_exec_error)?;
     Ok(QueryOutput {
-        internal_columns: columns.clone(),
+        internal_columns,
+        internal_types,
+        column_types,
         columns,
         rows: QueryRows::ExistsKeySet(keys),
     })

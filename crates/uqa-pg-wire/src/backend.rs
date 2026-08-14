@@ -13,6 +13,9 @@ pub enum Authentication {
     KerberosV5,
     CleartextPassword,
     Md5Password([u8; 4]),
+    Gss,
+    GssContinue(Vec<u8>),
+    Sspi,
     Sasl { mechanisms: Vec<String> },
     SaslContinue(Vec<u8>),
     SaslFinal(Vec<u8>),
@@ -94,7 +97,8 @@ pub enum BackendMessage {
     CopyBothResponse(CopyResponse),
     CopyData(Vec<u8>),
     CopyDone,
-    CopyFail(String),
+    FunctionCallResponse(Option<Vec<u8>>),
+    NotificationResponse(NotificationResponse),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +130,13 @@ impl FieldDescription {
 pub struct CopyResponse {
     pub overall_format: FormatCode,
     pub column_formats: Vec<FormatCode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationResponse {
+    pub process_id: i32,
+    pub channel: String,
+    pub payload: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -231,7 +242,8 @@ impl BackendMessage {
             Self::CopyBothResponse(response) => encode_copy_response(b'W', response),
             Self::CopyData(bytes) => Writer::frame(b'd', bytes),
             Self::CopyDone => encode_empty_body(b'c'),
-            Self::CopyFail(message) => encode_copy_fail(message),
+            Self::FunctionCallResponse(value) => encode_function_call_response(value.as_deref()),
+            Self::NotificationResponse(notification) => encode_notification_response(notification),
         }
     }
 }
@@ -296,6 +308,12 @@ fn encode_authentication(auth: &Authentication) -> Result<Vec<u8>, PgWireError> 
             body.write_i32(5);
             body.write_bytes(salt);
         }
+        Authentication::Gss => body.write_i32(7),
+        Authentication::GssContinue(data) => {
+            body.write_i32(8);
+            body.write_bytes(data);
+        }
+        Authentication::Sspi => body.write_i32(9),
         Authentication::Sasl { mechanisms } => {
             body.write_i32(10);
             for mechanism in mechanisms {
@@ -447,6 +465,16 @@ fn encode_parameter_description(oids: &[u32]) -> Result<Vec<u8>, PgWireError> {
 }
 
 fn encode_copy_response(tag: u8, response: &CopyResponse) -> Result<Vec<u8>, PgWireError> {
+    if response.overall_format == FormatCode::Text {
+        if let Some((index, _)) = response
+            .column_formats
+            .iter()
+            .enumerate()
+            .find(|(_, format)| **format == FormatCode::Binary)
+        {
+            return Err(PgWireError::BinaryColumnInTextCopy { column: index + 1 });
+        }
+    }
     let mut body = Writer::new();
     body.write_byte(match response.overall_format {
         FormatCode::Text => 0,
@@ -462,10 +490,26 @@ fn encode_copy_response(tag: u8, response: &CopyResponse) -> Result<Vec<u8>, PgW
     Writer::frame(tag, &body.into_inner())
 }
 
-fn encode_copy_fail(message: &str) -> Result<Vec<u8>, PgWireError> {
+fn encode_function_call_response(value: Option<&[u8]>) -> Result<Vec<u8>, PgWireError> {
     let mut body = Writer::new();
-    body.write_cstring(message, "CopyFail message")?;
-    Writer::frame(b'f', &body.into_inner())
+    match value {
+        Some(bytes) => {
+            body.write_i32(i32_len(bytes.len(), "FunctionCallResponse value")?);
+            body.write_bytes(bytes);
+        }
+        None => body.write_i32(-1),
+    }
+    Writer::frame(b'V', &body.into_inner())
+}
+
+fn encode_notification_response(
+    notification: &NotificationResponse,
+) -> Result<Vec<u8>, PgWireError> {
+    let mut body = Writer::new();
+    body.write_i32(notification.process_id);
+    body.write_cstring(&notification.channel, "NotificationResponse channel")?;
+    body.write_cstring(&notification.payload, "NotificationResponse payload")?;
+    Writer::frame(b'A', &body.into_inner())
 }
 
 fn encode_empty_body(tag: u8) -> Result<Vec<u8>, PgWireError> {

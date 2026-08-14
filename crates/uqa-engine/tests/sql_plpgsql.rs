@@ -11,7 +11,7 @@
 
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult};
-use uqa_sql::SQLError;
+use uqa_sql::{ColumnType, SQLError};
 
 fn exec(engine: &Engine, sql: &str) -> SQLResult {
     match engine.sql(sql, &[]) {

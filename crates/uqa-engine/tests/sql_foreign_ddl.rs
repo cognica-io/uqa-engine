@@ -147,6 +147,102 @@ fn select_from_memory_foreign_table() {
 }
 
 #[test]
+fn foreign_tables_preserve_declared_postgresql_type_identity() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE SERVER typed_mem FOREIGN DATA WRAPPER memory_fdw OPTIONS (kind 'memory')",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "CREATE FOREIGN TABLE remote_typed (
+             s SMALLINT,
+             b BIGINT,
+             r REAL,
+             d DOUBLE PRECISION,
+             n NUMERIC(10, 2),
+             v VARCHAR(7),
+             u UUID,
+             ts TIMESTAMPTZ,
+             a SMALLINT[]
+         ) SERVER typed_mem OPTIONS (source 'memory')",
+        &[],
+    )
+    .unwrap();
+    eng.load_memory_foreign_table(
+        "remote_typed",
+        vec![row(&[
+            ("s", Value::Int(1)),
+            ("b", Value::Int(2)),
+            ("r", Value::Float(1.5)),
+            ("d", Value::Float(2.5)),
+            (
+                "n",
+                Value::Decimal(uqa_core::DecimalValue::parse("1.23").unwrap()),
+            ),
+            ("v", Value::Str("value".into())),
+            (
+                "u",
+                Value::Str("550e8400-e29b-41d4-a716-446655440000".into()),
+            ),
+            (
+                "ts",
+                Value::Temporal(uqa_core::TemporalValue::TimestampTz { micros: 0 }),
+            ),
+            ("a", Value::List(vec![Value::Int(1), Value::Int(2)])),
+        ])],
+    )
+    .unwrap();
+
+    let result = eng
+        .sql("SELECT s, b, r, d, n, v, u, ts, a FROM remote_typed", &[])
+        .unwrap();
+    assert_eq!(
+        result.column_types,
+        [
+            Some(uqa_sql::ColumnType::SmallInteger),
+            Some(uqa_sql::ColumnType::BigInteger),
+            Some(uqa_sql::ColumnType::Real),
+            Some(uqa_sql::ColumnType::DoublePrecision),
+            Some(uqa_sql::ColumnType::Numeric {
+                precision: Some(10),
+                scale: Some(2),
+            }),
+            Some(uqa_sql::ColumnType::Varchar(Some(7))),
+            Some(uqa_sql::ColumnType::Uuid),
+            Some(uqa_sql::ColumnType::TimestampTz),
+            Some(uqa_sql::ColumnType::Array(Box::new(
+                uqa_sql::ColumnType::SmallInteger,
+            ))),
+        ]
+    );
+
+    let types = eng
+        .sql(
+            "SELECT pg_typeof(s) AS s, pg_typeof(b) AS b,
+                    pg_typeof(r) AS r, pg_typeof(d) AS d,
+                    pg_typeof(n) AS n, pg_typeof(v) AS v,
+                    pg_typeof(u) AS u, pg_typeof(ts) AS ts,
+                    pg_typeof(a) AS a
+             FROM remote_typed",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(types.rows[0]["s"], Value::Str("smallint".into()));
+    assert_eq!(types.rows[0]["b"], Value::Str("bigint".into()));
+    assert_eq!(types.rows[0]["r"], Value::Str("real".into()));
+    assert_eq!(types.rows[0]["d"], Value::Str("double precision".into()));
+    assert_eq!(types.rows[0]["n"], Value::Str("numeric".into()));
+    assert_eq!(types.rows[0]["v"], Value::Str("character varying".into()));
+    assert_eq!(types.rows[0]["u"], Value::Str("uuid".into()));
+    assert_eq!(
+        types.rows[0]["ts"],
+        Value::Str("timestamp with time zone".into())
+    );
+    assert_eq!(types.rows[0]["a"], Value::Str("smallint[]".into()));
+}
+
+#[test]
 fn memory_foreign_scan_is_pull_based_under_tiny_work_mem() {
     let eng = Engine::new();
     eng.sql("SET work_mem TO '1B'", &[]).unwrap();

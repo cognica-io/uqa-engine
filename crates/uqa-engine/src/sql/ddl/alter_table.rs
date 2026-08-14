@@ -344,7 +344,7 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
                 .try_persist_table_schema(&stmt.table)
                 .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
         }
-        AlterTableAction::AlterColumnType { name, ty } => {
+        AlterTableAction::AlterColumnType { name, ty, using } => {
             ensure_column_exists(engine, &stmt.table, &name)?;
             let mut candidate_columns = engine
                 .try_describe_table(&stmt.table)
@@ -383,9 +383,9 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
             )?;
             let old_ty = engine
                 .column_type(&stmt.table, &name)
-                .map_err(|err| ddl_storage_error("ALTER COLUMN TYPE", err))?;
-            let old_was_vector =
-                matches!(old_ty, Some(ColumnType::Vector(_) | ColumnType::Tensor(_)));
+                .map_err(|err| ddl_storage_error("ALTER COLUMN TYPE", err))?
+                .ok_or_else(|| SQLError::UnknownColumn(format!("{}.{name}", stmt.table)))?;
+            let old_was_vector = matches!(&old_ty, ColumnType::Vector(_) | ColumnType::Tensor(_));
             let new_is_vector = matches!(&ty, ColumnType::Vector(_) | ColumnType::Tensor(_));
 
             // Row rewrites maintain every currently registered vector index.
@@ -400,7 +400,14 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
                     .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
             }
             if target_generated_kind.is_none() {
-                rewrite_column_values_to_type(engine, &stmt.table, &name, &ty)?;
+                rewrite_column_values_to_type(
+                    engine,
+                    &stmt.table,
+                    &name,
+                    &old_ty,
+                    &ty,
+                    using.as_ref(),
+                )?;
             }
             engine
                 .set_column_type(&stmt.table, &name, &ty)

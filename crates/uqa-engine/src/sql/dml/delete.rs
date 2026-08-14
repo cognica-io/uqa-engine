@@ -10,8 +10,9 @@ use super::{
     apply_set_action_to_child, build_join_spill_with_ctes, build_returning_row,
     dml_returning_result, eval_mutation_expr, missing_document_error, referencing_rows,
     referrers_to_for_actions, rewrite_document_with_referential_actions, BTreeSet, CteScope,
-    DeletePlan, DocId, Document, Engine, ForeignKey, ForeignKeyAction, ResultRow,
-    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
+    DeletePlan, DmlReturningShape, DocId, Document, Engine, ForeignKey, ForeignKeyAction,
+    ResultRow, ReturningProjectionRow, ReturningRowImage, ReturningRowImages, SQLError, SQLParam,
+    SQLResult, Value,
 };
 
 pub(in crate::sql) fn run_delete(
@@ -30,7 +31,7 @@ pub(in crate::sql) fn run_delete_inner(
     let mut affected = 0u64;
     let cancel = engine.cancellation_token();
     let mut to_delete: Vec<uqa_core::DocId> = Vec::new();
-    let mut returning_docs: Vec<(uqa_core::DocId, Document)> = Vec::new();
+    let mut returning_docs: Vec<(uqa_core::DocId, Document, Option<ResultRow>)> = Vec::new();
     let mut ctes = CteScope::new();
     crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
@@ -66,8 +67,9 @@ pub(in crate::sql) fn run_delete_inner(
         let Some(doc) = engine.get_document(&stmt.table, doc_id)? else {
             return Err(missing_document_error("DELETE scan", &stmt.table, doc_id));
         };
+        let mut returning_context = None;
         let keep = match (stmt.predicate.as_ref(), using_rows.as_ref()) {
-            (None, _) => true,
+            (None, None) => true,
             (Some(_), None) if preselected => true,
             (Some(filter), None) => uqa_sql::expr::truthy(&eval_mutation_expr(
                 engine,
@@ -76,29 +78,33 @@ pub(in crate::sql) fn run_delete_inner(
                 Some(&doc),
                 params,
             )?),
-            (Some(filter), Some(rows)) => {
+            (filter, Some(rows)) => {
                 let mut matched = false;
                 let reader = rows
                     .read_rows()
                     .map_err(crate::sql::select::physical_exec_error)?;
                 for using_row in reader {
                     let using_row = using_row.map_err(crate::sql::select::physical_exec_error)?;
+                    let source_context = using_row
+                        .view()
+                        .iter()
+                        .map(|(column, value)| (column.to_string(), value.clone()))
+                        .collect::<ResultRow>();
                     let mut joined = ResultRow::new();
                     for (k, v) in &doc {
                         joined.insert(k.clone(), v.clone());
                         joined.insert(format!("{}.{k}", stmt.table), v.clone());
                     }
-                    for (k, v) in using_row.view().iter() {
-                        joined.insert(k.to_string(), v.clone());
+                    for (k, v) in &source_context {
+                        joined.insert(k.clone(), v.clone());
                     }
-                    if uqa_sql::expr::truthy(&eval_mutation_expr(
-                        engine,
-                        &ctes,
-                        filter,
-                        Some(&joined),
-                        params,
-                    )?) {
+                    let qualifies = filter.map_or(Ok(true), |filter| {
+                        eval_mutation_expr(engine, &ctes, filter, Some(&joined), params)
+                            .map(|value| uqa_sql::expr::truthy(&value))
+                    })?;
+                    if qualifies {
                         matched = true;
+                        returning_context = Some(source_context);
                         break;
                     }
                 }
@@ -107,7 +113,7 @@ pub(in crate::sql) fn run_delete_inner(
         };
         if keep {
             if !stmt.returning.is_empty() {
-                returning_docs.push((doc_id, doc.clone()));
+                returning_docs.push((doc_id, doc.clone(), returning_context));
             }
             to_delete.push(doc_id);
         }
@@ -131,18 +137,23 @@ pub(in crate::sql) fn run_delete_inner(
     if !stmt.returning.is_empty() {
         let returning_rows = returning_docs
             .into_iter()
-            .map(|(doc_id, doc)| {
+            .map(|(doc_id, doc, context)| {
                 build_returning_row(
                     engine,
-                    &stmt.table,
-                    ReturningRowImages {
-                        old: Some(ReturningRowImage {
-                            doc_id,
-                            document: &doc,
-                        }),
-                        new: None,
+                    ReturningProjectionRow {
+                        table: &stmt.table,
+                        images: ReturningRowImages {
+                            old: Some(ReturningRowImage {
+                                doc_id,
+                                document: &doc,
+                            }),
+                            new: None,
+                        },
+                        aliases: &stmt.returning_aliases,
+                        context: context
+                            .as_ref()
+                            .map(|row| row as &dyn uqa_sql::expr::RowLookup),
                     },
-                    &stmt.returning_aliases,
                     &stmt.returning,
                     params,
                     &ctes,
@@ -151,8 +162,17 @@ pub(in crate::sql) fn run_delete_inner(
             .collect::<Result<Vec<_>, _>>()?;
         return dml_returning_result(
             engine,
-            &stmt.table,
-            &stmt.returning,
+            DmlReturningShape {
+                table: &stmt.table,
+                target_qualifier: None,
+                aliases: &stmt.returning_aliases,
+                returning: &stmt.returning,
+                params,
+                ctes: &ctes,
+                supplemental_schema: using_rows
+                    .as_ref()
+                    .map(uqa_execution::SharedSpill::row_schema),
+            },
             returning_rows,
             affected,
         );

@@ -136,6 +136,7 @@ pub(in crate::sql) fn run_explain(
         row.insert("plan".to_string(), Value::Str(payload.to_string()));
         return Ok(SQLResult {
             columns: vec!["plan".to_string()],
+            column_types: vec![Some(uqa_sql::ColumnType::Text)],
             rows: vec![row],
             positional_rows: None,
             affected_rows: 0,
@@ -154,6 +155,7 @@ pub(in crate::sql) fn run_explain(
     }
     Ok(SQLResult {
         columns: vec!["plan".to_string()],
+        column_types: vec![Some(uqa_sql::ColumnType::Text)],
         rows,
         positional_rows: None,
         affected_rows: 0,

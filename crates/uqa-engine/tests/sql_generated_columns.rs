@@ -15,6 +15,7 @@ use uqa_engine::operator_tree_bridge::EngineDriver;
 use uqa_engine::Engine;
 use uqa_operators::{OperatorTree, SumMonoid};
 use uqa_planner::executor::{OperatorOutput, OperatorTreeDriver};
+use uqa_sql::ColumnType;
 
 fn int(row: &uqa_sql::ResultRow, column: &str) -> i64 {
     match row.get(column) {
@@ -390,17 +391,17 @@ fn generated_column_catalog_metadata_matches_pg18() {
 
     let definitions = engine
         .sql(
-            "SELECT adnum, adsrc FROM pg_catalog.pg_attrdef ORDER BY adnum",
+            "SELECT adnum, adbin FROM pg_catalog.pg_attrdef ORDER BY adnum",
             &[],
         )
         .unwrap();
     assert_eq!(definitions.rows.len(), 2);
     assert_eq!(
-        definitions.rows[0]["adsrc"],
+        definitions.rows[0]["adbin"],
         Value::Str("(source + 1)".into())
     );
     assert_eq!(
-        definitions.rows[1]["adsrc"],
+        definitions.rows[1]["adbin"],
         Value::Str("(source * 2)".into())
     );
 }
@@ -699,6 +700,14 @@ fn generated_columns_are_recomputed_for_upsert_and_merge() {
         )
         .unwrap();
     assert_eq!(merged.rows.len(), 2);
+    assert_eq!(
+        merged.column_types,
+        [
+            Some(ColumnType::Text),
+            Some(ColumnType::Integer),
+            Some(ColumnType::Integer),
+        ]
+    );
     let update = merged
         .rows
         .iter()

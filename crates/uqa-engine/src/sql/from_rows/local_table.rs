@@ -11,17 +11,19 @@ use super::{
     build_table_function_row_stream, build_values_rows, combine_filters, decide_join_sides,
     execute_query_plan_output, execute_view_plan_output_with_parent_cache,
     has_filters_for_qualifier, is_score_provenance_column, join_conjuncts, join_schema_sample,
-    join_using_predicate, null_row_for_schema, pad_nulls_for_from, physical_work_mem_bytes,
-    propagated_join_filters, push_output_filter_into_query_plan, qualified_key, qualifier_filter,
-    qualifier_for, qualify_source_operator, qualify_source_operator_with_columns,
+    join_using_predicate, null_row_for_schema, physical_work_mem_bytes, propagated_join_filters,
+    push_output_filter_into_query_plan, qualified_key, qualifier_filter, qualifier_for,
+    qualify_source_operator, qualify_source_operator_with_columns,
     query_contains_volatile_function, query_cte_names, query_output_shared, resolve_join_using,
-    shape_join_using_output, table_function_empty_schema, ColumnPrune, CteScope, Engine,
-    EngineExpressionEvaluator, EngineLateralSource, JoinExecutionStrategy, JoinKind,
-    PlanSubqueryArena, QualifierFilters, QueryOutputMode, ResultRow, SQLError, SQLParam,
+    shape_join_using_output, table_function_column_types, table_function_empty_schema, ColumnPrune,
+    CteScope, Engine, EngineExpressionEvaluator, EngineLateralSource, JoinExecutionStrategy,
+    JoinKind, PlanSubqueryArena, QualifierFilters, QueryOutputMode, ResultRow, SQLError, SQLParam,
     ScalarExpr, ScopedEngineHook, ScoredDocumentSource, ScoredInput, SourcePlan, TableFunctionCall,
     TableFunctionEvalContext, Value,
 };
 
+use crate::sql::select::bind_source_plan_schema;
+use crate::sql::virtual_relation_schema;
 use uqa_planner::{AccessPathPlan, ComputePlan, RelationalPlan};
 
 type StreamingLocalTableScan<'a> = (Box<dyn uqa_execution::PhysicalOperator + 'a>, bool);
@@ -32,6 +34,7 @@ pub(in crate::sql) struct EngineTableRowSource {
     column_definitions: Vec<uqa_sql::ast::ColumnDef>,
     columns: Vec<String>,
     schema: Vec<String>,
+    physical_schema: uqa_execution::RowSchema,
     predicate: Option<uqa_execution::ProjectedPredicate>,
     estimated_cardinality: u64,
     after: Option<uqa_core::DocId>,
@@ -247,6 +250,10 @@ impl uqa_execution::RowSource for EngineTableRowSource {
         &self.schema
     }
 
+    fn physical_schema(&self) -> Option<&uqa_execution::RowSchema> {
+        Some(&self.physical_schema)
+    }
+
     fn estimated_cardinality(&self) -> Option<u64> {
         Some(self.estimated_cardinality)
     }
@@ -257,10 +264,9 @@ impl uqa_execution::RowSource for EngineTableRowSource {
 
     fn next_batch(&mut self, max_rows: usize) -> uqa_execution::ExecResult<Vec<ResultRow>> {
         let rows = self.next_physical_rows_batch(max_rows)?;
-        let schema = uqa_execution::RowSchema::new(self.schema.clone());
         Ok(rows
             .iter()
-            .map(|row| schema.view(row).to_result_row())
+            .map(|row| self.physical_schema.view(row).to_result_row())
             .collect())
     }
 
@@ -345,7 +351,7 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
             .collect(),
         None => table_columns,
     };
-    let schema = columns
+    let schema: Vec<String> = columns
         .iter()
         .map(|column| qualified_key(&qualifier, column))
         .collect();
@@ -355,12 +361,23 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         .flatten();
     let filter_pushed = predicate.is_some();
     let column_definitions = table.columns.read().clone();
+    let column_types = columns
+        .iter()
+        .map(|column| {
+            column_definitions
+                .iter()
+                .find(|definition| definition.name == *column)
+                .map(|definition| definition.ty.clone())
+        })
+        .collect();
+    let physical_schema = uqa_execution::RowSchema::with_types(schema.clone(), column_types);
     let source = EngineTableRowSource {
         table_name: name.clone(),
         table,
         column_definitions,
         columns,
         schema,
+        physical_schema,
         predicate,
         estimated_cardinality: engine.table_doc_count(name)?,
         after: None,
@@ -443,12 +460,18 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             }
 
             if let Some(rows) = build_info_schema_rows(engine, name)? {
-                let columns: Vec<String> = rows
-                    .first()
-                    .map(|row| row.keys().cloned().collect())
-                    .unwrap_or_default();
-                let scan: Box<dyn PhysicalOperator + 'a> =
-                    Box::new(uqa_execution::TableScan::from_rows(columns.clone(), rows));
+                let schema = virtual_relation_schema(name).ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "virtual relation `{name}` has rows but no PostgreSQL 18 row type"
+                    ))
+                })?;
+                let (columns, types): (Vec<_>, Vec<_>) = schema
+                    .into_iter()
+                    .map(|(column, ty)| (column, Some(ty)))
+                    .unzip();
+                let scan: Box<dyn PhysicalOperator + 'a> = Box::new(
+                    uqa_execution::TableScan::from_typed_rows(columns.clone(), types, rows),
+                );
                 let operator =
                     qualify_source_operator_with_columns(scan, &columns, &qualifier, prune, &[]);
                 return Ok(attach_qualifier_filter(
@@ -464,12 +487,18 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                 let rows = engine
                     .scan_foreign_table_stream(name, None, &[], None)
                     .map_err(SQLError::Unsupported)?;
-                let columns = engine
-                    .foreign_table_columns(name)
+                let typed_columns = engine
+                    .foreign_table_typed_columns(name)
                     .map_err(SQLError::Unsupported)?;
+                let columns = typed_columns
+                    .iter()
+                    .map(|(column, _)| column.clone())
+                    .collect::<Vec<_>>();
+                let types = typed_columns.into_iter().map(|(_, ty)| Some(ty)).collect();
                 let scan: Box<dyn PhysicalOperator + 'a> =
-                    Box::new(uqa_execution::RowIteratorScan::new(
+                    Box::new(uqa_execution::RowIteratorScan::with_types(
                         columns.clone(),
+                        types,
                         Box::new(rows.map(|row| {
                             row.map_err(SQLError::Unsupported)
                                 .map_err(uqa_execution::ExecError::from)
@@ -557,12 +586,11 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                         "optimizer selected a hash strategy for a lateral join".into(),
                     ));
                 }
-                let left_nulls = null_row_for_schema(left_operator.schema());
-                let mut right_nulls = ResultRow::new();
-                pad_nulls_for_from(&mut right_nulls, right, engine)?;
                 let left_schema = left_operator.row_schema().clone();
+                let left_nulls = null_row_for_schema(left_schema.columns());
                 let right_schema =
-                    uqa_execution::RowSchema::new(right_nulls.keys().cloned().collect::<Vec<_>>());
+                    bind_source_plan_schema(engine, right, params, ctes, Some(&left_schema))?;
+                let right_nulls = null_row_for_schema(right_schema.columns());
                 let resolved_using =
                     resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
                 let effective_on = resolved_using
@@ -575,14 +603,17 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                     on: effective_on,
                     params,
                     ctes: ctes.clone(),
+                    outer_schema: left_schema.clone(),
                 };
-                let joined: Box<dyn PhysicalOperator + 'a> = Box::new(LateralJoin::new(
-                    left_operator,
-                    Box::new(source),
-                    *kind,
-                    left_nulls,
-                    right_nulls,
-                ));
+                let joined: Box<dyn PhysicalOperator + 'a> =
+                    Box::new(LateralJoin::new_with_right_schema(
+                        left_operator,
+                        Box::new(source),
+                        *kind,
+                        left_nulls,
+                        right_nulls,
+                        right_schema.clone(),
+                    ));
                 return if let Some(using) = resolved_using.as_ref() {
                     shape_join_using_output(joined, *kind, &left_schema, &right_schema, using)
                 } else {
@@ -713,6 +744,7 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             alias,
             column_aliases,
         } => {
+            let column_types = uqa_execution::values_column_types(rows, params)?;
             let source_columns = if column_aliases.is_empty() {
                 (0..rows.first().map_or(0, Vec::len))
                     .map(|index| format!("column{}", index + 1))
@@ -738,7 +770,11 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                 &hook,
                 &ctes.scalar_subqueries,
             )?;
-            Ok(Box::new(uqa_execution::TableScan::from_rows(columns, rows)))
+            Ok(Box::new(uqa_execution::TableScan::from_typed_rows(
+                columns,
+                column_types,
+                rows,
+            )))
         }
         SourcePlan::Function {
             name,
@@ -778,8 +814,18 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                 table_function_empty_schema(name, alias.as_deref(), column_aliases)
             };
             let rows = first.into_iter().map(Ok).chain(rows);
-            Ok(Box::new(uqa_execution::RowIteratorScan::new(
+            let types = table_function_column_types(
+                engine,
+                name,
+                args,
+                column_types,
+                &columns,
+                &uqa_execution::RowSchema::default(),
+                params,
+            );
+            Ok(Box::new(uqa_execution::RowIteratorScan::with_types(
                 columns,
+                types,
                 Box::new(rows),
             )))
         }
