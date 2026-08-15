@@ -20,6 +20,8 @@ use crate::error::{Result, SQLError};
 
 use super::{division_by_zero, float_to_i64_rounded, out_of_range, to_f64};
 
+mod number_format;
+
 const MICROS_PER_SECOND: i64 = 1_000_000;
 const MICROS_PER_MINUTE: i64 = 60 * MICROS_PER_SECOND;
 const MICROS_PER_HOUR: i64 = 3_600 * MICROS_PER_SECOND;
@@ -641,20 +643,8 @@ pub(super) fn pg_to_chrono_fmt(fmt: &str) -> String {
         .replace("PM", "%p")
 }
 
-pub(super) fn format_pg_number(n: f64, fmt: &str) -> String {
-    // Minimal `to_char(numeric, '999...')` support: count `9` digits
-    // and zero-pad the integral part. Falls back to plain Display.
-    let digits = fmt.chars().filter(|c| *c == '9' || *c == '0').count();
-    if digits == 0 {
-        return n.to_string();
-    }
-    if fmt.contains('.') {
-        let frac_digits = fmt.split('.').nth(1).map(str::len).unwrap_or(0);
-        format!("{n:.frac_digits$}")
-    } else {
-        let truncated = n.trunc();
-        format!("{truncated:0digits$.0}")
-    }
+pub(super) fn format_pg_number(value: &Value, fmt: &str) -> Result<String> {
+    number_format::format_pg_number(value, fmt)
 }
 
 /// `to_char(temporal, fmt)` for typed temporal values.

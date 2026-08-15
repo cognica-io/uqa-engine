@@ -101,7 +101,9 @@ use display::{
 use migration_io::{
     open_engine, open_engine_with_key, print_migration_report, print_migration_report_stdout,
 };
-use output::{history_path, print_result, print_result_expanded, value_to_display};
+use output::{
+    history_path, print_result, print_result_copy_text, print_result_expanded, value_to_display,
+};
 use repl::{PromptLineOutcome, Session};
 use statements::{contains_statement_terminator, split_statements, statement_is_pure_comment};
 
@@ -163,6 +165,7 @@ fn run_cli(args: CliArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    session.copy_text = args.copy_text;
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut out = TrackedWriter::new(stdout.lock());
@@ -219,6 +222,7 @@ struct CliArgs {
     scripts: Vec<PathBuf>,
     key: Option<String>,
     key_file: Option<PathBuf>,
+    copy_text: bool,
 }
 
 impl CliArgs {
@@ -299,6 +303,10 @@ impl CliAction {
                     parsed.key_file = Some(PathBuf::from(path));
                     i += 2;
                 }
+                "--copy-text" => {
+                    parsed.copy_text = true;
+                    i += 1;
+                }
                 "-h" | "--help" => return Ok(Self::Help),
                 arg if arg.starts_with('-') => return Err(format!("unknown option: {arg}")),
                 script => {
@@ -320,7 +328,7 @@ fn print_usage_stderr() {
 }
 
 fn usage_text() -> &'static str {
-    "Usage:\n    usql                        Start with an in-memory database\n    usql --db mydata.db         Start with persistent storage\n    usql script.sql             Execute a SQL script then enter REPL when stdin is a terminal\n    usql --db mydata.db s.sql   Persistent + script\n    usql -c \"SELECT 1\"          Execute a command string and exit\n    usql migrate-python-db <source> <destination>\n\nEncrypted databases:\n    usql --db enc.db --key <key>        Open (or create) an encrypted database\n    usql --db enc.db --key-file <file>  Read the key from a file\n    UQA_KEY=<key> usql --db enc.db      Read the key from the environment\n    Interactive sessions prompt for the key when an encrypted database\n    is opened without one. Compressed containers are detected and\n    opened automatically, including encrypted ones."
+    "Usage:\n    usql                        Start with an in-memory database\n    usql --db mydata.db         Start with persistent storage\n    usql script.sql             Execute a SQL script then enter REPL when stdin is a terminal\n    usql --db mydata.db s.sql   Persistent + script\n    usql -c \"SELECT 1\"          Execute a command string and exit\n    usql --copy-text -c \"...\"  Emit rows in PostgreSQL COPY text format\n    usql migrate-python-db <source> <destination>\n\nEncrypted databases:\n    usql --db enc.db --key <key>        Open (or create) an encrypted database\n    usql --db enc.db --key-file <file>  Read the key from a file\n    UQA_KEY=<key> usql --db enc.db      Read the key from the environment\n    Interactive sessions prompt for the key when an encrypted database\n    is opened without one. Compressed containers are detected and\n    opened automatically, including encrypted ones."
 }
 
 #[cfg(test)]

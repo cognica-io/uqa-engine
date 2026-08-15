@@ -392,7 +392,8 @@ fn builtin_function_type_inner(
         }
         "mod" | "gcd" | "lcm" => numeric_binary_function_type(argument(0)?, argument(1)?),
         "div" | "factorial" | "extract" | "to_number" => Ok(Some(numeric_type())),
-        "power" | "pow" | "sqrt" | "ln" | "log" | "log10" => {
+        "power" | "pow" => numeric_power_type(args, schema, params, resolver),
+        "sqrt" | "ln" | "log" | "log10" => {
             numeric_transcendental_type(args, schema, params, resolver)
         }
         "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "atan2" | "sinh" | "cosh" | "tanh"
@@ -614,6 +615,45 @@ fn numeric_transcendental_type(
         }
     }
     Ok(saw_argument.then(numeric_type))
+}
+
+fn numeric_power_type(
+    args: &[ScalarExpr],
+    schema: &RowSchema,
+    params: &[SQLParam],
+    resolver: Option<&dyn FunctionTypeResolver>,
+) -> Result<Option<ColumnType>, SQLError> {
+    let mut saw_numeric = false;
+    let mut saw_floating = false;
+    for argument in args {
+        let argument = named_argument_value(argument);
+        if matches!(argument, ScalarExpr::Literal(Value::Str(_) | Value::Null)) {
+            continue;
+        }
+        let Some(ty) = scalar_type_inner(argument, schema, params, resolver)? else {
+            continue;
+        };
+        match base_type(&ty) {
+            ColumnType::Numeric { .. } => saw_numeric = true,
+            ColumnType::SmallInteger | ColumnType::Integer | ColumnType::BigInteger => {}
+            ColumnType::Real | ColumnType::DoublePrecision => saw_floating = true,
+            _ => {
+                return Err(SQLError::Routine {
+                    sqlstate: "42883".into(),
+                    message: "function power with these argument types does not exist".into(),
+                })
+            }
+        }
+    }
+    Ok(if saw_floating {
+        Some(ColumnType::DoublePrecision)
+    } else if saw_numeric {
+        Some(numeric_type())
+    } else if !args.is_empty() {
+        Some(ColumnType::DoublePrecision)
+    } else {
+        None
+    })
 }
 
 fn array_element_type(ty: ColumnType) -> Option<ColumnType> {
@@ -1317,173 +1357,4 @@ fn undefined_equality_operator(left: &ColumnType, right: &ColumnType) -> SQLErro
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn common_type_matches_postgresql_numeric_and_left_character_precedence() {
-        assert_eq!(
-            common_type(&ColumnType::SmallInteger, &ColumnType::BigInteger).unwrap(),
-            ColumnType::BigInteger
-        );
-        assert_eq!(
-            common_type(
-                &ColumnType::Numeric {
-                    precision: None,
-                    scale: None,
-                },
-                &ColumnType::Real,
-            )
-            .unwrap(),
-            ColumnType::Real
-        );
-        assert_eq!(
-            common_type(&ColumnType::Varchar(Some(8)), &ColumnType::Text).unwrap(),
-            ColumnType::Varchar(None)
-        );
-        assert_eq!(
-            common_type(&ColumnType::Text, &ColumnType::Varchar(Some(8))).unwrap(),
-            ColumnType::Text
-        );
-        assert_eq!(
-            common_type(&ColumnType::Oid, &ColumnType::BigInteger).unwrap(),
-            ColumnType::Oid
-        );
-        assert_eq!(
-            common_type(&ColumnType::Integer, &ColumnType::Oid).unwrap(),
-            ColumnType::Oid
-        );
-    }
-
-    #[test]
-    fn equality_resolution_rejects_postgresql_undefined_operators() {
-        for (left, right) in [
-            (ColumnType::Boolean, ColumnType::Integer),
-            (ColumnType::Json, ColumnType::Json),
-            (
-                ColumnType::Array(Box::new(ColumnType::Integer)),
-                ColumnType::Array(Box::new(ColumnType::BigInteger)),
-            ),
-        ] {
-            let error = equality_operand_type(&left, &right).unwrap_err();
-            assert_eq!(error.sqlstate(), Some("42883"));
-        }
-    }
-
-    #[test]
-    fn values_type_resolution_uses_declared_casts_instead_of_runtime_values() {
-        let rows = vec![
-            vec![ScalarExpr::Cast {
-                expr: Box::new(ScalarExpr::Literal(Value::Int(1))),
-                ty: "smallint".into(),
-            }],
-            vec![ScalarExpr::Cast {
-                expr: Box::new(ScalarExpr::Literal(Value::Int(2))),
-                ty: "bigint".into(),
-            }],
-        ];
-        assert_eq!(
-            values_column_types(&rows, &[]).unwrap(),
-            vec![Some(ColumnType::BigInteger)]
-        );
-    }
-
-    #[test]
-    fn type_introspection_binds_before_integer_width_is_erased() {
-        let schema = RowSchema::with_types(vec!["v".into()], vec![Some(ColumnType::SmallInteger)]);
-        let expression = ScalarExpr::Func {
-            name: "pg_typeof".into(),
-            binding: None,
-            args: vec![ScalarExpr::Column("v".into())],
-            distinct: false,
-            order_by: Vec::new(),
-            filter: None,
-        };
-        assert_eq!(
-            bind_type_introspection(expression, &schema, &[]),
-            ScalarExpr::Cast {
-                expr: Box::new(ScalarExpr::Literal(Value::Str("smallint".into()))),
-                ty: "regtype".into(),
-            }
-        );
-    }
-
-    #[test]
-    fn qualified_type_introspection_binds_inside_an_expression() {
-        let schema = RowSchema::with_types(vec!["v".into()], vec![Some(ColumnType::Real)]);
-        let expression = ScalarExpr::IsNull {
-            expr: Box::new(ScalarExpr::Func {
-                name: "PG_CATALOG.PG_TYPEOF".into(),
-                binding: None,
-                args: vec![ScalarExpr::Column("v".into())],
-                distinct: false,
-                order_by: Vec::new(),
-                filter: None,
-            }),
-            negated: false,
-        };
-        assert_eq!(
-            bind_type_introspection(expression, &schema, &[]),
-            ScalarExpr::IsNull {
-                expr: Box::new(ScalarExpr::Cast {
-                    expr: Box::new(ScalarExpr::Literal(Value::Str("real".into()))),
-                    ty: "regtype".into(),
-                }),
-                negated: false,
-            }
-        );
-    }
-
-    #[test]
-    fn type_binding_reuses_existing_expression_storage() {
-        let expression = ScalarExpr::And(vec![ScalarExpr::Between {
-            expr: Box::new(ScalarExpr::Column("v".into())),
-            low: Box::new(ScalarExpr::Literal(Value::Int(1))),
-            high: Box::new(ScalarExpr::Literal(Value::Int(9))),
-        }]);
-        let ScalarExpr::And(items) = &expression else {
-            unreachable!();
-        };
-        let items_address = items.as_ptr();
-        let ScalarExpr::Between { expr, .. } = &items[0] else {
-            unreachable!();
-        };
-        let expression_address = std::ptr::from_ref::<ScalarExpr>(expr.as_ref());
-
-        let bound = bind_type_introspection(expression, &RowSchema::default(), &[]);
-
-        let ScalarExpr::And(items) = &bound else {
-            panic!("bound expression must preserve the conjunction");
-        };
-        let ScalarExpr::Between { expr, .. } = &items[0] else {
-            panic!("bound expression must preserve the range predicate");
-        };
-        assert_eq!(items.as_ptr(), items_address);
-        assert_eq!(
-            std::ptr::from_ref::<ScalarExpr>(expr.as_ref()),
-            expression_address
-        );
-    }
-
-    #[test]
-    fn array_cast_binding_preserves_the_declared_source_element_type() {
-        let source = ScalarExpr::Array(vec![ScalarExpr::Cast {
-            expr: Box::new(ScalarExpr::Literal(Value::Int(1))),
-            ty: "smallint".into(),
-        }]);
-        let expression = ScalarExpr::Cast {
-            expr: Box::new(source.clone()),
-            ty: "bytea[]".into(),
-        };
-        assert_eq!(
-            bind_type_introspection(expression, &RowSchema::default(), &[]),
-            ScalarExpr::Cast {
-                expr: Box::new(ScalarExpr::Cast {
-                    expr: Box::new(source),
-                    ty: "smallint[]".into(),
-                }),
-                ty: "bytea[]".into(),
-            }
-        );
-    }
-}
+mod tests;

@@ -137,9 +137,15 @@ impl<'a> Project<'a> {
             .iter()
             .take_while(|order| {
                 projections.iter().all(|(name, expression)| {
-                    name != &order.column
+                    child
+                        .row_schema()
+                        .columns()
+                        .iter()
+                        .position(|column| column == name)
+                        != Some(order.position)
                         || matches!(expression, ScalarExpr::Star | ScalarExpr::QualifiedStar(_))
-                        || matches!(expression, ScalarExpr::Column(source) if source == name)
+                        || crate::order_expression_position(child.row_schema(), expression)
+                            == Some(order.position)
                 })
             })
             .cloned()

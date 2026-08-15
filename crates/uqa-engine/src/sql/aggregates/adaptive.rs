@@ -16,8 +16,8 @@ use smallvec::SmallVec;
 use super::{
     aggregate_accumulator_templates, aggregate_targets, eval_scalar,
     instantiate_aggregate_accumulators, AggregateAccumulator, AggregateAccumulatorTemplate,
-    CteScope, Engine, PlanSubqueryArena, QueryBlockPlan, SQLError, SQLParam, ScalarEvalContext,
-    ScalarExpr, ScopedEngineHook, SpillBuffer, Value,
+    AggregateStatePlan, CteScope, DecimalValue, Engine, PlanSubqueryArena, QueryBlockPlan,
+    SQLError, SQLParam, ScalarEvalContext, ScalarExpr, ScopedEngineHook, SpillBuffer, Value,
 };
 use uqa_execution::{hash_canonical_row, Batch, RowSchema};
 
@@ -91,9 +91,9 @@ impl AdaptiveAggregateSet {
             .max(1);
         let spill_budget = (work_mem_bytes / 3).max(1);
         let accumulator_budget = (state_budget / target_count / 2).max(1);
-        let variable_state = aggregate_targets
+        let variable_state = accumulator_templates
             .iter()
-            .any(|expression| contains_named_function(expression, &["min", "max"]));
+            .any(aggregate_template_has_variable_state);
         let projected_group_columns =
             super::projected::ProjectedGroupColumn::compile(&statement.group_by, input_schema);
         let projected_aggregate_plans = super::projected_input::ProjectedAggregatePlans::compile(
@@ -436,17 +436,18 @@ fn is_mergeable_builtin(name: &str) -> bool {
     )
 }
 
-fn contains_named_function(expression: &ScalarExpr, names: &[&str]) -> bool {
-    match expression {
-        ScalarExpr::Func { name, args, .. } => {
-            names
-                .iter()
-                .any(|candidate| name.eq_ignore_ascii_case(candidate))
-                || args
-                    .iter()
-                    .any(|argument| contains_named_function(argument, names))
-        }
-        _ => false,
+fn aggregate_template_has_variable_state(template: &AggregateAccumulatorTemplate) -> bool {
+    match template {
+        AggregateAccumulatorTemplate::Builtin(plan) => matches!(
+            plan,
+            AggregateStatePlan::Generic
+                | AggregateStatePlan::Sum
+                | AggregateStatePlan::Min
+                | AggregateStatePlan::Max
+                | AggregateStatePlan::Buffered
+                | AggregateStatePlan::Statistics
+        ),
+        AggregateAccumulatorTemplate::Registered(_) => true,
     }
 }
 
@@ -458,8 +459,32 @@ fn estimate_group_bytes(key: &[Value], accumulators: &[AggregateAccumulator]) ->
                 .iter()
                 .map(|accumulator| {
                     std::mem::size_of::<AggregateAccumulator>()
+                        .saturating_add(
+                            accumulator
+                                .decimal_sum
+                                .as_ref()
+                                .map_or(0, DecimalValue::retained_bytes),
+                        )
                         .saturating_add(accumulator.min.as_ref().map_or(0, value_retained_bytes))
                         .saturating_add(accumulator.max.as_ref().map_or(0, value_retained_bytes))
+                        .saturating_add(
+                            accumulator
+                                .statistics_origin
+                                .as_ref()
+                                .map_or(0, DecimalValue::retained_bytes),
+                        )
+                        .saturating_add(
+                            accumulator
+                                .statistics_sum
+                                .as_ref()
+                                .map_or(0, DecimalValue::retained_bytes),
+                        )
+                        .saturating_add(
+                            accumulator
+                                .statistics_sum_squares
+                                .as_ref()
+                                .map_or(0, DecimalValue::retained_bytes),
+                        )
                         .saturating_add(accumulator.distinct.memory_bytes)
                         .saturating_add(accumulator.values.memory_bytes)
                         .saturating_add(accumulator.registered_ordered.memory_bytes)
@@ -507,11 +532,40 @@ fn value_retained_bytes(value: &Value) -> usize {
                 .saturating_add(value_retained_bytes(value))
                 .saturating_add(3 * std::mem::size_of::<usize>())
         }),
-        Value::Null
-        | Value::Bool(_)
-        | Value::Int(_)
-        | Value::Float(_)
-        | Value::Temporal(_)
-        | Value::Decimal(_) => 0,
+        Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Temporal(_) => 0,
+        Value::Decimal(value) => value.retained_bytes(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_decimal_aggregate_allocations_are_charged_to_group_state() {
+        assert!(DecimalValue::from_i64(1).retained_bytes() >= std::mem::size_of::<usize>());
+        let value = DecimalValue::parse("1e20000").unwrap();
+        let mut statistics = AggregateAccumulator::builtin("var_pop");
+        let empty_statistics = estimate_group_bytes(&[], std::slice::from_ref(&statistics));
+        statistics.observe(&Value::Decimal(value.clone())).unwrap();
+        assert!(
+            estimate_group_bytes(&[], std::slice::from_ref(&statistics))
+                > empty_statistics.saturating_add(4_000)
+        );
+
+        let mut sum = AggregateAccumulator::builtin("sum");
+        let empty_sum = estimate_group_bytes(&[], std::slice::from_ref(&sum));
+        sum.observe(&Value::Decimal(value.clone())).unwrap();
+        assert!(
+            estimate_group_bytes(&[], std::slice::from_ref(&sum)) > empty_sum.saturating_add(4_000)
+        );
+
+        assert!(value_retained_bytes(&Value::Decimal(value)) > std::mem::size_of::<Value>());
+        assert!(aggregate_template_has_variable_state(
+            &AggregateAccumulatorTemplate::Builtin(AggregateStatePlan::Statistics)
+        ));
+        assert!(aggregate_template_has_variable_state(
+            &AggregateAccumulatorTemplate::Builtin(AggregateStatePlan::Sum)
+        ));
+    }
 }

@@ -91,7 +91,18 @@ fn encode_accumulator(accumulator: AggregateAccumulator) -> Value {
         unsigned_bytes(accumulator.statistics_count),
         float_bytes(accumulator.statistics_mean),
         float_bytes(accumulator.statistics_m2),
+        Value::Bool(accumulator.statistics_moments_valid),
         Value::Bool(accumulator.statistics_has_float),
+        Value::Bool(accumulator.statistics_nonzero_deviation),
+        accumulator
+            .statistics_origin
+            .map_or(Value::Null, Value::Decimal),
+        accumulator
+            .statistics_sum
+            .map_or(Value::Null, Value::Decimal),
+        accumulator
+            .statistics_sum_squares
+            .map_or(Value::Null, Value::Decimal),
     ])
 }
 
@@ -110,9 +121,9 @@ fn decode_accumulator(
             "partial aggregate accumulator is not a list".into(),
         ));
     };
-    if fields.len() != 13 {
+    if fields.len() != 18 {
         return Err(SQLError::Internal(format!(
-            "partial aggregate accumulator has {} fields, expected 13",
+            "partial aggregate accumulator has {} fields, expected 18",
             fields.len()
         )));
     }
@@ -130,10 +141,25 @@ fn decode_accumulator(
     accumulator.statistics_count = decode_unsigned(next(&mut fields)?, "statistics count")?;
     accumulator.statistics_mean = decode_float(next(&mut fields)?, "statistics mean")?;
     accumulator.statistics_m2 = decode_float(next(&mut fields)?, "statistics m2")?;
+    accumulator.statistics_moments_valid = match next(&mut fields)? {
+        Value::Bool(value) => value,
+        _ => return Err(SQLError::Internal("invalid statistics moments flag".into())),
+    };
     accumulator.statistics_has_float = match next(&mut fields)? {
         Value::Bool(value) => value,
         _ => return Err(SQLError::Internal("invalid statistics float flag".into())),
     };
+    accumulator.statistics_nonzero_deviation = match next(&mut fields)? {
+        Value::Bool(value) => value,
+        _ => {
+            return Err(SQLError::Internal(
+                "invalid statistics nonzero-deviation flag".into(),
+            ))
+        }
+    };
+    accumulator.statistics_origin = optional_decimal(next(&mut fields)?)?;
+    accumulator.statistics_sum = optional_decimal(next(&mut fields)?)?;
+    accumulator.statistics_sum_squares = optional_decimal(next(&mut fields)?)?;
     Ok(accumulator)
 }
 
@@ -207,21 +233,120 @@ fn merge_statistics(
         target.statistics_count = source.statistics_count;
         target.statistics_mean = source.statistics_mean;
         target.statistics_m2 = source.statistics_m2;
+        target.statistics_moments_valid = source.statistics_moments_valid;
         target.statistics_has_float = source.statistics_has_float;
+        target.statistics_nonzero_deviation = source.statistics_nonzero_deviation;
+        target
+            .statistics_origin
+            .clone_from(&source.statistics_origin);
+        target.statistics_sum.clone_from(&source.statistics_sum);
+        target
+            .statistics_sum_squares
+            .clone_from(&source.statistics_sum_squares);
         return Ok(());
     }
     let combined = target
         .statistics_count
         .checked_add(source.statistics_count)
         .ok_or_else(|| SQLError::TypeMismatch("statistical aggregate count overflow".into()))?;
-    let delta = source.statistics_mean - target.statistics_mean;
-    let left = target.statistics_count as f64;
-    let right = source.statistics_count as f64;
-    let total = combined as f64;
-    target.statistics_mean += delta * right / total;
-    target.statistics_m2 += source.statistics_m2 + delta * delta * left * right / total;
+    let moments_valid = target.statistics_moments_valid && source.statistics_moments_valid;
+    let has_float = target.statistics_has_float || source.statistics_has_float;
+    if has_float && !moments_valid {
+        return Err(SQLError::TypeMismatch(
+            "numeric statistical state does not fit double precision".into(),
+        ));
+    }
+    if moments_valid {
+        let delta = source.statistics_mean - target.statistics_mean;
+        let left = target.statistics_count as f64;
+        let right = source.statistics_count as f64;
+        let total = combined as f64;
+        target.statistics_mean += delta * right / total;
+        target.statistics_m2 += source.statistics_m2 + delta * delta * left * right / total;
+    }
+    target.statistics_moments_valid = moments_valid;
+    target.statistics_has_float = has_float;
+    if has_float {
+        target.statistics_origin = None;
+        target.statistics_sum = None;
+        target.statistics_sum_squares = None;
+    } else {
+        merge_exact_statistics(target, source)?;
+    }
     target.statistics_count = combined;
-    target.statistics_has_float |= source.statistics_has_float;
+    Ok(())
+}
+
+fn merge_exact_statistics(
+    target: &mut AggregateAccumulator,
+    source: &AggregateAccumulator,
+) -> Result<(), SQLError> {
+    let target_origin = target
+        .statistics_origin
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("numeric statistical state omitted its origin".into()))?;
+    let source_origin = source.statistics_origin.as_ref().ok_or_else(|| {
+        SQLError::Internal("numeric statistical partial state omitted its origin".into())
+    })?;
+    let target_sum = target.statistics_sum.as_ref().ok_or_else(|| {
+        SQLError::Internal("numeric statistical state omitted its deviation sum".into())
+    })?;
+    let source_sum = source.statistics_sum.as_ref().ok_or_else(|| {
+        SQLError::Internal("numeric statistical partial state omitted its deviation sum".into())
+    })?;
+    let target_squares = target.statistics_sum_squares.as_ref().ok_or_else(|| {
+        SQLError::Internal("numeric statistical state omitted its deviation square sum".into())
+    })?;
+    let source_squares = source.statistics_sum_squares.as_ref().ok_or_else(|| {
+        SQLError::Internal(
+            "numeric statistical partial state omitted its deviation square sum".into(),
+        )
+    })?;
+    target.statistics_nonzero_deviation |=
+        source.statistics_nonzero_deviation || source_origin != target_origin;
+    if target_squares.is_nan() || source_squares.is_nan() {
+        let nan = target_squares.checked_add(source_squares).ok_or_else(|| {
+            SQLError::Internal("numeric special partial states did not produce NaN".into())
+        })?;
+        target.statistics_sum = Some(nan.clone());
+        target.statistics_sum_squares = Some(nan);
+        return Ok(());
+    }
+    let source_count = DecimalValue::from_i128(i128::from(source.statistics_count))
+        .ok_or_else(|| SQLError::TypeMismatch("statistical aggregate count overflow".into()))?;
+    let shift = source_origin.checked_sub(target_origin).ok_or_else(|| {
+        SQLError::TypeMismatch("numeric statistical origin shift overflow".into())
+    })?;
+    let shifted_sum = shift
+        .checked_mul(&source_count)
+        .and_then(|value| value.checked_add(source_sum))
+        .ok_or_else(|| {
+            SQLError::TypeMismatch("numeric statistical deviation sum overflow".into())
+        })?;
+    let twice_source_sum = source_sum
+        .checked_mul(&DecimalValue::from_i64(2))
+        .ok_or_else(|| {
+            SQLError::TypeMismatch("numeric statistical deviation sum overflow".into())
+        })?;
+    let shifted_squares = shift
+        .checked_mul(&shift)
+        .and_then(|value| value.checked_mul(&source_count))
+        .and_then(|shift_square| {
+            shift
+                .checked_mul(&twice_source_sum)
+                .and_then(|cross| shift_square.checked_add(&cross))
+        })
+        .and_then(|adjustment| adjustment.checked_add(source_squares))
+        .ok_or_else(|| {
+            SQLError::TypeMismatch("numeric statistical deviation square sum overflow".into())
+        })?;
+    target.statistics_sum = target_sum.checked_add(&shifted_sum);
+    target.statistics_sum_squares = target_squares.checked_add(&shifted_squares);
+    if target.statistics_sum.is_none() || target.statistics_sum_squares.is_none() {
+        return Err(SQLError::TypeMismatch(
+            "numeric statistical partial-state merge overflow".into(),
+        ));
+    }
     Ok(())
 }
 

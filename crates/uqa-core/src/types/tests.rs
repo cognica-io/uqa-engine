@@ -167,6 +167,71 @@ fn decimal_division_uses_postgresql_display_scale() {
     assert_eq!(divide("10.00", "4"), "2.5000000000000000");
     assert_eq!(divide("37569624.64", "1478"), "25419.231826792963");
     assert_eq!(divide("75.18", "1478"), "0.05086603518267929635");
+    let underflow = DecimalValue::parse("0e-16383")
+        .unwrap()
+        .checked_div_postgres(&DecimalValue::from_i64(4))
+        .unwrap();
+    assert!(underflow.is_zero());
+    assert_eq!(underflow.display_scale(), Some(1_000));
+}
+
+#[test]
+fn decimal_scaled_division_and_square_root_keep_guard_digits() {
+    let two = DecimalValue::from_i64(2);
+    let three = DecimalValue::from_i64(3);
+    assert_eq!(
+        two.checked_div_to_scale(&three, 20)
+            .unwrap()
+            .to_sql_string(),
+        "0.66666666666666666667"
+    );
+    assert_eq!(
+        two.sqrt_to_scale(16).unwrap().to_sql_string(),
+        "1.4142135623730950"
+    );
+    assert_eq!(
+        DecimalValue::parse("2.0000000000000000000000000000000000000000")
+            .unwrap()
+            .sqrt_to_scale(16)
+            .unwrap()
+            .to_sql_string(),
+        "1.4142135623730950"
+    );
+}
+
+#[test]
+fn decimal_power_preserves_postgresql_scale_and_significant_digits() {
+    let power = |base: &str, exponent: &str| {
+        DecimalValue::parse(base)
+            .unwrap()
+            .checked_pow_postgres(&DecimalValue::parse(exponent).unwrap())
+            .unwrap()
+            .to_sql_string()
+    };
+
+    assert_eq!(power("2", "0.5"), "1.4142135623730950");
+    assert_eq!(power("2", "0.1"), "1.0717734625362932");
+    assert_eq!(power("4", "0.25"), "1.4142135623730950");
+    assert_eq!(
+        power("0.000001", "3"),
+        "0.0000000000000000010000000000000000"
+    );
+    assert_eq!(power("4", "3"), "64.000000000000000");
+    assert_eq!(
+        power("2.0000000000000000000000000000000000000000", "0.5"),
+        "1.4142135623730950488016887242096980785697"
+    );
+    assert_eq!(power("-2", "NaN"), "NaN");
+    assert_eq!(power("-2", "Infinity"), "Infinity");
+    assert_eq!(power("-2", "-Infinity"), "0");
+    assert_eq!(
+        power("1e-1000", "-17"),
+        format!("1{}.{}", "0".repeat(17_000), "0".repeat(1_000))
+    );
+
+    let high_scale_base = format!("1.{}1", "0".repeat(16_382));
+    let high_scale_result = power(&high_scale_base, "0.5");
+    assert_eq!(high_scale_result, format!("1.{}", "0".repeat(1_000)));
 }
 
 #[test]

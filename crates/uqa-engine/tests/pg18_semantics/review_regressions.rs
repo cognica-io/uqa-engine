@@ -131,3 +131,30 @@ fn join_using_and_returning_alias_collisions_report_duplicate_relation() {
         "42601",
     );
 }
+
+#[test]
+fn numeric_to_char_places_sign_tokens_at_their_postgresql_positions() {
+    let eng = engine();
+    for (sql, expected) in [
+        ("SELECT to_char(12::numeric, 'PL999')", "+  12"),
+        ("SELECT to_char(-12::numeric, 'PL999')", "  -12"),
+        ("SELECT to_char(12::numeric, 'SG999')", "+ 12"),
+        ("SELECT to_char(-12::numeric, 'SG999')", "- 12"),
+        ("SELECT to_char(12::numeric, '9SG99')", " +12"),
+        ("SELECT to_char(-12::numeric, '9MI99')", " -12"),
+        ("SELECT to_char(12::numeric, '9S9.9')", "+12.0"),
+        ("SELECT to_char(-12::numeric, '99S.9')", "12.0-"),
+        ("SELECT to_char(12::numeric, '9MI99SG')", "  12+"),
+        ("SELECT to_char(-12::numeric, '9MI99SG')", " -12-"),
+        ("SELECT to_char(1::numeric, 'FM9.9MIPL')", "1.+"),
+        ("SELECT to_char(-1::numeric, 'FM9.9MIPL')", "1.-"),
+        ("SELECT to_char(-12::numeric, '999S,')", " 12-,"),
+        ("SELECT to_char(-12::numeric, '999,S')", " 12-,"),
+        ("SELECT to_char(-12::numeric, '999PR,')", " <12>,"),
+        ("SELECT to_char(12::numeric, '999PR,')", "  12 ,"),
+    ] {
+        assert_eq!(text(&eng, sql), expected, "{sql}");
+    }
+    assert_sqlstate(&eng, "SELECT to_char(12::numeric, 'PR999')", "42601");
+    assert_sqlstate(&eng, "SELECT to_char(12::numeric, '9S99MI')", "42601");
+}

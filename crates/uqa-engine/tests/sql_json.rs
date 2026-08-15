@@ -345,8 +345,7 @@ fn jsonb_pretty_returns_indented_text() {
     let Value::Str(text) = &result.rows[0]["v"] else {
         panic!("expected text");
     };
-    assert!(text.contains('\n'));
-    assert!(text.contains("\"a\""));
+    assert_eq!(text, "{\n    \"a\": [\n        1,\n        2\n    ]\n}");
 }
 
 #[test]
@@ -626,6 +625,21 @@ fn json_contains_operator() {
         "SELECT '{\"a\": 1, \"b\": 2}'::jsonb @> '{\"a\": 1}'::jsonb AS v FROM t WHERE id = 1",
     );
     assert_eq!(result.rows[0]["v"], Value::Bool(true));
+}
+
+#[test]
+fn jsonb_containment_compares_numbers_semantically() {
+    let engine = engine_with_table();
+    let result = exec(
+        &engine,
+        "SELECT '{\"a\": 1}'::jsonb @> '{\"a\": 1.0}'::jsonb AS equal_number, '[1.0]'::jsonb @> '1'::jsonb AS top_level_scalar, '[{\"a\": 1}]'::jsonb @> '{\"a\": 1}'::jsonb AS top_level_object, '{\"a\": [1.0]}'::jsonb @> '{\"a\": 1}'::jsonb AS nested_object_scalar, '[[1.0]]'::jsonb @> '[1]'::jsonb AS nested_array_scalar, '{\"a\": [1.0]}'::jsonb @> '{\"a\": [1]}'::jsonb AS matching_structure FROM t WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["equal_number"], Value::Bool(true));
+    assert_eq!(result.rows[0]["top_level_scalar"], Value::Bool(true));
+    assert_eq!(result.rows[0]["top_level_object"], Value::Bool(false));
+    assert_eq!(result.rows[0]["nested_object_scalar"], Value::Bool(false));
+    assert_eq!(result.rows[0]["nested_array_scalar"], Value::Bool(false));
+    assert_eq!(result.rows[0]["matching_structure"], Value::Bool(true));
 }
 
 #[test]

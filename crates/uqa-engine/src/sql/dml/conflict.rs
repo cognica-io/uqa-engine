@@ -369,19 +369,7 @@ pub(in crate::sql) fn build_returning_row(
         input.aliases,
         returning,
     )?;
-    let doc_id = input
-        .images
-        .new
-        .or(input.images.old)
-        .map_or(0, |image| image.doc_id);
-    build_projection_physical_row_with_ctes(engine, &row, &projections, params, ctes).map_err(
-        |err| {
-            SQLError::Internal(format!(
-                "RETURNING projection failed for table `{}` doc {doc_id}: {err}",
-                input.table
-            ))
-        },
-    )
+    build_projection_physical_row_with_ctes(engine, &row, &projections, params, ctes)
 }
 
 pub(in crate::sql) struct DmlReturningShape<'a> {

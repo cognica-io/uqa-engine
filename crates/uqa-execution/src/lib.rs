@@ -92,7 +92,8 @@ pub use join_output::{JoinOutput, JoinOutputSource};
 pub use lateral_join::{LateralJoin, LateralRows, LateralSource};
 pub use map_rows::{MapRows, SharedRowMapper};
 pub use physical::{
-    ordering_satisfies, ExecError, ExecResult, OperatorBatchCursor, PhysicalOperator, PhysicalOrder,
+    order_expression_position, ordering_satisfies, ExecError, ExecResult, OperatorBatchCursor,
+    PhysicalOperator, PhysicalOrder,
 };
 pub use project_set::{ProjectRows, ProjectSet, SetProjector};
 pub use projected_predicate::ProjectedPredicate;

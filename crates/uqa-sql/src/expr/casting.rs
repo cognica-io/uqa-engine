@@ -171,7 +171,7 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
                 let _validated = parse_json(text)?;
                 return Ok(Value::Json(text.clone()));
             }
-            Ok(typed_json_value(&value_to_json(v), false))
+            typed_json_value(&value_to_json(v), false)
         }
         "jsonb" => {
             if let Value::JsonB(text) = v {
@@ -181,7 +181,7 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
                 Value::Json(text) | Value::Str(text) | Value::FixedChar(text) => parse_json(text)?,
                 other => value_to_json(other),
             };
-            Ok(typed_json_value(&parsed, true))
+            typed_json_value(&parsed, true)
         }
         "bytea" => cast_bytea(v, source_ty),
         "boolean" | "bool" => cast_boolean(v),
@@ -727,11 +727,23 @@ impl<'a> PgArrayLiteralParser<'a> {
             if self.chars.next() != Some(']') {
                 return Err(self.error("array dimension is missing a closing `]`"));
             }
+            if upper == i32::MAX {
+                return Err(SQLError::Routine {
+                    sqlstate: "54000".into(),
+                    message: format!("array upper bound is too large: {upper}"),
+                });
+            }
+            if upper < lower {
+                return Err(SQLError::Routine {
+                    sqlstate: "2202E".into(),
+                    message: "upper bound cannot be less than lower bound".into(),
+                });
+            }
             let length = i64::from(upper)
                 .checked_sub(i64::from(lower))
                 .and_then(|difference| difference.checked_add(1))
                 .and_then(|length| usize::try_from(length).ok())
-                .ok_or_else(|| self.error("upper bound cannot be less than lower bound"))?;
+                .ok_or_else(|| self.error("array dimension is out of range"))?;
             dimensions.push((lower, length));
             self.skip_whitespace();
         }
@@ -1063,6 +1075,17 @@ fn cast_temporal_kind(value: &TemporalValue, target: TemporalCastTarget) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn array_literal_rejects_postgresql_unrepresentable_upper_bound() {
+        let error = parse_pg_array_literal("[2147483647:2147483647]={1}").unwrap_err();
+        assert_eq!(error.sqlstate(), Some("54000"));
+        assert_eq!(
+            error.to_string(),
+            "array upper bound is too large: 2147483647"
+        );
+        assert!(parse_pg_array_literal("[2147483646:2147483646]={1}").is_ok());
+    }
     use uqa_core::DecimalValue;
 
     #[test]

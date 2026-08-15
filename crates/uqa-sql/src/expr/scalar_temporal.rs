@@ -209,14 +209,9 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                 }
                 let fmt = value_to_string(&args[1]);
                 match &args[0] {
-                    Value::Int(i) => Ok(Value::Str(format_pg_number(*i as f64, &fmt))),
-                    Value::Float(f) => Ok(Value::Str(format_pg_number(*f, &fmt))),
-                    Value::Decimal(d) => d
-                        .to_f64()
-                        .map(|value| Value::Str(format_pg_number(value, &fmt)))
-                        .ok_or_else(|| {
-                            SQLError::TypeMismatch("to_char: numeric out of range".into())
-                        }),
+                    value @ (Value::Int(_) | Value::Float(_) | Value::Decimal(_)) => {
+                        format_pg_number(value, &fmt).map(Value::Str)
+                    }
                     Value::Temporal(t) => Ok(Value::Str(format_temporal(t, &fmt)?)),
                     Value::Str(s) => {
                         let temporal = coerce_temporal(&Value::Str(s.clone()))?;

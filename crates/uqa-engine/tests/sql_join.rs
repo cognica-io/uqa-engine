@@ -129,10 +129,12 @@ fn join_with_aggregate_groups_per_department() {
     let eng_row = &r.rows[0];
     assert_eq!(eng_row.get("dept"), Some(&Value::Str("engineering".into())));
     assert_eq!(eng_row.get("n"), Some(&Value::Int(2)));
-    match eng_row.get("avg_sal") {
-        Some(Value::Float(v)) => assert!((v - 100_000.0).abs() < 1e-9),
-        other => panic!("expected float avg, got {other:?}"),
-    }
+    assert_eq!(
+        eng_row.get("avg_sal"),
+        Some(&Value::Decimal(
+            uqa_core::DecimalValue::parse("100000.000000000000").unwrap()
+        ))
+    );
 }
 
 #[test]

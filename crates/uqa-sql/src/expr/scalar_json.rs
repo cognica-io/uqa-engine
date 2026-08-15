@@ -7,10 +7,10 @@
 //! JSON and `JSONPath` built-ins.
 
 use super::{
-    json_build_array_value, json_build_object_value, json_contained_by, json_contains,
-    json_delete_path, json_extract_path, json_has_key, json_has_keys, json_typeof, jsonb_insert,
-    jsonb_set, jsonpath_exists, jsonpath_match, parse_json, strip_nulls, typed_json_value,
-    value_to_json_text, value_to_string, Result, SQLError, Value,
+    format_jsonb_pretty, json_build_array_value, json_build_object_value, json_contained_by,
+    json_contains, json_delete_path, json_extract_path, json_has_key, json_has_keys, json_typeof,
+    jsonb_insert, jsonb_set, jsonpath_exists, jsonpath_match, parse_json, strip_nulls,
+    typed_json_value, value_to_json_text, value_to_string, Result, SQLError, Value,
 };
 
 pub(super) fn eval_json_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
@@ -122,7 +122,7 @@ pub(super) fn eval_json_functions(name: &str, args: &[Value]) -> Option<Result<V
                 }
                 let text = value_to_json_text(&args[0]);
                 if name == "to_jsonb" {
-                    Ok(typed_json_value(&parse_json(&text)?, true))
+                    typed_json_value(&parse_json(&text)?, true)
                 } else {
                     Ok(Value::Json(text))
                 }
@@ -134,9 +134,7 @@ pub(super) fn eval_json_functions(name: &str, args: &[Value]) -> Option<Result<V
                     return Err(SQLError::TypeMismatch("jsonb_pretty takes 1 arg".into()));
                 }
                 let parsed = parse_json(&value_to_string(&args[0]))?;
-                Ok(Value::Str(serde_json::to_string_pretty(&parsed).map_err(
-                    |err| SQLError::TypeMismatch(format!("jsonb_pretty: {err}")),
-                )?))
+                Ok(Value::Str(format_jsonb_pretty(&parsed)))
             }
             "json_strip_nulls" | "jsonb_strip_nulls" => {
                 if !(1..=2).contains(&args.len()) {
@@ -158,7 +156,7 @@ pub(super) fn eval_json_functions(name: &str, args: &[Value]) -> Option<Result<V
                 };
                 let mut parsed = parse_json(&value_to_string(&args[0]))?;
                 strip_nulls(&mut parsed, strip_in_arrays);
-                Ok(typed_json_value(&parsed, name.starts_with("jsonb")))
+                typed_json_value(&parsed, name.starts_with("jsonb"))
             }
             "json_object_keys" | "jsonb_object_keys" => {
                 if args.len() != 1 {

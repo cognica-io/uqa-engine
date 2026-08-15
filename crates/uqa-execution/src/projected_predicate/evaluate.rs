@@ -14,7 +14,7 @@ use uqa_sql::expr::{
 };
 use uqa_sql::SQLError;
 
-use super::ProjectedExpr;
+use super::{ProjectedExpr, ProjectedIntPredicate};
 use crate::PhysicalRowView;
 
 static NULL_VALUE: Value = Value::Null;
@@ -78,6 +78,7 @@ fn evaluate_truth<F: FieldValues + ?Sized>(
         } => evaluate_int_comparison_truth(fields.field(*field), *op, *literal, *field_on_left)?,
         ProjectedExpr::Not(expression) => evaluate_truth(expression, fields)?.map(|value| !value),
         ProjectedExpr::And(items) => evaluate_truth_and(items, fields)?,
+        ProjectedExpr::IntFieldConjunction(items) => evaluate_int_conjunction_truth(items, fields)?,
         ProjectedExpr::Or(items) => evaluate_truth_or(items, fields)?,
         ProjectedExpr::IsNull {
             expression,
@@ -183,6 +184,9 @@ fn evaluate<'a, F: FieldValues + ?Sized>(
             })
         }
         ProjectedExpr::And(items) => ProjectedValue::Owned(evaluate_and(items, fields)?),
+        ProjectedExpr::IntFieldConjunction(items) => ProjectedValue::Owned(truth_to_value(
+            evaluate_int_conjunction_truth(items, fields)?,
+        )),
         ProjectedExpr::Or(items) => ProjectedValue::Owned(evaluate_or(items, fields)?),
         ProjectedExpr::IsNull {
             expression,
@@ -324,6 +328,34 @@ fn evaluate_truth_and<F: FieldValues + ?Sized>(
     let mut saw_null = false;
     for item in items {
         match evaluate_truth(item, fields)? {
+            Some(false) => return Ok(Some(false)),
+            None => saw_null = true,
+            Some(true) => {}
+        }
+    }
+    Ok(if saw_null { None } else { Some(true) })
+}
+
+fn evaluate_int_conjunction_truth<F: FieldValues + ?Sized>(
+    items: &[ProjectedIntPredicate],
+    fields: &F,
+) -> Result<Option<bool>, SQLError> {
+    let mut saw_null = false;
+    for item in items {
+        let truth = match item {
+            ProjectedIntPredicate::Comparison {
+                field,
+                op,
+                literal,
+                field_on_left,
+            } => {
+                evaluate_int_comparison_truth(fields.field(*field), *op, *literal, *field_on_left)?
+            }
+            ProjectedIntPredicate::Between { field, low, high } => {
+                evaluate_int_between_truth(fields.field(*field), *low, *high)?
+            }
+        };
+        match truth {
             Some(false) => return Ok(Some(false)),
             None => saw_null = true,
             Some(true) => {}

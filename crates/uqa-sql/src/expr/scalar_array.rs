@@ -323,40 +323,45 @@ fn concatenate(left: &ArrayValue, right: &ArrayValue) -> Result<Value> {
         return Ok(Value::Array(left.clone()));
     }
     let (elements, lower_bounds) = if left.dimensions().len() == right.dimensions().len() {
-        if left.dimensions().get(1..) != right.dimensions().get(1..) {
-            return Err(SQLError::TypeMismatch(
-                "cannot concatenate incompatible arrays".into(),
-            ));
+        if left.dimensions().get(1..) != right.dimensions().get(1..)
+            || left.lower_bounds().get(1..) != right.lower_bounds().get(1..)
+        {
+            return Err(incompatible_array_concat());
         }
         let mut elements = left.elements().to_vec();
         elements.extend(right.elements().iter().cloned());
         (elements, left.lower_bounds().to_vec())
     } else if left.dimensions().len() + 1 == right.dimensions().len() {
-        if left.dimensions() != &right.dimensions()[1..] {
-            return Err(SQLError::TypeMismatch(
-                "cannot concatenate incompatible arrays".into(),
-            ));
+        if left.dimensions() != &right.dimensions()[1..]
+            || left.lower_bounds() != &right.lower_bounds()[1..]
+        {
+            return Err(incompatible_array_concat());
         }
         let mut elements = vec![Value::List(left.elements().to_vec())];
         elements.extend(right.elements().iter().cloned());
         (elements, right.lower_bounds().to_vec())
     } else if left.dimensions().len() == right.dimensions().len() + 1 {
-        if &left.dimensions()[1..] != right.dimensions() {
-            return Err(SQLError::TypeMismatch(
-                "cannot concatenate incompatible arrays".into(),
-            ));
+        if &left.dimensions()[1..] != right.dimensions()
+            || &left.lower_bounds()[1..] != right.lower_bounds()
+        {
+            return Err(incompatible_array_concat());
         }
         let mut elements = left.elements().to_vec();
         elements.push(Value::List(right.elements().to_vec()));
         (elements, left.lower_bounds().to_vec())
     } else {
-        return Err(SQLError::TypeMismatch(
-            "cannot concatenate incompatible arrays".into(),
-        ));
+        return Err(incompatible_array_concat());
     };
     ArrayValue::with_lower_bounds(elements, lower_bounds)
         .map(Value::Array)
-        .ok_or_else(|| SQLError::TypeMismatch("cannot concatenate incompatible arrays".into()))
+        .ok_or_else(incompatible_array_concat)
+}
+
+fn incompatible_array_concat() -> SQLError {
+    SQLError::Routine {
+        sqlstate: "2202E".into(),
+        message: "cannot concatenate incompatible arrays".into(),
+    }
 }
 
 fn flatten_elements(elements: &[Value], output: &mut Vec<Value>) {

@@ -173,7 +173,7 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
                 let pat = value_to_string(&args[1]);
                 let start = positive_regex_parameter(args.get(2), 1, "start")?;
                 let flags = args.get(3).map(value_to_string).unwrap_or_default();
-                let re = compile_pg_regex(&pat, &flags)?;
+                let re = compile_pg_regex(&pat, &flags, false)?;
                 let Some((tail, _)) = regex_tail(&s, start) else {
                     return Ok(Value::Int(0));
                 };
@@ -196,7 +196,7 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
                 }
                 let flags = args.get(5).map(value_to_string).unwrap_or_default();
                 let subexpression = nonnegative_regex_parameter(args.get(6), 0, "subexpr")?;
-                let re = compile_pg_regex(&pattern, &flags)?;
+                let re = compile_pg_regex(&pattern, &flags, false)?;
                 let Some((tail, base_chars)) = regex_tail(&string, start) else {
                     return Ok(Value::Int(0));
                 };
@@ -229,7 +229,7 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
                 let s = value_to_string(&args[0]);
                 let pat = value_to_string(&args[1]);
                 let flags = args.get(2).map(value_to_string).unwrap_or_default();
-                let re = compile_pg_regex(&pat, &flags)?;
+                let re = compile_pg_regex(&pat, &flags, false)?;
                 Ok(Value::Bool(re.is_match(&s)))
             }
             "regexp_substr" => {
@@ -247,7 +247,7 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
                 let occurrence = positive_regex_parameter(args.get(3), 1, "N")?;
                 let flags = args.get(4).map(value_to_string).unwrap_or_default();
                 let subexpression = nonnegative_regex_parameter(args.get(5), 0, "subexpr")?;
-                let re = compile_pg_regex(&pattern, &flags)?;
+                let re = compile_pg_regex(&pattern, &flags, false)?;
                 let Some((tail, _)) = regex_tail(&string, start) else {
                     return Ok(Value::Null);
                 };

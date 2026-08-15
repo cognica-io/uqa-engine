@@ -23,10 +23,10 @@ mod time;
 use encoding::{base64_decode, base64_encode, md5_hex};
 pub use json::value_to_json_text;
 use json::{
-    json_build_array_value, json_build_object_value, json_concat, json_contained_by, json_contains,
-    json_delete, json_delete_path, json_extract_path, json_has_key, json_has_keys, json_typeof,
-    jsonb_insert, jsonb_set, jsonpath_candidate, jsonpath_exists, jsonpath_match, parse_json,
-    strip_nulls, typed_json_value, value_to_json,
+    format_jsonb_pretty, json_build_array_value, json_build_object_value, json_concat,
+    json_contained_by, json_contains, json_delete, json_delete_path, json_extract_path,
+    json_has_key, json_has_keys, json_typeof, jsonb_insert, jsonb_set, jsonpath_candidate,
+    jsonpath_exists, jsonpath_match, parse_json, strip_nulls, typed_json_value, value_to_json,
 };
 use time::{
     age_between, coerce_temporal, date_trunc_value, extract_from_value, format_pg_number,

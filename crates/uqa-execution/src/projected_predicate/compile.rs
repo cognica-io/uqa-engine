@@ -10,7 +10,7 @@ use uqa_core::Value;
 use uqa_sql::expr::cast_value;
 use uqa_sql::{SQLError, SQLParam};
 
-use super::ProjectedExpr;
+use super::{ProjectedExpr, ProjectedIntPredicate};
 use crate::scalar::scalar_integer_binary_width;
 use crate::{RowSchema, ScalarExpr};
 
@@ -50,7 +50,7 @@ pub(super) fn compile(
         ScalarExpr::Not(expression) => {
             ProjectedExpr::Not(Box::new(require(expression, schema, params)?))
         }
-        ScalarExpr::And(items) => ProjectedExpr::And(require_all(items, schema, params)?),
+        ScalarExpr::And(items) => compiled_and(require_all(items, schema, params)?),
         ScalarExpr::Or(items) => ProjectedExpr::Or(require_all(items, schema, params)?),
         ScalarExpr::IsNull { expr, negated } => ProjectedExpr::IsNull {
             expression: Box::new(require(expr, schema, params)?),
@@ -130,6 +130,40 @@ pub(super) fn compile(
         | ScalarExpr::InSubquery { .. } => return Ok(None),
     };
     Ok(Some(compiled))
+}
+
+fn compiled_and(items: Vec<ProjectedExpr>) -> ProjectedExpr {
+    let all_integer_fields = items.iter().all(|item| {
+        matches!(
+            item,
+            ProjectedExpr::IntFieldComparison { .. } | ProjectedExpr::IntFieldBetween { .. }
+        )
+    });
+    if !all_integer_fields {
+        return ProjectedExpr::And(items);
+    }
+    ProjectedExpr::IntFieldConjunction(
+        items
+            .into_iter()
+            .map(|item| match item {
+                ProjectedExpr::IntFieldComparison {
+                    field,
+                    op,
+                    literal,
+                    field_on_left,
+                } => ProjectedIntPredicate::Comparison {
+                    field,
+                    op,
+                    literal,
+                    field_on_left,
+                },
+                ProjectedExpr::IntFieldBetween { field, low, high } => {
+                    ProjectedIntPredicate::Between { field, low, high }
+                }
+                _ => unreachable!("integer predicate conjunction was validated"),
+            })
+            .collect(),
+    )
 }
 
 fn is_integer_type(ty: &str) -> bool {

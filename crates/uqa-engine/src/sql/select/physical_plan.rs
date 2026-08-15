@@ -559,14 +559,15 @@ pub(in crate::sql) fn attach_order_limit<'a>(
         };
         let required_ordering = keys
             .iter()
-            .map(|key| match &key.expr {
-                ScalarExpr::Column(column) => Some(uqa_execution::PhysicalOrder {
-                    column: column.clone(),
-                    descending: key.descending,
-                    nulls_first: Some(key.nulls_first.unwrap_or(key.descending)),
-                    nullable: true,
-                }),
-                _ => None,
+            .map(|key| {
+                uqa_execution::order_expression_position(operator.row_schema(), &key.expr).map(
+                    |position| uqa_execution::PhysicalOrder {
+                        position,
+                        descending: key.descending,
+                        nulls_first: Some(key.nulls_first.unwrap_or(key.descending)),
+                        nullable: true,
+                    },
+                )
             })
             .collect::<Option<Vec<_>>>();
         let already_ordered = required_ordering.as_ref().is_some_and(|required| {
@@ -1191,4 +1192,45 @@ pub(in crate::sql) fn expr_is_jsonpath_fts_match(expr: &ScalarExpr) -> bool {
                     Some(ScalarExpr::Literal(Value::Str(path))) if path.trim_start().starts_with('$')
                 )
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn position_bound_order_by_reuses_qualified_primary_key_ordering() {
+        let schema = uqa_execution::RowSchema::with_qualified_types(
+            "lineitem",
+            vec!["id".into(), "extended_price".into()],
+            vec![None, None],
+        );
+        let projections = vec![
+            ProjectionPlan {
+                expr: ScalarExpr::Column("id".into()),
+                alias: None,
+            },
+            ProjectionPlan {
+                expr: ScalarExpr::Column("extended_price".into()),
+                alias: None,
+            },
+        ];
+        let (_, output) = order_projection(&projections, &schema).unwrap();
+        let expression =
+            resolve_order_expression(&ScalarExpr::Column("id".into()), &output).unwrap();
+        assert_eq!(expression, ScalarExpr::Position(0));
+        let required = [uqa_execution::PhysicalOrder {
+            position: uqa_execution::order_expression_position(&schema, &expression).unwrap(),
+            descending: false,
+            nulls_first: Some(false),
+            nullable: true,
+        }];
+        let actual = [uqa_execution::PhysicalOrder {
+            position: 0,
+            descending: false,
+            nulls_first: None,
+            nullable: false,
+        }];
+        assert!(uqa_execution::ordering_satisfies(&actual, &required));
+    }
 }

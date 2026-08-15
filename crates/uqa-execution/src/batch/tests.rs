@@ -222,15 +222,43 @@ fn result_materialization_moves_prefix_projected_values() {
 
 #[test]
 fn result_materialization_preserves_non_identity_schema_mapping() {
-    let source = RowSchema::new(vec!["left".into(), "right".into()]);
+    let source = RowSchema::new(vec!["left".into()]);
+    let source = RowSchema::append(&source, &["right".into()]);
     let selected = RowSchema::select(&source, &[("renamed".into(), "right".into())]);
+    let payload = "remapped payload".repeat(32);
+    let payload_address = payload.as_ptr();
     let batch = Batch::from_physical_rows(
         selected,
-        vec![PhysicalRow::from_values(vec![Value::Int(1), Value::Int(2)])],
+        vec![PhysicalRow::from_values(vec![Value::Int(1)]).append_values(vec![Value::Str(payload)])],
+    );
+
+    let rows = batch.into_result_rows();
+    let Value::Str(value) = &rows[0]["renamed"] else {
+        panic!("materialized value must remain text");
+    };
+    assert_eq!(value.as_ptr(), payload_address);
+}
+
+#[test]
+fn result_materialization_clones_only_duplicate_physical_slots() {
+    let source = RowSchema::new(vec!["value".into()]);
+    let selected = RowSchema::select(
+        &source,
+        &[
+            ("first".into(), "value".into()),
+            ("second".into(), "value".into()),
+        ],
+    );
+    let batch = Batch::from_physical_rows(
+        selected,
+        vec![PhysicalRow::from_values(vec![Value::Str("shared".into())])],
     );
 
     assert_eq!(
         batch.into_result_rows(),
-        vec![BTreeMap::from([("renamed".into(), Value::Int(2))])]
+        vec![BTreeMap::from([
+            ("first".into(), Value::Str("shared".into())),
+            ("second".into(), Value::Str("shared".into())),
+        ])]
     );
 }

@@ -94,6 +94,52 @@ pub(super) fn print_result(result: &SQLResult, out: &mut (impl Write + ?Sized)) 
     let _ = writeln!(out, "({} row(s))", result.rows.len());
 }
 
+/// Emit rows in `PostgreSQL` `COPY TO STDOUT` text format.
+pub(super) fn print_result_copy_text(result: &SQLResult, out: &mut (impl Write + ?Sized)) {
+    let columns: Vec<String> = if result.columns.is_empty() {
+        let mut keys: std::collections::BTreeSet<&String> = std::collections::BTreeSet::new();
+        for row in &result.rows {
+            keys.extend(row.keys());
+        }
+        keys.into_iter().cloned().collect()
+    } else {
+        result.columns.clone()
+    };
+    for row_index in 0..result.rows.len() {
+        let cells = columns
+            .iter()
+            .enumerate()
+            .map(|(column_index, _)| copy_text_cell(result.value_at(row_index, column_index)))
+            .collect::<Vec<_>>();
+        let _ = writeln!(out, "{}", cells.join("\t"));
+    }
+}
+
+fn copy_text_cell(value: Option<&Value>) -> String {
+    let Some(value) = value.filter(|value| !matches!(value, Value::Null)) else {
+        return "\\N".to_string();
+    };
+    let text = match value {
+        Value::Bool(true) => "t".to_string(),
+        Value::Bool(false) => "f".to_string(),
+        other => value_to_display(Some(other)),
+    };
+    let mut escaped = String::new();
+    for character in text.chars() {
+        match character {
+            '\u{0008}' => escaped.push_str("\\b"),
+            '\u{000c}' => escaped.push_str("\\f"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\u{000b}' => escaped.push_str("\\v"),
+            '\\' => escaped.push_str("\\\\"),
+            other => escaped.push(other),
+        }
+    }
+    escaped
+}
+
 pub(super) fn write_row(out: &mut (impl Write + ?Sized), cells: &[String], widths: &[usize]) {
     let line: Vec<String> = cells
         .iter()
@@ -234,7 +280,7 @@ pub(super) fn json_value_display(v: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::value_to_display;
+    use super::{copy_text_cell, value_to_display};
     use uqa_core::Value;
 
     #[test]
@@ -251,6 +297,17 @@ mod tests {
         assert_eq!(
             value_to_display(Some(&Value::Float(7.257_415_615_307_999e306))),
             "7.257415615307999e+306"
+        );
+    }
+
+    #[test]
+    fn copy_text_cells_distinguish_null_empty_and_literal_marker() {
+        assert_eq!(copy_text_cell(Some(&Value::Null)), "\\N");
+        assert_eq!(copy_text_cell(Some(&Value::Str(String::new()))), "");
+        assert_eq!(copy_text_cell(Some(&Value::Str("\\N".into()))), "\\\\N");
+        assert_eq!(
+            copy_text_cell(Some(&Value::Str("a\tb\nc\\d".into()))),
+            "a\\tb\\nc\\\\d"
         );
     }
 }

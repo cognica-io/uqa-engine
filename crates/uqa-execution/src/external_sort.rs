@@ -20,7 +20,9 @@ use std::path::PathBuf;
 use uqa_core::Value;
 
 use crate::batch::{Batch, PhysicalRow, RowSchema};
-use crate::physical::{ExecError, ExecResult, PhysicalOperator, PhysicalOrder};
+use crate::physical::{
+    order_expression_position, ExecError, ExecResult, PhysicalOperator, PhysicalOrder,
+};
 use crate::relational::{compare_sort_key_values_by, SharedExpressionEvaluator, SortKey};
 use crate::spill::{SpillBuffer, SpillDrain};
 
@@ -69,14 +71,13 @@ impl<'a> ExternalSort<'a> {
         let run_schema = run_schema(input_slots.len(), keys.len());
         let ordering = keys
             .iter()
-            .map(|key| match &key.expr {
-                crate::ScalarExpr::Column(column) => Some(PhysicalOrder {
-                    column: column.clone(),
+            .map(|key| {
+                order_expression_position(&schema, &key.expr).map(|position| PhysicalOrder {
+                    position,
                     descending: key.descending,
                     nulls_first: Some(key.nulls_first.unwrap_or(key.descending)),
                     nullable: true,
-                }),
-                _ => None,
+                })
             })
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default();
@@ -121,7 +122,8 @@ impl<'a> ExternalSort<'a> {
     fn build_initial_runs(&mut self) -> ExecResult<Vec<SortedRun>> {
         let mut sequence = 0_u64;
         let mut pending = Vec::new();
-        let mut pending_bytes = 0_usize;
+        let batch_overhead_bytes = encoded_batch_overhead_size(&self.run_schema)?;
+        let mut pending_bytes = batch_overhead_bytes;
         let mut runs = Vec::new();
 
         while let Some(batch) = self.child.next()? {
@@ -154,7 +156,7 @@ impl<'a> ExternalSort<'a> {
                     if let Some(run) = self.finish_run(std::mem::take(&mut pending), true)? {
                         runs.push(run);
                     }
-                    pending_bytes = 0;
+                    pending_bytes = batch_overhead_bytes;
                 }
 
                 pending.push(record);
@@ -168,7 +170,7 @@ impl<'a> ExternalSort<'a> {
                     if let Some(run) = self.finish_run(std::mem::take(&mut pending), true)? {
                         runs.push(run);
                     }
-                    pending_bytes = 0;
+                    pending_bytes = batch_overhead_bytes;
                 }
             }
         }
@@ -203,7 +205,7 @@ impl<'a> ExternalSort<'a> {
         }
 
         let mut buffer = self.create_run_buffer();
-        let mut writer = RunBatchWriter::new(self.run_schema.clone());
+        let mut writer = RunBatchWriter::new(self.run_schema.clone())?;
         for record in records {
             writer.push(&mut buffer, record.row)?;
         }
@@ -342,7 +344,11 @@ fn decode_record(
 }
 
 fn encoded_record_size(schema: &RowSchema, row: &PhysicalRow) -> ExecResult<usize> {
-    SpillBuffer::encoded_single_row_size(schema, row)
+    SpillBuffer::encoded_row_record_size(schema, row)
+}
+
+fn encoded_batch_overhead_size(schema: &RowSchema) -> ExecResult<usize> {
+    SpillBuffer::encoded_batch_overhead_size(schema)
 }
 
 fn validate_run_batch(batch: &Batch, expected: &RowSchema) -> ExecResult<()> {
@@ -382,33 +388,36 @@ fn compare_records(
 struct RunBatchWriter {
     schema: RowSchema,
     pending: Vec<PhysicalRow>,
-    conservative_bytes: usize,
+    batch_overhead_bytes: usize,
+    pending_bytes: usize,
 }
 
 impl RunBatchWriter {
-    fn new(schema: RowSchema) -> Self {
-        Self {
+    fn new(schema: RowSchema) -> ExecResult<Self> {
+        let batch_overhead_bytes = encoded_batch_overhead_size(&schema)?;
+        Ok(Self {
             schema,
             pending: Vec::new(),
-            conservative_bytes: 0,
-        }
+            batch_overhead_bytes,
+            pending_bytes: batch_overhead_bytes,
+        })
     }
 
     fn push(&mut self, output: &mut SpillBuffer, record: PhysicalRow) -> ExecResult<()> {
         let record_bytes = encoded_record_size(&self.schema, &record)?;
         let exceeds_budget = self
-            .conservative_bytes
+            .pending_bytes
             .checked_add(record_bytes)
             .is_none_or(|bytes| bytes > output.budget_bytes());
         if exceeds_budget && !self.pending.is_empty() {
             self.flush(output)?;
         }
         self.pending.push(record);
-        self.conservative_bytes = self
-            .conservative_bytes
+        self.pending_bytes = self
+            .pending_bytes
             .checked_add(record_bytes)
             .ok_or_else(|| ExecError::Other("external sort run batch size overflow".into()))?;
-        if self.conservative_bytes > output.budget_bytes() {
+        if self.pending_bytes > output.budget_bytes() {
             self.flush(output)?;
         }
         Ok(())
@@ -426,7 +435,7 @@ impl RunBatchWriter {
             self.schema.clone(),
             std::mem::take(&mut self.pending),
         ))?;
-        self.conservative_bytes = 0;
+        self.pending_bytes = self.batch_overhead_bytes;
         Ok(())
     }
 }
@@ -507,7 +516,7 @@ fn merge_group(
         }
     }
 
-    let mut writer = RunBatchWriter::new(run_schema.clone());
+    let mut writer = RunBatchWriter::new(run_schema.clone())?;
     let mut emitted = 0_usize;
     while !heap.is_empty() && keep.is_none_or(|keep| emitted < keep) {
         let item = heap_pop(&mut heap, keys, run_schema, source_width)
@@ -744,6 +753,17 @@ mod tests {
         assert_eq!(int_column(&output, "key"), (0..20).collect::<Vec<_>>());
         assert_eq!(operator.initial_run_count(), 1);
         assert_eq!(operator.merge_pass_count(), 0);
+    }
+
+    #[test]
+    fn spill_batch_schema_overhead_is_amortized_across_sort_rows() {
+        let rows = (0..20_000).rev().map(|value| row(value, value)).collect();
+        let mut operator = sort(rows, 4 * 1024 * 1024, None);
+
+        operator.open().unwrap();
+        assert_eq!(operator.initial_run_count(), 1);
+        assert_eq!(operator.merge_pass_count(), 0);
+        operator.close().unwrap();
     }
 
     #[test]

@@ -12,12 +12,10 @@ use crate::batch::{Batch, RowSchema};
 
 /// A leading physical row-order property carried between operators.
 ///
-/// Column names refer to the operator's output schema. `nulls_first` is
-/// irrelevant when `nullable` is false, which lets a primary-key scan satisfy
-/// either explicit NULLS placement without adding a redundant sort.
+/// `position` is a logical position in the operator's output schema. Positional tracking keeps duplicate labels and structured qualified identities distinct. `nulls_first` is irrelevant when `nullable` is false, which lets a primary-key scan satisfy either explicit NULLS placement without adding a redundant sort.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PhysicalOrder {
-    pub column: String,
+    pub position: usize,
     pub descending: bool,
     pub nulls_first: Option<bool>,
     pub nullable: bool,
@@ -107,12 +105,27 @@ pub trait PhysicalOperator: Send {
 pub fn ordering_satisfies(actual: &[PhysicalOrder], required: &[PhysicalOrder]) -> bool {
     actual.len() >= required.len()
         && actual.iter().zip(required).all(|(actual, required)| {
-            actual.column == required.column
+            actual.position == required.position
                 && actual.descending == required.descending
                 && (!actual.nullable
                     || actual.nulls_first == required.nulls_first
                     || required.nulls_first.is_none())
         })
+}
+
+/// Resolve a simple ordering expression to one logical position without collapsing duplicate or qualified SQL identities into a display label.
+pub fn order_expression_position(
+    schema: &RowSchema,
+    expression: &crate::ScalarExpr,
+) -> Option<usize> {
+    match expression {
+        crate::ScalarExpr::Column(column) => schema.unqualified_position(column),
+        crate::ScalarExpr::Position(position) => (*position < schema.len()).then_some(*position),
+        crate::ScalarExpr::QualifiedColumn { qualifier, column } => {
+            schema.qualified_position(qualifier, column)
+        }
+        _ => None,
+    }
 }
 
 /// Borrowing iterator over a physical operator. Construction opens the
@@ -300,5 +313,42 @@ mod tests {
             let _cursor = OperatorBatchCursor::open(&mut operator).unwrap();
         }
         assert!(operator.closed);
+    }
+
+    #[test]
+    fn ordering_positions_keep_duplicate_structured_identities_distinct() {
+        let schema = RowSchema::with_identities(
+            vec!["id".into(), "id".into()],
+            vec![
+                crate::ColumnIdentity::qualified("left", "id"),
+                crate::ColumnIdentity::qualified("right", "id"),
+            ],
+            vec![None, None],
+        );
+        assert_eq!(
+            order_expression_position(&schema, &crate::ScalarExpr::qualified_column("left", "id")),
+            Some(0)
+        );
+        assert_eq!(
+            order_expression_position(&schema, &crate::ScalarExpr::qualified_column("right", "id")),
+            Some(1)
+        );
+        assert_eq!(
+            order_expression_position(&schema, &crate::ScalarExpr::Column("id".into())),
+            None
+        );
+        let actual = [PhysicalOrder {
+            position: 0,
+            descending: false,
+            nulls_first: None,
+            nullable: false,
+        }];
+        let required = [PhysicalOrder {
+            position: 1,
+            descending: false,
+            nulls_first: Some(false),
+            nullable: true,
+        }];
+        assert!(!ordering_satisfies(&actual, &required));
     }
 }

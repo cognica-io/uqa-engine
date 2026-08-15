@@ -457,11 +457,6 @@ pub(in crate::sql) fn build_merge_returning_row(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<uqa_execution::OwnedPhysicalRow, SQLError> {
-    let current = input
-        .images
-        .new
-        .or(input.images.old)
-        .ok_or_else(|| SQLError::Internal("MERGE RETURNING has no target row image".into()))?;
     let mut row = returning_row_context(
         engine,
         input.target_table,
@@ -488,12 +483,5 @@ pub(in crate::sql) fn build_merge_returning_row(
         input.returning_aliases,
         returning,
     )?;
-    build_projection_physical_row_with_ctes(engine, &row, &projections, params, ctes).map_err(
-        |err| {
-            SQLError::Internal(format!(
-                "MERGE RETURNING projection failed for table `{}` doc {}: {err}",
-                input.target_table, current.doc_id
-            ))
-        },
-    )
+    build_projection_physical_row_with_ctes(engine, &row, &projections, params, ctes)
 }

@@ -533,6 +533,23 @@ fn encoded_byte_budget_never_retains_an_oversized_batch() {
 }
 
 #[test]
+fn encoded_batch_size_is_one_schema_header_plus_row_records() {
+    let batch = dummy_batch(0, 3);
+    let expected = SpillBuffer::encoded_batch_overhead_size(&batch.schema)
+        .unwrap()
+        .checked_add(
+            batch
+                .rows
+                .iter()
+                .map(|row| SpillBuffer::encoded_row_record_size(&batch.schema, row).unwrap())
+                .sum(),
+        )
+        .unwrap();
+
+    assert_eq!(SpillBuffer::encoded_size(&batch).unwrap(), expected);
+}
+
+#[test]
 fn reader_is_repeatable_and_row_stream_does_not_collect_all_batches() {
     let budget = SpillBuffer::encoded_size(&dummy_batch(0, 1)).unwrap();
     let mut buffer = SpillBuffer::new(budget);

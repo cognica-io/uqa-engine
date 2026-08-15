@@ -22,6 +22,7 @@ use uqa_sql::ResultRow;
 
 use crate::physical::{ExecError, ExecResult};
 
+mod materialization;
 mod outer_scope;
 mod owned_row;
 
@@ -98,6 +99,8 @@ struct SchemaColdMetadata {
     columns: Box<[Option<ColumnType>]>,
     aliases: HashMap<ColumnIdentity, Option<ColumnType>>,
     identity_layout: bool,
+    /// For a remapped result layout, the last logical position that reads each physical slot. At the explicit result boundary that last read can move the value; only earlier duplicate reads need to clone it.
+    materialization_last_use: Option<Box<[usize]>>,
 }
 
 #[derive(Default)]
@@ -313,6 +316,15 @@ impl RowSchema {
                 .iter()
                 .enumerate()
                 .all(|(position, slot)| position == *slot);
+        let materialization_last_use = (!identity_layout).then(|| {
+            let mut last_use = vec![NULL_SLOT; physical_width];
+            for (logical, slot) in slots.iter().copied().enumerate() {
+                if slot != NULL_SLOT {
+                    last_use[slot] = logical;
+                }
+            }
+            last_use.into_boxed_slice()
+        });
         let mut exact = HashMap::with_capacity(columns.len());
         let mut unqualified = HashMap::with_capacity(columns.len());
         let mut qualified = HashMap::with_capacity(columns.len());
@@ -368,6 +380,7 @@ impl RowSchema {
                     columns: types.into_boxed_slice(),
                     aliases: alias_types,
                     identity_layout,
+                    materialization_last_use,
                 }),
             }),
         }
@@ -1001,15 +1014,6 @@ impl RowSchema {
     pub fn view<'a>(&'a self, row: &'a PhysicalRow) -> PhysicalRowView<'a> {
         PhysicalRowView { schema: self, row }
     }
-
-    fn materialize_result_row(&self, row: PhysicalRow) -> ResultRow {
-        if self.index.cold.identity_layout {
-            let values = row.into_values();
-            debug_assert_eq!(self.len(), values.len());
-            return self.columns().iter().cloned().zip(values).collect();
-        }
-        self.view(&row).to_result_row()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1086,62 +1090,6 @@ impl RowFragment {
             self.projection = Some((0..width).collect::<Arc<[usize]>>());
         }
         self
-    }
-
-    /// Consume this fragment at an explicit row-materialization boundary. Unshared contiguous values, and the common prefix projection emitted by blocking operators, retain their existing allocations instead of being cloned one value at a time.
-    fn into_values(self) -> Vec<Value> {
-        let Self { values, projection } = self;
-        let Some(projection) = projection else {
-            return Arc::try_unwrap(values).unwrap_or_else(|values| values.as_ref().clone());
-        };
-        let mut values = match Arc::try_unwrap(values) {
-            Ok(values) => values,
-            Err(values) => {
-                return projection
-                    .iter()
-                    .map(|slot| {
-                        if *slot == NULL_SLOT {
-                            Value::Null
-                        } else {
-                            values.get(*slot).cloned().unwrap_or(Value::Null)
-                        }
-                    })
-                    .collect();
-            }
-        };
-        if projection
-            .iter()
-            .enumerate()
-            .all(|(position, slot)| position == *slot)
-        {
-            values.truncate(projection.len());
-            return values;
-        }
-
-        let mut remaining = vec![0usize; values.len()];
-        for slot in projection.iter().copied().filter(|slot| *slot != NULL_SLOT) {
-            if let Some(count) = remaining.get_mut(slot) {
-                *count += 1;
-            }
-        }
-        let mut values = values.into_iter().map(Some).collect::<Vec<_>>();
-        projection
-            .iter()
-            .map(|slot| {
-                if *slot == NULL_SLOT {
-                    return Value::Null;
-                }
-                let Some(count) = remaining.get_mut(*slot) else {
-                    return Value::Null;
-                };
-                *count -= 1;
-                if *count == 0 {
-                    values[*slot].take().unwrap_or(Value::Null)
-                } else {
-                    values[*slot].clone().unwrap_or(Value::Null)
-                }
-            })
-            .collect()
     }
 }
 
@@ -1305,22 +1253,6 @@ impl PhysicalRow {
         debug_assert_eq!(remaining, 0, "physical row prefix exceeds row width");
         Self { fragments }
     }
-
-    fn into_values(mut self) -> Vec<Value> {
-        if self.fragments.len() == 1 {
-            return self
-                .fragments
-                .pop()
-                .expect("one physical row fragment exists")
-                .into_values();
-        }
-        let capacity = self.fragments.iter().map(RowFragment::len).sum();
-        let mut values = Vec::with_capacity(capacity);
-        for fragment in self.fragments {
-            values.extend(fragment.into_values());
-        }
-        values
-    }
 }
 
 /// Stack-only schema/row pair implementing the scalar evaluator's read seam.
@@ -1438,9 +1370,16 @@ impl Batch {
 
     pub fn into_result_rows(self) -> Vec<ResultRow> {
         let schema = self.schema;
+        if schema.index.cold.identity_layout {
+            return self
+                .rows
+                .into_iter()
+                .map(|row| schema.materialize_identity_result_row(row))
+                .collect();
+        }
         self.rows
             .into_iter()
-            .map(|row| schema.materialize_result_row(row))
+            .map(|row| schema.materialize_remapped_result_row(row))
             .collect()
     }
 

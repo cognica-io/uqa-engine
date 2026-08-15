@@ -202,6 +202,7 @@ pub(super) struct Session {
     pub(super) history_path: Option<PathBuf>,
     pub(super) show_timing: bool,
     pub(super) expanded: bool,
+    pub(super) copy_text: bool,
     pub(super) output_path: Option<PathBuf>,
 }
 
@@ -249,6 +250,7 @@ impl Session {
             history_path,
             show_timing: false,
             expanded: false,
+            copy_text: false,
             output_path: None,
         })
     }
@@ -389,7 +391,9 @@ impl Session {
         let elapsed = start.elapsed();
         let result = match outcome {
             Ok(result) => self.write_query_output(out, |writer| {
-                if self.expanded {
+                if self.copy_text {
+                    print_result_copy_text(&result, writer);
+                } else if self.expanded {
                     print_result_expanded(&result, writer);
                 } else {
                     print_result(&result, writer);

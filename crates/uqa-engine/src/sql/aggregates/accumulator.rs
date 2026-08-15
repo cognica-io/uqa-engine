@@ -36,12 +36,16 @@ pub(in crate::sql) struct AggregateAccumulator {
     /// `PostgreSQL`).
     pub(super) bool_and: Option<bool>,
     pub(super) bool_or: Option<bool>,
-    /// Welford state for variance/stddev. This avoids retaining the complete
-    /// group for statistical aggregates.
+    /// Welford state for variance/stddev. This avoids retaining the complete group for statistical aggregates.
     pub(super) statistics_count: u64,
     pub(super) statistics_mean: f64,
     pub(super) statistics_m2: f64,
+    pub(super) statistics_moments_valid: bool,
     pub(super) statistics_has_float: bool,
+    pub(super) statistics_nonzero_deviation: bool,
+    pub(super) statistics_origin: Option<DecimalValue>,
+    pub(super) statistics_sum: Option<DecimalValue>,
+    pub(super) statistics_sum_squares: Option<DecimalValue>,
 }
 
 #[derive(Clone)]
@@ -175,7 +179,12 @@ impl Default for AggregateAccumulator {
             statistics_count: 0,
             statistics_mean: 0.0,
             statistics_m2: 0.0,
+            statistics_moments_valid: true,
             statistics_has_float: false,
+            statistics_nonzero_deviation: false,
+            statistics_origin: None,
+            statistics_sum: None,
+            statistics_sum_squares: None,
         }
     }
 }
@@ -202,7 +211,12 @@ impl AggregateAccumulator {
             statistics_count: 0,
             statistics_mean: 0.0,
             statistics_m2: 0.0,
+            statistics_moments_valid: true,
             statistics_has_float: false,
+            statistics_nonzero_deviation: false,
+            statistics_origin: None,
+            statistics_sum: None,
+            statistics_sum_squares: None,
         }
     }
 
@@ -325,20 +339,104 @@ impl AggregateAccumulator {
             AggregateStatePlan::BoolAnd => self.observe_bool_and(value)?,
             AggregateStatePlan::BoolOr => self.observe_bool_or(value)?,
             AggregateStatePlan::Buffered => {}
-            AggregateStatePlan::Statistics => {
-                self.statistics_has_float |= matches!(value, Value::Float(_));
-                let value = value_as_f64(value)?;
-                self.statistics_count = self.statistics_count.checked_add(1).ok_or_else(|| {
-                    SQLError::TypeMismatch("statistical aggregate count overflow".into())
-                })?;
-                let count = self.statistics_count as f64;
-                let delta = value - self.statistics_mean;
-                self.statistics_mean += delta / count;
-                let delta_after = value - self.statistics_mean;
-                self.statistics_m2 += delta * delta_after;
-            }
+            AggregateStatePlan::Statistics => self.observe_statistics(value)?,
         }
         Ok(())
+    }
+
+    fn observe_statistics(&mut self, value: &Value) -> Result<(), SQLError> {
+        let previous_count = self.statistics_count;
+        let next_count = previous_count
+            .checked_add(1)
+            .ok_or_else(|| SQLError::TypeMismatch("statistical aggregate count overflow".into()))?;
+        if matches!(value, Value::Float(_)) {
+            if !self.statistics_moments_valid {
+                return Err(SQLError::TypeMismatch(
+                    "numeric statistical state does not fit double precision".into(),
+                ));
+            }
+            self.statistics_has_float = true;
+            self.observe_float_statistic(value_as_f64(value)?, next_count);
+        } else {
+            let decimal = match value {
+                Value::Int(value) => DecimalValue::from_i64(*value),
+                Value::Decimal(value) => value.clone(),
+                other => {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "statistical aggregate requires a numeric value, got {other:?}"
+                    )))
+                }
+            };
+            if self.statistics_moments_valid {
+                if let Some(float) = decimal.to_f64() {
+                    self.observe_float_statistic(float, next_count);
+                } else {
+                    self.statistics_moments_valid = false;
+                    if self.statistics_has_float {
+                        return Err(SQLError::TypeMismatch(
+                            "numeric statistical input does not fit double precision".into(),
+                        ));
+                    }
+                }
+            }
+            if decimal.is_nan() || decimal.is_infinite() {
+                let nan = decimal.checked_sub(&decimal).ok_or_else(|| {
+                    SQLError::Internal("numeric special value did not produce NaN".into())
+                })?;
+                self.statistics_origin
+                    .get_or_insert_with(|| DecimalValue::from_i64(0));
+                self.statistics_sum = Some(nan.clone());
+                self.statistics_sum_squares = Some(nan);
+                self.statistics_nonzero_deviation = true;
+                self.statistics_count = next_count;
+                return Ok(());
+            }
+            if self
+                .statistics_sum_squares
+                .as_ref()
+                .is_some_and(DecimalValue::is_nan)
+            {
+                self.statistics_count = next_count;
+                return Ok(());
+            }
+            let origin = if let Some(origin) = &self.statistics_origin {
+                origin.clone()
+            } else {
+                let origin = decimal.clone();
+                self.statistics_origin = Some(origin.clone());
+                origin
+            };
+            let deviation = decimal.checked_sub(&origin).ok_or_else(|| {
+                SQLError::TypeMismatch("numeric statistical deviation overflow".into())
+            })?;
+            self.statistics_nonzero_deviation |= !deviation.is_zero();
+            let square = deviation.checked_mul(&deviation).ok_or_else(|| {
+                SQLError::TypeMismatch("numeric statistical deviation square overflow".into())
+            })?;
+            self.statistics_sum = Some(match self.statistics_sum.take() {
+                Some(sum) => sum.checked_add(&deviation).ok_or_else(|| {
+                    SQLError::TypeMismatch("numeric statistical deviation sum overflow".into())
+                })?,
+                None => deviation,
+            });
+            self.statistics_sum_squares = Some(match self.statistics_sum_squares.take() {
+                Some(sum) => sum.checked_add(&square).ok_or_else(|| {
+                    SQLError::TypeMismatch(
+                        "numeric statistical deviation square sum overflow".into(),
+                    )
+                })?,
+                None => square,
+            });
+        }
+        self.statistics_count = next_count;
+        Ok(())
+    }
+
+    fn observe_float_statistic(&mut self, value: f64, count: u64) {
+        let delta = value - self.statistics_mean;
+        self.statistics_mean += delta / count as f64;
+        let delta_after = value - self.statistics_mean;
+        self.statistics_m2 += delta * delta_after;
     }
 
     pub(super) fn observe_sum(&mut self, value: &Value) -> Result<(), SQLError> {

@@ -101,6 +101,21 @@ fn delete_filter_errors_propagate_and_roll_back() {
 }
 
 #[test]
+fn update_returning_errors_preserve_sqlstate_and_roll_back() {
+    let eng = corpus();
+    let error = eng
+        .sql(
+            "UPDATE items SET qty = qty + 1 WHERE id = 1 RETURNING old.qty, 1 / 0",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22012"));
+
+    let result = eng.sql("SELECT qty FROM items WHERE id = 1", &[]).unwrap();
+    assert_eq!(result.rows[0].get("qty"), Some(&Value::Int(3)));
+}
+
+#[test]
 fn dml_scalar_subqueries_execute_query_plan_children() {
     let eng = corpus();
 

@@ -86,7 +86,11 @@ fn composite_value_to_string<'a>(values: impl IntoIterator<Item = &'a Value>) ->
             if matches!(value, Value::Null) {
                 return String::new();
             }
-            let text = value_to_string(value);
+            let text = match value {
+                Value::Bool(true) => "t".to_string(),
+                Value::Bool(false) => "f".to_string(),
+                other => value_to_string(other),
+            };
             if text.is_empty()
                 || text.bytes().any(|byte| {
                     matches!(byte, b',' | b'(' | b')' | b'"' | b'\\') || byte.is_ascii_whitespace()

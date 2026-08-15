@@ -11,7 +11,7 @@ use icu_casemap::CaseMapper;
 use super::{
     compare, compile_pg_regex, division_by_zero, expect_str, float1, gcd_i64, initcap_str,
     json_concat, like_match, out_of_range, string1, to_decimal, to_f64, to_i64, trim_chars,
-    value_to_string, values_equal, ArrayValue, Result, SQLError, Value,
+    value_to_string, values_equal, ArrayValue, DecimalValue, Result, SQLError, Value,
 };
 
 pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
@@ -371,6 +371,12 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
                 if args.iter().any(|arg| matches!(arg, Value::Null)) {
                     return Ok(Value::Null);
                 }
+                if args.iter().any(|arg| matches!(arg, Value::Decimal(_)))
+                    && !args.iter().any(|arg| matches!(arg, Value::Float(_)))
+                {
+                    return numeric_power(&to_decimal(&args[0])?, &to_decimal(&args[1])?)
+                        .map(Value::Decimal);
+                }
                 Ok(Value::Float(to_f64(&args[0])?.powf(to_f64(&args[1])?)))
             }
             "sqrt" => float1(args, "sqrt", f64::sqrt),
@@ -516,17 +522,8 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
                 }
                 let s = value_to_string(&args[0]);
                 let pat = value_to_string(&args[1]);
-                let case_insensitive = args
-                    .get(2)
-                    .map(|v| value_to_string(v).contains('i'))
-                    .unwrap_or(false);
-                let pat = if case_insensitive {
-                    format!("(?i){pat}")
-                } else {
-                    pat
-                };
-                let re = regex::Regex::new(&pat)
-                    .map_err(|e| SQLError::TypeMismatch(format!("regex: {e}")))?;
+                let flags = args.get(2).map(value_to_string).unwrap_or_default();
+                let re = compile_pg_regex(&pat, &flags, name == "regexp_matches")?;
                 match re.captures(&s) {
                     None => Ok(Value::Null),
                     Some(caps) => {
@@ -603,6 +600,31 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
     })())
 }
 
+fn numeric_power(base: &DecimalValue, exponent: &DecimalValue) -> Result<DecimalValue> {
+    if base.is_zero() && exponent.is_negative() {
+        return Err(invalid_numeric_power(
+            "zero raised to a negative power is undefined",
+        ));
+    }
+    if base.is_negative() && !exponent.is_nan() && !exponent.is_integral() {
+        return Err(invalid_numeric_power(
+            "a negative number raised to a non-integer power yields a complex result",
+        ));
+    }
+    base.checked_pow_postgres(exponent)
+        .ok_or_else(|| SQLError::Routine {
+            sqlstate: "22003".into(),
+            message: "value overflows numeric format".into(),
+        })
+}
+
+fn invalid_numeric_power(message: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "2201F".into(),
+        message: message.into(),
+    }
+}
+
 fn invalid_regexp_replace_parameter(name: &str, value: i64) -> SQLError {
     SQLError::Routine {
         sqlstate: "22023".into(),
@@ -649,7 +671,7 @@ fn regexp_replace(
             .unwrap_or(string.len())
     };
     let (prefix, tail) = string.split_at(byte_start);
-    let regex = compile_pg_regex(pattern, flags)?;
+    let regex = compile_pg_regex(pattern, flags, true)?;
     let replacement = postgres_regex_replacement(replacement);
     let replaced = if occurrence == 0 {
         regex.replace_all(tail, replacement.as_str()).into_owned()

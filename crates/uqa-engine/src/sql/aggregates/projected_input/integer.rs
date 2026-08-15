@@ -30,12 +30,46 @@ enum ProjectedIntegerInstruction {
     Binary(BinaryOp),
 }
 
+#[derive(Clone, Copy)]
+enum ProjectedIntegerOperand {
+    Slot(usize),
+    Literal(Option<i64>),
+}
+
+enum ProjectedIntegerPlan {
+    DirectBinary {
+        operator: BinaryOp,
+        left: ProjectedIntegerOperand,
+        right: ProjectedIntegerOperand,
+    },
+    Program(Vec<ProjectedIntegerInstruction>),
+}
+
 pub(super) struct ProjectedIntegerExpression {
-    instructions: Vec<ProjectedIntegerInstruction>,
+    plan: ProjectedIntegerPlan,
 }
 
 impl ProjectedIntegerExpression {
     pub(super) fn compile(expression: &ScalarExpr, input_schema: &RowSchema) -> Option<Self> {
+        if let ScalarExpr::Binary { op, lhs, rhs } = expression {
+            if matches!(
+                op,
+                BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
+            ) {
+                if let (Some(left), Some(right)) = (
+                    compile_integer_operand(lhs, input_schema),
+                    compile_integer_operand(rhs, input_schema),
+                ) {
+                    return Some(Self {
+                        plan: ProjectedIntegerPlan::DirectBinary {
+                            operator: *op,
+                            left,
+                            right,
+                        },
+                    });
+                }
+            }
+        }
         let mut instructions = Vec::new();
         let mut stack_depth = 0usize;
         let mut max_stack_depth = 0usize;
@@ -46,17 +80,32 @@ impl ProjectedIntegerExpression {
             &mut stack_depth,
             &mut max_stack_depth,
         )?;
-        (stack_depth == 1 && max_stack_depth <= INTEGER_STACK_LIMIT)
-            .then_some(Self { instructions })
+        (stack_depth == 1 && max_stack_depth <= INTEGER_STACK_LIMIT).then_some(Self {
+            plan: ProjectedIntegerPlan::Program(instructions),
+        })
     }
 
     pub(super) fn evaluate<Row: RowLookup>(
         &self,
         row: &Row,
     ) -> Result<ProjectedIntegerValue, SQLError> {
+        let instructions = match &self.plan {
+            ProjectedIntegerPlan::DirectBinary {
+                operator,
+                left,
+                right,
+            } => {
+                return evaluate_integer_binary(
+                    *operator,
+                    evaluate_integer_operand(*left, row),
+                    evaluate_integer_operand(*right, row),
+                )
+            }
+            ProjectedIntegerPlan::Program(instructions) => instructions,
+        };
         let mut stack = [ProjectedIntegerValue::General; INTEGER_STACK_LIMIT];
         let mut stack_len = 0usize;
-        for instruction in &self.instructions {
+        for instruction in instructions {
             match *instruction {
                 ProjectedIntegerInstruction::Slot(slot) => {
                     stack[stack_len] = match row.positional_column(slot) {
@@ -82,6 +131,41 @@ impl ProjectedIntegerExpression {
         }
         debug_assert_eq!(stack_len, 1);
         Ok(stack[0])
+    }
+}
+
+fn compile_integer_operand(
+    expression: &ScalarExpr,
+    input_schema: &RowSchema,
+) -> Option<ProjectedIntegerOperand> {
+    match expression {
+        ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. } => Some(
+            ProjectedIntegerOperand::Slot(column_slot(expression, input_schema)?),
+        ),
+        ScalarExpr::Position(position) if *position < input_schema.len() => {
+            Some(ProjectedIntegerOperand::Slot(*position))
+        }
+        ScalarExpr::Literal(Value::Int(value)) => {
+            Some(ProjectedIntegerOperand::Literal(Some(*value)))
+        }
+        ScalarExpr::Literal(Value::Null) => Some(ProjectedIntegerOperand::Literal(None)),
+        _ => None,
+    }
+}
+
+fn evaluate_integer_operand<Row: RowLookup>(
+    operand: ProjectedIntegerOperand,
+    row: &Row,
+) -> ProjectedIntegerValue {
+    match operand {
+        ProjectedIntegerOperand::Slot(slot) => match row.positional_column(slot) {
+            Some(Value::Int(value)) => ProjectedIntegerValue::Integer(*value),
+            Some(Value::Null) | None => ProjectedIntegerValue::Null,
+            Some(_) => ProjectedIntegerValue::General,
+        },
+        ProjectedIntegerOperand::Literal(value) => {
+            value.map_or(ProjectedIntegerValue::Null, ProjectedIntegerValue::Integer)
+        }
     }
 }
 

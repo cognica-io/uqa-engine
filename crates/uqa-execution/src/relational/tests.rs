@@ -57,7 +57,7 @@ fn ascending_id_scan() -> Box<dyn PhysicalOperator> {
         rows: vec![row([("id", Value::Int(1))]), row([("id", Value::Int(2))])].into_iter(),
         schema: vec!["id".into()],
         ordering: vec![crate::PhysicalOrder {
-            column: "id".into(),
+            position: 0,
             descending: false,
             nulls_first: None,
             nullable: false,
@@ -72,7 +72,7 @@ fn appending_projection_only_propagates_unmodified_ordering_prefix() {
         vec![("derived".into(), ScalarExpr::Literal(Value::Int(1)))],
         vec![],
     );
-    assert_eq!(preserved.output_ordering()[0].column, "id");
+    assert_eq!(preserved.output_ordering()[0].position, 0);
 
     let overwritten = Project::appending(
         ascending_id_scan(),

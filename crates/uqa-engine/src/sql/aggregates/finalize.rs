@@ -62,7 +62,15 @@ pub(in crate::sql) fn aggregate_value_with_args(
                     .ok_or_else(|| SQLError::TypeMismatch("decimal AVG overflow".into()))?;
                 Value::Decimal(average)
             } else if acc.numeric_inputs.all_integers() {
-                Value::Float(acc.integer_sum as f64 / acc.count as f64)
+                let sum = DecimalValue::from_i128(acc.integer_sum)
+                    .ok_or_else(|| SQLError::TypeMismatch("integer AVG overflow".into()))?;
+                let divisor = DecimalValue::from_i128(i128::from(acc.count)).ok_or_else(|| {
+                    SQLError::TypeMismatch("aggregate count exceeds NUMERIC".into())
+                })?;
+                let average = sum
+                    .checked_div_postgres(&divisor)
+                    .ok_or_else(|| SQLError::TypeMismatch("integer AVG overflow".into()))?;
+                Value::Decimal(average)
             } else {
                 Value::Float(acc.sum / acc.count as f64)
             }
@@ -191,31 +199,25 @@ pub(in crate::sql) fn aggregate_value_with_args(
             if acc.statistics_count < 2 {
                 return Ok(Value::Null);
             }
-            statistical_value(
-                acc,
-                (acc.statistics_m2 / (acc.statistics_count as f64 - 1.0)).sqrt(),
-            )
+            statistical_standard_deviation(acc, true)?
         }
         "stddev_pop" => {
             if acc.statistics_count == 0 {
                 return Ok(Value::Null);
             }
-            statistical_value(
-                acc,
-                (acc.statistics_m2 / acc.statistics_count as f64).sqrt(),
-            )
+            statistical_standard_deviation(acc, false)?
         }
         "variance" | "var_samp" => {
             if acc.statistics_count < 2 {
                 return Ok(Value::Null);
             }
-            statistical_value(acc, acc.statistics_m2 / (acc.statistics_count as f64 - 1.0))
+            statistical_variance(acc, true)?
         }
         "var_pop" => {
             if acc.statistics_count == 0 {
                 return Ok(Value::Null);
             }
-            statistical_value(acc, acc.statistics_m2 / acc.statistics_count as f64)
+            statistical_variance(acc, false)?
         }
         "percentile_cont" => {
             let frac = percentile_fraction(args)?;
@@ -279,19 +281,85 @@ pub(in crate::sql) fn aggregate_json_key(value: &Value) -> String {
     }
 }
 
-/// Statistical aggregates (`variance`, `stddev_*`) return `numeric`
-/// for integer / numeric inputs in `PostgreSQL` (rendering with a
-/// decimal point, e.g. `1.00000...`), and `double precision` only for
-/// float inputs.
-pub(in crate::sql) fn statistical_value(
+fn statistical_variance(
     accumulator: &AggregateAccumulator,
-    computed: f64,
-) -> Value {
-    if accumulator.statistics_has_float || !computed.is_finite() {
-        return Value::Float(computed);
+    sample: bool,
+) -> Result<Value, SQLError> {
+    if accumulator.statistics_has_float {
+        let divisor = if sample {
+            accumulator.statistics_count as f64 - 1.0
+        } else {
+            accumulator.statistics_count as f64
+        };
+        return Ok(Value::Float(accumulator.statistics_m2 / divisor));
     }
-    uqa_core::DecimalValue::parse(&format!("{computed:.16}"))
-        .map_or(Value::Float(computed), Value::Decimal)
+    numeric_statistical_variance(accumulator, sample).map(Value::Decimal)
+}
+
+fn statistical_standard_deviation(
+    accumulator: &AggregateAccumulator,
+    sample: bool,
+) -> Result<Value, SQLError> {
+    if accumulator.statistics_has_float {
+        let divisor = if sample {
+            accumulator.statistics_count as f64 - 1.0
+        } else {
+            accumulator.statistics_count as f64
+        };
+        return Ok(Value::Float((accumulator.statistics_m2 / divisor).sqrt()));
+    }
+    let variance = numeric_statistical_variance(accumulator, sample)?;
+    if variance.is_nan() {
+        return Ok(Value::Decimal(variance));
+    }
+    let scale = variance
+        .display_scale()
+        .ok_or_else(|| SQLError::TypeMismatch("numeric standard deviation is not finite".into()))?;
+    variance
+        .sqrt_to_scale(scale)
+        .map(Value::Decimal)
+        .ok_or_else(|| SQLError::TypeMismatch("numeric standard deviation is undefined".into()))
+}
+
+fn numeric_statistical_variance(
+    accumulator: &AggregateAccumulator,
+    sample: bool,
+) -> Result<DecimalValue, SQLError> {
+    let count = DecimalValue::from_i128(i128::from(accumulator.statistics_count))
+        .ok_or_else(|| SQLError::TypeMismatch("statistical aggregate count overflow".into()))?;
+    let sum = accumulator.statistics_sum.as_ref().ok_or_else(|| {
+        SQLError::Internal("numeric statistical aggregate omitted its sum".into())
+    })?;
+    let sum_squares = accumulator.statistics_sum_squares.as_ref().ok_or_else(|| {
+        SQLError::Internal("numeric statistical aggregate omitted its square sum".into())
+    })?;
+    let numerator = count
+        .checked_mul(sum_squares)
+        .and_then(|total| {
+            sum.checked_mul(sum)
+                .and_then(|square| total.checked_sub(&square))
+        })
+        .ok_or_else(|| SQLError::TypeMismatch("numeric statistical result overflow".into()))?;
+    if numerator <= DecimalValue::from_i64(0) && !accumulator.statistics_nonzero_deviation {
+        return Ok(DecimalValue::from_i64(0));
+    }
+    let denominator = if sample {
+        let count_minus_one = DecimalValue::from_i128(i128::from(accumulator.statistics_count - 1))
+            .ok_or_else(|| SQLError::TypeMismatch("statistical aggregate count overflow".into()))?;
+        count.checked_mul(&count_minus_one)
+    } else {
+        count.checked_mul(&count)
+    }
+    .ok_or_else(|| SQLError::TypeMismatch("numeric statistical divisor overflow".into()))?;
+    let variance = numerator
+        .checked_div_postgres(&denominator)
+        .ok_or_else(|| SQLError::TypeMismatch("numeric statistical division failed".into()))?;
+    if variance <= DecimalValue::from_i64(0) {
+        return variance.checked_sub(&variance).ok_or_else(|| {
+            SQLError::TypeMismatch("numeric statistical zero normalization failed".into())
+        });
+    }
+    Ok(variance)
 }
 
 pub(in crate::sql) fn percentile_cont(

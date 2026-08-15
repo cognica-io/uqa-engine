@@ -8,6 +8,24 @@
 
 use crate::{Batch, ColumnIdentity, ExecResult, PhysicalOperator, PhysicalOrder, RowSchema};
 
+fn remap_ordering(
+    ordering: &[PhysicalOrder],
+    input_positions: &[Option<usize>],
+) -> Vec<PhysicalOrder> {
+    ordering
+        .iter()
+        .map_while(|order| {
+            let position = input_positions
+                .iter()
+                .position(|input| *input == Some(order.position))?;
+            Some(PhysicalOrder {
+                position,
+                ..order.clone()
+            })
+        })
+        .collect()
+}
+
 /// Select already-computed columns without evaluating expressions again.
 ///
 /// This is intentionally distinct from [`crate::Project`]: SQL `ORDER BY`
@@ -38,21 +56,11 @@ impl<'a> ColumnSelection<'a> {
         child: Box<dyn PhysicalOperator + 'a>,
         columns: Vec<(String, String)>,
     ) -> Self {
-        let ordering = child
-            .output_ordering()
+        let input_positions = columns
             .iter()
-            .map_while(|order| {
-                let output = columns
-                    .iter()
-                    .find(|(_, input)| input == &order.column)?
-                    .0
-                    .clone();
-                Some(PhysicalOrder {
-                    column: output,
-                    ..order.clone()
-                })
-            })
-            .collect();
+            .map(|(_, input)| child.row_schema().position(input))
+            .collect::<Vec<_>>();
+        let ordering = remap_ordering(child.output_ordering(), &input_positions);
         let schema = RowSchema::select(child.row_schema(), &columns);
         Self {
             child,
@@ -68,21 +76,11 @@ impl<'a> ColumnSelection<'a> {
         child: Box<dyn PhysicalOperator + 'a>,
         columns: Vec<(String, usize)>,
     ) -> Self {
-        let ordering = child
-            .output_ordering()
+        let input_positions = columns
             .iter()
-            .map_while(|order| {
-                let output = columns
-                    .iter()
-                    .find(|(_, position)| child.row_schema().columns()[*position] == order.column)?
-                    .0
-                    .clone();
-                Some(PhysicalOrder {
-                    column: output,
-                    ..order.clone()
-                })
-            })
-            .collect();
+            .map(|(_, position)| Some(*position))
+            .collect::<Vec<_>>();
+        let ordering = remap_ordering(child.output_ordering(), &input_positions);
         let schema = RowSchema::remap_positions(child.row_schema(), &columns, &[]);
         Self {
             child,
@@ -96,23 +94,11 @@ impl<'a> ColumnSelection<'a> {
         child: Box<dyn PhysicalOperator + 'a>,
         columns: Vec<(String, ColumnIdentity, usize)>,
     ) -> Self {
-        let ordering = child
-            .output_ordering()
+        let input_positions = columns
             .iter()
-            .map_while(|order| {
-                let output = columns
-                    .iter()
-                    .find(|(_, _, position)| {
-                        child.row_schema().columns()[*position] == order.column
-                    })?
-                    .0
-                    .clone();
-                Some(PhysicalOrder {
-                    column: output,
-                    ..order.clone()
-                })
-            })
-            .collect();
+            .map(|(_, _, position)| Some(*position))
+            .collect::<Vec<_>>();
+        let ordering = remap_ordering(child.output_ordering(), &input_positions);
         let columns = columns
             .into_iter()
             .map(|(label, identity, position)| {
@@ -218,5 +204,18 @@ mod tests {
         let row = batches[0].schema.view(&batches[0].rows[0]);
         assert_eq!(row.value_at(0), Some(&Value::Int(1)));
         assert_eq!(row.value_at(1), Some(&Value::Int(2)));
+    }
+
+    #[test]
+    fn ordering_is_remapped_by_selected_position() {
+        let ordering = vec![PhysicalOrder {
+            position: 2,
+            descending: false,
+            nulls_first: None,
+            nullable: false,
+        }];
+        let remapped = remap_ordering(&ordering, &[Some(2), Some(0)]);
+        assert_eq!(remapped[0].position, 0);
+        assert!(remap_ordering(&ordering, &[Some(0), Some(1)]).is_empty());
     }
 }

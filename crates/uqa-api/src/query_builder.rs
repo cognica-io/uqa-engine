@@ -813,7 +813,7 @@ mod tests {
                 BTreeMap::from([("value".into(), Value::Float(1.5))]),
             ],
         );
-        assert_eq!(infer_arrow_type("value", &result), DataType::Utf8);
+        assert_eq!(infer_arrow_type(0, "value", &result), DataType::Utf8);
         let batch = sql_result_to_record_batch(&result).expect("lossless string batch");
         let values = batch
             .column(0)
@@ -835,5 +835,27 @@ mod tests {
         let error = sql_result_to_record_batch(&result)
             .expect_err("a string document id must not silently become null");
         assert!(error.to_string().contains("int64 was inferred"));
+    }
+
+    #[test]
+    fn arrow_output_preserves_values_at_duplicate_column_positions() {
+        let result = SQLResult::from_rows_with_positions(
+            vec!["value".into(), "value".into()],
+            vec![BTreeMap::new()],
+            Some(vec![vec![Value::Int(5), Value::Int(6)]]),
+        );
+        let batch = sql_result_to_record_batch(&result).expect("duplicate-label Arrow batch");
+        let first = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .expect("first integer array");
+        let second = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .expect("second integer array");
+        assert_eq!(first.value(0), 5);
+        assert_eq!(second.value(0), 6);
     }
 }

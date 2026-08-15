@@ -6,11 +6,11 @@
 
 //! JSON scalar-function helpers for the expression evaluator.
 
-use uqa_core::{DecimalValue, TemporalValue, Value};
+use uqa_core::{jsonb_equality_key, DecimalValue, TemporalValue, Value};
 
 use crate::error::{Result, SQLError};
 
-use super::{hex_encode, value_to_string};
+use super::{hex_encode, out_of_range, value_to_string};
 
 pub(super) fn parse_json(s: &str) -> Result<serde_json::Value> {
     serde_json::from_str::<serde_json::Value>(s)
@@ -26,7 +26,10 @@ pub(super) fn format_json(value: &serde_json::Value, jsonb: bool) -> String {
     match value {
         serde_json::Value::Null => "null".to_string(),
         serde_json::Value::Bool(value) => value.to_string(),
-        serde_json::Value::Number(value) => value.to_string(),
+        serde_json::Value::Number(value) => {
+            let text = value.to_string();
+            DecimalValue::parse(&text).map_or(text, |value| value.to_sql_string())
+        }
         serde_json::Value::String(value) => serde_json::Value::String(value.clone()).to_string(),
         serde_json::Value::Array(values) => {
             let values = values
@@ -54,12 +57,75 @@ pub(super) fn format_json(value: &serde_json::Value, jsonb: bool) -> String {
     }
 }
 
-pub(super) fn typed_json_value(value: &serde_json::Value, jsonb: bool) -> Value {
+pub(super) fn format_jsonb_pretty(value: &serde_json::Value) -> String {
+    format_jsonb_pretty_at_depth(value, 0)
+}
+
+fn format_jsonb_pretty_at_depth(value: &serde_json::Value, depth: usize) -> String {
+    let indent = " ".repeat(depth * 4);
+    let child_indent = " ".repeat((depth + 1) * 4);
+    match value {
+        serde_json::Value::Array(values) => {
+            if values.is_empty() {
+                return format!("[\n{indent}]");
+            }
+            let values = values
+                .iter()
+                .map(|value| {
+                    format!(
+                        "{child_indent}{}",
+                        format_jsonb_pretty_at_depth(value, depth + 1)
+                    )
+                })
+                .collect::<Vec<_>>();
+            format!("[\n{}\n{indent}]", values.join(",\n"))
+        }
+        serde_json::Value::Object(values) => {
+            if values.is_empty() {
+                return format!("{{\n{indent}}}");
+            }
+            let mut values = values.iter().collect::<Vec<_>>();
+            values.sort_by(|(left, _), (right, _)| {
+                left.len()
+                    .cmp(&right.len())
+                    .then_with(|| left.as_bytes().cmp(right.as_bytes()))
+            });
+            let values = values
+                .into_iter()
+                .map(|(key, value)| {
+                    let key = serde_json::Value::String(key.clone()).to_string();
+                    format!(
+                        "{child_indent}{key}: {}",
+                        format_jsonb_pretty_at_depth(value, depth + 1)
+                    )
+                })
+                .collect::<Vec<_>>();
+            format!("{{\n{}\n{indent}}}", values.join(",\n"))
+        }
+        _ => format_json(value, true),
+    }
+}
+
+pub(super) fn typed_json_value(value: &serde_json::Value, jsonb: bool) -> Result<Value> {
+    if jsonb {
+        validate_jsonb_numbers(value)?;
+    }
     let text = format_json(value, jsonb);
     if jsonb {
-        Value::JsonB(text)
+        Ok(Value::JsonB(text))
     } else {
-        Value::Json(text)
+        Ok(Value::Json(text))
+    }
+}
+
+fn validate_jsonb_numbers(value: &serde_json::Value) -> Result<()> {
+    match value {
+        serde_json::Value::Number(value) => DecimalValue::parse(&value.to_string())
+            .map(|_| ())
+            .ok_or_else(|| out_of_range("numeric")),
+        serde_json::Value::Array(values) => values.iter().try_for_each(validate_jsonb_numbers),
+        serde_json::Value::Object(values) => values.values().try_for_each(validate_jsonb_numbers),
+        _ => Ok(()),
     }
 }
 
@@ -140,7 +206,7 @@ pub(super) fn json_build_array_value(args: &[Value], jsonb: bool) -> Result<Valu
             .join(", ")
     );
     if jsonb {
-        Ok(typed_json_value(&parse_json(&text)?, true))
+        typed_json_value(&parse_json(&text)?, true)
     } else {
         Ok(Value::Json(text))
     }
@@ -164,7 +230,7 @@ pub(super) fn json_build_object_value(args: &[Value], jsonb: bool) -> Result<Val
     }
     let text = format!("{{{}}}", fields.join(", "));
     if jsonb {
-        Ok(typed_json_value(&parse_json(&text)?, true))
+        typed_json_value(&parse_json(&text)?, true)
     } else {
         Ok(Value::Json(text))
     }
@@ -305,7 +371,7 @@ pub(super) fn json_extract_path(args: &[Value], as_text: bool, jsonb: bool) -> R
     } else if matches!(current, serde_json::Value::Null) {
         Ok(Value::Null)
     } else {
-        Ok(typed_json_value(&current, jsonb))
+        typed_json_value(&current, jsonb)
     }
 }
 
@@ -336,15 +402,43 @@ pub(super) fn json_contained_by(args: &[Value]) -> Result<Value> {
 }
 
 fn json_contains_value(lhs: &serde_json::Value, rhs: &serde_json::Value) -> bool {
+    json_contains_value_at_depth(lhs, rhs, true)
+}
+
+fn json_contains_value_at_depth(
+    lhs: &serde_json::Value,
+    rhs: &serde_json::Value,
+    top_level: bool,
+) -> bool {
     match (lhs, rhs) {
-        (serde_json::Value::Object(l), serde_json::Value::Object(r)) => r
+        (serde_json::Value::Object(l), serde_json::Value::Object(r)) => r.iter().all(|(k, rv)| {
+            l.get(k)
+                .is_some_and(|lv| json_contains_value_at_depth(lv, rv, false))
+        }),
+        (serde_json::Value::Array(l), serde_json::Value::Array(r)) => r.iter().all(|rv| {
+            l.iter()
+                .any(|lv| json_contains_value_at_depth(lv, rv, false))
+        }),
+        (serde_json::Value::Array(l), r) if top_level && jsonb_is_primitive(r) => l
             .iter()
-            .all(|(k, rv)| l.get(k).is_some_and(|lv| json_contains_value(lv, rv))),
-        (serde_json::Value::Array(l), serde_json::Value::Array(r)) => r
-            .iter()
-            .all(|rv| l.iter().any(|lv| json_contains_value(lv, rv))),
-        (serde_json::Value::Array(l), r) => l.iter().any(|lv| json_contains_value(lv, r)),
-        _ => lhs == rhs,
+            .any(|lv| json_contains_value_at_depth(lv, r, false)),
+        _ => jsonb_values_equal(lhs, rhs),
+    }
+}
+
+fn jsonb_is_primitive(value: &serde_json::Value) -> bool {
+    !matches!(
+        value,
+        serde_json::Value::Array(_) | serde_json::Value::Object(_)
+    )
+}
+
+fn jsonb_values_equal(lhs: &serde_json::Value, rhs: &serde_json::Value) -> bool {
+    let lhs = serde_json::to_string(lhs).expect("serializing parsed JSON cannot fail");
+    let rhs = serde_json::to_string(rhs).expect("serializing parsed JSON cannot fail");
+    match (jsonb_equality_key(&lhs), jsonb_equality_key(&rhs)) {
+        (Some(lhs), Some(rhs)) => lhs == rhs,
+        _ => false,
     }
 }
 
@@ -687,7 +781,7 @@ pub(super) fn json_concat(args: &[Value]) -> Result<Option<Value>> {
         }
         (left, right) => serde_json::Value::Array(vec![left, right]),
     };
-    Ok(Some(typed_json_value(&out, true)))
+    typed_json_value(&out, true).map(Some)
 }
 
 pub(super) fn json_delete(args: &[Value]) -> Result<Option<Value>> {
@@ -712,7 +806,7 @@ pub(super) fn json_delete(args: &[Value]) -> Result<Option<Value>> {
         }
         key => delete_key_or_string(&mut target, &value_to_string(key)),
     }
-    Ok(Some(typed_json_value(&target, true)))
+    typed_json_value(&target, true).map(Some)
 }
 
 pub(super) fn json_delete_path(args: &[Value]) -> Result<Value> {
@@ -724,7 +818,7 @@ pub(super) fn json_delete_path(args: &[Value]) -> Result<Value> {
     let mut target = value_to_json(&args[0]);
     let path = path_arg(&args[1])?;
     delete_path(&mut target, &path);
-    Ok(typed_json_value(&target, true))
+    typed_json_value(&target, true)
 }
 
 fn path_arg(value: &Value) -> Result<Vec<String>> {
@@ -834,7 +928,7 @@ pub(super) fn jsonb_set(args: &[Value]) -> Result<Value> {
         other => value_to_string(other).eq_ignore_ascii_case("true"),
     });
     json_set_path(&mut current, &path, new_val, create_missing);
-    Ok(typed_json_value(&current, true))
+    typed_json_value(&current, true)
 }
 
 pub(super) fn jsonb_insert(args: &[Value]) -> Result<Value> {
@@ -850,7 +944,7 @@ pub(super) fn jsonb_insert(args: &[Value]) -> Result<Value> {
         other => value_to_string(other).eq_ignore_ascii_case("true"),
     });
     json_insert_path(&mut current, &path, new_val, insert_after);
-    Ok(typed_json_value(&current, true))
+    typed_json_value(&current, true)
 }
 
 fn json_insert_path(
@@ -983,5 +1077,41 @@ pub(super) fn strip_nulls(value: &mut serde_json::Value, strip_in_arrays: bool) 
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod pretty_tests {
+    use super::{format_jsonb_pretty, parse_json, typed_json_value, DecimalValue};
+
+    #[test]
+    fn jsonb_pretty_uses_postgresql_layout_and_key_order() {
+        let value = parse_json(r#"{"zz":1,"b":[],"aa":{"long":3,"x":2}}"#).unwrap();
+        assert_eq!(
+            format_jsonb_pretty(&value),
+            "{\n    \"b\": [\n    ],\n    \"aa\": {\n        \"x\": 2,\n        \"long\": 3\n    },\n    \"zz\": 1\n}"
+        );
+        assert_eq!(format_jsonb_pretty(&parse_json("[]").unwrap()), "[\n]");
+        assert_eq!(format_jsonb_pretty(&parse_json("{}").unwrap()), "{\n}");
+        assert_eq!(
+            format_jsonb_pretty(&parse_json("1e-1000").unwrap()),
+            DecimalValue::parse("1e-1000").unwrap().to_sql_string()
+        );
+        assert_eq!(format_jsonb_pretty(&parse_json("1.00").unwrap()), "1.00");
+        assert_eq!(format_jsonb_pretty(&parse_json("-0").unwrap()), "0");
+    }
+
+    #[test]
+    fn jsonb_rejects_numbers_outside_postgresql_numeric_range() {
+        let maximum = parse_json("1e131071").unwrap();
+        assert!(typed_json_value(&maximum, true).is_ok());
+
+        for text in ["1e131072", "1e-16384", "[1e131072]", r#"{"n":1e131072}"#] {
+            let error = typed_json_value(&parse_json(text).unwrap(), true).unwrap_err();
+            assert_eq!(error.sqlstate(), Some("22003"));
+        }
+
+        assert!(typed_json_value(&parse_json("1e200000").unwrap(), false).is_ok());
+        assert!(typed_json_value(&parse_json("0e200000").unwrap(), true).is_ok());
     }
 }

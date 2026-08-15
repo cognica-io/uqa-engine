@@ -63,11 +63,8 @@ pub(crate) fn encoded_physical_row_record_size(
     Ok(bytes)
 }
 
-pub(crate) fn encoded_single_row_batch_size(
-    schema: &RowSchema,
-    row: &PhysicalRow,
-) -> ExecResult<usize> {
-    encoded_rows_size(schema, std::slice::from_ref(row))
+pub(crate) fn encoded_batch_overhead_size(schema: &RowSchema) -> ExecResult<usize> {
+    encoded_rows_size(schema, &[])
 }
 
 fn encoded_rows_size(schema: &RowSchema, rows: &[PhysicalRow]) -> ExecResult<usize> {

@@ -835,6 +835,45 @@ fn timestamp_text_uses_pg_format() {
         ),
         "13:05"
     );
+    assert_eq!(text(&eng, "SELECT to_char(1234.5, '9999.99')"), " 1234.50");
+    assert_eq!(text(&eng, "SELECT to_char(2.5::numeric, '9')"), " 3");
+    assert_eq!(text(&eng, "SELECT to_char(2.5::float8, '9')"), " 2");
+    assert_eq!(text(&eng, "SELECT to_char(-2.5::numeric, '9')"), "-3");
+    assert_eq!(text(&eng, "SELECT to_char(1.25::numeric, '9.9')"), " 1.3");
+    assert_eq!(text(&eng, "SELECT to_char(12::numeric, 'fm000')"), "012");
+    assert_eq!(text(&eng, "SELECT to_char(-1.2::numeric, 'S9')"), "-1");
+    assert_eq!(text(&eng, "SELECT to_char(1::numeric, 'FM090')"), "001");
+}
+
+#[test]
+fn integer_avg_remains_exact_numeric() {
+    let eng = engine();
+    assert_eq!(
+        text(
+            &eng,
+            "SELECT avg(x) FROM (VALUES (9007199254740992::bigint), (9007199254740993::bigint)) AS t(x)"
+        ),
+        "9007199254740992.5000"
+    );
+    assert_eq!(
+        text(&eng, "SELECT avg(x) FROM (VALUES (1), (2)) AS t(x)"),
+        "1.5000000000000000"
+    );
+}
+
+#[test]
+fn array_dimension_errors_and_concatenation_match_postgresql_18() {
+    let eng = engine();
+    let bounds = eng.sql("SELECT '[0:-1]={}'::int[]", &[]).unwrap_err();
+    assert_eq!(bounds.sqlstate(), Some("2202E"));
+
+    let incompatible = eng
+        .sql(
+            "SELECT array_cat('[0:0][2:3]={{1,2}}'::int[], '[5:5][9:10]={{3,4}}'::int[])",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(incompatible.sqlstate(), Some("2202E"));
 }
 
 // ---------------------------------------------------------------------
@@ -1069,18 +1108,6 @@ fn array_length_of_empty_array_is_null() {
 }
 
 #[test]
-fn power_and_root_operators() {
-    let eng = engine();
-    assert_eq!(scalar(&eng, "SELECT 2 ^ 10"), Value::Float(1024.0));
-    assert_eq!(scalar(&eng, "SELECT |/ 16.0"), Value::Float(4.0));
-    // glibc-compatible cbrt (PostgreSQL on Linux): last-ulp artifact.
-    assert_eq!(
-        scalar(&eng, "SELECT cbrt(27)"),
-        Value::Float(3.000_000_000_000_000_4)
-    );
-}
-
-#[test]
 fn srf_in_select_list_expands_rows() {
     let eng = engine();
     let result = eng.sql("SELECT generate_series(1, 3)", &[]).unwrap();
@@ -1184,6 +1211,32 @@ fn pg18_json_strip_nulls_can_strip_array_elements() {
             "SELECT jsonb_strip_nulls('{\"a\":null,\"b\":[1,null,{\"c\":null}]}'::jsonb, true) = '{\"b\":[1,{}]}'::jsonb"
         ),
         Value::Bool(true)
+    );
+}
+
+#[test]
+fn pg18_jsonb_numbers_use_postgresql_numeric_range() {
+    let eng = engine();
+    for sql in [
+        "SELECT '1e131072'::jsonb",
+        "SELECT '1e-16384'::jsonb",
+        "SELECT '[1e131072]'::jsonb",
+        "SELECT '{\"n\":1e131072}'::jsonb",
+    ] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("22003"), "{sql}");
+    }
+    assert_eq!(
+        scalar(&eng, "SELECT '1e131071'::jsonb > '0'::jsonb"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT '0e200000'::jsonb = '0'::jsonb"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT json_typeof('1e200000'::json)"),
+        Value::Str("number".into())
     );
 }
 
@@ -1366,6 +1419,14 @@ fn pg18_min_and_max_accept_arrays() {
 fn pg18_regex_functions_accept_named_arguments() {
     let eng = engine();
     assert_eq!(
+        scalar(&eng, "SELECT regexp_like(E'\\n', '[^a]', 'n')"),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT regexp_like(E'\\n', '[^\\n]', 'en')"),
+        Value::Bool(false)
+    );
+    assert_eq!(
         scalar(
             &eng,
             "SELECT regexp_count(pattern => '[a-z]+', string => '123abc456def')"
@@ -1412,6 +1473,9 @@ fn pg18_regex_functions_accept_named_arguments() {
 
 #[path = "pg18_semantics/numeric_exactness.rs"]
 mod numeric_exactness;
+
+#[path = "pg18_semantics/numeric_power_statistics.rs"]
+mod numeric_power_statistics;
 
 #[path = "pg18_semantics/array_containment.rs"]
 mod array_containment;

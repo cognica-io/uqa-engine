@@ -206,16 +206,16 @@ impl ScoredDocumentSource {
         // Projection pruning may remove the primary-key column. An ordering
         // property is only meaningful when the ordered value is present in
         // the physical output schema.
-        let ordered_primary_key =
-            ordered_primary_key.filter(|column| schema.iter().any(|candidate| candidate == column));
+        let ordered_primary_key = ordered_primary_key
+            .and_then(|column| schema.iter().position(|candidate| candidate == &column));
         let (input, score_origin, ordering, input_guarantees_presence) = match input {
             ScoredInput::All => (
                 ScoredInputCursor::All { after: None },
                 ScoreOrigin::Unscored,
                 ordered_primary_key
                     .into_iter()
-                    .map(|column| uqa_execution::PhysicalOrder {
-                        column,
+                    .map(|position| uqa_execution::PhysicalOrder {
+                        position,
                         descending: false,
                         nulls_first: None,
                         nullable: false,
@@ -233,8 +233,8 @@ impl ScoredDocumentSource {
                 let ordering = if doc_ids_are_ordered {
                     ordered_primary_key
                         .into_iter()
-                        .map(|column| uqa_execution::PhysicalOrder {
-                            column,
+                        .map(|position| uqa_execution::PhysicalOrder {
+                            position,
                             descending: false,
                             nulls_first: None,
                             nullable: false,
@@ -515,7 +515,7 @@ mod tests {
             Some("id".into()),
             None,
         );
-        assert_eq!(retained.output_ordering()[0].column, "id");
+        assert_eq!(retained.output_ordering()[0].position, 0);
     }
 
     #[test]

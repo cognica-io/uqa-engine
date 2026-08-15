@@ -27,7 +27,7 @@ mod format;
 
 use format::{
     append_batches, decode_batch, decode_physical_row_record, encode_physical_row_record,
-    encoded_batch_size, encoded_physical_row_record_size, encoded_single_row_batch_size,
+    encoded_batch_overhead_size, encoded_batch_size, encoded_physical_row_record_size,
     open_spill_reader, read_bounded_spill_record, spill_error, RECORD_PREFIX_BYTES,
 };
 
@@ -164,11 +164,15 @@ impl SpillBuffer {
         encoded_batch_size(batch)
     }
 
-    pub(crate) fn encoded_single_row_size(
+    pub(crate) fn encoded_batch_overhead_size(schema: &RowSchema) -> ExecResult<usize> {
+        encoded_batch_overhead_size(schema)
+    }
+
+    pub(crate) fn encoded_row_record_size(
         schema: &RowSchema,
         row: &PhysicalRow,
     ) -> ExecResult<usize> {
-        encoded_single_row_batch_size(schema, row)
+        encoded_physical_row_record_size(row, schema.physical_width())
     }
 
     /// Total buffered rows, including rows already written to disk.

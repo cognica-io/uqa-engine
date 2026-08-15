@@ -23,6 +23,20 @@ pub struct ProjectedPredicate {
     expression: ProjectedExpr,
 }
 
+pub(super) enum ProjectedIntPredicate {
+    Comparison {
+        field: usize,
+        op: BinaryOp,
+        literal: i64,
+        field_on_left: bool,
+    },
+    Between {
+        field: usize,
+        low: i64,
+        high: i64,
+    },
+}
+
 pub(super) enum ProjectedExpr {
     Field(usize),
     Literal(Value),
@@ -41,6 +55,7 @@ pub(super) enum ProjectedExpr {
     },
     Not(Box<Self>),
     And(Vec<Self>),
+    IntFieldConjunction(Vec<ProjectedIntPredicate>),
     Or(Vec<Self>),
     IsNull {
         expression: Box<Self>,
@@ -156,6 +171,10 @@ mod tests {
         let predicate = ProjectedPredicate::compile(&q6, &fields, &params)
             .unwrap()
             .unwrap();
+        assert!(matches!(
+            &predicate.expression,
+            ProjectedExpr::IntFieldConjunction(items) if items.len() == 3
+        ));
 
         let discounts = [Value::Null, Value::Int(1), Value::Int(2), Value::Int(8)];
         let quantities = [

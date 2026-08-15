@@ -44,10 +44,6 @@ impl ArrayValue {
         &self.elements
     }
 
-    pub fn elements_mut(&mut self) -> &mut Vec<Value> {
-        &mut self.elements
-    }
-
     pub fn into_elements(self) -> Vec<Value> {
         self.elements
     }

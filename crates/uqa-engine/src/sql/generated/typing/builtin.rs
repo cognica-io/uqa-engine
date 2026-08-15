@@ -92,7 +92,13 @@ pub(super) fn infer_builtin_function(
         }
         "power" | "pow" => {
             require_signature(name, args, &[TypeClass::Numeric, TypeClass::Numeric])?;
-            GenerationType::Real
+            if args.iter().any(|ty| matches!(ty, GenerationType::Numeric))
+                && !args.iter().any(|ty| matches!(ty, GenerationType::Real))
+            {
+                GenerationType::Numeric
+            } else {
+                GenerationType::Real
+            }
         }
         "sqrt" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh"
         | "exp" | "ln" | "log2" | "cbrt" | "gamma" | "lgamma" | "degrees" | "radians" => {

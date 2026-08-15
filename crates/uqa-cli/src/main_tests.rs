@@ -127,6 +127,7 @@ fn meta_ds_lists_sequences_using_search_path() {
         history_path: None,
         show_timing: false,
         expanded: false,
+        copy_text: false,
         output_path: None,
     };
 

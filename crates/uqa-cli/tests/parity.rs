@@ -71,6 +71,34 @@ fn command_string_executes_without_repl_banner() {
 }
 
 #[test]
+fn copy_text_output_distinguishes_null_empty_and_literal_null() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = run_usql(
+        &[
+            "--copy-text",
+            "-c",
+            "SELECT ''::text AS empty, NULL AS missing, 'NULL'::text AS literal",
+        ],
+        "",
+        dir.path(),
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(stdout(&output), "\t\\N\tNULL\n");
+}
+
+#[test]
+fn copy_text_output_uses_postgresql_boolean_type_output() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = run_usql(
+        &["--copy-text", "-c", "SELECT true, false, ROW(true, false)"],
+        "",
+        dir.path(),
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(stdout(&output), "t\tf\t(t,f)\n");
+}
+
+#[test]
 fn command_string_ignores_interactive_history() {
     let dir = tempfile::tempdir().expect("tempdir");
     let history = dir.path().join("history-is-a-directory");
