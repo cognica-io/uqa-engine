@@ -153,8 +153,8 @@ fn regexp_match_returns_capture_group() {
         )
         .unwrap();
     let m = match &res.rows[0]["m"] {
-        Value::List(items) if items.len() == 1 => items[0].clone(),
-        other => panic!("expected list with 1 group, got {other:?}"),
+        Value::Array(array) if array.elements().len() == 1 => array.elements()[0].clone(),
+        other => panic!("expected array with 1 group, got {other:?}"),
     };
     assert_eq!(m, Value::Str("42".into()));
 }

@@ -9,16 +9,41 @@ use std::collections::BTreeMap;
 
 #[test]
 fn qualified_schema_lookup_reads_positional_values() {
-    let schema = RowSchema::new(vec!["orders.id".into(), "customer.id".into()]);
+    let schema = RowSchema::with_identities(
+        vec!["id".into(), "id".into()],
+        vec![
+            ColumnIdentity::qualified("orders", "id"),
+            ColumnIdentity::qualified("customer", "id"),
+        ],
+        vec![None, None],
+    );
     let row = PhysicalRow::from_values(vec![Value::Int(1), Value::Int(2)]);
     let view = schema.view(&row);
+    assert_eq!(view.qualified_column("orders", "id"), Some(&Value::Int(1)));
     assert_eq!(
-        view.qualified_column("orders", "id", "orders.id"),
-        Some(&Value::Int(1))
-    );
-    assert_eq!(
-        view.qualified_column("customer", "id", "customer.id"),
+        view.qualified_column("customer", "id"),
         Some(&Value::Int(2))
+    );
+}
+
+#[test]
+fn duplicate_qualified_identity_is_ambiguous_but_star_keeps_both_positions() {
+    let schema = RowSchema::with_identities(
+        vec!["id".into(), "id".into()],
+        vec![
+            ColumnIdentity::qualified("nested", "id"),
+            ColumnIdentity::qualified("nested", "id"),
+        ],
+        vec![None, None],
+    );
+    let row = PhysicalRow::from_values(vec![Value::Int(1), Value::Int(2)]);
+    let view = schema.view(&row);
+
+    assert!(view.qualified_column_is_ambiguous("nested", "id"));
+    assert_eq!(view.qualified_column("nested", "id"), None);
+    assert_eq!(
+        schema.qualified_star_layout("nested"),
+        vec![("id".into(), 0, None), ("id".into(), 1, None)]
     );
 }
 
@@ -30,7 +55,14 @@ fn named_map_exact_key_precedes_qualified_metadata_suffixes() {
     assert!(!view.column_is_ambiguous("id"));
     assert_eq!(view.column("id"), Some(&Value::Int(2)));
 
-    let relational = RowSchema::new(vec!["id".into(), "other.id".into()]);
+    let relational = RowSchema::with_identities(
+        vec!["id".into(), "id".into()],
+        vec![
+            ColumnIdentity::unqualified("id"),
+            ColumnIdentity::qualified("other", "id"),
+        ],
+        vec![None, None],
+    );
     assert!(relational.column_is_ambiguous("id"));
 }
 
@@ -79,17 +111,17 @@ fn shared_storage_projection_remaps_without_cloning_values() {
 #[test]
 fn lookup_aliases_share_a_slot_without_becoming_output_columns() {
     let input = RowSchema::new(vec!["id".into()]);
-    let schema = RowSchema::with_lookup_aliases(&input, &[("orders.id".into(), "id".into())]);
+    let schema =
+        RowSchema::with_identity_aliases(&input, &[(ColumnIdentity::qualified("orders", "id"), 0)]);
+    assert!(schema.has_qualifier("orders"));
+    assert!(!schema.has_qualifier("missing"));
     let row = PhysicalRow::from_values(vec![Value::Int(7)]);
     let view = schema.view(&row);
 
     assert_eq!(schema.columns(), ["id"]);
     assert_eq!(schema.physical_width(), 1);
-    assert_eq!(view.get("orders.id"), Some(&Value::Int(7)));
-    assert_eq!(
-        view.qualified_column("orders", "id", "orders.id"),
-        Some(&Value::Int(7))
-    );
+    assert_eq!(view.get("orders.id"), None);
+    assert_eq!(view.qualified_column("orders", "id"), Some(&Value::Int(7)));
     assert_eq!(
         view.to_result_row(),
         BTreeMap::from([("id".into(), Value::Int(7))])
@@ -99,8 +131,10 @@ fn lookup_aliases_share_a_slot_without_becoming_output_columns() {
 #[test]
 fn canonical_projection_preserves_public_columns_and_hidden_alias_slots() {
     let input = RowSchema::new(vec!["value".into()]);
-    let aliased =
-        RowSchema::with_lookup_aliases(&input, &[("source.value".into(), "value".into())]);
+    let aliased = RowSchema::with_identity_aliases(
+        &input,
+        &[(ColumnIdentity::qualified("source", "value"), 0)],
+    );
     let projected = RowSchema::append(&aliased, &["value".into()]);
     let source = PhysicalRow::from_values(vec![Value::Str("source".into())]);
     let source_values = Arc::clone(&source.fragments[0].values);
@@ -115,7 +149,7 @@ fn canonical_projection_preserves_public_columns_and_hidden_alias_slots() {
     assert_eq!(canonical.physical_width(), 2);
     assert_eq!(view.get("value"), Some(&Value::Str("projected".into())));
     assert_eq!(
-        view.qualified_column("source", "value", "source.value"),
+        view.qualified_column("source", "value"),
         Some(&Value::Str("source".into()))
     );
     assert!(Arc::ptr_eq(&row.fragments[0].values, &projected_values));

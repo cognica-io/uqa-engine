@@ -85,9 +85,7 @@ use ddl::{
 };
 pub(crate) use ddl::{convert_value_to_column_type, validate_vector_dimensions};
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
-use from_rows::{
-    build_join_spill_with_ctes, engine_func_intercept, prefix_row, ColumnPrune, QualifierFilters,
-};
+use from_rows::{build_join_spill_with_ctes, engine_func_intercept, ColumnPrune, QualifierFilters};
 pub(crate) use generated::refresh_stored_generated_columns;
 use plan_executor::UnifiedPlanExecutor;
 use row_functions::{
@@ -104,8 +102,8 @@ pub(crate) use row_functions::{
 };
 pub(crate) use select::CteScope;
 use select::{
-    bind_projection_output_schema, build_projection_row_with_ctes, projection_columns, run_explain,
-    ScopedEngineHook,
+    bind_projection_output_schema, build_projection_physical_row_with_ctes, projection_columns,
+    run_explain, ScopedEngineHook,
 };
 use where_eval::execute_mixed_where;
 pub(crate) use where_eval::expr_is_null_free as expr_is_null_free_public;
@@ -125,9 +123,6 @@ const SCORE_PROVENANCE_COLUMN: &str = "\0uqa.score_bearing";
 
 fn is_score_provenance_column(column: &str) -> bool {
     column == SCORE_PROVENANCE_COLUMN
-        || column
-            .strip_suffix(SCORE_PROVENANCE_COLUMN)
-            .is_some_and(|prefix| prefix.ends_with('.'))
 }
 
 /// Resolve reserved system-schema aliases only when the local name belongs to

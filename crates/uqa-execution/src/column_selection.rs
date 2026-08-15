@@ -6,7 +6,7 @@
 
 //! Schema-only projection used after an expression-producing stage.
 
-use crate::{Batch, ExecResult, PhysicalOperator, PhysicalOrder, RowSchema};
+use crate::{Batch, ColumnIdentity, ExecResult, PhysicalOperator, PhysicalOrder, RowSchema};
 
 /// Select already-computed columns without evaluating expressions again.
 ///
@@ -84,6 +84,43 @@ impl<'a> ColumnSelection<'a> {
             })
             .collect();
         let schema = RowSchema::remap_positions(child.row_schema(), &columns, &[]);
+        Self {
+            child,
+            schema,
+            ordering,
+        }
+    }
+
+    /// Select logical input positions and assign explicit structured SQL identities without encoding qualifiers into output labels.
+    pub fn with_identities(
+        child: Box<dyn PhysicalOperator + 'a>,
+        columns: Vec<(String, ColumnIdentity, usize)>,
+    ) -> Self {
+        let ordering = child
+            .output_ordering()
+            .iter()
+            .map_while(|order| {
+                let output = columns
+                    .iter()
+                    .find(|(_, _, position)| {
+                        child.row_schema().columns()[*position] == order.column
+                    })?
+                    .0
+                    .clone();
+                Some(PhysicalOrder {
+                    column: output,
+                    ..order.clone()
+                })
+            })
+            .collect();
+        let columns = columns
+            .into_iter()
+            .map(|(label, identity, position)| {
+                let ty = child.row_schema().column_type(position).cloned();
+                (label, identity, position, ty)
+            })
+            .collect::<Vec<_>>();
+        let schema = RowSchema::remap_typed_identities(child.row_schema(), &columns, &[]);
         Self {
             child,
             schema,

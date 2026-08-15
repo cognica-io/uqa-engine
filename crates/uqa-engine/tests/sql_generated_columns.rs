@@ -530,6 +530,46 @@ fn generated_expression_dependencies_follow_rename_and_block_drop() {
 }
 
 #[test]
+fn generated_expression_binding_preserves_quoted_dotted_identifiers() {
+    let engine = Engine::new();
+    engine.sql("CREATE SCHEMA generated_ns", &[]).unwrap();
+    engine
+        .sql(
+            "CREATE TABLE generated_ns.\"base.table\" (
+                 \"source.value\" INTEGER,
+                 derived INTEGER GENERATED ALWAYS AS (\"base.table\".\"source.value\" + 1) STORED
+             )",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO generated_ns.\"base.table\" (\"source.value\") VALUES (4)",
+            &[],
+        )
+        .unwrap();
+    let selected = engine
+        .sql(
+            "SELECT \"source.value\", derived FROM generated_ns.\"base.table\"",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(selected.rows[0]["source.value"], Value::Int(4));
+    assert_eq!(selected.rows[0]["derived"], Value::Int(5));
+
+    let error = engine
+        .sql(
+            "CREATE TABLE generated_ns.invalid_qualifier (
+                 source INTEGER,
+                 derived INTEGER GENERATED ALWAYS AS (\"other.table\".source + 1) STORED
+             )",
+            &[],
+        )
+        .unwrap_err();
+    assert!(matches!(error, uqa_sql::SQLError::UnknownTable(name) if name == "other.table"));
+}
+
+#[test]
 fn generated_dependencies_block_base_type_changes_but_allow_generated_type_changes() {
     let engine = Engine::new();
     engine
@@ -652,6 +692,91 @@ fn stored_generated_primary_keys_are_remapped_and_failed_rewrites_roll_back() {
     assert_eq!(
         catalog.rows[0]["generation_expression"],
         Value::Str("(source + 10)".into())
+    );
+}
+
+#[test]
+fn persistent_generated_expression_rewrites_commit_or_roll_back_as_one_change() {
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("generated-rewrite-atomicity.sqlite");
+    {
+        let engine = Engine::open(&database).unwrap();
+        engine
+            .sql(
+                "CREATE TABLE persistent_generated_parent (
+                     source INTEGER,
+                     derived INTEGER GENERATED ALWAYS AS (source + 10) STORED UNIQUE
+                 )",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "CREATE TABLE persistent_generated_child (
+                     parent_value INTEGER REFERENCES persistent_generated_parent(derived)
+                 )",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "INSERT INTO persistent_generated_parent (source) VALUES (1)",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql("INSERT INTO persistent_generated_child VALUES (11)", &[])
+            .unwrap();
+
+        let error = engine
+            .sql(
+                "ALTER TABLE persistent_generated_parent ALTER COLUMN derived SET EXPRESSION AS (source + 20)",
+                &[],
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("FOREIGN KEY"), "{error}");
+    }
+    {
+        let engine = Engine::open(&database).unwrap();
+        let unchanged = engine
+            .sql("SELECT derived FROM persistent_generated_parent", &[])
+            .unwrap();
+        assert_eq!(unchanged.rows[0]["derived"], Value::Int(11));
+        let catalog = engine
+            .sql(
+                "SELECT generation_expression FROM information_schema.columns WHERE table_name = 'persistent_generated_parent' AND column_name = 'derived'",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            catalog.rows[0]["generation_expression"],
+            Value::Str("(source + 10)".into())
+        );
+
+        engine
+            .sql("DELETE FROM persistent_generated_child", &[])
+            .unwrap();
+        engine
+            .sql(
+                "ALTER TABLE persistent_generated_parent ALTER COLUMN derived SET EXPRESSION AS (source + 20)",
+                &[],
+            )
+            .unwrap();
+    }
+    let engine = Engine::open(&database).unwrap();
+    let changed = engine
+        .sql("SELECT derived FROM persistent_generated_parent", &[])
+        .unwrap();
+    assert_eq!(changed.rows[0]["derived"], Value::Int(21));
+    let catalog = engine
+        .sql(
+            "SELECT generation_expression FROM information_schema.columns WHERE table_name = 'persistent_generated_parent' AND column_name = 'derived'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        catalog.rows[0]["generation_expression"],
+        Value::Str("(source + 20)".into())
     );
 }
 
@@ -1119,4 +1244,106 @@ fn deep_learning_table_reads_virtual_generated_labels() {
         .load_model("generated-label-model")
         .unwrap()
         .is_some());
+}
+
+#[test]
+fn generated_columns_apply_postgresql_assignment_casts() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE generated_temporal_casts (
+                 source_date DATE,
+                 generated_timestamp TIMESTAMP GENERATED ALWAYS AS (source_date) STORED,
+                 source_timestamp TIMESTAMP,
+                 generated_date DATE GENERATED ALWAYS AS (source_timestamp) STORED
+             )",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO generated_temporal_casts (source_date, source_timestamp)
+             VALUES (DATE '2020-01-02', TIMESTAMP '2020-01-03 04:05:06')",
+            &[],
+        )
+        .unwrap();
+    let result = engine
+        .sql(
+            "SELECT generated_timestamp::text AS generated_timestamp, generated_date::text AS generated_date
+             FROM generated_temporal_casts",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        result.rows[0]["generated_timestamp"],
+        Value::Str("2020-01-02 00:00:00".into())
+    );
+    assert_eq!(
+        result.rows[0]["generated_date"],
+        Value::Str("2020-01-03".into())
+    );
+
+    let error = engine
+        .sql(
+            "CREATE TABLE generated_uuid_rejects_text (
+                 source TEXT,
+                 generated UUID GENERATED ALWAYS AS (source) STORED
+             )",
+            &[],
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("uuid"));
+}
+
+#[test]
+fn generated_columns_reject_nonexistent_builtin_signatures() {
+    let engine = Engine::new();
+    for expression in [
+        "cardinality(source, 1)",
+        "array_reverse(source, true)",
+        "array_remove(source, 1, 2)",
+    ] {
+        let sql = format!(
+            "CREATE TABLE generated_bad_array_signature (source INTEGER[], generated INTEGER GENERATED ALWAYS AS ({expression}) STORED)"
+        );
+        assert!(engine.sql(&sql, &[]).is_err(), "{expression}");
+    }
+    assert!(engine
+        .sql(
+            "CREATE TABLE generated_bad_justify_hours (source DATE, generated INTERVAL GENERATED ALWAYS AS (justify_hours(source)) STORED)",
+            &[],
+        )
+        .is_err());
+    assert!(engine
+        .sql(
+            "CREATE TABLE generated_bad_make_timestamp (source INTEGER, generated TIMESTAMP GENERATED ALWAYS AS (make_timestamp(2020, 1, 1, 0, 0, 0, source)) STORED)",
+            &[],
+        )
+        .is_err());
+}
+
+#[test]
+fn generated_expressions_preserve_declared_integer_widths() {
+    let engine = Engine::new();
+    for kind in ["VIRTUAL", "STORED"] {
+        let table = format!("generated_width_{}", kind.to_ascii_lowercase());
+        engine
+            .sql(
+                &format!(
+                    "CREATE TABLE {table} (source SMALLINT, bytes BYTEA GENERATED ALWAYS AS (source::bytea) {kind})"
+                ),
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(&format!("INSERT INTO {table} (source) VALUES (-1)"), &[])
+            .unwrap();
+        let result = engine
+            .sql(&format!("SELECT bytes FROM {table}"), &[])
+            .unwrap();
+        assert_eq!(
+            result.rows[0].get("bytes"),
+            Some(&Value::Bytes(vec![0xff, 0xff]))
+        );
+    }
 }

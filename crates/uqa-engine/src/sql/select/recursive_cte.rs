@@ -218,10 +218,10 @@ pub(in crate::sql) fn alias_query_output_to_shared(
                         .cloned()
                         .unwrap_or_else(|| source.clone())
                 };
-                (output, source.clone())
+                (output, index)
             })
             .collect::<Vec<_>>();
-        operator = Box::new(uqa_execution::ColumnSelection::with_mapping(
+        operator = Box::new(uqa_execution::ColumnSelection::with_positions(
             operator, mapping,
         ));
     }

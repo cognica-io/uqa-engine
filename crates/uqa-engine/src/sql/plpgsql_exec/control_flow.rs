@@ -7,8 +7,8 @@
 //! Loop and return control-flow execution.
 
 use super::{
-    coerce_routine_value, row_value, to_i64_value, Expr, Flow, FunctionReturns, Interpreter,
-    LoopSignal, PLpgSQLReturnValue, PLpgSQLStmt, SQLError, SQLResult, Value,
+    coerce_routine_value, result_row_values, to_i64_value, Expr, Flow, FunctionReturns,
+    Interpreter, LoopSignal, PLpgSQLReturnValue, PLpgSQLStmt, SQLError, SQLResult, Value,
 };
 
 impl Interpreter<'_> {
@@ -238,13 +238,12 @@ impl Interpreter<'_> {
                     uqa_sql::plpgsql::PLpgSQLDatum::Var(_)
                     | uqa_sql::plpgsql::PLpgSQLDatum::Rec { .. },
                 ) => Ok(self.values[*index].clone()),
-                Some(uqa_sql::plpgsql::PLpgSQLDatum::Row { fields }) => {
-                    let mut row = std::collections::BTreeMap::new();
-                    for field in fields {
-                        row.insert(field.name.clone(), self.values[field.varno].clone());
-                    }
-                    Ok(Value::Map(row))
-                }
+                Some(uqa_sql::plpgsql::PLpgSQLDatum::Row { fields }) => Ok(Value::Record(
+                    fields
+                        .iter()
+                        .map(|field| (field.name.clone(), self.values[field.varno].clone()))
+                        .collect(),
+                )),
                 Some(_) => Err(SQLError::Internal(format!(
                     "PL/pgSQL retvarno {index} is not a returnable datum"
                 ))),
@@ -267,12 +266,8 @@ impl Interpreter<'_> {
                 message: "structure of query does not match function result type".into(),
             });
         }
-        for row in &result.rows {
-            let values = result
-                .columns
-                .iter()
-                .map(|column| row_value(row, column))
-                .collect();
+        for row_index in 0..result.rows.len() {
+            let values = result_row_values(result, row_index).unwrap_or_default();
             self.set_rows.push(values);
         }
         Ok(())

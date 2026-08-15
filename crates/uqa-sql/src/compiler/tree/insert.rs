@@ -14,11 +14,18 @@ use super::{
 pub(in crate::compiler) fn compile_insert(
     stmt: &pg_query::protobuf::InsertStmt,
 ) -> Result<InsertStmt> {
-    let table = stmt
+    let relation = stmt
         .relation
         .as_ref()
-        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("INSERT without relation".into()))?;
+    let table = range_var_name(relation);
+    let target_qualifier = relation
+        .alias
+        .as_ref()
+        .map(|alias| alias.aliasname.as_str())
+        .filter(|alias| !alias.is_empty())
+        .unwrap_or(&relation.relname)
+        .to_string();
     let columns = stmt
         .cols
         .iter()
@@ -83,6 +90,7 @@ pub(in crate::compiler) fn compile_insert(
     };
     Ok(InsertStmt {
         table,
+        target_qualifier,
         columns,
         with,
         rows,

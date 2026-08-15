@@ -70,11 +70,11 @@ pub(in crate::sql) fn materialize_plan_ctes_with_filters(
                             .cloned()
                             .unwrap_or_else(|| source.clone())
                     };
-                    (output, source.clone())
+                    (output, index)
                 })
                 .collect();
             columns = renamed_columns;
-            operator = Box::new(uqa_execution::ColumnSelection::with_mapping(
+            operator = Box::new(uqa_execution::ColumnSelection::with_positions(
                 operator, mapping,
             ));
         }

@@ -9,22 +9,26 @@
 use super::{
     build_facet_output, column_prune_for_stmt_with_filter, combine_filter_parts, execute_function,
     execute_function_with_top_k, execute_mixed_where, execute_query_block_operator_output,
-    expand_star_columns, expr_contains_jsonpath_fts_match, expr_is_jsonpath_fts_match,
+    expand_from_star_columns, expr_contains_jsonpath_fts_match, expr_is_jsonpath_fts_match,
     facet_projection_fields, flatten_and_filter_parts, post_retrieval_score_top_k,
-    projection_columns, score_limited_text_filter, score_order_top_k, AccessPathPlan, ComputePlan,
-    CteScope, Engine, FacetExecution, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError,
-    SQLParam, ScalarExpr, ScoredDocumentSource, ScoredInput,
+    projection_columns, score_limited_text_filter, score_order_top_k, AccessPathPlan, CteScope,
+    Engine, FacetExecution, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam,
+    ScalarExpr, ScoredDocumentSource, ScoredInput, SingleRelation,
 };
 
 pub(in crate::sql) fn run_single_table_select_output(
     engine: &Engine,
-    table: &str,
+    relation: SingleRelation<'_>,
     block: &QueryBlockPlan,
     stmt: &QueryBlockPlan,
     params: &[SQLParam],
     ctes: &CteScope,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
+    let SingleRelation {
+        storage_name: table,
+        qualifier,
+    } = relation;
     if let Some(filter) = stmt.r#where.as_ref() {
         crate::sql::validate_expr_text_match_fields(engine, table, filter)?;
     }
@@ -153,28 +157,19 @@ pub(in crate::sql) fn run_single_table_select_output(
                 .find(|column| column.primary_key && column.ty.is_integer())
                 .map(|column| column.name)
         });
+    let predicate_schema = uqa_execution::RowSchema::with_qualified_types(
+        qualifier,
+        source_schema.clone(),
+        vec![None; source_schema.len()],
+    );
     let (pushed_predicate, residual_filter) =
-        split_projected_filter(physical_filter.take(), &source_schema, params)?;
+        split_projected_filter(physical_filter.take(), &predicate_schema, params)?;
     physical_filter = residual_filter;
     if pushed_predicate.is_none() && physical_filter.is_none() {
         if let Some(top_k) = post_retrieval_top_k {
             scored.retain_top_scores_with_ties(top_k);
         }
     }
-    // A correlated subquery in this block resolves outer references such as
-    // `papers.id` against these rows, so they must publish their relation
-    // qualifier. Blocks without a subquery cannot observe the extra keys and
-    // skip the per-row cost.
-    let outer_qualifier = stmt
-        .r#where
-        .as_ref()
-        .is_some_and(crate::sql::select::expr_contains_subquery)
-        .then(|| match block.from.as_ref() {
-            Some(uqa_planner::SourcePlan::Table { name, alias }) => {
-                alias.clone().unwrap_or_else(|| name.clone())
-            }
-            _ => table.to_string(),
-        });
     let source = ScoredDocumentSource::new(
         table,
         table_state,
@@ -183,19 +178,14 @@ pub(in crate::sql) fn run_single_table_select_output(
         ordered_primary_key,
         pushed_predicate,
     )
-    .with_outer_qualifier(outer_qualifier);
+    .with_qualifier(qualifier);
     let source: Box<dyn uqa_execution::PhysicalOperator + '_> =
         Box::new(uqa_execution::TableScan::new(Box::new(source)));
-    let columns = if matches!(block.compute, ComputePlan::Project) {
-        expand_star_columns(
-            projection_columns(&stmt.projections),
-            &stmt.projections,
-            engine,
-            Some(table),
-        )?
-    } else {
-        projection_columns(&stmt.projections)
-    };
+    let columns = expand_from_star_columns(
+        projection_columns(&stmt.projections),
+        &stmt.projections,
+        &predicate_schema,
+    )?;
     execute_query_block_operator_output(
         engine,
         source,
@@ -214,7 +204,7 @@ pub(in crate::sql) fn run_single_table_select_output(
 /// otherwise positional predicates back through the row scalar evaluator.
 fn split_projected_filter(
     predicate: Option<ScalarExpr>,
-    source_schema: &[String],
+    source_schema: &uqa_execution::RowSchema,
     params: &[SQLParam],
 ) -> Result<
     (
@@ -227,7 +217,7 @@ fn split_projected_filter(
         return Ok((None, None));
     };
     if let Some(compiled) =
-        uqa_execution::ProjectedPredicate::compile(&predicate, source_schema, params)?
+        uqa_execution::ProjectedPredicate::compile_with_schema(&predicate, source_schema, params)?
     {
         return Ok((Some(compiled), None));
     }
@@ -238,7 +228,9 @@ fn split_projected_filter(
     let mut projected = Vec::new();
     let mut residual = Vec::new();
     for conjunct in flatten_and_filter_parts(&predicate) {
-        if uqa_execution::ProjectedPredicate::compile(conjunct, source_schema, params)?.is_some() {
+        if uqa_execution::ProjectedPredicate::compile_with_schema(conjunct, source_schema, params)?
+            .is_some()
+        {
             projected.push(conjunct.clone());
         } else {
             residual.push(conjunct.clone());
@@ -246,12 +238,16 @@ fn split_projected_filter(
     }
     let projected = match combine_filter_parts(projected) {
         Some(expression) => Some(
-            uqa_execution::ProjectedPredicate::compile(&expression, source_schema, params)?
-                .ok_or_else(|| {
-                    SQLError::Internal(
-                        "individually compiled projected predicates could not be combined".into(),
-                    )
-                })?,
+            uqa_execution::ProjectedPredicate::compile_with_schema(
+                &expression,
+                source_schema,
+                params,
+            )?
+            .ok_or_else(|| {
+                SQLError::Internal(
+                    "individually compiled projected predicates could not be combined".into(),
+                )
+            })?,
         ),
         None => None,
     };

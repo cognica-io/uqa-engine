@@ -8,7 +8,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use uqa_execution::{JoinOutput, JoinOutputSource, PhysicalOperator, RowSchema, ScalarExpr};
+use uqa_execution::{
+    ColumnIdentity, JoinOutput, JoinOutputSource, PhysicalOperator, RowSchema, ScalarExpr,
+};
 use uqa_sql::ast::{BinaryOp, ColumnType, JoinKind, JoinUsing};
 use uqa_sql::SQLError;
 
@@ -21,8 +23,8 @@ pub(in crate::sql) struct ResolvedJoinUsing {
 }
 
 type JoinUsingLayout = (
-    Vec<(String, JoinOutputSource)>,
-    Vec<(String, JoinOutputSource)>,
+    Vec<(String, ColumnIdentity, JoinOutputSource)>,
+    Vec<(ColumnIdentity, JoinOutputSource)>,
 );
 
 #[derive(Debug, Clone)]
@@ -43,10 +45,7 @@ fn visible_columns(schema: &RowSchema) -> Vec<(&str, usize)> {
             if is_score_provenance_column(physical) {
                 return None;
             }
-            let name = physical
-                .rsplit_once('.')
-                .map_or(physical.as_str(), |(_, column)| column);
-            Some((name, position))
+            Some((schema.public_name(position)?, position))
         })
         .collect()
 }
@@ -130,6 +129,15 @@ pub(in crate::sql) fn resolve_join_using(
         (names, None)
     };
 
+    if let Some(alias) = alias.as_deref() {
+        if left.has_qualifier(alias) || right.has_qualifier(alias) {
+            return Err(SQLError::Routine {
+                sqlstate: "42712".into(),
+                message: format!("table name \"{alias}\" specified more than once"),
+            });
+        }
+    }
+
     let mut columns = Vec::with_capacity(names.len());
     for name in names {
         let left_position = unique_position(&left_positions, &name, "left")?;
@@ -165,12 +173,12 @@ pub(in crate::sql) fn join_using_predicate(
         .iter()
         .map(|column| {
             let lhs = coerced_join_column(
-                ScalarExpr::Column(left.columns()[column.left].clone()),
+                scalar_column(left, column.left),
                 left.column_type(column.left),
                 column.comparison_type.as_ref(),
             );
             let rhs = coerced_join_column(
-                ScalarExpr::Column(right.columns()[column.right].clone()),
+                scalar_column(right, column.right),
                 right.column_type(column.right),
                 column.comparison_type.as_ref(),
             );
@@ -188,6 +196,14 @@ pub(in crate::sql) fn join_using_predicate(
     }
 }
 
+fn scalar_column(schema: &RowSchema, position: usize) -> ScalarExpr {
+    let identity = &schema.identities()[position];
+    identity.qualifier().map_or_else(
+        || ScalarExpr::Column(identity.column().to_string()),
+        |qualifier| ScalarExpr::qualified_column(qualifier, identity.column()),
+    )
+}
+
 fn coerced_join_column(
     expression: ScalarExpr,
     source: Option<&ColumnType>,
@@ -199,16 +215,6 @@ fn coerced_join_column(
             ty: target.sql_name(),
         },
         _ => expression,
-    }
-}
-
-fn public_output_name(column: &str) -> String {
-    if is_score_provenance_column(column) {
-        column.to_string()
-    } else {
-        column
-            .rsplit_once('.')
-            .map_or_else(|| column.to_string(), |(_, name)| name.to_string())
     }
 }
 
@@ -285,13 +291,18 @@ fn join_using_layout(
                 ));
             }
         };
-        columns.push((column.name.clone(), source.clone()));
+        columns.push((
+            column.name.clone(),
+            ColumnIdentity::unqualified(&column.name),
+            source.clone(),
+        ));
         merged_sources.push((column.name.clone(), source));
     }
     for (position, column) in left.columns().iter().enumerate() {
         if !left_used[position] {
             columns.push((
-                public_output_name(column),
+                left.public_name(position).unwrap_or(column).to_string(),
+                left.identities()[position].clone(),
                 JoinOutputSource::Input(position),
             ));
         }
@@ -299,22 +310,23 @@ fn join_using_layout(
     for (position, column) in right.columns().iter().enumerate() {
         if !right_used[position] {
             columns.push((
-                public_output_name(column),
+                right.public_name(position).unwrap_or(column).to_string(),
+                right.identities()[position].clone(),
                 JoinOutputSource::Input(right_offset + position),
             ));
         }
     }
 
     let mut aliases = Vec::new();
-    for (position, column) in left.columns().iter().enumerate() {
-        if column.contains('.') {
-            aliases.push((column.clone(), JoinOutputSource::Input(position)));
+    for (position, identity) in left.identities().iter().enumerate() {
+        if identity.qualifier().is_some() {
+            aliases.push((identity.clone(), JoinOutputSource::Input(position)));
         }
     }
-    for (position, column) in right.columns().iter().enumerate() {
-        if column.contains('.') {
+    for (position, identity) in right.identities().iter().enumerate() {
+        if identity.qualifier().is_some() {
             aliases.push((
-                column.clone(),
+                identity.clone(),
                 JoinOutputSource::Input(right_offset + position),
             ));
         }
@@ -323,7 +335,7 @@ fn join_using_layout(
         aliases.extend(
             merged_sources
                 .into_iter()
-                .map(|(column, source)| (format!("{alias}.{column}"), source)),
+                .map(|(column, source)| (ColumnIdentity::qualified(alias, column), source)),
         );
     }
 
@@ -350,8 +362,16 @@ mod tests {
 
     #[test]
     fn natural_columns_follow_left_input_order() {
-        let left = RowSchema::new(vec!["l.b".into(), "l.a".into(), "l.only".into()]);
-        let right = RowSchema::new(vec!["r.a".into(), "r.b".into(), "r.other".into()]);
+        let left = RowSchema::with_qualified_types(
+            "l",
+            vec!["b".into(), "a".into(), "only".into()],
+            vec![None; 3],
+        );
+        let right = RowSchema::with_qualified_types(
+            "r",
+            vec!["a".into(), "b".into(), "other".into()],
+            vec![None; 3],
+        );
         let resolved = resolve_join_using(None, true, &left, &right)
             .unwrap()
             .unwrap();
@@ -367,8 +387,15 @@ mod tests {
 
     #[test]
     fn using_requires_one_column_on_each_side() {
-        let left = RowSchema::new(vec!["l.id".into(), "other.id".into()]);
-        let right = RowSchema::new(vec!["r.id".into()]);
+        let left = RowSchema::with_identities(
+            vec!["id".into(), "id".into()],
+            vec![
+                ColumnIdentity::qualified("l", "id"),
+                ColumnIdentity::qualified("other", "id"),
+            ],
+            vec![None; 2],
+        );
+        let right = RowSchema::with_qualified_types("r", vec!["id".into()], vec![None]);
         let error = resolve_join_using(
             Some(&JoinUsing {
                 columns: vec!["id".into()],

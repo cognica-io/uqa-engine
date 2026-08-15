@@ -7,9 +7,6 @@
 //! Streaming scored-document input adapters.
 
 mod materialize;
-mod projected_row;
-
-use projected_row::ProjectedValueSlot;
 
 use super::{
     doc_id_value, Arc, DocId, ExecResult, ResultRow, SQLError, ScoredEntry, Value, DOC_ID_COLUMN,
@@ -179,16 +176,12 @@ impl ScoredInput {
 
 pub(in crate::sql) struct ScoredDocumentSource {
     table_name: String,
-    /// Relation qualifier to expose alongside each bare column name, set only
-    /// when the enclosing block can evaluate a correlated subquery. See
-    /// [`ScoredDocumentSource::with_outer_qualifier`].
-    outer_qualifier: Option<String>,
     table: Arc<crate::TableState>,
     column_definitions: Vec<uqa_sql::ast::ColumnDef>,
     input: ScoredInputCursor,
     schema: uqa_execution::RowSchema,
     projected_fields: Vec<String>,
-    projected_slots: Vec<ProjectedValueSlot>,
+    projected_slots: Vec<uqa_execution::ProjectedValueSlot>,
     predicate: Option<uqa_execution::ProjectedPredicate>,
     score_origin: ScoreOrigin,
     hidden_columns: HiddenColumns,
@@ -276,7 +269,9 @@ impl ScoredDocumentSource {
             })
             .cloned()
             .collect::<Vec<_>>();
-        let projected_slots = ProjectedValueSlot::compile(&schema, &projected_fields);
+        let extra_columns = HiddenColumn::ALL.map(HiddenColumn::name);
+        let projected_slots =
+            uqa_execution::ProjectedValueSlot::compile(&schema, &projected_fields, &extra_columns);
         let column_definitions = table.columns.read().clone();
         let column_types = schema
             .iter()
@@ -296,7 +291,6 @@ impl ScoredDocumentSource {
         let schema = uqa_execution::RowSchema::with_types(schema, column_types);
         Self {
             table_name: table_name.to_string(),
-            outer_qualifier: None,
             table,
             column_definitions,
             input,
@@ -311,31 +305,13 @@ impl ScoredDocumentSource {
         }
     }
 
-    /// Also emit `qualifier.column` for every projected column.
-    ///
-    /// A correlated subquery is evaluated against a row that merges the inner
-    /// relation's columns over this one. Inner relations arrive already
-    /// qualified (`allowed.id`), while a plain single-table scan emits bare
-    /// names, so an outer reference such as `papers.id` had nothing to bind to:
-    /// the merge overwrote the bare `id` with the inner value, and the
-    /// qualified-lookup fallback then refused the bare name because another
-    /// qualifier claimed it. The reference silently evaluated to NULL and the
-    /// predicate matched nothing.
-    ///
-    /// Publishing the qualified name restores the symmetry. Bare lookups still
-    /// hit the bare key first, so inner-scope shadowing is unchanged. This is
-    /// opt-in because the extra keys cost row-construction time on a hot path,
-    /// and only blocks containing a subquery can observe them.
-    pub(in crate::sql) fn with_outer_qualifier(mut self, qualifier: Option<String>) -> Self {
-        if let Some(qualifier) = qualifier.as_deref() {
-            let aliases = self
-                .projected_fields
-                .iter()
-                .map(|field| (format!("{qualifier}.{field}"), field.clone()))
-                .collect::<Vec<_>>();
-            self.schema = uqa_execution::RowSchema::with_lookup_aliases(&self.schema, &aliases);
-        }
-        self.outer_qualifier = qualifier;
+    /// Bind every visible column to its relation without changing public labels or copying values.
+    pub(in crate::sql) fn with_qualifier(mut self, qualifier: &str) -> Self {
+        self.schema = uqa_execution::RowSchema::with_qualified_types(
+            qualifier,
+            self.schema.columns().to_vec(),
+            self.schema.column_types().to_vec(),
+        );
         self
     }
 
@@ -589,7 +565,7 @@ mod tests {
             Some("id".into()),
             None,
         )
-        .with_outer_qualifier(Some("a".into()));
+        .with_qualifier("a");
         let schema = source.physical_schema().unwrap().clone();
         let rows = source.next_physical_batch(16).unwrap();
 
@@ -597,7 +573,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].fragment_count(), 1);
         assert_eq!(
-            schema.view(&rows[0]).qualified_column("a", "id", "a.id"),
+            schema.view(&rows[0]).qualified_column("a", "id"),
             Some(&Value::Int(7))
         );
     }

@@ -54,7 +54,10 @@ fn walk_text_match_fields(
             }
             Ok(())
         }
-        ScalarExpr::And(items) | ScalarExpr::Or(items) | ScalarExpr::Array(items) => {
+        ScalarExpr::And(items)
+        | ScalarExpr::Or(items)
+        | ScalarExpr::Array(items)
+        | ScalarExpr::Row(items) => {
             for item in items {
                 walk_text_match_fields(item, validate)?;
             }
@@ -202,7 +205,14 @@ fn collect_from_tables(
     has_opaque_source: &mut bool,
 ) {
     match from {
-        SourcePlan::Table { name, alias } => out.push((alias.clone(), name.clone())),
+        SourcePlan::Table {
+            name,
+            qualifier,
+            alias,
+        } => out.push((
+            Some(alias.as_ref().unwrap_or(qualifier).clone()),
+            name.clone(),
+        )),
         SourcePlan::Join { left, right, .. } => {
             collect_from_tables(left, out, has_opaque_source);
             collect_from_tables(right, out, has_opaque_source);

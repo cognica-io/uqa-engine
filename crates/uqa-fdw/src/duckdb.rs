@@ -332,15 +332,29 @@ fn uqa_value_to_duck_value(value: &Value) -> Result<::duckdb::types::Value, FDWE
             ));
         }
         Value::Json(value) | Value::JsonB(value) => DuckValue::Text(value.clone()),
+        Value::Array(array) => {
+            if array.lower_bounds().iter().any(|lower| *lower != 1) {
+                return Err(FDWError::UnsupportedValue(
+                    "DuckDB cannot preserve PostgreSQL array lower bounds".into(),
+                ));
+            }
+            DuckValue::List(
+                array
+                    .elements()
+                    .iter()
+                    .map(uqa_value_to_duck_value)
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+        }
         Value::List(items) => DuckValue::List(
             items
                 .iter()
                 .map(uqa_value_to_duck_value)
                 .collect::<Result<Vec<_>, _>>()?,
         ),
-        Value::Map(_) => {
+        Value::Row(_) | Value::Record(_) | Value::Map(_) => {
             return Err(FDWError::UnsupportedValue(
-                "map literals cannot be bound to DuckDB parameters".into(),
+                "composite and map literals cannot be bound to DuckDB parameters".into(),
             ));
         }
     })

@@ -86,9 +86,26 @@ pub fn value_to_json_text(value: &Value) -> String {
         }
         Value::Temporal(value) => serde_json::Value::String(value.to_sql_string()).to_string(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
+        Value::Array(array) => {
+            let values = array
+                .elements()
+                .iter()
+                .map(value_to_json_text)
+                .collect::<Vec<_>>();
+            format!("[{}]", values.join(","))
+        }
         Value::List(values) => {
             let values = values.iter().map(value_to_json_text).collect::<Vec<_>>();
             format!("[{}]", values.join(","))
+        }
+        Value::Row(values) => record_json_text(
+            values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (format!("f{}", index + 1), value)),
+        ),
+        Value::Record(fields) => {
+            record_json_text(fields.iter().map(|(name, value)| (name.clone(), value)))
         }
         Value::Map(values) => {
             let values = values
@@ -101,6 +118,17 @@ pub fn value_to_json_text(value: &Value) -> String {
             format!("{{{}}}", values.join(","))
         }
     }
+}
+
+fn record_json_text<'a>(fields: impl IntoIterator<Item = (String, &'a Value)>) -> String {
+    let fields = fields
+        .into_iter()
+        .map(|(name, value)| {
+            let name = serde_json::Value::String(name).to_string();
+            format!("{name}:{}", value_to_json_text(value))
+        })
+        .collect::<Vec<_>>();
+    format!("{{{}}}", fields.join(","))
 }
 
 pub(super) fn json_build_array_value(args: &[Value], jsonb: bool) -> Result<Value> {
@@ -160,11 +188,16 @@ pub(super) fn value_to_json(v: &Value) -> serde_json::Value {
             },
             serde_json::Value::Number,
         ),
-        Value::Decimal(d) => d
-            .to_f64()
-            .and_then(serde_json::Number::from_f64)
-            .map(serde_json::Value::Number)
-            .unwrap_or_else(|| serde_json::Value::String(d.to_sql_string())),
+        Value::Decimal(d) => {
+            if d.is_nan() || d.is_infinite() {
+                serde_json::Value::String(d.to_sql_string())
+            } else {
+                d.to_sql_string()
+                    .parse::<serde_json::Number>()
+                    .map(serde_json::Value::Number)
+                    .unwrap_or_else(|_| serde_json::Value::String(d.to_sql_string()))
+            }
+        }
         Value::Str(s) => serde_json::Value::String(s.clone()),
         Value::FixedChar(s) => serde_json::Value::String(s.trim_end_matches(' ').to_string()),
         Value::Bytes(b) => serde_json::Value::String(format!("0x{}", hex_encode(b))),
@@ -172,7 +205,23 @@ pub(super) fn value_to_json(v: &Value) -> serde_json::Value {
         Value::Json(text) | Value::JsonB(text) => {
             serde_json::from_str(text).unwrap_or_else(|_| serde_json::Value::String(text.clone()))
         }
+        Value::Array(array) => {
+            serde_json::Value::Array(array.elements().iter().map(value_to_json).collect())
+        }
         Value::List(items) => serde_json::Value::Array(items.iter().map(value_to_json).collect()),
+        Value::Row(values) => serde_json::Value::Object(
+            values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (format!("f{}", index + 1), value_to_json(value)))
+                .collect(),
+        ),
+        Value::Record(fields) => serde_json::Value::Object(
+            fields
+                .iter()
+                .map(|(name, value)| (name.clone(), value_to_json(value)))
+                .collect(),
+        ),
         Value::Map(map) => {
             let mut obj = serde_json::Map::new();
             for (k, v) in map {
@@ -320,7 +369,8 @@ pub(super) fn json_has_keys(args: &[Value], require_all: bool) -> Result<Value> 
     }
     let obj = parse_json(&value_to_string(&args[0]))?;
     let keys = match &args[1] {
-        Value::List(items) => items.iter().map(value_to_string).collect::<Vec<_>>(),
+        Value::Array(array) => array_strings(array.elements()),
+        Value::List(items) => array_strings(items),
         other => {
             return Err(SQLError::TypeMismatch(format!(
                 "json key list must be array, got {other:?}"
@@ -650,9 +700,14 @@ pub(super) fn json_delete(args: &[Value]) -> Result<Option<Value>> {
     let mut target = value_to_json(&args[0]);
     match &args[1] {
         Value::Int(index) => delete_array_index(&mut target, *index),
+        Value::Array(array) => {
+            for key in array_strings(array.elements()) {
+                delete_key_or_string(&mut target, &key);
+            }
+        }
         Value::List(keys) => {
-            for key in keys {
-                delete_key_or_string(&mut target, &value_to_string(key));
+            for key in array_strings(keys) {
+                delete_key_or_string(&mut target, &key);
             }
         }
         key => delete_key_or_string(&mut target, &value_to_string(key)),
@@ -674,7 +729,8 @@ pub(super) fn json_delete_path(args: &[Value]) -> Result<Value> {
 
 fn path_arg(value: &Value) -> Result<Vec<String>> {
     match value {
-        Value::List(items) => Ok(items.iter().map(value_to_string).collect()),
+        Value::Array(array) => Ok(array_strings(array.elements())),
+        Value::List(items) => Ok(array_strings(items)),
         Value::Str(s) => Ok(s
             .trim_matches(|c| c == '{' || c == '}')
             .split(',')
@@ -685,6 +741,22 @@ fn path_arg(value: &Value) -> Result<Vec<String>> {
             "JSON path must be an array, got {other:?}"
         ))),
     }
+}
+
+fn array_strings(values: &[Value]) -> Vec<String> {
+    fn append(values: &[Value], output: &mut Vec<String>) {
+        for value in values {
+            if let Value::List(nested) = value {
+                append(nested, output);
+            } else {
+                output.push(value_to_string(value));
+            }
+        }
+    }
+
+    let mut output = Vec::new();
+    append(values, &mut output);
+    output
 }
 
 fn delete_key_or_string(target: &mut serde_json::Value, key: &str) {

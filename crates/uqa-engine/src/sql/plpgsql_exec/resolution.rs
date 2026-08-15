@@ -120,9 +120,7 @@ fn try_match_arguments(
             }
             Some(arg_name) => {
                 seen_named = true;
-                let idx = signature
-                    .iter()
-                    .position(|p| p.name.eq_ignore_ascii_case(arg_name))?;
+                let idx = signature.iter().position(|p| p.name == *arg_name)?;
                 if slots[idx].is_some() {
                     return None;
                 }
@@ -247,14 +245,22 @@ fn materialize_arguments(
 pub(super) fn coerce_routine_value(value: &Value, type_name: &str) -> Result<Value, SQLError> {
     match canonical_routine_type_name(type_name).as_str() {
         "record" => match value {
-            Value::Map(_) | Value::Null => Ok(value.clone()),
+            Value::Record(_) | Value::Null => Ok(value.clone()),
+            Value::Row(values) => Ok(Value::Record(
+                values
+                    .iter()
+                    .cloned()
+                    .enumerate()
+                    .map(|(index, value)| (format!("f{}", index + 1), value))
+                    .collect(),
+            )),
             _ => Err(SQLError::Routine {
                 sqlstate: "42804".into(),
                 message: "cannot cast non-composite value to type record".into(),
             }),
         },
         "anyarray" => match value {
-            Value::List(_) | Value::Null => Ok(value.clone()),
+            Value::Array(_) | Value::List(_) | Value::Null => Ok(value.clone()),
             _ => Err(SQLError::Routine {
                 sqlstate: "42804".into(),
                 message: "cannot cast non-array value to type anyarray".into(),

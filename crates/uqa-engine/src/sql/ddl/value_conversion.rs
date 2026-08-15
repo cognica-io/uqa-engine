@@ -11,6 +11,7 @@ use super::{
     value_to_vector, BTreeMap, ColumnType, DecimalValue, Engine, RowUpdateVectors, SQLError,
     TemporalValue, Value,
 };
+use uqa_core::ArrayValue;
 use uqa_sql::ast::Expr;
 
 /// Coerce a write value to fit the column's declared type.
@@ -85,17 +86,22 @@ fn convert_declared_value_to_column_type(
             convert_declared_value_to_column_type(value, source, base)
         }
         (ColumnType::Array(source), ColumnType::Array(target)) => {
-            let Value::List(values) = value else {
+            let Value::Array(array) = value else {
                 return Err(SQLError::TypeMismatch(format!(
                     "cannot cast a non-array value to {}[]",
                     column_type_name(target)
                 )));
             };
-            values
-                .into_iter()
-                .map(|value| convert_declared_value_to_column_type(value, source, target))
-                .collect::<Result<Vec<_>, _>>()
-                .map(Value::List)
+            let source = array_scalar_type(source);
+            let target = array_scalar_type(target);
+            let converted = convert_declared_array_elements(array.elements(), source, target)?;
+            ArrayValue::with_lower_bounds(converted, array.lower_bounds().to_vec())
+                .map(Value::Array)
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(
+                        "multidimensional arrays must have matching dimensions".into(),
+                    )
+                })
         }
         (source, ColumnType::Oid)
             if matches!(
@@ -269,14 +275,32 @@ pub(crate) fn convert_value_to_column_type(
             convert_value_to_column_type(value, &ColumnType::Array(Box::new(ColumnType::Oid)))
         }
         ColumnType::AnyArray => match value {
-            Value::List(_) => Ok(value),
+            Value::Array(_) => Ok(value),
             other => Err(SQLError::TypeMismatch(format!(
                 "cannot cast {other:?} to anyarray"
             ))),
         },
+        ColumnType::Record => match value {
+            Value::Record(_) => Ok(value),
+            Value::Row(values) => Ok(Value::Record(
+                values
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, value)| (format!("f{}", index + 1), value))
+                    .collect(),
+            )),
+            other => Err(SQLError::TypeMismatch(format!(
+                "cannot cast {other:?} to record"
+            ))),
+        },
         ColumnType::Array(element_type) => {
-            let items = match value {
-                Value::List(items) => items,
+            let array = match value {
+                Value::Array(array) => array,
+                Value::List(elements) => ArrayValue::try_new(elements).ok_or_else(|| {
+                    SQLError::TypeMismatch(
+                        "multidimensional arrays must have matching dimensions".into(),
+                    )
+                })?,
                 Value::Str(text) => uqa_sql::expr::parse_pg_array_literal(&text)?,
                 other => {
                     return Err(SQLError::TypeMismatch(format!(
@@ -285,12 +309,14 @@ pub(crate) fn convert_value_to_column_type(
                     )))
                 }
             };
-            let converted = items
-                .into_iter()
-                .map(|item| convert_value_to_column_type(item, element_type))
-                .collect::<Result<Vec<_>, _>>()?;
-            uqa_sql::expr::array_dimensions(&converted)?;
-            Ok(Value::List(converted))
+            let converted = convert_array_elements(array.elements(), element_type)?;
+            ArrayValue::with_lower_bounds(converted, array.lower_bounds().to_vec())
+                .map(Value::Array)
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(
+                        "multidimensional arrays must have matching dimensions".into(),
+                    )
+                })
         }
         ColumnType::Date
         | ColumnType::Time
@@ -314,6 +340,45 @@ pub(crate) fn convert_value_to_column_type(
         }
         ColumnType::Domain { base, .. } => convert_value_to_column_type(value, base),
     }
+}
+
+fn convert_array_elements(
+    elements: &[Value],
+    element_type: &ColumnType,
+) -> Result<Vec<Value>, SQLError> {
+    let element_type = array_scalar_type(element_type);
+    elements
+        .iter()
+        .cloned()
+        .map(|element| match element {
+            Value::List(nested) => convert_array_elements(&nested, element_type).map(Value::List),
+            scalar => convert_value_to_column_type(scalar, element_type),
+        })
+        .collect()
+}
+
+fn convert_declared_array_elements(
+    elements: &[Value],
+    source_type: &ColumnType,
+    target_type: &ColumnType,
+) -> Result<Vec<Value>, SQLError> {
+    elements
+        .iter()
+        .cloned()
+        .map(|element| match element {
+            Value::List(nested) => {
+                convert_declared_array_elements(&nested, source_type, target_type).map(Value::List)
+            }
+            scalar => convert_declared_value_to_column_type(scalar, source_type, target_type),
+        })
+        .collect()
+}
+
+fn array_scalar_type(mut ty: &ColumnType) -> &ColumnType {
+    while let ColumnType::Array(element) = ty {
+        ty = element;
+    }
+    ty
 }
 
 fn convert_varying_character(value: Value, length: u32) -> Result<Value, SQLError> {
@@ -387,6 +452,7 @@ pub(in crate::sql) fn column_type_name(ty: &ColumnType) -> &str {
         ColumnType::Int2Vector => "int2vector",
         ColumnType::OidVector => "oidvector",
         ColumnType::AnyArray => "anyarray",
+        ColumnType::Record => "record",
         ColumnType::Array(_) => "array",
         ColumnType::Date => "date",
         ColumnType::Time => "time",
@@ -409,58 +475,7 @@ fn parse_boolean_text(text: &str) -> Option<bool> {
 }
 
 fn convert_temporal_value(value: Value, ty: &ColumnType) -> Result<Value, SQLError> {
-    match value {
-        Value::Temporal(temporal) => coerce_temporal_kind(temporal, ty)
-            .map(Value::Temporal)
-            .ok_or_else(|| {
-                SQLError::TypeMismatch(format!(
-                    "cannot cast temporal value to {}",
-                    column_type_name(ty)
-                ))
-            }),
-        other => {
-            let text = value_to_text(&other);
-            let parsed = parse_temporal_text_for_type(&text, ty);
-            parsed.map(Value::Temporal).ok_or_else(|| {
-                SQLError::TypeMismatch(format!("cannot cast `{text}` to {}", column_type_name(ty)))
-            })
-        }
-    }
-}
-
-fn coerce_temporal_kind(value: TemporalValue, ty: &ColumnType) -> Option<TemporalValue> {
-    match (ty, value) {
-        (ColumnType::Date, value @ TemporalValue::Date { .. })
-        | (ColumnType::Time, value @ TemporalValue::Time { .. })
-        | (ColumnType::TimeTz, value @ TemporalValue::TimeTz { .. })
-        | (ColumnType::Timestamp, value @ TemporalValue::Timestamp { .. })
-        | (ColumnType::TimestampTz, value @ TemporalValue::TimestampTz { .. })
-        | (ColumnType::Interval, value @ TemporalValue::Interval { .. }) => Some(value),
-        (ColumnType::Timestamp, TemporalValue::TimestampTz { micros }) => {
-            Some(TemporalValue::Timestamp { micros })
-        }
-        (ColumnType::TimestampTz, TemporalValue::Timestamp { micros }) => {
-            Some(TemporalValue::TimestampTz { micros })
-        }
-        _ => None,
-    }
-}
-
-fn parse_temporal_text_for_type(text: &str, ty: &ColumnType) -> Option<TemporalValue> {
-    match ty {
-        ColumnType::Date => TemporalValue::parse_date(text),
-        ColumnType::Time => TemporalValue::parse_time(text),
-        ColumnType::TimeTz => TemporalValue::parse_time_tz(text),
-        ColumnType::Timestamp => TemporalValue::parse_timestamp(text).or_else(|| {
-            TemporalValue::parse_timestamp_tz(text).and_then(|value| match value {
-                TemporalValue::TimestampTz { micros } => Some(TemporalValue::Timestamp { micros }),
-                _ => None,
-            })
-        }),
-        ColumnType::TimestampTz => TemporalValue::parse_timestamp_tz(text),
-        ColumnType::Interval => TemporalValue::parse_interval(text),
-        _ => None,
-    }
+    uqa_sql::expr::cast_value(&value, column_type_name(ty))
 }
 
 pub(in crate::sql) fn value_to_text(value: &Value) -> String {
@@ -475,8 +490,10 @@ pub(in crate::sql) fn value_to_text(value: &Value) -> String {
         Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
         Value::Temporal(t) => t.to_sql_string(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
+        Value::Array(array) => uqa_sql::expr::array_value_to_string(array),
         Value::List(_) | Value::Map(_) => serde_json::to_string(&core_value_to_json(value))
             .unwrap_or_else(|_| format!("{value:?}")),
+        Value::Row(_) | Value::Record(_) => uqa_sql::expr::value_to_string(value),
     }
 }
 
@@ -547,9 +564,25 @@ pub(in crate::sql) fn core_value_to_json(value: &Value) -> serde_json::Value {
         Value::Json(text) | Value::JsonB(text) => {
             serde_json::from_str(text).unwrap_or_else(|_| serde_json::Value::String(text.clone()))
         }
+        Value::Array(array) => {
+            serde_json::Value::Array(array.elements().iter().map(core_value_to_json).collect())
+        }
         Value::List(items) => {
             serde_json::Value::Array(items.iter().map(core_value_to_json).collect())
         }
+        Value::Row(values) => serde_json::Value::Object(
+            values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (format!("f{}", index + 1), core_value_to_json(value)))
+                .collect(),
+        ),
+        Value::Record(fields) => serde_json::Value::Object(
+            fields
+                .iter()
+                .map(|(name, value)| (name.clone(), core_value_to_json(value)))
+                .collect(),
+        ),
         Value::Map(map) => serde_json::Value::Object(
             map.iter()
                 .map(|(k, v)| (k.clone(), core_value_to_json(v)))

@@ -395,7 +395,7 @@ impl Session {
                     print_result(&result, writer);
                 }
             }),
-            Err(err) => Err(err.to_string()),
+            Err(err) => Err(format!("{}: {err}", err.sqlstate().unwrap_or("XX000"))),
         };
         let timing_result = if self.show_timing {
             let ms = elapsed.as_secs_f64() * 1000.0;

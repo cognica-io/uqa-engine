@@ -106,10 +106,32 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
             9_u8.hash(state);
             value.hash(state);
         }
+        Value::Array(array) => {
+            12_u8.hash(state);
+            array.lower_bounds().hash(state);
+            array.elements().len().hash(state);
+            for value in array.elements() {
+                hash_value(value, state);
+            }
+        }
         Value::List(values) => {
             5_u8.hash(state);
             values.len().hash(state);
             for value in values {
+                hash_value(value, state);
+            }
+        }
+        Value::Row(values) => {
+            10_u8.hash(state);
+            values.len().hash(state);
+            for value in values {
+                hash_value(value, state);
+            }
+        }
+        Value::Record(fields) => {
+            11_u8.hash(state);
+            fields.len().hash(state);
+            for (_, value) in fields {
                 hash_value(value, state);
             }
         }
@@ -125,8 +147,16 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
 }
 
 fn hash_decimal_numeric<H: Hasher>(value: &DecimalValue, state: &mut H) {
-    1_u8.hash(state);
-    value.to_canonical_string().hash(state);
+    if value.is_nan() {
+        7_u8.hash(state);
+    } else if value.is_positive_infinity() {
+        8_u8.hash(state);
+    } else if value.is_negative_infinity() {
+        9_u8.hash(state);
+    } else {
+        1_u8.hash(state);
+        value.to_canonical_string().hash(state);
+    }
 }
 
 fn hash_float_numeric<H: Hasher>(value: f64, state: &mut H) {
@@ -139,9 +169,8 @@ fn hash_float_numeric<H: Hasher>(value: f64, state: &mut H) {
     } else if let Some(decimal) = DecimalValue::from_f64_lossy(value) {
         hash_decimal_numeric(&decimal, state);
     } else {
-        // Finite floats outside rust_decimal's exact comparison domain (or
-        // non-zero values below its scale) only compare equal to the same
-        // f64 value. Normalize signed zero for completeness.
+        // A finite float outside PostgreSQL's NUMERIC domain only compares
+        // equal to the same f64 value. Normalize signed zero for completeness.
         10_u8.hash(state);
         if value == 0.0 {
             0.0_f64.to_bits().hash(state);

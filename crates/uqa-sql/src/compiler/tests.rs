@@ -5,12 +5,33 @@
 //
 
 use super::*;
-use crate::ast::{ColumnType, FromClause, JoinKind, TableKeyConstraintKind};
+use crate::ast::{ColumnType, FromClause, JoinKind, Projection, TableKeyConstraintKind};
 
 #[test]
 fn bundled_parser_is_postgresql_18_4() {
     let parsed = pg_query::parse("SELECT 1").expect("parser accepts a scalar query");
     assert_eq!(parsed.protobuf.version, 180_004);
+}
+
+#[test]
+fn returning_row_aliases_preserve_quoted_identifier_case() {
+    let Statement::Insert(insert) = first(
+        "INSERT INTO items VALUES (1) RETURNING WITH (OLD AS \"Image\", NEW AS \"image\") \"Image\".*, \"image\".*",
+    ) else {
+        panic!("expected INSERT");
+    };
+    assert_eq!(insert.returning_aliases.old, "Image");
+    assert_eq!(insert.returning_aliases.new, "image");
+    assert!(insert.returning_aliases.old_explicit);
+    assert!(insert.returning_aliases.new_explicit);
+
+    let error =
+        compile("INSERT INTO items VALUES (1) RETURNING WITH (OLD AS image, NEW AS IMAGE) image.*")
+            .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42712"));
+    assert!(error
+        .to_string()
+        .contains("table name \"image\" specified more than once"));
 }
 
 fn first(sql: &str) -> Statement {
@@ -224,12 +245,55 @@ fn routine_type_names_preserve_percent_type_and_named_type_qualification() {
         panic!("not CREATE FUNCTION");
     };
     assert_eq!(function.params[0].type_name, "app.items.value%type");
+    assert_eq!(
+        function.params[0].type_reference,
+        Some(crate::ast::RoutineColumnTypeReference::new(
+            Some("app".into()),
+            "items".into(),
+            "value".into()
+        ))
+    );
     assert_eq!(function.params[1].type_name, "app.amount_domain");
     assert!(matches!(
         function.returns,
         crate::ast::FunctionReturns::Scalar { type_name }
             if type_name == "app.items.id%type"
     ));
+}
+
+#[test]
+fn routine_builtin_array_names_use_sql_array_spelling() {
+    let Statement::CreateFunction(function) = first(
+        "CREATE FUNCTION array_names(integer[]) RETURNS text[] LANGUAGE sql AS $$ SELECT ARRAY['x'] $$",
+    ) else {
+        panic!("not CREATE FUNCTION");
+    };
+    assert_eq!(function.params[0].type_name, "int4[]");
+    assert!(matches!(
+        function.returns,
+        crate::ast::FunctionReturns::Scalar { type_name } if type_name == "text[]"
+    ));
+}
+
+#[test]
+fn routine_percent_type_keeps_quoted_dotted_components_structured() {
+    let Statement::CreateFunction(function) = first(
+        "CREATE FUNCTION typed_dot(v \"app.dot\".\"items.dot\".\"value.dot\"%TYPE)
+         RETURNS \"app.dot\".\"items.dot\".\"value.dot\"%TYPE LANGUAGE sql AS $$ SELECT $1 $$",
+    ) else {
+        panic!("not CREATE FUNCTION");
+    };
+    let expected = crate::ast::RoutineColumnTypeReference::new(
+        Some("app.dot".into()),
+        "items.dot".into(),
+        "value.dot".into(),
+    );
+    assert_eq!(function.params[0].type_reference, Some(expected.clone()));
+    assert_eq!(function.return_type_reference, Some(expected));
+    assert_eq!(
+        function.params[0].type_name,
+        "\"app.dot\".\"items.dot\".\"value.dot\"%type"
+    );
 }
 
 #[test]
@@ -616,6 +680,20 @@ fn ordinary_table_function_keeps_scalar_identifier_arguments() {
     };
     assert!(relation.is_none());
     assert!(matches!(args.as_slice(), [Expr::Column(name)] if name == "items"));
+}
+
+#[test]
+fn qualified_wildcard_preserves_its_structured_relation_identity() {
+    let Statement::Select(select) = first("SELECT source.* FROM source") else {
+        panic!("not SELECT");
+    };
+    assert!(matches!(
+        select.projections.as_slice(),
+        [Projection {
+            expr: Expr::QualifiedStar(qualifier),
+            alias: None,
+        }] if qualifier == "source"
+    ));
 }
 
 #[test]

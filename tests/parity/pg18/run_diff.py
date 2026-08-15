@@ -24,8 +24,11 @@ FIELD_SEP = "\x1f"
 PSQL = [
     "docker", "exec", "-i", PG_CONTAINER,
     "psql", "-U", "postgres", "-d", PG_DATABASE,
-    "-tA", "-F", FIELD_SEP, "-v", "ON_ERROR_STOP=0", "-P", "null=<NULL>",
+    "-tA", "-F", FIELD_SEP, "-v", "ON_ERROR_STOP=0", "-v", "VERBOSITY=verbose",
+    "-P", "null=<NULL>",
 ]
+
+SQLSTATE_ERROR = re.compile(r"^ERROR:\s+([0-9A-Z]{5}):")
 
 
 def validate_manifest() -> dict:
@@ -102,12 +105,17 @@ def validate_manifest() -> dict:
 
 
 def sql_error(output: str) -> str | None:
-    """Return a SQL error message, excluding unrelated process failures."""
+    """Return a SQLSTATE, excluding unrelated process failures."""
     line = next(
         (line for line in output.splitlines() if line.lstrip().startswith("ERROR:")),
         None,
     )
-    return line.split("ERROR:", 1)[1].strip() if line is not None else None
+    if line is None:
+        return None
+    match = SQLSTATE_ERROR.match(line.lstrip())
+    if match is None:
+        raise RuntimeError(f"SQL error does not expose a SQLSTATE: {line}")
+    return match.group(1)
 
 
 def require_success(program: str, proc: subprocess.CompletedProcess[str]) -> None:
@@ -218,7 +226,7 @@ def normalize_cell(cell: str) -> str:
 
 def normalize(kind: str, payload: str) -> str:
     if kind == "error":
-        return "<ERROR>"
+        return f"<ERROR:{payload}>"
     rows = [
         FIELD_SEP.join(normalize_cell(cell) for cell in row.split(FIELD_SEP))
         for row in payload.splitlines()
@@ -254,12 +262,10 @@ def main() -> int:
         if pg_norm == uq_norm:
             matches += 1
             continue
-        if pg_kind == "error" and uq_kind == "error":
-            matches += 1  # both reject; message text not compared
-            continue
         category = (
             "engine-error" if uq_kind == "error" and pg_kind == "ok"
             else "engine-accepts" if uq_kind == "ok" and pg_kind == "error"
+            else "sqlstate-mismatch" if uq_kind == "error" and pg_kind == "error"
             else "value-mismatch"
         )
         diffs.append((category, query, pg_payload if pg_kind == "ok" else f"ERROR: {pg_payload}",

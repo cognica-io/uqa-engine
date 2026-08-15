@@ -58,6 +58,32 @@ fn sql_language_scalar_and_setof() {
 }
 
 #[test]
+fn sql_language_preserves_quoted_parameter_case() {
+    let eng = engine();
+    exec(
+        &eng,
+        "CREATE FUNCTION sql_quoted_parameter(\"InputValue\" int) RETURNS int AS $$
+           SELECT \"InputValue\"
+         $$ LANGUAGE sql",
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT sql_quoted_parameter(\"InputValue\" => 9) AS value",
+        ),
+        Value::Int(9)
+    );
+    assert_eq!(
+        exec_err(
+            &eng,
+            "SELECT sql_quoted_parameter(inputvalue => 9) AS value",
+        )
+        .sqlstate(),
+        Some("42883")
+    );
+}
+
+#[test]
 fn sql_language_standard_body() {
     let eng = engine();
     // PG14+ SQL-standard body (no dollar quoting): RETURN expr.

@@ -19,7 +19,7 @@ use super::{
     CteScope, Engine, PlanSubqueryArena, QueryBlockPlan, SQLError, SQLParam, ScalarEvalContext,
     ScalarExpr, ScopedEngineHook, SpillBuffer, Value,
 };
-use uqa_execution::{hash_canonical_row, Batch};
+use uqa_execution::{hash_canonical_row, Batch, RowSchema};
 
 const GROUP_ENTRY_OVERHEAD_BYTES: usize = 256;
 
@@ -67,7 +67,8 @@ impl AdaptiveAggregateSet {
         statement: QueryBlockPlan,
         relaxed: bool,
         work_mem_bytes: usize,
-        input_schema: &[String],
+        input_schema: &RowSchema,
+        params: &[SQLParam],
     ) -> Result<Self, SQLError> {
         let aggregate_targets = aggregate_targets(engine, &statement)
             .into_iter()
@@ -79,6 +80,8 @@ impl AdaptiveAggregateSet {
             &statement,
             &aggregate_targets,
             relaxed,
+            input_schema,
+            params,
         )?;
         let target_count = aggregate_targets.len().max(1);
         let state_budget = work_mem_bytes
@@ -128,9 +131,17 @@ impl AdaptiveAggregateSet {
         relaxed: bool,
         state_budget: usize,
         output_budget: usize,
-        input_schema: &[String],
+        input_schema: &RowSchema,
+        params: &[SQLParam],
     ) -> Result<Self, SQLError> {
-        let mut set = Self::new(engine, statement, relaxed, state_budget, input_schema)?;
+        let mut set = Self::new(
+            engine,
+            statement,
+            relaxed,
+            state_budget,
+            input_schema,
+            params,
+        )?;
         set.state_budget = state_budget.max(1);
         set.spill_budget = output_budget.max(1);
         set.accumulator_budget = (set.state_budget / set.aggregate_targets.len().max(1) / 2).max(1);
@@ -164,7 +175,8 @@ impl AdaptiveAggregateSet {
             let view = batch.schema.view(row);
             let context = ScalarEvalContext::from_row_lookup(&view, params)
                 .with_function_hook(&hook)
-                .with_subquery_runner(&subquery_arena);
+                .with_subquery_runner(&subquery_arena)
+                .with_physical_outer_row(&batch.schema, row);
             if !self.consume_projected_group(&view, &context)? {
                 self.consume_context(&context)?;
             }
@@ -462,10 +474,33 @@ fn value_retained_bytes(value: &Value) -> usize {
             value.capacity()
         }
         Value::Bytes(value) => value.capacity(),
-        Value::List(values) => values
+        Value::Array(array) => array
+            .elements()
+            .len()
+            .saturating_mul(std::mem::size_of::<Value>())
+            .saturating_add(array.elements().iter().map(value_retained_bytes).sum())
+            .saturating_add(
+                array
+                    .lower_bounds()
+                    .len()
+                    .saturating_mul(std::mem::size_of::<i32>()),
+            )
+            .saturating_add(
+                array
+                    .dimensions()
+                    .len()
+                    .saturating_mul(std::mem::size_of::<usize>()),
+            ),
+        Value::List(values) | Value::Row(values) => values
             .capacity()
             .saturating_mul(std::mem::size_of::<Value>())
             .saturating_add(values.iter().map(value_retained_bytes).sum()),
+        Value::Record(fields) => fields.iter().fold(0usize, |bytes, (name, value)| {
+            bytes
+                .saturating_add(name.capacity())
+                .saturating_add(value_retained_bytes(value))
+                .saturating_add(2 * std::mem::size_of::<usize>())
+        }),
         Value::Map(values) => values.iter().fold(0usize, |bytes, (key, value)| {
             bytes
                 .saturating_add(key.capacity())

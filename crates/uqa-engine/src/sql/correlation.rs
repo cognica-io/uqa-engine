@@ -311,16 +311,13 @@ fn source_scope(
     ctes: &BTreeMap<String, RelationColumns>,
 ) -> Result<QueryScope, SQLError> {
     match source {
-        SourcePlan::Table { name, alias } => {
+        SourcePlan::Table {
+            name,
+            qualifier,
+            alias,
+        } => {
             let mut qualifiers = BTreeSet::new();
-            if let Some(alias) = alias {
-                qualifiers.insert(alias.clone());
-            } else {
-                qualifiers.insert(name.clone());
-                if let Some(local) = name.rsplit('.').next() {
-                    qualifiers.insert(local.to_string());
-                }
-            }
+            qualifiers.insert(alias.as_ref().unwrap_or(qualifier).clone());
             Ok(QueryScope {
                 qualifiers,
                 columns: relation_columns(engine, name, ctes)?,
@@ -364,11 +361,14 @@ fn source_scope(
         }
         SourcePlan::Function {
             name,
+            output_name,
             alias,
             column_aliases,
             ..
         } => {
-            let qualifiers = alias.iter().cloned().collect();
+            let qualifiers = [alias.as_ref().unwrap_or(output_name).clone()]
+                .into_iter()
+                .collect();
             let mut names: BTreeSet<String> = column_aliases.iter().cloned().collect();
             let complete = !column_aliases.is_empty()
                 || matches!(
@@ -376,7 +376,7 @@ fn source_scope(
                     "generate_series" | "unnest" | "regexp_split_to_table" | "string_to_table"
                 );
             if names.is_empty() && complete {
-                names.insert(name.rsplit('.').next().unwrap_or(name).to_string());
+                names.insert(output_name.clone());
             }
             Ok(QueryScope {
                 qualifiers,
@@ -503,7 +503,10 @@ fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -
                     .as_deref()
                     .is_some_and(|expr| expression_has_external_reference(expr, scopes))
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => items
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => items
             .iter()
             .any(|expr| expression_has_external_reference(expr, scopes)),
         ScalarExpr::Binary { lhs, rhs, .. } => {
@@ -559,6 +562,8 @@ fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -
         ScalarExpr::InSubquery { expr, .. } => expression_has_external_reference(expr, scopes),
         ScalarExpr::Default
         | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)

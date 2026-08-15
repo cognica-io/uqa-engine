@@ -8,7 +8,7 @@
 
 use super::{
     eval, json_delete, time, to_decimal, to_f64, BinaryOp, DecimalValue, EvalContext, Expr, Result,
-    ResultRow, SQLError, SQLParam, Value,
+    SQLError, SQLParam, Value,
 };
 
 pub(super) fn eval_binary(
@@ -217,27 +217,22 @@ pub(super) fn eval_operand_borrowed<'a>(
                 None => EvalOperand::Owned(Value::Null),
             }))
         }
-        Expr::QualifiedColumn {
-            qualifier,
-            column,
-            key,
-        } => Ok(Some(
-            match ctx.row_lookup()?.qualified_column(qualifier, column, key) {
-                Some(value) => EvalOperand::Borrowed(value),
-                None => EvalOperand::Owned(Value::Null),
-            },
-        )),
+        Expr::QualifiedColumn { qualifier, column } => {
+            if ctx
+                .row_lookup()?
+                .qualified_column_is_ambiguous(qualifier, column)
+            {
+                return Err(SQLError::AmbiguousColumn(format!("{qualifier}.{column}")));
+            }
+            Ok(Some(
+                match ctx.row_lookup()?.qualified_column(qualifier, column) {
+                    Some(value) => EvalOperand::Borrowed(value),
+                    None => EvalOperand::Owned(Value::Null),
+                },
+            ))
+        }
         _ => Ok(None),
     }
-}
-
-pub(super) fn row_column_value<'a>(row: &'a ResultRow, name: &str) -> Option<&'a Value> {
-    if let Some(value) = row.get(name) {
-        return Some(value);
-    }
-    row.iter()
-        .find(|(key, _)| key.rsplit_once('.').is_some_and(|(_, col)| col == name))
-        .map(|(_, value)| value)
 }
 
 /// `NULL` is falsy; otherwise truthy iff the value coerces to a non-zero
@@ -286,10 +281,15 @@ pub(super) fn values_equal_nullable(a: &Value, b: &Value) -> Option<bool> {
         (Value::FixedChar(x), Value::Str(y)) | (Value::Str(y), Value::FixedChar(x)) => {
             Some(x.trim_end_matches(' ') == y.trim_end_matches(' '))
         }
-        // Row / array equality: any definite mismatch wins, otherwise a
-        // NULL element makes the whole comparison unknown (PostgreSQL
-        // row comparison semantics).
-        (Value::List(xs), Value::List(ys)) => {
+        // PostgreSQL arrays and stored composite records use total element
+        // equality: corresponding NULLs compare equal.
+        (Value::Array(_), Value::Array(_))
+        | (Value::List(_), Value::List(_))
+        | (Value::Record(_), Value::Record(_)) => Some(a == b),
+        // Anonymous row constructors use SQL three-valued comparison: any
+        // definite mismatch wins, otherwise a NULL field leaves equality
+        // unknown.
+        (Value::Row(xs), Value::Row(ys)) => {
             if xs.len() != ys.len() {
                 return Some(false);
             }
@@ -337,6 +337,7 @@ pub(super) fn compare_nullable(a: &Value, b: &Value) -> Result<Option<std::cmp::
         (Value::Str(x), Value::FixedChar(y)) => {
             Ok(Some(x.trim_end_matches(' ').cmp(y.trim_end_matches(' '))))
         }
+        (Value::JsonB(_), Value::JsonB(_)) => Ok(Some(a.cmp(b))),
         (Value::Temporal(x), Value::Temporal(y)) => Ok(Some(x.cmp(y))),
         (Value::Temporal(x), Value::Str(y)) => x
             .parse_same_kind(y)
@@ -347,9 +348,12 @@ pub(super) fn compare_nullable(a: &Value, b: &Value) -> Result<Option<std::cmp::
             .map(|parsed| Some(parsed.cmp(y)))
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
         (Value::Bool(x), Value::Bool(y)) => Ok(Some(x.cmp(y))),
-        // Row / array ordering: lexicographic, with NULL elements
-        // making the comparison unknown once reached before a decision.
-        (Value::List(xs), Value::List(ys)) => {
+        (Value::Array(_), Value::Array(_))
+        | (Value::List(_), Value::List(_))
+        | (Value::Record(_), Value::Record(_)) => Ok(Some(a.cmp(b))),
+        // Anonymous row-constructor ordering is lexicographic, with a NULL
+        // field making the result unknown if reached before a decision.
+        (Value::Row(xs), Value::Row(ys)) => {
             for (x, y) in xs.iter().zip(ys) {
                 match compare_nullable(x, y)? {
                     Some(Ordering::Equal) => {}

@@ -95,6 +95,22 @@ pub fn quote_literal(value: &Value) -> Result<String, ArrowFlightPrepareError> {
             let escaped = t.to_sql_string().replace('\'', "''");
             format!("'{escaped}'")
         }
+        Value::Array(array) => {
+            if array.lower_bounds().iter().any(|lower| *lower != 1) {
+                return Err(ArrowFlightPrepareError::UnsupportedLiteral(
+                    "Flight SQL cannot portably represent non-one-based array literals".into(),
+                ));
+            }
+            format!(
+                "ARRAY[{}]",
+                array
+                    .elements()
+                    .iter()
+                    .map(quote_literal)
+                    .collect::<Result<Vec<_>, _>>()?
+                    .join(", ")
+            )
+        }
         Value::List(items) => {
             // Used inside an IN list; emit a comma-separated literal
             // tuple. Outer caller decides whether to wrap in `(...)`.
@@ -104,9 +120,9 @@ pub fn quote_literal(value: &Value) -> Result<String, ArrowFlightPrepareError> {
                 .collect::<Result<Vec<_>, _>>()?
                 .join(", ")
         }
-        Value::Map(_) => {
+        Value::Row(_) | Value::Record(_) | Value::Map(_) => {
             return Err(ArrowFlightPrepareError::UnsupportedLiteral(
-                "map values have no portable Flight SQL literal".into(),
+                "composite and map values have no portable Flight SQL literal".into(),
             ));
         }
     })

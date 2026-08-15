@@ -6,10 +6,7 @@
 
 //! PL/pgSQL datum and `INTO` assignment semantics.
 
-use super::{
-    coerce_routine_value, row_value, BTreeMap, Interpreter, IntoTarget, PLpgSQLDatum, ResultRow,
-    SQLError, Value,
-};
+use super::{coerce_routine_value, Interpreter, IntoTarget, PLpgSQLDatum, SQLError, Value};
 
 impl Interpreter<'_> {
     pub(super) fn datum_name(&self, idx: usize) -> Result<String, SQLError> {
@@ -47,8 +44,18 @@ impl Interpreter<'_> {
                 Ok(())
             }
             PLpgSQLDatum::Rec { .. } => match value {
-                Value::Map(_) | Value::Null => {
+                Value::Record(_) | Value::Null => {
                     self.values[idx] = value;
+                    Ok(())
+                }
+                Value::Row(values) => {
+                    self.values[idx] = Value::Record(
+                        values
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, value)| (format!("f{}", index + 1), value))
+                            .collect(),
+                    );
                     Ok(())
                 }
                 _ => Err(SQLError::Routine {
@@ -59,18 +66,18 @@ impl Interpreter<'_> {
             PLpgSQLDatum::RecField { field, parent } => {
                 let parent_name = self.datum_name(*parent)?;
                 match &mut self.values[*parent] {
-                    Value::Map(map) => {
-                        let key = map
-                            .keys()
-                            .find(|k| k.eq_ignore_ascii_case(field))
-                            .cloned()
+                    Value::Record(fields) => {
+                        let field_value = fields
+                            .iter_mut()
+                            .find(|(name, _)| name == field)
+                            .map(|(_, value)| value)
                             .ok_or_else(|| SQLError::Routine {
                                 sqlstate: "42703".into(),
                                 message: format!(
                                     "record \"{parent_name}\" has no field \"{field}\""
                                 ),
                             })?;
-                        map.insert(key, value);
+                        *field_value = value;
                         Ok(())
                     }
                     _ => Err(SQLError::Routine {
@@ -90,18 +97,23 @@ impl Interpreter<'_> {
         &mut self,
         target: &IntoTarget,
         columns: &[String],
-        row: Option<&ResultRow>,
+        values: Option<&[Value]>,
     ) -> Result<(), SQLError> {
         match target {
             IntoTarget::Rec(dno) => {
-                let value = match row {
-                    Some(row) => {
-                        let mut record = BTreeMap::new();
-                        for column in columns {
-                            record.insert(column.clone(), row_value(row, column));
-                        }
-                        Value::Map(record)
-                    }
+                let value = match values {
+                    Some(values) => Value::Record(
+                        columns
+                            .iter()
+                            .enumerate()
+                            .map(|(index, column)| {
+                                (
+                                    column.clone(),
+                                    values.get(index).cloned().unwrap_or(Value::Null),
+                                )
+                            })
+                            .collect(),
+                    ),
                     None => Value::Null,
                 };
                 self.values[*dno] = value;
@@ -109,10 +121,10 @@ impl Interpreter<'_> {
             }
             IntoTarget::Row(fields) => {
                 for (idx, field) in fields.iter().enumerate() {
-                    let value = match (row, columns.get(idx)) {
-                        (Some(row), Some(column)) => row_value(row, column),
-                        _ => Value::Null,
-                    };
+                    let value = values
+                        .and_then(|values| values.get(idx))
+                        .cloned()
+                        .unwrap_or(Value::Null);
                     self.assign_datum(field.varno, value)?;
                 }
                 Ok(())

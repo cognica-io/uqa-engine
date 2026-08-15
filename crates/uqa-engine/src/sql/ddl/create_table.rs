@@ -33,7 +33,7 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
     }
     prepare_generated_columns(
         engine,
-        &c.name,
+        &c.qualifier,
         &mut c.columns,
         &c.key_constraints,
         &c.foreign_keys,

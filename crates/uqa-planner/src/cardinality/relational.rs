@@ -285,11 +285,7 @@ fn top_k_selectivity(k: usize, row_count: u64) -> Selectivity {
 
 fn scalar_column(expression: &ScalarExpr) -> Option<&str> {
     match expression {
-        ScalarExpr::Column(column) => Some(
-            column
-                .rsplit_once('.')
-                .map_or(column.as_str(), |(_, column)| column),
-        ),
+        ScalarExpr::Column(column) => Some(column),
         ScalarExpr::QualifiedColumn { column, .. } => Some(column),
         _ => None,
     }

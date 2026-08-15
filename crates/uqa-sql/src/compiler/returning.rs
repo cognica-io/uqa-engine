@@ -34,20 +34,24 @@ pub(in crate::compiler) fn compile_returning_clause(
         match option.option() {
             pg_query::protobuf::ReturningOptionKind::ReturningOptionOld => {
                 if old_seen {
-                    return Err(SQLError::TypeMismatch(
-                        "RETURNING OLD row name specified more than once".into(),
-                    ));
+                    return Err(SQLError::Routine {
+                        sqlstate: "42601".into(),
+                        message: "OLD cannot be specified multiple times".into(),
+                    });
                 }
                 aliases.old.clone_from(&option.value);
+                aliases.old_explicit = true;
                 old_seen = true;
             }
             pg_query::protobuf::ReturningOptionKind::ReturningOptionNew => {
                 if new_seen {
-                    return Err(SQLError::TypeMismatch(
-                        "RETURNING NEW row name specified more than once".into(),
-                    ));
+                    return Err(SQLError::Routine {
+                        sqlstate: "42601".into(),
+                        message: "NEW cannot be specified multiple times".into(),
+                    });
                 }
                 aliases.new.clone_from(&option.value);
+                aliases.new_explicit = true;
                 new_seen = true;
             }
             pg_query::protobuf::ReturningOptionKind::Undefined => {
@@ -57,10 +61,12 @@ pub(in crate::compiler) fn compile_returning_clause(
             }
         }
     }
-    if aliases.old.eq_ignore_ascii_case(&aliases.new) {
-        return Err(SQLError::TypeMismatch(
-            "RETURNING OLD and NEW row names must be different".into(),
-        ));
+    // libpg_query folds unquoted identifiers to lower case and preserves quoted identifiers, so direct comparison retains PostgreSQL's quoted-name distinction.
+    if aliases.old == aliases.new {
+        return Err(SQLError::Routine {
+            sqlstate: "42712".into(),
+            message: format!("table name \"{}\" specified more than once", aliases.old),
+        });
     }
 
     Ok((compile_projections(&clause.exprs)?, aliases))

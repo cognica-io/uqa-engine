@@ -226,6 +226,65 @@ fn percent_type_declarations_resolve_and_enforce_the_referenced_column_type() {
 }
 
 #[test]
+fn percent_type_preserves_quoted_dotted_schema_relation_and_column_identities() {
+    let eng = engine();
+    exec(&eng, "CREATE SCHEMA \"app.dot\"");
+    exec(
+        &eng,
+        "CREATE TABLE \"app.dot\".\"typed.dot\" (\"id.dot\" SMALLINT)",
+    );
+    exec(
+        &eng,
+        "CREATE FUNCTION quoted_percent_type(input_value \"app.dot\".\"typed.dot\".\"id.dot\"%TYPE)
+         RETURNS \"app.dot\".\"typed.dot\".\"id.dot\"%TYPE AS $$
+         DECLARE local_value \"app.dot\".\"typed.dot\".\"id.dot\"%TYPE;
+         BEGIN
+           local_value := input_value;
+           RETURN local_value;
+         END;
+         $$ LANGUAGE plpgsql",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT quoted_percent_type(7::smallint) AS v"),
+        Value::Int(7)
+    );
+    let mismatch = exec_err(&eng, "SELECT quoted_percent_type(40000) AS v");
+    assert_eq!(mismatch.sqlstate(), Some("42883"));
+    exec(
+        &eng,
+        "CREATE FUNCTION quoted_percent_type_overflow()
+         RETURNS \"app.dot\".\"typed.dot\".\"id.dot\"%TYPE AS $$
+         DECLARE local_value \"app.dot\".\"typed.dot\".\"id.dot\"%TYPE;
+         BEGIN
+           local_value := 40000;
+           RETURN local_value;
+         END;
+         $$ LANGUAGE plpgsql",
+    );
+    let error = exec_err(&eng, "SELECT quoted_percent_type_overflow() AS v");
+    assert_eq!(error.sqlstate(), Some("22003"));
+}
+
+#[test]
+fn select_into_assigns_duplicate_dotted_labels_by_position() {
+    let eng = engine();
+    exec(
+        &eng,
+        "CREATE FUNCTION positional_into() RETURNS int AS $$
+         DECLARE first_value int; second_value int;
+         BEGIN
+           SELECT 11 AS \"dup.name\", 22 AS \"dup.name\" INTO first_value, second_value;
+           RETURN first_value * 100 + second_value;
+         END;
+         $$ LANGUAGE plpgsql",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT positional_into() AS v"),
+        Value::Int(1122)
+    );
+}
+
+#[test]
 fn function_usable_inside_view_and_aggregate() {
     let eng = engine();
     exec(

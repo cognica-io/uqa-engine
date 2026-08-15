@@ -87,9 +87,10 @@ pub fn contains_retrieval(expression: &ScalarExpr) -> bool {
                 || order_by.iter().any(|order| contains_retrieval(&order.expr))
                 || filter.as_deref().is_some_and(contains_retrieval)
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-            items.iter().any(contains_retrieval)
-        }
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => items.iter().any(contains_retrieval),
         ScalarExpr::Binary { lhs, rhs, .. } => contains_retrieval(lhs) || contains_retrieval(rhs),
         ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::Not(inner)
@@ -123,7 +124,9 @@ pub fn contains_retrieval(expression: &ScalarExpr) -> bool {
         ScalarExpr::InSubquery { expr, .. } => contains_retrieval(expr),
         ScalarExpr::Default
         | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)

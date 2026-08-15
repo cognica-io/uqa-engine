@@ -7,9 +7,13 @@
 //! `information_schema.tables` / `information_schema.columns` and
 //! `pg_catalog.pg_tables` virtual views.
 
-use uqa_core::Value;
+use uqa_core::{ArrayValue, Value};
 use uqa_engine::Engine;
 use uqa_sql::{ast::ColumnType, ResultRow};
+
+fn array(values: Vec<Value>) -> Value {
+    Value::Array(ArrayValue::try_new(values).expect("rectangular test array"))
+}
 
 #[test]
 fn information_schema_tables_lists_user_tables() {
@@ -498,15 +502,15 @@ fn assert_pg_constraint_structure(eng: &Engine) -> Vec<String> {
     };
     assert_eq!(
         row("child_check")["conkey"],
-        Value::List(vec![Value::Int(6), Value::Int(7)])
+        array(vec![Value::Int(6), Value::Int(7)])
     );
     assert_eq!(
         row("child_a_b_key")["conkey"],
-        Value::List(vec![Value::Int(6), Value::Int(7)])
+        array(vec![Value::Int(6), Value::Int(7)])
     );
     assert_eq!(
         row("child_a_b_fkey")["confkey"],
-        Value::List(vec![Value::Int(2), Value::Int(3)])
+        array(vec![Value::Int(2), Value::Int(3)])
     );
     assert_ne!(row("child_a_b_fkey")["confrelid"], Value::Int(0));
     assert_eq!(row("child_a_b_fkey")["confupdtype"], Value::Str("r".into()));

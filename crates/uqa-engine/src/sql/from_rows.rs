@@ -9,16 +9,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::Value;
-use uqa_execution::{
-    eval_call_arguments, eval_scalar, ScalarEvalContext, ScalarExpr, ScalarSubqueryRunner,
-};
+use uqa_execution::{eval_call_arguments, eval_scalar, ScalarEvalContext, ScalarExpr};
 use uqa_planner::{
     AccessPathPlan, ComputePlan, JoinExecutionStrategy, QueryBlockPlan, QueryPlan, RelationalPlan,
     SourcePlan,
 };
 use uqa_sql::ast::JoinKind;
 use uqa_sql::{ResultRow, SQLError, SQLParam};
-use uqa_storage::document_store::Document;
 
 use crate::{Engine, SQLTableFunctionResult, SQLTableFunctionStream};
 
@@ -51,27 +48,8 @@ where
     })
 }
 
-fn qualifier_for(name: &str, alias: Option<&str>) -> String {
-    alias.unwrap_or(name).to_string()
-}
-
-fn qualified_key(qual: &str, column: &str) -> String {
-    let mut key = String::with_capacity(qual.len() + 1 + column.len());
-    key.push_str(qual);
-    key.push('.');
-    key.push_str(column);
-    key
-}
-
-/// Synthesize rows for `information_schema` / `pg_catalog` virtual
-/// views. Returns `None` for any unknown name so the caller falls back
-/// to the regular table lookup.
-pub(super) fn prefix_row(qual: &str, doc: &Document) -> ResultRow {
-    let mut out = ResultRow::new();
-    for (k, v) in doc {
-        out.insert(qualified_key(qual, k), v.clone());
-    }
-    out
+fn qualifier_for(qualifier: &str, alias: Option<&str>) -> String {
+    alias.unwrap_or(qualifier).to_string()
 }
 
 fn has_filters_for_qualifier(filters: Option<&QualifierFilters>, qual: &str) -> bool {
@@ -228,18 +206,16 @@ fn from_qualifiers(from: &SourcePlan) -> BTreeSet<String> {
 
 fn collect_from_qualifiers(from: &SourcePlan, out: &mut BTreeSet<String>) {
     match from {
-        SourcePlan::Table { name, alias } => {
-            out.insert(alias.clone().unwrap_or_else(|| name.clone()));
-        }
         SourcePlan::Join { left, right, .. } => {
             collect_from_qualifiers(left, out);
             collect_from_qualifiers(right, out);
         }
-        SourcePlan::Values { alias, .. }
-        | SourcePlan::Function { alias, .. }
-        | SourcePlan::Subquery { alias, .. } => {
-            if let Some(alias) = alias {
-                out.insert(alias.clone());
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::Subquery { .. } => {
+            if let Some(qualifier) = from.visible_qualifier() {
+                out.insert(qualifier.to_string());
             }
         }
     }

@@ -7,13 +7,14 @@
 //! Virtual `pg_catalog` relation builders.
 
 use super::helpers::{
-    all_schema_names, array_dimension_count, bool_value, catalog_name, catalog_ordinal,
-    catalog_usize, constraint_catalog_rows, current_user_name, current_user_oid, default_expr_text,
-    index_columns, indexdef, int_value, list_int, pg_type_align, pg_type_array_oid,
-    pg_type_by_value, pg_type_collation_oid, pg_type_element_oid, pg_type_len, pg_type_modifier,
-    pg_type_oid, pg_type_routine_oids, pg_type_storage, pg_type_subscript_handler, relation_oid,
-    routine_type_oid, row, schema_oid, split_index_name, split_schema_name, stable_oid, str_value,
-    table_columns_for, PgTypeRoutineOids, PG18_BUILTIN_ROUTINES,
+    all_schema_names, array_dimension_count, bool_value, catalog_array, catalog_name,
+    catalog_ordinal, catalog_usize, constraint_catalog_rows, current_user_name, current_user_oid,
+    default_expr_text, index_columns, indexdef, int_value, list_int, pg_type_align,
+    pg_type_array_oid, pg_type_by_value, pg_type_collation_oid, pg_type_element_oid, pg_type_len,
+    pg_type_modifier, pg_type_oid, pg_type_routine_oids, pg_type_storage,
+    pg_type_subscript_handler, relation_oid, routine_type_oid, row, schema_oid, split_index_name,
+    split_schema_name, stable_oid, str_value, table_columns_for, PgTypeRoutineOids,
+    PG18_BUILTIN_ROUTINES,
 };
 use super::{
     registered_names, routine_signature_types, value_to_text, ColumnType, Engine, ResultRow,
@@ -372,9 +373,9 @@ pub(super) fn build_pg_attrdef(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
 }
 
 pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    Ok(constraint_catalog_rows(engine)?
+    constraint_catalog_rows(engine)?
         .into_iter()
-        .map(|constraint| {
+        .map(|constraint| -> Result<ResultRow, SQLError> {
             let foreign_key = constraint.foreign_key.as_ref();
             let constrained_key: Vec<i64> = constraint
                 .columns
@@ -384,12 +385,24 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
             let constrained_key = if constrained_key.is_empty() {
                 Value::Null
             } else {
-                list_int(&constrained_key)
+                catalog_array(
+                    constrained_key.into_iter().map(Value::Int).collect(),
+                    "pg_constraint.conkey",
+                )?
             };
-            let referenced_key = foreign_key.map_or(Value::Null, |foreign_key| {
-                list_int(&foreign_key.column_ordinals)
-            });
-            row([
+            let referenced_key = match foreign_key {
+                Some(foreign_key) => catalog_array(
+                    foreign_key
+                        .column_ordinals
+                        .iter()
+                        .copied()
+                        .map(Value::Int)
+                        .collect(),
+                    "pg_constraint.confkey",
+                )?,
+                None => Value::Null,
+            };
+            Ok(row([
                 (
                     "oid",
                     int_value(stable_oid(
@@ -449,9 +462,9 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
                 ("conffeqop", Value::Null),
                 ("conexclop", Value::Null),
                 ("conbin", Value::Null),
-            ])
+            ]))
         })
-        .collect())
+        .collect()
 }
 
 const fn foreign_key_action_code(action: uqa_sql::ast::ForeignKeyAction) -> &'static str {
@@ -941,13 +954,14 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
                     if routine.argument_names.is_empty() {
                         Value::Null
                     } else {
-                        Value::List(
+                        catalog_array(
                             routine
                                 .argument_names
                                 .iter()
                                 .map(|name| str_value(*name))
                                 .collect(),
-                        )
+                            "pg_proc.proargnames",
+                        )?
                     },
                 ),
                 (
@@ -1020,29 +1034,90 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
             uqa_sql::ast::FunctionVolatility::Stable => "s",
             uqa_sql::ast::FunctionVolatility::Volatile => "v",
         };
-        let arg_names: Vec<Value> = def
+        let input_params = def
             .params
             .iter()
-            .map(|p| str_value(p.name.clone()))
-            .collect();
-        let arg_modes: Vec<Value> = def
-            .params
-            .iter()
-            .map(|p| {
-                str_value(match p.mode {
-                    uqa_sql::ast::FunctionParamMode::In => "i",
-                    uqa_sql::ast::FunctionParamMode::Out => "o",
-                    uqa_sql::ast::FunctionParamMode::InOut => "b",
-                    uqa_sql::ast::FunctionParamMode::Table => "t",
-                })
+            .filter(|parameter| {
+                matches!(
+                    parameter.mode,
+                    uqa_sql::ast::FunctionParamMode::In | uqa_sql::ast::FunctionParamMode::InOut
+                )
             })
-            .collect();
-        let defaults = def.params.iter().filter(|p| p.default.is_some()).count();
-        let argument_type_oids = def
-            .signature_params()
+            .collect::<Vec<_>>();
+        let defaults = input_params
+            .iter()
+            .filter(|parameter| parameter.default.is_some())
+            .count();
+        let argument_type_oids = input_params
             .iter()
             .map(|parameter| int_value(routine_type_oid(&parameter.type_name)))
             .collect::<Vec<_>>();
+        let has_output_mode = def
+            .params
+            .iter()
+            .any(|parameter| parameter.mode != uqa_sql::ast::FunctionParamMode::In);
+        let all_argument_type_oids = if has_output_mode {
+            catalog_array(
+                def.params
+                    .iter()
+                    .map(|parameter| int_value(routine_type_oid(&parameter.type_name)))
+                    .collect(),
+                "pg_proc.proallargtypes",
+            )?
+        } else {
+            Value::Null
+        };
+        let arg_modes = if has_output_mode {
+            catalog_array(
+                def.params
+                    .iter()
+                    .map(|parameter| {
+                        str_value(match parameter.mode {
+                            uqa_sql::ast::FunctionParamMode::In => "i",
+                            uqa_sql::ast::FunctionParamMode::Out => "o",
+                            uqa_sql::ast::FunctionParamMode::InOut => "b",
+                            uqa_sql::ast::FunctionParamMode::Table => "t",
+                        })
+                    })
+                    .collect(),
+                "pg_proc.proargmodes",
+            )?
+        } else {
+            Value::Null
+        };
+        let arg_names = if def
+            .params
+            .iter()
+            .any(|parameter| !parameter.name.is_empty())
+        {
+            catalog_array(
+                def.params
+                    .iter()
+                    .map(|parameter| str_value(parameter.name.clone()))
+                    .collect(),
+                "pg_proc.proargnames",
+            )?
+        } else {
+            Value::Null
+        };
+        let return_type_oid = if def.is_procedure {
+            if def.output_params().is_empty() {
+                2278
+            } else {
+                2249
+            }
+        } else {
+            match &def.returns {
+                uqa_sql::ast::FunctionReturns::Scalar { type_name }
+                | uqa_sql::ast::FunctionReturns::SetOf { type_name } => routine_type_oid(type_name),
+                uqa_sql::ast::FunctionReturns::Table => 2249,
+                uqa_sql::ast::FunctionReturns::None => match def.output_params().as_slice() {
+                    [output] => routine_type_oid(&output.type_name),
+                    [] => 2278,
+                    _ => 2249,
+                },
+            }
+        };
         rows.push(row([
             ("oid", int_value(stable_oid("proc", &identity))),
             ("proname", str_value(routine_name)),
@@ -1068,20 +1143,17 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
             ("proparallel", str_value("u")),
             (
                 "pronargs",
-                int_value(catalog_usize(
-                    def.signature_arity(),
-                    "pg_proc argument count",
-                )?),
+                int_value(catalog_usize(input_params.len(), "pg_proc argument count")?),
             ),
             (
                 "pronargdefaults",
                 int_value(catalog_usize(defaults, "pg_proc default argument count")?),
             ),
-            ("prorettype", int_value(25)),
+            ("prorettype", int_value(return_type_oid)),
             ("proargtypes", Value::List(argument_type_oids)),
-            ("proallargtypes", Value::Null),
-            ("proargmodes", Value::List(arg_modes)),
-            ("proargnames", Value::List(arg_names)),
+            ("proallargtypes", all_argument_type_oids),
+            ("proargmodes", arg_modes),
+            ("proargnames", arg_names),
             ("proargdefaults", Value::Null),
             ("protrftypes", Value::Null),
             ("prosrc", str_value(source)),

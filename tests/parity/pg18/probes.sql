@@ -417,3 +417,21 @@ SELECT date '2024-01-31' - 1
 SELECT factorial(0)
 SELECT cbrt(-27)
 SELECT num_nonnulls(NULL, NULL)
+-- independent review regressions
+SELECT array_append('{}'::int[], 1)
+SELECT array_prepend(1, '{}'::int[])
+SELECT ARRAY[1] < ARRAY[2]
+SELECT ARRAY[1,2] < ARRAY[[1,2]]
+SELECT ARRAY[2,0] > ARRAY[[1,9]]
+SELECT ARRAY[1] < '[2:2]={1}'::int[]
+SELECT encode((ARRAY[1::smallint]::bytea[])[1], 'hex')
+SELECT '-+1'::numeric
+SELECT '+NaN'::numeric
+SELECT pg_typeof(ARRAY['x', 'y'::varchar])
+SELECT pg_typeof(CASE WHEN true THEN 'x' ELSE 'y'::varchar END)
+SELECT pg_typeof(COALESCE('x', 'y'::varchar))
+SELECT 1e-9000::numeric * 1e-9000::numeric = 0
+SELECT 0e200000::numeric = 0
+SELECT ('{\ a}'::text[])[1] = ' a'
+SELECT ('{N\ULL}'::text[])[1] = 'NULL'
+SELECT * FROM (VALUES (1)) AS l(id) FULL JOIN (VALUES (1)) AS r(id) USING (id) AS l

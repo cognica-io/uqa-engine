@@ -89,11 +89,12 @@ pub(super) fn compile_alter_table(
     stmt: &pg_query::protobuf::AlterTableStmt,
 ) -> Result<AlterTableStmt> {
     use pg_query::protobuf::{AlterTableType, DropBehavior};
-    let table = stmt
+    let relation = stmt
         .relation
         .as_ref()
-        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("ALTER TABLE without relation".into()))?;
+    let table = range_var_name(relation);
+    let qualifier = relation.relname.clone();
     let if_exists = stmt.missing_ok;
     let cmd = stmt
         .cmds
@@ -255,6 +256,7 @@ pub(super) fn compile_alter_table(
     };
     Ok(AlterTableStmt {
         table,
+        qualifier,
         if_exists,
         action,
     })
@@ -262,11 +264,11 @@ pub(super) fn compile_alter_table(
 
 pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<AlterTableStmt> {
     use pg_query::protobuf::ObjectType;
-    let table = stmt
+    let relation = stmt
         .relation
         .as_ref()
-        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("RENAME without relation".into()))?;
+    let table = range_var_name(relation);
     let action = match stmt.rename_type() {
         ObjectType::ObjectColumn => AlterTableAction::RenameColumn {
             from: stmt.subname.clone(),
@@ -283,6 +285,7 @@ pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Al
     };
     Ok(AlterTableStmt {
         table,
+        qualifier: relation.relname.clone(),
         if_exists: stmt.missing_ok,
         action,
     })

@@ -182,7 +182,7 @@ fn octet_md5_format_regex_overlay_coverage_cases() {
     );
     assert_eq!(
         scalar("SELECT regexp_match('foobarbaz', 'b(.)r') FROM t"),
-        Value::List(vec![Value::Str("a".into())])
+        Value::Array(uqa_core::ArrayValue::try_new(vec![Value::Str("a".into())]).unwrap())
     );
     assert_eq!(
         scalar("SELECT regexp_match('hello', 'xyz') FROM t"),

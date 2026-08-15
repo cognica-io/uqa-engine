@@ -18,17 +18,12 @@ pub(super) fn lower_scalar_expression(
 ) -> ScalarExpr {
     match expression {
         Expr::Star => ScalarExpr::Star,
+        Expr::QualifiedStar(qualifier) => ScalarExpr::QualifiedStar(qualifier),
         Expr::Default => ScalarExpr::Default,
         Expr::Column(column) => ScalarExpr::Column(column),
-        Expr::QualifiedColumn {
-            qualifier,
-            column,
-            key,
-        } => ScalarExpr::QualifiedColumn {
-            qualifier,
-            column,
-            key,
-        },
+        Expr::QualifiedColumn { qualifier, column } => {
+            ScalarExpr::QualifiedColumn { qualifier, column }
+        }
         Expr::Literal(value) => ScalarExpr::Literal(value),
         Expr::Param(index) => ScalarExpr::Param(index),
         Expr::Func {
@@ -54,6 +49,12 @@ pub(super) fn lower_scalar_expression(
                 .map(|filter| Box::new(lower_scalar_expression(*filter, aggregates, subqueries))),
         },
         Expr::Array(items) => ScalarExpr::Array(
+            items
+                .into_iter()
+                .map(|item| lower_scalar_expression(item, aggregates, subqueries))
+                .collect(),
+        ),
+        Expr::Row(items) => ScalarExpr::Row(
             items
                 .into_iter()
                 .map(|item| lower_scalar_expression(item, aggregates, subqueries))

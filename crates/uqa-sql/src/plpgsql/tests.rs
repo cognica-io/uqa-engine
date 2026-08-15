@@ -98,10 +98,57 @@ fn pg18_return_slots_and_cursor_minus_one_sentinel_lower_directly() {
     }));
 }
 
+#[test]
+fn pg18_percent_type_identifiers_lower_as_structured_identity() {
+    let parsed = parse_plpgsql_text(
+        "CREATE FUNCTION quoted_type_reference() RETURNS void AS $$ DECLARE local_value \"app.dot\".\"typed.dot\".\"id.dot\"%TYPE; BEGIN RETURN; END $$ LANGUAGE plpgsql;",
+    )
+    .unwrap();
+    let PLpgSQLDatum::Var(variable) = parsed
+        .datums
+        .iter()
+        .find(
+            |datum| matches!(datum, PLpgSQLDatum::Var(variable) if variable.name == "local_value"),
+        )
+        .unwrap()
+    else {
+        unreachable!();
+    };
+    assert_eq!(
+        variable.type_reference,
+        Some(RoutineColumnTypeReference::new(
+            Some("app.dot".into()),
+            "typed.dot".into(),
+            "id.dot".into(),
+        ))
+    );
+}
+
+#[test]
+fn pg18_builtin_array_datums_use_sql_array_spelling() {
+    let parsed = parse_plpgsql_text(
+        "CREATE FUNCTION array_datum(vals integer[]) RETURNS integer[] AS $$ DECLARE local_vals integer[]; BEGIN RETURN vals; END $$ LANGUAGE plpgsql;",
+    )
+    .unwrap();
+    let array_types = parsed
+        .datums
+        .iter()
+        .filter_map(|datum| match datum {
+            PLpgSQLDatum::Var(variable) if variable.type_name.ends_with("[]") => {
+                Some(variable.type_name.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(array_types.len() >= 2, "array datums: {array_types:?}");
+    assert!(array_types.iter().all(|type_name| *type_name == "int4[]"));
+}
+
 fn scalar_datum(name: &str) -> PLpgSQLDatum {
     PLpgSQLDatum::Var(Box::new(PLpgSQLVar {
         name: name.into(),
         type_name: "integer".into(),
+        type_reference: None,
         default: None,
         constant: false,
         not_null: false,

@@ -236,7 +236,8 @@ pub(in crate::sql) fn value_lt(a: &Value, b: &Value) -> bool {
         (Value::FixedChar(x), Value::FixedChar(y)) => x.trim_end() < y.trim_end(),
         (Value::Bytes(x), Value::Bytes(y)) => x < y,
         (Value::Temporal(x), Value::Temporal(y)) => x < y,
-        (Value::List(_), Value::List(_)) => a.cmp(b).is_lt(),
+        (Value::Array(_), Value::Array(_)) | (Value::List(_), Value::List(_)) => a.cmp(b).is_lt(),
+        (Value::Row(_), Value::Row(_)) | (Value::Record(_), Value::Record(_)) => a.cmp(b).is_lt(),
         (Value::Map(x), Value::Map(y)) => x < y,
         _ => false,
     }

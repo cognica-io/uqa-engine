@@ -13,8 +13,19 @@ use uqa_sql::ast::ColumnType;
 use uqa_sql::expr::RowLookup;
 use uqa_sql::SQLError;
 
+use crate::PhysicalRow;
+
 pub trait ExpressionEvaluator: Send + Sync {
     fn evaluate(&self, expression: &ScalarExpr, row: &dyn RowLookup) -> ExecResult<Value>;
+
+    fn evaluate_physical(
+        &self,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        row: &PhysicalRow,
+    ) -> ExecResult<Value> {
+        self.evaluate(expression, &schema.view(row))
+    }
 
     /// Bound SQL parameters used by static type resolution. Implementations
     /// that do not evaluate parameters may keep the empty default.
@@ -48,7 +59,7 @@ pub trait ExpressionEvaluator: Send + Sync {
 pub type SharedExpressionEvaluator<'a> = Arc<dyn ExpressionEvaluator + 'a>;
 
 pub trait RowPredicate: Send + Sync {
-    fn keep(&self, row: &dyn RowLookup) -> ExecResult<bool>;
+    fn keep_physical(&self, schema: &RowSchema, row: &PhysicalRow) -> ExecResult<bool>;
 }
 
 pub type SharedRowPredicate<'a> = Arc<dyn RowPredicate + 'a>;

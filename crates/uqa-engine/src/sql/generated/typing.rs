@@ -21,6 +21,7 @@ pub(super) enum GenerationType {
     Real,
     Numeric,
     Text,
+    Uuid,
     Bytea,
     Json,
     JsonB,
@@ -108,7 +109,7 @@ fn bind_function_calls(
             }
             Ok(())
         }
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+        Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
             for item in items {
                 bind_function_calls(engine, columns, item, dependencies)?;
             }
@@ -156,6 +157,7 @@ fn bind_function_calls(
         Expr::Default
         | Expr::Param(_)
         | Expr::Star
+        | Expr::QualifiedStar(_)
         | Expr::Column(_)
         | Expr::QualifiedColumn { .. }
         | Expr::Literal(_)
@@ -176,7 +178,6 @@ pub(super) fn column_generation_type(ty: &ColumnType) -> GenerationType {
         ColumnType::Boolean => GenerationType::Boolean,
         ColumnType::Text
         | ColumnType::Name
-        | ColumnType::Uuid
         | ColumnType::Varchar(_)
         | ColumnType::Bpchar
         | ColumnType::Character(_)
@@ -185,6 +186,7 @@ pub(super) fn column_generation_type(ty: &ColumnType) -> GenerationType {
         | ColumnType::Regtype
         | ColumnType::PgNodeTree
         | ColumnType::AclItem => GenerationType::Text,
+        ColumnType::Uuid => GenerationType::Uuid,
         ColumnType::Real | ColumnType::DoublePrecision => GenerationType::Real,
         ColumnType::Numeric { .. } => GenerationType::Numeric,
         ColumnType::Json => GenerationType::Json,
@@ -195,6 +197,7 @@ pub(super) fn column_generation_type(ty: &ColumnType) -> GenerationType {
         ColumnType::AnyArray => {
             GenerationType::Array(Box::new(GenerationType::UnknownLiteral("unknown".into())))
         }
+        ColumnType::Record => GenerationType::Record,
         ColumnType::Array(element) => {
             GenerationType::Array(Box::new(column_generation_type(element)))
         }
@@ -223,6 +226,7 @@ pub(super) fn generation_type_name(ty: &GenerationType) -> String {
         GenerationType::Real => "double precision".into(),
         GenerationType::Numeric => "numeric".into(),
         GenerationType::Text => "text".into(),
+        GenerationType::Uuid => "uuid".into(),
         GenerationType::Bytea => "bytea".into(),
         GenerationType::Json => "json".into(),
         GenerationType::JsonB => "jsonb".into(),
@@ -261,6 +265,12 @@ fn infer_expression(
             Ok(GenerationType::Array(Box::new(finalize_common_type(
                 element,
             ))))
+        }
+        Expr::Row(items) => {
+            for item in items {
+                infer_expression(engine, columns, item, dependencies)?;
+            }
+            Ok(GenerationType::Record)
         }
         Expr::Binary { op, lhs, rhs } => {
             let lhs = infer_expression(engine, columns, lhs, dependencies)?;
@@ -360,6 +370,7 @@ fn infer_expression(
         Expr::Default
         | Expr::Param(_)
         | Expr::Star
+        | Expr::QualifiedStar(_)
         | Expr::WindowCall { .. }
         | Expr::ScalarSubquery(_)
         | Expr::Exists { .. }
@@ -403,17 +414,21 @@ fn infer_function(
                 })?,
             FunctionReturns::None => {
                 let outputs = function.def.output_params();
-                if outputs.len() != 1 {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "generated-column function `{name}` does not return one scalar value"
-                    )));
+                if outputs.len() > 1 {
+                    GenerationType::Record
+                } else {
+                    let output = outputs.first().ok_or_else(|| {
+                        SQLError::TypeMismatch(format!(
+                            "generated-column function `{name}` does not return a value"
+                        ))
+                    })?;
+                    generation_type_from_name(&output.type_name).ok_or_else(|| {
+                        SQLError::TypeMismatch(format!(
+                            "generated-column function `{name}` returns unsupported type `{}`",
+                            output.type_name
+                        ))
+                    })?
                 }
-                generation_type_from_name(&outputs[0].type_name).ok_or_else(|| {
-                    SQLError::TypeMismatch(format!(
-                        "generated-column function `{name}` returns unsupported type `{}`",
-                        outputs[0].type_name
-                    ))
-                })?
             }
             FunctionReturns::SetOf { .. } | FunctionReturns::Table => unreachable!(),
         };
@@ -564,7 +579,7 @@ fn user_function_match_cost(
             saw_named = true;
             signature
                 .iter()
-                .position(|parameter| parameter.name.eq_ignore_ascii_case(argument_name))?
+                .position(|parameter| parameter.name == *argument_name)?
         } else {
             if saw_named || positional >= signature.len() {
                 return None;
@@ -610,7 +625,9 @@ fn function_argument_cast_cost(actual: &GenerationType, declared: &str) -> Optio
         return Some(1);
     }
     match actual {
-        GenerationType::Text if matches!(declared.as_str(), "text" | "varchar" | "bpchar") => {
+        GenerationType::Text | GenerationType::Uuid
+            if matches!(declared.as_str(), "text" | "varchar" | "bpchar") =>
+        {
             Some(1)
         }
         GenerationType::Date if matches!(declared.as_str(), "timestamp" | "timestamptz") => Some(1),
@@ -632,6 +649,7 @@ fn generation_type_identity(ty: &GenerationType) -> Option<String> {
         GenerationType::Real => "float8".into(),
         GenerationType::Numeric => "numeric".into(),
         GenerationType::Text => "text".into(),
+        GenerationType::Uuid => "uuid".into(),
         GenerationType::Bytea => "bytea".into(),
         GenerationType::Json => "json".into(),
         GenerationType::JsonB => "jsonb".into(),
@@ -670,469 +688,8 @@ fn routine_type_is_preferred(type_name: &str) -> bool {
     )
 }
 
-#[allow(clippy::too_many_lines)]
-fn infer_builtin_function(
-    name: &str,
-    args: &[GenerationType],
-) -> Result<Option<GenerationType>, SQLError> {
-    let result = match name {
-        "coalesce" | "greatest" | "least" => {
-            require_arity(name, args, 1, usize::MAX)?;
-            common_types(args)?
-        }
-        "nullif" => {
-            require_arity(name, args, 2, 2)?;
-            common_type(&args[0], &args[1])?;
-            finalize_common_type(args[0].clone())
-        }
-        "upper" | "lower" | "casefold" | "initcap" => {
-            require_signature(name, args, &[TypeClass::Text])?;
-            GenerationType::Text
-        }
-        "length" | "char_length" | "character_length" | "octet_length" => {
-            require_signature(name, args, &[TypeClass::Text])?;
-            GenerationType::Integer
-        }
-        "trim" | "btrim" | "ltrim" | "rtrim" => {
-            require_arity(name, args, 1, 2)?;
-            require_class(name, args, TypeClass::Text)?;
-            GenerationType::Text
-        }
-        "reverse" => {
-            require_arity(name, args, 1, 1)?;
-            if accepts_class(&args[0], TypeClass::Bytea) {
-                GenerationType::Bytea
-            } else {
-                require_class(name, args, TypeClass::Text)?;
-                GenerationType::Text
-            }
-        }
-        "concat" | "concat_ws" | "format" => {
-            return Err(non_immutable_function(name));
-        }
-        "concat_op" => {
-            require_arity(name, args, 2, 2)?;
-            concat_result_type(&args[0], &args[1])?
-        }
-        "replace" => {
-            require_signature(
-                name,
-                args,
-                &[TypeClass::Text, TypeClass::Text, TypeClass::Text],
-            )?;
-            GenerationType::Text
-        }
-        "substring" | "substr" => {
-            require_arity(name, args, 2, 3)?;
-            require_one(name, &args[0], TypeClass::Text)?;
-            require_one(name, &args[1], TypeClass::Integer)?;
-            if let Some(length) = args.get(2) {
-                require_one(name, length, TypeClass::Integer)?;
-            }
-            GenerationType::Text
-        }
-        "left" | "right" => {
-            require_signature(name, args, &[TypeClass::Text, TypeClass::Integer])?;
-            GenerationType::Text
-        }
-        "abs" | "ceil" | "ceiling" | "floor" | "sign" => {
-            require_signature(name, args, &[TypeClass::Numeric])?;
-            numeric_input_type(&args[0])
-        }
-        "round" | "trunc" => {
-            require_arity(name, args, 1, 2)?;
-            require_one(name, &args[0], TypeClass::Numeric)?;
-            if let Some(scale) = args.get(1) {
-                require_one(name, scale, TypeClass::Integer)?;
-            }
-            numeric_input_type(&args[0])
-        }
-        "power" | "pow" => {
-            require_signature(name, args, &[TypeClass::Numeric, TypeClass::Numeric])?;
-            GenerationType::Real
-        }
-        "sqrt" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh"
-        | "exp" | "ln" | "log2" | "cbrt" | "gamma" | "lgamma" | "degrees" | "radians" => {
-            require_signature(name, args, &[TypeClass::Numeric])?;
-            GenerationType::Real
-        }
-        "atan2" => {
-            require_signature(name, args, &[TypeClass::Numeric, TypeClass::Numeric])?;
-            GenerationType::Real
-        }
-        "log" | "log10" => {
-            require_arity(name, args, 1, 2)?;
-            require_class(name, args, TypeClass::Numeric)?;
-            if args.len() == 2 && !args.iter().any(|ty| matches!(ty, GenerationType::Real)) {
-                GenerationType::Numeric
-            } else {
-                GenerationType::Real
-            }
-        }
-        "mod" => {
-            require_signature(name, args, &[TypeClass::Numeric, TypeClass::Numeric])?;
-            common_numeric_type(args)?
-        }
-        "div" | "gcd" | "lcm" => {
-            require_signature(name, args, &[TypeClass::Integer, TypeClass::Integer])?;
-            GenerationType::Integer
-        }
-        "starts_with" | "like" | "ilike" | "similar_to" => {
-            require_signature(name, args, &[TypeClass::Text, TypeClass::Text])?;
-            GenerationType::Boolean
-        }
-        "position" | "strpos" => {
-            require_signature(name, args, &[TypeClass::Text, TypeClass::Text])?;
-            GenerationType::Integer
-        }
-        "ascii" => {
-            require_signature(name, args, &[TypeClass::Text])?;
-            GenerationType::Integer
-        }
-        "chr" => {
-            require_signature(name, args, &[TypeClass::Integer])?;
-            GenerationType::Text
-        }
-        "regexp_match" | "regexp_matches" => {
-            require_arity(name, args, 2, 3)?;
-            require_class(name, args, TypeClass::Text)?;
-            GenerationType::Array(Box::new(GenerationType::Text))
-        }
-        "regexp_replace" => {
-            require_arity(name, args, 3, 6)?;
-            require_one(name, &args[0], TypeClass::Text)?;
-            require_one(name, &args[1], TypeClass::Text)?;
-            require_one(name, &args[2], TypeClass::Text)?;
-            GenerationType::Text
-        }
-        "pi" => {
-            require_arity(name, args, 0, 0)?;
-            GenerationType::Real
-        }
-        "random"
-        | "array_sample"
-        | "now"
-        | "current_timestamp"
-        | "current_date"
-        | "clock_timestamp"
-        | "statement_timestamp"
-        | "timeofday"
-        | "gen_random_uuid"
-        | "uuidv4"
-        | "uuidv7"
-        | "current_database"
-        | "current_catalog"
-        | "current_user"
-        | "session_user"
-        | "pg_typeof"
-        | "typeof"
-        | "row_to_json"
-        | "to_json"
-        | "to_jsonb"
-        | "json_build_object"
-        | "jsonb_build_object"
-        | "json_build_array"
-        | "jsonb_build_array"
-        | "to_char"
-        | "to_date"
-        | "to_number" => {
-            return Err(non_immutable_function(name));
-        }
-        "crc32" | "crc32c" => {
-            require_signature(name, args, &[TypeClass::Bytea])?;
-            GenerationType::Integer
-        }
-        "width_bucket" => {
-            require_arity(name, args, 4, 4)?;
-            require_class(name, &args[..3], TypeClass::Numeric)?;
-            require_one(name, &args[3], TypeClass::Integer)?;
-            GenerationType::Integer
-        }
-        "lpad" | "rpad" => {
-            require_arity(name, args, 2, 3)?;
-            require_one(name, &args[0], TypeClass::Text)?;
-            require_one(name, &args[1], TypeClass::Integer)?;
-            if let Some(fill) = args.get(2) {
-                require_one(name, fill, TypeClass::Text)?;
-            }
-            GenerationType::Text
-        }
-        "repeat" => {
-            require_signature(name, args, &[TypeClass::Text, TypeClass::Integer])?;
-            GenerationType::Text
-        }
-        "translate" => {
-            require_signature(
-                name,
-                args,
-                &[TypeClass::Text, TypeClass::Text, TypeClass::Text],
-            )?;
-            GenerationType::Text
-        }
-        "overlay" => {
-            require_arity(name, args, 3, 4)?;
-            require_one(name, &args[0], TypeClass::Text)?;
-            require_one(name, &args[1], TypeClass::Text)?;
-            require_one(name, &args[2], TypeClass::Integer)?;
-            if let Some(count) = args.get(3) {
-                require_one(name, count, TypeClass::Integer)?;
-            }
-            GenerationType::Text
-        }
-        "md5" => {
-            require_arity(name, args, 1, 1)?;
-            if !accepts_class(&args[0], TypeClass::Text)
-                && !accepts_class(&args[0], TypeClass::Bytea)
-            {
-                return Err(function_type_error(name, &args[0], "text or bytea"));
-            }
-            GenerationType::Text
-        }
-        "encode" => {
-            require_signature(name, args, &[TypeClass::Bytea, TypeClass::Text])?;
-            GenerationType::Text
-        }
-        "decode" => {
-            require_signature(name, args, &[TypeClass::Text, TypeClass::Text])?;
-            GenerationType::Bytea
-        }
-        "split_part" => {
-            require_signature(
-                name,
-                args,
-                &[TypeClass::Text, TypeClass::Text, TypeClass::Integer],
-            )?;
-            GenerationType::Text
-        }
-        "factorial" => {
-            require_signature(name, args, &[TypeClass::Integer])?;
-            GenerationType::Numeric
-        }
-        "bit_length" => {
-            require_arity(name, args, 1, 1)?;
-            GenerationType::Integer
-        }
-        "to_hex" => {
-            require_signature(name, args, &[TypeClass::Integer])?;
-            GenerationType::Text
-        }
-        "string_to_array" => {
-            require_arity(name, args, 2, 3)?;
-            require_class(name, args, TypeClass::Text)?;
-            GenerationType::Array(Box::new(GenerationType::Text))
-        }
-        "string_to_table" | "unnest" | "json_object_keys" | "jsonb_object_keys" => {
-            return Err(SQLError::TypeMismatch(format!(
-                "set-returning function `{name}` is not allowed in a column generation expression"
-            )));
-        }
-        "quote_ident" => {
-            require_signature(name, args, &[TypeClass::Text])?;
-            GenerationType::Text
-        }
-        "quote_literal" | "quote_nullable" => {
-            require_arity(name, args, 1, 1)?;
-            if !accepts_class(&args[0], TypeClass::Text) {
-                return Err(non_immutable_function(name));
-            }
-            GenerationType::Text
-        }
-        "regexp_count" | "regexp_instr" => {
-            require_arity(name, args, 2, 6)?;
-            require_one(name, &args[0], TypeClass::Text)?;
-            require_one(name, &args[1], TypeClass::Text)?;
-            GenerationType::Integer
-        }
-        "regexp_like" => {
-            require_arity(name, args, 2, 3)?;
-            require_class(name, args, TypeClass::Text)?;
-            GenerationType::Boolean
-        }
-        "regexp_substr" => {
-            require_arity(name, args, 2, 5)?;
-            require_one(name, &args[0], TypeClass::Text)?;
-            require_one(name, &args[1], TypeClass::Text)?;
-            GenerationType::Text
-        }
-        "num_nulls" | "num_nonnulls" => GenerationType::Integer,
-        "array_positions" => {
-            require_arity(name, args, 2, 2)?;
-            require_one(name, &args[0], TypeClass::Array)?;
-            GenerationType::Array(Box::new(GenerationType::Integer))
-        }
-        "array_replace" | "array_remove" | "array_append" => {
-            require_arity(name, args, 2, 3)?;
-            require_one(name, &args[0], TypeClass::Array)?;
-            args[0].clone()
-        }
-        "array_prepend" => {
-            require_arity(name, args, 2, 2)?;
-            require_one(name, &args[1], TypeClass::Array)?;
-            args[1].clone()
-        }
-        "array_to_string" => {
-            require_arity(name, args, 2, 3)?;
-            require_one(name, &args[0], TypeClass::Array)?;
-            require_one(name, &args[1], TypeClass::Text)?;
-            GenerationType::Text
-        }
-        "array_fill" => {
-            require_arity(name, args, 2, 3)?;
-            require_one(name, &args[1], TypeClass::Array)?;
-            GenerationType::Array(Box::new(args[0].clone()))
-        }
-        "trim_array" => {
-            require_signature(name, args, &[TypeClass::Array, TypeClass::Integer])?;
-            args[0].clone()
-        }
-        "array_overlap" | "__any_op" | "__all_op" | "__is_distinct" | "__between_symmetric" => {
-            GenerationType::Boolean
-        }
-        "__subscript" => {
-            require_arity(name, args, 2, 2)?;
-            require_one(name, &args[0], TypeClass::Array)?;
-            match &args[0] {
-                GenerationType::Array(element) => (**element).clone(),
-                GenerationType::Vector | GenerationType::Tensor => GenerationType::Real,
-                GenerationType::Null | GenerationType::UnknownLiteral(_) => GenerationType::Null,
-                _ => unreachable!(),
-            }
-        }
-        "__slice" => {
-            require_arity(name, args, 3, 3)?;
-            require_one(name, &args[0], TypeClass::Array)?;
-            args[0].clone()
-        }
-        "array_length" | "array_upper" | "array_lower" => {
-            require_signature(name, args, &[TypeClass::Array, TypeClass::Integer])?;
-            GenerationType::Integer
-        }
-        "cardinality" | "array_position" => {
-            require_arity(name, args, 1, 2)?;
-            require_one(name, &args[0], TypeClass::Array)?;
-            GenerationType::Integer
-        }
-        "array_cat" => {
-            require_signature(name, args, &[TypeClass::Array, TypeClass::Array])?;
-            common_type(&args[0], &args[1])?
-        }
-        "array_reverse" | "array_sort" => {
-            require_arity(name, args, 1, 3)?;
-            require_one(name, &args[0], TypeClass::Array)?;
-            for flag in &args[1..] {
-                require_one(name, flag, TypeClass::Boolean)?;
-            }
-            args[0].clone()
-        }
-        "json_typeof" | "jsonb_typeof" | "jsonb_pretty" => {
-            require_arity(name, args, 1, 1)?;
-            GenerationType::Text
-        }
-        "json_array_length" | "jsonb_array_length" => {
-            require_arity(name, args, 1, 1)?;
-            GenerationType::Integer
-        }
-        "json_extract_path" => {
-            require_arity(name, args, 2, usize::MAX)?;
-            require_one(name, &args[0], TypeClass::Json)?;
-            GenerationType::Json
-        }
-        "jsonb_extract_path" => {
-            require_arity(name, args, 2, usize::MAX)?;
-            require_one(name, &args[0], TypeClass::JsonB)?;
-            GenerationType::JsonB
-        }
-        "json_extract_path_text" | "jsonb_extract_path_text" => {
-            require_arity(name, args, 2, usize::MAX)?;
-            GenerationType::Text
-        }
-        "json_contains" | "json_contained_by" | "json_has_key" | "json_has_any_key"
-        | "json_has_all_keys" | "jsonb_path_exists" | "jsonpath_exists" | "jsonb_path_match"
-        | "jsonpath_match" => GenerationType::Boolean,
-        "json_delete_path" => GenerationType::JsonB,
-        "jsonb_set" | "jsonb_insert" => {
-            require_arity(name, args, 3, 4)?;
-            require_one(name, &args[0], TypeClass::JsonB)?;
-            GenerationType::JsonB
-        }
-        "json_strip_nulls" => {
-            require_arity(name, args, 1, 2)?;
-            require_one(name, &args[0], TypeClass::Json)?;
-            GenerationType::Json
-        }
-        "jsonb_strip_nulls" => {
-            require_arity(name, args, 1, 2)?;
-            require_one(name, &args[0], TypeClass::JsonB)?;
-            GenerationType::JsonB
-        }
-        "to_timestamp" => {
-            require_signature(name, args, &[TypeClass::Numeric])?;
-            GenerationType::TimestampTz
-        }
-        "extract" | "date_part" => {
-            require_signature(name, args, &[TypeClass::Text, TypeClass::Temporal])?;
-            if matches!(args[1], GenerationType::TimestampTz) {
-                return Err(non_immutable_function(name));
-            }
-            if name == "extract" {
-                GenerationType::Numeric
-            } else {
-                GenerationType::Real
-            }
-        }
-        "age" => {
-            require_arity(name, args, 2, 2)?;
-            require_class(name, args, TypeClass::Temporal)?;
-            GenerationType::Interval
-        }
-        "date_trunc" => {
-            require_signature(name, args, &[TypeClass::Text, TypeClass::Temporal])?;
-            if matches!(args[1], GenerationType::TimestampTz) {
-                return Err(non_immutable_function(name));
-            }
-            args[1].clone()
-        }
-        "make_timestamp" => {
-            require_arity(name, args, 6, 7)?;
-            require_class(name, args, TypeClass::Numeric)?;
-            GenerationType::Timestamp
-        }
-        "make_date" => {
-            require_signature(
-                name,
-                args,
-                &[TypeClass::Integer, TypeClass::Integer, TypeClass::Integer],
-            )?;
-            GenerationType::Date
-        }
-        "make_interval" => {
-            require_arity(name, args, 0, 7)?;
-            require_class(name, args, TypeClass::Numeric)?;
-            GenerationType::Interval
-        }
-        "justify_hours" => {
-            require_arity(name, args, 1, 1)?;
-            require_one(name, &args[0], TypeClass::Temporal)?;
-            GenerationType::Interval
-        }
-        "isfinite" => {
-            require_signature(name, args, &[TypeClass::Temporal])?;
-            GenerationType::Boolean
-        }
-        "point" => {
-            require_signature(name, args, &[TypeClass::Numeric, TypeClass::Numeric])?;
-            GenerationType::Array(Box::new(GenerationType::Real))
-        }
-        "st_distance" => {
-            require_signature(name, args, &[TypeClass::Array, TypeClass::Array])?;
-            GenerationType::Real
-        }
-        "st_within" | "st_dwithin" | "overlaps" => GenerationType::Boolean,
-        _ => return Ok(None),
-    };
-    Ok(Some(result))
-}
-
+mod builtin;
+use builtin::infer_builtin_function;
 fn infer_binary_type(
     op: BinaryOp,
     lhs: &GenerationType,
@@ -1168,6 +725,7 @@ fn infer_binary_type(
     }
     use GenerationType as T;
     match (lhs, rhs, op) {
+        (T::JsonB, T::Text | T::Integer | T::Array(_), BinaryOp::Subtract) => Ok(T::JsonB),
         (T::Date, T::Integer, BinaryOp::Add | BinaryOp::Subtract)
         | (T::Integer, T::Date, BinaryOp::Add) => Ok(T::Date),
         (T::Date, T::Date, BinaryOp::Subtract) => Ok(T::Integer),
@@ -1227,13 +785,29 @@ fn value_generation_type(value: &Value) -> GenerationType {
         Value::Temporal(uqa_core::TemporalValue::Timestamp { .. }) => GenerationType::Timestamp,
         Value::Temporal(uqa_core::TemporalValue::TimestampTz { .. }) => GenerationType::TimestampTz,
         Value::Temporal(uqa_core::TemporalValue::Interval { .. }) => GenerationType::Interval,
+        Value::Array(array) => {
+            let mut element = GenerationType::Null;
+            merge_array_generation_types(array.elements(), &mut element);
+            GenerationType::Array(Box::new(element))
+        }
         Value::List(values) => {
             let element = values.iter().fold(GenerationType::Null, |current, value| {
                 common_type(&current, &value_generation_type(value)).unwrap_or(current)
             });
             GenerationType::Array(Box::new(element))
         }
-        Value::Map(_) => GenerationType::Record,
+        Value::Row(_) | Value::Record(_) => GenerationType::Record,
+        Value::Map(_) => GenerationType::JsonB,
+    }
+}
+
+fn merge_array_generation_types(values: &[Value], element: &mut GenerationType) {
+    for value in values {
+        if let Value::List(nested) = value {
+            merge_array_generation_types(nested, element);
+        } else if let Ok(common) = common_type(element, &value_generation_type(value)) {
+            *element = common;
+        }
     }
 }
 
@@ -1248,7 +822,8 @@ fn generation_type_from_name(name: &str) -> Option<GenerationType> {
         "int2" | "int4" | "int8" => GenerationType::Integer,
         "float4" | "float8" => GenerationType::Real,
         "numeric" => GenerationType::Numeric,
-        "text" | "varchar" | "bpchar" | "uuid" => GenerationType::Text,
+        "text" | "varchar" | "bpchar" => GenerationType::Text,
+        "uuid" => GenerationType::Uuid,
         "bytea" => GenerationType::Bytea,
         "json" => GenerationType::Json,
         "jsonb" => GenerationType::JsonB,
@@ -1272,7 +847,11 @@ fn assignment_compatible(source: &GenerationType, target: &GenerationType) -> bo
         (source, target) if source == target => true,
         (T::Integer | T::Real | T::Numeric, T::Integer | T::Real | T::Numeric) => true,
         (_, T::Text) => true,
-        (T::Timestamp, T::TimestampTz) | (T::TimestampTz, T::Timestamp) => true,
+        (T::Date, T::Timestamp | T::TimestampTz)
+        | (T::Timestamp, T::Date | T::Time | T::TimestampTz)
+        | (T::TimestampTz, T::Date | T::Time | T::TimeTz | T::Timestamp)
+        | (T::Time, T::TimeTz | T::Interval)
+        | (T::TimeTz | T::Interval, T::Time) => true,
         (T::Array(source), T::Array(target)) => assignment_compatible(source, target),
         (T::Array(element), T::Vector) => is_numeric(element),
         (T::Array(element), T::Tensor) => {

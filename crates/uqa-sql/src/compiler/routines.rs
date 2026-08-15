@@ -8,23 +8,31 @@
 
 use super::dispatch::compile_stmt;
 use super::{
-    compile_expr, compile_qualified_name, extract_string, Expr, Node, NodeEnum, Result, SQLError,
-    Statement,
+    compile_expr, compile_qualified_name, extract_string, render_relation_component, Expr, Node,
+    NodeEnum, Result, SQLError, Statement,
 };
+
+struct CompiledFunctionTypeName {
+    name: String,
+    reference: Option<crate::ast::RoutineColumnTypeReference>,
+}
 
 /// Canonical spelling of a routine `TypeName`. A leading `pg_catalog`
 /// qualifier is redundant, while relation qualification on `%TYPE` and
 /// schema qualification on named types must survive compilation for catalog
 /// resolution by the engine.
-pub(super) fn compile_function_type_name(t: &pg_query::protobuf::TypeName) -> Result<String> {
+fn compile_function_type_name(
+    t: &pg_query::protobuf::TypeName,
+) -> Result<CompiledFunctionTypeName> {
     let mut components = t
         .names
         .iter()
         .map(extract_string)
         .collect::<Result<Vec<_>>>()?;
-    if components
-        .first()
-        .is_some_and(|component| component.eq_ignore_ascii_case("pg_catalog"))
+    if !t.pct_type
+        && components
+            .first()
+            .is_some_and(|component| component.eq_ignore_ascii_case("pg_catalog"))
     {
         components.remove(0);
     }
@@ -35,19 +43,43 @@ pub(super) fn compile_function_type_name(t: &pg_query::protobuf::TypeName) -> Re
     }
     // `setof` is inspected separately by the caller; the name itself
     // stays scalar.
-    let mut name = components.join(".").trim().to_ascii_lowercase();
-    if t.pct_type {
-        if components.len() < 2 {
-            return Err(SQLError::TypeMismatch(
-                "%TYPE requires a relation and column reference".into(),
-            ));
+    let reference = if t.pct_type {
+        let reference = match components.as_slice() {
+            [relation, column] => {
+                crate::ast::RoutineColumnTypeReference::new(None, relation.clone(), column.clone())
+            }
+            [schema, relation, column] => crate::ast::RoutineColumnTypeReference::new(
+                Some(schema.clone()),
+                relation.clone(),
+                column.clone(),
+            ),
+            _ => {
+                return Err(SQLError::TypeMismatch(
+                    "%TYPE requires a relation and column reference".into(),
+                ))
+            }
+        };
+        Some(reference)
+    } else {
+        None
+    };
+    let mut name = components
+        .iter()
+        .map(|component| render_relation_component(component))
+        .collect::<Vec<_>>()
+        .join(".");
+    if !t.pct_type && t.array_bounds.is_empty() && components.len() == 1 {
+        if let Some(element) = crate::ast::builtin_array_element_name(&components[0]) {
+            name = format!("{element}[]");
         }
+    }
+    if t.pct_type {
         name.push_str("%type");
     }
     for _ in &t.array_bounds {
         name.push_str("[]");
     }
-    Ok(name)
+    Ok(CompiledFunctionTypeName { name, reference })
 }
 
 /// String payload of a `DefElem` argument.
@@ -106,7 +138,7 @@ pub(super) fn compile_create_function(
                 )));
             }
         };
-        let type_name = fp
+        let compiled_type = fp
             .arg_type
             .as_ref()
             .map(compile_function_type_name)
@@ -117,8 +149,13 @@ pub(super) fn compile_create_function(
             None => None,
         };
         params.push(FunctionParam {
-            name: fp.name.to_ascii_lowercase(),
-            type_name,
+            // libpg_query has already folded unquoted identifiers while
+            // preserving quoted identifiers. Keep that distinction: named
+            // argument matching in PostgreSQL is case-sensitive after parse
+            // analysis.
+            name: fp.name.clone(),
+            type_name: compiled_type.name,
+            type_reference: compiled_type.reference,
             mode,
             default,
         });
@@ -140,18 +177,23 @@ pub(super) fn compile_create_function(
         }
     }
 
-    let returns = if has_table_param {
-        FunctionReturns::Table
+    let (returns, return_type_reference) = if has_table_param {
+        (FunctionReturns::Table, None)
     } else {
         match stmt.return_type.as_ref() {
-            None => FunctionReturns::None,
+            None => (FunctionReturns::None, None),
             Some(t) => {
-                let type_name = compile_function_type_name(t)?;
-                if t.setof {
-                    FunctionReturns::SetOf { type_name }
+                let compiled = compile_function_type_name(t)?;
+                let returns = if t.setof {
+                    FunctionReturns::SetOf {
+                        type_name: compiled.name,
+                    }
                 } else {
-                    FunctionReturns::Scalar { type_name }
-                }
+                    FunctionReturns::Scalar {
+                        type_name: compiled.name,
+                    }
+                };
+                (returns, compiled.reference)
             }
         }
     };
@@ -273,6 +315,7 @@ pub(super) fn compile_create_function(
         is_procedure: stmt.is_procedure,
         params,
         returns,
+        return_type_reference,
         language,
         body,
         volatility,
@@ -409,7 +452,9 @@ pub(super) fn compile_drop_function(
                 owa.objargs
                     .iter()
                     .map(|arg| match arg.node.as_ref() {
-                        Some(NodeEnum::TypeName(t)) => compile_function_type_name(t),
+                        Some(NodeEnum::TypeName(t)) => {
+                            compile_function_type_name(t).map(|compiled| compiled.name)
+                        }
                         other => Err(SQLError::Unsupported(format!(
                             "DROP FUNCTION argument type node {other:?}"
                         ))),

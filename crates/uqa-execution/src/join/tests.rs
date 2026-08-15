@@ -147,17 +147,17 @@ fn hash_join_prepares_constant_like_residual_once() {
         }
     }
 
-    let left = TableScan::from_rows(vec!["c.k".into()], vec![row(&[("c.k", Value::Int(1))])]);
-    let right = TableScan::from_rows(
-        vec!["o.k".into(), "o.comment".into()],
+    let left = TableScan::from_physical_rows(
+        RowSchema::with_qualified_types("c", vec!["k".into()], vec![None]),
+        vec![PhysicalRow::from_values(vec![Value::Int(1)])],
+    );
+    let right = TableScan::from_physical_rows(
+        RowSchema::with_qualified_types("o", vec!["k".into(), "comment".into()], vec![None, None]),
         vec![
-            row(&[
-                ("o.k", Value::Int(1)),
-                ("o.comment", Value::Str("ordinary order".into())),
-            ]),
-            row(&[
-                ("o.k", Value::Int(1)),
-                ("o.comment", Value::Str("special pending requests".into())),
+            PhysicalRow::from_values(vec![Value::Int(1), Value::Str("ordinary order".into())]),
+            PhysicalRow::from_values(vec![
+                Value::Int(1),
+                Value::Str("special pending requests".into()),
             ]),
         ],
     );
@@ -176,8 +176,8 @@ fn hash_join_prepares_constant_like_residual_once() {
         Box::new(left),
         Box::new(right),
         JoinKind::Inner,
-        vec![ScalarExpr::Column("c.k".into())],
-        vec![ScalarExpr::Column("o.k".into())],
+        vec![ScalarExpr::qualified_column("c", "k")],
+        vec![ScalarExpr::qualified_column("o", "k")],
         Some(predicate),
         Arc::new(ResidualEvaluatorMustNotRun),
         ResultRow::new(),
@@ -187,7 +187,7 @@ fn hash_join_prepares_constant_like_residual_once() {
 
     let (_, rows) = run_to_rows(&mut join).unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["o.comment"], Value::Str("ordinary order".into()));
+    assert_eq!(rows[0]["comment"], Value::Str("ordinary order".into()));
 }
 
 #[test]

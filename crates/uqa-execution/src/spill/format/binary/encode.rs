@@ -9,7 +9,7 @@
 use std::fs::File;
 use std::io::{BufWriter, Seek, SeekFrom, Write};
 
-use crate::batch::{Batch, PhysicalRow, RowSchema};
+use crate::batch::{Batch, ColumnIdentity, PhysicalRow, RowSchema};
 use crate::physical::ExecResult;
 use crate::spill::format::{spill_error, RECORD_PREFIX_BYTES};
 use uqa_core::{TemporalValue, Value};
@@ -76,6 +76,7 @@ fn encoded_rows_size(schema: &RowSchema, rows: &[PhysicalRow]) -> ExecResult<usi
     add_size(&mut bytes, 8, "schema column count")?;
     for (logical, column) in schema.columns().iter().enumerate() {
         add_string_size(&mut bytes, column, "schema column")?;
+        add_identity_size(&mut bytes, &schema.identities()[logical], "schema identity")?;
         add_size(&mut bytes, 8, "schema logical slot")?;
         add_string_size(
             &mut bytes,
@@ -94,13 +95,13 @@ fn encoded_rows_size(schema: &RowSchema, rows: &[PhysicalRow]) -> ExecResult<usi
     }
     let aliases = schema.lookup_aliases_with_types();
     add_size(&mut bytes, 8, "schema alias count")?;
-    for (name, slot, ty) in aliases {
-        add_string_size(&mut bytes, name, "schema alias")?;
+    for (identity, slot, ty) in aliases {
+        add_identity_size(&mut bytes, identity, "schema alias")?;
         add_size(&mut bytes, 8, "schema alias slot")?;
         add_string_size(&mut bytes, &encoded_column_type(ty)?, "schema alias type")?;
         if slot.is_some_and(|slot| slot >= schema.physical_width()) {
             return Err(spill_error(format!(
-                "schema alias `{name}` is outside physical width {}",
+                "schema alias `{identity:?}` is outside physical width {}",
                 schema.physical_width()
             )));
         }
@@ -126,6 +127,15 @@ fn add_size(total: &mut usize, bytes: usize, description: &str) -> ExecResult<()
 fn add_string_size(total: &mut usize, value: &str, description: &str) -> ExecResult<()> {
     add_size(total, 8, description)?;
     add_size(total, value.len(), description)
+}
+
+fn add_identity_size(
+    total: &mut usize,
+    identity: &ColumnIdentity,
+    description: &str,
+) -> ExecResult<()> {
+    add_string_size(total, identity.qualifier().unwrap_or(""), description)?;
+    add_string_size(total, identity.column(), description)
 }
 
 fn encoded_column_type(ty: Option<&uqa_sql::ast::ColumnType>) -> ExecResult<String> {
@@ -159,9 +169,41 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
             add_size(total, value.sql_string_len(), "decimal value")
         }
         Value::Json(value) | Value::JsonB(value) => add_string_size(total, value, "JSON value"),
+        Value::Array(array) => {
+            add_size(total, 8, "array lower-bound count")?;
+            add_size(
+                total,
+                array
+                    .lower_bounds()
+                    .len()
+                    .checked_mul(4)
+                    .ok_or_else(|| spill_error("array lower-bound size overflow"))?,
+                "array lower bounds",
+            )?;
+            add_size(total, 8, "array element count")?;
+            for value in array.elements() {
+                add_value_size(total, value, depth + 1)?;
+            }
+            Ok(())
+        }
         Value::List(values) => {
             add_size(total, 8, "list length")?;
             for value in values {
+                add_value_size(total, value, depth + 1)?;
+            }
+            Ok(())
+        }
+        Value::Row(values) => {
+            add_size(total, 8, "row length")?;
+            for value in values {
+                add_value_size(total, value, depth + 1)?;
+            }
+            Ok(())
+        }
+        Value::Record(fields) => {
+            add_size(total, 8, "record length")?;
+            for (name, value) in fields {
+                add_string_size(total, name, "record field name")?;
                 add_value_size(total, value, depth + 1)?;
             }
             Ok(())
@@ -231,6 +273,7 @@ fn encode_batch(writer: &mut impl Write, batch: &Batch) -> ExecResult<()> {
     write_u64(writer, batch.schema.columns().len())?;
     for (logical, column) in batch.schema.columns().iter().enumerate() {
         write_bytes(writer, column.as_bytes())?;
+        write_identity(writer, &batch.schema.identities()[logical])?;
         write_slot(writer, batch.schema.slot(logical))?;
         write_bytes(
             writer,
@@ -239,8 +282,8 @@ fn encode_batch(writer: &mut impl Write, batch: &Batch) -> ExecResult<()> {
     }
     let aliases = batch.schema.lookup_aliases_with_types();
     write_u64(writer, aliases.len())?;
-    for (name, slot, ty) in aliases {
-        write_bytes(writer, name.as_bytes())?;
+    for (identity, slot, ty) in aliases {
+        write_identity(writer, identity)?;
         write_slot(writer, slot)?;
         write_bytes(writer, encoded_column_type(ty)?.as_bytes())?;
     }
@@ -258,6 +301,11 @@ fn encode_batch(writer: &mut impl Write, batch: &Batch) -> ExecResult<()> {
         }
     }
     Ok(())
+}
+
+fn write_identity(writer: &mut impl Write, identity: &ColumnIdentity) -> ExecResult<()> {
+    write_bytes(writer, identity.qualifier().unwrap_or("").as_bytes())?;
+    write_bytes(writer, identity.column().as_bytes())
 }
 
 fn write_slot(writer: &mut impl Write, slot: Option<usize>) -> ExecResult<()> {
@@ -315,10 +363,39 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
             write_tag(writer, 12)?;
             write_bytes(writer, value.as_bytes())
         }
+        Value::Array(array) => {
+            write_tag(writer, 15)?;
+            write_u64(writer, array.lower_bounds().len())?;
+            for lower_bound in array.lower_bounds() {
+                write_raw(writer, &lower_bound.to_le_bytes(), "array lower bound")?;
+            }
+            write_u64(writer, array.elements().len())?;
+            for value in array.elements() {
+                encode_value(writer, value, depth + 1)?;
+            }
+            Ok(())
+        }
         Value::List(values) => {
             write_tag(writer, 8)?;
             write_u64(writer, values.len())?;
             for value in values {
+                encode_value(writer, value, depth + 1)?;
+            }
+            Ok(())
+        }
+        Value::Row(values) => {
+            write_tag(writer, 13)?;
+            write_u64(writer, values.len())?;
+            for value in values {
+                encode_value(writer, value, depth + 1)?;
+            }
+            Ok(())
+        }
+        Value::Record(fields) => {
+            write_tag(writer, 14)?;
+            write_u64(writer, fields.len())?;
+            for (name, value) in fields {
+                write_bytes(writer, name.as_bytes())?;
                 encode_value(writer, value, depth + 1)?;
             }
             Ok(())

@@ -179,8 +179,8 @@ pub fn agtype_type_ordinal(value: &Value) -> u8 {
             Value::Int(_) => 3,
             Value::Float(_) => 4,
             Value::Bool(_) => 5,
-            Value::List(_) => 9,
-            Value::Map(_) => 10,
+            Value::Array(_) | Value::List(_) | Value::Row(_) => 9,
+            Value::Record(_) | Value::Map(_) => 10,
             Value::Json(text) | Value::JsonB(text) => json_type_ordinal(text),
             Value::Bytes(_) | Value::Temporal(_) => 11,
         },
@@ -201,8 +201,8 @@ pub fn agtype_type_name(value: &Value) -> &'static str {
             Value::Float(_) => "float",
             Value::Decimal(_) => "numeric",
             Value::Str(_) | Value::FixedChar(_) => "string",
-            Value::List(_) => "list",
-            Value::Map(_) => "map",
+            Value::Array(_) | Value::List(_) | Value::Row(_) => "list",
+            Value::Record(_) | Value::Map(_) => "map",
             Value::Json(text) | Value::JsonB(text) => json_type_name(text),
             Value::Bytes(_) => "bytea",
             Value::Temporal(_) => "temporal",
@@ -331,7 +331,17 @@ fn render_into(value: &Value, out: &mut String) {
             Value::Bytes(b) => render_json_string(&String::from_utf8_lossy(b), out),
             Value::Temporal(t) => render_json_string(&t.to_sql_string(), out),
             Value::Json(text) | Value::JsonB(text) => out.push_str(text),
-            Value::List(items) => {
+            Value::Array(array) => {
+                out.push('[');
+                for (index, item) in array.elements().iter().enumerate() {
+                    if index > 0 {
+                        out.push_str(", ");
+                    }
+                    render_into(item, out);
+                }
+                out.push(']');
+            }
+            Value::List(items) | Value::Row(items) => {
                 out.push('[');
                 for (i, item) in items.iter().enumerate() {
                     if i > 0 {
@@ -340,6 +350,18 @@ fn render_into(value: &Value, out: &mut String) {
                     render_into(item, out);
                 }
                 out.push(']');
+            }
+            Value::Record(fields) => {
+                out.push('{');
+                for (index, (name, value)) in fields.iter().enumerate() {
+                    if index > 0 {
+                        out.push_str(", ");
+                    }
+                    render_json_string(name, out);
+                    out.push_str(": ");
+                    render_into(value, out);
+                }
+                out.push('}');
             }
             Value::Map(map) => {
                 out.push('{');
@@ -417,8 +439,8 @@ fn sort_priority(value: &Value) -> u8 {
         Some(EntityKind::Edge) => 1,
         Some(EntityKind::Vertex) => 2,
         None => match value {
-            Value::Map(_) => 3,
-            Value::List(_) => 4,
+            Value::Record(_) | Value::Map(_) => 3,
+            Value::Array(_) | Value::List(_) | Value::Row(_) => 4,
             Value::Json(text) | Value::JsonB(text) => json_sort_priority(text),
             Value::Str(_) | Value::FixedChar(_) | Value::Bytes(_) | Value::Temporal(_) => 5,
             Value::Bool(_) => 6,

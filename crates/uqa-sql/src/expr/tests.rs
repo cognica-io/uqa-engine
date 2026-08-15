@@ -34,7 +34,7 @@ fn parameter_zero_is_not_aliased_to_parameter_one() {
 }
 
 #[test]
-fn array_collects_into_list() {
+fn array_constructor_creates_a_sql_array() {
     let ctx = EvalContext::new(None, &[]);
     let got = eval(
         &Expr::Array(vec![
@@ -44,17 +44,21 @@ fn array_collects_into_list() {
         &ctx,
     )
     .unwrap();
-    assert_eq!(got, Value::List(vec![Value::Int(1), Value::Int(2)]));
+    assert_eq!(
+        got,
+        Value::Array(ArrayValue::try_new(vec![Value::Int(1), Value::Int(2)]).unwrap())
+    );
 }
 
 #[test]
 fn postgres_array_literals_preserve_nesting_quotes_and_nulls() {
     assert_eq!(
         parse_pg_array_literal(r#"{{"a,b",NULL},{"c\"d","NULL"}}"#).unwrap(),
-        vec![
+        ArrayValue::try_new(vec![
             Value::List(vec![Value::Str("a,b".into()), Value::Null]),
             Value::List(vec![Value::Str("c\"d".into()), Value::Str("NULL".into()),]),
-        ]
+        ])
+        .unwrap()
     );
 }
 
@@ -68,10 +72,13 @@ fn postgres_array_literals_reject_invalid_or_ragged_shapes() {
 
 #[test]
 fn multidimensional_array_functions_use_every_dimension() {
-    let matrix = Value::List(vec![
-        Value::List(vec![Value::Int(1), Value::Int(2)]),
-        Value::List(vec![Value::Int(3), Value::Int(4)]),
-    ]);
+    let matrix = Value::Array(
+        ArrayValue::try_new(vec![
+            Value::List(vec![Value::Int(1), Value::Int(2)]),
+            Value::List(vec![Value::Int(3), Value::Int(4)]),
+        ])
+        .unwrap(),
+    );
     assert_eq!(
         eval_scalar_function("array_length", &[matrix.clone(), Value::Int(1)]).unwrap(),
         Value::Int(2)
@@ -89,18 +96,22 @@ fn multidimensional_array_functions_use_every_dimension() {
         Value::Int(4)
     );
     assert_eq!(
-        eval_scalar_function("cardinality", &[Value::List(Vec::new())]).unwrap(),
+        eval_scalar_function(
+            "cardinality",
+            &[Value::Array(ArrayValue::try_new(Vec::new()).unwrap())]
+        )
+        .unwrap(),
         Value::Int(0)
     );
 }
 
 #[test]
 fn array_functions_reject_ragged_values_and_invalid_arity() {
-    let ragged = Value::List(vec![
+    assert!(ArrayValue::try_new(vec![
         Value::List(vec![Value::Int(1)]),
         Value::List(vec![Value::Int(2), Value::Int(3)]),
-    ]);
-    assert!(eval_scalar_function("array_length", &[ragged, Value::Int(2)]).is_err());
+    ])
+    .is_none());
     assert!(eval_scalar_function("cardinality", &[]).is_err());
     assert!(eval_scalar_function("unnest", &[]).is_err());
 }
@@ -120,7 +131,7 @@ fn projected_row_lookup_evaluates_columns_without_a_result_map() {
                 .and_then(|index| self.values.get(index))
         }
 
-        fn qualified_column(&self, _qualifier: &str, column: &str, _key: &str) -> Option<&Value> {
+        fn qualified_column(&self, _qualifier: &str, column: &str) -> Option<&Value> {
             self.column(column)
         }
     }
@@ -140,7 +151,6 @@ fn projected_row_lookup_evaluates_columns_without_a_result_map() {
             &Expr::QualifiedColumn {
                 qualifier: "lineitem".into(),
                 column: "status".into(),
-                key: String::new(),
             },
             &ctx,
         )
@@ -159,6 +169,14 @@ fn projected_row_lookup_evaluates_columns_without_a_result_map() {
         .unwrap(),
         Value::Bool(true)
     );
+}
+
+#[test]
+fn named_result_rows_never_infer_qualified_identity_from_dotted_labels() {
+    let row = ResultRow::from([("source.id".into(), Value::Int(7))]);
+    assert_eq!(row.column("source.id"), Some(&Value::Int(7)));
+    assert_eq!(row.column("id"), None);
+    assert_eq!(row.qualified_column("source", "id"), None);
 }
 
 #[test]
@@ -314,11 +332,14 @@ fn collection_and_string_sizes_fail_without_wrapping_or_panicking() {
     );
     assert!(eval_scalar_function(
         "array_fill",
-        &[Value::Int(1), Value::List(vec![Value::Int(i64::MAX)]),],
+        &[
+            Value::Int(1),
+            Value::Array(ArrayValue::try_new(vec![Value::Int(i64::MAX)]).unwrap()),
+        ],
     )
     .is_err());
 
-    let values = Value::List(vec![Value::Int(1), Value::Int(2)]);
+    let values = Value::Array(ArrayValue::try_new(vec![Value::Int(1), Value::Int(2)]).unwrap());
     assert!(eval_scalar_function("trim_array", &[values.clone(), Value::Int(i64::MAX)]).is_err());
     assert!(eval_scalar_function("array_sample", &[values.clone(), Value::Int(i64::MAX)]).is_err());
     assert_eq!(
@@ -331,7 +352,7 @@ fn collection_and_string_sizes_fail_without_wrapping_or_panicking() {
             &[values, Value::Int(i64::MAX), Value::Int(i64::MAX)],
         )
         .unwrap(),
-        Value::List(Vec::new())
+        Value::Array(ArrayValue::try_new(Vec::new()).unwrap())
     );
     assert_eq!(
         eval_scalar_function(

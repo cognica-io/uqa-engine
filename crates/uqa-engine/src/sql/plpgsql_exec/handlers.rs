@@ -8,9 +8,9 @@
 
 use super::{
     call_signature, execute_routine, output_column_names, resolve_bound_routine, resolve_routine,
-    routine_local_name, routine_resolution_error, BTreeMap, CreateFunction, DepthGuard,
-    DropFunctionStmt, Engine, FunctionBinding, FunctionReturns, Interpreter, ResultRow, SQLError,
-    SQLResult, SQLTableFunctionResult, Value,
+    routine_local_name, routine_resolution_error, CreateFunction, DepthGuard, DropFunctionStmt,
+    Engine, FunctionBinding, FunctionReturns, Interpreter, ResultRow, SQLError, SQLResult,
+    SQLTableFunctionResult, Value,
 };
 
 pub(in crate::sql) fn run_create_function(
@@ -49,6 +49,7 @@ pub(in crate::sql) fn run_do_block(
         returns: FunctionReturns::Scalar {
             type_name: "void".into(),
         },
+        return_type_reference: None,
         language: "plpgsql".into(),
         body: uqa_sql::ast::FunctionBody::Source(body.to_string()),
         volatility: uqa_sql::ast::FunctionVolatility::Volatile,
@@ -187,16 +188,12 @@ fn execute_resolved_scalar_function(
                 )));
             }
         },
-        _ => {
-            let mut record = BTreeMap::new();
-            for (column, value) in output_column_names(&function.def)
+        _ => Value::Record(
+            output_column_names(&function.def)
                 .into_iter()
                 .zip(outcome.out_values)
-            {
-                record.insert(column, value);
-            }
-            Value::Map(record)
-        }
+                .collect(),
+        ),
     };
     Ok(value)
 }

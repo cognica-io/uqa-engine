@@ -6,7 +6,73 @@
 
 //! Lazy generate-series, regex, string, and JSON value streams.
 
-use super::{json_table_arg, json_table_value_to_text, prefix_row, ResultRow, SQLError, Value};
+use super::{
+    json_table_arg, json_table_value_to_text, multi_unnest_internal_columns, ResultRow, SQLError,
+    Value,
+};
+
+pub(in crate::sql) fn unnest_row_stream(
+    evaluated: Vec<Value>,
+    output_name: &str,
+    alias: Option<&str>,
+    column_aliases: &[String],
+) -> Result<uqa_execution::ProjectRows, SQLError> {
+    if evaluated.is_empty() || column_aliases.len() > evaluated.len() {
+        return Err(SQLError::BadArity {
+            name: "unnest".into(),
+            expected: "one output alias per array argument".into(),
+            actual: evaluated.len(),
+        });
+    }
+    let arrays = evaluated
+        .into_iter()
+        .map(|value| match value {
+            Value::Array(array) => {
+                fn flatten(values: &[Value], output: &mut Vec<Value>) {
+                    for value in values {
+                        if let Value::List(nested) = value {
+                            flatten(nested, output);
+                        } else {
+                            output.push(value.clone());
+                        }
+                    }
+                }
+
+                let mut values = Vec::new();
+                flatten(array.elements(), &mut values);
+                Ok(values)
+            }
+            Value::List(items) => Ok(items),
+            Value::Null => Ok(Vec::new()),
+            _ => Err(SQLError::UnknownFunction(
+                "unnest requires array arguments".into(),
+            )),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if arrays.len() == 1 {
+        let column = column_aliases
+            .first()
+            .map_or_else(|| alias.unwrap_or(output_name).to_string(), Clone::clone);
+        let values = arrays.into_iter().next().unwrap_or_default();
+        return Ok(Box::new(values.into_iter().map(move |value| {
+            Ok([(column.clone(), value)].into_iter().collect())
+        })));
+    }
+
+    let columns = multi_unnest_internal_columns(arrays.len());
+    let row_count = arrays.iter().map(Vec::len).max().unwrap_or(0);
+    Ok(Box::new((0..row_count).map(move |row_position| {
+        Ok(columns
+            .iter()
+            .cloned()
+            .zip(
+                arrays
+                    .iter()
+                    .map(|array| array.get(row_position).cloned().unwrap_or(Value::Null)),
+            )
+            .collect::<ResultRow>())
+    })))
+}
 
 pub(in crate::sql) fn generate_series_values(
     evaluated: Vec<Value>,
@@ -15,6 +81,9 @@ pub(in crate::sql) fn generate_series_values(
         return Err(SQLError::TypeMismatch(
             "generate_series requires 2-3 args".into(),
         ));
+    }
+    if evaluated.iter().any(|value| matches!(value, Value::Null)) {
+        return Ok(Box::new(std::iter::empty()));
     }
     let start = generate_series_integer(&evaluated[0], "start")?;
     let end = generate_series_integer(&evaluated[1], "stop")?;
@@ -222,7 +291,7 @@ pub(in crate::sql) fn json_object_key_values(
 pub(in crate::sql) fn json_each_row_stream(
     name: &str,
     evaluated: Vec<Value>,
-    alias: Option<&str>,
+    _alias: Option<&str>,
     column_aliases: &[String],
 ) -> Result<uqa_execution::ProjectRows, SQLError> {
     if evaluated.len() != 1 {
@@ -242,13 +311,10 @@ pub(in crate::sql) fn json_each_row_stream(
         .get(1)
         .cloned()
         .unwrap_or_else(|| "value".into());
-    let qualifier = alias.map(str::to_string);
     Ok(Box::new(object.into_iter().map(move |(key, value)| {
         let mut row = ResultRow::new();
         row.insert(key_column.clone(), Value::Str(key));
         row.insert(value_column.clone(), json_table_value_to_text(&value));
-        Ok(qualifier
-            .as_deref()
-            .map_or(row.clone(), |qualifier| prefix_row(qualifier, &row)))
+        Ok(row)
     })))
 }

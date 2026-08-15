@@ -158,11 +158,17 @@ fn python_array_types_preserve_elements_and_dimensions() {
     let document = coerce_migrated_document(document, &columns).unwrap();
     assert_eq!(
         document["tags"],
-        Value::List(vec![Value::Str("1".into()), Value::Str("2".into())])
+        Value::Array(
+            uqa_core::ArrayValue::try_new(vec![Value::Str("1".into()), Value::Str("2".into()),])
+                .expect("one-dimensional text array")
+        )
     );
     assert_eq!(
         document["numbers"],
-        Value::List(vec![Value::Int(3), Value::Int(4)])
+        Value::Array(
+            uqa_core::ArrayValue::try_new(vec![Value::Int(3), Value::Int(4)])
+                .expect("one-dimensional integer array")
+        )
     );
 }
 

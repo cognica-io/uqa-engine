@@ -205,6 +205,37 @@ fn aggregate_results_preserve_postgresql_return_types() {
             Some(ColumnType::Array(Box::new(ColumnType::SmallInteger))),
         ]
     );
+    let types = exec(
+        &engine,
+        "SELECT
+            pg_typeof(COUNT(*)) AS count_type,
+            pg_typeof(SUM(small_value)) AS small_sum_type,
+            pg_typeof(AVG(small_value)) AS small_avg_type,
+            pg_typeof(SUM(big_value)) AS big_sum_type,
+            pg_typeof(AVG(real_value)) AS real_avg_type,
+            pg_typeof(MIN(small_value)) AS small_min_type,
+            pg_typeof(ARRAY_AGG(small_value)) AS small_array_type
+         FROM aggregate_types",
+    );
+    assert_eq!(types.rows[0]["count_type"], Value::Str("bigint".into()));
+    assert_eq!(types.rows[0]["small_sum_type"], Value::Str("bigint".into()));
+    assert_eq!(
+        types.rows[0]["small_avg_type"],
+        Value::Str("numeric".into())
+    );
+    assert_eq!(types.rows[0]["big_sum_type"], Value::Str("numeric".into()));
+    assert_eq!(
+        types.rows[0]["real_avg_type"],
+        Value::Str("double precision".into())
+    );
+    assert_eq!(
+        types.rows[0]["small_min_type"],
+        Value::Str("smallint".into())
+    );
+    assert_eq!(
+        types.rows[0]["small_array_type"],
+        Value::Str("smallint[]".into())
+    );
 }
 
 #[test]

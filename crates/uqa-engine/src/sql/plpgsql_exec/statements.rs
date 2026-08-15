@@ -7,8 +7,8 @@
 //! PL/pgSQL statement dispatch.
 
 use super::{
-    result_row_count, return_query_context_error, strict_into_check, truthy, Flow, Interpreter,
-    LoopSignal, PLpgSQLStmt, SQLError, Value,
+    result_row_count, result_row_values, return_query_context_error, strict_into_check, truthy,
+    Flow, Interpreter, LoopSignal, PLpgSQLStmt, SQLError, Value,
 };
 
 impl Interpreter<'_> {
@@ -112,9 +112,10 @@ impl Interpreter<'_> {
                 let result = self.exec_query(query)?;
                 let mut iterated = false;
                 let mut outcome = Flow::Normal;
-                for row in &result.rows {
+                for row_index in 0..result.rows.len() {
                     iterated = true;
-                    self.assign_into(target, &result.columns, Some(row))?;
+                    let values = result_row_values(&result, row_index);
+                    self.assign_into(target, &result.columns, values.as_deref())?;
                     match self.exec_loop_body(label.as_deref(), body)? {
                         LoopSignal::Continue => {}
                         LoopSignal::Break => break,
@@ -188,7 +189,8 @@ impl Interpreter<'_> {
                     if *strict {
                         strict_into_check(row_count)?;
                     }
-                    self.assign_into(target, &result.columns, result.rows.first())?;
+                    let values = result_row_values(&result, 0);
+                    self.assign_into(target, &result.columns, values.as_deref())?;
                 }
                 // PostgreSQL: EXECUTE never changes FOUND.
                 Ok(Flow::Normal)

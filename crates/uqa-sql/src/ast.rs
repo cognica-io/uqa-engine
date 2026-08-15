@@ -60,6 +60,8 @@ pub enum ColumnType {
     Int2Vector,
     OidVector,
     AnyArray,
+    /// `PostgreSQL`'s anonymous composite pseudo-type (OID 2249).
+    Record,
     /// A `PostgreSQL` array whose elements retain their declared SQL type.
     /// Nested array bounds are represented recursively.
     Array(Box<ColumnType>),
@@ -90,6 +92,43 @@ pub enum ColumnType {
         oid: u32,
         base: Box<ColumnType>,
     },
+}
+
+pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str> {
+    Some(match type_name {
+        "_bool" => "bool",
+        "_bytea" => "bytea",
+        "_char" => "\"char\"",
+        "_name" => "name",
+        "_int8" => "int8",
+        "_int2" => "int2",
+        "_int2vector" => "int2vector",
+        "_int4" => "int4",
+        "_regproc" => "regproc",
+        "_text" => "text",
+        "_oid" => "oid",
+        "_oidvector" => "oidvector",
+        "_bpchar" => "bpchar",
+        "_varchar" => "varchar",
+        "_float4" => "float4",
+        "_float8" => "float8",
+        "_aclitem" => "aclitem",
+        "_date" => "date",
+        "_time" => "time",
+        "_timestamp" => "timestamp",
+        "_timestamptz" => "timestamptz",
+        "_interval" => "interval",
+        "_numeric" => "numeric",
+        "_timetz" => "timetz",
+        "_record" => "record",
+        "_uuid" => "uuid",
+        "_json" => "json",
+        "_jsonb" => "jsonb",
+        "_regtype" => "regtype",
+        "_xid" => "xid",
+        "_pg_node_tree" => "pg_node_tree",
+        _ => return None,
+    })
 }
 
 impl ColumnType {
@@ -123,6 +162,9 @@ impl ColumnType {
     /// cast's declared type is not reconstructed from its runtime value.
     pub fn from_sql_name(name: &str) -> Result<Self, crate::SQLError> {
         let normalized = name.trim().to_ascii_lowercase();
+        if let Some(element) = builtin_array_element_name(&normalized) {
+            return Self::from_sql_name(element).map(|ty| Self::Array(Box::new(ty)));
+        }
         if let Some(element) = normalized.strip_suffix("[]") {
             return Self::from_sql_name(element).map(|ty| Self::Array(Box::new(ty)));
         }
@@ -207,6 +249,7 @@ impl ColumnType {
             "int2vector" => Ok(Self::Int2Vector),
             "oidvector" => Ok(Self::OidVector),
             "anyarray" => Ok(Self::AnyArray),
+            "record" => Ok(Self::Record),
             "date" => Ok(Self::Date),
             "time" | "time without time zone" => Ok(Self::Time),
             "timetz" | "time with time zone" => Ok(Self::TimeTz),
@@ -263,6 +306,7 @@ impl ColumnType {
             Self::Int2Vector => "int2vector".into(),
             Self::OidVector => "oidvector".into(),
             Self::AnyArray => "anyarray".into(),
+            Self::Record => "record".into(),
             Self::Array(element) => format!("{}[]", element.sql_name()),
             Self::Date => "date".into(),
             Self::Time => "time without time zone".into(),
@@ -384,6 +428,8 @@ pub struct ForeignKeyRef {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateTable {
     pub name: String,
+    /// Local SQL relation identifier used while binding expressions declared inside the table definition.
+    pub qualifier: String,
     pub columns: Vec<ColumnDef>,
     /// `CREATE TABLE IF NOT EXISTS` - silently ignore the statement
     /// when a table with this name already exists.
@@ -545,10 +591,66 @@ pub struct FunctionParam {
     /// Raw type name as written (last segment, lower-cased by the
     /// compiler; e.g. `int4`, `text`, `numeric`).
     pub type_name: String,
+    /// Parsed relation and column identity for `%TYPE`; ordinary types have no reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_reference: Option<RoutineColumnTypeReference>,
     pub mode: FunctionParamMode,
     /// `DEFAULT <expr>` for trailing input parameters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Expr>,
+}
+
+/// Structured relation-column identity carried by a routine `%TYPE` declaration until catalog binding resolves it to a concrete SQL type.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoutineColumnTypeReference {
+    pub schema: Option<String>,
+    pub relation: String,
+    pub column: String,
+}
+
+impl RoutineColumnTypeReference {
+    pub fn new(schema: Option<String>, relation: String, column: String) -> Self {
+        Self {
+            schema,
+            relation,
+            column,
+        }
+    }
+
+    pub fn relation_reference(&self) -> String {
+        match self.schema.as_deref() {
+            Some(schema) => format!(
+                "{}.{}",
+                render_identifier_component(schema),
+                render_identifier_component(&self.relation)
+            ),
+            None => render_identifier_component(&self.relation),
+        }
+    }
+
+    pub fn type_reference(&self) -> String {
+        format!(
+            "{}.{}%type",
+            self.relation_reference(),
+            render_identifier_component(&self.column)
+        )
+    }
+}
+
+fn render_identifier_component(component: &str) -> String {
+    let can_render_bare = component
+        .bytes()
+        .enumerate()
+        .all(|(index, byte)| match byte {
+            b'a'..=b'z' | b'_' => true,
+            b'0'..=b'9' | b'$' => index != 0,
+            _ => false,
+        });
+    if can_render_bare && !component.is_empty() {
+        component.to_string()
+    } else {
+        format!("\"{}\"", component.replace('"', "\"\""))
+    }
 }
 
 /// Declared result shape of a user-defined function.
@@ -595,6 +697,9 @@ pub struct CreateFunction {
     pub is_procedure: bool,
     pub params: Vec<FunctionParam>,
     pub returns: FunctionReturns,
+    /// Parsed `%TYPE` identity for a scalar or set return declaration until registration resolves it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub return_type_reference: Option<RoutineColumnTypeReference>,
     /// Lower-cased language name (`plpgsql`, `sql`).
     pub language: String,
     pub body: FunctionBody,
@@ -689,6 +794,8 @@ pub struct DropFunctionStmt {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlterTableStmt {
     pub table: String,
+    /// Local SQL relation identifier used while binding new or replaced generation expressions.
+    pub qualifier: String,
     pub if_exists: bool,
     pub action: AlterTableAction,
 }
@@ -746,6 +853,8 @@ pub enum AlterTableAction {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InsertStmt {
     pub table: String,
+    /// SQL-visible target relation name: explicit alias, otherwise the local relation name.
+    pub target_qualifier: String,
     pub columns: Vec<String>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
     pub with: Vec<CTE>,
@@ -771,6 +880,10 @@ pub struct InsertStmt {
 pub struct ReturningAliases {
     pub old: String,
     pub new: String,
+    #[serde(default)]
+    pub old_explicit: bool,
+    #[serde(default)]
+    pub new_explicit: bool,
 }
 
 impl Default for ReturningAliases {
@@ -778,6 +891,8 @@ impl Default for ReturningAliases {
         Self {
             old: "old".into(),
             new: "new".into(),
+            old_explicit: false,
+            new_explicit: false,
         }
     }
 }
@@ -884,7 +999,13 @@ pub enum SetOpKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FromClause {
     /// `FROM <table> [AS <alias>]`.
-    Table { name: String, alias: Option<String> },
+    Table {
+        /// Durable catalog identity, including an explicit schema when present.
+        name: String,
+        /// Relation name visible to SQL column binding before an alias is applied.
+        qualifier: String,
+        alias: Option<String>,
+    },
     /// `FROM left <kind> right ON predicate`. `lateral` is true when
     /// the right side is a LATERAL subquery / function -- the engine
     /// re-evaluates it for every left row.
@@ -919,6 +1040,8 @@ pub enum FromClause {
     /// dispatches by name.
     Function {
         name: String,
+        /// Local function identifier used as `PostgreSQL`'s default output column label. Kept separate from the catalog-qualified lookup name so quoted identifiers containing `.` remain indivisible.
+        output_name: String,
         /// Catalog relation bound to a relation-aware table function.
         /// Kept separate from scalar arguments so name resolution,
         /// dependency tracking, and planning never treat it as text data.
@@ -956,7 +1079,14 @@ impl FromClause {
     /// order. Used by the compiler to resolve unqualified column refs.
     pub fn collect_tables(&self, out: &mut Vec<(String, Option<String>)>) {
         match self {
-            FromClause::Table { name, alias } => out.push((name.clone(), alias.clone())),
+            FromClause::Table {
+                name,
+                qualifier,
+                alias,
+            } => out.push((
+                name.clone(),
+                Some(alias.as_ref().unwrap_or(qualifier).clone()),
+            )),
             FromClause::Join { left, right, .. } => {
                 left.collect_tables(out);
                 right.collect_tables(out);
@@ -993,6 +1123,7 @@ pub enum DiscardTarget {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateStmt {
     pub table: String,
+    pub target_qualifier: String,
     pub assignments: Vec<(String, Expr)>,
     pub r#where: Option<Expr>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
@@ -1008,6 +1139,7 @@ pub struct UpdateStmt {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteStmt {
     pub table: String,
+    pub target_qualifier: String,
     pub r#where: Option<Expr>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
     pub with: Vec<CTE>,
@@ -1145,6 +1277,7 @@ pub enum Statement {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeStmt {
     pub target: String,
+    pub target_qualifier: String,
     pub target_alias: Option<String>,
     pub source: FromClause,
     pub join_condition: Expr,

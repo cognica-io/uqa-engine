@@ -6,7 +6,7 @@
 
 //! SQLSTATE matching, row diagnostics, and `RAISE` formatting.
 
-use super::{cast_value, condition_sqlstates, ResultRow, SQLError, SQLResult, Value};
+use super::{cast_value, condition_sqlstates, SQLError, SQLResult, Value};
 
 pub(super) fn return_query_context_error() -> SQLError {
     SQLError::Routine {
@@ -15,19 +15,13 @@ pub(super) fn return_query_context_error() -> SQLError {
     }
 }
 
-/// Column lookup with a qualified-key fallback: result rows may key
-/// values as `table.column` while the column list carries the bare
-/// label.
-pub(super) fn row_value(row: &ResultRow, column: &str) -> Value {
-    if let Some(value) = row.get(column) {
-        return value.clone();
-    }
-    row.iter()
-        .find(|(key, _)| {
-            key.rsplit_once('.')
-                .is_some_and(|(_, suffix)| suffix == column)
-        })
-        .map_or(Value::Null, |(_, value)| value.clone())
+/// Copy one result row in declared output-column order. Positional result storage is authoritative when labels repeat; named rows are only the public compatibility carrier used by [`SQLResult::value_at`]'s final fallback.
+pub(super) fn result_row_values(result: &SQLResult, row: usize) -> Option<Vec<Value>> {
+    (row < result.rows.len()).then(|| {
+        (0..result.columns.len())
+            .map(|column| result.value_at(row, column).cloned().unwrap_or(Value::Null))
+            .collect()
+    })
 }
 
 pub(super) fn result_row_count(result: &SQLResult) -> Result<i64, SQLError> {
@@ -176,6 +170,7 @@ pub(super) fn raise_text(value: &Value) -> String {
         Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
         Value::Temporal(t) => t.to_sql_string(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
+        Value::Array(array) => uqa_sql::expr::array_value_to_string(array),
         Value::Bytes(b) => {
             use std::fmt::Write as _;
             let mut out = String::with_capacity(2 + b.len() * 2);
@@ -189,9 +184,18 @@ pub(super) fn raise_text(value: &Value) -> String {
             let inner = items.iter().map(raise_text).collect::<Vec<_>>().join(",");
             format!("{{{inner}}}")
         }
-        Value::Map(map) => {
-            let inner = map.values().map(raise_text).collect::<Vec<_>>().join(",");
+        Value::Row(items) => {
+            let inner = items.iter().map(raise_text).collect::<Vec<_>>().join(",");
             format!("({inner})")
         }
+        Value::Record(fields) => {
+            let inner = fields
+                .iter()
+                .map(|(_, value)| raise_text(value))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("({inner})")
+        }
+        Value::Map(map) => serde_json::to_string(map).unwrap_or_else(|_| format!("{map:?}")),
     }
 }

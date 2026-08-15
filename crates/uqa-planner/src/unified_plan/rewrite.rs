@@ -290,7 +290,10 @@ pub(super) fn rewrite_scalar(
                 rewrite_scalar(filter, rewrite);
             }
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => {
             for item in items {
                 rewrite_scalar(item, rewrite);
             }
@@ -348,7 +351,9 @@ pub(super) fn rewrite_scalar(
         ScalarExpr::InSubquery { expr, .. } => rewrite_scalar(expr, rewrite),
         ScalarExpr::Default
         | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)

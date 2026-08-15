@@ -10,15 +10,14 @@ use super::{
     build_set_projection, collect_exists_key_operator, collect_query_operator,
     expression_may_return_set, is_score_provenance_column, prepare_aggregate_set_projection,
     prepare_correlated_exists_predicate, prepare_group_set_projection, prepare_window_plan,
-    projection_columns, projections_may_return_set, query_plan_output_columns,
-    resolve_limit_offset_with_ctes, should_defer_distinct_limit, validate_projection_set_contexts,
-    Arc, ComputePlan, CteScope, Engine, EngineExpressionEvaluator, HashSet, OutputColumnMapping,
-    PhysicalAggregateExecutor, PhysicalProjection, PhysicalWindowExecutor, ProjectionPlan,
-    QueryBlockPlan, QueryOutput, QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr,
-    SharedExpressionEvaluator, SourcePlan, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN, SCORE_COLUMN,
+    projection_columns, projections_may_return_set, resolve_limit_offset_with_ctes,
+    should_defer_distinct_limit, validate_query_block_expression_types,
+    validate_query_set_contexts, Arc, ComputePlan, CteScope, Engine, EngineExpressionEvaluator,
+    HashSet, OutputColumnMapping, PhysicalAggregateExecutor, PhysicalProjection,
+    PhysicalWindowExecutor, ProjectionPlan, QueryBlockPlan, QueryOutput, QueryOutputMode,
+    ResultRow, SQLError, SQLParam, ScalarExpr, SharedExpressionEvaluator, Value, DOC_ID_COLUMN,
+    MERGE_ACTION_COLUMN, SCORE_COLUMN,
 };
-use crate::sql::from_rows::table_function_empty_schema;
-use crate::sql::virtual_relation_schema;
 
 const ORDER_SET_COLUMN_PREFIX: &str = "\0uqa.order_set_value.";
 const DISTINCT_SET_COLUMN_PREFIX: &str = "\0uqa.distinct_set_value.";
@@ -38,102 +37,42 @@ fn projection_set_batch_size(statement: &QueryBlockPlan) -> usize {
 pub(in crate::sql) fn expand_from_star_columns(
     columns: Vec<String>,
     projections: &[ProjectionPlan],
-    source_columns: &[String],
-) -> Vec<String> {
-    let has_star = projections
-        .iter()
-        .any(|p| matches!(p.expr, ScalarExpr::Star));
-    if !has_star {
-        return columns;
-    }
-    let source_cols = source_columns
-        .iter()
-        .filter(|column| visible_projection_source_column(column))
-        .map(|column| {
-            column
-                .rsplit_once('.')
-                .map_or(column.as_str(), |(_, name)| name)
-                .to_string()
-        })
-        .collect::<Vec<_>>();
-    if source_cols.is_empty() {
-        return columns;
-    }
-    let mut out = Vec::with_capacity(columns.len() + source_cols.len());
-    for column in columns {
-        if column == "*" {
-            out.extend(source_cols.iter().cloned());
-        } else {
-            out.push(column);
-        }
-    }
-    out
-}
-
-pub(in crate::sql) fn from_clause_output_columns(
-    engine: &Engine,
-    from: &SourcePlan,
-) -> Vec<String> {
-    match from {
-        SourcePlan::Function {
-            name,
-            alias,
-            column_aliases,
-            ..
-        } => {
-            if !column_aliases.is_empty() {
-                return qualify_output_columns(alias.as_deref(), column_aliases.clone());
+    source_schema: &uqa_execution::RowSchema,
+) -> Result<Vec<String>, SQLError> {
+    let mut output = Vec::new();
+    for (position, projection) in projections.iter().enumerate() {
+        match &projection.expr {
+            ScalarExpr::Star => {
+                output.extend(
+                    source_schema
+                        .columns()
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, column)| visible_projection_source_column(column))
+                        .map(|(source_position, column)| {
+                            source_schema
+                                .public_name(source_position)
+                                .unwrap_or(column)
+                                .to_string()
+                        }),
+                );
             }
-            user_function_output_columns(engine, name).map_or_else(
-                || table_function_empty_schema(name, alias.as_deref(), column_aliases),
-                |columns| qualify_output_columns(alias.as_deref(), columns),
-            )
-        }
-        SourcePlan::Values {
-            rows,
-            alias,
-            column_aliases,
-        } => {
-            let cols = if column_aliases.is_empty() {
-                let width = rows.first().map_or(0, Vec::len);
-                (0..width).map(|idx| format!("column{}", idx + 1)).collect()
-            } else {
-                column_aliases.clone()
-            };
-            qualify_output_columns(alias.as_deref(), cols)
-        }
-        SourcePlan::Subquery {
-            body,
-            alias,
-            column_aliases,
-        } => {
-            let columns = if column_aliases.is_empty() {
-                query_plan_output_columns(body).unwrap_or_default()
-            } else {
-                column_aliases.clone()
-            };
-            qualify_output_columns(alias.as_deref(), columns)
-        }
-        SourcePlan::Join { left, right, .. } => {
-            let mut cols = from_clause_output_columns(engine, left);
-            cols.extend(from_clause_output_columns(engine, right));
-            cols
-        }
-        SourcePlan::Table { name, alias } => {
-            let qualifier = alias.as_deref().unwrap_or(name);
-            engine.try_table_columns(name).map_or_else(
-                |_| {
-                    virtual_relation_schema(name).map_or_else(Vec::new, |schema| {
-                        qualify_output_columns(
-                            Some(qualifier),
-                            schema.into_iter().map(|(column, _)| column).collect(),
-                        )
-                    })
-                },
-                |columns| qualify_output_columns(Some(qualifier), columns),
-            )
+            ScalarExpr::QualifiedStar(qualifier) => {
+                let qualified_columns = source_schema
+                    .qualified_star_layout(qualifier)
+                    .into_iter()
+                    .filter(|(column, _, _)| visible_projection_source_column(column))
+                    .map(|(column, _, _)| column)
+                    .collect::<Vec<_>>();
+                if qualified_columns.is_empty() {
+                    return Err(SQLError::UnknownTable(qualifier.clone()));
+                }
+                output.extend(qualified_columns);
+            }
+            _ => output.push(columns[position].clone()),
         }
     }
+    Ok(output)
 }
 
 /// Output column names of a user-defined routine used as a FROM
@@ -165,19 +104,6 @@ pub(in crate::sql) fn user_function_output_columns(
     None
 }
 
-pub(in crate::sql) fn qualify_output_columns(
-    alias: Option<&str>,
-    columns: Vec<String>,
-) -> Vec<String> {
-    match alias {
-        Some(a) => columns
-            .into_iter()
-            .map(|column| format!("{a}.{column}"))
-            .collect(),
-        None => columns,
-    }
-}
-
 pub(in crate::sql) fn physical_exec_error(error: uqa_execution::ExecError) -> SQLError {
     match error {
         uqa_execution::ExecError::SQL(error) => error,
@@ -202,12 +128,6 @@ pub(in crate::sql) fn physical_work_mem_bytes(engine: &Engine) -> Result<usize, 
     engine.work_mem_bytes()
 }
 
-pub(in crate::sql) fn source_columns(rows: &[ResultRow]) -> Vec<String> {
-    rows.first()
-        .map(|row| row.keys().cloned().collect())
-        .unwrap_or_default()
-}
-
 pub(in crate::sql) fn physical_projections(
     projections: &[ProjectionPlan],
 ) -> Vec<PhysicalProjection> {
@@ -217,6 +137,62 @@ pub(in crate::sql) fn physical_projections(
         .enumerate()
         .map(|(index, projection)| (labels[index].clone(), projection.expr.clone()))
         .collect()
+}
+
+fn bound_projection_expression(schema: &uqa_execution::RowSchema, position: usize) -> ScalarExpr {
+    let Some(identity) = schema.identity(position) else {
+        return ScalarExpr::Position(position);
+    };
+    if let Some(qualifier) = identity.qualifier() {
+        if schema.qualified_position(qualifier, identity.column()) == Some(position) {
+            return ScalarExpr::qualified_column(qualifier, identity.column());
+        }
+    } else if schema.unqualified_position(identity.column()) == Some(position) {
+        return ScalarExpr::Column(identity.column().to_string());
+    }
+    ScalarExpr::Position(position)
+}
+
+fn expand_bound_projection_stars(
+    projections: &[ProjectionPlan],
+    schema: &uqa_execution::RowSchema,
+) -> Result<Vec<ProjectionPlan>, SQLError> {
+    let mut expanded = Vec::new();
+    for projection in projections {
+        match &projection.expr {
+            ScalarExpr::Star => {
+                for (position, column) in schema.columns().iter().enumerate() {
+                    if !visible_projection_source_column(column) {
+                        continue;
+                    }
+                    expanded.push(ProjectionPlan {
+                        expr: bound_projection_expression(schema, position),
+                        alias: Some(schema.public_name(position).unwrap_or(column).to_string()),
+                    });
+                }
+            }
+            ScalarExpr::QualifiedStar(qualifier) => {
+                let layout = schema.qualified_star_position_layout(qualifier);
+                if layout.is_empty() {
+                    return Err(SQLError::UnknownTable(qualifier.clone()));
+                }
+                for (column, logical, _, _) in layout {
+                    if !visible_projection_source_column(&column) {
+                        continue;
+                    }
+                    expanded.push(ProjectionPlan {
+                        expr: logical.map_or_else(
+                            || ScalarExpr::qualified_column(qualifier, &column),
+                            |position| bound_projection_expression(schema, position),
+                        ),
+                        alias: Some(column),
+                    });
+                }
+            }
+            _ => expanded.push(projection.clone()),
+        }
+    }
+    Ok(expanded)
 }
 
 pub(in crate::sql) fn score_provenance_columns(schema: &[String]) -> Vec<String> {
@@ -244,7 +220,7 @@ pub(in crate::sql) fn append_score_provenance_mappings(
 ) {
     for column in score_provenance_columns(schema) {
         if !mappings.iter().any(|(name, _)| name == &column) {
-            mappings.push((column.clone(), column));
+            mappings.push((column.clone(), ScalarExpr::Column(column)));
         }
     }
 }
@@ -264,23 +240,53 @@ pub(in crate::sql) fn visible_projection_source_column(column: &str) -> bool {
 /// Sort/Limit has consumed it.
 pub(in crate::sql) fn order_projection(
     projections: &[ProjectionPlan],
-    input_columns: &[String],
-) -> (Vec<PhysicalProjection>, Vec<OutputColumnMapping>) {
+    input_schema: &uqa_execution::RowSchema,
+) -> Result<(Vec<PhysicalProjection>, Vec<OutputColumnMapping>), SQLError> {
     let labels = projection_columns(projections);
     let mut physical = Vec::new();
     let mut output = Vec::new();
-    let mut occupied: HashSet<String> = input_columns.iter().cloned().collect();
+    let mut occupied: HashSet<String> = input_schema.columns().iter().cloned().collect();
 
     for (index, projection) in projections.iter().enumerate() {
         if matches!(projection.expr, ScalarExpr::Star) {
-            for column in input_columns {
-                if visible_projection_source_column(column)
-                    && !output
-                        .iter()
-                        .any(|(name, _): &(String, String)| name == column)
-                {
-                    output.push((column.clone(), column.clone()));
+            for (position, column) in input_schema.columns().iter().enumerate() {
+                if visible_projection_source_column(column) {
+                    output.push((
+                        input_schema
+                            .public_name(position)
+                            .unwrap_or(column)
+                            .to_string(),
+                        ScalarExpr::Position(position),
+                    ));
                 }
+            }
+            continue;
+        }
+        if let ScalarExpr::QualifiedStar(qualifier) = &projection.expr {
+            let columns = input_schema.qualified_star_position_layout(qualifier);
+            if columns.is_empty() {
+                return Err(SQLError::UnknownTable(qualifier.clone()));
+            }
+            for (star_position, (column, logical, _, _)) in columns.into_iter().enumerate() {
+                if !visible_projection_source_column(&column) {
+                    continue;
+                }
+                if let Some(logical) = logical {
+                    output.push((column, ScalarExpr::Position(logical)));
+                    continue;
+                }
+                let mut internal = format!("__uqa_projection_{index}_{star_position}");
+                let mut suffix = 0usize;
+                while occupied.contains(&internal) {
+                    suffix += 1;
+                    internal = format!("__uqa_projection_{index}_{star_position}_{suffix}");
+                }
+                occupied.insert(internal.clone());
+                physical.push((
+                    internal.clone(),
+                    ScalarExpr::qualified_column(qualifier, &column),
+                ));
+                output.push((column, ScalarExpr::Column(internal)));
             }
             continue;
         }
@@ -290,9 +296,19 @@ pub(in crate::sql) fn order_projection(
         // own slot: ColumnSelection consumes each physical input once, so two
         // output mappings cannot safely share the same source column.
         if let ScalarExpr::Column(source) = &projection.expr {
-            if &labels[index] == source && input_columns.contains(source) {
-                output.push((labels[index].clone(), source.clone()));
-                continue;
+            if &labels[index] == source {
+                if let Some(position) = input_schema.unqualified_position(source) {
+                    output.push((labels[index].clone(), ScalarExpr::Position(position)));
+                    continue;
+                }
+            }
+        }
+        if let ScalarExpr::QualifiedColumn { qualifier, column } = &projection.expr {
+            if &labels[index] == column {
+                if let Some(position) = input_schema.qualified_position(qualifier, column) {
+                    output.push((labels[index].clone(), ScalarExpr::Position(position)));
+                    continue;
+                }
             }
         }
 
@@ -304,15 +320,37 @@ pub(in crate::sql) fn order_projection(
         }
         occupied.insert(internal.clone());
         physical.push((internal.clone(), projection.expr.clone()));
-        output.push((labels[index].clone(), internal));
+        output.push((labels[index].clone(), ScalarExpr::Column(internal)));
     }
-    (physical, output)
+    Ok((physical, output))
 }
 
 pub(in crate::sql) fn identity_order_columns(columns: &[String]) -> Vec<OutputColumnMapping> {
     columns
         .iter()
-        .map(|column| (column.clone(), column.clone()))
+        .map(|column| (column.clone(), ScalarExpr::Column(column.clone())))
+        .collect()
+}
+
+fn output_selection_positions(
+    schema: &uqa_execution::RowSchema,
+    output: Vec<OutputColumnMapping>,
+) -> Result<Vec<(String, usize)>, SQLError> {
+    output
+        .into_iter()
+        .map(|(label, source)| {
+            let position = match source {
+                ScalarExpr::Position(position) if position < schema.len() => Some(position),
+                ScalarExpr::Column(column) => schema.position(&column),
+                _ => None,
+            }
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "bound output column `{label}` is unavailable in the physical row"
+                ))
+            })?;
+            Ok((label, position))
+        })
         .collect()
 }
 
@@ -331,18 +369,21 @@ pub(in crate::sql) fn resolve_order_expression(
                         "ORDER BY position {position} is not in the select list"
                     ))
                 })?;
-            Ok(ScalarExpr::Column(output_columns[index].1.clone()))
+            Ok(output_columns[index].1.clone())
         }
         // SQL output aliases are visible only as a bare ORDER BY name. A
         // name embedded in a larger expression continues to bind to the
         // input row, which is why this rewrite deliberately is not recursive.
-        ScalarExpr::Column(name) => Ok(output_columns
-            .iter()
-            .find(|(output, _)| output == name)
-            .map_or_else(
-                || expression.clone(),
-                |(_, physical)| ScalarExpr::Column(physical.clone()),
-            )),
+        ScalarExpr::Column(name) => {
+            let mut matches = output_columns.iter().filter(|(output, _)| output == name);
+            let Some((_, physical)) = matches.next() else {
+                return Ok(expression.clone());
+            };
+            if matches.next().is_some() {
+                return Err(SQLError::AmbiguousColumn(name.clone()));
+            }
+            Ok(physical.clone())
+        }
         _ => Ok(expression.clone()),
     }
 }
@@ -352,11 +393,13 @@ fn prepare_order_set_projections(
     statement: &QueryBlockPlan,
     output_columns: &[OutputColumnMapping],
     projections: &mut Vec<PhysicalProjection>,
+    schema: &uqa_execution::RowSchema,
+    params: &[SQLParam],
 ) -> Result<Option<QueryBlockPlan>, SQLError> {
     let mut prepared: Option<QueryBlockPlan> = None;
     for (index, order) in statement.order_by.iter().enumerate() {
         let expression = resolve_order_expression(&order.expr, output_columns)?;
-        if !expression_may_return_set(engine, &expression) {
+        if !expression_may_return_set(engine, &expression, schema, params)? {
             continue;
         }
         let column = if let Some((column, _)) = projections
@@ -380,11 +423,13 @@ fn append_distinct_set_projections(
     statement: &QueryBlockPlan,
     output_columns: &[OutputColumnMapping],
     projections: &mut Vec<PhysicalProjection>,
+    schema: &uqa_execution::RowSchema,
+    params: &[SQLParam],
 ) -> Result<Vec<String>, SQLError> {
     let mut columns = Vec::new();
     for (index, expression) in statement.distinct_on.iter().enumerate() {
         let expression = resolve_order_expression(expression, output_columns)?;
-        if expression_may_return_set(engine, &expression) {
+        if expression_may_return_set(engine, &expression, schema, params)? {
             let column = format!("{DISTINCT_SET_COLUMN_PREFIX}{index}");
             projections.push((column.clone(), expression));
             columns.push(column);
@@ -396,12 +441,14 @@ fn append_distinct_set_projections(
 fn prepare_aggregate_set_key_statement(
     engine: &Engine,
     statement: &QueryBlockPlan,
+    schema: &uqa_execution::RowSchema,
+    params: &[SQLParam],
 ) -> Result<Option<QueryBlockPlan>, SQLError> {
     let output = identity_order_columns(&projection_columns(&statement.projections));
     let mut prepared: Option<QueryBlockPlan> = None;
     for (index, order) in statement.order_by.iter().enumerate() {
         let expression = resolve_order_expression(&order.expr, &output)?;
-        if !expression_may_return_set(engine, &expression) {
+        if !expression_may_return_set(engine, &expression, schema, params)? {
             continue;
         }
         let current = prepared.as_ref().unwrap_or(statement);
@@ -433,7 +480,7 @@ fn prepare_aggregate_set_key_statement(
     }
     for (index, expression) in statement.distinct_on.iter().enumerate() {
         let expression = resolve_order_expression(expression, &output)?;
-        if !expression_may_return_set(engine, &expression) {
+        if !expression_may_return_set(engine, &expression, schema, params)? {
             continue;
         }
         let column = format!("{DISTINCT_SET_COLUMN_PREFIX}{index}");
@@ -450,6 +497,7 @@ fn prepare_aggregate_set_key_statement(
 
 pub(in crate::sql) fn execute_filter_rows(
     engine: &Engine,
+    schema: uqa_execution::RowSchema,
     rows: Vec<ResultRow>,
     predicate: ScalarExpr,
     params: &[SQLParam],
@@ -458,8 +506,8 @@ pub(in crate::sql) fn execute_filter_rows(
     use uqa_execution::scan::TableScan;
     use uqa_execution::{physical::run_to_rows, Filter, PhysicalOperator};
 
-    let columns = source_columns(&rows);
-    let scan: Box<dyn PhysicalOperator + '_> = Box::new(TableScan::from_rows(columns, rows));
+    let scan: Box<dyn PhysicalOperator + '_> =
+        Box::new(TableScan::from_rows_with_schema(schema, rows));
     let evaluator = EngineExpressionEvaluator::shared(engine, params, ctes);
     let mut filter = Filter::with_evaluator(scan, predicate, evaluator);
     let (_, rows) = run_to_rows(&mut filter).map_err(physical_exec_error)?;
@@ -469,7 +517,7 @@ pub(in crate::sql) fn execute_filter_rows(
 pub(in crate::sql) fn attach_order_limit<'a>(
     mut operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
     statement: &QueryBlockPlan,
-    output_columns: &[(String, String)],
+    output_columns: &[OutputColumnMapping],
     engine: &Engine,
     params: &[SQLParam],
     ctes: &CteScope,
@@ -552,6 +600,8 @@ pub(in crate::sql) fn execute_query_block_operator_output<'a>(
     columns: Vec<String>,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
+    validate_query_block_expression_types(engine, statement, operator.row_schema(), params)?;
+    validate_query_set_contexts(engine, statement, operator.row_schema(), params)?;
     if matches!(output_mode, QueryOutputMode::ExistsKeySet)
         && matches!(statement.compute, ComputePlan::Project)
         && statement.order_by.is_empty()
@@ -559,7 +609,12 @@ pub(in crate::sql) fn execute_query_block_operator_output<'a>(
         && statement.offset.is_none()
         && !statement.distinct
         && statement.distinct_on.is_empty()
-        && !projections_may_return_set(engine, &physical_projections(&statement.projections))
+        && !projections_may_return_set(
+            engine,
+            &physical_projections(&statement.projections),
+            operator.row_schema(),
+            params,
+        )?
         && matches!(original.compute, ComputePlan::Project)
         && original.order_by.is_empty()
         && original.limit.is_none()
@@ -642,7 +697,11 @@ pub(in crate::sql) fn finish_query_block_operator_output<'a>(
                 .iter()
                 .enumerate()
                 .map(|(index, expression)| {
-                    if expression_may_return_set(engine, expression) {
+                    if operator
+                        .schema()
+                        .iter()
+                        .any(|column| column == &format!("{DISTINCT_SET_COLUMN_PREFIX}{index}"))
+                    {
                         ScalarExpr::Column(format!("{DISTINCT_SET_COLUMN_PREFIX}{index}"))
                     } else {
                         expression.clone()
@@ -718,12 +777,30 @@ pub(in crate::sql) fn build_relational_operator<'a>(
 ) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
     use uqa_execution::{ColumnSelection, HashAggregate, Project, Window};
 
-    validate_projection_set_contexts(engine, &statement.projections)?;
+    let expanded_statement = statement
+        .projections
+        .iter()
+        .any(|projection| {
+            matches!(
+                projection.expr,
+                ScalarExpr::Star | ScalarExpr::QualifiedStar(_)
+            )
+        })
+        .then(|| {
+            let mut expanded = statement.clone();
+            expanded.projections =
+                expand_bound_projection_stars(&statement.projections, operator.row_schema())?;
+            Ok::<_, SQLError>(expanded)
+        })
+        .transpose()?;
+    let statement = expanded_statement.as_ref().unwrap_or(statement);
     let evaluator = EngineExpressionEvaluator::shared(engine, params, ctes);
     operator = attach_relational_filter(engine, operator, predicate, params, ctes, &evaluator)?;
     let mut group_statement = None;
     if matches!(statement.compute, ComputePlan::Aggregate) {
-        if let Some(plan) = prepare_group_set_projection(engine, statement) {
+        if let Some(plan) =
+            prepare_group_set_projection(engine, statement, operator.row_schema(), params)?
+        {
             operator = build_set_projection(
                 operator,
                 engine,
@@ -733,7 +810,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                 plan.projections,
                 true,
                 uqa_execution::DEFAULT_BATCH_SIZE,
-            );
+            )?;
             group_statement = Some(plan.statement);
         }
     }
@@ -750,9 +827,12 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                     statement,
                     &distinct_output,
                     &mut projections,
+                    operator.row_schema(),
+                    params,
                 )?;
                 append_score_provenance_projections(&mut projections, operator.schema());
-                if projections_may_return_set(engine, &projections) {
+                if projections_may_return_set(engine, &projections, operator.row_schema(), params)?
+                {
                     operator = build_set_projection(
                         operator,
                         engine,
@@ -762,7 +842,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                         projections,
                         false,
                         projection_set_batch_size(statement),
-                    );
+                    )?;
                     operator = attach_order_limit(
                         operator,
                         statement,
@@ -788,27 +868,40 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                 }
             } else {
                 let (mut physical, mut output) =
-                    order_projection(&statement.projections, operator.schema());
+                    order_projection(&statement.projections, operator.row_schema())?;
                 // SQL ordinals and aliases are resolved only against the
                 // visible SELECT list. Score provenance is carried through
                 // the final column selection for parent query blocks, but it
                 // is not itself a selectable output position.
                 let order_output = output.clone();
-                let order_statement =
-                    prepare_order_set_projections(engine, statement, &order_output, &mut physical)?;
+                let order_statement = prepare_order_set_projections(
+                    engine,
+                    statement,
+                    &order_output,
+                    &mut physical,
+                    operator.row_schema(),
+                    params,
+                )?;
                 let distinct_columns = append_distinct_set_projections(
                     engine,
                     statement,
                     &order_output,
                     &mut physical,
+                    operator.row_schema(),
+                    params,
                 )?;
                 append_score_provenance_mappings(&mut output, operator.schema());
                 output.extend(
                     distinct_columns
                         .into_iter()
-                        .map(|column| (column.clone(), column)),
+                        .map(|column| (column.clone(), ScalarExpr::Column(column))),
                 );
-                operator = if projections_may_return_set(engine, &physical) {
+                operator = if projections_may_return_set(
+                    engine,
+                    &physical,
+                    operator.row_schema(),
+                    params,
+                )? {
                     build_set_projection(
                         operator,
                         engine,
@@ -818,7 +911,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                         physical,
                         true,
                         uqa_execution::DEFAULT_BATCH_SIZE,
-                    )
+                    )?
                 } else {
                     Box::new(Project::appending_with_evaluator(
                         operator,
@@ -835,16 +928,24 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                     ctes,
                     evaluator,
                 )?;
-                operator = Box::new(ColumnSelection::with_mapping(operator, output));
+                let output = output_selection_positions(operator.row_schema(), output)?;
+                operator = Box::new(ColumnSelection::with_positions(operator, output));
             }
         }
         ComputePlan::Aggregate => {
-            let set_key_statement = prepare_aggregate_set_key_statement(engine, statement)?;
+            let set_key_statement = prepare_aggregate_set_key_statement(
+                engine,
+                statement,
+                operator.row_schema(),
+                params,
+            )?;
             let statement = set_key_statement.as_ref().unwrap_or(statement);
             let schema = projection_columns(&statement.projections);
             let input_schema = operator.row_schema().clone();
             let work_mem_bytes = physical_work_mem_bytes(engine)?;
-            if let Some(set_plan) = prepare_aggregate_set_projection(engine, statement) {
+            if let Some(set_plan) =
+                prepare_aggregate_set_projection(engine, statement, &input_schema, params)?
+            {
                 let aggregate_schema = projection_columns(&set_plan.statement.projections);
                 let aggregate_types = set_plan
                     .statement
@@ -885,7 +986,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                     set_plan.projections,
                     false,
                     projection_set_batch_size(statement),
-                );
+                )?;
             } else {
                 let aggregate_types = statement
                     .projections
@@ -930,23 +1031,32 @@ pub(in crate::sql) fn build_relational_operator<'a>(
         }
         ComputePlan::Window => {
             let source_row_schema = operator.row_schema().clone();
-            let source_schema = operator.schema().to_vec();
             let work_mem_bytes = physical_work_mem_bytes(engine)?;
             let window_plan = prepare_window_plan(&statement.projections);
             let mut projections = physical_projections(window_plan.projections());
-            let output_columns = order_projection(&statement.projections, &source_schema)
+            let schema = window_plan.output_schema(engine, &source_row_schema, params)?;
+            let output_columns = order_projection(&statement.projections, &source_row_schema)?
                 .1
                 .into_iter()
-                .map(|(output, _)| (output.clone(), output))
+                .enumerate()
+                .map(|(position, (output, _))| (output, ScalarExpr::Position(position)))
                 .collect::<Vec<_>>();
             let order_statement = prepare_order_set_projections(
                 engine,
                 statement,
                 &output_columns,
                 &mut projections,
+                &schema,
+                params,
             )?;
-            append_distinct_set_projections(engine, statement, &output_columns, &mut projections)?;
-            let schema = window_plan.output_schema(engine, &source_row_schema, params)?;
+            append_distinct_set_projections(
+                engine,
+                statement,
+                &output_columns,
+                &mut projections,
+                &schema,
+                params,
+            )?;
             operator = Box::new(Window::with_typed_executor(
                 operator,
                 schema.columns().to_vec(),
@@ -961,24 +1071,26 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                 )),
             ));
             append_score_provenance_projections(&mut projections, operator.schema());
-            operator = if projections_may_return_set(engine, &projections) {
-                build_set_projection(
-                    operator,
-                    engine,
-                    params,
-                    ctes,
-                    Arc::clone(&evaluator),
-                    projections,
-                    false,
-                    projection_set_batch_size(statement),
-                )
-            } else {
-                Box::new(Project::with_evaluator(
-                    operator,
-                    projections,
-                    Arc::clone(&evaluator),
-                ))
-            };
+            operator =
+                if projections_may_return_set(engine, &projections, operator.row_schema(), params)?
+                {
+                    build_set_projection(
+                        operator,
+                        engine,
+                        params,
+                        ctes,
+                        Arc::clone(&evaluator),
+                        projections,
+                        false,
+                        projection_set_batch_size(statement),
+                    )?
+                } else {
+                    Box::new(Project::with_evaluator(
+                        operator,
+                        projections,
+                        Arc::clone(&evaluator),
+                    ))
+                };
             operator = attach_order_limit(
                 operator,
                 order_statement.as_ref().unwrap_or(statement),
@@ -1050,7 +1162,7 @@ pub(in crate::sql) fn walk_expr<F: FnMut(&ScalarExpr)>(expr: &ScalarExpr, f: &mu
             }
         }
         ScalarExpr::Cast { expr, .. } => walk_expr(expr, f),
-        ScalarExpr::Array(items) => {
+        ScalarExpr::Array(items) | ScalarExpr::Row(items) => {
             for p in items {
                 walk_expr(p, f);
             }

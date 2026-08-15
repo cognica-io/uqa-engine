@@ -12,7 +12,7 @@ use super::{
     normalize_plpgsql_type, optional_array, require, require_nonempty_str,
     validate_assignable_datum, CreateFunction, FunctionBody, FunctionParamMode, FunctionReturns,
     JSONValue, PLpgSQLCursor, PLpgSQLDatum, PLpgSQLFunction, PLpgSQLRowField, PLpgSQLVar, Result,
-    SQLError,
+    RoutineColumnTypeReference, SQLError,
 };
 
 pub fn parse_function(def: &CreateFunction) -> Result<PLpgSQLFunction> {
@@ -168,6 +168,50 @@ pub(super) fn lower_function(function: &JSONValue) -> Result<PLpgSQLFunction> {
     })
 }
 
+fn has_percent_type_suffix(type_name: &str) -> bool {
+    type_name
+        .get(type_name.len().saturating_sub("%type".len())..)
+        .is_some_and(|suffix| suffix.eq_ignore_ascii_case("%type"))
+}
+
+fn lower_percent_type_reference(
+    datatype: &JSONValue,
+    variable_name: &str,
+) -> Result<RoutineColumnTypeReference> {
+    let identifiers = require(datatype, "typname_identifiers")?
+        .as_array()
+        .ok_or_else(|| {
+            SQLError::Internal(format!(
+                "PL/pgSQL variable `{variable_name}` type metadata `typname_identifiers` must be an array"
+            ))
+        })?;
+    let identifiers = identifiers
+        .iter()
+        .enumerate()
+        .map(|(index, identifier)| match identifier.as_str() {
+            Some(identifier) if !identifier.is_empty() => Ok(identifier.to_string()),
+            _ => Err(SQLError::Internal(format!(
+                "PL/pgSQL variable `{variable_name}` type metadata identifier {index} must be a non-empty string"
+            ))),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    match identifiers.as_slice() {
+        [relation, column] => Ok(RoutineColumnTypeReference::new(
+            None,
+            relation.clone(),
+            column.clone(),
+        )),
+        [schema, relation, column] => Ok(RoutineColumnTypeReference::new(
+            Some(schema.clone()),
+            relation.clone(),
+            column.clone(),
+        )),
+        _ => Err(SQLError::TypeMismatch(format!(
+            "PL/pgSQL variable `{variable_name}` %TYPE must identify a relation column"
+        ))),
+    }
+}
+
 pub(super) fn lower_datum(raw: &JSONValue) -> Result<PLpgSQLDatum> {
     ensure_single_tag(raw, "datum")?;
     if let Some(var) = raw.get("PLpgSQL_var") {
@@ -184,6 +228,9 @@ pub(super) fn lower_datum(raw: &JSONValue) -> Result<PLpgSQLDatum> {
                 "PL/pgSQL variable `{name}` has an empty normalized type"
             )));
         }
+        let type_reference = has_percent_type_suffix(&type_name)
+            .then(|| lower_percent_type_reference(datatype, &name))
+            .transpose()?;
         let default = match var.get("default_val") {
             Some(node) => Some(lower_expr(node)?),
             None => None,
@@ -216,6 +263,7 @@ pub(super) fn lower_datum(raw: &JSONValue) -> Result<PLpgSQLDatum> {
         return Ok(PLpgSQLDatum::Var(Box::new(PLpgSQLVar {
             name,
             type_name,
+            type_reference,
             default,
             constant: json_bool_or_false(var, "isconst")?,
             not_null: json_bool_or_false(var, "notnull")?,

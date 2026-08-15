@@ -9,6 +9,7 @@
 use super::{
     AssignmentPlan, BTreeMap, OptimizerConfig, ProjectionPlan, ScalarExpr, ScalarFrameBound, Value,
 };
+use uqa_core::ArrayValue;
 use uqa_sql::expr::{
     cast_value, eval_binary_values_with_integer_width, integer_width_for_literal, truthy,
 };
@@ -271,15 +272,17 @@ fn fold_literal_expression(expression: ScalarExpr) -> ScalarExpr {
                 .iter()
                 .all(|item| matches!(item, ScalarExpr::Literal(_))) =>
         {
-            ScalarExpr::Literal(Value::List(
-                items
-                    .into_iter()
-                    .filter_map(|item| match item {
-                        ScalarExpr::Literal(value) => Some(value),
-                        _ => None,
-                    })
-                    .collect(),
-            ))
+            let values = items
+                .into_iter()
+                .filter_map(|item| match item {
+                    ScalarExpr::Literal(value) => Some(value),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            ArrayValue::try_new(values.clone()).map_or_else(
+                || ScalarExpr::Array(values.into_iter().map(ScalarExpr::Literal).collect()),
+                |array| ScalarExpr::Literal(Value::Array(array)),
+            )
         }
         other => other,
     }

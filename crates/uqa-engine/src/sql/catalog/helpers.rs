@@ -10,6 +10,7 @@ use super::{
     canonical_routine_type_name, column_type_name, ColumnType, Engine, Expr, RelationIdentity,
     ResultRow, SQLColumnDef, SQLError, Value,
 };
+use uqa_core::ArrayValue;
 use uqa_sql::ast::{
     ForeignKey, ForeignKeyAction, ForeignKeyMatch, TableKeyConstraintKind, WindowFrame, WindowSpec,
 };
@@ -49,6 +50,12 @@ pub(super) fn bool_value(value: bool) -> Value {
 
 pub(super) fn list_int(values: &[i64]) -> Value {
     Value::List(values.iter().copied().map(Value::Int).collect())
+}
+
+pub(super) fn catalog_array(values: Vec<Value>, label: &str) -> Result<Value, SQLError> {
+    ArrayValue::try_new(values)
+        .map(Value::Array)
+        .ok_or_else(|| SQLError::Internal(format!("{label} has non-rectangular dimensions")))
 }
 
 pub(super) fn row(entries: impl IntoIterator<Item = (&'static str, Value)>) -> ResultRow {
@@ -501,6 +508,7 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::Int2Vector => 22,
         ColumnType::OidVector => 30,
         ColumnType::AnyArray => 2277,
+        ColumnType::Record => 2249,
         ColumnType::Array(element) => match element.as_ref() {
             ColumnType::SmallInteger => 1005,
             ColumnType::Integer => 1007,
@@ -527,6 +535,7 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
             ColumnType::Int2Vector => 1006,
             ColumnType::OidVector => 1013,
             ColumnType::AnyArray => 0,
+            ColumnType::Record => 2287,
             ColumnType::Date => 1182,
             ColumnType::Time => 1183,
             ColumnType::TimeTz => 1270,
@@ -552,27 +561,11 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
 
 pub(super) fn routine_type_oid(type_name: &str) -> i64 {
     let canonical = canonical_routine_type_name(type_name);
+    if let Ok(column_type) = ColumnType::from_sql_name(&canonical) {
+        return pg_type_oid(&column_type);
+    }
     match canonical.as_str() {
-        "bool" => 16,
-        "bytea" => 17,
-        "int8" => 20,
-        "int2" => 21,
-        "int4" => 23,
-        "text" => 25,
-        "json" => 114,
-        "float4" => 700,
-        "float8" => 701,
-        "varchar" => 1043,
-        "date" => 1082,
-        "time" => 1083,
-        "timestamp" => 1114,
-        "timestamptz" => 1184,
-        "timetz" => 1266,
-        "numeric" => 1700,
-        "record" => 2249,
         "void" => 2278,
-        "jsonb" => 3802,
-        "vector" => 380_000,
         other => stable_oid("type", other),
     }
 }
@@ -818,6 +811,7 @@ pub(super) fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRoutineOids {
         }
         ColumnType::Regtype => PgTypeRoutineOids::new(2220, 2221, 2454, 2455),
         ColumnType::AnyArray => PgTypeRoutineOids::new(2296, 2297, 2502, 2503),
+        ColumnType::Record => PgTypeRoutineOids::new(2290, 2291, 2402, 2403),
         ColumnType::Uuid => PgTypeRoutineOids::new(2952, 2953, 2961, 2962),
         ColumnType::JsonB => PgTypeRoutineOids::new(3806, 3804, 3805, 3803),
         ColumnType::Vector(_) | ColumnType::Tensor(_) => PgTypeRoutineOids::new(0, 0, 0, 0),
@@ -907,6 +901,7 @@ pub(super) fn info_udt_name(ty: &ColumnType) -> String {
         ColumnType::Int2Vector => "int2vector".into(),
         ColumnType::OidVector => "oidvector".into(),
         ColumnType::AnyArray => "anyarray".into(),
+        ColumnType::Record => "record".into(),
         ColumnType::Array(element) => match element.as_ref() {
             ColumnType::SmallInteger => "_int2".into(),
             ColumnType::Integer => "_int4".into(),
@@ -933,6 +928,7 @@ pub(super) fn info_udt_name(ty: &ColumnType) -> String {
             ColumnType::Int2Vector => "_int2vector".into(),
             ColumnType::OidVector => "_oidvector".into(),
             ColumnType::AnyArray => "_anyarray".into(),
+            ColumnType::Record => "_record".into(),
             ColumnType::Date => "_date".into(),
             ColumnType::Time => "_time".into(),
             ColumnType::TimeTz => "_timetz".into(),
@@ -1261,7 +1257,7 @@ fn collect_expression_columns(expression: &Expr, output: &mut Vec<String>) {
                 collect_expression_columns(filter, output);
             }
         }
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+        Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
             for item in items {
                 collect_expression_columns(item, output);
             }
@@ -1312,6 +1308,7 @@ fn collect_expression_columns(expression: &Expr, output: &mut Vec<String>) {
         Expr::InSubquery { expr, .. } => collect_expression_columns(expr, output),
         Expr::Default
         | Expr::Star
+        | Expr::QualifiedStar(_)
         | Expr::Literal(_)
         | Expr::Param(_)
         | Expr::ScalarSubquery(_)

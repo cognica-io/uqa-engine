@@ -11,7 +11,7 @@ use super::{
     PhysicalOperator, ResultRow, RowSchema, SQLParam, ScalarEvalContext, ScalarExpr, SortKey,
     Value,
 };
-use uqa_sql::expr::RowLookup;
+use crate::ProjectedRow;
 
 mod adaptive;
 mod fold;
@@ -61,7 +61,7 @@ pub trait AggregateExecutor: Send {
 
     /// Fold one projected row. Implementations advertising support must
     /// preserve the same expression and aggregate semantics as [`Self::consume`].
-    fn consume_projected_row(&mut self, _row: &dyn RowLookup) -> ExecResult<()> {
+    fn consume_projected_row(&mut self, _row: &ProjectedRow<'_, '_>) -> ExecResult<()> {
         Err(ExecError::Other(
             "aggregate executor does not accept projected rows".into(),
         ))

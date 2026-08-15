@@ -246,6 +246,7 @@ pub(in crate::compiler) fn compile_create_table(
     }
     Ok(CreateTable {
         name,
+        qualifier: relation.relname.clone(),
         columns,
         if_not_exists: stmt.if_not_exists,
         checks,

@@ -7,7 +7,7 @@
 //! Positional integer expression bytecode for analytical aggregates.
 
 use uqa_core::Value;
-use uqa_execution::ScalarExpr;
+use uqa_execution::{RowSchema, ScalarExpr};
 use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::RowLookup;
 use uqa_sql::SQLError;
@@ -35,7 +35,7 @@ pub(super) struct ProjectedIntegerExpression {
 }
 
 impl ProjectedIntegerExpression {
-    pub(super) fn compile(expression: &ScalarExpr, input_schema: &[String]) -> Option<Self> {
+    pub(super) fn compile(expression: &ScalarExpr, input_schema: &RowSchema) -> Option<Self> {
         let mut instructions = Vec::new();
         let mut stack_depth = 0usize;
         let mut max_stack_depth = 0usize;
@@ -50,7 +50,10 @@ impl ProjectedIntegerExpression {
             .then_some(Self { instructions })
     }
 
-    pub(super) fn evaluate(&self, row: &dyn RowLookup) -> Result<ProjectedIntegerValue, SQLError> {
+    pub(super) fn evaluate<Row: RowLookup>(
+        &self,
+        row: &Row,
+    ) -> Result<ProjectedIntegerValue, SQLError> {
         let mut stack = [ProjectedIntegerValue::General; INTEGER_STACK_LIMIT];
         let mut stack_len = 0usize;
         for instruction in &self.instructions {
@@ -84,7 +87,7 @@ impl ProjectedIntegerExpression {
 
 fn emit_integer_expression(
     expression: &ScalarExpr,
-    input_schema: &[String],
+    input_schema: &RowSchema,
     instructions: &mut Vec<ProjectedIntegerInstruction>,
     stack_depth: &mut usize,
     max_stack_depth: &mut usize,

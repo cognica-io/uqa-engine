@@ -69,7 +69,7 @@ uqa-api = { version = "0.1.2", path = "crates/uqa-api" }
 
 # Shared external dependencies (versions added when first consumer pulls them in)
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["arbitrary_precision"] }
 thiserror = "1.0"
 tracing = "0.1"
 parking_lot = "0.12"
@@ -78,9 +78,10 @@ ahash = "0.8"
 rayon = "1.10"
 regex = "1.11"
 unicode-normalization = "0.1"
-rust_decimal = "1.42"
+num-bigint = "0.4"
+num-traits = "0.2"
 rusqlite = { version = "0.39", default-features = false, features = ["bundled-sqlcipher-vendored-openssl", "blob", "cache"] }
-pg_query = { version = "6.1.1", git = "https://github.com/jaepil/pg_query.rs", rev = "7f020727f9fcdefa434b944bbe9a8f0ef029bef7" }
+pg_query = { version = "6.1.1", git = "https://github.com/jaepil/pg_query.rs", rev = "516b3a03fed42e606ce01bc8b5a864a1698c210d" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 argon2 = { version = "0.5", default-features = false }
 chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }

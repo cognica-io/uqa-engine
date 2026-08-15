@@ -178,7 +178,7 @@ fn collect_constraint_columns(expression: &uqa_sql::ast::Expr, output: &mut Vec<
                 collect_constraint_columns(filter, output);
             }
         }
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+        Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
             for item in items {
                 collect_constraint_columns(item, output);
             }
@@ -243,6 +243,7 @@ fn collect_constraint_columns(expression: &uqa_sql::ast::Expr, output: &mut Vec<
         Expr::InSubquery { expr, .. } => collect_constraint_columns(expr, output),
         Expr::Default
         | Expr::Star
+        | Expr::QualifiedStar(_)
         | Expr::Literal(_)
         | Expr::Param(_)
         | Expr::ScalarSubquery(_)

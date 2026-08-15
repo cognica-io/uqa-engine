@@ -11,7 +11,7 @@ use icu_casemap::CaseMapper;
 use super::{
     compare, compile_pg_regex, division_by_zero, expect_str, float1, gcd_i64, initcap_str,
     json_concat, like_match, out_of_range, string1, to_decimal, to_f64, to_i64, trim_chars,
-    value_to_string, values_equal, Result, SQLError, Value,
+    value_to_string, values_equal, ArrayValue, Result, SQLError, Value,
 };
 
 pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
@@ -172,24 +172,23 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
                 // JSON carriers keep JSON arrays distinct from SQL arrays.
                 if let [left, right] = args {
                     match (left, right) {
-                        (Value::List(left), Value::List(right)) => {
-                            let mut values = left.clone();
-                            values.extend(right.iter().cloned());
-                            return Ok(Value::List(values));
+                        (Value::Array(_), Value::Array(_)) => {
+                            return super::scalar_array::eval_array_functions("array_cat", args)
+                                .expect("array_cat is a registered array function");
                         }
-                        (Value::List(values), Value::Null) | (Value::Null, Value::List(values)) => {
-                            return Ok(Value::List(values.clone()));
+                        (Value::Array(array), Value::Null) | (Value::Null, Value::Array(array)) => {
+                            return Ok(Value::Array(array.clone()));
                         }
-                        (Value::List(left), right) => {
-                            let mut values = left.clone();
-                            values.push(right.clone());
-                            return Ok(Value::List(values));
+                        (Value::Array(_), _) => {
+                            return super::scalar_array::eval_array_functions("array_append", args)
+                                .expect("array_append is a registered array function");
                         }
-                        (left, Value::List(right)) => {
-                            let mut values = Vec::with_capacity(right.len().saturating_add(1));
-                            values.push(left.clone());
-                            values.extend(right.iter().cloned());
-                            return Ok(Value::List(values));
+                        (_, Value::Array(_)) => {
+                            return super::scalar_array::eval_array_functions(
+                                "array_prepend",
+                                args,
+                            )
+                            .expect("array_prepend is a registered array function");
                         }
                         _ => {}
                     }
@@ -548,9 +547,17 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
                                     "regex capture set omitted its mandatory full match".into(),
                                 )
                             })?;
-                            Ok(Value::List(vec![Value::Str(full_match.as_str().into())]))
+                            ArrayValue::try_new(vec![Value::Str(full_match.as_str().into())])
+                                .map(Value::Array)
+                                .ok_or_else(|| {
+                                    SQLError::TypeMismatch("invalid regexp_match result".into())
+                                })
                         } else {
-                            Ok(Value::List(groups))
+                            ArrayValue::try_new(groups)
+                                .map(Value::Array)
+                                .ok_or_else(|| {
+                                    SQLError::TypeMismatch("invalid regexp_match result".into())
+                                })
                         }
                     }
                 }

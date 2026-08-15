@@ -9,7 +9,7 @@
 
 use std::borrow::Cow;
 
-use uqa_core::{DecimalValue, TemporalValue, Value};
+use uqa_core::{ArrayValue, DecimalValue, TemporalValue, Value};
 
 use crate::ast::{BinaryOp, Expr};
 use crate::error::{Result, SQLError};
@@ -47,8 +47,7 @@ mod scalar_postgres;
 mod scalar_temporal;
 
 use binary::{
-    compare, compare_nullable, eval_binary, eval_comparison_op, row_column_value, values_equal,
-    values_equal_nullable,
+    compare, compare_nullable, eval_binary, eval_comparison_op, values_equal, values_equal_nullable,
 };
 pub(crate) use binary::{division_by_zero, out_of_range};
 pub use binary::{
@@ -61,8 +60,9 @@ pub use casting::{
 pub(crate) use conversion::to_f64;
 use conversion::{
     allocation_error, coerce_i64, expect_str, float1, float_to_i64_rounded, float_to_i64_trunc,
-    gcd_i64, initcap_str, nonnegative_usize, string1, to_decimal, to_i64, value_to_string,
+    gcd_i64, initcap_str, nonnegative_usize, string1, to_decimal, to_i64,
 };
+pub use conversion::{array_value_to_string, value_to_string};
 pub use conversion::{value_to_tensor, value_to_vector};
 use scalar_dispatch::{eval_scalar_function, eval_sequence_function};
 pub use scalar_helpers::CompiledLikePattern;
@@ -149,7 +149,12 @@ pub trait RowLookup {
         false
     }
 
-    fn qualified_column(&self, qualifier: &str, column: &str, key: &str) -> Option<&Value>;
+    fn qualified_column(&self, qualifier: &str, column: &str) -> Option<&Value>;
+
+    /// Whether a qualified identity names more than one visible input column.
+    fn qualified_column_is_ambiguous(&self, _qualifier: &str, _column: &str) -> bool {
+        false
+    }
 
     /// Return a value by the physical schema position used to construct this
     /// row view. Materialized named rows do not expose positional access;
@@ -164,54 +169,15 @@ pub trait RowLookup {
     /// map. The default keeps narrow projected lookup implementations source
     /// compatible when they deliberately do not expose whole-row semantics.
     fn visit_columns(&self, _visitor: &mut dyn FnMut(&str, &Value)) {}
-
-    /// Visit logical output columns plus hidden lookup aliases. Physical rows
-    /// use this only when a genuinely correlated lateral fallback must cross a
-    /// named-row boundary; ordinary projection/materialization remains limited
-    /// to [`Self::visit_columns`].
-    fn visit_lookup_columns(&self, visitor: &mut dyn FnMut(&str, &Value)) {
-        self.visit_columns(visitor);
-    }
-
-    /// Physical correlated subqueries require the concrete outer row passed
-    /// to `ScalarSubqueryRunner`. Projected row views return `None`; planners
-    /// only use them for expressions that cannot contain subqueries.
-    fn result_row(&self) -> Option<&ResultRow> {
-        None
-    }
 }
 
 impl RowLookup for ResultRow {
     fn column(&self, name: &str) -> Option<&Value> {
-        row_column_value(self, name)
+        self.get(name)
     }
 
-    fn column_is_ambiguous(&self, name: &str) -> bool {
-        if self.contains_key(name) {
-            return false;
-        }
-        self.keys()
-            .filter(|key| {
-                key.rsplit_once('.')
-                    .is_some_and(|(_, column)| column == name)
-            })
-            .take(2)
-            .count()
-            > 1
-    }
-
-    fn qualified_column(&self, qualifier: &str, column: &str, key: &str) -> Option<&Value> {
-        let value = if key.is_empty() {
-            let qualified_key = format!("{qualifier}.{column}");
-            self.get(&qualified_key)
-        } else {
-            self.get(key)
-        };
-        value.or_else(|| unqualified_fallback(self, column))
-    }
-
-    fn result_row(&self) -> Option<&ResultRow> {
-        Some(self)
+    fn qualified_column(&self, _qualifier: &str, _column: &str) -> Option<&Value> {
+        None
     }
 
     fn visit_columns(&self, visitor: &mut dyn FnMut(&str, &Value)) {
@@ -275,15 +241,16 @@ impl<'a> EvalContext<'a> {
     }
 
     /// Resolve a qualified column without constructing an AST expression.
-    pub fn qualified_column_value(
-        &self,
-        qualifier: &str,
-        column: &str,
-        key: &str,
-    ) -> Result<Value> {
+    pub fn qualified_column_value(&self, qualifier: &str, column: &str) -> Result<Value> {
+        if self
+            .row_lookup()?
+            .qualified_column_is_ambiguous(qualifier, column)
+        {
+            return Err(SQLError::AmbiguousColumn(format!("{qualifier}.{column}")));
+        }
         Ok(self
             .row_lookup()?
-            .qualified_column(qualifier, column, key)
+            .qualified_column(qualifier, column)
             .cloned()
             .unwrap_or(Value::Null))
     }
@@ -318,29 +285,49 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             // Plain column refs match either an unqualified key or the
             // suffix of a qualified `table.col` key, so the same row
             // shape works for single-table SELECTs and JOIN tuples.
+            if ctx.row_lookup()?.column_is_ambiguous(name) {
+                return Err(SQLError::AmbiguousColumn(name.clone()));
+            }
             Ok(ctx
                 .row_lookup()?
                 .column(name)
                 .cloned()
                 .unwrap_or(Value::Null))
         }
-        Expr::QualifiedColumn {
-            qualifier,
-            column,
-            key,
-        } => Ok(ctx
-            .row_lookup()?
-            .qualified_column(qualifier, column, key)
-            .cloned()
-            .unwrap_or(Value::Null)),
+        Expr::QualifiedColumn { qualifier, column } => {
+            if ctx
+                .row_lookup()?
+                .qualified_column_is_ambiguous(qualifier, column)
+            {
+                return Err(SQLError::AmbiguousColumn(format!("{qualifier}.{column}")));
+            }
+            Ok(ctx
+                .row_lookup()?
+                .qualified_column(qualifier, column)
+                .cloned()
+                .unwrap_or(Value::Null))
+        }
         Expr::Array(elements) => {
             let mut out = Vec::with_capacity(elements.len());
             for e in elements {
                 out.push(eval(e, ctx)?);
             }
-            Ok(Value::List(out))
+            ArrayValue::try_new(out).map(Value::Array).ok_or_else(|| {
+                SQLError::TypeMismatch(
+                    "multidimensional arrays must have matching dimensions".into(),
+                )
+            })
         }
-        Expr::Star => Err(SQLError::Internal("`*` cannot be evaluated".into())),
+        Expr::Row(elements) => {
+            let mut out = Vec::with_capacity(elements.len());
+            for element in elements {
+                out.push(eval(element, ctx)?);
+            }
+            Ok(Value::Row(out))
+        }
+        Expr::Star | Expr::QualifiedStar(_) => {
+            Err(SQLError::Internal("`*` cannot be evaluated".into()))
+        }
         Expr::Func {
             name,
             binding,
@@ -502,21 +489,6 @@ fn eval_between(v: &Value, lo: &Value, hi: &Value) -> Result<Value> {
     })
 }
 
-/// Fallback for a qualified column reference against a row keyed by
-/// bare column names (single-relation result rows). Declines when a
-/// different qualifier owns the column so join rows never
-/// mis-resolve.
-pub fn unqualified_fallback<'a>(row: &'a ResultRow, column: &str) -> Option<&'a Value> {
-    let claimed_by_other = row.keys().any(|key| {
-        key.rsplit_once('.')
-            .is_some_and(|(_, suffix)| suffix == column)
-    });
-    if claimed_by_other {
-        return None;
-    }
-    row.get(column)
-}
-
 fn normalized_function_name(name: &str) -> Cow<'_, str> {
     let stripped = name.strip_prefix("pg_catalog.").unwrap_or(name);
     if stripped.bytes().any(|byte| byte.is_ascii_uppercase()) {
@@ -547,7 +519,7 @@ pub fn evaluate_call_args(
                 let value_expr = inner
                     .get(1)
                     .ok_or_else(|| SQLError::Internal("named argument without a value".into()))?;
-                Ok((Some(arg_name.to_ascii_lowercase()), eval(value_expr, ctx)?))
+                Ok((Some(arg_name.clone()), eval(value_expr, ctx)?))
             }
             other => Ok((None, eval(other, ctx)?)),
         })
@@ -637,7 +609,9 @@ pub fn eval_function_call(
                 schemas.push("public".to_string());
                 schemas
             });
-        return Ok(Value::List(schemas.into_iter().map(Value::Str).collect()));
+        return ArrayValue::try_new(schemas.into_iter().map(Value::Str).collect())
+            .map(Value::Array)
+            .ok_or_else(|| SQLError::TypeMismatch("invalid current_schemas result".into()));
     }
 
     // Functions registered in the operator registry (text_match,
@@ -705,22 +679,22 @@ fn builtin_named_args(function: &str, call_args: &[(Option<String>, Value)]) -> 
         "regexp_substr" => match call_args.len() {
             2 => &["string", "pattern"],
             3 => &["string", "pattern", "start"],
-            4 => &["string", "pattern", "start", "n"],
-            5 => &["string", "pattern", "start", "n", "flags"],
-            6 => &["string", "pattern", "start", "n", "flags", "subexpr"],
+            4 => &["string", "pattern", "start", "N"],
+            5 => &["string", "pattern", "start", "N", "flags"],
+            6 => &["string", "pattern", "start", "N", "flags", "subexpr"],
             _ => return None,
         },
         "regexp_instr" => match call_args.len() {
             2 => &["string", "pattern"],
             3 => &["string", "pattern", "start"],
-            4 => &["string", "pattern", "start", "n"],
-            5 => &["string", "pattern", "start", "n", "endoption"],
-            6 => &["string", "pattern", "start", "n", "endoption", "flags"],
+            4 => &["string", "pattern", "start", "N"],
+            5 => &["string", "pattern", "start", "N", "endoption"],
+            6 => &["string", "pattern", "start", "N", "endoption", "flags"],
             7 => &[
                 "string",
                 "pattern",
                 "start",
-                "n",
+                "N",
                 "endoption",
                 "flags",
                 "subexpr",
@@ -736,8 +710,8 @@ fn builtin_named_args(function: &str, call_args: &[(Option<String>, Value)]) -> 
                 &["string", "pattern", "replacement", "flags"]
             }
             4 => &["string", "pattern", "replacement", "start"],
-            5 => &["string", "pattern", "replacement", "start", "n"],
-            6 => &["string", "pattern", "replacement", "start", "n", "flags"],
+            5 => &["string", "pattern", "replacement", "start", "N"],
+            6 => &["string", "pattern", "replacement", "start", "N", "flags"],
             _ => return None,
         },
         "make_interval" => return make_interval_named_args(call_args),
@@ -823,8 +797,10 @@ pub fn value_type_name(v: &Value) -> &'static str {
         Value::Decimal(_) => "numeric",
         Value::Json(_) => "json",
         Value::JsonB(_) => "jsonb",
+        Value::Array(_) => "anyarray",
         Value::List(_) => "anyarray",
-        Value::Map(_) => "record",
+        Value::Row(_) | Value::Record(_) => "record",
+        Value::Map(_) => "jsonb",
     }
 }
 

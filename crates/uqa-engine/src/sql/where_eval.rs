@@ -19,6 +19,7 @@ use super::select::{execute_filter_rows, CteScope};
 
 fn filter_documents(
     engine: &Engine,
+    schema: uqa_execution::RowSchema,
     filter: &ScalarExpr,
     params: &[SQLParam],
     documents: Vec<uqa_storage::document_store::Document>,
@@ -29,7 +30,7 @@ fn filter_documents(
     // fresh scope leaves those slots empty, so a residual predicate combining
     // a retrieval function with `IN (SELECT ...)`, `EXISTS`, or a scalar
     // subquery would fail to resolve slot 0.
-    let rows = execute_filter_rows(engine, documents, filter.clone(), params, ctes)?;
+    let rows = execute_filter_rows(engine, schema, documents, filter.clone(), params, ctes)?;
     rows.into_iter()
         .map(|row| match row.get(super::DOC_ID_COLUMN) {
             Some(uqa_core::Value::Int(doc_id)) if *doc_id >= 0 => Ok(ScoredEntry {
@@ -46,17 +47,12 @@ fn filter_documents(
 fn filter_table_rows(
     engine: &Engine,
     table: &str,
+    qualifier: &str,
     filter: &ScalarExpr,
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     let doc_ids = engine.table_doc_ids(table)?;
-    // A correlated subquery in this predicate resolves outer references such
-    // as `papers.id` against these rows, so they must publish the relation
-    // qualifier alongside the bare column name. Without it the merge with the
-    // inner relation's qualified columns leaves the outer reference NULL and
-    // the predicate silently matches nothing.
-    let publish_qualifier = crate::sql::select::expr_contains_subquery(filter);
     // When the predicate reads a known column set, evaluate it against
     // a per-row field projection fetched in one storage scan instead
     // of materialising every document.
@@ -75,14 +71,12 @@ fn filter_table_rows(
             let mut document = uqa_storage::document_store::Document::new();
             for (name, value) in names.iter().zip(values) {
                 document.insert(name.clone(), value.clone());
-                if publish_qualifier {
-                    document.insert(format!("{table}.{name}"), value.clone());
-                }
             }
             document.insert(super::DOC_ID_COLUMN.into(), super::doc_id_value(doc_id)?);
             documents.push(document);
         }
-        return filter_documents(engine, filter, params, documents, ctes);
+        let schema = table_filter_schema(engine, table, qualifier, names)?;
+        return filter_documents(engine, schema, filter, params, documents, ctes);
     }
     let mut documents = Vec::with_capacity(doc_ids.len());
     for doc_id in doc_ids {
@@ -91,17 +85,47 @@ fn filter_table_rows(
                 "WHERE scan: document {doc_id} listed by table `{table}` disappeared during the statement"
             ))
         })?;
-        if publish_qualifier {
-            for (name, value) in document.clone() {
-                if name != super::DOC_ID_COLUMN {
-                    document.insert(format!("{table}.{name}"), value);
-                }
-            }
-        }
         document.insert(super::DOC_ID_COLUMN.into(), super::doc_id_value(doc_id)?);
         documents.push(document);
     }
-    filter_documents(engine, filter, params, documents, ctes)
+    let columns = engine.try_table_columns(table).map_err(|error| {
+        SQLError::Internal(format!("read table columns for `{table}`: {error}"))
+    })?;
+    let schema = table_filter_schema(engine, table, qualifier, columns)?;
+    filter_documents(engine, schema, filter, params, documents, ctes)
+}
+
+fn table_filter_schema(
+    engine: &Engine,
+    table: &str,
+    qualifier: &str,
+    mut columns: Vec<String>,
+) -> Result<uqa_execution::RowSchema, SQLError> {
+    let definitions = engine
+        .try_describe_table(table)
+        .map_err(|error| SQLError::Internal(format!("read table schema for `{table}`: {error}")))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let mut types = columns
+        .iter()
+        .map(|column| {
+            definitions
+                .iter()
+                .find(|definition| definition.name == *column)
+                .map(|definition| definition.ty.clone())
+        })
+        .collect::<Vec<_>>();
+    let mut identities = columns
+        .iter()
+        .map(|column| uqa_execution::ColumnIdentity::qualified(qualifier, column))
+        .collect::<Vec<_>>();
+    columns.push(super::DOC_ID_COLUMN.into());
+    identities.push(uqa_execution::ColumnIdentity::unqualified(
+        super::DOC_ID_COLUMN,
+    ));
+    types.push(Some(uqa_sql::ast::ColumnType::BigInteger));
+    Ok(uqa_execution::RowSchema::with_identities(
+        columns, identities, types,
+    ))
 }
 
 pub(super) fn execute_mixed_where(
@@ -111,7 +135,7 @@ pub(super) fn execute_mixed_where(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    let mut rows = execute_mixed_where_expr(engine, table, filter, params, ctes)?;
+    let mut rows = execute_mixed_where_expr(engine, table, table, filter, params, ctes)?;
     rows.sort_by_key(|e| e.doc_id);
     Ok(rows)
 }
@@ -124,12 +148,13 @@ pub(super) fn execute_mixed_where(
 pub(super) fn collect_where_doc_ids(
     engine: &Engine,
     table: &str,
+    qualifier: &str,
     filter: &ScalarExpr,
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<Vec<DocId>, SQLError> {
     let scored = if is_jsonpath_fts_match_filter(filter) {
-        execute_mixed_where(engine, table, filter, params, ctes)?
+        execute_mixed_where_expr(engine, table, qualifier, filter, params, ctes)?
     } else if let Some(entries) =
         crate::operator_tree_bridge::run_optimised(engine, table, Some(filter), params)?
     {
@@ -139,7 +164,7 @@ pub(super) fn collect_where_doc_ids(
             ScalarExpr::Func { name, args, .. } if uqa_sql::registry::is_registered(name) => {
                 execute_function(engine, table, name, args, params)?
             }
-            other => execute_mixed_where(engine, table, other, params, ctes)?,
+            other => execute_mixed_where_expr(engine, table, qualifier, other, params, ctes)?,
         }
     };
     Ok(scored.into_iter().map(|entry| entry.doc_id).collect())
@@ -155,6 +180,7 @@ fn is_jsonpath_fts_match_filter(filter: &ScalarExpr) -> bool {
 fn execute_mixed_where_expr(
     engine: &Engine,
     table: &str,
+    qualifier: &str,
     filter: &ScalarExpr,
     params: &[SQLParam],
     ctes: &CteScope,
@@ -165,9 +191,9 @@ fn execute_mixed_where_expr(
             let Some(first) = iter.next() else {
                 return all_table_rows(engine, table);
             };
-            let mut out = execute_mixed_where_expr(engine, table, first, params, ctes)?;
+            let mut out = execute_mixed_where_expr(engine, table, qualifier, first, params, ctes)?;
             for part in iter {
-                let rhs = execute_mixed_where_expr(engine, table, part, params, ctes)?;
+                let rhs = execute_mixed_where_expr(engine, table, qualifier, part, params, ctes)?;
                 out = intersect_scored(out, rhs);
             }
             Ok(out)
@@ -177,7 +203,7 @@ fn execute_mixed_where_expr(
             for part in parts {
                 out = union_scored(
                     out,
-                    execute_mixed_where_expr(engine, table, part, params, ctes)?,
+                    execute_mixed_where_expr(engine, table, qualifier, part, params, ctes)?,
                 );
             }
             Ok(out)
@@ -190,16 +216,16 @@ fn execute_mixed_where_expr(
         ScalarExpr::Not(inner) if expr_is_null_free(inner) => complement_scored(
             engine,
             table,
-            execute_mixed_where_expr(engine, table, inner, params, ctes)?,
+            execute_mixed_where_expr(engine, table, qualifier, inner, params, ctes)?,
         ),
         ScalarExpr::Func { name, args, .. } if uqa_sql::registry::is_registered(name) => {
             if is_jsonpath_fts_match(name, args) {
-                filter_table_rows(engine, table, filter, params, ctes)
+                filter_table_rows(engine, table, qualifier, filter, params, ctes)
             } else {
                 execute_function(engine, table, name, args, params)
             }
         }
-        other => filter_table_rows(engine, table, other, params, ctes),
+        other => filter_table_rows(engine, table, qualifier, other, params, ctes),
     }
 }
 

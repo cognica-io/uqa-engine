@@ -188,10 +188,12 @@ fn reordered_inner_join_source(
     let mut relation_tables = BTreeMap::new();
     for (source_id, atom) in atoms.iter().enumerate() {
         let (qualifier, cardinality, column_stats, access_cost, paradigm) = match atom {
-            SourcePlan::Table { name, alias } => {
-                let qualifier = alias
-                    .clone()
-                    .unwrap_or_else(|| name.rsplit('.').next().unwrap_or(name).to_string());
+            SourcePlan::Table {
+                name,
+                qualifier,
+                alias,
+            } => {
+                let qualifier = alias.clone().unwrap_or_else(|| qualifier.clone());
                 relation_tables.insert(qualifier.clone(), name.clone());
                 let relation_stats = statistics.relation_statistics(name);
                 let cardinality = relation_stats
@@ -210,24 +212,23 @@ fn reordered_inner_join_source(
                     crate::AccessParadigm::Relational,
                 )
             }
-            SourcePlan::Function {
-                alias: Some(alias), ..
-            } => {
+            SourcePlan::Function { .. } => {
                 let Some(estimate) = statistics.source_access_estimate(atom) else {
                     return Ok(None);
                 };
                 (
-                    alias.clone(),
+                    atom.visible_qualifier()
+                        .expect("a function source always has a visible qualifier")
+                        .to_string(),
                     estimate.output_rows,
                     BTreeMap::new(),
                     estimate.cost,
                     estimate.paradigm,
                 )
             }
-            SourcePlan::Join { .. }
-            | SourcePlan::Values { .. }
-            | SourcePlan::Function { alias: None, .. }
-            | SourcePlan::Subquery { .. } => return Ok(None),
+            SourcePlan::Join { .. } | SourcePlan::Values { .. } | SourcePlan::Subquery { .. } => {
+                return Ok(None)
+            }
         };
         if qualifier.is_empty() || !aliases.insert(qualifier.clone()) {
             return Ok(None);
@@ -460,9 +461,10 @@ fn collect_resolved_aliases(
                 && order_by.iter().all(|order| recur(&order.expr))
                 && filter.as_deref().is_none_or(recur)
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-            items.iter().all(recur)
-        }
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => items.iter().all(recur),
         ScalarExpr::Binary { lhs, rhs, .. } => recur(lhs) && recur(rhs),
         ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::Not(inner)
@@ -483,6 +485,8 @@ fn collect_resolved_aliases(
         }
         ScalarExpr::Default
         | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::WindowCall { .. }
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }
@@ -686,28 +690,15 @@ fn attach_join_predicates(
 fn source_qualifiers(source: &SourcePlan) -> BTreeSet<String> {
     let mut qualifiers = BTreeSet::new();
     match source {
-        SourcePlan::Table { name, alias } => {
-            qualifiers.insert(
-                alias
-                    .clone()
-                    .unwrap_or_else(|| name.rsplit('.').next().unwrap_or(name).to_string()),
-            );
+        SourcePlan::Join { .. } => {}
+        SourcePlan::Table { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Subquery { .. } => {
+            if let Some(qualifier) = source.visible_qualifier() {
+                qualifiers.insert(qualifier.to_string());
+            }
         }
-        SourcePlan::Function {
-            alias: Some(alias), ..
-        }
-        | SourcePlan::Values {
-            alias: Some(alias), ..
-        }
-        | SourcePlan::Subquery {
-            alias: Some(alias), ..
-        } => {
-            qualifiers.insert(alias.clone());
-        }
-        SourcePlan::Join { .. }
-        | SourcePlan::Function { alias: None, .. }
-        | SourcePlan::Values { alias: None, .. }
-        | SourcePlan::Subquery { alias: None, .. } => {}
     }
     qualifiers
 }
@@ -733,7 +724,10 @@ fn collect_scalar_qualifiers(expression: &ScalarExpr, output: &mut BTreeSet<Stri
                 collect_scalar_qualifiers(filter, output);
             }
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => {
             for item in items {
                 collect_scalar_qualifiers(item, output);
             }
@@ -789,9 +783,13 @@ fn collect_scalar_qualifiers(expression: &ScalarExpr, output: &mut BTreeSet<Stri
             }
         }
         ScalarExpr::InSubquery { expr, .. } => collect_scalar_qualifiers(expr, output),
+        ScalarExpr::QualifiedStar(qualifier) => {
+            output.insert(qualifier.clone());
+        }
         ScalarExpr::Default
         | ScalarExpr::Star
         | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)

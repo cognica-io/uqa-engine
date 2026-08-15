@@ -9,9 +9,16 @@
 use super::{JSONValue, PLpgSQLDatum, Result, SQLError};
 
 pub(super) fn normalize_plpgsql_type(raw: &str) -> String {
-    let mut t = raw.trim().to_ascii_lowercase();
+    let raw = raw.trim();
+    if raw.to_ascii_lowercase().contains("%type") {
+        return raw.to_string();
+    }
+    let mut t = raw.to_ascii_lowercase();
     if let Some(rest) = t.strip_prefix("pg_catalog.") {
         t = rest.to_string();
+    }
+    if let Some(element) = crate::ast::builtin_array_element_name(&t) {
+        return format!("{element}[]");
     }
     t.replace('"', "")
 }

@@ -87,6 +87,12 @@ fn rewrite_aggregates(
                 .map(|item| rewrite_aggregates(engine, item, replace))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
+        ScalarExpr::Row(items) => Ok(ScalarExpr::Row(
+            items
+                .iter()
+                .map(|item| rewrite_aggregates(engine, item, replace))
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
         ScalarExpr::Binary { op, lhs, rhs } => Ok(ScalarExpr::Binary {
             op: *op,
             lhs: Box::new(rewrite_aggregates(engine, lhs, replace)?),

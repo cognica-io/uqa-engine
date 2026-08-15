@@ -127,9 +127,12 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                 let day = u32::try_from(to_i64(&args[2])?).map_err(|_| out_of_range("date"))?;
                 let epoch = chrono::DateTime::<chrono::Utc>::UNIX_EPOCH.date_naive();
                 let date = chrono::NaiveDate::from_ymd_opt(year, month, day).ok_or_else(|| {
-                    SQLError::TypeMismatch(format!(
-                        "make_date: invalid date {year:04}-{month:02}-{day:02}"
-                    ))
+                    SQLError::Routine {
+                        sqlstate: "22008".into(),
+                        message: format!(
+                            "date field value out of range: {year:04}-{month:02}-{day:02}"
+                        ),
+                    }
                 })?;
                 Ok(Value::Temporal(TemporalValue::Date {
                     days: i32::try_from(date.signed_duration_since(epoch).num_days())
@@ -247,7 +250,10 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                     return parse_roman_numeral(&s)
                         .map(DecimalValue::from_i64)
                         .map(Value::Decimal)
-                        .ok_or_else(|| SQLError::TypeMismatch(format!("to_number: {s:?}")));
+                        .ok_or_else(|| SQLError::Routine {
+                            sqlstate: "22P02".into(),
+                            message: "invalid Roman numeral".into(),
+                        });
                 }
                 let cleaned: String = s
                     .chars()
@@ -308,59 +314,107 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
 }
 
 fn parse_roman_numeral(input: &str) -> Option<i64> {
-    let roman = input.trim().to_ascii_uppercase();
+    const MAX_ROMAN_LEN: usize = 15;
+
+    fn roman_value(byte: u8) -> Option<i64> {
+        match byte.to_ascii_uppercase() {
+            b'I' => Some(1),
+            b'V' => Some(5),
+            b'X' => Some(10),
+            b'L' => Some(50),
+            b'C' => Some(100),
+            b'D' => Some(500),
+            b'M' => Some(1_000),
+            _ => None,
+        }
+    }
+
+    fn valid_subtraction(current: u8, next: u8) -> bool {
+        matches!(
+            (current.to_ascii_uppercase(), next.to_ascii_uppercase()),
+            (b'I', b'V' | b'X') | (b'X', b'L' | b'C') | (b'C', b'D' | b'M')
+        )
+    }
+
+    let input = input.as_bytes();
+    let mut start = 0;
+    while input.get(start).is_some_and(u8::is_ascii_whitespace) {
+        start += 1;
+    }
+    let roman = input[start..]
+        .iter()
+        .copied()
+        .take(MAX_ROMAN_LEN)
+        .take_while(|byte| roman_value(*byte).is_some())
+        .map(|byte| byte.to_ascii_uppercase())
+        .collect::<Vec<_>>();
     if roman.is_empty() {
         return None;
     }
-    let mut total = 0_i64;
-    let mut previous = 0_i64;
-    for character in roman.chars().rev() {
-        let value = match character {
-            'I' => 1,
-            'V' => 5,
-            'X' => 10,
-            'L' => 50,
-            'C' => 100,
-            'D' => 500,
-            'M' => 1_000,
-            _ => return None,
-        };
-        if value < previous {
-            total -= value;
-        } else {
-            total += value;
-            previous = value;
-        }
-    }
-    (1..=3_999)
-        .contains(&total)
-        .then(|| roman_numeral(total))
-        .filter(|canonical| canonical == &roman)
-        .map(|_| total)
-}
 
-fn roman_numeral(mut value: i64) -> String {
-    const DIGITS: &[(i64, &str)] = &[
-        (1_000, "M"),
-        (900, "CM"),
-        (500, "D"),
-        (400, "CD"),
-        (100, "C"),
-        (90, "XC"),
-        (50, "L"),
-        (40, "XL"),
-        (10, "X"),
-        (9, "IX"),
-        (5, "V"),
-        (4, "IV"),
-        (1, "I"),
-    ];
-    let mut output = String::new();
-    for (unit, token) in DIGITS {
-        while value >= *unit {
-            output.push_str(token);
-            value -= unit;
+    let mut total = 0_i64;
+    let mut repeat_count = 1;
+    let mut v_count = 0;
+    let mut l_count = 0;
+    let mut d_count = 0;
+    let mut subtraction_encountered = false;
+    let mut last_subtracted_value = 0;
+    let mut index = 0;
+    while index < roman.len() {
+        let current = roman[index];
+        let current_value = roman_value(current)?;
+        if subtraction_encountered && current_value >= last_subtracted_value {
+            return None;
         }
+        if v_count > 0 && current_value >= 5
+            || l_count > 0 && current_value >= 50
+            || d_count > 0 && current_value >= 500
+        {
+            return None;
+        }
+        match current {
+            b'V' => v_count += 1,
+            b'L' => l_count += 1,
+            b'D' => d_count += 1,
+            _ => {}
+        }
+
+        if let Some(next) = roman.get(index + 1).copied() {
+            let next_value = roman_value(next)?;
+            if current_value < next_value {
+                if !valid_subtraction(current, next) || repeat_count > 1 {
+                    return None;
+                }
+                if v_count > 0 && next_value >= 5
+                    || l_count > 0 && next_value >= 50
+                    || d_count > 0 && next_value >= 500
+                {
+                    return None;
+                }
+                match next {
+                    b'V' => v_count += 1,
+                    b'L' => l_count += 1,
+                    b'D' => d_count += 1,
+                    _ => {}
+                }
+                index += 2;
+                repeat_count = 1;
+                subtraction_encountered = true;
+                last_subtracted_value = current_value;
+                total += next_value - current_value;
+                continue;
+            }
+            if current == next {
+                repeat_count += 1;
+                if repeat_count > 3 {
+                    return None;
+                }
+            } else {
+                repeat_count = 1;
+            }
+        }
+        total += current_value;
+        index += 1;
     }
-    output
+    Some(total)
 }

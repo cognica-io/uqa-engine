@@ -78,6 +78,7 @@ pub enum ColumnType {
     Int2Vector,
     OidVector,
     AnyArray,
+    Record,
     Json,
     JsonB,
     Date,

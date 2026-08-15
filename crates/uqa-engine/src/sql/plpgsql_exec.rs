@@ -10,7 +10,7 @@
 //! state, control flow, dynamic SQL, and diagnostics live in focused modules.
 
 use std::cell::Cell;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use uqa_core::Value;
@@ -56,7 +56,8 @@ pub(super) use handlers::{run_call, run_create_function, run_do_block, run_drop_
 
 use diagnostics::{
     arm_matches, catchable, format_raise_message, looks_like_sqlstate, result_row_count,
-    return_query_context_error, routine_message, row_value, strict_into_check, to_i64_value,
+    result_row_values, return_query_context_error, routine_message, strict_into_check,
+    to_i64_value,
 };
 use resolution::{
     call_signature, coerce_routine_value, output_column_names, resolve_bound_routine,

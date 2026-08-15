@@ -96,6 +96,118 @@ fn set_valued_function_expands_inside_scalar_expression() {
 }
 
 #[test]
+fn select_list_set_functions_allow_postgresql_expression_contexts_and_preserve_types() {
+    let eng = engine();
+
+    let unary = exec(&eng, "SELECT -generate_series(1, 3) AS value");
+    assert_eq!(
+        unary
+            .rows
+            .iter()
+            .map(|row| row["value"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Int(-1), Value::Int(-2), Value::Int(-3)]
+    );
+
+    let in_list = exec(&eng, "SELECT generate_series(1, 3) IN (1, 2) AS contained");
+    assert_eq!(
+        in_list
+            .rows
+            .iter()
+            .map(|row| row["contained"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Bool(true), Value::Bool(true), Value::Bool(false)]
+    );
+
+    let arrays = exec(&eng, "SELECT ARRAY[generate_series(1, 2)] AS value");
+    assert_eq!(
+        arrays
+            .rows
+            .iter()
+            .map(|row| row["value"].clone())
+            .collect::<Vec<_>>(),
+        vec![
+            Value::Array(uqa_core::ArrayValue::try_new(vec![Value::Int(1)]).unwrap()),
+            Value::Array(uqa_core::ArrayValue::try_new(vec![Value::Int(2)]).unwrap()),
+        ]
+    );
+
+    let typed = exec(
+        &eng,
+        "SELECT generate_series(1::bigint, 2::bigint) AS value",
+    );
+    assert_eq!(typed.column_types, [Some(ColumnType::BigInteger)]);
+    let unnested = exec(&eng, "SELECT unnest(ARRAY[1::bigint, 2::bigint]) AS value");
+    assert_eq!(unnested.column_types, [Some(ColumnType::BigInteger)]);
+
+    let null_step = exec(&eng, "SELECT generate_series(1, 3, NULL) AS value");
+    assert!(null_step.rows.is_empty());
+}
+
+#[test]
+fn set_projection_resolves_scalar_and_set_overloads_independently() {
+    let eng = engine();
+    exec(
+        &eng,
+        "CREATE FUNCTION overloaded_projection(value int) RETURNS int AS $$
+         BEGIN RETURN value + 1; END;
+         $$ LANGUAGE plpgsql",
+    );
+    exec(
+        &eng,
+        "CREATE FUNCTION overloaded_projection(value text) RETURNS SETOF text AS $$
+         BEGIN RETURN NEXT value; END;
+         $$ LANGUAGE plpgsql",
+    );
+
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT coalesce(overloaded_projection(1), 0) AS value",
+        ),
+        Value::Int(2)
+    );
+    let set = exec(
+        &eng,
+        "SELECT overloaded_projection('set-value'::text) AS value",
+    );
+    assert_eq!(set.rows[0]["value"], Value::Str("set-value".into()));
+
+    exec(
+        &eng,
+        "CREATE TABLE overloaded_projection_input (int_value int, text_value text)",
+    );
+    exec(
+        &eng,
+        "INSERT INTO overloaded_projection_input VALUES (1, 'one'), (2, 'two')",
+    );
+    let scalar_columns = exec(
+        &eng,
+        "SELECT coalesce(overloaded_projection(int_value), 0) AS value FROM overloaded_projection_input ORDER BY int_value",
+    );
+    assert_eq!(
+        scalar_columns
+            .rows
+            .iter()
+            .map(|row| row["value"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Int(2), Value::Int(3)]
+    );
+    let set_columns = exec(
+        &eng,
+        "SELECT overloaded_projection(text_value) AS value FROM overloaded_projection_input ORDER BY text_value",
+    );
+    assert_eq!(
+        set_columns
+            .rows
+            .iter()
+            .map(|row| row["value"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Str("one".into()), Value::Str("two".into())]
+    );
+}
+
+#[test]
 fn select_list_set_functions_zip_expand_order_and_limit() {
     let eng = engine();
     let result = exec(
@@ -313,6 +425,10 @@ fn select_list_set_functions_reject_pg18_forbidden_contexts() {
         (
             "SELECT NOT (generate_series(0, 1)::boolean)",
             "argument of NOT must not return a set",
+        ),
+        (
+            "SELECT 1 IN (generate_series(1, 2))",
+            "argument of IN must not return a set",
         ),
         (
             "SELECT 1 WHERE generate_series(1, 2) > 0",

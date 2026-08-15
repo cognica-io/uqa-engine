@@ -6,7 +6,7 @@
 
 //! Compiled aggregate inputs for borrowed positional document rows.
 
-use uqa_execution::{ScalarEvalContext, ScalarExpr};
+use uqa_execution::{RowSchema, ScalarEvalContext, ScalarExpr};
 use uqa_sql::expr::RowLookup;
 use uqa_sql::SQLError;
 
@@ -42,7 +42,7 @@ impl ProjectedAggregatePlans {
     pub(super) fn compile(
         engine: &Engine,
         aggregate_targets: &[ScalarExpr],
-        input_schema: &[String],
+        input_schema: &RowSchema,
     ) -> Self {
         let plans = aggregate_targets
             .iter()
@@ -58,10 +58,10 @@ impl ProjectedAggregatePlans {
         self.all_direct
     }
 
-    pub(super) fn observe_direct(
+    pub(super) fn observe_direct<Row: RowLookup>(
         &self,
         accumulators: &mut [AggregateAccumulator],
-        row: &dyn RowLookup,
+        row: &Row,
         params: &[uqa_sql::SQLParam],
     ) -> Result<(), SQLError> {
         if !self.all_direct || self.plans.len() != accumulators.len() {
@@ -101,11 +101,11 @@ impl ProjectedAggregatePlans {
         Ok(())
     }
 
-    pub(super) fn observe(
+    pub(super) fn observe<Row: RowLookup>(
         &self,
         accumulators: &mut [AggregateAccumulator],
         aggregate_targets: &[ScalarExpr],
-        row: &dyn RowLookup,
+        row: &Row,
         context: &ScalarEvalContext<'_>,
     ) -> Result<(), SQLError> {
         if self.plans.len() != accumulators.len() || self.plans.len() != aggregate_targets.len() {
@@ -150,7 +150,7 @@ impl ProjectedAggregatePlans {
 fn compile_plan(
     engine: &Engine,
     expression: &ScalarExpr,
-    input_schema: &[String],
+    input_schema: &RowSchema,
 ) -> ProjectedAggregatePlan {
     let ScalarExpr::Func {
         name,
@@ -193,20 +193,14 @@ fn compile_plan(
     })
 }
 
-pub(super) fn column_slot(expression: &ScalarExpr, input_schema: &[String]) -> Option<usize> {
-    let name = match expression {
-        ScalarExpr::Column(name) => name,
-        ScalarExpr::QualifiedColumn { column, key, .. } => {
-            if !key.is_empty() {
-                if let Some(slot) = input_schema.iter().position(|candidate| candidate == key) {
-                    return Some(slot);
-                }
-            }
-            column
+pub(super) fn column_slot(expression: &ScalarExpr, input_schema: &RowSchema) -> Option<usize> {
+    match expression {
+        ScalarExpr::Column(column) => input_schema.unqualified_position(column),
+        ScalarExpr::QualifiedColumn { qualifier, column } => {
+            input_schema.qualified_position(qualifier, column)
         }
-        _ => return None,
-    };
-    input_schema.iter().position(|candidate| candidate == name)
+        _ => None,
+    }
 }
 
 #[cfg(test)]

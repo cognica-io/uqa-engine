@@ -25,7 +25,7 @@ pub use predicate::Predicate;
 pub use ranked_view::RankedView;
 pub use relation::{LogSemiring, Relation, RelationEntry, Semiring};
 pub use types::{
-    DecimalValue, DocId, Edge, EdgeId, FieldName, GeneralizedPayload, GeneralizedPostingEntry,
-    IndexStats, PathExpr, PathSegment, Payload, PostingEntry, TemporalValue, Value, Vertex,
-    VertexId,
+    jsonb_equality_key, ArrayValue, DecimalValue, DocId, Edge, EdgeId, FieldName,
+    GeneralizedPayload, GeneralizedPostingEntry, IndexStats, PathExpr, PathSegment, Payload,
+    PostingEntry, TemporalValue, Value, Vertex, VertexId,
 };

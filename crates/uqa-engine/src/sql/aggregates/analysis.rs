@@ -6,7 +6,8 @@
 
 //! HAVING resolution, aggregate discovery, and group-row context.
 
-use super::{Engine, ProjectionPlan, QueryBlockPlan, ResultRow, ScalarExpr, Value};
+use super::{Engine, ProjectionPlan, QueryBlockPlan, ScalarExpr, Value};
+use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema};
 
 pub(in crate::sql) fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
     match (lhs, rhs) {
@@ -189,7 +190,10 @@ pub(in crate::sql) fn collect_aggregate_exprs<'a>(
                 collect_aggregate_exprs(engine, filter, out);
             }
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => {
             for item in items {
                 collect_aggregate_exprs(engine, item, out);
             }
@@ -234,7 +238,9 @@ pub(in crate::sql) fn collect_aggregate_exprs<'a>(
         ScalarExpr::InSubquery { expr, .. } => collect_aggregate_exprs(engine, expr, out),
         ScalarExpr::Default
         | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
@@ -256,14 +262,19 @@ pub(in crate::sql) fn contains_aggregate(engine: &Engine, expr: &ScalarExpr) -> 
 /// whole documents.
 pub(in crate::sql) fn expr_references_columns(expr: &ScalarExpr) -> bool {
     match expr {
-        ScalarExpr::Star | ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. } => true,
+        ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
+        | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
+        | ScalarExpr::QualifiedColumn { .. } => true,
         ScalarExpr::Func { args, filter, .. } => {
             args.iter().any(expr_references_columns)
                 || filter.as_deref().is_some_and(expr_references_columns)
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-            items.iter().any(expr_references_columns)
-        }
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => items.iter().any(expr_references_columns),
         ScalarExpr::Binary { lhs, rhs, .. } => {
             expr_references_columns(lhs) || expr_references_columns(rhs)
         }
@@ -300,27 +311,25 @@ pub(in crate::sql) fn expr_references_columns(expr: &ScalarExpr) -> bool {
 pub(in crate::sql) fn group_context_row(
     stmt: &QueryBlockPlan,
     group_values: &[Value],
-) -> ResultRow {
-    let mut row = ResultRow::new();
+) -> OwnedPhysicalRow {
+    let mut columns = Vec::new();
+    let mut identities = Vec::new();
+    let mut values = Vec::new();
     for (expr, value) in stmt.group_by.iter().zip(group_values) {
         match expr {
             ScalarExpr::Column(column) => {
-                row.insert(column.clone(), value.clone());
+                columns.push(column.clone());
+                identities.push(ColumnIdentity::unqualified(column.clone()));
+                values.push(value.clone());
             }
-            ScalarExpr::QualifiedColumn {
-                qualifier,
-                column,
-                key,
-            } => {
-                if key.is_empty() {
-                    row.insert(format!("{qualifier}.{column}"), value.clone());
-                } else {
-                    row.insert(key.clone(), value.clone());
-                }
-                row.insert(column.clone(), value.clone());
+            ScalarExpr::QualifiedColumn { qualifier, column } => {
+                columns.push(column.clone());
+                identities.push(ColumnIdentity::qualified(qualifier.clone(), column.clone()));
+                values.push(value.clone());
             }
             _ => {}
         }
     }
-    row
+    let schema = RowSchema::with_identities(columns, identities, vec![None; values.len()]);
+    OwnedPhysicalRow::new(schema, PhysicalRow::from_values(values))
 }

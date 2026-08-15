@@ -126,10 +126,13 @@ impl<'a> ExternalSort<'a> {
 
         while let Some(batch) = self.child.next()? {
             for row in batch.rows {
-                let view = batch.schema.view(&row);
                 let mut key_values = Vec::with_capacity(self.keys.len());
                 for key in &self.keys {
-                    key_values.push(self.evaluator.evaluate(&key.expr, &view)?);
+                    key_values.push(self.evaluator.evaluate_physical(
+                        &key.expr,
+                        &batch.schema,
+                        &row,
+                    )?);
                 }
                 let record_sequence = sequence;
                 key_values.push(Value::Bytes(record_sequence.to_be_bytes().to_vec()));
@@ -804,8 +807,10 @@ mod tests {
     #[test]
     fn forced_spill_preserves_hidden_alias_and_public_column_slots() {
         let base = RowSchema::new(vec!["value".into(), "key".into()]);
-        let aliased =
-            RowSchema::with_lookup_aliases(&base, &[("source.value".into(), "value".into())]);
+        let aliased = RowSchema::with_identity_aliases(
+            &base,
+            &[(crate::ColumnIdentity::qualified("source", "value"), 0)],
+        );
         let schema = RowSchema::append(&aliased, &["value".into()]);
         let rows = vec![
             PhysicalRow::from_values(vec![Value::Str("source-b".into()), Value::Int(2)])
@@ -838,8 +843,7 @@ mod tests {
                     let view = batch.schema.view(row);
                     (
                         view.get("value").cloned(),
-                        view.qualified_column("source", "value", "source.value")
-                            .cloned(),
+                        view.qualified_column("source", "value").cloned(),
                     )
                 })
             })

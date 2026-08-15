@@ -7,9 +7,9 @@
 //! Routine execution, recursion limits, and `LANGUAGE sql` result shaping.
 
 use super::{
-    coerce_routine_value, row_value, Cell, CompiledFunctionBody, CreateFunction, Engine,
-    FunctionReturns, Interpreter, ResultRow, RoutineOutcome, SQLError, SQLParam, SQLResult,
-    SQLUserFunction, UnifiedPlanExecutor, Value,
+    coerce_routine_value, result_row_values, Cell, CompiledFunctionBody, CreateFunction, Engine,
+    FunctionReturns, Interpreter, RoutineOutcome, SQLError, SQLParam, SQLResult, SQLUserFunction,
+    UnifiedPlanExecutor, Value,
 };
 
 thread_local! {
@@ -113,16 +113,10 @@ fn execute_sql_language(
     if shape_checked && last.columns.len() != expected {
         return Err(sql_body_shape_error(def));
     }
-    let row_values = |row: &ResultRow| -> Vec<Value> {
-        last.columns
-            .iter()
-            .map(|column| row_value(row, column))
-            .collect()
-    };
     if def.returns_set() {
         let mut set_rows = Vec::with_capacity(last.rows.len());
-        for row in &last.rows {
-            let mut values = row_values(row);
+        for row_index in 0..last.rows.len() {
+            let mut values = result_row_values(&last, row_index).unwrap_or_default();
             if values.len() != expected {
                 return Err(sql_body_shape_error(def));
             }
@@ -139,7 +133,7 @@ fn execute_sql_language(
             set_rows,
         });
     }
-    let first = last.rows.first().map(row_values);
+    let first = result_row_values(&last, 0);
     if !out_params.is_empty() {
         let mut out_values = vec![Value::Null; out_params.len()];
         if let Some(values) = first {

@@ -6,6 +6,8 @@
 
 //! Scalar projection and star expansion.
 
+use uqa_core::Value;
+
 use super::{
     Batch, DefaultExpressionEvaluator, ExecResult, PhysicalOperator, RowSchema, SQLParam,
     ScalarExpr, SharedExpressionEvaluator,
@@ -74,10 +76,23 @@ impl<'a> Project<'a> {
         let mut columns = Vec::new();
         let mut types = Vec::new();
         for (name, expression) in &projections {
-            if matches!(expression, ScalarExpr::Star) {
+            if let ScalarExpr::QualifiedStar(qualifier) = expression {
+                for (column, _, ty) in child.row_schema().qualified_star_layout(qualifier) {
+                    if evaluator.star_column_visible(&column) {
+                        columns.push(column);
+                        types.push(ty);
+                    }
+                }
+            } else if matches!(expression, ScalarExpr::Star) {
                 for (position, column) in child.schema().iter().enumerate() {
                     if evaluator.star_column_visible(column) {
-                        columns.push(column.clone());
+                        columns.push(
+                            child
+                                .row_schema()
+                                .public_name(position)
+                                .unwrap_or(column)
+                                .to_string(),
+                        );
                         types.push(child.row_schema().column_type(position).cloned());
                     }
                 }
@@ -123,7 +138,7 @@ impl<'a> Project<'a> {
             .take_while(|order| {
                 projections.iter().all(|(name, expression)| {
                     name != &order.column
-                        || matches!(expression, ScalarExpr::Star)
+                        || matches!(expression, ScalarExpr::Star | ScalarExpr::QualifiedStar(_))
                         || matches!(expression, ScalarExpr::Column(source) if source == name)
                 })
             })
@@ -131,7 +146,9 @@ impl<'a> Project<'a> {
             .collect();
         let appended = projections
             .iter()
-            .filter(|(_, expression)| !matches!(expression, ScalarExpr::Star))
+            .filter(|(_, expression)| {
+                !matches!(expression, ScalarExpr::Star | ScalarExpr::QualifiedStar(_))
+            })
             .map(|(name, expression)| {
                 (
                     name.clone(),
@@ -177,30 +194,41 @@ impl PhysicalOperator for Project<'_> {
             if self.pass_through {
                 let mut computed = Vec::with_capacity(self.projections.len());
                 for (_, expr) in &self.projections {
-                    if !matches!(expr, ScalarExpr::Star) {
-                        computed.push(self.evaluator.evaluate(expr, &view)?);
+                    if !matches!(expr, ScalarExpr::Star | ScalarExpr::QualifiedStar(_)) {
+                        computed.push(self.evaluator.evaluate_physical(
+                            expr,
+                            &batch.schema,
+                            &row,
+                        )?);
                     }
                 }
                 out.push(row.append_values(computed));
                 continue;
             }
-            if self
-                .projections
-                .iter()
-                .any(|(_, expression)| matches!(expression, ScalarExpr::Star))
-            {
+            if self.projections.iter().any(|(_, expression)| {
+                matches!(expression, ScalarExpr::Star | ScalarExpr::QualifiedStar(_))
+            }) {
                 let mut values = Vec::with_capacity(self.schema.len());
                 for (name, expr) in &self.projections {
-                    if matches!(expr, ScalarExpr::Star) {
-                        values.extend(
-                            self.evaluator
-                                .project_star(&view)?
-                                .into_iter()
-                                .map(|(_, value)| value),
-                        );
+                    if let ScalarExpr::QualifiedStar(qualifier) = expr {
+                        for (column, slot, _) in batch.schema.qualified_star_layout(qualifier) {
+                            if self.evaluator.star_column_visible(&column) {
+                                values.push(row.value(slot).cloned().unwrap_or(Value::Null));
+                            }
+                        }
+                    } else if matches!(expr, ScalarExpr::Star) {
+                        for (position, column) in batch.schema.iter().enumerate() {
+                            if self.evaluator.star_column_visible(column) {
+                                values
+                                    .push(view.value_at(position).cloned().unwrap_or(Value::Null));
+                            }
+                        }
                     } else {
                         let _ = name;
-                        values.push(self.evaluator.evaluate(expr, &view)?);
+                        values.push(
+                            self.evaluator
+                                .evaluate_physical(expr, &batch.schema, &row)?,
+                        );
                     }
                 }
                 out.push(PhysicalRow::from_values(values));
@@ -209,7 +237,10 @@ impl PhysicalOperator for Project<'_> {
             let values = self
                 .projections
                 .iter()
-                .map(|(_, expression)| self.evaluator.evaluate(expression, &view))
+                .map(|(_, expression)| {
+                    self.evaluator
+                        .evaluate_physical(expression, &batch.schema, &row)
+                })
                 .collect::<ExecResult<Vec<_>>>()?;
             out.push(PhysicalRow::from_values(values));
         }

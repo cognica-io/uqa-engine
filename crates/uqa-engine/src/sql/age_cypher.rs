@@ -28,7 +28,7 @@ pub(super) fn build_rows(
     engine: &Engine,
     args: &[ScalarExpr],
     evaluated: &[Value],
-    qualifier: Option<&str>,
+    _qualifier: Option<&str>,
     column_aliases: &[String],
     column_types: &[String],
 ) -> Result<Vec<ResultRow>, SQLError> {
@@ -99,10 +99,6 @@ pub(super) fn build_rows(
             let value = coerce_to_column_type(value, declared, target_col)?;
             row.insert(target_col.clone(), value);
         }
-        let row = match qualifier {
-            Some(alias) => super::prefix_row(alias, &row),
-            None => row,
-        };
         out.push(row);
     }
     Ok(out)

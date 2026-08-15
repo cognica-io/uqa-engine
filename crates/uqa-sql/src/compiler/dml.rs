@@ -12,11 +12,18 @@ use super::{
 };
 
 pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<UpdateStmt> {
-    let table = stmt
+    let relation = stmt
         .relation
         .as_ref()
-        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("UPDATE without relation".into()))?;
+    let table = range_var_name(relation);
+    let target_qualifier = relation
+        .alias
+        .as_ref()
+        .map(|alias| alias.aliasname.as_str())
+        .filter(|alias| !alias.is_empty())
+        .unwrap_or(&relation.relname)
+        .to_string();
     let mut assignments = Vec::new();
     for target_node in &stmt.target_list {
         let inner = target_node
@@ -50,6 +57,7 @@ pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<Up
     };
     Ok(UpdateStmt {
         table,
+        target_qualifier,
         assignments,
         r#where,
         with,
@@ -60,11 +68,18 @@ pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<Up
 }
 
 pub(super) fn compile_delete(stmt: &pg_query::protobuf::DeleteStmt) -> Result<DeleteStmt> {
-    let table = stmt
+    let relation = stmt
         .relation
         .as_ref()
-        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("DELETE without relation".into()))?;
+    let table = range_var_name(relation);
+    let target_qualifier = relation
+        .alias
+        .as_ref()
+        .map(|alias| alias.aliasname.as_str())
+        .filter(|alias| !alias.is_empty())
+        .unwrap_or(&relation.relname)
+        .to_string();
     let r#where = stmt
         .where_clause
         .as_ref()
@@ -81,6 +96,7 @@ pub(super) fn compile_delete(stmt: &pg_query::protobuf::DeleteStmt) -> Result<De
     };
     Ok(DeleteStmt {
         table,
+        target_qualifier,
         r#where,
         with,
         using,

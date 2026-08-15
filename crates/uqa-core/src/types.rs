@@ -9,10 +9,8 @@
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
-use std::str::FromStr;
 
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
-use rust_decimal::{Decimal, RoundingStrategy};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Document identifier.
@@ -35,14 +33,17 @@ pub enum PathSegment {
 /// hierarchical document.
 pub type PathExpr = Vec<PathSegment>;
 
+mod array;
 mod decimal;
 mod graph;
 mod graph_phi;
 mod index_stats;
+mod jsonb;
 mod posting;
 mod temporal;
 mod value;
 
+pub use array::ArrayValue;
 pub use decimal::DecimalValue;
 pub use graph::{Edge, EdgeId, Vertex, VertexId};
 pub use graph_phi::{
@@ -50,6 +51,7 @@ pub use graph_phi::{
     GRAPH_PHI_VERTICES_FIELD,
 };
 pub use index_stats::IndexStats;
+pub use jsonb::jsonb_equality_key;
 pub use posting::{GeneralizedPayload, GeneralizedPostingEntry, Payload, PostingEntry};
 pub use temporal::TemporalValue;
 pub use value::Value;

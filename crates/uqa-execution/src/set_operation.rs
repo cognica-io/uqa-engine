@@ -10,7 +10,7 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 
 use uqa_core::Value;
-use uqa_sql::ast::SetOpKind;
+use uqa_sql::ast::{ColumnType, SetOpKind};
 use uqa_sql::expr::RowLookup;
 use uqa_sql::ResultRow;
 
@@ -33,13 +33,55 @@ impl ExpressionEvaluator for ColumnEvaluator {
     }
 }
 
+fn set_operation_types(left: &RowSchema, right: &RowSchema) -> ExecResult<Vec<Option<ColumnType>>> {
+    if left.len() != right.len() {
+        return Err(ExecError::Other(format!(
+            "set-operation inputs have different widths: {} and {}",
+            left.len(),
+            right.len()
+        )));
+    }
+    left.column_types()
+        .iter()
+        .zip(right.column_types())
+        .map(|(left, right)| match (left, right) {
+            (None, None) => Ok(None),
+            (Some(ty), None) | (None, Some(ty)) => Ok(Some(ty.clone())),
+            (Some(left), Some(right)) => uqa_execution_common_type(left, right).map(Some),
+        })
+        .collect()
+}
+
+fn uqa_execution_common_type(left: &ColumnType, right: &ColumnType) -> ExecResult<ColumnType> {
+    crate::common_type(left, right).map_err(ExecError::from)
+}
+
+fn coerce_set_value(
+    value: Value,
+    source_type: Option<&ColumnType>,
+    target_type: &ColumnType,
+) -> ExecResult<Value> {
+    let cast_target = match target_type {
+        ColumnType::Domain { base, .. } => base.as_ref(),
+        target => target,
+    };
+    let source_name = source_type.map(ColumnType::sql_name);
+    uqa_sql::expr::cast_value_from(&value, &cast_target.sql_name(), source_name.as_deref())
+        .map_err(ExecError::from)
+}
+
 struct AlignSchema<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
     schema: RowSchema,
+    coercions: Vec<Option<ColumnType>>,
 }
 
 impl<'a> AlignSchema<'a> {
-    fn new(child: Box<dyn PhysicalOperator + 'a>, output: Vec<String>) -> ExecResult<Self> {
+    fn new(
+        child: Box<dyn PhysicalOperator + 'a>,
+        output: Vec<String>,
+        output_types: &[Option<ColumnType>],
+    ) -> ExecResult<Self> {
         let source = child.schema().to_vec();
         if source.len() != output.len() {
             return Err(ExecError::Other(format!(
@@ -48,9 +90,31 @@ impl<'a> AlignSchema<'a> {
                 source.len()
             )));
         }
-        let mapping = output.into_iter().zip(source).collect::<Vec<_>>();
-        let schema = RowSchema::select(child.row_schema(), &mapping);
-        Ok(Self { child, schema })
+        if output.len() != output_types.len() {
+            return Err(ExecError::Other(format!(
+                "set-operation output type width {} does not match input width {}",
+                output_types.len(),
+                output.len()
+            )));
+        }
+        let coercions = child
+            .row_schema()
+            .column_types()
+            .iter()
+            .zip(output_types)
+            .map(|(source, target)| {
+                target
+                    .as_ref()
+                    .filter(|target| source.as_ref() != Some(*target))
+                    .cloned()
+            })
+            .collect();
+        let schema = RowSchema::with_types(output, output_types.to_vec());
+        Ok(Self {
+            child,
+            schema,
+            coercions,
+        })
     }
 }
 
@@ -67,10 +131,52 @@ impl PhysicalOperator for AlignSchema<'_> {
         let Some(batch) = self.child.next()? else {
             return Ok(None);
         };
-        Ok(Some(Batch::from_physical_rows(
-            self.schema.clone(),
-            batch.rows,
-        )))
+        let identity_layout = batch.schema.physical_width() == self.schema.physical_width()
+            && (0..batch.schema.len())
+                .all(|position| batch.schema.slot(position) == Some(position));
+        if self.coercions.iter().all(Option::is_none) && identity_layout {
+            return Ok(Some(Batch::from_physical_rows(
+                self.schema.clone(),
+                batch.rows,
+            )));
+        }
+        if self.coercions.iter().all(Option::is_none) {
+            let slots = (0..batch.schema.len())
+                .map(|position| {
+                    batch.schema.slot(position).ok_or_else(|| {
+                        ExecError::Other(format!(
+                            "set-operation input column {position} has no physical slot"
+                        ))
+                    })
+                })
+                .collect::<ExecResult<Vec<_>>>()?;
+            let rows = batch
+                .rows
+                .into_iter()
+                .map(|row| row.project_slots(&slots))
+                .collect();
+            return Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)));
+        }
+        let mut rows = Vec::with_capacity(batch.rows.len());
+        for row in &batch.rows {
+            let view = batch.schema.view(row);
+            let values = self
+                .coercions
+                .iter()
+                .enumerate()
+                .map(|(position, target)| {
+                    let value = view.value_at(position).cloned().unwrap_or(Value::Null);
+                    match target {
+                        Some(target) => {
+                            coerce_set_value(value, batch.schema.column_type(position), target)
+                        }
+                        None => Ok(value),
+                    }
+                })
+                .collect::<ExecResult<Vec<_>>>()?;
+            rows.push(crate::PhysicalRow::from_values(values));
+        }
+        Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)))
     }
 
     fn close(&mut self) -> ExecResult<()> {
@@ -189,11 +295,23 @@ impl<'a> ExternalSetOperation<'a> {
         all: bool,
         work_mem_bytes: usize,
     ) -> ExecResult<Self> {
+        let output_types = set_operation_types(left.row_schema(), right.row_schema())?;
+        Self::new_with_types(left, right, kind, all, output_types, work_mem_bytes)
+    }
+
+    pub fn new_with_types(
+        left: Box<dyn PhysicalOperator + 'a>,
+        right: Box<dyn PhysicalOperator + 'a>,
+        kind: SetOpKind,
+        all: bool,
+        output_types: Vec<Option<ColumnType>>,
+        work_mem_bytes: usize,
+    ) -> ExecResult<Self> {
         let output = left.schema().to_vec();
         let left: Box<dyn PhysicalOperator + 'a> =
-            Box::new(AlignSchema::new(left, output.clone())?);
+            Box::new(AlignSchema::new(left, output.clone(), &output_types)?);
         let right: Box<dyn PhysicalOperator + 'a> =
-            Box::new(AlignSchema::new(right, output.clone())?);
+            Box::new(AlignSchema::new(right, output.clone(), &output_types)?);
         let (left, right) = if matches!((kind, all), (SetOpKind::Union, true)) {
             (left, right)
         } else {
@@ -226,7 +344,7 @@ impl<'a> ExternalSetOperation<'a> {
             right: RowCursor::new(right),
             kind,
             all,
-            schema: RowSchema::new(output),
+            schema: RowSchema::with_types(output, output_types),
             left_group: None,
             right_group: None,
             pending_row: None,
@@ -461,5 +579,27 @@ mod tests {
             execute(SetOpKind::Except, false, &[1, 1, 2], &[1, 3]),
             vec![2]
         );
+    }
+
+    #[test]
+    fn set_inputs_compact_schema_only_projections_before_alignment() {
+        let left = TableScan::from_rows(
+            vec!["v".into(), "hidden".into()],
+            vec![[
+                ("v".into(), Value::Int(1)),
+                ("hidden".into(), Value::Int(99)),
+            ]
+            .into_iter()
+            .collect()],
+        );
+        let left: Box<dyn PhysicalOperator> = Box::new(crate::ColumnSelection::with_positions(
+            Box::new(left),
+            vec![("v".into(), 0)],
+        ));
+        let right = TableScan::from_rows(vec!["v".into()], vec![row(2)]);
+        let mut set =
+            ExternalSetOperation::new(left, Box::new(right), SetOpKind::Union, true, 1).unwrap();
+        let rows = run_to_rows(&mut set).unwrap().1;
+        assert_eq!(rows, vec![row(1), row(2)]);
     }
 }

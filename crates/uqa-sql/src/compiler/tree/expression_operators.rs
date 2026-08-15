@@ -240,7 +240,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 "@>" => {
                     return Ok(Expr::Func {
                         binding: None,
-                        name: "json_contains".into(),
+                        name: "contains_op".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
                         order_by: Vec::new(),
@@ -250,7 +250,7 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 "<@" => {
                     return Ok(Expr::Func {
                         binding: None,
-                        name: "json_contained_by".into(),
+                        name: "contained_by_op".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
                         order_by: Vec::new(),

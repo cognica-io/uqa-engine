@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use uqa_core::{DecimalValue, DocId, TemporalValue, Value};
+use uqa_core::{ArrayValue, DecimalValue, DocId, TemporalValue, Value};
 
 use super::{ManagedConnection, Result, SQLiteError};
 
@@ -51,7 +51,10 @@ enum StoredValue {
     Decimal(DecimalValue),
     Json(String),
     JsonB(String),
+    Array(ArrayValue),
     List(Vec<StoredValue>),
+    Row(Vec<StoredValue>),
+    Record(Vec<(String, StoredValue)>),
     Map(BTreeMap<String, StoredValue>),
 }
 
@@ -69,7 +72,15 @@ impl From<&Value> for StoredValue {
             Value::Decimal(value) => Self::Decimal(value.clone()),
             Value::Json(value) => Self::Json(value.clone()),
             Value::JsonB(value) => Self::JsonB(value.clone()),
+            Value::Array(value) => Self::Array(value.clone()),
             Value::List(values) => Self::List(values.iter().map(Self::from).collect()),
+            Value::Row(values) => Self::Row(values.iter().map(Self::from).collect()),
+            Value::Record(fields) => Self::Record(
+                fields
+                    .iter()
+                    .map(|(name, value)| (name.clone(), Self::from(value)))
+                    .collect(),
+            ),
             Value::Map(values) => Self::Map(
                 values
                     .iter()
@@ -94,7 +105,15 @@ impl StoredValue {
             Self::Decimal(value) => Value::Decimal(value),
             Self::Json(value) => Value::Json(value),
             Self::JsonB(value) => Value::JsonB(value),
+            Self::Array(value) => Value::Array(value),
             Self::List(values) => Value::List(values.into_iter().map(Self::into_value).collect()),
+            Self::Row(values) => Value::Row(values.into_iter().map(Self::into_value).collect()),
+            Self::Record(fields) => Value::Record(
+                fields
+                    .into_iter()
+                    .map(|(name, value)| (name, value.into_value()))
+                    .collect(),
+            ),
             Self::Map(values) => Value::Map(
                 values
                     .into_iter()

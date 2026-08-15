@@ -9,7 +9,7 @@
 use std::hash::BuildHasher;
 
 use uqa_core::Value;
-use uqa_execution::{hash_canonical_row, ExecResult, ScalarExpr};
+use uqa_execution::{hash_canonical_row, ExecResult, RowSchema, ScalarExpr};
 use uqa_sql::expr::RowLookup;
 
 pub(super) enum ProjectedGroupColumn {
@@ -19,7 +19,7 @@ pub(super) enum ProjectedGroupColumn {
 impl ProjectedGroupColumn {
     pub(super) fn compile(
         expressions: &[ScalarExpr],
-        input_schema: &[String],
+        input_schema: &RowSchema,
     ) -> Option<Vec<Self>> {
         expressions
             .iter()
@@ -30,26 +30,26 @@ impl ProjectedGroupColumn {
     }
 
     #[inline]
-    pub(super) fn value<'row>(&self, row: &'row dyn RowLookup) -> Option<&'row Value> {
+    pub(super) fn value<'row, Row: RowLookup>(&self, row: &'row Row) -> Option<&'row Value> {
         match self {
             Self::Position(index) => row.positional_column(*index),
         }
     }
 }
 
-pub(super) fn group_hash<S: BuildHasher>(
+pub(super) fn group_hash<S: BuildHasher, Row: RowLookup>(
     columns: &[ProjectedGroupColumn],
-    row: &dyn RowLookup,
+    row: &Row,
     build_hasher: &S,
 ) -> ExecResult<u64> {
     hash_canonical_row(build_hasher, columns.iter().map(|column| column.value(row)))
 }
 
 #[inline]
-pub(super) fn group_matches(
+pub(super) fn group_matches<Row: RowLookup>(
     columns: &[ProjectedGroupColumn],
     key: &[Value],
-    row: &dyn RowLookup,
+    row: &Row,
 ) -> bool {
     let null = Value::Null;
     key.len() == columns.len()
@@ -59,9 +59,9 @@ pub(super) fn group_matches(
             .all(|(stored, column)| stored == column.value(row).unwrap_or(&null))
 }
 
-pub(super) fn group_key(
+pub(super) fn group_key<Row: RowLookup>(
     columns: &[ProjectedGroupColumn],
-    row: &dyn RowLookup,
+    row: &Row,
     null: &Value,
 ) -> Vec<Value> {
     columns

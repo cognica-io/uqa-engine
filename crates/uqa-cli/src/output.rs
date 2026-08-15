@@ -129,7 +129,7 @@ pub(super) fn value_to_display(v: Option<&Value>) -> String {
         Some(Value::Null) | None => "NULL".to_string(),
         Some(Value::Bool(b)) => b.to_string(),
         Some(Value::Int(n)) => n.to_string(),
-        Some(Value::Float(f)) => format!("{f}"),
+        Some(Value::Float(f)) => uqa_graph::agtype::format_float_pg(*f),
         Some(Value::Decimal(d)) => d.to_sql_string(),
         Some(Value::Str(s) | Value::FixedChar(s)) => s.clone(),
         // PostgreSQL bytea hex output form.
@@ -145,7 +145,9 @@ pub(super) fn value_to_display(v: Option<&Value>) -> String {
         }
         Some(Value::Temporal(t)) => t.to_sql_string(),
         Some(Value::Json(text) | Value::JsonB(text)) => text.clone(),
+        Some(Value::Array(array)) => uqa_sql::expr::array_value_to_string(array),
         Some(Value::List(items)) => pg_array_display(items),
+        Some(value @ (Value::Row(_) | Value::Record(_))) => uqa_sql::expr::value_to_string(value),
         // Maps come from JSON/JSONB values: render canonical JSON the
         // way psql prints jsonb, not a Rust-debug-ish map.
         Some(value @ Value::Map(_)) => json_value_display(value),
@@ -188,16 +190,34 @@ pub(super) fn json_value_display(v: &Value) -> String {
         Value::Null => "null".to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Int(n) => n.to_string(),
-        Value::Float(f) => format!("{f}"),
+        Value::Float(f) => uqa_graph::agtype::format_float_pg(*f),
         Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) | Value::FixedChar(s) => serde_json::Value::String(s.clone()).to_string(),
         Value::Bytes(_) | Value::Temporal(_) => {
             serde_json::Value::String(value_to_display(Some(v))).to_string()
         }
         Value::Json(text) | Value::JsonB(text) => text.clone(),
-        Value::List(items) => {
+        Value::Array(array) => {
+            let inner = array
+                .elements()
+                .iter()
+                .map(json_value_display)
+                .collect::<Vec<_>>();
+            format!("[{}]", inner.join(", "))
+        }
+        Value::List(items) | Value::Row(items) => {
             let inner: Vec<String> = items.iter().map(json_value_display).collect();
             format!("[{}]", inner.join(", "))
+        }
+        Value::Record(fields) => {
+            let inner: Vec<String> = fields
+                .iter()
+                .map(|(key, value)| {
+                    let key = serde_json::Value::String(key.clone()).to_string();
+                    format!("{key}: {}", json_value_display(value))
+                })
+                .collect();
+            format!("{{{}}}", inner.join(", "))
         }
         Value::Map(m) => {
             let inner: Vec<String> = m
@@ -209,5 +229,28 @@ pub(super) fn json_value_display(v: &Value) -> String {
                 .collect();
             format!("{{{}}}", inner.join(", "))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::value_to_display;
+    use uqa_core::Value;
+
+    #[test]
+    fn float_output_matches_postgresql_special_and_scientific_spelling() {
+        assert_eq!(value_to_display(Some(&Value::Float(f64::NAN))), "NaN");
+        assert_eq!(
+            value_to_display(Some(&Value::Float(f64::INFINITY))),
+            "Infinity"
+        );
+        assert_eq!(
+            value_to_display(Some(&Value::Float(f64::NEG_INFINITY))),
+            "-Infinity"
+        );
+        assert_eq!(
+            value_to_display(Some(&Value::Float(7.257_415_615_307_999e306))),
+            "7.257415615307999e+306"
+        );
     }
 }

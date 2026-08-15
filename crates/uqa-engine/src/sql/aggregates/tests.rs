@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use uqa_core::ArrayValue;
 
 #[test]
 fn aggregate_spill_record_reader_rejects_oversized_and_truncated_records() {
@@ -47,7 +48,7 @@ fn collection_aggregate_still_retains_inputs() {
     assert_eq!(accumulator.values.rows.len(), 1);
     assert_eq!(
         aggregate_value("array_agg", &accumulator).unwrap(),
-        Value::List(vec![Value::Int(7)])
+        Value::Array(ArrayValue::try_new(vec![Value::Int(7)]).expect("one-dimensional array"))
     );
 }
 
@@ -93,7 +94,9 @@ fn tiny_budget_collection_aggregate_spills_and_merge_streams_exact_order() {
     assert!(!accumulator.values.runs.is_empty());
     assert!(accumulator.values.runs.len() < AGGREGATE_MERGE_FAN_IN);
     assert!(accumulator.values.memory_bytes <= accumulator.values.budget_bytes);
-    let expected = Value::List((0..512_i64).map(Value::Int).collect());
+    let expected = Value::Array(
+        ArrayValue::try_new((0..512_i64).map(Value::Int).collect()).expect("one-dimensional array"),
+    );
     assert_eq!(
         aggregate_value("array_agg", &accumulator).unwrap(),
         expected

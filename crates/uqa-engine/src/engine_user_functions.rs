@@ -15,7 +15,7 @@ use uqa_execution::{FunctionTypeResolver, ScalarExpr};
 use uqa_planner::UnifiedPlan;
 use uqa_sql::ast::{
     ColumnType, CreateFunction, DropFunctionItem, DropFunctionStmt, FunctionBinding, FunctionBody,
-    FunctionReturns, Statement,
+    FunctionReturns, RoutineColumnTypeReference, Statement,
 };
 use uqa_sql::SQLError;
 
@@ -97,13 +97,32 @@ impl FunctionTypeResolver for Engine {
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
     ) -> Result<Option<ColumnType>, SQLError> {
-        let function = if let Some(binding) = binding {
-            self.lookup_sql_functions(&binding.name)
+        let Some(function) =
+            self.resolve_static_sql_function(name, binding, argument_names, argument_types)?
+        else {
+            return Ok(None);
+        };
+        static_function_return_type(name, &function.def).map(Some)
+    }
+}
+
+impl Engine {
+    pub(crate) fn resolve_static_sql_function(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+        if let Some(binding) = binding {
+            return self
+                .lookup_sql_functions(&binding.name)
                 .and_then(|overloads| {
                     overloads.into_iter().find(|function| {
                         routine_signature_types(&function.def) == binding.argument_types
                     })
                 })
+                .map(Some)
                 .ok_or_else(|| SQLError::Routine {
                     sqlstate: "42883".into(),
                     message: format!(
@@ -111,14 +130,12 @@ impl FunctionTypeResolver for Engine {
                         binding.name,
                         binding.argument_types.join(", ")
                     ),
-                })?
-        } else {
-            let Some(overloads) = self.lookup_sql_functions(name) else {
-                return Ok(None);
-            };
-            resolve_static_function_overload(name, overloads, argument_names, argument_types)?
+                });
+        }
+        let Some(overloads) = self.lookup_sql_functions(name) else {
+            return Ok(None);
         };
-        static_function_return_type(name, &function.def).map(Some)
+        resolve_static_function_overload(name, overloads, argument_names, argument_types).map(Some)
     }
 }
 
@@ -128,17 +145,27 @@ fn resolve_static_function_overload(
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
 ) -> Result<Arc<SQLUserFunction>, SQLError> {
-    let mut candidates = overloads
+    let candidates = overloads
         .into_iter()
-        .filter(|function| !function.def.is_procedure)
         .filter_map(|function| static_function_match(function, argument_names, argument_types))
+        .collect::<Vec<_>>();
+    let procedure_matches = candidates
+        .iter()
+        .any(|candidate| candidate.function.def.is_procedure);
+    let mut candidates = candidates
+        .into_iter()
+        .filter(|candidate| !candidate.function.def.is_procedure)
         .collect::<Vec<_>>();
     if candidates.is_empty() {
         return Err(static_function_resolution_error(
-            "42883",
+            if procedure_matches { "42809" } else { "42883" },
             name,
             argument_types,
-            "does not exist",
+            if procedure_matches {
+                "is a procedure"
+            } else {
+                "does not exist"
+            },
         ));
     }
 
@@ -154,38 +181,7 @@ fn resolve_static_function_overload(
         .max()
         .unwrap_or(0);
     candidates.retain(|candidate| candidate.preferred_matches == most_preferred);
-
-    for (index, actual) in argument_types.iter().enumerate() {
-        if actual.is_some() || candidates.len() <= 1 {
-            continue;
-        }
-        let mut categories = candidates
-            .iter()
-            .map(|candidate| routine_type_category(&candidate.argument_types[index]))
-            .collect::<Vec<_>>();
-        categories.sort_unstable();
-        categories.dedup();
-        let selected = if categories.contains(&'S') {
-            Some('S')
-        } else if categories.len() == 1 {
-            categories.first().copied()
-        } else {
-            None
-        };
-        if let Some(selected) = selected {
-            candidates.retain(|candidate| {
-                routine_type_category(&candidate.argument_types[index]) == selected
-            });
-            if candidates
-                .iter()
-                .any(|candidate| routine_type_is_preferred(&candidate.argument_types[index]))
-            {
-                candidates.retain(|candidate| {
-                    routine_type_is_preferred(&candidate.argument_types[index])
-                });
-            }
-        }
-    }
+    narrow_unknown_function_arguments(&mut candidates, argument_types);
 
     if candidates.len() > 1 {
         let mut known = argument_types.iter().flatten();
@@ -232,6 +228,43 @@ fn resolve_static_function_overload(
         .ok_or_else(|| SQLError::Internal("resolved function candidate disappeared".into()))
 }
 
+fn narrow_unknown_function_arguments(
+    candidates: &mut Vec<StaticFunctionMatch>,
+    argument_types: &[Option<ColumnType>],
+) {
+    for (index, actual) in argument_types.iter().enumerate() {
+        if actual.is_some() || candidates.len() <= 1 {
+            continue;
+        }
+        let mut categories = candidates
+            .iter()
+            .map(|candidate| routine_type_category(&candidate.argument_types[index]))
+            .collect::<Vec<_>>();
+        categories.sort_unstable();
+        categories.dedup();
+        let selected = if categories.contains(&'S') {
+            Some('S')
+        } else if categories.len() == 1 {
+            categories.first().copied()
+        } else {
+            None
+        };
+        if let Some(selected) = selected {
+            candidates.retain(|candidate| {
+                routine_type_category(&candidate.argument_types[index]) == selected
+            });
+            if candidates
+                .iter()
+                .any(|candidate| routine_type_is_preferred(&candidate.argument_types[index]))
+            {
+                candidates.retain(|candidate| {
+                    routine_type_is_preferred(&candidate.argument_types[index])
+                });
+            }
+        }
+    }
+}
+
 fn static_function_match(
     function: Arc<SQLUserFunction>,
     argument_names: &[Option<String>],
@@ -250,7 +283,7 @@ fn static_function_match(
             saw_named = true;
             signature
                 .iter()
-                .position(|parameter| parameter.name.eq_ignore_ascii_case(argument_name))?
+                .position(|parameter| parameter.name == *argument_name)?
         } else {
             if saw_named || positional >= signature.len() {
                 return None;
@@ -359,12 +392,15 @@ fn static_function_return_type(name: &str, def: &CreateFunction) -> Result<Colum
         FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => type_name,
         FunctionReturns::None => {
             let outputs = def.output_params();
-            if outputs.len() != 1 {
-                return Err(SQLError::TypeMismatch(format!(
-                    "function `{name}` does not return one scalar value"
-                )));
+            if outputs.len() > 1 {
+                return Ok(ColumnType::Record);
             }
-            &outputs[0].type_name
+            &outputs
+                .first()
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(format!("function `{name}` does not return a value"))
+                })?
+                .type_name
         }
         FunctionReturns::Table => {
             return Err(SQLError::TypeMismatch(format!(
@@ -438,23 +474,34 @@ fn resolve_routine_type_references(
     def: &mut CreateFunction,
 ) -> Result<(), SQLError> {
     for parameter in &mut def.params {
-        parameter.type_name =
-            resolve_routine_type_name(engine, &parameter.type_name, &["record", "anyarray"])?;
+        parameter.type_name = resolve_routine_type_name_with_reference(
+            engine,
+            &parameter.type_name,
+            &["record", "anyarray"],
+            parameter.type_reference.as_ref(),
+        )?;
+        parameter.type_reference = None;
     }
     match &mut def.returns {
         FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
-            *type_name =
-                resolve_routine_type_name(engine, type_name, &["void", "record", "anyarray"])?;
+            *type_name = resolve_routine_type_name_with_reference(
+                engine,
+                type_name,
+                &["void", "record", "anyarray"],
+                def.return_type_reference.as_ref(),
+            )?;
         }
         FunctionReturns::None | FunctionReturns::Table => {}
     }
+    def.return_type_reference = None;
     Ok(())
 }
 
-fn resolve_routine_type_name(
+fn resolve_routine_type_name_with_reference(
     engine: &Engine,
     type_name: &str,
     allowed_pseudo_types: &[&str],
+    structured_reference: Option<&RoutineColumnTypeReference>,
 ) -> Result<String, SQLError> {
     let mut base = type_name.trim();
     let mut array_dimensions = 0usize;
@@ -462,25 +509,29 @@ fn resolve_routine_type_name(
         base = element.trim_end();
         array_dimensions += 1;
     }
-    let resolved = if let Some(reference) = base.strip_suffix("%type") {
-        let (table, column) = reference.rsplit_once('.').ok_or_else(|| {
-            SQLError::TypeMismatch(format!(
-                "type reference `{type_name}` must identify a relation column"
+    let resolved = if base
+        .get(base.len().saturating_sub("%type".len())..)
+        .is_some_and(|suffix| suffix.eq_ignore_ascii_case("%type"))
+    {
+        let reference = structured_reference.ok_or_else(|| {
+            SQLError::Internal(format!(
+                "routine type reference `{type_name}` is missing structured relation-column identity"
             ))
         })?;
+        let table = reference.relation_reference();
         let columns = engine
-            .try_describe_table(table)
+            .try_describe_table(&table)
             .map_err(|error| {
                 SQLError::Internal(format!(
                     "resolve routine type reference `{type_name}`: {error}"
                 ))
             })?
-            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+            .ok_or_else(|| SQLError::UnknownTable(table.clone()))?;
         columns
             .into_iter()
-            .find(|definition| definition.name.eq_ignore_ascii_case(column))
+            .find(|definition| definition.name == reference.column)
             .map(|definition| definition.ty)
-            .ok_or_else(|| SQLError::UnknownColumn(format!("{table}.{column}")))?
+            .ok_or_else(|| SQLError::UnknownColumn(reference.type_reference()))?
     } else {
         let canonical = canonical_routine_type_name(base);
         if allowed_pseudo_types.contains(&canonical.as_str()) {
@@ -512,11 +563,13 @@ fn resolve_plpgsql_datum_types(
         let uqa_sql::plpgsql::PLpgSQLDatum::Var(variable) = datum else {
             continue;
         };
-        variable.type_name = resolve_routine_type_name(
+        variable.type_name = resolve_routine_type_name_with_reference(
             engine,
             &variable.type_name,
             &["record", "anyarray", "refcursor"],
+            variable.type_reference.as_ref(),
         )?;
+        variable.type_reference = None;
     }
     Ok(())
 }
@@ -563,7 +616,7 @@ fn compile_sql_routine_plans(
     let parameter_names: Vec<String> = def
         .signature_params()
         .iter()
-        .map(|parameter| parameter.name.to_ascii_lowercase())
+        .map(|parameter| parameter.name.clone())
         .collect();
     statements
         .into_iter()
@@ -573,16 +626,14 @@ fn compile_sql_routine_plans(
             });
             plan.rewrite_scalar_expressions(&mut |expression| {
                 let parameter = match expression {
-                    ScalarExpr::Column(name) => parameter_names.iter().position(|parameter| {
-                        !parameter.is_empty() && parameter == &name.to_ascii_lowercase()
-                    }),
+                    ScalarExpr::Column(name) => parameter_names
+                        .iter()
+                        .position(|parameter| !parameter.is_empty() && parameter == name),
                     ScalarExpr::QualifiedColumn {
                         qualifier, column, ..
-                    } if qualifier.eq_ignore_ascii_case(&local_name) => {
-                        parameter_names.iter().position(|parameter| {
-                            !parameter.is_empty() && parameter == &column.to_ascii_lowercase()
-                        })
-                    }
+                    } if qualifier == &local_name => parameter_names
+                        .iter()
+                        .position(|parameter| !parameter.is_empty() && parameter == column),
                     _ => None,
                 };
                 if let Some(position) = parameter {

@@ -602,11 +602,22 @@ fn value_to_json(value: Value) -> Result<JSON, String> {
         }
         Value::Bytes(value) => Ok(json!({ "$bytes": BASE64.encode(value) })),
         Value::Temporal(value) => Ok(json!(value.to_sql_string())),
-        Value::List(values) => values
+        Value::Array(array) => array
+            .into_elements()
             .into_iter()
             .map(value_to_json)
             .collect::<Result<Vec<_>, _>>()
             .map(JSON::Array),
+        Value::List(values) | Value::Row(values) => values
+            .into_iter()
+            .map(value_to_json)
+            .collect::<Result<Vec<_>, _>>()
+            .map(JSON::Array),
+        Value::Record(values) => values
+            .into_iter()
+            .map(|(key, value)| Ok((key, value_to_json(value)?)))
+            .collect::<Result<JSONMap<_, _>, String>>()
+            .map(JSON::Object),
         Value::Map(values) => values
             .into_iter()
             .map(|(key, value)| Ok((key, value_to_json(value)?)))

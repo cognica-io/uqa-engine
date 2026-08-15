@@ -71,10 +71,8 @@ pub(super) fn regclass_literal_mut(expression: &mut ScalarExpr) -> Option<&mut S
     match expression {
         ScalarExpr::Literal(Value::Str(reference)) => Some(reference),
         ScalarExpr::Cast { expr, ty }
-            if ty
-                .rsplit_once('.')
-                .map_or(ty.as_str(), |(_, local)| local)
-                .eq_ignore_ascii_case("regclass") =>
+            if ty.eq_ignore_ascii_case("regclass")
+                || ty.eq_ignore_ascii_case("pg_catalog.regclass") =>
         {
             regclass_literal_mut(expr)
         }
@@ -164,7 +162,13 @@ pub(super) fn bind_source_plan_relations<E>(
     resolve: &mut impl FnMut(&str) -> Result<String, E>,
 ) -> Result<(), E> {
     match source {
-        SourcePlan::Table { name, .. } => {
+        SourcePlan::Table {
+            name, qualifier, ..
+        } => {
+            if qualifier.is_empty() {
+                *qualifier = RelationIdentity::parse_reference(name)
+                    .map_or_else(|_| name.clone(), |(_, relation)| relation);
+            }
             let is_cte =
                 RelationIdentity::parse_reference(name)
                     .ok()
@@ -183,12 +187,20 @@ pub(super) fn bind_source_plan_relations<E>(
             bind_query_plan_relations(body, visible_ctes, resolve)?;
         }
         SourcePlan::Function {
-            relation: Some(relation),
+            name,
+            output_name,
+            relation,
             ..
         } => {
-            *relation = resolve(relation)?;
+            if output_name.is_empty() {
+                *output_name = RelationIdentity::parse_reference(name)
+                    .map_or_else(|_| name.clone(), |(_, function)| function);
+            }
+            if let Some(relation) = relation {
+                *relation = resolve(relation)?;
+            }
         }
-        SourcePlan::Values { .. } | SourcePlan::Function { relation: None, .. } => {}
+        SourcePlan::Values { .. } => {}
     }
     Ok(())
 }

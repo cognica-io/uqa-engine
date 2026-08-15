@@ -6,10 +6,11 @@
 
 use std::collections::BTreeMap;
 
-use uqa_core::{DecimalValue, TemporalValue, Value};
+use uqa_core::{ArrayValue, DecimalValue, TemporalValue, Value};
 use uqa_sql::expr::RowLookup as _;
 
 use super::*;
+use crate::ColumnIdentity;
 
 fn dummy_batch(start: usize, n: usize) -> Batch {
     let schema = RowSchema::new(vec!["x".into()]);
@@ -96,9 +97,12 @@ fn positional_spill_preserves_duplicate_logical_columns() {
 
 #[test]
 fn positional_spill_preserves_hidden_alias_layout() {
-    let input = RowSchema::new(vec!["source.id".into()]);
-    let projected = RowSchema::select(&input, &[("id".into(), "source.id".into())]);
-    let schema = RowSchema::with_lookup_aliases(&projected, &[("source.id".into(), "id".into())]);
+    let input = RowSchema::with_qualified_types("source", vec!["id".into()], vec![None]);
+    let projected = RowSchema::select(&input, &[("id".into(), "id".into())]);
+    let schema = RowSchema::with_identity_aliases(
+        &projected,
+        &[(ColumnIdentity::qualified("source", "id"), 0)],
+    );
     let mut buffer = SpillBuffer::new(0);
     buffer
         .push(Batch::from_physical_rows(
@@ -110,20 +114,21 @@ fn positional_spill_preserves_hidden_alias_layout() {
     let restored = buffer.drain_all().unwrap();
     let view = restored[0].schema.view(&restored[0].rows[0]);
     assert_eq!(view.column("id"), Some(&Value::Int(42)));
-    assert_eq!(
-        view.qualified_column("source", "id", "source.id"),
-        Some(&Value::Int(42))
-    );
+    assert_eq!(view.qualified_column("source", "id"), Some(&Value::Int(42)));
 }
 
 #[test]
 fn positional_spill_preserves_logical_and_alias_types() {
-    let input = RowSchema::with_types(
-        vec!["source.id".into()],
+    let input = RowSchema::with_qualified_types(
+        "source",
+        vec!["id".into()],
         vec![Some(uqa_sql::ast::ColumnType::SmallInteger)],
     );
-    let projected = RowSchema::select(&input, &[("id".into(), "source.id".into())]);
-    let schema = RowSchema::with_lookup_aliases(&projected, &[("source.id".into(), "id".into())]);
+    let projected = RowSchema::select(&input, &[("id".into(), "id".into())]);
+    let schema = RowSchema::with_identity_aliases(
+        &projected,
+        &[(ColumnIdentity::qualified("source", "id"), 0)],
+    );
     let mut buffer = SpillBuffer::new(0);
     buffer
         .push(Batch::from_physical_rows(
@@ -139,7 +144,7 @@ fn positional_spill_preserves_logical_and_alias_types() {
         Some(&uqa_sql::ast::ColumnType::SmallInteger)
     );
     assert_eq!(
-        schema.qualified_type("source", "id", "source.id"),
+        schema.qualified_type("source", "id"),
         Some(&uqa_sql::ast::ColumnType::SmallInteger)
     );
 }
@@ -191,8 +196,10 @@ fn indexed_spill_reads_large_partitions_without_an_offset_vector() {
 #[test]
 fn indexed_spill_preserves_hidden_aliases_without_named_rows() {
     let input = RowSchema::new(vec!["value".into()]);
-    let aliased =
-        RowSchema::with_lookup_aliases(&input, &[("source.value".into(), "value".into())]);
+    let aliased = RowSchema::with_identity_aliases(
+        &input,
+        &[(ColumnIdentity::qualified("source", "value"), 0)],
+    );
     let schema = RowSchema::append(&aliased, &["value".into()]);
     let row = PhysicalRow::from_values(vec![Value::Str("source".into())])
         .append_values(vec![Value::Str("projected".into())]);
@@ -203,7 +210,7 @@ fn indexed_spill_preserves_hidden_aliases_without_named_rows() {
     let view = spill.row_schema().view(&restored);
     assert_eq!(view.get("value"), Some(&Value::Str("projected".into())));
     assert_eq!(
-        view.qualified_column("source", "value", "source.value"),
+        view.qualified_column("source", "value"),
         Some(&Value::Str("source".into()))
     );
 }
@@ -309,6 +316,24 @@ fn exact_value_variants_and_float_bits_round_trip() {
             Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]),
         ),
         (
+            "array".into(),
+            Value::Array(
+                ArrayValue::with_lower_bounds(
+                    vec![Value::Int(10), Value::Int(20), Value::Int(30)],
+                    vec![-2],
+                )
+                .unwrap(),
+            ),
+        ),
+        ("row".into(), Value::Row(vec![Value::Int(1), Value::Null])),
+        (
+            "record".into(),
+            Value::Record(vec![
+                ("key".into(), Value::Str("a".into())),
+                ("value".into(), Value::Json("1".into())),
+            ]),
+        ),
+        (
             "nan".into(),
             Value::Float(f64::from_bits(0x7ff8_0000_0000_0042)),
         ),
@@ -346,7 +371,10 @@ fn exact_value_variants_and_float_bits_round_trip() {
 
     for key in [
         "bytes",
+        "array",
         "list",
+        "row",
+        "record",
         "fixed_char",
         "decimal",
         "temporal",

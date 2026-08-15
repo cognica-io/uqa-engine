@@ -12,26 +12,23 @@ use uqa_sql::{SQLError, SQLParam};
 
 use super::ProjectedExpr;
 use crate::scalar::scalar_integer_binary_width;
-use crate::ScalarExpr;
+use crate::{RowSchema, ScalarExpr};
 
 pub(super) fn compile(
     expression: &ScalarExpr,
-    fields: &[String],
+    schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<Option<ProjectedExpr>, SQLError> {
     let compiled = match expression {
         ScalarExpr::Column(column) => {
-            let Some(index) = resolve_unqualified_field(column, fields) else {
+            let Some(index) = schema.unqualified_position(column) else {
                 return Ok(None);
             };
             ProjectedExpr::Field(index)
         }
-        ScalarExpr::QualifiedColumn {
-            qualifier,
-            column,
-            key,
-        } => {
-            let Some(index) = resolve_qualified_field(qualifier, column, key, fields) else {
+        ScalarExpr::Position(index) if *index < schema.len() => ProjectedExpr::Field(*index),
+        ScalarExpr::QualifiedColumn { qualifier, column } => {
+            let Some(index) = schema.qualified_position(qualifier, column) else {
                 return Ok(None);
             };
             ProjectedExpr::Field(index)
@@ -42,35 +39,35 @@ pub(super) fn compile(
             let integer_width = scalar_integer_binary_width(lhs, rhs);
             compiled_binary(
                 *op,
-                require(lhs, fields, params)?,
-                require(rhs, fields, params)?,
+                require(lhs, schema, params)?,
+                require(rhs, schema, params)?,
                 integer_width,
             )
         }
         ScalarExpr::UnaryMinus(expression) => {
-            ProjectedExpr::UnaryMinus(Box::new(require(expression, fields, params)?))
+            ProjectedExpr::UnaryMinus(Box::new(require(expression, schema, params)?))
         }
         ScalarExpr::Not(expression) => {
-            ProjectedExpr::Not(Box::new(require(expression, fields, params)?))
+            ProjectedExpr::Not(Box::new(require(expression, schema, params)?))
         }
-        ScalarExpr::And(items) => ProjectedExpr::And(require_all(items, fields, params)?),
-        ScalarExpr::Or(items) => ProjectedExpr::Or(require_all(items, fields, params)?),
+        ScalarExpr::And(items) => ProjectedExpr::And(require_all(items, schema, params)?),
+        ScalarExpr::Or(items) => ProjectedExpr::Or(require_all(items, schema, params)?),
         ScalarExpr::IsNull { expr, negated } => ProjectedExpr::IsNull {
-            expression: Box::new(require(expr, fields, params)?),
+            expression: Box::new(require(expr, schema, params)?),
             negated: *negated,
         },
         ScalarExpr::Between { expr, low, high } => compiled_between(
-            require(expr, fields, params)?,
-            require(low, fields, params)?,
-            require(high, fields, params)?,
+            require(expr, schema, params)?,
+            require(low, schema, params)?,
+            require(high, schema, params)?,
         ),
         ScalarExpr::InList {
             expr,
             list,
             negated,
         } => ProjectedExpr::InList {
-            expression: Box::new(require(expr, fields, params)?),
-            list: require_all(list, fields, params)?,
+            expression: Box::new(require(expr, schema, params)?),
+            list: require_all(list, schema, params)?,
             negated: *negated,
         },
         ScalarExpr::Func {
@@ -95,7 +92,7 @@ pub(super) fn compile(
                 _ => return Ok(None),
             };
             ProjectedExpr::Like {
-                expression: Box::new(require(expression, fields, params)?),
+                expression: Box::new(require(expression, schema, params)?),
                 pattern: uqa_sql::expr::CompiledLikePattern::from_value(
                     &pattern,
                     normalized.eq_ignore_ascii_case("ilike"),
@@ -103,7 +100,7 @@ pub(super) fn compile(
             }
         }
         ScalarExpr::Cast { expr, ty } => {
-            let expression = require(expr, fields, params)?;
+            let expression = require(expr, schema, params)?;
             match expression {
                 // A typed SQL literal is represented as CAST(literal AS type).
                 // Evaluate it once while preparing the predicate instead of
@@ -119,10 +116,13 @@ pub(super) fn compile(
                 },
             }
         }
-        ScalarExpr::Default
+        ScalarExpr::Position(_)
+        | ScalarExpr::Default
         | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Func { .. }
         | ScalarExpr::Array(_)
+        | ScalarExpr::Row(_)
         | ScalarExpr::WindowCall { .. }
         | ScalarExpr::Case { .. }
         | ScalarExpr::ScalarSubquery(_)
@@ -154,41 +154,6 @@ fn is_integer_type(ty: &str) -> bool {
             | "xid"
             | "pg_catalog.xid"
     )
-}
-
-fn resolve_unqualified_field(column: &str, fields: &[String]) -> Option<usize> {
-    if let Some(index) = fields.iter().position(|field| field == column) {
-        return Some(index);
-    }
-    let mut matches = fields.iter().enumerate().filter_map(|(index, field)| {
-        field
-            .rsplit_once('.')
-            .filter(|(_, suffix)| *suffix == column)
-            .map(|_| index)
-    });
-    let first = matches.next()?;
-    matches.next().is_none().then_some(first)
-}
-
-fn resolve_qualified_field(
-    qualifier: &str,
-    column: &str,
-    key: &str,
-    fields: &[String],
-) -> Option<usize> {
-    if !key.is_empty() {
-        if let Some(index) = fields.iter().position(|field| field == key) {
-            return Some(index);
-        }
-    }
-    let qualified = format!("{qualifier}.{column}");
-    fields
-        .iter()
-        .position(|field| field == &qualified)
-        // Storage projections deliberately use unqualified field names. A
-        // qualified expression can bind to one of those only when the exact
-        // qualifier is absent from the positional schema.
-        .or_else(|| fields.iter().position(|field| field == column))
 }
 
 fn compiled_binary(
@@ -262,22 +227,22 @@ fn compiled_between(
 
 fn require(
     expression: &ScalarExpr,
-    fields: &[String],
+    schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<ProjectedExpr, SQLError> {
-    compile(expression, fields, params)?.ok_or_else(|| {
+    compile(expression, schema, params)?.ok_or_else(|| {
         SQLError::Unsupported("expression cannot use positional predicate evaluation".into())
     })
 }
 
 fn require_all(
     expressions: &[ScalarExpr],
-    fields: &[String],
+    schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<Vec<ProjectedExpr>, SQLError> {
     expressions
         .iter()
-        .map(|expression| require(expression, fields, params))
+        .map(|expression| require(expression, schema, params))
         .collect()
 }
 

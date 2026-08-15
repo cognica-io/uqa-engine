@@ -78,7 +78,7 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
                 .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?;
             crate::sql::generated::prepare_generated_columns(
                 engine,
-                &stmt.table,
+                &stmt.qualifier,
                 &mut candidate_columns,
                 &key_constraints,
                 &foreign_keys,
@@ -145,7 +145,7 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
                 .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
             crate::sql::generated::prepare_generated_columns(
                 engine,
-                &stmt.table,
+                &stmt.qualifier,
                 &mut columns,
                 &key_constraints,
                 &foreign_keys,
@@ -274,7 +274,7 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
                 .map_err(|error| ddl_storage_error("ALTER COLUMN SET EXPRESSION", error))?;
             crate::sql::generated::prepare_generated_columns(
                 engine,
-                &stmt.table,
+                &stmt.qualifier,
                 &mut columns,
                 &key_constraints,
                 &foreign_keys,
@@ -376,7 +376,7 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
                 .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?;
             crate::sql::generated::prepare_generated_columns(
                 engine,
-                &stmt.table,
+                &stmt.qualifier,
                 &mut candidate_columns,
                 &key_constraints,
                 &foreign_keys,

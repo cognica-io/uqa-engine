@@ -38,7 +38,7 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
             Some(value) => Expr::Literal(value),
             None => expr.clone(),
         },
-        Expr::Default | Expr::Literal(_) | Expr::Star => expr.clone(),
+        Expr::Default | Expr::Literal(_) | Expr::Star | Expr::QualifiedStar(_) => expr.clone(),
         Expr::Func {
             name,
             binding,
@@ -58,6 +58,7 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
             },
         },
         Expr::Array(items) => Expr::Array(bind_exprs(items, r)?),
+        Expr::Row(items) => Expr::Row(bind_exprs(items, r)?),
         Expr::Binary { op, lhs, rhs } => Expr::Binary {
             op: *op,
             lhs: Box::new(bind_expr(lhs, r)?),
@@ -282,6 +283,7 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
         },
         FromClause::Function {
             name,
+            output_name,
             relation,
             args,
             alias,
@@ -289,6 +291,7 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             column_types,
         } => FromClause::Function {
             name: name.clone(),
+            output_name: output_name.clone(),
             relation: relation.clone(),
             args: bind_exprs(args, r)?,
             alias: alias.clone(),

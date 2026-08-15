@@ -13,7 +13,7 @@
 
 use super::{
     is_score_provenance_column, projection_columns, user_function_output_columns, CteScope, Engine,
-    QueryBlockPlan, QueryPlan, RelationalPlan, SQLError, SQLParam, ScalarExpr, SourcePlan,
+    QueryBlockPlan, QueryPlan, RelationalPlan, SQLError, SQLParam, ScalarExpr, SourcePlan, Value,
 };
 use crate::sql::from_rows::{
     join_using_output_schema, resolve_join_using, table_function_column_types,
@@ -23,6 +23,8 @@ use crate::sql::virtual_relation_schema;
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_execution::RowSchema;
 use uqa_sql::ast::ColumnType;
+
+type ProjectionStarColumn = (String, Option<ColumnType>);
 
 #[derive(Default)]
 struct SchemaScope {
@@ -49,6 +51,27 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
+        self.bind_query_mode(engine, plan, params, outer, false)
+    }
+
+    fn bind_set_operand(
+        &mut self,
+        engine: &Engine,
+        plan: &QueryPlan,
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<RowSchema, SQLError> {
+        self.bind_query_mode(engine, plan, params, outer, true)
+    }
+
+    fn bind_query_mode(
+        &mut self,
+        engine: &Engine,
+        plan: &QueryPlan,
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+        preserve_top_level_unknown: bool,
+    ) -> Result<RowSchema, SQLError> {
         let mut previous = Vec::with_capacity(plan.ctes.len());
         for cte in &plan.ctes {
             let provisional = if cte.recursive {
@@ -71,7 +94,13 @@ impl SchemaScope {
             }
         }
 
-        let result = self.bind_root(engine, &plan.root, params, outer);
+        let result = self.bind_root(
+            engine,
+            &plan.root,
+            params,
+            outer,
+            preserve_top_level_unknown,
+        );
         for (name, schema) in previous.into_iter().rev() {
             match schema {
                 Some(schema) => {
@@ -94,7 +123,7 @@ impl SchemaScope {
     ) -> Result<RowSchema, SQLError> {
         match &plan.root {
             RelationalPlan::SetOp { left, .. } => self.bind_query(engine, left, params, outer),
-            _ => self.bind_root(engine, &plan.root, params, outer),
+            _ => self.bind_root(engine, &plan.root, params, outer, false),
         }
     }
 
@@ -104,14 +133,15 @@ impl SchemaScope {
         root: &RelationalPlan,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
+        preserve_top_level_unknown: bool,
     ) -> Result<RowSchema, SQLError> {
         match root {
             RelationalPlan::QueryBlock(block) => {
-                self.bind_query_block(engine, block, params, outer)
+                self.bind_query_block(engine, block, params, outer, preserve_top_level_unknown)
             }
             RelationalPlan::SetOp { left, right, .. } => {
-                let left = self.bind_query(engine, left, params, outer)?;
-                let right = self.bind_query(engine, right, params, outer)?;
+                let left = self.bind_set_operand(engine, left, params, outer)?;
+                let right = self.bind_set_operand(engine, right, params, outer)?;
                 if left.len() != right.len() {
                     return Err(SQLError::TypeMismatch(format!(
                         "set operation has {} columns on the left and {} on the right",
@@ -127,13 +157,14 @@ impl SchemaScope {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(RowSchema::with_types(left.columns().to_vec(), types))
             }
-            RelationalPlan::Values { rows, .. } => {
+            RelationalPlan::Values { rows, subqueries } => {
                 let columns = rows.first().map_or_else(Vec::new, |row| {
                     (1..=row.len())
                         .map(|index| format!("column{index}"))
                         .collect()
                 });
-                let types = values_types_in_scope(engine, rows, outer, params)?;
+                let types =
+                    self.bind_values_types(engine, rows, subqueries, outer, params, outer)?;
                 Ok(RowSchema::with_types(columns, types))
             }
         }
@@ -145,35 +176,44 @@ impl SchemaScope {
         block: &QueryBlockPlan,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
+        preserve_top_level_unknown: bool,
     ) -> Result<RowSchema, SQLError> {
         let source = block.from.as_ref().map_or_else(
             || Ok(RowSchema::default()),
-            |source| self.bind_source(engine, source, params, outer),
+            |source| self.bind_source(engine, source, &block.subqueries, params, outer),
         )?;
         let expression_schema = overlay_outer_schema(&source, outer);
         let labels = projection_columns(&block.projections);
         let mut columns = Vec::new();
         let mut types = Vec::new();
         for (position, projection) in block.projections.iter().enumerate() {
-            if matches!(projection.expr, ScalarExpr::Star) {
-                for (source_position, source_column) in source.columns().iter().enumerate() {
-                    if is_score_provenance_column(source_column) {
-                        continue;
-                    }
-                    columns.push(public_column_name(source_column));
-                    types.push(source.column_type(source_position).cloned());
+            if let Some(star_columns) = projection_star_columns(&projection.expr, &source)? {
+                for (column, ty) in star_columns {
+                    columns.push(column);
+                    types.push(ty);
                 }
                 continue;
             }
             columns.push(labels[position].clone());
-            types.push(self.bind_expression_type(
-                engine,
-                &projection.expr,
-                &expression_schema,
-                &block.subqueries,
-                params,
-                outer,
-            )?);
+            types.push(
+                if preserve_top_level_unknown
+                    && matches!(
+                        &projection.expr,
+                        ScalarExpr::Literal(Value::Str(_) | Value::Null)
+                    )
+                {
+                    None
+                } else {
+                    self.bind_expression_type(
+                        engine,
+                        &projection.expr,
+                        &expression_schema,
+                        &block.subqueries,
+                        params,
+                        outer,
+                    )?
+                },
+            );
         }
         Ok(RowSchema::with_types(columns, types))
     }
@@ -197,16 +237,58 @@ impl SchemaScope {
         uqa_execution::scalar_type_with_resolver(expression, schema, params, engine)
     }
 
+    fn bind_values_types(
+        &mut self,
+        engine: &Engine,
+        rows: &[Vec<ScalarExpr>],
+        subqueries: &[QueryPlan],
+        schema: Option<&RowSchema>,
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<Vec<Option<ColumnType>>, SQLError> {
+        let width = rows.first().map_or(0, Vec::len);
+        let empty = RowSchema::default();
+        let schema = schema.unwrap_or(&empty);
+        let mut types = vec![None; width];
+        for row in rows {
+            if row.len() != width {
+                return Err(SQLError::TypeMismatch(
+                    "VALUES lists must all be the same length".into(),
+                ));
+            }
+            for (position, expression) in row.iter().enumerate() {
+                let candidate =
+                    if matches!(expression, ScalarExpr::Literal(Value::Str(_) | Value::Null)) {
+                        None
+                    } else {
+                        self.bind_expression_type(
+                            engine, expression, schema, subqueries, params, outer,
+                        )?
+                    };
+                types[position] = merge_types(types[position].as_ref(), candidate.as_ref())?;
+            }
+        }
+        Ok(types
+            .into_iter()
+            .map(|ty| ty.or(Some(ColumnType::Text)))
+            .collect())
+    }
+
     fn bind_source(
         &mut self,
         engine: &Engine,
         source: &SourcePlan,
+        subqueries: &[QueryPlan],
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
         match source {
-            SourcePlan::Table { name, alias } => {
-                let qualifier = alias.as_deref().unwrap_or(name);
+            SourcePlan::Table {
+                name,
+                qualifier,
+                alias,
+            } => {
+                let qualifier = alias.as_deref().unwrap_or(qualifier);
                 if let Some(schema) = self.ctes.get(name) {
                     return Ok(rename_schema(schema, &[], Some(qualifier)));
                 }
@@ -229,13 +311,13 @@ impl SchemaScope {
                     let definitions = table.columns.read();
                     let columns = definitions
                         .iter()
-                        .map(|column| format!("{qualifier}.{}", column.name))
+                        .map(|column| column.name.clone())
                         .collect();
                     let types = definitions
                         .iter()
                         .map(|column| Some(column.ty.clone()))
                         .collect();
-                    return Ok(RowSchema::with_types(columns, types));
+                    return Ok(RowSchema::with_qualified_types(qualifier, columns, types));
                 }
                 if engine
                     .foreign_table(name)
@@ -247,17 +329,17 @@ impl SchemaScope {
                         .map_err(SQLError::Unsupported)?;
                     let columns = typed_columns
                         .iter()
-                        .map(|(column, _)| format!("{qualifier}.{column}"))
+                        .map(|(column, _)| column.clone())
                         .collect();
                     let types = typed_columns.into_iter().map(|(_, ty)| Some(ty)).collect();
-                    return Ok(RowSchema::with_types(columns, types));
+                    return Ok(RowSchema::with_qualified_types(qualifier, columns, types));
                 }
                 if let Some(schema) = virtual_relation_schema(name) {
                     let (columns, types): (Vec<_>, Vec<_>) = schema
                         .into_iter()
-                        .map(|(column, ty)| (format!("{qualifier}.{column}"), Some(ty)))
+                        .map(|(column, ty)| (column, Some(ty)))
                         .unzip();
-                    return Ok(RowSchema::with_types(columns, types));
+                    return Ok(RowSchema::with_qualified_types(qualifier, columns, types));
                 }
                 Err(SQLError::Unsupported(format!(
                     "relation `{name}` does not exist"
@@ -275,13 +357,23 @@ impl SchemaScope {
                 } else {
                     column_aliases.clone()
                 };
-                let columns = qualify_columns(alias.as_deref(), columns);
                 let binding_schema = outer.cloned().unwrap_or_default();
-                let types = values_types_in_scope(engine, rows, Some(&binding_schema), params)?;
-                Ok(RowSchema::with_types(columns, types))
+                let types = self.bind_values_types(
+                    engine,
+                    rows,
+                    subqueries,
+                    Some(&binding_schema),
+                    params,
+                    Some(&binding_schema),
+                )?;
+                Ok(match alias.as_deref() {
+                    Some(qualifier) => RowSchema::with_qualified_types(qualifier, columns, types),
+                    None => RowSchema::with_types(columns, types),
+                })
             }
             SourcePlan::Function {
                 name,
+                output_name,
                 args,
                 alias,
                 column_aliases,
@@ -290,11 +382,25 @@ impl SchemaScope {
             } => {
                 let columns = if column_aliases.is_empty() {
                     user_function_output_columns(engine, name).map_or_else(
-                        || table_function_empty_schema(name, alias.as_deref(), column_aliases),
-                        |columns| qualify_columns(alias.as_deref(), columns),
+                        || {
+                            table_function_empty_schema(
+                                name,
+                                output_name,
+                                alias.as_deref(),
+                                column_aliases,
+                                args.len(),
+                            )
+                        },
+                        |columns| columns,
                     )
                 } else {
-                    table_function_empty_schema(name, alias.as_deref(), column_aliases)
+                    table_function_empty_schema(
+                        name,
+                        output_name,
+                        alias.as_deref(),
+                        column_aliases,
+                        args.len(),
+                    )
                 };
                 let input = outer.cloned().unwrap_or_default();
                 let types = table_function_column_types(
@@ -306,7 +412,8 @@ impl SchemaScope {
                     &input,
                     params,
                 );
-                Ok(RowSchema::with_types(columns, types))
+                let qualifier = alias.as_deref().unwrap_or(output_name);
+                Ok(RowSchema::with_qualified_types(qualifier, columns, types))
             }
             SourcePlan::Subquery {
                 body,
@@ -325,13 +432,18 @@ impl SchemaScope {
                 lateral,
                 ..
             } => {
-                let left_schema = self.bind_source(engine, left, params, outer)?;
+                let left_schema = self.bind_source(engine, left, subqueries, params, outer)?;
                 let implicit_lateral_function =
                     matches!(right.as_ref(), SourcePlan::Function { .. });
                 let right_scope = (*lateral || implicit_lateral_function)
                     .then(|| overlay_outer_schema(&left_schema, outer));
-                let right_schema =
-                    self.bind_source(engine, right, params, right_scope.as_ref().or(outer))?;
+                let right_schema = self.bind_source(
+                    engine,
+                    right,
+                    subqueries,
+                    params,
+                    right_scope.as_ref().or(outer),
+                )?;
                 let resolved =
                     resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
                 resolved.map_or_else(
@@ -349,6 +461,17 @@ impl SchemaScope {
     }
 }
 
+/// Derive the exact output row type of a query plan without executing it.
+pub(in crate::sql) fn bind_query_plan_schema(
+    engine: &Engine,
+    plan: &QueryPlan,
+    params: &[SQLParam],
+    ctes: &CteScope,
+    outer: Option<&RowSchema>,
+) -> Result<RowSchema, SQLError> {
+    SchemaScope::from_execution_scope(ctes).bind_query(engine, plan, params, outer)
+}
+
 /// Derive the exact row type of one FROM source without executing it.
 pub(in crate::sql) fn bind_source_plan_schema(
     engine: &Engine,
@@ -357,7 +480,13 @@ pub(in crate::sql) fn bind_source_plan_schema(
     ctes: &CteScope,
     outer: Option<&RowSchema>,
 ) -> Result<RowSchema, SQLError> {
-    SchemaScope::from_execution_scope(ctes).bind_source(engine, source, params, outer)
+    SchemaScope::from_execution_scope(ctes).bind_source(
+        engine,
+        source,
+        &ctes.scalar_subqueries,
+        params,
+        outer,
+    )
 }
 
 /// Bind a projection against an already-declared input schema. `star_schema`
@@ -377,13 +506,14 @@ pub(in crate::sql) fn bind_projection_output_schema(
     let mut columns = Vec::new();
     let mut types = Vec::new();
     for (position, projection) in projections.iter().enumerate() {
-        if matches!(projection.expr, ScalarExpr::Star) {
-            for (source_position, source_column) in star_schema.columns().iter().enumerate() {
-                if is_score_provenance_column(source_column) {
-                    continue;
-                }
-                columns.push(public_column_name(source_column));
-                types.push(star_schema.column_type(source_position).cloned());
+        let expansion_schema = match projection.expr {
+            ScalarExpr::QualifiedStar(_) => expression_schema,
+            _ => star_schema,
+        };
+        if let Some(star_columns) = projection_star_columns(&projection.expr, expansion_schema)? {
+            for (column, ty) in star_columns {
+                columns.push(column);
+                types.push(ty);
             }
             continue;
         }
@@ -400,8 +530,71 @@ pub(in crate::sql) fn bind_projection_output_schema(
     Ok(RowSchema::with_types(columns, types))
 }
 
+/// Validate every scalar expression in a query block while the physical input
+/// still carries declared SQL types. This phase must precede polymorphic
+/// rewrites such as `pg_typeof`, because an invalid common type is an error,
+/// not an `unknown` result.
+pub(in crate::sql) fn validate_query_block_expression_types(
+    engine: &Engine,
+    statement: &QueryBlockPlan,
+    schema: &RowSchema,
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
+    for expression in statement
+        .projections
+        .iter()
+        .map(|projection| &projection.expr)
+        .chain(statement.group_by.iter())
+        .chain(statement.grouping_sets.iter().flatten())
+        .chain(statement.order_by.iter().map(|order| &order.expr))
+        .chain(statement.distinct_on.iter())
+        .chain(statement.r#where.iter())
+        .chain(statement.having.iter())
+        .chain(statement.limit.iter())
+        .chain(statement.offset.iter())
+    {
+        uqa_execution::scalar_type_with_resolver(expression, schema, params, engine)?;
+    }
+    Ok(())
+}
+
+fn projection_star_columns(
+    expression: &ScalarExpr,
+    schema: &RowSchema,
+) -> Result<Option<Vec<ProjectionStarColumn>>, SQLError> {
+    match expression {
+        ScalarExpr::Star => Ok(Some(
+            schema
+                .columns()
+                .iter()
+                .enumerate()
+                .filter(|(_, column)| !is_score_provenance_column(column))
+                .map(|(position, column)| {
+                    (
+                        schema.public_name(position).unwrap_or(column).to_string(),
+                        schema.column_type(position).cloned(),
+                    )
+                })
+                .collect(),
+        )),
+        ScalarExpr::QualifiedStar(qualifier) => {
+            let columns = schema
+                .qualified_star_layout(qualifier)
+                .into_iter()
+                .filter(|(column, _, _)| !is_score_provenance_column(column))
+                .map(|(column, _, ty)| (column, ty))
+                .collect::<Vec<_>>();
+            if columns.is_empty() {
+                return Err(SQLError::UnknownTable(qualifier.clone()));
+            }
+            Ok(Some(columns))
+        }
+        _ => Ok(None),
+    }
+}
+
 fn rename_schema(schema: &RowSchema, aliases: &[String], qualifier: Option<&str>) -> RowSchema {
-    let columns = schema
+    let columns: Vec<String> = schema
         .columns()
         .iter()
         .enumerate()
@@ -412,27 +605,17 @@ fn rename_schema(schema: &RowSchema, aliases: &[String], qualifier: Option<&str>
                 aliases
                     .get(position)
                     .cloned()
-                    .unwrap_or_else(|| public_column_name(column))
+                    .unwrap_or_else(|| schema.public_name(position).unwrap_or(column).to_string())
             };
-            qualifier.map_or(base.clone(), |qualifier| format!("{qualifier}.{base}"))
+            base
         })
         .collect();
-    RowSchema::with_types(columns, schema.column_types().to_vec())
-}
-
-fn qualify_columns(qualifier: Option<&str>, columns: Vec<String>) -> Vec<String> {
-    qualifier.map_or(columns.clone(), |qualifier| {
-        columns
-            .into_iter()
-            .map(|column| format!("{qualifier}.{column}"))
-            .collect()
-    })
-}
-
-fn public_column_name(column: &str) -> String {
-    column
-        .rsplit_once('.')
-        .map_or_else(|| column.to_string(), |(_, name)| name.to_string())
+    match qualifier {
+        Some(qualifier) => {
+            RowSchema::with_qualified_types(qualifier, columns, schema.column_types().to_vec())
+        }
+        None => RowSchema::with_types(columns, schema.column_types().to_vec()),
+    }
 }
 
 fn overlay_outer_schema(current: &RowSchema, outer: Option<&RowSchema>) -> RowSchema {
@@ -440,40 +623,24 @@ fn overlay_outer_schema(current: &RowSchema, outer: Option<&RowSchema>) -> RowSc
         return current.clone();
     };
     let columns = outer
-        .columns()
+        .identities()
         .iter()
         .enumerate()
-        .map(|(position, column)| (column.clone(), outer.column_type(position).cloned()))
+        .map(|(position, identity)| (identity.clone(), outer.column_type(position).cloned()))
         .collect::<Vec<_>>();
-    RowSchema::with_typed_outer_scope(current, &columns)
+    RowSchema::with_typed_outer_identities(current, &columns)
 }
 
-fn values_types_in_scope(
+pub(in crate::sql) fn values_types_in_scope(
     engine: &Engine,
     rows: &[Vec<ScalarExpr>],
+    subqueries: &[QueryPlan],
     schema: Option<&RowSchema>,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<Vec<Option<ColumnType>>, SQLError> {
-    let width = rows.first().map_or(0, Vec::len);
-    let empty = RowSchema::default();
-    let schema = schema.unwrap_or(&empty);
-    let mut types = vec![None; width];
-    for row in rows {
-        if row.len() != width {
-            return Err(SQLError::TypeMismatch(
-                "VALUES lists must all be the same length".into(),
-            ));
-        }
-        for (position, expression) in row.iter().enumerate() {
-            let candidate =
-                uqa_execution::scalar_type_with_resolver(expression, schema, params, engine)?;
-            types[position] = merge_types(types[position].as_ref(), candidate.as_ref())?;
-        }
-    }
-    Ok(types
-        .into_iter()
-        .map(|ty| ty.or(Some(ColumnType::Text)))
-        .collect())
+    SchemaScope::from_execution_scope(ctes)
+        .bind_values_types(engine, rows, subqueries, schema, params, schema)
 }
 
 fn merge_types(

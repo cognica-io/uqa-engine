@@ -23,13 +23,15 @@ use uqa_planner::{
 };
 
 use super::from_rows::execute_lateral_subquery_output;
-use super::scalar::{eval_physical_scalar, PhysicalEvalContext, PhysicalSubqueryRunner};
+use super::scalar::{
+    eval_physical_scalar, PhysicalEvalContext, PhysicalOuterRow, PhysicalSubqueryRunner,
+};
 use super::volatility::{expr_contains_volatile_function, query_contains_volatile_function};
 use super::{
     contains_aggregate, doc_id_value, engine_func_intercept, execute_function,
     execute_function_with_top_k, execute_mixed_where, expect_column_name, has_aggregate,
     has_window, is_score_provenance_column, optimize_engine_plan, prepare_window_plan,
-    projection_label_at, BTreeMap, BTreeSet, BinaryOp, ColumnPrune, Document, Engine,
+    projection_label_at, BTreeMap, BTreeSet, BinaryOp, ColumnPrune, ColumnType, Engine,
     PhysicalAggregateExecutor, PhysicalWindowExecutor, QualifierFilters, ResultRow, SQLError,
     SQLParam, SQLResult, ScoredEntry, SetOpKind, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
     SCORE_COLUMN, SCORE_PROVENANCE_COLUMN,
@@ -72,7 +74,14 @@ pub(in crate::sql) use table_access::*;
 // -------------------------------------------------------------------------
 
 type PhysicalProjection = (String, ScalarExpr);
-type OutputColumnMapping = (String, String);
+/// Public output label paired with the bound expression that addresses its physical value after relational binding. Positional expressions preserve repeated labels without inventing SQL-visible names.
+type OutputColumnMapping = (String, ScalarExpr);
+
+#[derive(Clone, Copy)]
+pub(in crate::sql) struct SingleRelation<'a> {
+    pub storage_name: &'a str,
+    pub qualifier: &'a str,
+}
 
 /// Execute the physical relational plan directly. CTEs, set-operation
 /// branches, values, and query blocks recurse through plan children; query
@@ -168,6 +177,21 @@ impl QueryOutput {
         }
     }
 
+    pub(super) fn into_public_operator<'a>(self) -> Box<dyn uqa_execution::PhysicalOperator + 'a> {
+        let columns = self.columns.clone();
+        let public_width = columns.len();
+        let operator = self.into_operator();
+        let positions = columns
+            .into_iter()
+            .enumerate()
+            .map(|(position, column)| (column, position))
+            .collect();
+        debug_assert!(operator.row_schema().len() >= public_width);
+        Box::new(uqa_execution::ColumnSelection::with_positions(
+            operator, positions,
+        ))
+    }
+
     fn into_subquery_result(self) -> Result<uqa_execution::SubqueryResult, SQLError> {
         let QueryOutput {
             columns,
@@ -238,6 +262,7 @@ pub(super) fn execute_query_plan_output(
             offset,
             subqueries,
         } => {
+            let set_schema = bind_query_plan_schema(engine, plan, params, ctes, None)?;
             // Materialize each child directly into a disk-backed, repeatable
             // stream before starting the next child. A nested set operation
             // therefore never owns two cardinality-sized `SQLResult.rows`
@@ -251,7 +276,7 @@ pub(super) fn execute_query_plan_output(
                 QueryOutputMode::SharedSpill,
             )?;
             let columns = lhs.columns.clone();
-            let left: Box<dyn uqa_execution::PhysicalOperator + '_> = lhs.into_operator();
+            let left: Box<dyn uqa_execution::PhysicalOperator + '_> = lhs.into_public_operator();
             let rhs = execute_query_plan_output(
                 engine,
                 right,
@@ -259,13 +284,14 @@ pub(super) fn execute_query_plan_output(
                 ctes,
                 QueryOutputMode::SharedSpill,
             )?;
-            let right: Box<dyn uqa_execution::PhysicalOperator + '_> = rhs.into_operator();
+            let right: Box<dyn uqa_execution::PhysicalOperator + '_> = rhs.into_public_operator();
             let operation: Box<dyn uqa_execution::PhysicalOperator + '_> = Box::new(
-                uqa_execution::ExternalSetOperation::new(
+                uqa_execution::ExternalSetOperation::new_with_types(
                     left,
                     right,
                     *kind,
                     *all,
+                    set_schema.column_types().to_vec(),
                     physical_work_mem_bytes(engine)?,
                 )
                 .map_err(physical_exec_error)?,
@@ -304,7 +330,12 @@ pub(super) fn execute_query_plan_output(
             collect_query_operator(engine, columns, operation, output_mode)
         }
         RelationalPlan::Values { rows, subqueries } => {
-            validate_values_set_contexts(engine, rows)?;
+            validate_values_set_contexts(
+                engine,
+                rows,
+                &uqa_execution::RowSchema::default(),
+                params,
+            )?;
             execute_plan_values_output(engine, rows, subqueries, params, ctes, output_mode)
         }
     }
@@ -548,16 +579,17 @@ pub(in crate::sql) fn collect_exists_key_operator<'a>(
                 let mut key = SmallVec::<[Value; 4]>::with_capacity(projections.len());
                 let mut contains_null = false;
                 for projection in projections {
-                    let value = match evaluator.evaluate(&projection.expr, &view) {
-                        Ok(value) => value,
-                        Err(error) => {
-                            return Err(close_after_physical_failure(
-                                operator.as_mut(),
-                                error,
-                                "evaluate EXISTS key",
-                            ));
-                        }
-                    };
+                    let value =
+                        match evaluator.evaluate_physical(&projection.expr, &batch.schema, row) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                return Err(close_after_physical_failure(
+                                    operator.as_mut(),
+                                    error,
+                                    "evaluate EXISTS key",
+                                ));
+                            }
+                        };
                     if matches!(value, Value::Null) {
                         contains_null = true;
                         break;
@@ -649,10 +681,24 @@ pub(super) fn combine_set_spills_with_order_output(
 ) -> Result<QueryOutput, SQLError> {
     use uqa_execution::{ExternalSetOperation, PhysicalOperator};
 
-    let left: Box<dyn PhysicalOperator> =
-        Box::new(uqa_execution::SharedSpillScan::new(execution.lhs));
+    let public_positions = || {
+        execution
+            .columns
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(position, column)| (column, position))
+            .collect::<Vec<_>>()
+    };
+    let left: Box<dyn PhysicalOperator> = Box::new(uqa_execution::ColumnSelection::with_positions(
+        Box::new(uqa_execution::SharedSpillScan::new(execution.lhs)),
+        public_positions(),
+    ));
     let right: Box<dyn PhysicalOperator> =
-        Box::new(uqa_execution::SharedSpillScan::new(execution.rhs));
+        Box::new(uqa_execution::ColumnSelection::with_positions(
+            Box::new(uqa_execution::SharedSpillScan::new(execution.rhs)),
+            public_positions(),
+        ));
     let mut operation: Box<dyn PhysicalOperator + '_> = Box::new(
         ExternalSetOperation::new(
             left,
@@ -694,6 +740,8 @@ fn execute_plan_values_output(
     let columns: Vec<String> = (0..rows[0].len())
         .map(|index| format!("column{}", index + 1))
         .collect();
+    let column_types = values_types_in_scope(engine, rows, subqueries, None, params, ctes)?;
+    let empty_schema = uqa_execution::RowSchema::default();
     let hook = ScopedEngineHook::new(engine, ctes);
     let context = PhysicalEvalContext::new(None, params)
         .with_function_hook(&hook)
@@ -709,16 +757,47 @@ fn execute_plan_values_output(
         }
         let mut row = ResultRow::new();
         for (index, expression) in source.iter().enumerate() {
+            let source_type = uqa_execution::common_context_expression_type(
+                expression,
+                &empty_schema,
+                params,
+                Some(engine),
+            )?;
+            let value = eval_physical_scalar(expression, subqueries, &context)?;
             row.insert(
                 columns[index].clone(),
-                eval_physical_scalar(expression, subqueries, &context)?,
+                coerce_common_context_value(
+                    value,
+                    source_type.as_ref(),
+                    column_types[index].as_ref(),
+                )?,
             );
         }
         output.push(row);
     }
-    let scan: Box<dyn uqa_execution::PhysicalOperator + '_> =
-        Box::new(uqa_execution::TableScan::from_rows(columns.clone(), output));
+    let scan: Box<dyn uqa_execution::PhysicalOperator + '_> = Box::new(
+        uqa_execution::TableScan::from_typed_rows(columns.clone(), column_types, output),
+    );
     collect_query_operator(engine, columns, scan, output_mode)
+}
+
+pub(in crate::sql) fn coerce_common_context_value(
+    value: Value,
+    source_type: Option<&ColumnType>,
+    target_type: Option<&ColumnType>,
+) -> Result<Value, SQLError> {
+    let Some(target_type) = target_type else {
+        return Ok(value);
+    };
+    if source_type == Some(target_type) {
+        return Ok(value);
+    }
+    let cast_target = match target_type {
+        ColumnType::Domain { base, .. } => base.as_ref(),
+        target => target,
+    };
+    let source_name = source_type.map(ColumnType::sql_name);
+    uqa_sql::expr::cast_value_from(&value, &cast_target.sql_name(), source_name.as_deref())
 }
 
 #[cfg(test)]

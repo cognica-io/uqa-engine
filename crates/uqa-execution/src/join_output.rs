@@ -10,7 +10,7 @@ use uqa_core::Value;
 use uqa_sql::ast::ColumnType;
 use uqa_sql::expr::cast_value;
 
-use crate::{Batch, ExecError, ExecResult, PhysicalOperator, RowSchema};
+use crate::{Batch, ColumnIdentity, ExecError, ExecResult, PhysicalOperator, RowSchema};
 
 /// Source of one visible or hidden join-output identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,21 +38,19 @@ pub struct JoinOutput<'a> {
 }
 
 impl<'a> JoinOutput<'a> {
-    /// Compile the positional schema of a qualified join without constructing
-    /// or executing an operator. Binders use this to expose the exact same
-    /// merged-column identities and hidden qualified aliases as execution.
+    /// Compile the positional schema of a qualified join without constructing or executing an operator. Binders use this to expose the exact same merged-column identities and hidden qualified aliases as execution.
     pub fn try_schema(
         input: &RowSchema,
-        columns: &[(String, JoinOutputSource)],
-        aliases: &[(String, JoinOutputSource)],
+        columns: &[(String, ColumnIdentity, JoinOutputSource)],
+        aliases: &[(ColumnIdentity, JoinOutputSource)],
     ) -> ExecResult<RowSchema> {
         compile_layout(input, columns, aliases).map(|(schema, _)| schema)
     }
 
     pub fn try_new(
         child: Box<dyn PhysicalOperator + 'a>,
-        columns: Vec<(String, JoinOutputSource)>,
-        aliases: Vec<(String, JoinOutputSource)>,
+        columns: Vec<(String, ColumnIdentity, JoinOutputSource)>,
+        aliases: Vec<(ColumnIdentity, JoinOutputSource)>,
     ) -> ExecResult<Self> {
         let (schema, computed) = compile_layout(child.row_schema(), &columns, &aliases)?;
         Ok(Self {
@@ -65,14 +63,14 @@ impl<'a> JoinOutput<'a> {
 
 fn compile_layout(
     input: &RowSchema,
-    columns: &[(String, JoinOutputSource)],
-    aliases: &[(String, JoinOutputSource)],
+    columns: &[(String, ColumnIdentity, JoinOutputSource)],
+    aliases: &[(ColumnIdentity, JoinOutputSource)],
 ) -> ExecResult<(RowSchema, Vec<JoinOutputSource>)> {
     let input_width = input.len();
     let mut computed = Vec::<JoinOutputSource>::new();
     for source in columns
         .iter()
-        .map(|(_, source)| source)
+        .map(|(_, _, source)| source)
         .chain(aliases.iter().map(|(_, source)| source))
     {
         match source {
@@ -127,21 +125,21 @@ fn compile_layout(
     };
     let columns = columns
         .iter()
-        .map(|(name, source)| {
+        .map(|(name, identity, source)| {
             let ty = match source {
                 JoinOutputSource::Input(position) => intermediate.column_type(*position).cloned(),
                 JoinOutputSource::Cast { .. } | JoinOutputSource::Coalesce { .. } => {
                     source_type(source)
                 }
             };
-            (name.clone(), source_position(source), ty)
+            (name.clone(), identity.clone(), source_position(source), ty)
         })
         .collect::<Vec<_>>();
     let aliases = aliases
         .iter()
         .map(|(name, source)| (name.clone(), source_position(source)))
         .collect::<Vec<_>>();
-    let schema = RowSchema::remap_typed_positions(&intermediate, &columns, &aliases);
+    let schema = RowSchema::remap_typed_identities(&intermediate, &columns, &aliases);
     Ok((schema, computed))
 }
 
@@ -252,13 +250,31 @@ mod tests {
         let mut output = JoinOutput::try_new(
             Box::new(child),
             vec![
-                ("id".into(), JoinOutputSource::Input(0)),
-                ("name".into(), JoinOutputSource::Input(1)),
-                ("note".into(), JoinOutputSource::Input(3)),
+                (
+                    "id".into(),
+                    ColumnIdentity::unqualified("id"),
+                    JoinOutputSource::Input(0),
+                ),
+                (
+                    "name".into(),
+                    ColumnIdentity::qualified("l", "name"),
+                    JoinOutputSource::Input(1),
+                ),
+                (
+                    "note".into(),
+                    ColumnIdentity::qualified("r", "note"),
+                    JoinOutputSource::Input(3),
+                ),
             ],
             vec![
-                ("l.id".into(), JoinOutputSource::Input(0)),
-                ("r.id".into(), JoinOutputSource::Input(2)),
+                (
+                    ColumnIdentity::qualified("l", "id"),
+                    JoinOutputSource::Input(0),
+                ),
+                (
+                    ColumnIdentity::qualified("r", "id"),
+                    JoinOutputSource::Input(2),
+                ),
             ],
         )
         .unwrap();
@@ -266,14 +282,8 @@ mod tests {
         let batch = output.next().unwrap().unwrap();
         assert_eq!(batch.schema.columns(), ["id", "name", "note"]);
         let view = batch.schema.view(&batch.rows[0]);
-        assert_eq!(
-            view.qualified_column("l", "id", "l.id"),
-            Some(&Value::Int(1))
-        );
-        assert_eq!(
-            view.qualified_column("r", "id", "r.id"),
-            Some(&Value::Int(1))
-        );
+        assert_eq!(view.qualified_column("l", "id"), Some(&Value::Int(1)));
+        assert_eq!(view.qualified_column("r", "id"), Some(&Value::Int(1)));
         output.close().unwrap();
     }
 
@@ -290,6 +300,7 @@ mod tests {
             Box::new(child),
             vec![(
                 "id".into(),
+                ColumnIdentity::unqualified("id"),
                 JoinOutputSource::Coalesce {
                     left: 0,
                     right: 1,

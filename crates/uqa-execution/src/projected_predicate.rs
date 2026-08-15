@@ -11,7 +11,7 @@ use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::IntegerWidth;
 use uqa_sql::{SQLError, SQLParam};
 
-use crate::ScalarExpr;
+use crate::{RowSchema, ScalarExpr};
 
 mod compile;
 mod evaluate;
@@ -77,7 +77,16 @@ impl ProjectedPredicate {
         fields: &[String],
         params: &[SQLParam],
     ) -> Result<Option<Self>, SQLError> {
-        match compile::compile(expression, fields, params) {
+        Self::compile_with_schema(expression, &RowSchema::new(fields.to_vec()), params)
+    }
+
+    /// Compile against structured SQL identities instead of interpreting punctuation in public labels as qualification metadata.
+    pub fn compile_with_schema(
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        params: &[SQLParam],
+    ) -> Result<Option<Self>, SQLError> {
+        match compile::compile(expression, schema, params) {
             Ok(expression) => Ok(expression.map(|expression| Self { expression })),
             Err(SQLError::Unsupported(_)) => Ok(None),
             Err(error) => Err(error),
@@ -244,10 +253,12 @@ mod tests {
             order_by: Vec::new(),
             filter: None,
         }));
-        let left_schema = crate::RowSchema::new(vec!["c.id".into()]);
-        let right_schema = crate::RowSchema::new(vec!["o.comment".into()]);
+        let left_schema =
+            crate::RowSchema::with_qualified_types("c", vec!["id".into()], vec![None]);
+        let right_schema =
+            crate::RowSchema::with_qualified_types("o", vec!["comment".into()], vec![None]);
         let schema = crate::RowSchema::join(&left_schema, &right_schema, std::iter::empty());
-        let predicate = ProjectedPredicate::compile(&expression, schema.columns(), &[])
+        let predicate = ProjectedPredicate::compile_with_schema(&expression, &schema, &[])
             .unwrap()
             .unwrap();
 

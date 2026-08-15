@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult};
+use uqa_sql::ast::ColumnType;
 
 fn exec(engine: &Engine, sql: &str) -> SQLResult {
     engine.sql(sql, &[]).unwrap()
@@ -154,6 +155,31 @@ fn json_preserves_input_text_while_jsonb_canonicalizes() {
     );
     assert_eq!(result.rows[0]["raw"], json("{\"b\":2,\"a\":1}"));
     assert_eq!(result.rows[0]["bin"], jsonb("{\"a\": 1, \"b\": 2}"));
+}
+
+#[test]
+fn jsonb_comparison_uses_postgresql_structural_semantics() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT '1'::jsonb = '1.0'::jsonb AS numeric_equal,
+                '{\"b\":2,\"a\":1}'::jsonb = '{\"a\":1.0,\"b\":2}'::jsonb AS object_equal,
+                '[10]'::jsonb > '[2]'::jsonb AS numeric_order",
+    );
+    assert_eq!(result.rows[0]["numeric_equal"], Value::Bool(true));
+    assert_eq!(result.rows[0]["object_equal"], Value::Bool(true));
+    assert_eq!(result.rows[0]["numeric_order"], Value::Bool(true));
+}
+
+#[test]
+fn jsonb_distinct_uses_postgresql_numeric_equality() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT DISTINCT value
+         FROM (VALUES ('1'::jsonb), ('1.0'::jsonb)) AS source(value)",
+    );
+    assert_eq!(result.rows.len(), 1);
 }
 
 #[test]
@@ -755,6 +781,20 @@ fn json_each_key_value_pairs() {
         .collect();
     assert_eq!(kv[&s("x")], s("10"));
     assert_eq!(kv[&s("y")], s("20"));
+}
+
+#[test]
+fn json_each_in_the_select_list_returns_a_typed_record() {
+    let engine = Engine::new();
+    let result = exec(&engine, "SELECT json_each('{\"a\": 1}'::json) AS pair");
+    assert_eq!(result.column_types, [Some(ColumnType::Record)]);
+    assert_eq!(
+        result.rows[0]["pair"],
+        Value::Record(vec![
+            ("key".into(), Value::Str("a".into())),
+            ("value".into(), Value::Str("1".into())),
+        ])
+    );
 }
 
 #[test]

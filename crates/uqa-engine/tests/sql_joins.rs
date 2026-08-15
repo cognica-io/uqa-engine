@@ -615,6 +615,30 @@ fn join_using_resolves_postgresql_common_types_before_execution() {
          FULL JOIN (VALUES ('x'::varchar)) AS r(id) USING (id)",
     );
     assert_eq!(text_left.rows[0]["ty"], Value::Str("text".into()));
+
+    let temporal = query(
+        &engine,
+        "SELECT pg_typeof(id) AS ty, id::text AS value
+         FROM (VALUES ('2020-01-01'::date)) AS l(id)
+         FULL JOIN (VALUES ('2020-01-01 00:00:00'::timestamp)) AS r(id) USING (id)",
+    );
+    assert_eq!(
+        temporal.rows[0]["ty"],
+        Value::Str("timestamp without time zone".into())
+    );
+    assert_eq!(
+        temporal.rows[0]["value"],
+        Value::Str("2020-01-01 00:00:00".into())
+    );
+
+    for sql in [
+        "SELECT pg_typeof(id) AS ty, id FROM (VALUES (1::oid)) AS l(id) FULL JOIN (VALUES (1::integer)) AS r(id) USING (id)",
+        "SELECT pg_typeof(id) AS ty, id FROM (VALUES (1::bigint)) AS l(id) FULL JOIN (VALUES (1::oid)) AS r(id) USING (id)",
+    ] {
+        let oid = query(&engine, sql);
+        assert_eq!(oid.rows[0]["ty"], Value::Str("oid".into()), "{sql}");
+        assert_eq!(oid.rows[0]["id"], Value::Int(1), "{sql}");
+    }
 }
 
 #[test]
@@ -726,6 +750,87 @@ fn cursor_preserves_different_duplicate_non_using_columns() {
         batch.columns()[2].values,
         [Value::Str("right-value".into())]
     );
+}
+
+#[test]
+fn duplicate_join_columns_survive_ordering_derived_tables_and_cte_aliases() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE duplicate_left (id INTEGER, left_value TEXT)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE duplicate_right (id INTEGER, right_value TEXT)",
+    );
+    exec(&engine, "INSERT INTO duplicate_left VALUES (1, 'left')");
+    exec(&engine, "INSERT INTO duplicate_right VALUES (2, 'right')");
+
+    for sql in [
+        "SELECT * FROM duplicate_left l CROSS JOIN duplicate_right r ORDER BY l.id",
+        "SELECT nested.* FROM (SELECT * FROM duplicate_left l CROSS JOIN duplicate_right r) nested",
+    ] {
+        let result = query(&engine, sql);
+        assert_eq!(
+            result.columns,
+            ["id", "left_value", "id", "right_value"],
+            "{sql}"
+        );
+        assert_eq!(result.value_at(0, 0), Some(&Value::Int(1)), "{sql}");
+        assert_eq!(
+            result.value_at(0, 1),
+            Some(&Value::Str("left".into())),
+            "{sql}"
+        );
+        assert_eq!(result.value_at(0, 2), Some(&Value::Int(2)), "{sql}");
+        assert_eq!(
+            result.value_at(0, 3),
+            Some(&Value::Str("right".into())),
+            "{sql}"
+        );
+    }
+
+    let aliased = query(
+        &engine,
+        "WITH joined(first_id, left_value, second_id, right_value) AS (
+             SELECT * FROM duplicate_left l CROSS JOIN duplicate_right r
+         )
+         SELECT first_id, second_id FROM joined",
+    );
+    assert_eq!(aliased.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(aliased.value_at(0, 1), Some(&Value::Int(2)));
+
+    let ambiguous = engine
+        .sql(
+            "SELECT nested.id FROM (SELECT * FROM duplicate_left l CROSS JOIN duplicate_right r) nested",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(ambiguous.sqlstate(), Some("42702"));
+}
+
+#[test]
+fn duplicate_projection_labels_remain_positional_and_order_alias_is_ambiguous() {
+    let engine = Engine::new();
+    let result = query(
+        &engine,
+        "SELECT l.id AS x, r.id AS x
+         FROM (VALUES (1)) l(id) CROSS JOIN (VALUES (2)) r(id)
+         ORDER BY 1",
+    );
+    assert_eq!(result.columns, ["x", "x"]);
+    assert_eq!(result.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(result.value_at(0, 1), Some(&Value::Int(2)));
+
+    let error = engine
+        .sql(
+            "SELECT l.id AS x, r.id AS x
+             FROM (VALUES (1)) l(id) CROSS JOIN (VALUES (2)) r(id)
+             ORDER BY x",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42702"));
 }
 
 #[test]
@@ -915,4 +1020,63 @@ fn empty_cte_lateral_source_keeps_its_declared_type() {
             Some(uqa_sql::ColumnType::SmallInteger),
         ]
     );
+}
+
+#[test]
+fn qualified_star_projects_only_the_named_relation() {
+    let engine = engine_with_orders();
+    let result = query(
+        &engine,
+        "SELECT u.*, o.product
+         FROM users AS u JOIN orders AS o ON o.user_id = u.id
+         WHERE o.oid = 10",
+    );
+    assert_eq!(result.columns, ["id", "name", "product"]);
+    assert_eq!(result.rows[0]["id"], Value::Int(1));
+    assert_eq!(result.rows[0]["name"], Value::Str("Alice".into()));
+    assert_eq!(result.rows[0]["product"], Value::Str("Book".into()));
+}
+
+#[test]
+fn qualified_star_preserves_using_side_values() {
+    let engine = using_engine();
+    let result = query(
+        &engine,
+        "SELECT r.*
+         FROM join_left AS l LEFT JOIN join_right AS r USING (id)
+         WHERE l.id IN (1, 2)
+         ORDER BY l.id",
+    );
+    assert_eq!(result.columns, ["id", "shared", "r_only"]);
+    assert_eq!(result.rows[0]["id"], Value::Int(1));
+    assert_eq!(result.rows[0]["shared"], Value::Str("same".into()));
+    assert_eq!(result.rows[1]["id"], Value::Null);
+    assert_eq!(result.rows[1]["shared"], Value::Null);
+    assert_eq!(result.rows[1]["r_only"], Value::Null);
+}
+
+#[test]
+fn qualified_star_keeps_dots_inside_quoted_identifiers() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE dotted_star (\"c.d\" INTEGER, plain TEXT)",
+    );
+    exec(&engine, "INSERT INTO dotted_star VALUES (7, 'seven')");
+    let result = query(
+        &engine,
+        "SELECT \"a.b\".* FROM dotted_star AS \"a.b\" ORDER BY \"a.b\".\"c.d\"",
+    );
+    assert_eq!(result.columns, ["c.d", "plain"]);
+    assert_eq!(result.rows[0]["c.d"], Value::Int(7));
+    assert_eq!(result.rows[0]["plain"], Value::Str("seven".into()));
+}
+
+#[test]
+fn qualified_star_rejects_an_unknown_relation() {
+    let engine = engine_with_orders();
+    let error = engine
+        .sql("SELECT missing.* FROM users AS u", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42P01"));
 }

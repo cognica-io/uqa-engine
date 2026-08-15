@@ -6,8 +6,12 @@
 
 //! `PostgreSQL` 18 built-in routine and database catalog regressions.
 
-use uqa_core::Value;
+use uqa_core::{ArrayValue, Value};
 use uqa_engine::Engine;
+
+fn array(values: Vec<Value>) -> Value {
+    Value::Array(ArrayValue::try_new(values).expect("rectangular catalog array"))
+}
 
 pub(super) fn expected_information_schema_domain_layouts() -> Vec<Vec<Value>> {
     vec![
@@ -105,10 +109,13 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     assert_eq!(row(3261)["prorettype"], Value::Int(114));
     assert_eq!(
         row(3261)["proargnames"],
-        Value::List(vec![
-            Value::Str("target".into()),
-            Value::Str("strip_in_arrays".into()),
-        ])
+        Value::Array(
+            uqa_core::ArrayValue::try_new(vec![
+                Value::Str("target".into()),
+                Value::Str("strip_in_arrays".into()),
+            ])
+            .expect("flat pg_proc argument-name array")
+        )
     );
     assert_eq!(row(6364)["proleakproof"], Value::Bool(true));
     assert_eq!(row(6383)["prosrc"], Value::Str("dgamma".into()));
@@ -143,6 +150,96 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
         assert_eq!(row["is_deterministic"], Value::Str("NO".into()));
         assert_eq!(row["external_language"], Value::Str("INTERNAL".into()));
     }
+}
+
+#[test]
+fn postgresql_18_user_routine_catalog_preserves_argument_modes_and_type_oids() {
+    let engine = Engine::new();
+    for ddl in [
+        "CREATE FUNCTION cat_plain(integer) RETURNS integer AS $$ BEGIN RETURN 1; END; $$ LANGUAGE plpgsql",
+        "CREATE FUNCTION cat_out(a integer, OUT x integer, OUT y text) AS $$ BEGIN x := a; y := 'x'; END; $$ LANGUAGE plpgsql",
+        "CREATE FUNCTION cat_table(a integer) RETURNS TABLE(x integer, y text) AS $$ BEGIN RETURN QUERY SELECT a, 'x'; END; $$ LANGUAGE plpgsql",
+        "CREATE FUNCTION cat_arrays(integer[]) RETURNS text[] AS $$ BEGIN RETURN ARRAY['x']; END; $$ LANGUAGE plpgsql",
+        "CREATE PROCEDURE cat_proc(IN a integer, OUT y text) AS $$ BEGIN y := 'x'; END; $$ LANGUAGE plpgsql",
+    ] {
+        engine
+            .sql(ddl, &[])
+            .unwrap_or_else(|error| panic!("{ddl}: {error}"));
+    }
+
+    let result = engine
+        .sql(
+            "SELECT proname, prokind, pronargs, prorettype, proretset, proargtypes, \
+                    proallargtypes, proargmodes, proargnames \
+             FROM pg_catalog.pg_proc \
+             WHERE proname IN ('cat_plain', 'cat_out', 'cat_table', 'cat_arrays', 'cat_proc')",
+            &[],
+        )
+        .unwrap();
+    let row = |name: &str| {
+        result
+            .rows
+            .iter()
+            .find(|row| row["proname"] == Value::Str(name.into()))
+            .unwrap_or_else(|| panic!("missing pg_proc row {name}"))
+    };
+
+    assert_eq!(row("cat_plain")["pronargs"], Value::Int(1));
+    assert_eq!(row("cat_plain")["prorettype"], Value::Int(23));
+    assert_eq!(
+        row("cat_plain")["proargtypes"],
+        Value::List(vec![Value::Int(23)])
+    );
+    assert_eq!(row("cat_plain")["proallargtypes"], Value::Null);
+    assert_eq!(row("cat_plain")["proargmodes"], Value::Null);
+    assert_eq!(row("cat_plain")["proargnames"], Value::Null);
+
+    assert_eq!(row("cat_out")["prorettype"], Value::Int(2249));
+    assert_eq!(
+        row("cat_out")["proargtypes"],
+        Value::List(vec![Value::Int(23)])
+    );
+    assert_eq!(
+        row("cat_out")["proallargtypes"],
+        array(vec![Value::Int(23), Value::Int(23), Value::Int(25)])
+    );
+    assert_eq!(
+        row("cat_out")["proargmodes"],
+        array(vec![
+            Value::Str("i".into()),
+            Value::Str("o".into()),
+            Value::Str("o".into())
+        ])
+    );
+    assert_eq!(
+        row("cat_out")["proargnames"],
+        array(vec![
+            Value::Str("a".into()),
+            Value::Str("x".into()),
+            Value::Str("y".into())
+        ])
+    );
+
+    assert_eq!(row("cat_table")["prorettype"], Value::Int(2249));
+    assert_eq!(row("cat_table")["proretset"], Value::Bool(true));
+    assert_eq!(
+        row("cat_table")["proargmodes"],
+        array(vec![
+            Value::Str("i".into()),
+            Value::Str("t".into()),
+            Value::Str("t".into())
+        ])
+    );
+
+    assert_eq!(row("cat_arrays")["prorettype"], Value::Int(1009));
+    assert_eq!(
+        row("cat_arrays")["proargtypes"],
+        Value::List(vec![Value::Int(1007)])
+    );
+
+    assert_eq!(row("cat_proc")["prokind"], Value::Str("p".into()));
+    assert_eq!(row("cat_proc")["pronargs"], Value::Int(1));
+    assert_eq!(row("cat_proc")["prorettype"], Value::Int(2249));
 }
 
 #[test]

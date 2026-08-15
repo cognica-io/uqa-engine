@@ -8,7 +8,7 @@
 
 use super::{
     out_of_range, parse_json, to_decimal, to_f64, typed_json_value, value_to_json, value_to_string,
-    Result, SQLError, TemporalValue, Value,
+    ArrayValue, Result, SQLError, TemporalValue, Value,
 };
 
 /// Cast a value to the named SQL type, mirroring `CAST(expr AS ty)`.
@@ -24,10 +24,11 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
         return Ok(Value::Null);
     }
     if let Some(elem_ty) = ty.strip_suffix("[]") {
-        // `'{1,2,3}'::int[]` parses the PostgreSQL array literal
-        // before casting each element.
-        let items: Vec<Value> = match v {
-            Value::List(items) => items.clone(),
+        let source_elem_ty = source_ty
+            .and_then(|source| source.trim().strip_suffix("[]"))
+            .map(str::trim);
+        let array = match v {
+            Value::Array(array) => array.clone(),
             Value::Str(s) => parse_pg_array_literal(s)?,
             other => {
                 return Err(SQLError::TypeMismatch(format!(
@@ -35,11 +36,10 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
                 )));
             }
         };
-        return items
-            .iter()
-            .map(|item| cast_value_from(item, elem_ty, None))
-            .collect::<Result<Vec<_>>>()
-            .map(Value::List);
+        let elements = cast_array_elements(array.elements(), elem_ty, source_elem_ty)?;
+        return ArrayValue::with_lower_bounds(elements, array.lower_bounds().to_vec())
+            .map(Value::Array)
+            .ok_or_else(|| SQLError::TypeMismatch("array dimensions changed during cast".into()));
     }
     let (base, modifier) = split_type_modifier(ty);
     match base {
@@ -132,20 +132,37 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
             ));
             Ok(Value::FixedChar(text))
         }
-        "date" => cast_temporal(v, TemporalValue::parse_date, "date"),
-        "time" | "time without time zone" => cast_temporal(v, TemporalValue::parse_time, "time"),
-        "timetz" | "time with time zone" => {
-            cast_temporal(v, TemporalValue::parse_time_tz, "time with time zone")
-        }
-        "timestamp" | "datetime" | "timestamp without time zone" => {
-            cast_temporal(v, TemporalValue::parse_timestamp, "timestamp")
-        }
+        "date" => cast_date(v, source_ty),
+        "time" | "time without time zone" => cast_temporal(
+            v,
+            TemporalCastTarget::Time,
+            TemporalValue::parse_time,
+            "time",
+        ),
+        "timetz" | "time with time zone" => cast_temporal(
+            v,
+            TemporalCastTarget::TimeTz,
+            TemporalValue::parse_time_tz,
+            "time with time zone",
+        ),
+        "timestamp" | "datetime" | "timestamp without time zone" => cast_temporal(
+            v,
+            TemporalCastTarget::Timestamp,
+            TemporalValue::parse_timestamp,
+            "timestamp",
+        ),
         "timestamptz" | "timestamp with time zone" => cast_temporal(
             v,
+            TemporalCastTarget::TimestampTz,
             TemporalValue::parse_timestamp_tz,
             "timestamp with time zone",
         ),
-        "interval" => cast_temporal(v, TemporalValue::parse_interval, "interval"),
+        "interval" => cast_temporal(
+            v,
+            TemporalCastTarget::Interval,
+            TemporalValue::parse_interval,
+            "interval",
+        ),
         "json" => {
             if let Value::Json(text) = v {
                 return Ok(Value::Json(text.clone()));
@@ -232,8 +249,10 @@ fn canonical_cast_source(source_ty: Option<&str>, value: &Value) -> String {
         Value::Temporal(_) => "timestamp",
         Value::Json(_) => "json",
         Value::JsonB(_) => "jsonb",
+        Value::Array(_) => "anyarray",
         Value::List(_) => "anyarray",
-        Value::Map(_) => "record",
+        Value::Row(_) | Value::Record(_) => "record",
+        Value::Map(_) => "jsonb",
         Value::Null => "unknown",
     });
     let (source, _) = split_type_modifier(source);
@@ -608,22 +627,68 @@ pub(super) fn cast_boolean(v: &Value) -> Result<Value> {
 /// Parse a `PostgreSQL` array literal (`{1,2,3}`, `{"a b",NULL}`,
 /// `{{1,2},{3,4}}`) into nested lists of string/NULL values; the caller
 /// casts elements.
-pub fn parse_pg_array_literal(text: &str) -> Result<Vec<Value>> {
+pub fn parse_pg_array_literal(text: &str) -> Result<ArrayValue> {
     let mut parser = PgArrayLiteralParser::new(text);
-    let items = parser.parse()?;
+    let (declared_dimensions, items) = parser.parse()?;
     if let Err(error) = array_shape(&items) {
         return Err(SQLError::Routine {
             sqlstate: "22P02".into(),
             message: format!("malformed array literal: \"{text}\" ({})", error.message()),
         });
     }
-    Ok(items)
+    let array = ArrayValue::try_new(items).ok_or_else(|| SQLError::Routine {
+        sqlstate: "22P02".into(),
+        message: format!("malformed array literal: \"{text}\""),
+    })?;
+    let Some(declared_dimensions) = declared_dimensions else {
+        return Ok(array);
+    };
+    let declared_lengths = declared_dimensions
+        .iter()
+        .map(|(_, length)| *length)
+        .collect::<Vec<_>>();
+    if declared_lengths != array.dimensions() {
+        return Err(SQLError::Routine {
+            sqlstate: "22P02".into(),
+            message: format!(
+                "malformed array literal: \"{text}\" (specified array dimensions do not match array contents)"
+            ),
+        });
+    }
+    let lower_bounds = declared_dimensions
+        .into_iter()
+        .map(|(lower, _)| lower)
+        .collect();
+    ArrayValue::with_lower_bounds(array.into_elements(), lower_bounds).ok_or_else(|| {
+        SQLError::Routine {
+            sqlstate: "22P02".into(),
+            message: format!("malformed array literal: \"{text}\""),
+        }
+    })
+}
+
+fn cast_array_elements(
+    items: &[Value],
+    element_type: &str,
+    source_element_type: Option<&str>,
+) -> Result<Vec<Value>> {
+    items
+        .iter()
+        .map(|item| match item {
+            Value::List(nested) => {
+                cast_array_elements(nested, element_type, source_element_type).map(Value::List)
+            }
+            other => cast_value_from(other, element_type, source_element_type),
+        })
+        .collect()
 }
 
 pub(super) struct PgArrayLiteralParser<'a> {
     source: &'a str,
     chars: std::iter::Peekable<std::str::Chars<'a>>,
 }
+
+type ParsedArrayLiteral = (Option<Vec<(i32, usize)>>, Vec<Value>);
 
 impl<'a> PgArrayLiteralParser<'a> {
     fn new(source: &'a str) -> Self {
@@ -633,14 +698,67 @@ impl<'a> PgArrayLiteralParser<'a> {
         }
     }
 
-    fn parse(&mut self) -> Result<Vec<Value>> {
+    fn parse(&mut self) -> Result<ParsedArrayLiteral> {
         self.skip_whitespace();
+        let dimensions = self.parse_dimension_declaration()?;
         let items = self.parse_array()?;
         self.skip_whitespace();
         if self.chars.peek().is_some() {
             return Err(self.error("unexpected content after closing brace"));
         }
-        Ok(items)
+        Ok((dimensions, items))
+    }
+
+    fn parse_dimension_declaration(&mut self) -> Result<Option<Vec<(i32, usize)>>> {
+        if self.chars.peek() != Some(&'[') {
+            return Ok(None);
+        }
+        let mut dimensions = Vec::new();
+        while self.chars.next_if_eq(&'[').is_some() {
+            self.skip_whitespace();
+            let lower = self.parse_dimension_bound()?;
+            self.skip_whitespace();
+            if self.chars.next() != Some(':') {
+                return Err(self.error("array dimension must contain `:`"));
+            }
+            self.skip_whitespace();
+            let upper = self.parse_dimension_bound()?;
+            self.skip_whitespace();
+            if self.chars.next() != Some(']') {
+                return Err(self.error("array dimension is missing a closing `]`"));
+            }
+            let length = i64::from(upper)
+                .checked_sub(i64::from(lower))
+                .and_then(|difference| difference.checked_add(1))
+                .and_then(|length| usize::try_from(length).ok())
+                .ok_or_else(|| self.error("upper bound cannot be less than lower bound"))?;
+            dimensions.push((lower, length));
+            self.skip_whitespace();
+        }
+        if self.chars.next() != Some('=') {
+            return Err(self.error("array dimensions must be followed by `=`"));
+        }
+        self.skip_whitespace();
+        Ok(Some(dimensions))
+    }
+
+    fn parse_dimension_bound(&mut self) -> Result<i32> {
+        let mut text = String::new();
+        if self
+            .chars
+            .peek()
+            .is_some_and(|character| matches!(character, '+' | '-'))
+        {
+            text.push(self.chars.next().expect("peeked array bound sign"));
+        }
+        while self.chars.peek().is_some_and(char::is_ascii_digit) {
+            text.push(self.chars.next().expect("peeked array bound digit"));
+        }
+        if text.is_empty() || matches!(text.as_str(), "+" | "-") {
+            return Err(self.error("array dimension bound must be an integer"));
+        }
+        text.parse()
+            .map_err(|_| self.error("array dimension bound is out of range"))
     }
 
     fn parse_array(&mut self) -> Result<Vec<Value>> {
@@ -702,6 +820,8 @@ impl<'a> PgArrayLiteralParser<'a> {
 
     fn parse_unquoted_element(&mut self) -> Result<Value> {
         let mut value = String::new();
+        let mut significant_len = 0;
+        let mut was_escaped = false;
         while let Some(character) = self.chars.peek().copied() {
             match character {
                 ',' | '}' => break,
@@ -710,26 +830,31 @@ impl<'a> PgArrayLiteralParser<'a> {
                 }
                 '\\' => {
                     let _escape = self.chars.next();
-                    value.push(
-                        self.chars
-                            .next()
-                            .ok_or_else(|| self.error("array element ends with an escape"))?,
-                    );
+                    let escaped = self
+                        .chars
+                        .next()
+                        .ok_or_else(|| self.error("array element ends with an escape"))?;
+                    value.push(escaped);
+                    significant_len = value.len();
+                    was_escaped = true;
                 }
                 _ => {
                     let _character = self.chars.next();
                     value.push(character);
+                    if !character.is_whitespace() {
+                        significant_len = value.len();
+                    }
                 }
             }
         }
-        let value = value.trim();
+        value.truncate(significant_len);
         if value.is_empty() {
             return Err(self.error("array contains a missing element"));
         }
-        if value.eq_ignore_ascii_case("null") {
+        if !was_escaped && value.eq_ignore_ascii_case("null") {
             Ok(Value::Null)
         } else {
-            Ok(Value::Str(value.to_string()))
+            Ok(Value::Str(value))
         }
     }
 
@@ -802,16 +927,136 @@ pub fn array_dimensions(items: &[Value]) -> Result<Vec<usize>> {
     array_shape(items).map_err(|error| SQLError::TypeMismatch(error.message().to_string()))
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum TemporalCastTarget {
+    Date,
+    Time,
+    TimeTz,
+    Timestamp,
+    TimestampTz,
+    Interval,
+}
+
 pub(super) fn cast_temporal(
     v: &Value,
+    target: TemporalCastTarget,
     parse: fn(&str) -> Option<TemporalValue>,
     ty: &str,
 ) -> Result<Value> {
     match v {
-        Value::Temporal(value) => Ok(Value::Temporal(value.clone())),
+        Value::Temporal(value) => cast_temporal_kind(value, target)
+            .map(Value::Temporal)
+            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to {ty}"))),
         other => parse(&value_to_string(other))
             .map(Value::Temporal)
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to {ty}"))),
+    }
+}
+
+fn cast_date(v: &Value, source_ty: Option<&str>) -> Result<Value> {
+    match v {
+        Value::Temporal(value) => cast_temporal_kind(value, TemporalCastTarget::Date)
+            .map(Value::Temporal)
+            .ok_or_else(|| undefined_cast(&canonical_cast_source(source_ty, v), "date")),
+        Value::Str(text) | Value::FixedChar(text) => TemporalValue::try_parse_date(text)
+            .map(Value::Temporal)
+            .map_err(|error| {
+                let field_overflow = matches!(
+                    error.kind(),
+                    chrono::format::ParseErrorKind::OutOfRange
+                        | chrono::format::ParseErrorKind::Impossible
+                );
+                SQLError::Routine {
+                    sqlstate: if field_overflow { "22008" } else { "22007" }.into(),
+                    message: if field_overflow {
+                        format!("date/time field value out of range: \"{text}\"")
+                    } else {
+                        format!("invalid input syntax for type date: \"{text}\"")
+                    },
+                }
+            }),
+        _ => Err(undefined_cast(&canonical_cast_source(source_ty, v), "date")),
+    }
+}
+
+fn cast_temporal_kind(value: &TemporalValue, target: TemporalCastTarget) -> Option<TemporalValue> {
+    const MICROS_PER_DAY: i64 = 86_400_000_000;
+    match (target, value) {
+        (TemporalCastTarget::Date, TemporalValue::Date { days }) => {
+            Some(TemporalValue::Date { days: *days })
+        }
+        (
+            TemporalCastTarget::Date,
+            TemporalValue::Timestamp { micros } | TemporalValue::TimestampTz { micros },
+        ) => Some(TemporalValue::Date {
+            days: i32::try_from(micros.div_euclid(MICROS_PER_DAY)).ok()?,
+        }),
+        (TemporalCastTarget::Time, TemporalValue::Time { micros })
+        | (TemporalCastTarget::Time, TemporalValue::TimeTz { micros, .. })
+        | (
+            TemporalCastTarget::Time,
+            TemporalValue::Timestamp { micros } | TemporalValue::TimestampTz { micros },
+        )
+        | (TemporalCastTarget::Time, TemporalValue::Interval { micros, .. }) => {
+            Some(TemporalValue::Time {
+                micros: micros.rem_euclid(MICROS_PER_DAY),
+            })
+        }
+        (
+            TemporalCastTarget::TimeTz,
+            TemporalValue::TimeTz {
+                micros,
+                offset_minutes,
+            },
+        ) => Some(TemporalValue::TimeTz {
+            micros: *micros,
+            offset_minutes: *offset_minutes,
+        }),
+        (TemporalCastTarget::TimeTz, TemporalValue::Time { micros })
+        | (TemporalCastTarget::TimeTz, TemporalValue::TimestampTz { micros }) => {
+            Some(TemporalValue::TimeTz {
+                micros: micros.rem_euclid(MICROS_PER_DAY),
+                offset_minutes: 0,
+            })
+        }
+        (TemporalCastTarget::Timestamp, TemporalValue::Timestamp { micros })
+        | (TemporalCastTarget::Timestamp, TemporalValue::TimestampTz { micros }) => {
+            Some(TemporalValue::Timestamp { micros: *micros })
+        }
+        (TemporalCastTarget::Timestamp, TemporalValue::Date { days }) => {
+            Some(TemporalValue::Timestamp {
+                micros: i64::from(*days).checked_mul(MICROS_PER_DAY)?,
+            })
+        }
+        (TemporalCastTarget::TimestampTz, TemporalValue::TimestampTz { micros })
+        | (TemporalCastTarget::TimestampTz, TemporalValue::Timestamp { micros }) => {
+            Some(TemporalValue::TimestampTz { micros: *micros })
+        }
+        (TemporalCastTarget::TimestampTz, TemporalValue::Date { days }) => {
+            Some(TemporalValue::TimestampTz {
+                micros: i64::from(*days).checked_mul(MICROS_PER_DAY)?,
+            })
+        }
+        (
+            TemporalCastTarget::Interval,
+            TemporalValue::Interval {
+                months,
+                days,
+                micros,
+            },
+        ) => Some(TemporalValue::Interval {
+            months: *months,
+            days: *days,
+            micros: *micros,
+        }),
+        (TemporalCastTarget::Interval, TemporalValue::Time { micros }) => {
+            Some(TemporalValue::Interval {
+                months: 0,
+                days: 0,
+                micros: *micros,
+            })
+        }
+        _ => None,
     }
 }
 
@@ -819,6 +1064,30 @@ pub(super) fn cast_temporal(
 mod tests {
     use super::*;
     use uqa_core::DecimalValue;
+
+    #[test]
+    fn temporal_cross_casts_convert_the_carrier_kind() {
+        let date = Value::Temporal(TemporalValue::parse_date("2020-01-02").unwrap());
+        assert_eq!(
+            cast_value(&date, "timestamp").unwrap(),
+            Value::Temporal(TemporalValue::parse_timestamp("2020-01-02 00:00:00").unwrap())
+        );
+        let timestamp =
+            Value::Temporal(TemporalValue::parse_timestamp("2020-01-02 03:04:05").unwrap());
+        assert_eq!(
+            cast_value(&timestamp, "date").unwrap(),
+            Value::Temporal(TemporalValue::parse_date("2020-01-02").unwrap())
+        );
+        assert_eq!(
+            cast_value(&timestamp, "time").unwrap(),
+            Value::Temporal(TemporalValue::parse_time("03:04:05").unwrap())
+        );
+        let interval = Value::Temporal(TemporalValue::parse_interval("1 day 25:02:03").unwrap());
+        assert_eq!(
+            cast_value(&interval, "time").unwrap(),
+            Value::Temporal(TemporalValue::parse_time("01:02:03").unwrap())
+        );
+    }
 
     #[test]
     fn uuid_cast_matches_postgresql_input_and_canonical_output() {

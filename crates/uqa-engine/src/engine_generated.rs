@@ -7,7 +7,6 @@
 //! Physical/logical row conversion for `PostgreSQL` generated columns.
 
 use uqa_sql::ast::{ColumnDef, GeneratedColumnKind};
-use uqa_sql::expr::EvalContext;
 use uqa_sql::{ResultRow, SQLError};
 use uqa_storage::document_store::Document;
 
@@ -43,6 +42,13 @@ fn materialize_matching_virtual_generated_columns(
     document: &mut Document,
     mut selected: impl FnMut(&str) -> bool,
 ) -> Result<(), SQLError> {
+    let schema = uqa_execution::RowSchema::with_types(
+        columns.iter().map(|column| column.name.clone()).collect(),
+        columns
+            .iter()
+            .map(|column| Some(column.ty.clone()))
+            .collect(),
+    );
     for column in columns {
         let Some(generated) = column.generated.as_ref() else {
             continue;
@@ -53,8 +59,18 @@ fn materialize_matching_virtual_generated_columns(
         if !selected(&column.name) {
             continue;
         }
+        let mut expression = uqa_planner::ExpressionPlan::lower((*generated.expression).clone());
+        if !expression.subqueries.is_empty() {
+            return Err(SQLError::Internal(
+                "validated virtual generated expression contains a subquery".into(),
+            ));
+        }
+        expression.scalar = uqa_execution::bind_type_introspection(expression.scalar, &schema, &[]);
         let row: &ResultRow = document;
-        let value = uqa_sql::expr::eval(&generated.expression, &EvalContext::new(Some(row), &[]))?;
+        let value = uqa_execution::eval_scalar(
+            &expression.scalar,
+            &uqa_execution::ScalarEvalContext::new(Some(row), &[]),
+        )?;
         document.insert(
             column.name.clone(),
             crate::sql::convert_value_to_column_type(value, &column.ty)?,

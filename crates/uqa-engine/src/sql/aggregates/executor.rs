@@ -7,8 +7,7 @@
 //! Engine adapter selecting adaptive or sort aggregation per grouping set.
 
 use super::{CteScope, Engine, QueryBlockPlan, SQLError, SQLParam, SpillBuffer};
-use uqa_execution::{AggregateExecutor, Batch, ExecResult, RowSchema};
-use uqa_sql::expr::RowLookup;
+use uqa_execution::{AggregateExecutor, Batch, ExecResult, ProjectedRow, RowSchema};
 
 enum AggregateSet {
     Adaptive(Box<super::adaptive::AdaptiveAggregateSet>),
@@ -41,7 +40,6 @@ impl<'a> PhysicalAggregateExecutor<'a> {
         output_schema: RowSchema,
         work_mem_bytes: usize,
     ) -> Result<Self, SQLError> {
-        let input_columns = input_schema.columns().to_vec();
         let statements = grouping_set_statements(statement);
         let set_budget = (work_mem_bytes / statements.len().max(1)).max(1);
         let sets = statements
@@ -53,7 +51,8 @@ impl<'a> PhysicalAggregateExecutor<'a> {
                         statement,
                         relaxed,
                         set_budget,
-                        &input_columns,
+                        &input_schema,
+                        params,
                     )
                     .map(|set| AggregateSet::Adaptive(Box::new(set)));
                 }
@@ -67,7 +66,8 @@ impl<'a> PhysicalAggregateExecutor<'a> {
                                 relaxed,
                                 (set_budget / 2).max(1),
                                 phase_budget,
-                                &input_columns,
+                                &input_schema,
+                                params,
                             )?,
                         ))
                     } else {
@@ -165,7 +165,7 @@ impl AggregateExecutor for PhysicalAggregateExecutor<'_> {
         })
     }
 
-    fn consume_projected_row(&mut self, row: &dyn RowLookup) -> ExecResult<()> {
+    fn consume_projected_row(&mut self, row: &ProjectedRow<'_, '_>) -> ExecResult<()> {
         for set in &mut self.sets {
             let AggregateSet::Adaptive(set) = set else {
                 return Err(uqa_execution::ExecError::Other(

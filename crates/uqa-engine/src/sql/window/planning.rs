@@ -19,9 +19,10 @@ pub(super) fn expr_has_window(expr: &ScalarExpr) -> bool {
                 || order_by.iter().any(|order| expr_has_window(&order.expr))
                 || filter.as_ref().is_some_and(|expr| expr_has_window(expr))
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-            items.iter().any(expr_has_window)
-        }
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => items.iter().any(expr_has_window),
         ScalarExpr::Binary { lhs, rhs, .. } => expr_has_window(lhs) || expr_has_window(rhs),
         ScalarExpr::Not(inner)
         | ScalarExpr::UnaryMinus(inner)
@@ -48,7 +49,9 @@ pub(super) fn expr_has_window(expr: &ScalarExpr) -> bool {
         }
         ScalarExpr::Default
         | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
@@ -110,6 +113,10 @@ pub(super) fn rewrite_window_expr(
         ScalarExpr::Array(items) => {
             let (items, changed) = rewrite_window_exprs(items, projection_index, counter, slots);
             (ScalarExpr::Array(items), changed)
+        }
+        ScalarExpr::Row(items) => {
+            let (items, changed) = rewrite_window_exprs(items, projection_index, counter, slots);
+            (ScalarExpr::Row(items), changed)
         }
         ScalarExpr::Binary { op, lhs, rhs } => {
             let (lhs, lhs_changed) = rewrite_window_expr(lhs, projection_index, counter, slots);

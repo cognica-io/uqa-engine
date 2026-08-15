@@ -11,6 +11,7 @@ use super::{
     AggregateAccumulator, AggregateValueBuffer, DecimalValue, ProjectionPlan, SQLError, ScalarExpr,
     Value,
 };
+use uqa_core::ArrayValue;
 
 pub(in crate::sql) fn aggregate_value(
     name: &str,
@@ -92,7 +93,10 @@ pub(in crate::sql) fn aggregate_value_with_args(
                     Value::Bytes(_)
                     | Value::Json(_)
                     | Value::JsonB(_)
+                    | Value::Array(_)
                     | Value::List(_)
+                    | Value::Row(_)
+                    | Value::Record(_)
                     | Value::Map(_) => Err(SQLError::TypeMismatch(format!(
                         "string_agg requires a text-coercible value, got {v:?}"
                     ))),
@@ -108,7 +112,13 @@ pub(in crate::sql) fn aggregate_value_with_args(
             if ordered_values.is_empty() {
                 return Ok(Value::Null);
             }
-            Value::List(ordered_values)
+            ArrayValue::try_new(ordered_values)
+                .map(Value::Array)
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(
+                        "cannot accumulate arrays of different dimensionality".into(),
+                    )
+                })?
         }
         "json_agg" | "jsonb_agg" => {
             let ordered_values = acc.values.ordered_values()?;
@@ -261,8 +271,11 @@ pub(in crate::sql) fn aggregate_json_key(value: &Value) -> String {
         Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
         Value::Temporal(t) => t.to_sql_string(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
-        Value::List(_) | Value::Map(_) => serde_json::to_string(&core_value_to_json(value))
-            .unwrap_or_else(|_| format!("{value:?}")),
+        Value::Array(_) => uqa_sql::expr::value_to_string(value),
+        Value::List(_) | Value::Row(_) | Value::Record(_) | Value::Map(_) => {
+            serde_json::to_string(&core_value_to_json(value))
+                .unwrap_or_else(|_| format!("{value:?}"))
+        }
     }
 }
 
@@ -373,9 +386,7 @@ pub(in crate::sql) fn mode_value(values: &AggregateValueBuffer) -> Result<Value,
     Ok(best_value)
 }
 
-/// Compute a projection's output column name. `PostgreSQL` reports
-/// standalone expressions as `?column?`; `projection_columns` adds a
-/// suffix when the row map needs unique keys.
+/// Compute a projection's `PostgreSQL` output column name. Standalone expressions use `?column?`; repeated labels remain repeated until the final named-map compatibility boundary.
 pub(in crate::sql) fn projection_label_at(proj: &ProjectionPlan) -> String {
     if let Some(a) = &proj.alias {
         return a.clone();
@@ -383,7 +394,7 @@ pub(in crate::sql) fn projection_label_at(proj: &ProjectionPlan) -> String {
     match &proj.expr {
         ScalarExpr::Column(c) => c.clone(),
         ScalarExpr::QualifiedColumn { column, .. } => column.clone(),
-        ScalarExpr::Star => "*".into(),
+        ScalarExpr::Star | ScalarExpr::QualifiedStar(_) => "*".into(),
         ScalarExpr::Func { name, .. } => name.clone(),
         _ => "?column?".into(),
     }

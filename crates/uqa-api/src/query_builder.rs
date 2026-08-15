@@ -797,6 +797,14 @@ mod tests {
     }
 
     #[test]
+    fn render_sql_array_preserves_explicit_lower_bound() {
+        let array =
+            uqa_core::ArrayValue::with_lower_bounds(vec![Value::Int(1), Value::Int(2)], vec![0])
+                .expect("one-dimensional array");
+        assert_eq!(render_value(&Value::Array(array)).unwrap(), "'[0:1]={1,2}'");
+    }
+
+    #[test]
     fn mixed_numeric_arrow_output_does_not_round_large_integers() {
         let result = SQLResult::from_rows(
             vec!["value".into()],

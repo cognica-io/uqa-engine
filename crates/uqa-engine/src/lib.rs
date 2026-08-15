@@ -679,6 +679,22 @@ fn value_to_f64_vec(value: &Value) -> Result<Vec<f64>, String> {
                 other => Err(format!("expected numeric feature, got {other:?}")),
             })
             .collect(),
+        Value::Array(array) if array.dimensions().len() <= 1 => array
+            .elements()
+            .iter()
+            .map(|item| match item {
+                Value::Float(value) => Ok(*value),
+                Value::Int(value) => Ok(*value as f64),
+                Value::Decimal(value) => value
+                    .to_f64()
+                    .ok_or_else(|| "decimal feature is outside f64 range".to_string()),
+                other => Err(format!("expected numeric feature, got {other:?}")),
+            })
+            .collect(),
+        Value::Array(array) => Err(format!(
+            "expected one-dimensional feature array, got {} dimensions",
+            array.dimensions().len()
+        )),
         other => Err(format!("expected feature array, got {other:?}")),
     }
 }

@@ -317,9 +317,10 @@ fn contains_explicit_fusion(expression: &ScalarExpr) -> bool {
                     .any(|order| contains_explicit_fusion(&order.expr))
                 || filter.as_deref().is_some_and(contains_explicit_fusion)
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-            items.iter().any(contains_explicit_fusion)
-        }
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => items.iter().any(contains_explicit_fusion),
         ScalarExpr::Binary { lhs, rhs, .. } => {
             contains_explicit_fusion(lhs) || contains_explicit_fusion(rhs)
         }
@@ -357,7 +358,9 @@ fn contains_explicit_fusion(expression: &ScalarExpr) -> bool {
         ScalarExpr::InSubquery { expr, .. } => contains_explicit_fusion(expr),
         ScalarExpr::Default
         | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)

@@ -69,9 +69,20 @@ pub(super) unsafe fn value_to_napi(env: sys::napi_env, value: Value) -> Result<s
             }
             Value::Bytes(value) => Buffer::to_napi_value(env, Buffer::from(value)),
             Value::Temporal(value) => String::to_napi_value(env, value.to_sql_string()),
-            Value::List(values) => {
+            Value::Array(array) => Vec::<JSValue>::to_napi_value(
+                env,
+                array.into_elements().into_iter().map(JSValue).collect(),
+            ),
+            Value::List(values) | Value::Row(values) => {
                 Vec::<JSValue>::to_napi_value(env, values.into_iter().map(JSValue).collect())
             }
+            Value::Record(values) => BTreeMap::<String, JSValue>::to_napi_value(
+                env,
+                values
+                    .into_iter()
+                    .map(|(key, value)| (key, JSValue(value)))
+                    .collect(),
+            ),
             Value::Map(values) => BTreeMap::<String, JSValue>::to_napi_value(
                 env,
                 values

@@ -128,7 +128,10 @@ pub(super) fn infer_arrow_type(column: &str, result: &SQLResult) -> DataType {
             | Value::JsonB(_)
             | Value::Bytes(_)
             | Value::Temporal(_)
+            | Value::Array(_)
             | Value::List(_)
+            | Value::Row(_)
+            | Value::Record(_)
             | Value::Map(_) => DataType::Utf8,
         };
         ty = Some(match (ty, next) {
@@ -260,7 +263,10 @@ fn value_kind(value: &Value) -> &'static str {
         Value::JsonB(_) => "jsonb",
         Value::Bytes(_) => "bytes",
         Value::Temporal(_) => "temporal",
+        Value::Array(_) => "array",
         Value::List(_) => "list",
+        Value::Row(_) => "row",
+        Value::Record(_) => "record",
         Value::Map(_) => "map",
     }
 }
@@ -275,7 +281,9 @@ fn value_to_arrow_string(value: &Value) -> Option<String> {
         Value::Str(v) | Value::FixedChar(v) | Value::Json(v) | Value::JsonB(v) => Some(v.clone()),
         Value::Bytes(v) => Some(format!("{v:?}")),
         Value::Temporal(v) => Some(v.to_sql_string()),
+        Value::Array(v) => Some(uqa_sql::expr::array_value_to_string(v)),
         Value::List(v) => Some(format!("{v:?}")),
+        Value::Row(_) | Value::Record(_) => Some(uqa_sql::expr::value_to_string(value)),
         Value::Map(v) => Some(format!("{v:?}")),
     }
 }

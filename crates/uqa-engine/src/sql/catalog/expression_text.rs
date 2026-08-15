@@ -18,6 +18,7 @@ pub(super) fn default_expr_text(expr: Option<&Expr>) -> Value {
 pub(super) fn schema_expr_text(expr: &Expr) -> String {
     match expr {
         Expr::Star => "*".into(),
+        Expr::QualifiedStar(qualifier) => format!("{qualifier}.*"),
         Expr::Default => "DEFAULT".into(),
         Expr::Column(name) => name.clone(),
         Expr::QualifiedColumn {
@@ -74,6 +75,14 @@ pub(super) fn schema_expr_text(expr: &Expr) -> String {
         }
         Expr::Array(items) => format!(
             "ARRAY[{}]",
+            items
+                .iter()
+                .map(schema_expr_text)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Expr::Row(items) => format!(
+            "ROW({})",
             items
                 .iter()
                 .map(schema_expr_text)
@@ -211,11 +220,47 @@ fn schema_literal_text(value: &Value) -> String {
         Value::Decimal(value) => format!("{value:?}"),
         Value::Json(value) => format!("'{}'::json", value.replace('\'', "''")),
         Value::JsonB(value) => format!("'{}'::jsonb", value.replace('\'', "''")),
+        Value::Array(array)
+            if array
+                .lower_bounds()
+                .iter()
+                .any(|lower_bound| *lower_bound != 1) =>
+        {
+            format!(
+                "'{}'",
+                uqa_sql::expr::array_value_to_string(array).replace('\'', "''")
+            )
+        }
+        Value::Array(array) => format!(
+            "ARRAY[{}]",
+            array
+                .elements()
+                .iter()
+                .map(schema_literal_text)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         Value::List(values) => format!(
             "ARRAY[{}]",
             values
                 .iter()
                 .map(schema_literal_text)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Value::Row(values) => format!(
+            "ROW({})",
+            values
+                .iter()
+                .map(schema_literal_text)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Value::Record(fields) => format!(
+            "ROW({})",
+            fields
+                .iter()
+                .map(|(_, value)| schema_literal_text(value))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),

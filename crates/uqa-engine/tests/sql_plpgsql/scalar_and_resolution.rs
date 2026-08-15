@@ -196,16 +196,15 @@ fn out_parameters_shape_result() {
     let row = &result.rows[0];
     assert_eq!(row.get("s"), Some(&Value::Int(6)));
     assert_eq!(row.get("p"), Some(&Value::Int(10)));
-    // Scalar position folds the OUT parameters into a record value
-    // (PG renders `(6,10)`; the engine represents it as a map).
+    // Scalar position folds the OUT parameters into a named record value (PG renders `(6,10)`).
     let record = scalar(&eng, "SELECT f_out(5) AS r");
-    match record {
-        Value::Map(map) => {
-            assert_eq!(map.get("s"), Some(&Value::Int(6)));
-            assert_eq!(map.get("p"), Some(&Value::Int(10)));
-        }
-        other => panic!("expected record map, got {other:?}"),
-    }
+    assert_eq!(
+        record,
+        Value::Record(vec![
+            ("s".into(), Value::Int(6)),
+            ("p".into(), Value::Int(10)),
+        ])
+    );
     // Single OUT parameter yields the bare value in scalar position.
     exec(
         &eng,
@@ -252,6 +251,29 @@ fn overload_resolution_by_arity() {
             .contains("function \"ovl\" already exists with same argument types"),
         "got: {err}"
     );
+}
+
+#[test]
+fn quoted_named_arguments_preserve_identifier_case() {
+    let eng = engine();
+    exec(
+        &eng,
+        "CREATE FUNCTION quoted_named_argument(\"InputValue\" int) RETURNS int AS $$
+         BEGIN RETURN \"InputValue\"; END;
+         $$ LANGUAGE plpgsql",
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT quoted_named_argument(\"InputValue\" => 7) AS value",
+        ),
+        Value::Int(7)
+    );
+    let error = exec_err(
+        &eng,
+        "SELECT quoted_named_argument(inputvalue => 7) AS value",
+    );
+    assert_eq!(error.sqlstate(), Some("42883"));
 }
 
 #[test]

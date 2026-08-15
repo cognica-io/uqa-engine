@@ -54,6 +54,8 @@ pub(super) fn aggregate_sorted_input(
         statement,
         &aggregate_targets,
         relaxed,
+        input_schema,
+        params,
     )?;
     let accumulator_budget = (phase_budget / aggregate_targets.len().max(1)).max(1);
     let mut current_key: Option<Vec<Value>> = None;
@@ -67,7 +69,8 @@ pub(super) fn aggregate_sorted_input(
                 let view = batch.schema.view(&row);
                 let context = ScalarEvalContext::from_row_lookup(&view, params)
                     .with_function_hook(&hook)
-                    .with_subquery_runner(&subquery_arena);
+                    .with_subquery_runner(&subquery_arena)
+                    .with_physical_outer_row(&batch.schema, &row);
                 let key = statement
                     .group_by
                     .iter()

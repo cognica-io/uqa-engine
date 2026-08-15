@@ -10,18 +10,19 @@ use super::{
     age_cypher, checked_integer_value, doc_id_value, eval_call_arguments, execute_tree_entries,
     expect_optional_graph_value, generate_series_values, graph_betweenness_entries,
     graph_hits_entries, graph_pagerank_entries, json_table_arg, json_table_value_to_text,
-    prefix_row, PlanSubqueryArena, ResultRow, SQLError, SQLTableFunctionResult,
-    SQLTableFunctionStream, ScalarEvalContext, TableFunctionCall, TableFunctionEvalContext, Value,
+    unnest_row_stream, PlanSubqueryArena, ResultRow, SQLError, SQLTableFunctionResult,
+    SQLTableFunctionStream, ScalarEvalContext, SourceEvalContext, TableFunctionCall, Value,
 };
 
 #[allow(clippy::similar_names)]
 pub(in crate::sql) fn build_table_function_rows_with_row(
-    context: &TableFunctionEvalContext<'_>,
+    context: &SourceEvalContext<'_>,
     call: TableFunctionCall<'_>,
-    row: Option<&ResultRow>,
+    row: Option<&uqa_execution::OwnedPhysicalRow>,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let TableFunctionCall {
         name,
+        output_name,
         relation,
         args,
         alias,
@@ -31,7 +32,12 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
     use uqa_sql::expr::unknown_function_error;
     let engine = context.engine;
     let subquery_arena = PlanSubqueryArena::new(context.subqueries, Some(context.subquery_runner));
-    let ctx = ScalarEvalContext::new(row, context.params)
+    let ctx = match row {
+        Some(row) => ScalarEvalContext::from_row_lookup(row, context.params)
+            .with_physical_outer_row(&row.schema, &row.row),
+        None => ScalarEvalContext::new(None, context.params),
+    };
+    let ctx = ctx
         .with_function_hook(context.eval_hook)
         .with_subquery_runner(&subquery_arena);
     let identity = name.to_ascii_lowercase();
@@ -52,30 +58,22 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
     let default_col = column_aliases
         .first()
         .cloned()
-        .unwrap_or_else(|| alias.unwrap_or(name).to_string());
-    let qual = alias;
+        .unwrap_or_else(|| alias.unwrap_or(output_name).to_string());
     let mut out: Vec<ResultRow> = Vec::new();
     let push_scalar = |out: &mut Vec<ResultRow>, value: Value| {
         let mut r = ResultRow::new();
-        r.insert(default_col.clone(), value.clone());
-        if column_aliases.is_empty() && alias.is_some() && default_col != name {
-            r.insert(name.to_string(), value);
-        }
-        let r = match qual {
-            Some(a) => prefix_row(a, &r),
-            None => r,
-        };
+        r.insert(default_col.clone(), value);
         out.push(r);
     };
     if !has_named_args {
         if let Some(result) = engine.call_registered_table_function(&identity, &evaluated) {
-            return registered_table_function_rows(name, result?, qual, column_aliases);
+            return registered_table_function_rows(name, result?, alias, column_aliases);
         }
     }
     if let Some(result) =
         crate::sql::plpgsql_exec::call_user_table_function(engine, &identity, &call_args)
     {
-        return registered_table_function_rows(name, result?, qual, column_aliases);
+        return registered_table_function_rows(name, result?, alias, column_aliases);
     }
     if has_named_args {
         return Err(unknown_function_error(&lower, &call_args));
@@ -87,18 +85,9 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
             }
             Ok(out)
         }
-        "unnest" => {
-            for value in &evaluated {
-                if let Value::List(items) = value {
-                    for item in items {
-                        push_scalar(&mut out, item.clone());
-                    }
-                } else {
-                    push_scalar(&mut out, value.clone());
-                }
-            }
-            Ok(out)
-        }
+        "unnest" => unnest_row_stream(evaluated, output_name, alias, column_aliases)?
+            .collect::<uqa_execution::ExecResult<Vec<_>>>()
+            .map_err(crate::sql::select::physical_exec_error),
         "regexp_split_to_table" => {
             if evaluated.len() != 2 {
                 return Err(SQLError::TypeMismatch(
@@ -142,10 +131,6 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
                 let mut r = ResultRow::new();
                 r.insert(key_col.clone(), Value::Str(k));
                 r.insert(val_col.clone(), json_table_value_to_text(&v));
-                let r = match qual {
-                    Some(a) => prefix_row(a, &r),
-                    None => r,
-                };
                 out.push(r);
             }
             Ok(out)
@@ -170,10 +155,6 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
             for v in arr {
                 let mut r = ResultRow::new();
                 r.insert(col.clone(), json_table_value_to_text(&v));
-                let r = match qual {
-                    Some(a) => prefix_row(a, &r),
-                    None => r,
-                };
                 out.push(r);
             }
             Ok(out)
@@ -209,10 +190,6 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
                     .unwrap_or_else(|| "create_analyzer".into()),
                 Value::Str(format!("analyzer '{analyzer_name}' created")),
             );
-            let r = match qual {
-                Some(a) => prefix_row(a, &r),
-                None => r,
-            };
             Ok(vec![r])
         }
         "drop_analyzer" => {
@@ -243,10 +220,6 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
                     .unwrap_or_else(|| "drop_analyzer".into()),
                 Value::Str(format!("analyzer '{analyzer_name}' dropped")),
             );
-            let r = match qual {
-                Some(a) => prefix_row(a, &r),
-                None => r,
-            };
             Ok(vec![r])
         }
         "list_analyzers" => {
@@ -275,10 +248,6 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
             for n in names {
                 let mut r = ResultRow::new();
                 r.insert(key.clone(), Value::Str(n));
-                let r = match qual {
-                    Some(a) => prefix_row(a, &r),
-                    None => r,
-                };
                 out.push(r);
             }
             Ok(out)
@@ -319,10 +288,6 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
                     "total_field_length".into(),
                     checked_integer_value(stat.total_field_length, "total field length")?,
                 );
-                let r = match qual {
-                    Some(a) => prefix_row(a, &r),
-                    None => r,
-                };
                 out.push(r);
             }
             Ok(out)
@@ -375,10 +340,6 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
                     .unwrap_or_else(|| "set_table_analyzer".into()),
                 Value::Str(msg),
             );
-            let r = match qual {
-                Some(a) => prefix_row(a, &r),
-                None => r,
-            };
             Ok(vec![r])
         }
         "pagerank" | "graph_pagerank" | "hits" | "graph_hits" | "betweenness"
@@ -411,17 +372,18 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
                 let mut r = ResultRow::new();
                 r.insert(id_col.clone(), doc_id_value(entry.doc_id)?);
                 r.insert(score_col.clone(), Value::Float(entry.score));
-                let r = match qual {
-                    Some(a) => prefix_row(a, &r),
-                    None => r,
-                };
                 out.push(r);
             }
             Ok(out)
         }
-        "cypher" => {
-            age_cypher::build_rows(engine, args, &evaluated, qual, column_aliases, column_types)
-        }
+        "cypher" => age_cypher::build_rows(
+            engine,
+            args,
+            &evaluated,
+            alias,
+            column_aliases,
+            column_types,
+        ),
         "rpq" => {
             if !(2..=3).contains(&evaluated.len()) {
                 return Err(SQLError::TypeMismatch(
@@ -454,10 +416,6 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
             for entry in entries {
                 let mut r = ResultRow::new();
                 r.insert(id_col.clone(), doc_id_value(entry.doc_id)?);
-                let r = match qual {
-                    Some(a) => prefix_row(a, &r),
-                    None => r,
-                };
                 out.push(r);
             }
             Ok(out)
@@ -470,7 +428,7 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
 
 fn operator_join_rows(
     tuples: uqa_core::GeneralizedPostingList,
-    alias: Option<&str>,
+    _alias: Option<&str>,
     column_aliases: &[String],
 ) -> Result<Vec<ResultRow>, SQLError> {
     let left_column = column_aliases
@@ -505,11 +463,7 @@ fn operator_join_rows(
                 .cloned()
                 .unwrap_or(Value::Null),
         );
-        if let Some(alias) = alias {
-            rows.push(prefix_row(alias, &row));
-        } else {
-            rows.push(row);
-        }
+        rows.push(row);
     }
     Ok(rows)
 }
@@ -517,7 +471,7 @@ fn operator_join_rows(
 pub(in crate::sql) fn registered_table_function_rows(
     name: &str,
     result: SQLTableFunctionResult,
-    alias: Option<&str>,
+    _alias: Option<&str>,
     column_aliases: &[String],
 ) -> Result<Vec<ResultRow>, SQLError> {
     if result.columns.is_empty() {
@@ -549,10 +503,6 @@ pub(in crate::sql) fn registered_table_function_rows(
         for (column, value) in columns.iter().zip(values) {
             row.insert(column.clone(), value);
         }
-        let row = match alias {
-            Some(alias) => prefix_row(alias, &row),
-            None => row,
-        };
         out.push(row);
     }
     Ok(out)
@@ -561,7 +511,7 @@ pub(in crate::sql) fn registered_table_function_rows(
 pub(in crate::sql) fn registered_table_function_row_stream(
     name: &str,
     result: SQLTableFunctionStream,
-    alias: Option<&str>,
+    _alias: Option<&str>,
     column_aliases: &[String],
 ) -> Result<uqa_execution::ProjectRows, SQLError> {
     if result.columns.is_empty() {
@@ -582,7 +532,6 @@ pub(in crate::sql) fn registered_table_function_row_stream(
         })
         .collect::<Vec<_>>();
     let function_name = name.to_string();
-    let qualifier = alias.map(str::to_string);
     Ok(Box::new(result.rows.map(
         move |values| -> uqa_execution::ExecResult<ResultRow> {
             let values = values.map_err(uqa_execution::ExecError::from)?;
@@ -597,9 +546,7 @@ pub(in crate::sql) fn registered_table_function_row_stream(
             for (column, value) in columns.iter().zip(values) {
                 row.insert(column.clone(), value);
             }
-            Ok(qualifier
-                .as_deref()
-                .map_or(row.clone(), |qualifier| prefix_row(qualifier, &row)))
+            Ok(row)
         },
     )))
 }

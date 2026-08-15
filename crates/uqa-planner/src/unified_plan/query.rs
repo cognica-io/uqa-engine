@@ -276,13 +276,36 @@ impl QueryBlockPlan {
 }
 
 impl SourcePlan {
+    /// SQL-visible relation qualifier for a non-join FROM item. PostgreSQL uses the local function name, not its schema-qualified lookup identity, when a table function has no explicit alias.
+    #[must_use]
+    pub fn visible_qualifier(&self) -> Option<&str> {
+        match self {
+            Self::Table {
+                qualifier, alias, ..
+            } => Some(alias.as_deref().unwrap_or(qualifier)),
+            Self::Function {
+                output_name, alias, ..
+            } => Some(alias.as_deref().unwrap_or(output_name)),
+            Self::Values { alias, .. } | Self::Subquery { alias, .. } => alias.as_deref(),
+            Self::Join { .. } => None,
+        }
+    }
+
     pub(super) fn lower_with(
         source: FromClause,
         aggregates: &dyn AggregateClassifier,
         subqueries: &mut Vec<QueryPlan>,
     ) -> Self {
         match source {
-            FromClause::Table { name, alias } => Self::Table { name, alias },
+            FromClause::Table {
+                name,
+                qualifier,
+                alias,
+            } => Self::Table {
+                name,
+                qualifier,
+                alias,
+            },
             FromClause::Join {
                 left,
                 right,
@@ -319,6 +342,7 @@ impl SourcePlan {
             },
             FromClause::Function {
                 name,
+                output_name,
                 relation,
                 args,
                 alias,
@@ -326,6 +350,7 @@ impl SourcePlan {
                 column_types,
             } => Self::Function {
                 name,
+                output_name,
                 relation,
                 args: args
                     .into_iter()
@@ -370,7 +395,14 @@ impl SourcePlan {
 
     pub fn collect_tables(&self, output: &mut Vec<(String, Option<String>)>) {
         match self {
-            Self::Table { name, alias } => output.push((name.clone(), alias.clone())),
+            Self::Table {
+                name,
+                qualifier,
+                alias,
+            } => output.push((
+                name.clone(),
+                Some(alias.as_ref().unwrap_or(qualifier).clone()),
+            )),
             Self::Join { left, right, .. } => {
                 left.collect_tables(output);
                 right.collect_tables(output);

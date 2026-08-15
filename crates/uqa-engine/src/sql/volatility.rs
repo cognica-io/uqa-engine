@@ -62,6 +62,8 @@ pub(super) fn function_volatility(
             | "clock_timestamp"
             | "timeofday"
             | "gen_random_uuid"
+            | "uuidv4"
+            | "uuidv7"
             | "create_analyzer"
             | "drop_analyzer"
             | "set_table_analyzer"
@@ -147,7 +149,10 @@ pub(super) fn expr_contains_volatile_function(engine: &Engine, expr: &ScalarExpr
                     .as_ref()
                     .is_some_and(|expr| expr_contains_volatile_function(engine, expr))
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => items
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => items
             .iter()
             .any(|expr| expr_contains_volatile_function(engine, expr)),
         ScalarExpr::Binary { lhs, rhs, .. } => {
@@ -210,7 +215,9 @@ pub(super) fn expr_contains_volatile_function(engine: &Engine, expr: &ScalarExpr
         | ScalarExpr::InSubquery { .. } => true,
         ScalarExpr::Default
         | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_) => false,

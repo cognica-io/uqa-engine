@@ -6,9 +6,11 @@
 
 //! Scalar coercion, checked numeric conversion, and vector/tensor decoding.
 
-use super::{hex_encode, out_of_range, value_to_json, DecimalValue, Result, SQLError, Value};
+use super::{
+    hex_encode, out_of_range, value_to_json, ArrayValue, DecimalValue, Result, SQLError, Value,
+};
 
-pub(super) fn value_to_string(v: &Value) -> String {
+pub fn value_to_string(v: &Value) -> String {
     match v {
         Value::Null => "".into(),
         Value::Int(i) => i.to_string(),
@@ -19,10 +21,84 @@ pub(super) fn value_to_string(v: &Value) -> String {
         Value::Bool(b) => (if *b { "true" } else { "false" }).into(),
         Value::Temporal(t) => t.to_sql_string(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
+        Value::Array(array) => array_value_to_string(array),
         Value::List(_) | Value::Map(_) => value_to_json(v).to_string(),
+        Value::Row(values) => composite_value_to_string(values.iter()),
+        Value::Record(fields) => composite_value_to_string(fields.iter().map(|(_, value)| value)),
         // bytea renders as PostgreSQL hex output in text contexts.
         Value::Bytes(b) => format!("\\x{}", hex_encode(b)),
     }
+}
+
+pub fn array_value_to_string(array: &ArrayValue) -> String {
+    let dimensions = if array
+        .lower_bounds()
+        .iter()
+        .any(|lower_bound| *lower_bound != 1)
+    {
+        array
+            .lower_bounds()
+            .iter()
+            .zip(array.dimensions())
+            .map(|(lower, length)| {
+                let upper = i64::from(*lower) + i64::try_from(*length).unwrap_or(i64::MAX) - 1;
+                format!("[{lower}:{upper}]")
+            })
+            .collect::<String>()
+            + "="
+    } else {
+        String::new()
+    };
+    format!("{dimensions}{}", array_elements_to_string(array.elements()))
+}
+
+fn array_elements_to_string(elements: &[Value]) -> String {
+    let rendered = elements
+        .iter()
+        .map(|value| match value {
+            Value::Null => "NULL".to_string(),
+            Value::Bool(value) => if *value { "t" } else { "f" }.to_string(),
+            Value::List(nested) => array_elements_to_string(nested),
+            Value::Array(nested) => array_value_to_string(nested),
+            other => {
+                let text = value_to_string(other);
+                let requires_quotes = text.is_empty()
+                    || text.eq_ignore_ascii_case("null")
+                    || text.chars().any(|character| {
+                        character.is_whitespace()
+                            || matches!(character, ',' | '{' | '}' | '"' | '\\')
+                    });
+                if requires_quotes {
+                    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
+                } else {
+                    text
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+    format!("{{{}}}", rendered.join(","))
+}
+
+fn composite_value_to_string<'a>(values: impl IntoIterator<Item = &'a Value>) -> String {
+    let fields = values
+        .into_iter()
+        .map(|value| {
+            if matches!(value, Value::Null) {
+                return String::new();
+            }
+            let text = value_to_string(value);
+            if text.is_empty()
+                || text.bytes().any(|byte| {
+                    matches!(byte, b',' | b'(' | b')' | b'"' | b'\\') || byte.is_ascii_whitespace()
+                })
+            {
+                format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\"\""))
+            } else {
+                text
+            }
+        })
+        .collect::<Vec<_>>();
+    format!("({})", fields.join(","))
 }
 
 pub(super) fn expect_str(args: &[Value], idx: usize) -> Result<String> {
@@ -143,8 +219,12 @@ pub(super) fn to_decimal(v: &Value) -> Result<DecimalValue> {
         Value::Float(f) => DecimalValue::from_f64_lossy(*f)
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to numeric"))),
         Value::Bool(b) => Ok(DecimalValue::from_bool(*b)),
-        Value::Str(s) | Value::FixedChar(s) => DecimalValue::parse(s)
-            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot parse {s:?} as numeric"))),
+        Value::Str(s) | Value::FixedChar(s) => {
+            DecimalValue::parse(s).ok_or_else(|| SQLError::Routine {
+                sqlstate: "22P02".into(),
+                message: format!("invalid input syntax for type numeric: \"{s}\""),
+            })
+        }
         other => Err(SQLError::TypeMismatch(format!(
             "expected number, got {other:?}"
         ))),
@@ -194,34 +274,42 @@ pub(super) fn coerce_i64(v: &Value) -> Option<i64> {
 /// list (used to read vector literals from `ARRAY[...]` or `$N` Vector
 /// params).
 pub fn value_to_vector(v: &Value) -> Result<Vec<f32>> {
-    match v {
-        Value::List(items) => {
-            let mut out = Vec::with_capacity(items.len());
-            for item in items {
-                let x = match item {
-                    Value::Float(f) => numeric_f64_to_f32(*f, item)?,
-                    Value::Int(i) => *i as f32,
-                    Value::Decimal(d) => numeric_f64_to_f32(
-                        d.to_f64().ok_or_else(|| {
-                            SQLError::TypeMismatch(format!(
-                                "vector element must fit f32, got {item:?}"
-                            ))
-                        })?,
-                        item,
-                    )?,
-                    other => {
-                        return Err(SQLError::TypeMismatch(format!(
-                            "vector element must be numeric, got {other:?}"
-                        )))
-                    }
-                };
-                out.push(x);
-            }
-            Ok(out)
+    let items = match v {
+        Value::List(items) => items.as_slice(),
+        Value::Array(array) if array.dimensions().len() <= 1 => array.elements(),
+        Value::Array(array) => {
+            return Err(SQLError::TypeMismatch(format!(
+                "expected one-dimensional vector input, got {} dimensions",
+                array.dimensions().len()
+            )))
         }
-        other => Err(SQLError::TypeMismatch(format!(
-            "expected vector (numeric list), got {other:?}"
-        ))),
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "expected vector (numeric array), got {other:?}"
+            )))
+        }
+    };
+    {
+        let mut out = Vec::with_capacity(items.len());
+        for item in items {
+            let x = match item {
+                Value::Float(f) => numeric_f64_to_f32(*f, item)?,
+                Value::Int(i) => *i as f32,
+                Value::Decimal(d) => numeric_f64_to_f32(
+                    d.to_f64().ok_or_else(|| {
+                        SQLError::TypeMismatch(format!("vector element must fit f32, got {item:?}"))
+                    })?,
+                    item,
+                )?,
+                other => {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "vector element must be numeric, got {other:?}"
+                    )))
+                }
+            };
+            out.push(x);
+        }
+        Ok(out)
     }
 }
 
@@ -238,16 +326,28 @@ pub(super) fn numeric_f64_to_f32(value: f64, source: &Value) -> Result<f32> {
 /// vectors. Used by `TENSOR(N)` columns to store chunk embeddings for one
 /// row while still indexing each vector element.
 pub fn value_to_tensor(v: &Value) -> Result<Vec<Vec<f32>>> {
-    match v {
-        Value::List(items) => {
-            let mut out = Vec::with_capacity(items.len());
-            for item in items {
-                out.push(value_to_vector(item)?);
-            }
-            Ok(out)
+    let items = match v {
+        Value::List(items) => items.as_slice(),
+        Value::Array(array) if array.dimensions().is_empty() || array.dimensions().len() == 2 => {
+            array.elements()
         }
-        other => Err(SQLError::TypeMismatch(format!(
-            "expected tensor (list of numeric lists), got {other:?}"
-        ))),
+        Value::Array(array) => {
+            return Err(SQLError::TypeMismatch(format!(
+                "expected two-dimensional tensor input, got {} dimensions",
+                array.dimensions().len()
+            )))
+        }
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "expected tensor (array of numeric arrays), got {other:?}"
+            )))
+        }
+    };
+    {
+        let mut out = Vec::with_capacity(items.len());
+        for item in items {
+            out.push(value_to_vector(item)?);
+        }
+        Ok(out)
     }
 }

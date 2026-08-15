@@ -4,6 +4,7 @@
 
 - `engine-error`: PostgreSQL answers, the engine rejects (missing feature).
 - `engine-accepts`: PostgreSQL rejects, the engine answers (missing guard, e.g. division by zero).
+- `sqlstate-mismatch`: both engines reject, but with different SQLSTATE codes.
 - `value-mismatch`: both answer, values differ after normalization (boolean display and numerically equivalent float formatting are normalized; JSON and JSONB output text is compared exactly).
 
 ## Prerequisites
@@ -27,4 +28,4 @@ python3 tests/parity/pg18/run_diff.py
 
 The manifest records the pinned parser chain, oracle provenance, milestone states, positive evidence, and every currently tracked incomplete gate. Its validator rejects malformed accounting, stale wrapper revisions, duplicate items, verified items with open issues, and any complete-compatibility claim made before every item and milestone is complete.
 
-The differential summary line reports `total/match/diff`, and any difference makes the runner exit nonzero. Error-vs-error rows count as matches (message text is not compared). Update `probes.sql` freely: one probe per line, `--` comments skipped; probes must be side-effect-free single statements. Set `UQA_PG_CONTAINER`, `UQA_PG_DATABASE`, or `UQA_USQL` to override the defaults while keeping both systems under test in equivalent contexts.
+The differential summary line reports `total/match/diff`, and any difference makes the runner exit nonzero. Error rows match only when their SQLSTATE codes match; message text is not compared. Update `probes.sql` freely: one probe per line, `--` comments skipped; probes must be side-effect-free single statements. Set `UQA_PG_CONTAINER`, `UQA_PG_DATABASE`, or `UQA_USQL` to override the defaults while keeping both systems under test in equivalent contexts.

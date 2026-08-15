@@ -7,10 +7,10 @@
 //! Source qualification, view output, and table-function schemas.
 
 use super::{
-    execute_query_plan_output, is_score_provenance_column, qualified_key, qualifier_filter,
-    restore_cte_names, save_and_remove_cte_names, BTreeSet, ColumnPrune, CteScope, Engine,
-    EngineExpressionEvaluator, QualifierFilters, QueryOutput, QueryOutputMode, QueryPlan,
-    QueryRows, ResultRow, SQLError, SQLParam, ScalarExpr, Value,
+    execute_query_plan_output, is_score_provenance_column, qualifier_filter, restore_cte_names,
+    save_and_remove_cte_names, BTreeSet, ColumnPrune, CteScope, Engine, EngineExpressionEvaluator,
+    QualifierFilters, QueryOutput, QueryOutputMode, QueryPlan, QueryRows, ResultRow, SQLError,
+    SQLParam, ScalarExpr, Value,
 };
 use uqa_sql::ast::{ColumnType, FunctionReturns};
 
@@ -63,9 +63,7 @@ pub(in crate::sql) fn qualify_source_operator_with_columns<'a>(
             let source_base = if is_score_provenance_column(source) {
                 source.as_str()
             } else {
-                source
-                    .rsplit_once('.')
-                    .map_or(source.as_str(), |(_, column)| column)
+                operator.row_schema().public_name(index).unwrap_or(source)
             };
             let column = aliases.get(index).map_or(source_base, String::as_str);
             if !is_score_provenance_column(column)
@@ -76,15 +74,15 @@ pub(in crate::sql) fn qualify_source_operator_with_columns<'a>(
             {
                 return None;
             }
-            let output = if qualifier.is_empty() {
-                column.to_string()
+            let identity = if qualifier.is_empty() {
+                uqa_execution::ColumnIdentity::unqualified(column)
             } else {
-                qualified_key(qualifier, column)
+                uqa_execution::ColumnIdentity::qualified(qualifier, column)
             };
-            Some((output, source.clone()))
+            Some((column.to_string(), identity, index))
         })
         .collect();
-    Box::new(uqa_execution::ColumnSelection::with_mapping(
+    Box::new(uqa_execution::ColumnSelection::with_identities(
         operator, mapping,
     ))
 }
@@ -116,11 +114,29 @@ pub(in crate::sql) fn null_row_for_schema(schema: &[String]) -> ResultRow {
 
 pub(in crate::sql) fn table_function_empty_schema(
     name: &str,
+    output_name: &str,
     alias: Option<&str>,
     column_aliases: &[String],
+    output_width: usize,
 ) -> Vec<String> {
     let lower = crate::sql::builtin_function_dispatch_name(&name.to_ascii_lowercase());
-    let mut columns = if column_aliases.is_empty() {
+    if lower == "unnest" {
+        let width = output_width.max(1);
+        let default_column = if width == 1 {
+            alias.unwrap_or(output_name)
+        } else {
+            output_name
+        };
+        return (0..width)
+            .map(|position| {
+                column_aliases
+                    .get(position)
+                    .cloned()
+                    .unwrap_or_else(|| default_column.to_string())
+            })
+            .collect();
+    }
+    if column_aliases.is_empty() {
         match lower.as_str() {
             "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
                 vec!["key".into(), "value".into()]
@@ -137,35 +153,20 @@ pub(in crate::sql) fn table_function_empty_schema(
             }
             _ => vec![scalar_table_function_default_column(
                 &lower,
+                output_name,
                 alias,
                 column_aliases,
             )],
         }
     } else {
         column_aliases.to_vec()
-    };
-    // Scalar set-returning functions keep the function name addressable when
-    // a relation alias is supplied without a column alias (`AS gs`). The row
-    // builder emits both `gs.gs` and `gs.generate_series`; the static schema
-    // used by a lateral join must advertise the same keys before execution.
-    if column_aliases.is_empty()
-        && alias.is_some()
-        && !is_json_array_table_function(&lower)
-        && matches!(
-            lower.as_str(),
-            "generate_series" | "unnest" | "regexp_split_to_table" | "string_to_table"
-        )
-        && !columns.contains(&lower)
-    {
-        columns.push(lower.clone());
     }
-    match alias {
-        Some(alias) => columns
-            .into_iter()
-            .map(|column| qualified_key(alias, &column))
-            .collect(),
-        None => columns,
-    }
+}
+
+pub(in crate::sql) fn multi_unnest_internal_columns(width: usize) -> Vec<String> {
+    (0..width)
+        .map(|position| format!("\0uqa.unnest.{position}"))
+        .collect()
 }
 
 pub(in crate::sql) fn table_function_column_types(
@@ -306,6 +307,7 @@ pub(in crate::sql) fn is_json_array_table_function(name: &str) -> bool {
 
 pub(in crate::sql) fn scalar_table_function_default_column(
     normalized_name: &str,
+    output_name: &str,
     alias: Option<&str>,
     column_aliases: &[String],
 ) -> String {
@@ -313,7 +315,7 @@ pub(in crate::sql) fn scalar_table_function_default_column(
         if is_json_array_table_function(normalized_name) {
             "value".into()
         } else {
-            alias.unwrap_or(normalized_name).to_string()
+            alias.unwrap_or(output_name).to_string()
         }
     })
 }

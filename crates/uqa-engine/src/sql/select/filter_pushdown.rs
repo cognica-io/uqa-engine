@@ -372,7 +372,10 @@ fn outer_expression_contains_volatile_function(engine: &Engine, expression: &Sca
                     outer_expression_contains_volatile_function(engine, filter)
                 })
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => items
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => items
             .iter()
             .any(|item| outer_expression_contains_volatile_function(engine, item)),
         ScalarExpr::Binary { lhs, rhs, .. } => {
@@ -434,7 +437,9 @@ fn outer_expression_contains_volatile_function(engine: &Engine, expression: &Sca
         }
         ScalarExpr::Default
         | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_) => false,
@@ -465,7 +470,10 @@ fn collect_subquery_ids(expression: &ScalarExpr, output: &mut BTreeSet<usize>) {
             collect_subquery_ids(expr, output);
             output.insert(*subquery);
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => {
             for item in items {
                 collect_subquery_ids(item, output);
             }
@@ -538,7 +546,9 @@ fn collect_subquery_ids(expression: &ScalarExpr, output: &mut BTreeSet<usize>) {
         }
         ScalarExpr::Default
         | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_) => {}
@@ -575,7 +585,10 @@ fn collect_pushdown_outer_columns(expression: &ScalarExpr, output: &mut BTreeSet
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. } => true,
         ScalarExpr::InSubquery { expr, .. } => collect_pushdown_outer_columns(expr, output),
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => items
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => items
             .iter()
             .all(|item| collect_pushdown_outer_columns(item, output)),
         ScalarExpr::Func {
@@ -627,7 +640,11 @@ fn collect_pushdown_outer_columns(expression: &ScalarExpr, output: &mut BTreeSet
                     .as_deref()
                     .is_none_or(|branch| collect_pushdown_outer_columns(branch, output))
         }
-        ScalarExpr::Default | ScalarExpr::Star | ScalarExpr::WindowCall { .. } => false,
+        ScalarExpr::Default
+        | ScalarExpr::Star
+        | ScalarExpr::Position(_)
+        | ScalarExpr::QualifiedStar(_)
+        | ScalarExpr::WindowCall { .. } => false,
     }
 }
 
@@ -639,8 +656,12 @@ fn source_column_owners(engine: &Engine, source: &SourcePlan) -> ColumnOwners {
 
 fn collect_source_column_owners(engine: &Engine, source: &SourcePlan, owners: &mut ColumnOwners) {
     match source {
-        SourcePlan::Table { name, alias } => {
-            let qualifier = alias.as_deref().unwrap_or(name);
+        SourcePlan::Table {
+            name,
+            qualifier,
+            alias,
+        } => {
+            let qualifier = alias.as_deref().unwrap_or(qualifier);
             let mut columns = engine.try_table_columns(name).unwrap_or_default();
             if columns.is_empty() {
                 columns = engine
@@ -735,11 +756,15 @@ pub(in crate::sql) fn collect_cte_source_references(
     references: &mut BTreeMap<String, Vec<String>>,
 ) {
     match source {
-        SourcePlan::Table { name, alias } if cte_names.contains(name.as_str()) => {
+        SourcePlan::Table {
+            name,
+            qualifier,
+            alias,
+        } if cte_names.contains(name.as_str()) => {
             references
                 .entry(name.clone())
                 .or_default()
-                .push(alias.clone().unwrap_or_else(|| name.clone()));
+                .push(alias.clone().unwrap_or_else(|| qualifier.clone()));
         }
         SourcePlan::Join { left, right, .. } => {
             collect_cte_source_references(left, cte_names, references);
@@ -958,14 +983,22 @@ pub(in crate::sql) fn rewrite_output_filter(
             ..
         } if expression_qualifier.eq_ignore_ascii_case(qualifier) => map_column(column, used)?,
         ScalarExpr::Default
+        | ScalarExpr::Position(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::WindowCall { .. }
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }
         | ScalarExpr::InSubquery { .. } => return None,
         ScalarExpr::Literal(_) | ScalarExpr::Param(_) => expression.clone(),
         ScalarExpr::Array(items) => ScalarExpr::Array(
+            items
+                .iter()
+                .map(|item| recur(item, used))
+                .collect::<Option<Vec<_>>>()?,
+        ),
+        ScalarExpr::Row(items) => ScalarExpr::Row(
             items
                 .iter()
                 .map(|item| recur(item, used))
@@ -1093,10 +1126,12 @@ mod tests {
         SourcePlan::Join {
             left: Box::new(SourcePlan::Table {
                 name: "left_table".into(),
+                qualifier: "left_table".into(),
                 alias: Some("l".into()),
             }),
             right: Box::new(SourcePlan::Table {
                 name: "right_table".into(),
+                qualifier: "right_table".into(),
                 alias: Some("r".into()),
             }),
             kind,

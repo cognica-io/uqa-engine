@@ -204,3 +204,29 @@ fn ntile_buckets_partition() {
     assert_eq!(id_to_bucket.get(&2), Some(&1));
     assert_eq!(id_to_bucket.get(&3), Some(&2));
 }
+
+#[test]
+fn star_with_window_projection_preserves_every_source_position() {
+    let eng = corpus();
+    for star in ["*", "sales.*"] {
+        let result = eng
+            .sql(
+                &format!(
+                    "SELECT {star}, row_number() OVER (ORDER BY id) AS rn
+                     FROM sales
+                     WHERE id <= 2
+                     ORDER BY id"
+                ),
+                &[],
+            )
+            .unwrap();
+        assert_eq!(result.columns, ["id", "rep", "region", "amount", "rn"]);
+        assert_eq!(result.value_at(0, 0), Some(&Value::Int(1)));
+        assert_eq!(result.value_at(0, 1), Some(&Value::Str("alice".into())));
+        assert_eq!(result.value_at(0, 2), Some(&Value::Str("east".into())));
+        assert_eq!(result.value_at(0, 3), Some(&Value::Int(100)));
+        assert_eq!(result.value_at(0, 4), Some(&Value::Int(1)));
+        assert_eq!(result.value_at(1, 0), Some(&Value::Int(2)));
+        assert_eq!(result.value_at(1, 4), Some(&Value::Int(2)));
+    }
+}

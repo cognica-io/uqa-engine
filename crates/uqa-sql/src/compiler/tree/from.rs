@@ -52,6 +52,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
             }
             Ok(FromClause::Table {
                 name: range_var_name(r),
+                qualifier: r.relname.clone(),
                 alias: r.alias.as_ref().and_then(|a| {
                     if a.aliasname.is_empty() {
                         None
@@ -186,6 +187,15 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                     .ok_or_else(|| SQLError::Internal("RangeFunction empty pair".into()))?,
                 _ => first_node,
             };
+            let Some(NodeEnum::FuncCall(raw_call)) = call.node.as_ref() else {
+                return Err(SQLError::Internal(
+                    "RangeFunction lost its function-call parse node".into(),
+                ));
+            };
+            let output_name = extract_strings(&raw_call.funcname)?
+                .into_iter()
+                .last()
+                .ok_or_else(|| SQLError::Internal("RangeFunction has an empty name".into()))?;
             let expr = compile_expr(call)?;
             let (name, mut args) = match expr {
                 Expr::Func { name, args, .. } => (name, args),
@@ -196,11 +206,6 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                 }
             };
             let relation = if crate::registry::is_operator_join_table_function(&name) {
-                let Some(NodeEnum::FuncCall(raw_call)) = call.node.as_ref() else {
-                    return Err(SQLError::Internal(format!(
-                        "operator join `{name}` lost its function-call parse node"
-                    )));
-                };
                 let relation_node = raw_call.args.first().ok_or_else(|| SQLError::BadArity {
                     name: name.clone(),
                     expected: "a relation identifier followed by operator operands".into(),
@@ -218,6 +223,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
             let coldef_aliases: Vec<String> = coldefs.into_iter().map(|(name, _)| name).collect();
             Ok(FromClause::Function {
                 name,
+                output_name,
                 relation,
                 args,
                 alias,

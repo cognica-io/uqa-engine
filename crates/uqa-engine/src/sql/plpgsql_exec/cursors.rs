@@ -7,8 +7,8 @@
 //! Bound PL/pgSQL cursor execution.
 
 use super::{
-    Interpreter, IntoTarget, PLpgSQLCursorArgument, PLpgSQLCursorState, PLpgSQLDatum,
-    PLpgSQLRowField, SQLError, Value,
+    result_row_values, Interpreter, IntoTarget, PLpgSQLCursorArgument, PLpgSQLCursorState,
+    PLpgSQLDatum, PLpgSQLRowField, SQLError, Value,
 };
 
 impl Interpreter<'_> {
@@ -114,7 +114,7 @@ impl Interpreter<'_> {
             ));
         }
         let portal_name = self.open_portal_name(cursor_index, "FETCH")?;
-        let (columns, row) = {
+        let (columns, values) = {
             let state = self
                 .cursors
                 .get_mut(&portal_name)
@@ -122,14 +122,14 @@ impl Interpreter<'_> {
                     sqlstate: "34000".into(),
                     message: format!("cursor \"{portal_name}\" does not exist"),
                 })?;
-            let row = state.result.rows.get(state.position).cloned();
-            if row.is_some() {
+            let values = result_row_values(&state.result, state.position);
+            if values.is_some() {
                 state.position += 1;
             }
-            (state.result.columns.clone(), row)
+            (state.result.columns.clone(), values)
         };
-        self.assign_into(target, &columns, row.as_ref())?;
-        let found = row.is_some();
+        self.assign_into(target, &columns, values.as_deref())?;
+        let found = values.is_some();
         self.last_row_count = i64::from(found);
         self.set_found(found);
         Ok(())

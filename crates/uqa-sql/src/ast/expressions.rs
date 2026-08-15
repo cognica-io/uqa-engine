@@ -67,6 +67,8 @@ pub enum FrameBound {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Star,
+    /// Relation-qualified wildcard projection (`table.*` or `alias.*`).
+    QualifiedStar(String),
     /// `DEFAULT` in an INSERT/UPDATE assignment. This is a mutation marker,
     /// not a scalar value, and must be resolved against the target column
     /// before expression evaluation.
@@ -77,8 +79,6 @@ pub enum Expr {
     QualifiedColumn {
         qualifier: String,
         column: String,
-        #[serde(default)]
-        key: String,
     },
     Literal(Value),
     /// A positional bind parameter (`$1`, `$2`, ...).
@@ -102,6 +102,8 @@ pub enum Expr {
     /// `ARRAY[1.0, 2.0, ...]` literal - currently restricted to numeric
     /// elements (vectors).
     Array(Vec<Expr>),
+    /// Anonymous SQL row constructor (`ROW(...)` or `(a, b)`).
+    Row(Vec<Expr>),
     /// `lhs op rhs` - comparison or arithmetic.
     Binary {
         op: BinaryOp,
@@ -176,13 +178,9 @@ pub enum Expr {
 
 impl Expr {
     pub fn qualified_column(qualifier: impl Into<String>, column: impl Into<String>) -> Self {
-        let qualifier = qualifier.into();
-        let column = column.into();
-        let key = format!("{qualifier}.{column}");
         Self::QualifiedColumn {
-            qualifier,
-            column,
-            key,
+            qualifier: qualifier.into(),
+            column: column.into(),
         }
     }
 }

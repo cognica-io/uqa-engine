@@ -26,7 +26,10 @@ pub(super) enum StoredValue {
     Decimal(DecimalValue),
     Json(String),
     JsonB(String),
+    Array(uqa_core::ArrayValue),
     List(Vec<StoredValue>),
+    Row(Vec<StoredValue>),
+    Record(Vec<(String, StoredValue)>),
     Map(BTreeMap<String, StoredValue>),
 }
 
@@ -44,7 +47,15 @@ impl StoredValue {
             Value::Decimal(value) => Self::Decimal(value),
             Value::Json(value) => Self::Json(value),
             Value::JsonB(value) => Self::JsonB(value),
+            Value::Array(value) => Self::Array(value),
             Value::List(values) => Self::List(values.into_iter().map(Self::from_value).collect()),
+            Value::Row(values) => Self::Row(values.into_iter().map(Self::from_value).collect()),
+            Value::Record(fields) => Self::Record(
+                fields
+                    .into_iter()
+                    .map(|(name, value)| (name, Self::from_value(value)))
+                    .collect(),
+            ),
             Value::Map(values) => Self::Map(
                 values
                     .into_iter()
@@ -67,7 +78,15 @@ impl StoredValue {
             Self::Decimal(value) => Value::Decimal(value),
             Self::Json(value) => Value::Json(value),
             Self::JsonB(value) => Value::JsonB(value),
+            Self::Array(value) => Value::Array(value),
             Self::List(values) => Value::List(values.into_iter().map(Self::into_value).collect()),
+            Self::Row(values) => Value::Row(values.into_iter().map(Self::into_value).collect()),
+            Self::Record(fields) => Value::Record(
+                fields
+                    .into_iter()
+                    .map(|(name, value)| (name, value.into_value()))
+                    .collect(),
+            ),
             Self::Map(values) => Value::Map(
                 values
                     .into_iter()
@@ -90,8 +109,12 @@ pub(super) fn value_requires_typed_encoding(value: &Value) -> bool {
                     .all(|item| matches!(item, Value::Int(value) if u8::try_from(*value).is_ok()))
                 || items.iter().any(value_requires_typed_encoding)
         }
+        Value::Row(items) => items.iter().any(value_requires_typed_encoding),
+        Value::Record(fields) => fields
+            .iter()
+            .any(|(_, value)| value_requires_typed_encoding(value)),
         Value::Map(values) => values.values().any(value_requires_typed_encoding),
-        Value::Bytes(_) | Value::Json(_) | Value::JsonB(_) => true,
+        Value::Array(_) | Value::Bytes(_) | Value::Json(_) | Value::JsonB(_) => true,
         _ => false,
     }
 }

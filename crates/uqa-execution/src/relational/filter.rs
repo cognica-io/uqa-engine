@@ -92,13 +92,14 @@ impl PhysicalOperator for Filter<'_> {
             };
             let mut kept = Vec::with_capacity(batch.rows.len());
             for row in batch.rows {
-                let view = batch.schema.view(&row);
                 let keep = match &self.condition {
                     FilterCondition::Expression {
                         predicate,
                         evaluator,
-                    } => truthy(&evaluator.evaluate(predicate, &view)?),
-                    FilterCondition::Row(predicate) => predicate.keep(&view)?,
+                    } => truthy(&evaluator.evaluate_physical(predicate, &batch.schema, &row)?),
+                    FilterCondition::Row(predicate) => {
+                        predicate.keep_physical(&batch.schema, &row)?
+                    }
                 };
                 if keep {
                     kept.push(row);

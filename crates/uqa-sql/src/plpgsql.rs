@@ -28,7 +28,7 @@ use uqa_core::Value;
 
 use crate::ast::{
     CreateFunction, Expr, FromClause, FunctionBody, FunctionParamMode, FunctionReturns, MergeWhen,
-    Projection, SelectStmt, Statement, CTE,
+    Projection, RoutineColumnTypeReference, SelectStmt, Statement, CTE,
 };
 use crate::error::{Result, SQLError};
 
@@ -162,6 +162,8 @@ pub struct PLpgSQLVar {
     /// Normalized type name (`integer`, `text`, ...). The engine resolves
     /// catalog-backed references such as `%TYPE` before execution.
     pub type_name: String,
+    /// Exact relation-column identity emitted by the PL/pgSQL parser for a table-backed `%TYPE` declaration.
+    pub type_reference: Option<RoutineColumnTypeReference>,
     pub default: Option<Expr>,
     pub constant: bool,
     pub not_null: bool,

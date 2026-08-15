@@ -56,7 +56,7 @@ Explicit `ESCAPE` clauses for `LIKE`, `ILIKE`, and `SIMILAR TO` are not implemen
 | Random | `random`, `setseed` |
 | Formatting | `to_hex`, `to_number` |
 
-`to_number(text, 'RN')` accepts canonical Roman numerals from 1 through 3999. Random state is session-local. Use `setseed` for deterministic test input, not for cryptographic randomness; `gen_random_uuid` and `uuidv4` produce random version 4 UUIDs, while `uuidv7([shift interval])` produces time-ordered version 7 UUIDs.
+`to_number(text, 'RN')` reads the PostgreSQL Roman-numeral prefix after leading whitespace, accepts values from 1 through 3999, and ignores input after that prefix. Random state is session-local. Use `setseed` for deterministic test input, not for cryptographic randomness; `gen_random_uuid` and `uuidv4` produce random version 4 UUIDs, while `uuidv7([shift interval])` produces time-ordered version 7 UUIDs.
 
 ## Array functions
 

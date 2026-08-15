@@ -65,7 +65,7 @@ fn walk_schema_expr_mut(
                 walk_schema_expr_mut(filter, visit)?;
             }
         }
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+        Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
             for item in items {
                 walk_schema_expr_mut(item, visit)?;
             }
@@ -138,6 +138,7 @@ fn walk_schema_expr_mut(
         }
         Expr::Default
         | Expr::Star
+        | Expr::QualifiedStar(_)
         | Expr::Column(_)
         | Expr::QualifiedColumn { .. }
         | Expr::Literal(_)
@@ -175,10 +176,8 @@ fn regclass_literal_mut(expression: &mut uqa_sql::ast::Expr) -> Option<&mut Stri
     match expression {
         uqa_sql::ast::Expr::Literal(Value::Str(reference)) => Some(reference),
         uqa_sql::ast::Expr::Cast { expr, ty }
-            if ty
-                .rsplit_once('.')
-                .map_or(ty.as_str(), |(_, local)| local)
-                .eq_ignore_ascii_case("regclass") =>
+            if ty.eq_ignore_ascii_case("regclass")
+                || ty.eq_ignore_ascii_case("pg_catalog.regclass") =>
         {
             regclass_literal_mut(expr)
         }
@@ -191,7 +190,7 @@ pub(crate) fn schema_expr_references_column(expression: &uqa_sql::ast::Expr, col
     let mut referenced = false;
     let result = walk_schema_expr_mut(&mut expression, &mut |node| {
         referenced |= match node {
-            uqa_sql::ast::Expr::Star => true,
+            uqa_sql::ast::Expr::Star | uqa_sql::ast::Expr::QualifiedStar(_) => true,
             uqa_sql::ast::Expr::Column(name)
             | uqa_sql::ast::Expr::QualifiedColumn { column: name, .. } => name == column,
             _ => false,
@@ -208,19 +207,14 @@ fn rename_schema_expr_column(
 ) -> StorageBackendResult<()> {
     walk_schema_expr_mut(expression, &mut |node| {
         match node {
-            uqa_sql::ast::Expr::Star => {
+            uqa_sql::ast::Expr::Star | uqa_sql::ast::Expr::QualifiedStar(_) => {
                 return Err(StorageBackendError::Other(
                     "schema expression contains `*` and cannot be rewritten safely".into(),
                 ));
             }
             uqa_sql::ast::Expr::Column(name) if name == from => *name = to.to_string(),
-            uqa_sql::ast::Expr::QualifiedColumn {
-                qualifier,
-                column,
-                key,
-            } if column == from => {
+            uqa_sql::ast::Expr::QualifiedColumn { column, .. } if column == from => {
                 *column = to.to_string();
-                *key = format!("{qualifier}.{to}");
             }
             _ => {}
         }
@@ -249,15 +243,9 @@ fn rename_schema_expr_relation(
     to: &str,
 ) -> StorageBackendResult<()> {
     walk_schema_expr_mut(expression, &mut |node| {
-        if let uqa_sql::ast::Expr::QualifiedColumn {
-            qualifier,
-            column,
-            key,
-        } = node
-        {
+        if let uqa_sql::ast::Expr::QualifiedColumn { qualifier, .. } = node {
             if stored_relation_reference_matches(qualifier, from) {
                 *qualifier = to.to_string();
-                *key = format!("{to}.{column}");
             }
         }
         Ok(())
@@ -271,15 +259,9 @@ fn rename_schema_expr_qualified_column(
     to: &str,
 ) -> StorageBackendResult<()> {
     walk_schema_expr_mut(expression, &mut |node| {
-        if let uqa_sql::ast::Expr::QualifiedColumn {
-            qualifier,
-            column,
-            key,
-        } = node
-        {
+        if let uqa_sql::ast::Expr::QualifiedColumn { qualifier, column } = node {
             if column == from && stored_relation_reference_matches(qualifier, table) {
                 *column = to.to_string();
-                *key = format!("{qualifier}.{to}");
             }
         }
         Ok(())

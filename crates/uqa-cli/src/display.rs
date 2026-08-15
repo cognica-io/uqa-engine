@@ -130,6 +130,7 @@ pub(super) fn sql_type_name(ty: &ColumnType) -> String {
         ColumnType::OidVector => "oidvector".into(),
         ColumnType::AnyArray => "anyarray".into(),
         ColumnType::Array(element) => format!("{}[]", sql_type_name(element)),
+        ColumnType::Record => "record".into(),
         ColumnType::Date => "date".into(),
         ColumnType::Time => "time".into(),
         ColumnType::TimeTz => "time with time zone".into(),
@@ -185,6 +186,7 @@ pub(super) fn fdw_type_name(ty: &uqa_fdw::ColumnType) -> String {
         uqa_fdw::ColumnType::Tensor(dim) => format!("tensor({dim})"),
         uqa_fdw::ColumnType::Domain { schema, name, .. } => format!("{schema}.{name}"),
         uqa_fdw::ColumnType::Array(element) => format!("{}[]", fdw_type_name(element)),
+        uqa_fdw::ColumnType::Record => "record".into(),
     }
 }
 
