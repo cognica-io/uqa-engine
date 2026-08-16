@@ -172,3 +172,44 @@ fn array_cast_binding_preserves_the_declared_source_element_type() {
         }
     );
 }
+
+#[test]
+fn common_type_binding_coerces_selector_results_before_runtime_evaluation() {
+    let schema = RowSchema::with_types(
+        vec!["floating".into(), "exact".into()],
+        vec![
+            Some(ColumnType::DoublePrecision),
+            Some(ColumnType::Numeric {
+                precision: None,
+                scale: None,
+            }),
+        ],
+    );
+    let expression = ScalarExpr::Func {
+        name: "coalesce".into(),
+        binding: None,
+        args: vec![
+            ScalarExpr::Column("floating".into()),
+            ScalarExpr::Column("exact".into()),
+        ],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+
+    let bound = bind_type_introspection(expression, &schema, &[]);
+    let ScalarExpr::Func { args, .. } = &bound else {
+        panic!("COALESCE must remain a function expression");
+    };
+    assert!(matches!(
+        args.as_slice(),
+        [
+            ScalarExpr::Column(_),
+            ScalarExpr::Cast { ty, .. }
+        ] if ty == "double precision"
+    ));
+    assert_eq!(
+        scalar_type(&bound, &schema, &[]).unwrap(),
+        Some(ColumnType::DoublePrecision)
+    );
+}

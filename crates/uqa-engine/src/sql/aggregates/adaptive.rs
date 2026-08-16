@@ -12,6 +12,7 @@ mod projected;
 use std::collections::HashMap;
 
 use smallvec::SmallVec;
+use uqa_sql::ast::ColumnType;
 
 use super::{
     aggregate_accumulator_templates, aggregate_targets, eval_scalar,
@@ -72,7 +73,14 @@ impl AdaptiveAggregateSet {
     ) -> Result<Self, SQLError> {
         let aggregate_targets = aggregate_targets(engine, &statement)
             .into_iter()
-            .cloned()
+            .map(|target| {
+                uqa_execution::bind_type_introspection_with_resolver(
+                    target.clone(),
+                    input_schema,
+                    params,
+                    engine,
+                )
+            })
             .collect::<Vec<_>>();
         let accumulator_templates = aggregate_accumulator_templates(engine, &aggregate_targets);
         let output_plan = super::output::AggregateOutputPlan::compile(
@@ -91,9 +99,13 @@ impl AdaptiveAggregateSet {
             .max(1);
         let spill_budget = (work_mem_bytes / 3).max(1);
         let accumulator_budget = (state_budget / target_count / 2).max(1);
-        let variable_state = accumulator_templates
+        let variable_state = aggregate_targets
             .iter()
-            .any(aggregate_template_has_variable_state);
+            .zip(&accumulator_templates)
+            .try_fold(false, |variable, (target, template)| {
+                aggregate_target_has_variable_state(engine, target, template, input_schema, params)
+                    .map(|target_variable| variable || target_variable)
+            })?;
         let projected_group_columns =
             super::projected::ProjectedGroupColumn::compile(&statement.group_by, input_schema);
         let projected_aggregate_plans = super::projected_input::ProjectedAggregatePlans::compile(
@@ -436,18 +448,59 @@ fn is_mergeable_builtin(name: &str) -> bool {
     )
 }
 
-fn aggregate_template_has_variable_state(template: &AggregateAccumulatorTemplate) -> bool {
-    match template {
-        AggregateAccumulatorTemplate::Builtin(plan) => matches!(
-            plan,
-            AggregateStatePlan::Generic
-                | AggregateStatePlan::Sum
-                | AggregateStatePlan::Min
-                | AggregateStatePlan::Max
-                | AggregateStatePlan::Buffered
-                | AggregateStatePlan::Statistics
-        ),
-        AggregateAccumulatorTemplate::Registered(_) => true,
+fn aggregate_target_has_variable_state(
+    engine: &Engine,
+    target: &ScalarExpr,
+    template: &AggregateAccumulatorTemplate,
+    input_schema: &RowSchema,
+    params: &[SQLParam],
+) -> Result<bool, SQLError> {
+    let AggregateAccumulatorTemplate::Builtin(plan) = template else {
+        return Ok(true);
+    };
+    let ScalarExpr::Func {
+        args,
+        distinct,
+        order_by,
+        ..
+    } = target
+    else {
+        return Ok(true);
+    };
+    if *distinct || !order_by.is_empty() {
+        return Ok(true);
+    }
+    match plan {
+        AggregateStatePlan::Count | AggregateStatePlan::BoolAnd | AggregateStatePlan::BoolOr => {
+            Ok(false)
+        }
+        AggregateStatePlan::Sum => {
+            let Some(argument) = args.first() else {
+                return Ok(true);
+            };
+            let input_type =
+                uqa_execution::scalar_type_with_resolver(argument, input_schema, params, engine)?;
+            Ok(!input_type.as_ref().is_some_and(fixed_width_sum_type))
+        }
+        AggregateStatePlan::Generic
+        | AggregateStatePlan::Min
+        | AggregateStatePlan::Max
+        | AggregateStatePlan::Buffered
+        | AggregateStatePlan::Statistics => Ok(true),
+    }
+}
+
+fn fixed_width_sum_type(ty: &ColumnType) -> bool {
+    match ty {
+        ColumnType::SmallInteger
+        | ColumnType::Integer
+        | ColumnType::BigInteger
+        | ColumnType::Oid
+        | ColumnType::Xid
+        | ColumnType::Real
+        | ColumnType::DoublePrecision => true,
+        ColumnType::Domain { base, .. } => fixed_width_sum_type(base),
+        _ => false,
     }
 }
 
@@ -561,11 +614,11 @@ mod tests {
         );
 
         assert!(value_retained_bytes(&Value::Decimal(value)) > std::mem::size_of::<Value>());
-        assert!(aggregate_template_has_variable_state(
-            &AggregateAccumulatorTemplate::Builtin(AggregateStatePlan::Statistics)
-        ));
-        assert!(aggregate_template_has_variable_state(
-            &AggregateAccumulatorTemplate::Builtin(AggregateStatePlan::Sum)
-        ));
+        assert!(fixed_width_sum_type(&ColumnType::BigInteger));
+        assert!(fixed_width_sum_type(&ColumnType::DoublePrecision));
+        assert!(!fixed_width_sum_type(&ColumnType::Numeric {
+            precision: None,
+            scale: None,
+        }));
     }
 }

@@ -221,6 +221,29 @@ fn result_materialization_moves_prefix_projected_values() {
 }
 
 #[test]
+fn result_materialization_reads_shared_projection_without_changing_storage() {
+    let stored = Arc::new(vec![
+        Value::Str("unused".into()),
+        Value::Str("selected".repeat(32)),
+        Value::Int(7),
+    ]);
+    let row = PhysicalRow::from_shared_values(Arc::clone(&stored), Arc::from([2, 1]));
+    let batch = Batch::from_physical_rows(
+        RowSchema::new(vec!["number".into(), "text".into()]),
+        vec![row],
+    );
+
+    assert_eq!(
+        batch.into_result_rows(),
+        vec![BTreeMap::from([
+            ("number".into(), Value::Int(7)),
+            ("text".into(), Value::Str("selected".repeat(32))),
+        ])]
+    );
+    assert_eq!(stored[0], Value::Str("unused".into()));
+}
+
+#[test]
 fn result_materialization_preserves_non_identity_schema_mapping() {
     let source = RowSchema::new(vec!["left".into()]);
     let source = RowSchema::append(&source, &["right".into()]);

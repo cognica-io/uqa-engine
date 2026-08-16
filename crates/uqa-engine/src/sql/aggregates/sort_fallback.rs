@@ -47,7 +47,14 @@ pub(super) fn aggregate_sorted_input(
     let subquery_arena = PlanSubqueryArena::new(&statement.subqueries, Some(&hook));
     let aggregate_targets = aggregate_targets(engine, statement)
         .into_iter()
-        .cloned()
+        .map(|target| {
+            uqa_execution::bind_type_introspection_with_resolver(
+                target.clone(),
+                input_schema,
+                params,
+                engine,
+            )
+        })
         .collect::<Vec<_>>();
     let output_plan = super::output::AggregateOutputPlan::compile(
         engine,

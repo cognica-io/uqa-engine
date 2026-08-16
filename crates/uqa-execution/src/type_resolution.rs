@@ -760,9 +760,11 @@ fn binary_operator_name(op: BinaryOp) -> &'static str {
     }
 }
 
-/// Bind polymorphic type-introspection calls while the input schema still
-/// carries declared SQL types. Runtime values deliberately do not encode
-/// integer widths, varchar identity, or float widths.
+/// Bind polymorphic type-introspection calls and common-type coercions while
+/// the input schema still carries declared SQL types. Runtime values
+/// deliberately do not encode integer widths, varchar identity, or float
+/// widths, and selector expressions must return the common SQL type rather
+/// than the storage type of the branch selected at runtime.
 pub fn bind_type_introspection(
     expression: ScalarExpr,
     schema: &RowSchema,
@@ -811,6 +813,9 @@ fn bind_type_introspection_inner(
             if containment::is_operator(&name) {
                 containment::bind_unknown_arguments(&mut args, schema, params, resolver);
             }
+            if is_common_type_function(&name) {
+                bind_common_type_expressions(&mut args, schema, params, resolver);
+            }
             if is_pg_typeof(&name) && args.len() == 1 {
                 let name = scalar_type_inner(&args[0], schema, params, resolver)
                     .ok()
@@ -832,6 +837,7 @@ fn bind_type_introspection_inner(
         }
         ScalarExpr::Array(mut items) => {
             bind_type_introspection_items(&mut items, schema, params, resolver);
+            bind_common_type_expressions(&mut items, schema, params, resolver);
             ScalarExpr::Array(items)
         }
         ScalarExpr::Row(mut items) => {
@@ -936,6 +942,46 @@ fn bind_type_introspection_inner(
             if let Some(else_branch) = else_branch.as_deref_mut() {
                 bind_type_introspection_in_place(else_branch, schema, params, resolver);
             }
+            if base.is_some() {
+                let comparison_type = common_expression_type(
+                    base.iter()
+                        .map(Box::as_ref)
+                        .chain(when.iter().map(|(condition, _)| condition)),
+                    schema,
+                    params,
+                    resolver,
+                );
+                if let Some(comparison_type) = comparison_type {
+                    if let Some(base) = base.as_deref_mut() {
+                        bind_common_type_cast(base, &comparison_type, schema, params, resolver);
+                    }
+                    for (condition, _) in &mut when {
+                        bind_common_type_cast(
+                            condition,
+                            &comparison_type,
+                            schema,
+                            params,
+                            resolver,
+                        );
+                    }
+                }
+            }
+            let result_type = common_expression_type(
+                when.iter()
+                    .map(|(_, result)| result)
+                    .chain(else_branch.iter().map(Box::as_ref)),
+                schema,
+                params,
+                resolver,
+            );
+            if let Some(result_type) = result_type {
+                for (_, result) in &mut when {
+                    bind_common_type_cast(result, &result_type, schema, params, resolver);
+                }
+                if let Some(else_branch) = else_branch.as_deref_mut() {
+                    bind_common_type_cast(else_branch, &result_type, schema, params, resolver);
+                }
+            }
             ScalarExpr::Case {
                 base,
                 when,
@@ -990,6 +1036,7 @@ fn requires_type_introspection_binding(expression: &ScalarExpr) -> bool {
             ..
         } => {
             is_pg_typeof(name)
+                || is_common_type_function(name)
                 || containment::is_operator(name)
                 || args.iter().any(requires_type_introspection_binding)
                 || order_by
@@ -999,14 +1046,13 @@ fn requires_type_introspection_binding(expression: &ScalarExpr) -> bool {
                     .as_deref()
                     .is_some_and(requires_type_introspection_binding)
         }
-        ScalarExpr::Array(items)
-        | ScalarExpr::Row(items)
-        | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => items.iter().any(requires_type_introspection_binding),
+        ScalarExpr::Array(_) | ScalarExpr::Case { .. } | ScalarExpr::UnaryMinus(_) => true,
+        ScalarExpr::Row(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
+            items.iter().any(requires_type_introspection_binding)
+        }
         ScalarExpr::Binary { lhs, rhs, .. } => {
             requires_type_introspection_binding(lhs) || requires_type_introspection_binding(rhs)
         }
-        ScalarExpr::UnaryMinus(_) => true,
         ScalarExpr::Not(expression)
         | ScalarExpr::IsNull {
             expr: expression, ..
@@ -1034,21 +1080,6 @@ fn requires_type_introspection_binding(expression: &ScalarExpr) -> bool {
                     frame_bound_requires_type_introspection_binding(&frame.start)
                         || frame_bound_requires_type_introspection_binding(&frame.end)
                 })
-        }
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            base.as_deref()
-                .is_some_and(requires_type_introspection_binding)
-                || when.iter().any(|(condition, result)| {
-                    requires_type_introspection_binding(condition)
-                        || requires_type_introspection_binding(result)
-                })
-                || else_branch
-                    .as_deref()
-                    .is_some_and(requires_type_introspection_binding)
         }
         ScalarExpr::Cast { expr, ty } => {
             cast_requires_declared_source(ty) || requires_type_introspection_binding(expr)
@@ -1081,6 +1112,68 @@ fn frame_bound_requires_type_introspection_binding(bound: &crate::ScalarFrameBou
 
 fn is_pg_typeof(name: &str) -> bool {
     name.eq_ignore_ascii_case("pg_typeof") || name.eq_ignore_ascii_case("pg_catalog.pg_typeof")
+}
+
+fn is_common_type_function(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "coalesce" | "greatest" | "least"
+    )
+}
+
+fn bind_common_type_expressions(
+    expressions: &mut [ScalarExpr],
+    schema: &RowSchema,
+    params: &[SQLParam],
+    resolver: Option<&dyn FunctionTypeResolver>,
+) {
+    let Some(target) = common_expression_type(expressions.iter(), schema, params, resolver) else {
+        return;
+    };
+    for expression in expressions {
+        bind_common_type_cast(expression, &target, schema, params, resolver);
+    }
+}
+
+fn common_expression_type<'a>(
+    expressions: impl IntoIterator<Item = &'a ScalarExpr>,
+    schema: &RowSchema,
+    params: &[SQLParam],
+    resolver: Option<&dyn FunctionTypeResolver>,
+) -> Option<ColumnType> {
+    let mut common = None;
+    let mut saw_expression = false;
+    for expression in expressions {
+        saw_expression = true;
+        let expression_type =
+            common_context_expression_type(expression, schema, params, resolver).ok()?;
+        common = merge_optional_types(common, expression_type).ok()?;
+    }
+    saw_expression.then(|| common.unwrap_or(ColumnType::Text))
+}
+
+fn bind_common_type_cast(
+    expression: &mut ScalarExpr,
+    target: &ColumnType,
+    schema: &RowSchema,
+    params: &[SQLParam],
+    resolver: Option<&dyn FunctionTypeResolver>,
+) {
+    let target = base_type(target);
+    let source = common_context_expression_type(expression, schema, params, resolver)
+        .ok()
+        .flatten();
+    if source
+        .as_ref()
+        .is_some_and(|source| base_type(source) == target)
+    {
+        return;
+    }
+    let inner = std::mem::replace(expression, ScalarExpr::Literal(Value::Null));
+    *expression = ScalarExpr::Cast {
+        expr: Box::new(inner),
+        ty: target.sql_name(),
+    };
 }
 
 fn bind_type_introspection_items(

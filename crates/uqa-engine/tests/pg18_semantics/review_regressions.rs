@@ -69,6 +69,43 @@ fn common_type_selection_keeps_unknown_literals_until_context_resolution() {
 }
 
 #[test]
+fn common_type_selection_coerces_runtime_values_before_aggregation() {
+    let eng = engine();
+    eng.sql(
+        "CREATE TABLE mixed_common_type (g INTEGER, floating DOUBLE PRECISION, exact NUMERIC)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO mixed_common_type VALUES (1, NULL, 1.25), (1, 2.5, 9.75), (2, NULL, 4.5)",
+        &[],
+    )
+    .unwrap();
+    eng.sql("SET work_mem TO '1B'", &[]).unwrap();
+
+    let rows = eng
+        .sql(
+            "SELECT g,
+                    pg_typeof(SUM(COALESCE(floating, exact))) AS sum_type,
+                    SUM(COALESCE(floating, exact)) AS coalesced,
+                    SUM(CASE WHEN floating IS NULL THEN exact ELSE floating END) AS conditional
+             FROM mixed_common_type
+             GROUP BY g
+             ORDER BY g",
+            &[],
+        )
+        .unwrap()
+        .rows;
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["sum_type"], Value::Str("double precision".into()));
+    assert_eq!(rows[0]["coalesced"], Value::Float(3.75));
+    assert_eq!(rows[0]["conditional"], Value::Float(3.75));
+    assert_eq!(rows[1]["coalesced"], Value::Float(4.5));
+    assert_eq!(rows[1]["conditional"], Value::Float(4.5));
+}
+
+#[test]
 fn numeric_parser_and_extreme_scale_arithmetic_match_postgresql_18() {
     let eng = engine();
     assert_sqlstate(&eng, "SELECT '-+1'::numeric", "22P02");
