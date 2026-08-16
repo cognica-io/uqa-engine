@@ -7,6 +7,14 @@
 use super::temporal::{MICROS_PER_DAY, MICROS_PER_SECOND};
 use super::*;
 
+#[test]
+fn dynamic_value_keeps_variable_width_payloads_indirect() {
+    let pointer_bytes = std::mem::size_of::<usize>();
+    assert_eq!(std::mem::size_of::<ArrayValue>(), pointer_bytes);
+    assert_eq!(std::mem::size_of::<DecimalValue>(), pointer_bytes);
+    assert!(std::mem::size_of::<Value>() <= 4 * pointer_bytes);
+}
+
 struct HostileEmptySequence;
 
 impl<'de> serde::de::SeqAccess<'de> for HostileEmptySequence {

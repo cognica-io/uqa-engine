@@ -30,10 +30,20 @@ enum DecimalRepr {
 /// ordering, hashing keys, and arithmetic operate on the exact value.
 #[derive(Debug, Clone)]
 pub struct DecimalValue {
-    repr: DecimalRepr,
+    repr: Box<DecimalRepr>,
 }
 
 impl DecimalValue {
+    fn with_repr(repr: DecimalRepr) -> Self {
+        Self {
+            repr: Box::new(repr),
+        }
+    }
+
+    fn repr(&self) -> &DecimalRepr {
+        self.repr.as_ref()
+    }
+
     pub fn parse(input: &str) -> Option<Self> {
         let input = input.trim();
         match input.to_ascii_lowercase().as_str() {
@@ -97,12 +107,10 @@ impl DecimalValue {
     }
 
     pub fn from_i64(value: i64) -> Self {
-        Self {
-            repr: DecimalRepr::Finite {
-                coefficient: BigInt::from(value),
-                scale: 0,
-            },
-        }
+        Self::with_repr(DecimalRepr::Finite {
+            coefficient: BigInt::from(value),
+            scale: 0,
+        })
     }
 
     pub fn from_i128(value: i128) -> Option<Self> {
@@ -132,21 +140,21 @@ impl DecimalValue {
 
     pub fn is_zero(&self) -> bool {
         matches!(
-            &self.repr,
+            self.repr(),
             DecimalRepr::Finite { coefficient, .. } if coefficient.is_zero()
         )
     }
 
     pub fn is_nan(&self) -> bool {
-        matches!(self.repr, DecimalRepr::NaN)
+        matches!(self.repr(), DecimalRepr::NaN)
     }
 
     pub fn is_positive_infinity(&self) -> bool {
-        matches!(self.repr, DecimalRepr::PositiveInfinity)
+        matches!(self.repr(), DecimalRepr::PositiveInfinity)
     }
 
     pub fn is_negative_infinity(&self) -> bool {
-        matches!(self.repr, DecimalRepr::NegativeInfinity)
+        matches!(self.repr(), DecimalRepr::NegativeInfinity)
     }
 
     pub fn is_infinite(&self) -> bool {
@@ -158,7 +166,7 @@ impl DecimalValue {
     }
 
     pub fn is_integral(&self) -> bool {
-        match &self.repr {
+        match self.repr() {
             DecimalRepr::Finite { coefficient, scale } => {
                 *scale == 0 || (coefficient % pow10(*scale)).is_zero()
             }
@@ -169,7 +177,7 @@ impl DecimalValue {
 
     pub fn checked_add(&self, rhs: &Self) -> Option<Self> {
         use DecimalRepr::{Finite, NaN, NegativeInfinity, PositiveInfinity};
-        match (&self.repr, &rhs.repr) {
+        match (self.repr(), rhs.repr()) {
             (NaN, _) | (_, NaN) => Some(Self::nan()),
             (PositiveInfinity, NegativeInfinity) | (NegativeInfinity, PositiveInfinity) => {
                 Some(Self::nan())
@@ -200,7 +208,7 @@ impl DecimalValue {
 
     pub fn checked_mul(&self, rhs: &Self) -> Option<Self> {
         use DecimalRepr::{Finite, NaN};
-        if matches!(self.repr, NaN) || matches!(rhs.repr, NaN) {
+        if matches!(self.repr(), NaN) || matches!(rhs.repr(), NaN) {
             return Some(Self::nan());
         }
         if self.is_infinite() || rhs.is_infinite() {
@@ -218,7 +226,7 @@ impl DecimalValue {
                 coefficient: right,
                 scale: right_scale,
             },
-        ) = (&self.repr, &rhs.repr)
+        ) = (self.repr(), rhs.repr())
         else {
             unreachable!("special numeric handled above")
         };
@@ -262,7 +270,7 @@ impl DecimalValue {
                 coefficient: divisor,
                 scale: divisor_scale,
             },
-        ) = (&self.repr, &rhs.repr)
+        ) = (self.repr(), rhs.repr())
         else {
             unreachable!("special numeric handled above")
         };
@@ -311,7 +319,7 @@ impl DecimalValue {
                 coefficient: divisor,
                 scale: divisor_scale,
             },
-        ) = (&self.repr, &rhs.repr)
+        ) = (self.repr(), rhs.repr())
         else {
             unreachable!("special numeric handled above")
         };
@@ -352,7 +360,7 @@ impl DecimalValue {
                 coefficient: right,
                 scale: right_scale,
             },
-        ) = (&self.repr, &rhs.repr)
+        ) = (self.repr(), rhs.repr())
         else {
             unreachable!("special numeric handled above")
         };
@@ -363,13 +371,11 @@ impl DecimalValue {
     }
 
     pub fn abs(&self) -> Self {
-        match &self.repr {
-            DecimalRepr::Finite { coefficient, scale } => Self {
-                repr: DecimalRepr::Finite {
-                    coefficient: coefficient.abs(),
-                    scale: *scale,
-                },
-            },
+        match self.repr() {
+            DecimalRepr::Finite { coefficient, scale } => Self::with_repr(DecimalRepr::Finite {
+                coefficient: coefficient.abs(),
+                scale: *scale,
+            }),
             DecimalRepr::NegativeInfinity | DecimalRepr::PositiveInfinity => {
                 Self::positive_infinity()
             }
@@ -388,7 +394,7 @@ impl DecimalValue {
         if self.is_positive_infinity() {
             return Some(Self::positive_infinity());
         }
-        let DecimalRepr::Finite { coefficient, scale } = &self.repr else {
+        let DecimalRepr::Finite { coefficient, scale } = self.repr() else {
             unreachable!("special numeric handled above")
         };
         if coefficient.is_negative() {
@@ -422,22 +428,25 @@ impl DecimalValue {
     }
 
     pub fn display_scale(&self) -> Option<u32> {
-        match &self.repr {
+        match self.repr() {
             DecimalRepr::Finite { scale, .. } => Some(*scale),
             _ => None,
         }
     }
 
-    /// Return a conservative byte charge for the heap-backed coefficient storage retained by this value.
+    /// Return a conservative byte charge for the boxed representation and any heap-backed coefficient storage retained by this value.
     pub fn retained_bytes(&self) -> usize {
-        let DecimalRepr::Finite { coefficient, .. } = &self.repr else {
-            return 0;
+        let coefficient_bytes = match self.repr() {
+            DecimalRepr::Finite { coefficient, .. } => {
+                let bits = usize::try_from(coefficient.bits()).unwrap_or(usize::MAX);
+                let digits = bits.div_ceil(usize::BITS as usize).max(1);
+                digits
+                    .saturating_mul(std::mem::size_of::<usize>())
+                    .saturating_mul(4)
+            }
+            _ => 0,
         };
-        let bits = usize::try_from(coefficient.bits()).unwrap_or(usize::MAX);
-        let digits = bits.div_ceil(usize::BITS as usize).max(1);
-        digits
-            .saturating_mul(std::mem::size_of::<usize>())
-            .saturating_mul(4)
+        std::mem::size_of::<DecimalRepr>().saturating_add(coefficient_bytes)
     }
 
     pub fn ceil(&self) -> Self {
@@ -468,7 +477,7 @@ impl DecimalValue {
     }
 
     pub fn fits_precision(&self, precision: u32, scale: i32) -> bool {
-        match &self.repr {
+        match self.repr() {
             DecimalRepr::NaN => true,
             DecimalRepr::NegativeInfinity | DecimalRepr::PositiveInfinity => false,
             DecimalRepr::Finite {
@@ -500,7 +509,7 @@ impl DecimalValue {
     }
 
     pub fn to_sql_string(&self) -> String {
-        match &self.repr {
+        match self.repr() {
             DecimalRepr::Finite { coefficient, scale } => format_finite(coefficient, *scale),
             DecimalRepr::NegativeInfinity => "-Infinity".into(),
             DecimalRepr::PositiveInfinity => "Infinity".into(),
@@ -509,7 +518,7 @@ impl DecimalValue {
     }
 
     pub fn to_canonical_string(&self) -> String {
-        match &self.repr {
+        match self.repr() {
             DecimalRepr::Finite { coefficient, scale } => {
                 let (coefficient, scale) = canonical_finite_parts(coefficient, *scale);
                 format_finite(&coefficient, scale)
@@ -522,7 +531,7 @@ impl DecimalValue {
     /// as text because `PostgreSQL` numeric coefficients exceed primitive
     /// integer widths.
     pub fn canonical_parts(&self) -> (String, u32) {
-        match &self.repr {
+        match self.repr() {
             DecimalRepr::Finite { coefficient, scale } => {
                 let (coefficient, scale) = canonical_finite_parts(coefficient, *scale);
                 (coefficient.to_string(), scale)
@@ -536,14 +545,14 @@ impl DecimalValue {
     }
 
     pub fn to_i64_trunc(&self) -> Option<i64> {
-        let DecimalRepr::Finite { coefficient, scale } = &self.repr else {
+        let DecimalRepr::Finite { coefficient, scale } = self.repr() else {
             return None;
         };
         (coefficient / pow10(*scale)).to_i64()
     }
 
     pub fn to_f64(&self) -> Option<f64> {
-        match self.repr {
+        match self.repr() {
             DecimalRepr::NegativeInfinity => Some(f64::NEG_INFINITY),
             DecimalRepr::PositiveInfinity => Some(f64::INFINITY),
             DecimalRepr::NaN => Some(f64::NAN),
@@ -562,27 +571,19 @@ impl DecimalValue {
         if integer_digits > MAX_INTEGER_DIGITS {
             return None;
         }
-        Some(Self {
-            repr: DecimalRepr::Finite { coefficient, scale },
-        })
+        Some(Self::with_repr(DecimalRepr::Finite { coefficient, scale }))
     }
 
     fn nan() -> Self {
-        Self {
-            repr: DecimalRepr::NaN,
-        }
+        Self::with_repr(DecimalRepr::NaN)
     }
 
     fn positive_infinity() -> Self {
-        Self {
-            repr: DecimalRepr::PositiveInfinity,
-        }
+        Self::with_repr(DecimalRepr::PositiveInfinity)
     }
 
     fn negative_infinity() -> Self {
-        Self {
-            repr: DecimalRepr::NegativeInfinity,
-        }
+        Self::with_repr(DecimalRepr::NegativeInfinity)
     }
 
     fn infinity_with_sign(sign: i8) -> Self {
@@ -594,7 +595,7 @@ impl DecimalValue {
     }
 
     fn sign(&self) -> i8 {
-        match &self.repr {
+        match self.repr() {
             DecimalRepr::Finite { coefficient, .. } => {
                 if coefficient.is_negative() {
                     -1
@@ -608,13 +609,11 @@ impl DecimalValue {
     }
 
     fn negated(&self) -> Self {
-        match &self.repr {
-            DecimalRepr::Finite { coefficient, scale } => Self {
-                repr: DecimalRepr::Finite {
-                    coefficient: -coefficient,
-                    scale: *scale,
-                },
-            },
+        match self.repr() {
+            DecimalRepr::Finite { coefficient, scale } => Self::with_repr(DecimalRepr::Finite {
+                coefficient: -coefficient,
+                scale: *scale,
+            }),
             DecimalRepr::NegativeInfinity => Self::positive_infinity(),
             DecimalRepr::PositiveInfinity => Self::negative_infinity(),
             DecimalRepr::NaN => Self::nan(),
@@ -622,7 +621,7 @@ impl DecimalValue {
     }
 
     fn integral_round(&self, rounding: IntegralRounding) -> Self {
-        let DecimalRepr::Finite { coefficient, scale } = &self.repr else {
+        let DecimalRepr::Finite { coefficient, scale } = self.repr() else {
             return self.clone();
         };
         if *scale == 0 {
@@ -641,16 +640,14 @@ impl DecimalValue {
             }
             _ => quotient,
         };
-        Self {
-            repr: DecimalRepr::Finite {
-                coefficient,
-                scale: 0,
-            },
-        }
+        Self::with_repr(DecimalRepr::Finite {
+            coefficient,
+            scale: 0,
+        })
     }
 
     fn quantize(&self, target_scale: i32, round: bool) -> Option<Self> {
-        let DecimalRepr::Finite { coefficient, scale } = &self.repr else {
+        let DecimalRepr::Finite { coefficient, scale } = self.repr() else {
             return Some(self.clone());
         };
         if target_scale >= 0 {
@@ -795,7 +792,7 @@ fn postgres_div_scale(dividend: &DecimalValue, divisor: &DecimalValue) -> u32 {
 /// Return `PostgreSQL` `NumericVar`'s normalized base-10000 weight, first
 /// non-zero digit, and display scale.
 fn numeric_group_head(value: &DecimalValue) -> Option<(i32, u32, u32)> {
-    let DecimalRepr::Finite { coefficient, scale } = &value.repr else {
+    let DecimalRepr::Finite { coefficient, scale } = value.repr() else {
         return None;
     };
     if coefficient.is_zero() {
@@ -1064,7 +1061,7 @@ fn estimate_decimal_ln_weight(value: &DecimalValue) -> Option<i32> {
 }
 
 fn decimal_weight(value: &DecimalValue) -> Option<i32> {
-    let DecimalRepr::Finite { coefficient, scale } = &value.repr else {
+    let DecimalRepr::Finite { coefficient, scale } = value.repr() else {
         return None;
     };
     if coefficient.is_zero() {
@@ -1081,7 +1078,7 @@ fn decimal_group_weight(value: &DecimalValue) -> Option<i32> {
 }
 
 fn decimal_integral_i32(value: &DecimalValue) -> Option<i32> {
-    let DecimalRepr::Finite { coefficient, scale } = &value.repr else {
+    let DecimalRepr::Finite { coefficient, scale } = value.repr() else {
         return None;
     };
     let divisor = pow10(*scale);
@@ -1091,7 +1088,7 @@ fn decimal_integral_i32(value: &DecimalValue) -> Option<i32> {
 }
 
 fn decimal_integral_is_odd(value: &DecimalValue) -> Option<bool> {
-    let DecimalRepr::Finite { coefficient, scale } = &value.repr else {
+    let DecimalRepr::Finite { coefficient, scale } = value.repr() else {
         return None;
     };
     let divisor = pow10(*scale);
@@ -1103,7 +1100,7 @@ fn decimal_integral_is_odd(value: &DecimalValue) -> Option<bool> {
 
 impl DecimalValue {
     fn approximate_log10_abs(&self) -> Option<f64> {
-        let DecimalRepr::Finite { coefficient, scale } = &self.repr else {
+        let DecimalRepr::Finite { coefficient, scale } = self.repr() else {
             return None;
         };
         if coefficient.is_zero() {
@@ -1143,7 +1140,7 @@ impl PartialOrd for DecimalValue {
 impl Ord for DecimalValue {
     fn cmp(&self, other: &Self) -> Ordering {
         use DecimalRepr::{Finite, NaN, NegativeInfinity, PositiveInfinity};
-        match (&self.repr, &other.repr) {
+        match (self.repr(), other.repr()) {
             (NaN, NaN)
             | (NegativeInfinity, NegativeInfinity)
             | (PositiveInfinity, PositiveInfinity) => Ordering::Equal,

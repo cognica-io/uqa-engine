@@ -285,3 +285,28 @@ fn result_materialization_clones_only_duplicate_physical_slots() {
         ])]
     );
 }
+
+#[test]
+fn remapped_result_materialization_keeps_the_last_duplicate_label() {
+    let source = RowSchema::new(vec!["first".into(), "unused".into(), "last".into()]);
+    let selected = RowSchema::select(
+        &source,
+        &[
+            ("value".into(), "first".into()),
+            ("value".into(), "last".into()),
+        ],
+    );
+    let batch = Batch::from_physical_rows(
+        selected,
+        vec![PhysicalRow::from_values(vec![
+            Value::Int(1),
+            Value::Int(2),
+            Value::Int(3),
+        ])],
+    );
+
+    assert_eq!(
+        batch.into_result_rows(),
+        vec![BTreeMap::from([("value".into(), Value::Int(3))])]
+    );
+}

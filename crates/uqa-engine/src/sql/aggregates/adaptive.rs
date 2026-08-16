@@ -553,10 +553,14 @@ fn value_retained_bytes(value: &Value) -> usize {
         }
         Value::Bytes(value) => value.capacity(),
         Value::Array(array) => array
-            .elements()
-            .len()
-            .saturating_mul(std::mem::size_of::<Value>())
-            .saturating_add(array.elements().iter().map(value_retained_bytes).sum())
+            .retained_header_bytes()
+            .saturating_add(
+                array
+                    .elements()
+                    .len()
+                    .saturating_mul(std::mem::size_of::<Value>())
+                    .saturating_add(array.elements().iter().map(value_retained_bytes).sum()),
+            )
             .saturating_add(
                 array
                     .lower_bounds()

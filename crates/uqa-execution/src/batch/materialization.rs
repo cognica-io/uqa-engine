@@ -20,26 +20,55 @@ impl RowSchema {
     }
 
     pub(super) fn materialize_remapped_result_row(&self, row: PhysicalRow) -> ResultRow {
+        let template = self.result_row_template();
+        self.materialize_remapped_result_row_with_template(row, &template)
+    }
+
+    pub(super) fn materialize_remapped_result_rows(
+        &self,
+        rows: Vec<PhysicalRow>,
+    ) -> Vec<ResultRow> {
+        let template = self.result_row_template();
+        rows.into_iter()
+            .map(|row| self.materialize_remapped_result_row_with_template(row, &template))
+            .collect()
+    }
+
+    fn result_row_template(&self) -> ResultRow {
+        self.index
+            .cold
+            .result_logical_order
+            .iter()
+            .map(|logical| (self.columns()[*logical].clone(), Value::Null))
+            .collect()
+    }
+
+    fn materialize_remapped_result_row_with_template(
+        &self,
+        row: PhysicalRow,
+        template: &ResultRow,
+    ) -> ResultRow {
         let mut fragments = row.into_value_fragments();
         debug_assert_eq!(
             self.physical_width(),
             fragments.iter().map(Vec::len).sum::<usize>()
         );
-        let last_use = self
+        let mut result = template.clone();
+        for ((logical, take), output) in self
             .index
             .cold
-            .materialization_last_use
-            .as_deref()
-            .expect("remapped result schema has a materialization plan");
-        let mut result = ResultRow::new();
-        for (logical, column) in self.columns().iter().enumerate() {
-            let slot = self.index.slots[logical];
+            .result_logical_order
+            .iter()
+            .zip(self.index.cold.result_take.iter())
+            .zip(result.values_mut())
+        {
+            let slot = self.index.slots[*logical];
             let value = if slot == NULL_SLOT {
                 Value::Null
             } else {
-                materialize_fragment_slot(&mut fragments, slot, last_use[slot] == logical)
+                materialize_fragment_slot(&mut fragments, slot, *take)
             };
-            result.insert(column.clone(), value);
+            *output = value;
         }
         result
     }

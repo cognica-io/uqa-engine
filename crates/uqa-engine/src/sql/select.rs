@@ -152,8 +152,14 @@ impl QueryOutput {
                 ));
             }
         };
-        for row in &mut rows {
-            row.retain(|column, _| !is_score_provenance_column(column));
+        if self
+            .internal_columns
+            .iter()
+            .any(|column| is_score_provenance_column(column))
+        {
+            for row in &mut rows {
+                row.retain(|column, _| !is_score_provenance_column(column));
+            }
         }
         Ok(SQLResult::from_typed_rows_with_positions(
             self.columns,

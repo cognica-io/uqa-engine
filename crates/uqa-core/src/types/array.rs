@@ -10,6 +10,11 @@ use super::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArrayValue {
+    storage: Box<ArrayStorage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ArrayStorage {
     elements: Vec<Value>,
     dimensions: Vec<usize>,
     lower_bounds: Vec<i32>,
@@ -21,9 +26,11 @@ impl ArrayValue {
         let dimensions = normalized_shape(&elements)?;
         let lower_bounds = vec![1; dimensions.len()];
         Some(Self {
-            elements,
-            dimensions,
-            lower_bounds,
+            storage: Box::new(ArrayStorage {
+                elements,
+                dimensions,
+                lower_bounds,
+            }),
         })
     }
 
@@ -34,40 +41,47 @@ impl ArrayValue {
             return None;
         }
         Some(Self {
-            elements,
-            dimensions,
-            lower_bounds,
+            storage: Box::new(ArrayStorage {
+                elements,
+                dimensions,
+                lower_bounds,
+            }),
         })
     }
 
     pub fn elements(&self) -> &[Value] {
-        &self.elements
+        &self.storage.elements
     }
 
     pub fn into_elements(self) -> Vec<Value> {
-        self.elements
+        self.storage.elements
     }
 
     pub fn lower_bounds(&self) -> &[i32] {
-        &self.lower_bounds
+        &self.storage.lower_bounds
     }
 
     pub fn dimensions(&self) -> &[usize] {
-        &self.dimensions
+        &self.storage.dimensions
     }
 
     pub fn lower_bound(&self, dimension: usize) -> Option<i32> {
-        self.lower_bounds.get(dimension).copied()
+        self.storage.lower_bounds.get(dimension).copied()
     }
 
     pub fn upper_bound(&self, dimension: usize) -> Option<i64> {
         let lower = i64::from(self.lower_bound(dimension)?);
-        let length = i64::try_from(*self.dimensions.get(dimension)?).ok()?;
+        let length = i64::try_from(*self.storage.dimensions.get(dimension)?).ok()?;
         (length > 0).then(|| lower + length - 1)
     }
 
     pub fn with_elements(&self, elements: Vec<Value>) -> Option<Self> {
-        Self::with_lower_bounds(elements, self.lower_bounds.clone())
+        Self::with_lower_bounds(elements, self.storage.lower_bounds.clone())
+    }
+
+    /// Heap bytes used by the boxed array headers. Element buffers are accounted for by callers together with their recursively retained values.
+    pub fn retained_header_bytes(&self) -> usize {
+        std::mem::size_of::<ArrayStorage>()
     }
 }
 
@@ -131,8 +145,8 @@ impl serde::Serialize for ArrayValue {
         }
 
         EncodedArray {
-            elements: &self.elements,
-            lower_bounds: &self.lower_bounds,
+            elements: &self.storage.elements,
+            lower_bounds: &self.storage.lower_bounds,
         }
         .serialize(serializer)
     }

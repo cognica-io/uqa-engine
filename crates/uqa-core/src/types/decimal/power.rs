@@ -103,7 +103,7 @@ struct PowerIntermediate {
 
 impl PowerIntermediate {
     fn from_decimal(value: &DecimalValue) -> Option<Self> {
-        let DecimalRepr::Finite { coefficient, scale } = &value.repr else {
+        let DecimalRepr::Finite { coefficient, scale } = value.repr() else {
             return None;
         };
         Some(Self {
