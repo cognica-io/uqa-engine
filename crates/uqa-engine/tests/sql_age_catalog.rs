@@ -562,6 +562,41 @@ fn created_labels_keep_ids_and_kinds(engine: &Engine) {
             .contains("label Person is for vertices, not edges"),
         "{edge_with_vertex_label}"
     );
+    // The reserved names denote the default labels: entities created under
+    // them take label ids 1 / 2 and never appear as user labels.
+    exec(
+        engine,
+        "SELECT * FROM cypher('labels', $$
+             MATCH (a:Person {name: 'ada'}), (b:Person {name: 'bob'})
+             CREATE (:_ag_label_vertex {n: 1}), (a)-[:_ag_label_edge]->(b)
+         $$) AS (ignored agtype)",
+    );
+    let default_ids = exec(
+        engine,
+        "SELECT * FROM cypher('labels', $$ MATCH (n:_ag_label_vertex) RETURN id(n) $$) AS (id bigint)",
+    );
+    assert_eq!(default_ids.rows.len(), 1);
+    assert_eq!(int(default_ids.rows[0].get("id")) >> 48, 1);
+    assert_eq!(
+        strings(
+            engine,
+            "SELECT name FROM ag_catalog.ag_label ORDER BY id",
+            "name"
+        ),
+        vec!["_ag_label_vertex", "_ag_label_edge", "Person", "KNOWS"]
+    );
+    let reserved_kind = engine
+        .sql(
+            "SELECT * FROM cypher('labels', $$ CREATE (:_ag_label_edge {n: 2}) $$) AS (ignored agtype)",
+            &[],
+        )
+        .unwrap_err();
+    assert!(
+        reserved_kind
+            .to_string()
+            .contains("label _ag_label_edge is for edges, not vertices"),
+        "{reserved_kind}"
+    );
 }
 
 fn drop_label_follows_age(engine: &Engine) {
@@ -610,15 +645,17 @@ fn drop_label_follows_age(engine: &Engine) {
         scalar(engine, "SELECT drop_label('labels', 'City')"),
         Value::Null
     );
+    // ada, bob, and the unlabeled default-label vertex remain.
     assert_eq!(
         scalar(
             engine,
             "SELECT * FROM cypher('labels', $$ MATCH (n) RETURN count(n) $$) AS (c bigint)"
         ),
-        Value::Int(2)
+        Value::Int(3)
     );
     // Dropping a vertex label removes the vertices with their incident
-    // edges, and dropping an edge label removes just the edges.
+    // edges, and dropping an edge label removes just the edges; the
+    // default-label edge between ada and bob is untouched by either.
     assert_eq!(
         scalar(engine, "SELECT drop_label('labels', 'KNOWS')"),
         Value::Null
@@ -628,7 +665,7 @@ fn drop_label_follows_age(engine: &Engine) {
             engine,
             "SELECT * FROM cypher('labels', $$ MATCH ()-[r]->() RETURN count(r) $$) AS (c bigint)"
         ),
-        Value::Int(0)
+        Value::Int(1)
     );
     exec(engine, "SELECT create_elabel('labels', 'KNOWS')");
     exec(
@@ -642,12 +679,13 @@ fn drop_label_follows_age(engine: &Engine) {
         scalar(engine, "SELECT drop_label('labels', 'Person')"),
         Value::Null
     );
+    // Only the unlabeled vertex survives; both edges left with ada and bob.
     assert_eq!(
         scalar(
             engine,
             "SELECT * FROM cypher('labels', $$ MATCH (n) RETURN count(n) $$) AS (c bigint)"
         ),
-        Value::Int(0)
+        Value::Int(1)
     );
     assert_eq!(
         scalar(
@@ -754,7 +792,7 @@ fn postgres_catalogs_mirror_graph_namespaces_labels_and_sequences() {
     exec(
         &engine,
         "SELECT * FROM cypher('mirror', $$
-             CREATE (:Person {name: 'ada'})-[:KNOWS]->(:Person {name: 'bob'}), (:Person {name: 'cid'})
+             CREATE (:Person {name: 'ada'})-[:KNOWS]->(:Person {name: 'bob'}), (:Person {name: 'cid'}), ()
          $$) AS (ignored agtype)",
     );
     exec(&engine, "SELECT create_elabel('mirror', 'WORKS_AT')");
@@ -817,9 +855,9 @@ fn assert_pg_class_mirrors_label_relations(engine: &Engine) {
             ("Person_id_seq".into(), "S".into(), 0, 0),
             ("WORKS_AT".into(), "r".into(), 4, 0),
             ("WORKS_AT_id_seq".into(), "S".into(), 0, 0),
-            ("_ag_label_edge".into(), "r".into(), 4, 1),
+            ("_ag_label_edge".into(), "r".into(), 4, 0),
             ("_ag_label_edge_id_seq".into(), "S".into(), 0, 0),
-            ("_ag_label_vertex".into(), "r".into(), 2, 3),
+            ("_ag_label_vertex".into(), "r".into(), 2, 1),
             ("_ag_label_vertex_id_seq".into(), "S".into(), 0, 0),
             ("_label_id_seq".into(), "S".into(), 0, 0),
         ]
@@ -850,8 +888,8 @@ fn assert_pg_attribute_mirrors_label_columns(engine: &Engine) {
         shaped,
         vec![
             ("id".into(), "graphid".into(), true),
-            ("start_id".into(), "graphid".into(), false),
-            ("end_id".into(), "graphid".into(), false),
+            ("start_id".into(), "graphid".into(), true),
+            ("end_id".into(), "graphid".into(), true),
             ("properties".into(), "agtype".into(), false),
         ]
     );
@@ -896,7 +934,7 @@ fn assert_pg_sequences_mirror_label_sequences(engine: &Engine) {
                 "_ag_label_vertex_id_seq".into(),
                 "bigint".into(),
                 max_entry,
-                None
+                Some(1)
             ),
             ("_label_id_seq".into(), "integer".into(), 65_535, Some(5)),
         ]
@@ -977,6 +1015,35 @@ fn graph_namespaces_and_schemas_share_one_name_space() {
     assert!(!engine.has_graph("shared_ns").unwrap());
     let reserved = engine.sql("CREATE SCHEMA ag_catalog", &[]).unwrap_err();
     assert!(reserved.to_string().contains("reserved"), "{reserved}");
+    let protected = engine.sql("DROP SCHEMA ag_catalog", &[]).unwrap_err();
+    assert!(
+        protected.to_string().contains("cannot be dropped"),
+        "{protected}"
+    );
+    // IF EXISTS keeps skipping unknown names even with CASCADE.
+    assert!(exec(&engine, "DROP SCHEMA IF EXISTS never_created CASCADE")
+        .rows
+        .is_empty());
+    exec(&engine, "SELECT create_graph('shared_again')");
+    exec(
+        &engine,
+        "DROP SCHEMA IF EXISTS shared_again, never_created CASCADE",
+    );
+    assert!(!engine.has_graph("shared_again").unwrap());
+    // Virtual and graph namespaces are visible to the session schema functions.
+    exec(&engine, "SELECT create_graph('visible_ns')");
+    exec(
+        &engine,
+        "SET search_path = ag_catalog, visible_ns, \"$user\", public",
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT current_schema()"),
+        Value::Str("ag_catalog".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT current_schemas(false)::text"),
+        Value::Str("{ag_catalog,visible_ns,public}".into())
+    );
 }
 
 #[test]

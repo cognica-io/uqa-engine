@@ -342,9 +342,9 @@ impl MemoryGraphStore {
         let Some(id) = registry.labels.get(label).copied() else {
             return Ok(None);
         };
-        let kind = registry.kinds.get(label).copied().ok_or_else(|| {
+        let kind = registry.label_kind(label).ok_or_else(|| {
             GraphStoreError::CorruptGraph(format!(
-                "graph {graph:?} label {label:?} has no recorded kind"
+                "graph {graph:?} label {label:?} has no registry entry"
             ))
         })?;
         match kind {

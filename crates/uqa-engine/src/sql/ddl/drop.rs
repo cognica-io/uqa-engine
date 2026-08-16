@@ -11,7 +11,8 @@ use super::{CatalogIndexRow, ColumnType, DropKind, DropStmt, Engine, SQLError, S
 pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError> {
     if stmt.cascade
         && matches!(stmt.kind, DropKind::View | DropKind::Schema)
-        && !(stmt.kind == DropKind::Schema && only_graph_namespaces(engine, &stmt.names)?)
+        && !(stmt.kind == DropKind::Schema
+            && only_graph_namespaces(engine, &stmt.names, stmt.if_exists)?)
     {
         return Err(SQLError::Unsupported(format!(
             "DROP {} CASCADE is not supported; no objects were changed",
@@ -28,7 +29,11 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
 /// `DROP SCHEMA ... CASCADE` is implemented for graph namespaces, whose only
 /// dependents are the graph's own label relations, so cascading drops the
 /// graph exactly like AGE.
-fn only_graph_namespaces(engine: &Engine, names: &[String]) -> Result<bool, SQLError> {
+fn only_graph_namespaces(
+    engine: &Engine,
+    names: &[String],
+    if_exists: bool,
+) -> Result<bool, SQLError> {
     for name in names {
         let is_graph = engine
             .has_graph(name)
@@ -36,6 +41,11 @@ fn only_graph_namespaces(engine: &Engine, names: &[String]) -> Result<bool, SQLE
         let is_schema = engine
             .has_schema(name)
             .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?;
+        // `IF EXISTS` skips a name that is neither a graph nor a schema, so
+        // it must not force the unsupported-CASCADE rejection.
+        if if_exists && !is_graph && !is_schema {
+            continue;
+        }
         if !is_graph || is_schema {
             return Ok(false);
         }

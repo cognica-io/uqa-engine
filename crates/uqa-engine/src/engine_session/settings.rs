@@ -45,15 +45,22 @@ impl Engine {
             .any(|entry| entry == schema)
     }
 
-    /// First existing schema on this logical session's explicit search path.
+    /// First existing namespace on this logical session's explicit search
+    /// path: a durable schema, a virtual system schema such as `ag_catalog`,
+    /// or a graph namespace.
     pub fn current_schema_name(&self) -> StorageBackendResult<Option<String>> {
         self.synchronize_catalog_registries()?;
         let session = self.session.state.read();
         let schemas = self.durable.schemas.read();
+        let graphs = self.durable.graphs.read();
         Ok(session
             .search_path
             .iter()
-            .find(|name| schemas.contains(name.as_str()))
+            .find(|name| {
+                schemas.contains(name.as_str())
+                    || super::schemas::is_virtual_system_schema(name)
+                    || graphs.contains_key(name.as_str())
+            })
             .cloned())
     }
 
@@ -67,6 +74,7 @@ impl Engine {
         self.synchronize_catalog_registries()?;
         let session = self.session.state.read();
         let schemas = self.durable.schemas.read();
+        let graphs = self.durable.graphs.read();
         let path = &session.search_path;
         let mut out = Vec::new();
         if include_implicit && !path.iter().any(|name| name == "pg_catalog") {
@@ -74,7 +82,8 @@ impl Engine {
         }
         for name in path {
             if (schemas.contains(name.as_str())
-                || matches!(name.as_str(), "pg_catalog" | "information_schema"))
+                || super::schemas::is_virtual_system_schema(name)
+                || graphs.contains_key(name.as_str()))
                 && !out.contains(name)
             {
                 out.push(name.clone());

@@ -508,3 +508,79 @@ fn legacy_registries_without_kinds_learn_them_from_entities() {
         Some(LabelKind::Edge)
     );
 }
+
+#[test]
+fn reserved_label_names_resolve_to_the_default_labels() {
+    let mut store = MemoryGraphStore::new();
+    store.create_graph("g");
+    assert_eq!(
+        store.allocate_vertex_id("_ag_label_vertex", "g").unwrap(),
+        make_graphid(1, 1).unwrap()
+    );
+    assert_eq!(
+        store.allocate_edge_id("_ag_label_edge", "g").unwrap(),
+        make_graphid(2, 1).unwrap()
+    );
+    let err = store.allocate_edge_id("_ag_label_vertex", "g").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "invalid graph mutation: label _ag_label_vertex is for vertices, not edges"
+    );
+    let err = store.allocate_vertex_id("_ag_label_edge", "g").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "invalid graph mutation: label _ag_label_edge is for edges, not vertices"
+    );
+    // The reserved names never become user labels.
+    let names: Vec<String> = store
+        .graph_labels("g")
+        .unwrap()
+        .into_iter()
+        .map(|label| label.name)
+        .collect();
+    assert_eq!(names, vec!["_ag_label_vertex", "_ag_label_edge"]);
+    assert_eq!(
+        store.allocate_vertex_id("Person", "g").unwrap(),
+        make_graphid(3, 1).unwrap()
+    );
+}
+
+#[test]
+fn legacy_labels_without_kind_and_entities_report_consistently() {
+    let mut store = MemoryGraphStore::new();
+    store.create_graph("g");
+    let legacy: GraphLabelRegistry =
+        serde_json::from_str(r#"{"labels":{"Ghost":3},"sequences":{"3":2},"next_label_id":4}"#)
+            .unwrap();
+    store.import_label_registry("g", &legacy);
+    store.rebuild_label_registry_from_ids("g");
+    // No entity can tell the kind, so the catalog and the drop path agree
+    // on the vertex default until the label is used again.
+    assert_eq!(
+        store.graph_label_kind("g", "Ghost").unwrap(),
+        Some(LabelKind::Vertex)
+    );
+    let ghost = store
+        .graph_labels("g")
+        .unwrap()
+        .into_iter()
+        .find(|label| label.name == "Ghost")
+        .unwrap();
+    assert_eq!(
+        (ghost.id, ghost.kind, ghost.last_sequence),
+        (3, LabelKind::Vertex, 2)
+    );
+    // First use records the kind, either way.
+    assert_eq!(
+        store.allocate_edge_id("Ghost", "g").unwrap(),
+        make_graphid(3, 3).unwrap()
+    );
+    assert_eq!(
+        store.graph_label_kind("g", "Ghost").unwrap(),
+        Some(LabelKind::Edge)
+    );
+    assert_eq!(
+        store.drop_label("g", "Ghost").unwrap(),
+        Some((3, LabelKind::Edge))
+    );
+}

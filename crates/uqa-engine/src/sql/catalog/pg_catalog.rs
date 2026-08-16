@@ -677,13 +677,13 @@ pub(super) fn build_pg_type() -> Vec<ResultRow> {
         ));
     }
     for domain in super::schema::ag_catalog_domains() {
-        let ColumnType::Domain { base, .. } = &domain else {
+        let ColumnType::Domain { name, base, .. } = &domain else {
             unreachable!("ag_catalog type constructor returned a non-domain")
         };
-        let category = if matches!(**base, ColumnType::Integer) {
-            "N"
-        } else {
-            "Z"
+        let category = match name.as_str() {
+            "label_id" => "N",
+            "label_kind" => "Z",
+            other => unreachable!("unknown ag_catalog domain {other}"),
         };
         types.push(pg_type_catalog_row(
             &domain,

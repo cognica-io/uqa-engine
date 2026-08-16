@@ -168,14 +168,16 @@ impl GraphLabelRegistry {
         if label.is_empty() {
             return Ok(kind.default_label_id());
         }
-        if let Some(existing) = self.kinds.get(label).copied() {
-            if existing != kind {
-                return Err(GraphStoreError::InvalidMutation(format!(
-                    "label {label} is for {}, not {}",
-                    existing.entity_noun(),
-                    kind.entity_noun()
-                )));
+        // The reserved AGE names always denote the default labels, so they
+        // resolve to the reserved ids instead of allocating a user label.
+        for reserved in [LabelKind::Vertex, LabelKind::Edge] {
+            if label == reserved.default_label_name() {
+                Self::require_kind(label, reserved, kind)?;
+                return Ok(reserved.default_label_id());
             }
+        }
+        if let Some(existing) = self.kinds.get(label).copied() {
+            Self::require_kind(label, existing, kind)?;
         }
         if let Some(id) = self.labels.get(label) {
             if *id > MAX_GRAPHID_LABEL_ID {
@@ -190,6 +192,21 @@ impl GraphLabelRegistry {
         self.labels.insert(label.to_string(), id);
         self.kinds.insert(label.to_string(), kind);
         Ok(id)
+    }
+
+    fn require_kind(
+        label: &str,
+        existing: LabelKind,
+        requested: LabelKind,
+    ) -> GraphStoreResult<()> {
+        if existing == requested {
+            return Ok(());
+        }
+        Err(GraphStoreError::InvalidMutation(format!(
+            "label {label} is for {}, not {}",
+            existing.entity_noun(),
+            requested.entity_noun()
+        )))
     }
 
     fn allocate_label_id(&mut self) -> GraphStoreResult<u32> {
@@ -214,7 +231,9 @@ impl GraphLabelRegistry {
             || self.labels.contains_key(label)
     }
 
-    /// The kind of a registered or default label.
+    /// The kind of a registered or default label. A user label persisted
+    /// before kinds were recorded, and whose entities are all gone, reports
+    /// as a vertex label until its next use records the kind.
     #[must_use]
     pub fn label_kind(&self, label: &str) -> Option<LabelKind> {
         if label == VERTEX_DEFAULT_LABEL_NAME {
@@ -223,7 +242,10 @@ impl GraphLabelRegistry {
         if label == EDGE_DEFAULT_LABEL_NAME {
             return Some(LabelKind::Edge);
         }
-        self.kinds.get(label).copied()
+        if !self.labels.contains_key(label) {
+            return None;
+        }
+        Some(self.kinds.get(label).copied().unwrap_or(LabelKind::Vertex))
     }
 
     /// Register an empty user label ahead of any entity, as
@@ -281,14 +303,11 @@ impl GraphLabelRegistry {
         let mut user: Vec<GraphLabelInfo> = self
             .labels
             .iter()
-            .filter_map(|(name, id)| {
-                let kind = self.kinds.get(name).copied()?;
-                Some(GraphLabelInfo {
-                    name: name.clone(),
-                    id: *id,
-                    kind,
-                    last_sequence: self.sequences.get(id).copied().unwrap_or(0),
-                })
+            .map(|(name, id)| GraphLabelInfo {
+                name: name.clone(),
+                id: *id,
+                kind: self.label_kind(name).unwrap_or(LabelKind::Vertex),
+                last_sequence: self.sequences.get(id).copied().unwrap_or(0),
             })
             .collect();
         user.sort_by_key(|label| label.id);

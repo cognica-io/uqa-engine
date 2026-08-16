@@ -60,7 +60,7 @@ Each missing clause above must be implemented with PostgreSQL 18 semantics; sour
 - `WITHOUT OVERLAPS` keys and `PERIOD` foreign keys are not implemented because range and multirange column types are not yet available.
 - Expression indexes are not implemented.
 - SQL index access methods are B-tree, GIN, IVF, and HNSW.
-- `DROP ... CASCADE` is rejected for implemented catalog objects.
+- `DROP ... CASCADE` is rejected for implemented catalog objects except graph namespaces, where `DROP SCHEMA graph_name CASCADE` drops the graph.
 - `ALTER TABLE DROP COLUMN CASCADE` is rejected.
 - `ALTER COLUMN TYPE USING` is preserved structurally and evaluated once per old row inside the atomic ALTER transaction; the complete PostgreSQL assignment-cast matrix, dependency and collation rewrites, domain checks, and upstream ALTER regression cases remain open.
 - `CREATE SCHEMA AUTHORIZATION` and embedded schema elements are not implemented.
@@ -100,7 +100,7 @@ Volatility affects planning, but UQA-RS does not reproduce every PostgreSQL cata
 
 The `cypher` table function follows an Apache AGE-shaped SQL interface and uses `agtype` output. UQA-RS adds concrete SQL output types for direct joins. The Cypher parser is an implemented subset rather than complete AGE or Neo4j Cypher.
 
-Graph and label management follows AGE's `graph_commands.c` and `label_commands.c`: `create_graph`, `drop_graph`, `graph_exists`, `create_vlabel`, `create_elabel`, `drop_label`, and `alter_graph` validate names with AGE's Unicode identifier rules and raise AGE's messages and SQLSTATEs, and `ag_catalog.ag_graph` / `ag_catalog.ag_label` report the same rows an AGE database holds. Label relations such as `graph._ag_label_vertex` are catalog metadata only; entities are read through `cypher(...)`, and `LOAD 'age'` is a no-op rather than a shared-library load.
+Graph and label management follows AGE's `graph_commands.c` and `label_commands.c`: `create_graph`, `drop_graph`, `graph_exists`, `create_vlabel`, `create_elabel`, `drop_label`, and `alter_graph` validate names with AGE's Unicode identifier rules and raise AGE's messages and SQLSTATEs, and `ag_catalog.ag_graph` / `ag_catalog.ag_label` report the same rows an AGE database holds. Label relations such as `graph._ag_label_vertex` are catalog metadata only; entities are read through `cypher(...)`, and `LOAD 'age'` is a no-op rather than a shared-library load. One deliberate difference: AGE's `drop_label` runs `DROP TABLE ... RESTRICT`, which removes an empty default label relation and leaves the graph unusable, while the engine always rejects dropping `_ag_label_vertex` and `_ag_label_edge` with `cannot drop table graph.label because other objects depend on it` (`2BP01`) because every graph depends on its default labels.
 
 Regular path query syntax and functions such as `graph_traverse` and `graph_pagerank` are UQA-RS extensions.
 

@@ -69,6 +69,25 @@ impl Engine {
         Ok(self.durable.graphs.read().contains_key(name))
     }
 
+    /// Every named graph with its `ag_label` entries, read under one catalog
+    /// lock so catalog relations that mirror graphs do not re-read the
+    /// registry once per graph.
+    pub fn graph_label_catalog(
+        &self,
+    ) -> StorageBackendResult<Vec<(String, Vec<uqa_graph::GraphLabelInfo>)>> {
+        self.synchronize_catalog_registries()?;
+        let graphs = self.durable.graphs.read();
+        graphs
+            .iter()
+            .map(|(name, store)| {
+                store
+                    .graph_labels(name)
+                    .map(|labels| (name.clone(), labels))
+                    .map_err(graph_store_error)
+            })
+            .collect()
+    }
+
     /// The `ag_label` entries of a named graph: the two AGE default labels
     /// followed by the user labels in label-id order. `None` when the graph
     /// does not exist.
@@ -173,9 +192,9 @@ impl Engine {
     fn rename_graph_inner(&self, from: &str, to: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
         let mut graphs = self.durable.graphs.write();
-        if !graphs.contains_key(from) {
+        let Some(store) = graphs.get(from) else {
             return Ok(false);
-        }
+        };
         if from == to {
             return Ok(true);
         }
@@ -184,9 +203,6 @@ impl Engine {
                 "graph `{to}` already exists"
             )));
         }
-        let Some(store) = graphs.get(from) else {
-            return Ok(false);
-        };
         let mut candidate = store.clone();
         candidate
             .rename_graph(from, to)

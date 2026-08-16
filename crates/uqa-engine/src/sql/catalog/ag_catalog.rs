@@ -42,18 +42,12 @@ pub(super) struct GraphCatalogEntry {
 }
 
 pub(super) fn graph_catalog_entries(engine: &Engine) -> Result<Vec<GraphCatalogEntry>, SQLError> {
-    let mut entries = Vec::new();
-    for name in engine
-        .list_graphs()
+    Ok(engine
+        .graph_label_catalog()
         .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))?
-    {
-        let labels = engine
-            .list_graph_labels(&name)
-            .map_err(|err| SQLError::Internal(format!("read graph label catalog: {err}")))?
-            .unwrap_or_default();
-        entries.push(GraphCatalogEntry { name, labels });
-    }
-    Ok(entries)
+        .into_iter()
+        .map(|(name, labels)| GraphCatalogEntry { name, labels })
+        .collect())
 }
 
 /// `ag_graph.graphid` of a named graph.
@@ -122,25 +116,27 @@ pub(super) fn build_ag_label(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
     Ok(out)
 }
 
+/// `pg_class.reltuples` of a label relation. The default label relations
+/// physically hold only the unlabeled entities; user label relations hold
+/// the entities that carry their label.
 fn label_relation_tuples(engine: &Engine, graph: &str, label: &GraphLabelInfo) -> f64 {
+    let stored_label = if label.id == uqa_graph::VERTEX_DEFAULT_LABEL_ID
+        || label.id == uqa_graph::EDGE_DEFAULT_LABEL_ID
+    {
+        ""
+    } else {
+        label.name.as_str()
+    };
     let count = engine
         .graph_with(graph, |store| {
             use uqa_graph::GraphStore as _;
             match label.kind {
-                LabelKind::Vertex if label.id == uqa_graph::VERTEX_DEFAULT_LABEL_ID => store
-                    .vertex_ids_in_graph(graph)
-                    .map(|ids| ids.len())
-                    .unwrap_or(0),
                 LabelKind::Vertex => store
-                    .vertex_ids_by_label(&label.name, graph)
+                    .vertex_ids_by_label(stored_label, graph)
                     .map(|ids| ids.len())
-                    .unwrap_or(0),
-                LabelKind::Edge if label.id == uqa_graph::EDGE_DEFAULT_LABEL_ID => store
-                    .edges_in_graph(graph)
-                    .map(|edges| edges.len())
                     .unwrap_or(0),
                 LabelKind::Edge => store
-                    .edge_ids_by_label(&label.name, graph)
+                    .edge_ids_by_label(stored_label, graph)
                     .map(|ids| ids.len())
                     .unwrap_or(0),
             }
@@ -242,7 +238,10 @@ fn age_pg_attribute_row(relid: i64, attnum: i64, column: &str, type_name: &str) 
         ("attalign", str_value(align)),
         ("attstorage", str_value(storage)),
         ("attcompression", str_value("")),
-        ("attnotnull", bool_value(column == "id")),
+        (
+            "attnotnull",
+            bool_value(matches!(column, "id" | "start_id" | "end_id")),
+        ),
         ("atthasdef", bool_value(column == "id")),
         ("atthasmissing", bool_value(false)),
         ("attidentity", str_value("")),

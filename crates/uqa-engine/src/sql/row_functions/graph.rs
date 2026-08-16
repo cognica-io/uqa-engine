@@ -274,11 +274,9 @@ pub(in crate::sql) fn run_age_create_graph_with_evaluator(
             format!("graph \"{name}\" already exists"),
         ));
     }
-    if engine.has_schema(&name).map_err(age_graph_catalog_error)?
-        || matches!(
-            name.as_str(),
-            "pg_catalog" | "information_schema" | "ag_catalog"
-        )
+    if engine
+        .has_namespace(&name)
+        .map_err(age_graph_catalog_error)?
     {
         return Err(age_error(
             AGE_DUPLICATE_SCHEMA,
@@ -446,6 +444,11 @@ pub(in crate::sql) fn run_age_drop_label_with_evaluator(
             "force option is not supported yet",
         ));
     }
+    // AGE issues `DROP TABLE ... RESTRICT`, which fails while user label
+    // relations inherit from the default label and otherwise removes the
+    // default relation and leaves the graph unusable. The engine keeps the
+    // dependency error in both cases because every graph depends on its
+    // default labels; the manual documents this as a deliberate difference.
     if entry.id == uqa_graph::VERTEX_DEFAULT_LABEL_ID
         || entry.id == uqa_graph::EDGE_DEFAULT_LABEL_ID
     {
@@ -492,15 +495,8 @@ pub(in crate::sql) fn run_age_alter_graph_with_evaluator(
     // `RenameSchema` rejects any taken name, including the graph's own
     // current name, so renaming a graph onto itself is a duplicate schema.
     if engine
-        .has_graph(&new_value)
+        .has_namespace(&new_value)
         .map_err(age_graph_catalog_error)?
-        || engine
-            .has_schema(&new_value)
-            .map_err(age_graph_catalog_error)?
-        || matches!(
-            new_value.as_str(),
-            "pg_catalog" | "information_schema" | "ag_catalog"
-        )
     {
         return Err(age_error(
             AGE_DUPLICATE_SCHEMA,

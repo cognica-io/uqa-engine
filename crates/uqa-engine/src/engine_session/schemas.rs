@@ -8,6 +8,12 @@
 
 use super::{CatalogIndexRow, Engine, RelationIdentity, StorageBackendError, StorageBackendResult};
 
+/// Namespaces the engine implements without a durable schema row: the
+/// `PostgreSQL` system schemas and the Apache AGE catalog schema.
+pub(crate) fn is_virtual_system_schema(name: &str) -> bool {
+    matches!(name, "pg_catalog" | "information_schema" | "ag_catalog")
+}
+
 impl Engine {
     pub fn list_catalog_indexes(&self) -> StorageBackendResult<Vec<CatalogIndexRow>> {
         self.synchronize_catalog_registries()?;
@@ -61,7 +67,7 @@ impl Engine {
 
     pub(crate) fn preflight_drop_schema(&self, name: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
-        if matches!(name, "public" | "pg_catalog" | "information_schema") {
+        if name == "public" || is_virtual_system_schema(name) {
             return Err(StorageBackendError::Other(format!(
                 "schema `{name}` cannot be dropped"
             )));
@@ -98,13 +104,23 @@ impl Engine {
         Ok(self.durable.schemas.read().contains(name))
     }
 
+    /// Whether `name` resolves as a namespace: a durable schema, a virtual
+    /// system schema (`pg_catalog`, `information_schema`, `ag_catalog`), or
+    /// the namespace a named graph owns.
+    pub fn has_namespace(&self, name: &str) -> StorageBackendResult<bool> {
+        self.synchronize_catalog_registries()?;
+        Ok(is_virtual_system_schema(name)
+            || self.durable.schemas.read().contains(name)
+            || self.durable.graphs.read().contains_key(name))
+    }
+
     pub(crate) fn validate_schema_name(name: &str) -> StorageBackendResult<()> {
         if name.is_empty() {
             return Err(StorageBackendError::Other(format!(
                 "invalid schema name `{name}`"
             )));
         }
-        if matches!(name, "pg_catalog" | "information_schema" | "ag_catalog") {
+        if is_virtual_system_schema(name) {
             return Err(StorageBackendError::Other(format!(
                 "schema name `{name}` is reserved"
             )));
