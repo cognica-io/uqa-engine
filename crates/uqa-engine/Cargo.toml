@@ -58,32 +58,8 @@ arrow-schema = { workspace = true }
 sha2 = { workspace = true }
 
 [[test]]
-name = "engine_catalog"
-path = "tests/engine_catalog.rs"
-
-[[test]]
-name = "engine_functions"
-path = "tests/engine_functions.rs"
-
-[[test]]
-name = "engine_graph"
-path = "tests/engine_graph.rs"
-
-[[test]]
-name = "engine_queries"
-path = "tests/engine_queries.rs"
-
-[[test]]
-name = "engine_search"
-path = "tests/engine_search.rs"
-
-[[test]]
-name = "engine_storage"
-path = "tests/engine_storage.rs"
-
-[[test]]
-name = "sql_tpch"
-path = "tests/sql_tpch.rs"
+name = "integration"
+path = "tests/integration.rs"
 
 [[bench]]
 name = "sql_e2e"

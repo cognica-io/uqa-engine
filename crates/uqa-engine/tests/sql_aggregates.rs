@@ -97,7 +97,7 @@ fn float_col(row: &uqa_sql::ResultRow, col: &str) -> Option<f64> {
         Value::Float(f) => Some(*f),
         Value::Int(n) => Some(*n as f64),
         // Statistical aggregates over integer columns return numeric
-        // (PostgreSQL 17), so accept exact decimals here too.
+        // (PostgreSQL 18), so accept exact decimals here too.
         Value::Decimal(d) => d.to_f64(),
         _ => None,
     }
@@ -110,9 +110,9 @@ fn str_col<'a>(row: &'a uqa_sql::ResultRow, col: &str) -> Option<&'a str> {
     }
 }
 
-fn list_col<'a>(row: &'a uqa_sql::ResultRow, col: &str) -> Option<&'a Vec<Value>> {
+fn array_col<'a>(row: &'a uqa_sql::ResultRow, col: &str) -> Option<&'a [Value]> {
     match row.get(col)? {
-        Value::List(v) => Some(v),
+        Value::Array(array) => Some(array.elements()),
         _ => None,
     }
 }
@@ -175,6 +175,33 @@ fn qualified_columns_work_in_projected_single_table_aggregates() {
     assert_eq!(int_col(&r.rows[0], "total"), Some(115));
     assert_eq!(float_col(&r.rows[0], "mean"), Some(28.75));
     assert_eq!(int_col(&r.rows[0], "cnt"), Some(4));
+}
+
+#[test]
+fn grouped_lookup_keeps_quoted_dotted_identities_structured() {
+    let eng = engine();
+    eng.sql(
+        "CREATE TABLE \"aggregate.table\" (\"group.key\" INTEGER, amount INTEGER)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO \"aggregate.table\" VALUES (1, 10), (1, 20), (2, 30)",
+        &[],
+    )
+    .unwrap();
+    let result = eng
+        .sql(
+            "SELECT \"a.b\".\"group.key\" AS key, SUM(amount) AS total
+             FROM \"aggregate.table\" AS \"a.b\"
+             GROUP BY \"a.b\".\"group.key\"
+             HAVING \"a.b\".\"group.key\" = 1",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["key"], Value::Int(1));
+    assert_eq!(result.rows[0]["total"], Value::Int(30));
 }
 
 #[test]
@@ -429,7 +456,7 @@ fn array_agg_basic() {
     let r = eng
         .sql("SELECT array_agg(name) AS names FROM products", &[])
         .unwrap();
-    let names = list_col(&r.rows[0], "names").unwrap();
+    let names = array_col(&r.rows[0], "names").unwrap();
     let strs: std::collections::BTreeSet<String> = names
         .iter()
         .filter_map(|v| match v {
@@ -455,7 +482,7 @@ fn array_agg_with_group_by() {
         std::collections::BTreeMap::new();
     for row in &r.rows {
         let cat = str_col(row, "category").unwrap_or_default().to_string();
-        let names = list_col(row, "names").unwrap();
+        let names = array_col(row, "names").unwrap();
         let s: std::collections::BTreeSet<String> = names
             .iter()
             .filter_map(|v| match v {
@@ -483,7 +510,7 @@ fn array_agg_with_order_by() {
             &[],
         )
         .unwrap();
-    let names = list_col(&r.rows[0], "names").unwrap();
+    let names = array_col(&r.rows[0], "names").unwrap();
     let strs: Vec<String> = names
         .iter()
         .filter_map(|v| match v {
@@ -506,7 +533,7 @@ fn array_agg_with_order_by_desc() {
             &[],
         )
         .unwrap();
-    let names = list_col(&r.rows[0], "names").unwrap();
+    let names = array_col(&r.rows[0], "names").unwrap();
     let strs: Vec<String> = names
         .iter()
         .filter_map(|v| match v {
@@ -533,7 +560,7 @@ fn aggregate_value_buffer_spills_and_restores_ordered_and_unordered_values() {
         )
         .unwrap();
 
-    let nums = list_col(&r.rows[0], "nums").unwrap();
+    let nums = array_col(&r.rows[0], "nums").unwrap();
     assert_eq!(nums.len(), 5000);
     assert_eq!(nums.first(), Some(&Value::Int(4999)));
     assert_eq!(nums.get(4095), Some(&Value::Int(904)));
@@ -763,7 +790,7 @@ fn array_agg_ordered_with_group_by() {
         std::collections::BTreeMap::new();
     for row in &r.rows {
         let cat = str_col(row, "category").unwrap_or_default().to_string();
-        let names = list_col(row, "by_price").unwrap();
+        let names = array_col(row, "by_price").unwrap();
         let s: Vec<String> = names
             .iter()
             .filter_map(|v| match v {
@@ -868,7 +895,7 @@ fn group_by_alias_for_cast_expression() {
         )
         .unwrap();
     assert_eq!(r.rows.len(), 2);
-    // PostgreSQL 17: float8 -> int casts round half to even, so
+    // PostgreSQL 18: float8 -> int casts round half to even, so
     // 1.2 -> 1 and 1.8 / 2.1 -> 2 (verified: CAST(1.8::float8 AS int) = 2).
     assert_eq!(r.rows[0]["tile_x"], Value::Int(1));
     assert_eq!(r.rows[0]["cnt"], Value::Int(1));
@@ -1017,5 +1044,49 @@ fn having_can_use_an_aggregate_not_projected_by_select() {
     assert_eq!(str_col(&result.rows[0], "cat"), Some("a"));
 }
 
+#[test]
+fn grouped_star_expands_to_bound_source_columns() {
+    let eng = engine_with_table();
+    let bare = eng
+        .sql("SELECT * FROM t GROUP BY id, val, name ORDER BY id", &[])
+        .unwrap();
+    assert_eq!(bare.columns, ["id", "val", "name"]);
+    assert_eq!(bare.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(bare.value_at(0, 1), Some(&Value::Int(10)));
+    assert_eq!(bare.value_at(0, 2), Some(&Value::Str("alpha".into())));
+
+    let qualified = eng
+        .sql(
+            "SELECT t.*, count(*) AS c
+             FROM t
+             GROUP BY t.id, t.val, t.name
+             ORDER BY t.id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(qualified.columns, ["id", "val", "name", "c"]);
+    assert_eq!(qualified.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(qualified.value_at(0, 3), Some(&Value::Int(1)));
+}
+
 #[path = "sql_aggregates/numeric_statistics.rs"]
 mod numeric_statistics;
+
+#[test]
+fn min_and_max_compare_composite_values_lexicographically() {
+    let eng = engine();
+    let result = eng
+        .sql(
+            "SELECT min(value) AS minimum, max(value) AS maximum FROM (VALUES (ROW(1, 2)), (ROW(1, 1)), (ROW(0, 9))) AS input(value)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        result.rows[0].get("minimum"),
+        Some(&Value::Row(vec![Value::Int(0), Value::Int(9)]))
+    );
+    assert_eq!(
+        result.rows[0].get("maximum"),
+        Some(&Value::Row(vec![Value::Int(1), Value::Int(2)]))
+    );
+}

@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use uqa_core::ArrayValue;
 
 #[test]
 fn aggregate_spill_record_reader_rejects_oversized_and_truncated_records() {
@@ -47,7 +48,7 @@ fn collection_aggregate_still_retains_inputs() {
     assert_eq!(accumulator.values.rows.len(), 1);
     assert_eq!(
         aggregate_value("array_agg", &accumulator).unwrap(),
-        Value::List(vec![Value::Int(7)])
+        Value::Array(ArrayValue::try_new(vec![Value::Int(7)]).expect("one-dimensional array"))
     );
 }
 
@@ -93,7 +94,9 @@ fn tiny_budget_collection_aggregate_spills_and_merge_streams_exact_order() {
     assert!(!accumulator.values.runs.is_empty());
     assert!(accumulator.values.runs.len() < AGGREGATE_MERGE_FAN_IN);
     assert!(accumulator.values.memory_bytes <= accumulator.values.budget_bytes);
-    let expected = Value::List((0..512_i64).map(Value::Int).collect());
+    let expected = Value::Array(
+        ArrayValue::try_new((0..512_i64).map(Value::Int).collect()).expect("one-dimensional array"),
+    );
     assert_eq!(
         aggregate_value("array_agg", &accumulator).unwrap(),
         expected
@@ -186,16 +189,166 @@ fn builtins_only_update_state_used_by_their_finalizer() {
 }
 
 #[test]
-fn statistical_aggregate_uses_constant_welford_state() {
+fn statistical_aggregate_uses_constant_exact_numeric_state() {
     let mut accumulator = AggregateAccumulator::builtin("stddev_pop");
     accumulator.observe(&Value::Int(7)).unwrap();
 
     assert_eq!(accumulator.statistics_count, 1);
+    assert_eq!(
+        accumulator
+            .statistics_origin
+            .as_ref()
+            .map(DecimalValue::to_sql_string),
+        Some("7".into())
+    );
+    assert_eq!(
+        accumulator
+            .statistics_sum
+            .as_ref()
+            .map(DecimalValue::to_sql_string),
+        Some("0".into())
+    );
+    assert_eq!(
+        accumulator
+            .statistics_sum_squares
+            .as_ref()
+            .map(DecimalValue::to_sql_string),
+        Some("0".into())
+    );
     assert_eq!(accumulator.decimal_sum, None);
     assert_eq!(accumulator.min, None);
     assert_eq!(accumulator.max, None);
     assert!(accumulator.values.rows.is_empty());
     assert!(accumulator.values.runs.is_empty());
+}
+
+#[test]
+fn numeric_statistical_partial_states_merge_exactly() {
+    let mut left = AggregateAccumulator::builtin("var_pop");
+    left.observe(&Value::Int(1)).unwrap();
+    let mut right = AggregateAccumulator::builtin("var_pop");
+    right.observe(&Value::Int(2)).unwrap();
+    right.observe(&Value::Int(3)).unwrap();
+
+    super::partial_state::merge_accumulators(&mut left, right).unwrap();
+    let Value::Decimal(variance) = aggregate_value("var_pop", &left).unwrap() else {
+        panic!("integer var_pop must return numeric");
+    };
+    assert_eq!(variance.to_sql_string(), "0.66666666666666666667");
+}
+
+#[test]
+fn numeric_statistical_states_center_values_before_squaring_and_merging() {
+    let huge = DecimalValue::parse("1e70000").unwrap();
+    let adjacent = huge
+        .checked_add(&DecimalValue::from_i64(1))
+        .expect("adjacent numeric remains in PostgreSQL's range");
+
+    let mut equal = AggregateAccumulator::builtin("var_pop");
+    equal.observe(&Value::Decimal(huge.clone())).unwrap();
+    equal.observe(&Value::Decimal(huge.clone())).unwrap();
+    assert_eq!(
+        aggregate_value("var_pop", &equal).unwrap(),
+        Value::Decimal(DecimalValue::from_i64(0))
+    );
+
+    let mut left = AggregateAccumulator::builtin("var_pop");
+    left.observe(&Value::Decimal(huge)).unwrap();
+    let mut right = AggregateAccumulator::builtin("var_pop");
+    right.observe(&Value::Decimal(adjacent)).unwrap();
+    super::partial_state::merge_accumulators(&mut left, right).unwrap();
+    let Value::Decimal(variance) = aggregate_value("var_pop", &left).unwrap() else {
+        panic!("numeric var_pop must return numeric");
+    };
+    assert_eq!(variance.to_sql_string(), "0.25000000000000000000");
+}
+
+#[test]
+fn exact_statistical_zero_and_special_results_match_postgresql() {
+    let mut zero = AggregateAccumulator::builtin("var_pop");
+    zero.observe(&Value::Int(1)).unwrap();
+    zero.observe(&Value::Int(1)).unwrap();
+    assert_eq!(
+        aggregate_value("var_pop", &zero).unwrap(),
+        Value::Decimal(DecimalValue::from_i64(0))
+    );
+    assert_eq!(
+        aggregate_value("stddev_pop", &zero).unwrap(),
+        Value::Decimal(DecimalValue::from_i64(0))
+    );
+
+    let mut special = AggregateAccumulator::builtin("stddev_pop");
+    special
+        .observe(&Value::Decimal(DecimalValue::parse("Infinity").unwrap()))
+        .unwrap();
+    special.observe(&Value::Int(1)).unwrap();
+    assert_eq!(
+        aggregate_value("stddev_pop", &special).unwrap(),
+        Value::Decimal(DecimalValue::parse("NaN").unwrap())
+    );
+
+    let huge = DecimalValue::parse("1e100000").unwrap();
+    special.observe(&Value::Decimal(huge.clone())).unwrap();
+    assert_eq!(
+        aggregate_value("var_pop", &special).unwrap(),
+        Value::Decimal(DecimalValue::parse("NaN").unwrap())
+    );
+
+    let mut finite = AggregateAccumulator::builtin("var_pop");
+    finite.observe(&Value::Decimal(huge)).unwrap();
+    super::partial_state::merge_accumulators(&mut special, finite).unwrap();
+    assert_eq!(
+        aggregate_value("var_pop", &special).unwrap(),
+        Value::Decimal(DecimalValue::parse("NaN").unwrap())
+    );
+}
+
+#[test]
+fn exact_statistical_underflow_preserves_postgresql_result_scale() {
+    let mut accumulator = AggregateAccumulator::builtin("var_pop");
+    accumulator
+        .observe(&Value::Decimal(DecimalValue::from_i64(0)))
+        .unwrap();
+    accumulator
+        .observe(&Value::Decimal(DecimalValue::parse("1e-10000").unwrap()))
+        .unwrap();
+
+    let Value::Decimal(variance) = aggregate_value("var_pop", &accumulator).unwrap() else {
+        panic!("numeric var_pop must return numeric");
+    };
+    assert!(variance.is_zero());
+    assert_eq!(variance.display_scale(), Some(1_000));
+}
+
+#[test]
+fn mixed_statistical_partial_states_merge_stable_moments() {
+    let mut exact = AggregateAccumulator::builtin("var_pop");
+    exact.observe(&Value::Int(1)).unwrap();
+    let mut floating = AggregateAccumulator::builtin("var_pop");
+    floating.observe(&Value::Float(2.0)).unwrap();
+
+    super::partial_state::merge_accumulators(&mut exact, floating).unwrap();
+    assert_eq!(
+        aggregate_value("var_pop", &exact).unwrap(),
+        Value::Float(0.25)
+    );
+}
+
+#[test]
+fn exact_to_float_statistics_transition_avoids_raw_moment_cancellation() {
+    let mut accumulator = AggregateAccumulator::builtin("var_pop");
+    accumulator
+        .observe(&Value::Decimal(DecimalValue::parse("100000000").unwrap()))
+        .unwrap();
+    accumulator
+        .observe(&Value::Decimal(DecimalValue::parse("100000001").unwrap()))
+        .unwrap();
+    accumulator.observe(&Value::Float(100_000_002.0)).unwrap();
+
+    let Value::Float(variance) = aggregate_value("var_pop", &accumulator).unwrap() else {
+        panic!("mixed numeric var_pop must return double precision");
+    };
+    assert!((variance - (2.0 / 3.0)).abs() < f64::EPSILON);
 }
 
 #[test]
@@ -214,14 +367,14 @@ fn integer_sum_stays_exact_beyond_float_precision() {
 }
 
 #[test]
-fn integer_average_promotes_to_float_only_when_finalized_or_mixed() {
+fn integer_average_returns_numeric_until_mixed_with_float() {
     let mut integers = AggregateAccumulator::builtin("avg");
     integers.observe(&Value::Int(2)).unwrap();
     integers.observe(&Value::Int(3)).unwrap();
     assert_eq!(integers.sum, 0.0);
     assert_eq!(
         aggregate_value("avg", &integers).unwrap(),
-        Value::Float(2.5)
+        Value::Decimal(DecimalValue::parse("2.5000000000000000").unwrap())
     );
 
     integers.observe(&Value::Float(1.5)).unwrap();

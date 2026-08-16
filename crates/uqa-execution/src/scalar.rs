@@ -6,13 +6,16 @@
 
 //! AST-independent scalar physical IR shared by the planner and executors.
 
-use uqa_core::Value;
-use uqa_sql::ast::{BinaryOp, FrameMode, NullsOrder};
+use uqa_core::{ArrayValue, Value};
+use uqa_sql::ast::{BinaryOp, FrameMode, FunctionBinding, NullsOrder};
 use uqa_sql::expr::{
-    cast_value, eval_binary_values, eval_function_call, truthy, EngineHook, EvalContext, RowLookup,
-    NAMED_ARG_FUNCTION,
+    cast_value_from, eval_binary_values, eval_binary_values_with_integer_width, eval_function_call,
+    integer_width_for_literal, integer_width_for_type, negate_value, truthy, EngineHook,
+    EvalContext, IntegerWidth, RowLookup, NAMED_ARG_FUNCTION,
 };
 use uqa_sql::{ResultRow, SQLError, SQLParam};
+
+use crate::batch::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 
 /// Index into the query children owned by the enclosing expression plan.
 pub type SubqueryId = usize;
@@ -20,27 +23,34 @@ pub type SubqueryId = usize;
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ScalarExpr {
     Star,
+    QualifiedStar(String),
+    Default,
     Column(String),
+    /// Logical position in an already-bound physical row schema. This variant is introduced only after relational binding so duplicate SQL labels remain independently addressable.
+    Position(usize),
     QualifiedColumn {
         qualifier: String,
         column: String,
-        key: String,
     },
     Literal(Value),
     Param(usize),
     Func {
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<FunctionBinding>,
         args: Vec<Self>,
         distinct: bool,
         order_by: Vec<ScalarOrder>,
         filter: Option<Box<Self>>,
     },
     Array(Vec<Self>),
+    Row(Vec<Self>),
     Binary {
         op: BinaryOp,
         lhs: Box<Self>,
         rhs: Box<Self>,
     },
+    UnaryMinus(Box<Self>),
     Not(Box<Self>),
     And(Vec<Self>),
     Or(Vec<Self>),
@@ -117,13 +127,9 @@ pub enum ScalarFrameBound {
 impl ScalarExpr {
     #[must_use]
     pub fn qualified_column(qualifier: impl Into<String>, column: impl Into<String>) -> Self {
-        let qualifier = qualifier.into();
-        let column = column.into();
-        let key = format!("{qualifier}.{column}");
         Self::QualifiedColumn {
-            qualifier,
-            column,
-            key,
+            qualifier: qualifier.into(),
+            column: column.into(),
         }
     }
 
@@ -151,15 +157,16 @@ impl ScalarExpr {
                         .as_deref()
                         .is_none_or(|filter| filter.collect_columns(output))
             }
-            Self::Array(items) | Self::And(items) | Self::Or(items) => {
+            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => {
                 items.iter().all(|item| item.collect_columns(output))
             }
             Self::Binary { lhs, rhs, .. } => {
                 lhs.collect_columns(output) && rhs.collect_columns(output)
             }
-            Self::Not(expr) | Self::IsNull { expr, .. } | Self::Cast { expr, .. } => {
-                expr.collect_columns(output)
-            }
+            Self::UnaryMinus(expr)
+            | Self::Not(expr)
+            | Self::IsNull { expr, .. }
+            | Self::Cast { expr, .. } => expr.collect_columns(output),
             Self::Between { expr, low, high } => {
                 expr.collect_columns(output)
                     && low.collect_columns(output)
@@ -182,7 +189,10 @@ impl ScalarExpr {
                         .as_deref()
                         .is_none_or(|branch| branch.collect_columns(output))
             }
-            Self::Star
+            Self::Default
+            | Self::Star
+            | Self::QualifiedStar(_)
+            | Self::Position(_)
             | Self::WindowCall { .. }
             | Self::ScalarSubquery(_)
             | Self::Exists { .. }
@@ -204,13 +214,15 @@ impl ScalarExpr {
                     || order_by.iter().any(|order| order.expr.contains_window())
                     || filter.as_deref().is_some_and(Self::contains_window)
             }
-            Self::Array(items) | Self::And(items) | Self::Or(items) => {
+            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => {
                 items.iter().any(Self::contains_window)
             }
             Self::Binary { lhs, rhs, .. } => lhs.contains_window() || rhs.contains_window(),
-            Self::Not(expr) | Self::IsNull { expr, .. } | Self::Cast { expr, .. } => {
-                expr.contains_window()
-            }
+            Self::UnaryMinus(expr)
+            | Self::Not(expr)
+            | Self::IsNull { expr, .. }
+            | Self::Cast { expr, .. }
+            | Self::InSubquery { expr, .. } => expr.contains_window(),
             Self::Between { expr, low, high } => {
                 expr.contains_window() || low.contains_window() || high.contains_window()
             }
@@ -228,10 +240,12 @@ impl ScalarExpr {
                     })
                     || else_branch.as_deref().is_some_and(Self::contains_window)
             }
-            Self::InSubquery { expr, .. } => expr.contains_window(),
-            Self::Star
+            Self::Default
+            | Self::Star
+            | Self::QualifiedStar(_)
             | Self::Column(_)
             | Self::QualifiedColumn { .. }
+            | Self::Position(_)
             | Self::Literal(_)
             | Self::Param(_)
             | Self::ScalarSubquery(_)
@@ -253,13 +267,14 @@ impl ScalarExpr {
                     || order_by.iter().any(|order| order.expr.contains_subquery())
                     || filter.as_deref().is_some_and(Self::contains_subquery)
             }
-            Self::Array(items) | Self::And(items) | Self::Or(items) => {
+            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => {
                 items.iter().any(Self::contains_subquery)
             }
             Self::Binary { lhs, rhs, .. } => lhs.contains_subquery() || rhs.contains_subquery(),
-            Self::Not(expr) | Self::IsNull { expr, .. } | Self::Cast { expr, .. } => {
-                expr.contains_subquery()
-            }
+            Self::UnaryMinus(expr)
+            | Self::Not(expr)
+            | Self::IsNull { expr, .. }
+            | Self::Cast { expr, .. } => expr.contains_subquery(),
             Self::Between { expr, low, high } => {
                 expr.contains_subquery() || low.contains_subquery() || high.contains_subquery()
             }
@@ -285,9 +300,12 @@ impl ScalarExpr {
                     })
                     || else_branch.as_deref().is_some_and(Self::contains_subquery)
             }
-            Self::Star
+            Self::Default
+            | Self::Star
+            | Self::QualifiedStar(_)
             | Self::Column(_)
             | Self::QualifiedColumn { .. }
+            | Self::Position(_)
             | Self::Literal(_)
             | Self::Param(_) => false,
         }
@@ -307,13 +325,15 @@ impl ScalarExpr {
                     || order_by.iter().any(|order| order.expr.contains_parameter())
                     || filter.as_deref().is_some_and(Self::contains_parameter)
             }
-            Self::Array(items) | Self::And(items) | Self::Or(items) => {
+            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => {
                 items.iter().any(Self::contains_parameter)
             }
             Self::Binary { lhs, rhs, .. } => lhs.contains_parameter() || rhs.contains_parameter(),
-            Self::Not(expr) | Self::IsNull { expr, .. } | Self::Cast { expr, .. } => {
-                expr.contains_parameter()
-            }
+            Self::UnaryMinus(expr)
+            | Self::Not(expr)
+            | Self::IsNull { expr, .. }
+            | Self::Cast { expr, .. }
+            | Self::InSubquery { expr, .. } => expr.contains_parameter(),
             Self::Between { expr, low, high } => {
                 expr.contains_parameter() || low.contains_parameter() || high.contains_parameter()
             }
@@ -343,10 +363,12 @@ impl ScalarExpr {
                     })
                     || else_branch.as_deref().is_some_and(Self::contains_parameter)
             }
-            Self::InSubquery { expr, .. } => expr.contains_parameter(),
-            Self::Star
+            Self::Default
+            | Self::Star
+            | Self::QualifiedStar(_)
             | Self::Column(_)
             | Self::QualifiedColumn { .. }
+            | Self::Position(_)
             | Self::Literal(_)
             | Self::ScalarSubquery(_)
             | Self::Exists { .. } => false,
@@ -374,15 +396,17 @@ impl ScalarExpr {
                         .as_deref()
                         .is_some_and(|expression| expression.contains_aggregate(is_aggregate))
             }
-            Self::Array(items) | Self::And(items) | Self::Or(items) => items
+            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => items
                 .iter()
                 .any(|expression| expression.contains_aggregate(is_aggregate)),
             Self::Binary { lhs, rhs, .. } => {
                 lhs.contains_aggregate(is_aggregate) || rhs.contains_aggregate(is_aggregate)
             }
-            Self::Not(expr) | Self::IsNull { expr, .. } | Self::Cast { expr, .. } => {
-                expr.contains_aggregate(is_aggregate)
-            }
+            Self::UnaryMinus(expr)
+            | Self::Not(expr)
+            | Self::IsNull { expr, .. }
+            | Self::Cast { expr, .. }
+            | Self::InSubquery { expr, .. } => expr.contains_aggregate(is_aggregate),
             Self::Between { expr, low, high } => {
                 expr.contains_aggregate(is_aggregate)
                     || low.contains_aggregate(is_aggregate)
@@ -409,10 +433,12 @@ impl ScalarExpr {
                         .as_deref()
                         .is_some_and(|expression| expression.contains_aggregate(is_aggregate))
             }
-            Self::InSubquery { expr, .. } => expr.contains_aggregate(is_aggregate),
-            Self::Star
+            Self::Default
+            | Self::Star
+            | Self::QualifiedStar(_)
             | Self::Column(_)
             | Self::QualifiedColumn { .. }
+            | Self::Position(_)
             | Self::Literal(_)
             | Self::Param(_)
             | Self::ScalarSubquery(_)
@@ -444,6 +470,17 @@ pub trait ScalarSubqueryRunner {
         params: &[SQLParam],
     ) -> Result<SubqueryResult, SQLError>;
 
+    fn execute_subquery_physical(
+        &self,
+        subquery: SubqueryId,
+        outer_schema: &RowSchema,
+        outer_row: &PhysicalRow,
+        params: &[SQLParam],
+    ) -> Result<SubqueryResult, SQLError> {
+        let outer = outer_schema.view(outer_row);
+        self.execute_subquery(subquery, Some(&outer), params)
+    }
+
     fn scalar_subquery_value(
         &self,
         subquery: SubqueryId,
@@ -451,6 +488,17 @@ pub trait ScalarSubqueryRunner {
         params: &[SQLParam],
     ) -> Result<Value, SQLError> {
         self.execute_subquery(subquery, outer_row, params)?
+            .into_scalar_value()
+    }
+
+    fn scalar_subquery_value_physical(
+        &self,
+        subquery: SubqueryId,
+        outer_schema: &RowSchema,
+        outer_row: &PhysicalRow,
+        params: &[SQLParam],
+    ) -> Result<Value, SQLError> {
+        self.execute_subquery_physical(subquery, outer_schema, outer_row, params)?
             .into_scalar_value()
     }
 
@@ -464,6 +512,17 @@ pub trait ScalarSubqueryRunner {
             .into_exists()
     }
 
+    fn subquery_exists_physical(
+        &self,
+        subquery: SubqueryId,
+        outer_schema: &RowSchema,
+        outer_row: &PhysicalRow,
+        params: &[SQLParam],
+    ) -> Result<bool, SQLError> {
+        self.execute_subquery_physical(subquery, outer_schema, outer_row, params)?
+            .into_exists()
+    }
+
     fn subquery_contains(
         &self,
         subquery: SubqueryId,
@@ -474,6 +533,18 @@ pub trait ScalarSubqueryRunner {
         self.execute_subquery(subquery, outer_row, params)?
             .contains(needle)
     }
+
+    fn subquery_contains_physical(
+        &self,
+        subquery: SubqueryId,
+        needle: &Value,
+        outer_schema: &RowSchema,
+        outer_row: &PhysicalRow,
+        params: &[SQLParam],
+    ) -> Result<Option<bool>, SQLError> {
+        self.execute_subquery_physical(subquery, outer_schema, outer_row, params)?
+            .contains(needle)
+    }
 }
 
 /// Pull-based scalar-subquery result. Scalar, EXISTS, and IN consumers never
@@ -481,14 +552,20 @@ pub trait ScalarSubqueryRunner {
 /// at most two rows, one row, or one row at a time.
 pub struct SubqueryResult {
     pub columns: Vec<String>,
-    pub rows: Box<dyn Iterator<Item = Result<ResultRow, SQLError>> + Send>,
+    pub rows: Box<dyn Iterator<Item = Result<OwnedPhysicalRow, SQLError>> + Send>,
 }
 
 impl SubqueryResult {
     pub fn from_rows(columns: Vec<String>, rows: Vec<ResultRow>) -> Self {
+        let schema = RowSchema::new(columns.clone());
         Self {
             columns,
-            rows: Box::new(rows.into_iter().map(Ok)),
+            rows: Box::new(rows.into_iter().map(move |row| {
+                Ok(OwnedPhysicalRow::new(
+                    schema.clone(),
+                    PhysicalRow::from_result_row(&schema, row),
+                ))
+            })),
         }
     }
 
@@ -501,11 +578,15 @@ impl SubqueryResult {
                 "scalar subquery returned more than one row".into(),
             ));
         }
-        let first_column = self
-            .columns
-            .first()
-            .ok_or_else(|| SQLError::TypeMismatch("scalar subquery returned no columns".into()))?;
-        Ok(first_row.get(first_column).cloned().unwrap_or(Value::Null))
+        if self.columns.is_empty() {
+            return Err(SQLError::TypeMismatch(
+                "scalar subquery returned no columns".into(),
+            ));
+        }
+        Ok(first_row
+            .positional_column(0)
+            .cloned()
+            .unwrap_or(Value::Null))
     }
 
     pub fn into_exists(mut self) -> Result<bool, SQLError> {
@@ -513,15 +594,15 @@ impl SubqueryResult {
     }
 
     pub fn contains(self, needle: &Value) -> Result<Option<bool>, SQLError> {
-        let Some(first_column) = self.columns.first() else {
+        if self.columns.is_empty() {
             return Ok(Some(false));
-        };
+        }
         let mut saw_row = false;
         let mut saw_null = false;
         for row in self.rows {
             let row = row?;
             saw_row = true;
-            match row.get(first_column) {
+            match row.positional_column(0) {
                 Some(Value::Null) | None => saw_null = true,
                 Some(value) if !matches!(needle, Value::Null) && value == needle => {
                     return Ok(Some(true));
@@ -545,6 +626,7 @@ pub struct ScalarEvalContext<'a> {
     params: &'a [SQLParam],
     function_hook: Option<&'a dyn EngineHook>,
     subquery_runner: Option<&'a dyn ScalarSubqueryRunner>,
+    physical_outer_row: Option<(&'a RowSchema, &'a PhysicalRow)>,
 }
 
 impl<'a> ScalarEvalContext<'a> {
@@ -556,6 +638,7 @@ impl<'a> ScalarEvalContext<'a> {
             params,
             function_hook: None,
             subquery_runner: None,
+            physical_outer_row: None,
         }
     }
 
@@ -567,6 +650,7 @@ impl<'a> ScalarEvalContext<'a> {
             params,
             function_hook: None,
             subquery_runner: None,
+            physical_outer_row: None,
         }
     }
 
@@ -579,6 +663,12 @@ impl<'a> ScalarEvalContext<'a> {
     #[must_use]
     pub fn with_subquery_runner(mut self, runner: &'a dyn ScalarSubqueryRunner) -> Self {
         self.subquery_runner = Some(runner);
+        self
+    }
+
+    #[must_use]
+    pub fn with_physical_outer_row(mut self, schema: &'a RowSchema, row: &'a PhysicalRow) -> Self {
+        self.physical_outer_row = Some((schema, row));
         self
     }
 
@@ -605,30 +695,78 @@ pub fn eval_scalar(
     context: &ScalarEvalContext<'_>,
 ) -> Result<Value, SQLError> {
     match expression {
-        ScalarExpr::Star => Err(SQLError::Internal("`*` cannot be evaluated".into())),
+        ScalarExpr::Default => Err(SQLError::Internal(
+            "DEFAULT reached scalar expression evaluation without a mutation target".into(),
+        )),
+        ScalarExpr::Star | ScalarExpr::QualifiedStar(_) => {
+            Err(SQLError::Internal("`*` cannot be evaluated".into()))
+        }
         ScalarExpr::Column(name) => context.sql_context().column_value(name),
-        ScalarExpr::QualifiedColumn {
-            qualifier,
-            column,
-            key,
-        } => context
+        ScalarExpr::Position(position) => context
+            .row_lookup
+            .and_then(|row| row.positional_column(*position))
+            .cloned()
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "bound physical column position {position} is unavailable"
+                ))
+            }),
+        ScalarExpr::QualifiedColumn { qualifier, column } => context
             .sql_context()
-            .qualified_column_value(qualifier, column, key),
+            .qualified_column_value(qualifier, column),
         ScalarExpr::Literal(value) => Ok(value.clone()),
         ScalarExpr::Param(index) => eval_parameter(*index, context.params),
-        ScalarExpr::Func { name, args, .. } => {
+        ScalarExpr::Func {
+            name,
+            binding,
+            args,
+            ..
+        } => {
             let arguments = eval_call_arguments(args, context)?;
-            eval_function_call(name, arguments, &context.sql_context())
+            if let Some(binding) = binding {
+                let sql_context = context.sql_context();
+                let engine = sql_context.engine.ok_or_else(|| {
+                    SQLError::Unsupported(
+                        "bound user function requires a logical engine session".into(),
+                    )
+                })?;
+                engine
+                    .call_bound_user_function(binding, &arguments)
+                    .unwrap_or_else(|| Err(SQLError::UnknownFunction(binding.name.clone())))
+            } else {
+                eval_function_call(name, arguments, &context.sql_context())
+            }
         }
         ScalarExpr::Array(items) => items
             .iter()
             .map(|item| eval_scalar(item, context))
             .collect::<Result<Vec<_>, _>>()
-            .map(Value::List),
+            .and_then(|items| {
+                ArrayValue::try_new(items).map(Value::Array).ok_or_else(|| {
+                    SQLError::TypeMismatch(
+                        "multidimensional arrays must have matching dimensions".into(),
+                    )
+                })
+            }),
+        ScalarExpr::Row(items) => items
+            .iter()
+            .map(|item| eval_scalar(item, context))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Row),
         ScalarExpr::Binary { op, lhs, rhs } => {
             let left = eval_scalar(lhs, context)?;
             let right = eval_scalar(rhs, context)?;
-            eval_binary_values(*op, &left, &right)
+            eval_binary_values_with_integer_width(
+                *op,
+                &left,
+                &right,
+                scalar_integer_binary_width(lhs, rhs),
+            )
+        }
+        ScalarExpr::UnaryMinus(inner) => {
+            let source_ty = scalar_source_type(inner);
+            let value = eval_scalar(inner, context)?;
+            negate_value(&value, source_ty)
         }
         ScalarExpr::Not(inner) => {
             let value = eval_scalar(inner, context)?;
@@ -659,8 +797,9 @@ pub fn eval_scalar(
             else_branch,
         } => eval_case(base.as_deref(), when, else_branch.as_deref(), context),
         ScalarExpr::Cast { expr, ty } => {
+            let source_ty = scalar_source_type(expr);
             let value = eval_scalar(expr, context)?;
-            cast_value(&value, ty)
+            cast_value_from(&value, ty, source_ty)
         }
         ScalarExpr::ScalarSubquery(subquery) => execute_scalar_subquery(*subquery, context),
         ScalarExpr::Exists { subquery, negated } => {
@@ -729,10 +868,7 @@ pub fn eval_call_arguments(
                 let value = marker_args
                     .get(1)
                     .ok_or_else(|| SQLError::Internal("named argument without a value".into()))?;
-                Ok((
-                    Some(argument_name.to_ascii_lowercase()),
-                    eval_scalar(value, context)?,
-                ))
+                Ok((Some(argument_name.clone()), eval_scalar(value, context)?))
             }
             other => Ok((None, eval_scalar(other, context)?)),
         })
@@ -848,7 +984,12 @@ fn execute_scalar_subquery(
     let runner = context
         .subquery_runner
         .ok_or_else(|| SQLError::Unsupported("physical subquery requires a plan runner".into()))?;
-    runner.scalar_subquery_value(subquery, context.outer_row(), context.params)
+    match context.physical_outer_row {
+        Some((schema, row)) => {
+            runner.scalar_subquery_value_physical(subquery, schema, row, context.params)
+        }
+        None => runner.scalar_subquery_value(subquery, context.outer_row(), context.params),
+    }
 }
 
 fn execute_exists_subquery(
@@ -858,7 +999,12 @@ fn execute_exists_subquery(
     let runner = context
         .subquery_runner
         .ok_or_else(|| SQLError::Unsupported("physical subquery requires a plan runner".into()))?;
-    runner.subquery_exists(subquery, context.outer_row(), context.params)
+    match context.physical_outer_row {
+        Some((schema, row)) => {
+            runner.subquery_exists_physical(subquery, schema, row, context.params)
+        }
+        None => runner.subquery_exists(subquery, context.outer_row(), context.params),
+    }
 }
 
 fn execute_in_subquery(
@@ -869,7 +1015,44 @@ fn execute_in_subquery(
     let runner = context
         .subquery_runner
         .ok_or_else(|| SQLError::Unsupported("physical subquery requires a plan runner".into()))?;
-    runner.subquery_contains(subquery, needle, context.outer_row(), context.params)
+    match context.physical_outer_row {
+        Some((schema, row)) => {
+            runner.subquery_contains_physical(subquery, needle, schema, row, context.params)
+        }
+        None => runner.subquery_contains(subquery, needle, context.outer_row(), context.params),
+    }
+}
+
+fn scalar_source_type(expression: &ScalarExpr) -> Option<&str> {
+    match expression {
+        ScalarExpr::Cast { ty, .. } => Some(ty),
+        ScalarExpr::UnaryMinus(inner) => scalar_source_type(inner),
+        ScalarExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => Some("integer"),
+        ScalarExpr::Literal(Value::Int(_)) => Some("bigint"),
+        ScalarExpr::Literal(Value::Bytes(_)) => Some("bytea"),
+        _ => None,
+    }
+}
+
+fn scalar_integer_width(expression: &ScalarExpr) -> Option<IntegerWidth> {
+    match expression {
+        ScalarExpr::Literal(Value::Int(value)) => Some(integer_width_for_literal(*value)),
+        ScalarExpr::Cast { ty, .. } => integer_width_for_type(ty),
+        ScalarExpr::UnaryMinus(inner) => scalar_integer_width(inner),
+        ScalarExpr::Binary {
+            op: BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide,
+            lhs,
+            rhs,
+        } => Some(scalar_integer_width(lhs)?.max(scalar_integer_width(rhs)?)),
+        _ => None,
+    }
+}
+
+pub(crate) fn scalar_integer_binary_width(
+    lhs: &ScalarExpr,
+    rhs: &ScalarExpr,
+) -> Option<IntegerWidth> {
+    Some(scalar_integer_width(lhs)?.max(scalar_integer_width(rhs)?))
 }
 
 #[cfg(test)]
@@ -908,6 +1091,7 @@ mod tests {
     fn parameter_detection_descends_into_nested_expressions() {
         let expression = ScalarExpr::Func {
             name: "knn_match".into(),
+            binding: None,
             args: vec![
                 ScalarExpr::Column("embedding".into()),
                 ScalarExpr::Array(vec![ScalarExpr::Param(1)]),

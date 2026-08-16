@@ -92,7 +92,17 @@ impl Engine {
         };
         let n = u64::try_from(doc_ids.len())
             .map_err(|_| StorageBackendError::Other("ANALYZE document count exceeds u64".into()))?;
-        let columns: Vec<String> = t.columns.read().iter().map(|c| c.name.clone()).collect();
+        let columns: Vec<String> = t
+            .columns
+            .read()
+            .iter()
+            .filter(|column| {
+                !column.generated.as_ref().is_some_and(|generated| {
+                    generated.kind == uqa_sql::ast::GeneratedColumnKind::Virtual
+                })
+            })
+            .map(|column| column.name.clone())
+            .collect();
 
         let (mut col_values, mut col_nulls) =
             collect_analyze_values(snapshot.as_ref(), &doc_ids, &columns)?;

@@ -326,24 +326,49 @@ fn group_entry_bytes(map_key: &[Value], state: &GroupState) -> usize {
 
 fn value_retained_bytes(value: &Value) -> usize {
     std::mem::size_of::<Value>().saturating_add(match value {
-        Value::Str(value) | Value::FixedChar(value) => value.capacity(),
+        Value::Str(value) | Value::FixedChar(value) | Value::Json(value) | Value::JsonB(value) => {
+            value.capacity()
+        }
         Value::Bytes(value) => value.capacity(),
-        Value::List(values) => values
+        Value::Array(array) => array
+            .retained_header_bytes()
+            .saturating_add(
+                array
+                    .elements()
+                    .len()
+                    .saturating_mul(std::mem::size_of::<Value>())
+                    .saturating_add(array.elements().iter().map(value_retained_bytes).sum()),
+            )
+            .saturating_add(
+                array
+                    .lower_bounds()
+                    .len()
+                    .saturating_mul(std::mem::size_of::<i32>()),
+            )
+            .saturating_add(
+                array
+                    .dimensions()
+                    .len()
+                    .saturating_mul(std::mem::size_of::<usize>()),
+            ),
+        Value::List(values) | Value::Row(values) => values
             .capacity()
             .saturating_mul(std::mem::size_of::<Value>())
             .saturating_add(values.iter().map(value_retained_bytes).sum()),
+        Value::Record(fields) => fields.iter().fold(0usize, |bytes, (name, value)| {
+            bytes
+                .saturating_add(name.capacity())
+                .saturating_add(value_retained_bytes(value))
+                .saturating_add(2 * std::mem::size_of::<usize>())
+        }),
         Value::Map(values) => values.iter().fold(0usize, |bytes, (key, value)| {
             bytes
                 .saturating_add(key.capacity())
                 .saturating_add(value_retained_bytes(value))
                 .saturating_add(3 * std::mem::size_of::<usize>())
         }),
-        Value::Null
-        | Value::Bool(_)
-        | Value::Int(_)
-        | Value::Float(_)
-        | Value::Temporal(_)
-        | Value::Decimal(_) => 0,
+        Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Temporal(_) => 0,
+        Value::Decimal(value) => value.retained_bytes(),
     })
 }
 

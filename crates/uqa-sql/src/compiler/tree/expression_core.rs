@@ -17,6 +17,7 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
         return Err(SQLError::Internal("missing expr node".into()));
     };
     match inner {
+        NodeEnum::SetToDefault(_) => Ok(Expr::Default),
         NodeEnum::AConst(c) => compile_const(c),
         NodeEnum::ColumnRef(c) => compile_column_ref(c),
         NodeEnum::ParamRef(p) => {
@@ -44,6 +45,7 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
                 return Err(SQLError::Internal("NamedArgExpr without value".into()));
             };
             Ok(Expr::Func {
+                binding: None,
                 name: "__named_arg".into(),
                 args: vec![
                     Expr::Literal(Value::Str(arg.name.clone())),
@@ -66,6 +68,7 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
         NodeEnum::AExpr(a) => compile_a_expr(a),
         NodeEnum::SqlvalueFunction(svf) => compile_sql_value_function(svf),
         NodeEnum::MergeSupportFunc(_) => Ok(Expr::Func {
+            binding: None,
             name: "merge_action".into(),
             args: Vec::new(),
             distinct: false,
@@ -85,6 +88,7 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
                 .map(compile_expr)
                 .collect::<Result<Vec<_>>>()?;
             Ok(Expr::Func {
+                binding: None,
                 name: "coalesce".into(),
                 args,
                 distinct: false,
@@ -116,6 +120,7 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
                 )));
             }
             Ok(Expr::Func {
+                binding: None,
                 name: name.into(),
                 args,
                 distinct: false,
@@ -124,23 +129,20 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
             })
         }
         NodeEnum::SubLink(sl) => compile_sublink(sl),
-        // ROW(a, b) constructors compare element-wise; the evaluator
-        // reuses the list comparison rules for them.
         NodeEnum::RowExpr(row) => {
             let elements: Vec<Expr> = row
                 .args
                 .iter()
                 .map(compile_expr)
                 .collect::<Result<Vec<_>>>()?;
-            Ok(Expr::Array(elements))
+            Ok(Expr::Row(elements))
         }
         NodeEnum::AIndirection(ind) => compile_indirection(ind),
         other => Err(SQLError::Unsupported(format!("expression form: {other:?}"))),
     }
 }
 
-/// `expr[i]`, `expr[lo:hi]`, and chains thereof. Subscripts are
-/// 1-based; slices clamp to the array, both per `PostgreSQL`.
+/// `expr[i]`, `expr[lo:hi]`, and chains thereof. The complete array-indirection group is lowered as one operation because `PostgreSQL` resolves all dimensions together and treats every dimension as a slice when any dimension contains a colon.
 pub(in crate::compiler) fn compile_indirection(
     ind: &pg_query::protobuf::AIndirection,
 ) -> Result<Expr> {
@@ -154,48 +156,81 @@ pub(in crate::compiler) fn compile_indirection(
             "AIndirection without indirection steps".into(),
         ));
     }
-    for step in &ind.indirection {
+    let mut position = 0;
+    while position < ind.indirection.len() {
+        let step = &ind.indirection[position];
         let inner = step
             .node
             .as_ref()
             .ok_or_else(|| SQLError::Internal("indirection contains an empty step".into()))?;
         match inner {
-            NodeEnum::AIndices(idx) => {
-                if idx.is_slice {
-                    let lower = idx
-                        .lidx
-                        .as_deref()
-                        .map(compile_expr)
-                        .transpose()?
-                        .unwrap_or(Expr::Literal(Value::Null));
-                    let upper = idx
-                        .uidx
-                        .as_deref()
-                        .map(compile_expr)
-                        .transpose()?
-                        .unwrap_or(Expr::Literal(Value::Null));
-                    current = Expr::Func {
-                        name: "__slice".into(),
-                        args: vec![current, lower, upper],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    };
-                } else {
-                    let index = idx
-                        .uidx
-                        .as_deref()
-                        .map(compile_expr)
-                        .transpose()?
-                        .ok_or_else(|| SQLError::Internal("subscript without index".into()))?;
-                    current = Expr::Func {
-                        name: "__subscript".into(),
-                        args: vec![current, index],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    };
+            NodeEnum::AIndices(_) => {
+                let start = position;
+                while position < ind.indirection.len()
+                    && matches!(
+                        ind.indirection[position].node.as_ref(),
+                        Some(NodeEnum::AIndices(_))
+                    )
+                {
+                    position += 1;
                 }
+                let indices = &ind.indirection[start..position];
+                let has_slice = indices.iter().any(|step| {
+                    matches!(
+                        step.node.as_ref(),
+                        Some(NodeEnum::AIndices(index)) if index.is_slice
+                    )
+                });
+                let mut args = vec![current];
+                for step in indices {
+                    let Some(NodeEnum::AIndices(index)) = step.node.as_ref() else {
+                        return Err(SQLError::Internal("invalid array indirection group".into()));
+                    };
+                    if has_slice {
+                        let lower = if index.is_slice {
+                            index
+                                .lidx
+                                .as_deref()
+                                .map(compile_expr)
+                                .transpose()?
+                                .unwrap_or(Expr::Literal(Value::Null))
+                        } else {
+                            Expr::Literal(Value::Int(1))
+                        };
+                        let upper = index
+                            .uidx
+                            .as_deref()
+                            .map(compile_expr)
+                            .transpose()?
+                            .unwrap_or(Expr::Literal(Value::Null));
+                        args.push(lower);
+                        args.push(upper);
+                    } else {
+                        args.push(
+                            index
+                                .uidx
+                                .as_deref()
+                                .map(compile_expr)
+                                .transpose()?
+                                .ok_or_else(|| {
+                                    SQLError::Internal("subscript without index".into())
+                                })?,
+                        );
+                    }
+                }
+                current = Expr::Func {
+                    binding: None,
+                    name: if has_slice {
+                        "__array_slices".into()
+                    } else {
+                        "__array_subscripts".into()
+                    },
+                    args,
+                    distinct: false,
+                    order_by: Vec::new(),
+                    filter: None,
+                };
+                continue;
             }
             NodeEnum::String(field) => {
                 if field.sval.is_empty() {
@@ -205,6 +240,7 @@ pub(in crate::compiler) fn compile_indirection(
                 }
                 // `(composite).field` access on map values.
                 current = Expr::Func {
+                    binding: None,
                     name: "__subscript".into(),
                     args: vec![current, Expr::Literal(Value::Str(field.sval.clone()))],
                     distinct: false,
@@ -218,6 +254,7 @@ pub(in crate::compiler) fn compile_indirection(
                 )));
             }
         }
+        position += 1;
     }
     Ok(current)
 }
@@ -249,6 +286,7 @@ pub(in crate::compiler) fn compile_sql_value_function(
         }
     };
     Ok(Expr::Func {
+        binding: None,
         name: name.into(),
         args: Vec::new(),
         distinct: false,

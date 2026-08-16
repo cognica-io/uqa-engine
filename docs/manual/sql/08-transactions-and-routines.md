@@ -55,7 +55,7 @@ Known settings include:
 | Setting | Default or behavior |
 | --- | --- |
 | `search_path` | Schema resolution path |
-| `server_version` | Read-only compatibility value `17.0-uqa` |
+| `server_version` | Read-only compatibility value `18.0-uqa` |
 | `server_encoding` | Read-only `UTF8` |
 | `client_encoding` | Mutable, default `UTF8` |
 | `datestyle` | Mutable, default `ISO, MDY` |
@@ -105,7 +105,9 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 ```
 
-The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer and query `FOR`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, and exception handlers covered by the routine tests.
+The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer and query `FOR`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, exception handlers, and bound cursors covered by the routine tests.
+
+Bound cursors support `CURSOR [(arguments)] FOR query`, positional or named `OPEN` arguments, repeated `FETCH NEXT ... INTO`, `FOUND`, and `CLOSE` within one routine activation. The query result and cursor position are owned by the PL/pgSQL interpreter. `OPEN ... FOR`, dynamic cursor queries, `MOVE`, fetch directions other than `NEXT`, `refcursor` parameters or returns, and cursors left open when a routine exits are rejected because those forms require session-level portal state that is not implemented.
 
 This is a deliberate subset. Validate every routine body during migration instead of assuming all PostgreSQL PL/pgSQL statements or diagnostics exist.
 

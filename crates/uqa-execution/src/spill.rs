@@ -19,21 +19,19 @@ use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tempfile::NamedTempFile;
-use uqa_sql::ResultRow;
-
-use crate::batch::{Batch, PhysicalRow, RowSchema};
+use crate::batch::{Batch, OwnedPhysicalRow, PhysicalRow, RowSchema};
 use crate::physical::ExecResult;
+use tempfile::NamedTempFile;
 
 mod format;
 
 use format::{
-    append_batches, decode_batch, decode_row, encoded_batch_size,
-    encoded_named_single_row_batch_size, encoded_single_row_batch_size, open_spill_reader,
-    read_bounded_spill_record, spill_error, ExactRow,
+    append_batches, decode_batch, decode_physical_row_record, encode_physical_row_record,
+    encoded_batch_overhead_size, encoded_batch_size, encoded_physical_row_record_size,
+    open_spill_reader, read_bounded_spill_record, spill_error, RECORD_PREFIX_BYTES,
 };
 
-const SPILL_MAGIC: &[u8] = b"UQA-SPILL\x02\n";
+const SPILL_MAGIC: &[u8] = b"UQA-SPILL\x01\n";
 
 /// Append-only batch buffer with an encoded-byte memory budget.
 ///
@@ -42,6 +40,7 @@ const SPILL_MAGIC: &[u8] = b"UQA-SPILL\x02\n";
 /// decoded batch can itself be larger than the budget; successful pushes do not
 /// retain such an oversized batch in memory.
 pub struct SpillBuffer {
+    schema: Option<RowSchema>,
     batches: Vec<Batch>,
     rows: usize,
     in_memory_rows: usize,
@@ -60,6 +59,7 @@ pub struct SpillBuffer {
 impl SpillBuffer {
     pub fn new(budget_bytes: usize) -> Self {
         Self {
+            schema: None,
             batches: Vec::new(),
             rows: 0,
             in_memory_rows: 0,
@@ -95,6 +95,17 @@ impl SpillBuffer {
     /// creation, encoding, or writing fails, the new batch and all earlier
     /// batches remain owned by the buffer and the error is returned.
     pub fn push(&mut self, batch: Batch) -> ExecResult<bool> {
+        if let Some(schema) = self.schema.as_ref() {
+            if schema != &batch.schema {
+                return Err(spill_error(format!(
+                    "spill buffer schema mismatch: expected {:?}, got {:?}",
+                    schema.columns(),
+                    batch.schema.columns()
+                )));
+            }
+        } else {
+            self.schema = Some(batch.schema.clone());
+        }
         let batch_rows = batch.rows.len();
         let next_rows = self
             .rows
@@ -153,18 +164,15 @@ impl SpillBuffer {
         encoded_batch_size(batch)
     }
 
-    pub(crate) fn encoded_single_row_size(
+    pub(crate) fn encoded_batch_overhead_size(schema: &RowSchema) -> ExecResult<usize> {
+        encoded_batch_overhead_size(schema)
+    }
+
+    pub(crate) fn encoded_row_record_size(
         schema: &RowSchema,
         row: &PhysicalRow,
     ) -> ExecResult<usize> {
-        encoded_single_row_batch_size(schema, row)
-    }
-
-    pub(crate) fn encoded_named_single_row_size(
-        schema: &RowSchema,
-        row: &ResultRow,
-    ) -> ExecResult<usize> {
-        encoded_named_single_row_batch_size(schema, row)
+        encoded_physical_row_record_size(row, schema.physical_width())
     }
 
     /// Total buffered rows, including rows already written to disk.
@@ -290,10 +298,11 @@ impl SpillBuffer {
             disk_finished,
             failed: false,
             max_record_bytes: self.max_spilled_record_bytes,
+            expected_schema: self.schema.clone(),
         })
     }
 
-    /// Open a repeatable row stream without materializing all buffered rows.
+    /// Open a repeatable physical-row stream without collecting all batches.
     pub fn read_rows(&self) -> ExecResult<SpillRows<SpillReader<'_>>> {
         self.reader().map(SpillRows::new)
     }
@@ -311,6 +320,7 @@ impl SpillBuffer {
             .transpose()?;
         let spill_file = self.spill_file.take();
         let memory = std::mem::take(&mut self.batches).into_iter();
+        let expected_schema = self.schema.take();
 
         self.rows = 0;
         self.in_memory_rows = 0;
@@ -329,6 +339,7 @@ impl SpillBuffer {
             disk_finished,
             failed: false,
             max_record_bytes,
+            expected_schema,
         })
     }
 
@@ -337,13 +348,14 @@ impl SpillBuffer {
         self.drain()?.collect()
     }
 
-    /// Consume the buffer as a row stream without materializing all batches.
+    /// Consume the buffer as a physical-row stream without collecting batches.
     pub fn drain_rows(&mut self) -> ExecResult<SpillRows<SpillDrain>> {
         self.drain().map(SpillRows::new)
     }
 
     /// Discard all buffered data and remove any spill file.
     pub fn clear(&mut self) {
+        self.schema = None;
         self.batches.clear();
         self.spill_file = None;
         self.rows = 0;
@@ -361,13 +373,20 @@ impl SpillBuffer {
     /// once spilling has started, every pending batch is flushed and readers
     /// reopen the file independently. Both forms support repeatable scans
     /// without collecting the complete input again.
-    pub fn into_shared(mut self, schema: Vec<String>) -> ExecResult<SharedSpill> {
+    pub fn into_shared(mut self, schema: impl Into<RowSchema>) -> ExecResult<SharedSpill> {
+        let schema = schema.into();
+        if let Some(actual) = self.schema.as_ref() {
+            if actual != &schema {
+                return Err(spill_error(format!(
+                    "shared spill schema mismatch: expected {:?}, got {:?}",
+                    schema.columns(),
+                    actual.columns()
+                )));
+            }
+        }
         let rows = self.rows;
         let storage = if self.spill_file.is_none() {
-            let batches = std::mem::take(&mut self.batches)
-                .into_iter()
-                .map(|batch| batch.into_canonical(&schema))
-                .collect::<ExecResult<Vec<_>>>()?;
+            let batches = std::mem::take(&mut self.batches);
             SharedSpillStorage::Memory(batches)
         } else {
             self.spill_pending()?;
@@ -423,7 +442,7 @@ enum SharedSpillStorage {
 
 struct SharedSpillInner {
     storage: SharedSpillStorage,
-    schema: Vec<String>,
+    schema: RowSchema,
     rows: usize,
     max_record_bytes: usize,
 }
@@ -437,6 +456,10 @@ pub struct SharedSpill {
 
 impl SharedSpill {
     pub fn schema(&self) -> &[String] {
+        self.inner.schema.columns()
+    }
+
+    pub fn row_schema(&self) -> &RowSchema {
         &self.inner.schema
     }
 
@@ -463,6 +486,7 @@ impl SharedSpill {
         match Arc::try_unwrap(self.inner) {
             Ok(SharedSpillInner {
                 storage: SharedSpillStorage::Memory(batches),
+                schema,
                 max_record_bytes,
                 ..
             }) => Ok(SharedSpillReader {
@@ -470,6 +494,7 @@ impl SharedSpill {
                 source: None,
                 failed: false,
                 max_record_bytes,
+                expected_schema: Some(schema),
             }),
             Ok(inner) => Self::reader_from_source(Arc::new(inner)),
             Err(source) => Self::reader_from_source(source),
@@ -484,16 +509,18 @@ impl SharedSpill {
             }
         };
         let max_record_bytes = source.max_record_bytes;
+        let expected_schema = Some(source.schema.clone());
         Ok(SharedSpillReader {
             reader,
             source: Some(source),
             failed: false,
             max_record_bytes,
+            expected_schema,
         })
     }
 
-    /// Open an independent row-at-a-time reader without materializing the
-    /// spill's batches or row count in memory.
+    /// Open an independent physical-row reader without collecting the spill's
+    /// batches or row count in memory.
     pub fn read_rows(&self) -> ExecResult<SpillRows<SharedSpillReader>> {
         self.reader().map(SpillRows::new)
     }
@@ -505,6 +532,18 @@ enum SharedSpillReaderSource {
     Disk(BufReader<File>),
 }
 
+fn validate_decoded_schema(batch: Batch, expected_schema: Option<&RowSchema>) -> ExecResult<Batch> {
+    if expected_schema.is_none_or(|expected| expected == &batch.schema) {
+        return Ok(batch);
+    }
+    let expected = expected_schema.expect("schema presence checked above");
+    Err(spill_error(format!(
+        "spill batch schema mismatch: expected {:?}, got {:?}",
+        expected.columns(),
+        batch.schema.columns()
+    )))
+}
+
 /// Reader for a [`SharedSpill`]. Independent readers retain the shared source;
 /// a consuming reader may instead own unique in-memory batches directly.
 pub struct SharedSpillReader {
@@ -512,6 +551,7 @@ pub struct SharedSpillReader {
     source: Option<Arc<SharedSpillInner>>,
     failed: bool,
     max_record_bytes: usize,
+    expected_schema: Option<RowSchema>,
 }
 
 impl Iterator for SharedSpillReader {
@@ -532,15 +572,22 @@ impl Iterator for SharedSpillReader {
                 };
                 let batch = batches.get(*next_batch)?.clone();
                 *next_batch += 1;
-                Some(Ok(batch))
+                Some(validate_decoded_schema(
+                    batch,
+                    self.expected_schema.as_ref(),
+                ))
             }
-            SharedSpillReaderSource::OwnedMemory(batches) => batches.next().map(Ok),
+            SharedSpillReaderSource::OwnedMemory(batches) => batches
+                .next()
+                .map(|batch| validate_decoded_schema(batch, self.expected_schema.as_ref())),
             SharedSpillReaderSource::Disk(reader) => {
                 match read_bounded_spill_record(reader, self.max_record_bytes, "shared spill batch")
                 {
                     Ok(None) => None,
                     Ok(Some(record)) => {
-                        let decoded = decode_batch(&record);
+                        let decoded = decode_batch(&record).and_then(|batch| {
+                            validate_decoded_schema(batch, self.expected_schema.as_ref())
+                        });
                         if decoded.is_err() {
                             self.failed = true;
                         }
@@ -568,6 +615,7 @@ pub struct SpillDrain {
     disk_finished: bool,
     failed: bool,
     max_record_bytes: usize,
+    expected_schema: Option<RowSchema>,
 }
 
 impl Iterator for SpillDrain {
@@ -593,7 +641,9 @@ impl Iterator for SpillDrain {
                     self.spill_file = None;
                 }
                 Ok(Some(record)) => {
-                    let decoded = decode_batch(&record);
+                    let decoded = decode_batch(&record).and_then(|batch| {
+                        validate_decoded_schema(batch, self.expected_schema.as_ref())
+                    });
                     if decoded.is_err() {
                         self.failed = true;
                     }
@@ -608,7 +658,9 @@ impl Iterator for SpillDrain {
             }
         }
 
-        self.memory.next().map(Ok)
+        self.memory
+            .next()
+            .map(|batch| validate_decoded_schema(batch, self.expected_schema.as_ref()))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -628,6 +680,7 @@ pub struct SpillReader<'a> {
     disk_finished: bool,
     failed: bool,
     max_record_bytes: usize,
+    expected_schema: Option<RowSchema>,
 }
 
 impl Iterator for SpillReader<'_> {
@@ -652,7 +705,9 @@ impl Iterator for SpillReader<'_> {
                     self.reader = None;
                 }
                 Ok(Some(record)) => {
-                    let decoded = decode_batch(&record);
+                    let decoded = decode_batch(&record).and_then(|batch| {
+                        validate_decoded_schema(batch, self.expected_schema.as_ref())
+                    });
                     if decoded.is_err() {
                         self.failed = true;
                     }
@@ -667,7 +722,10 @@ impl Iterator for SpillReader<'_> {
             }
         }
 
-        self.memory.next().cloned().map(Ok)
+        self.memory
+            .next()
+            .cloned()
+            .map(|batch| validate_decoded_schema(batch, self.expected_schema.as_ref()))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -680,20 +738,23 @@ impl Iterator for SpillReader<'_> {
     }
 }
 
-/// Row-flattening adapter for [`SpillReader`] and [`SpillDrain`].
+/// Physical-row flattening adapter for [`SpillReader`] and [`SpillDrain`].
 pub struct SpillRows<I> {
     batches: I,
-    current: std::vec::IntoIter<ResultRow>,
+    current_schema: Option<RowSchema>,
+    current: std::vec::IntoIter<PhysicalRow>,
 }
 
-/// Disk-only row store with constant-memory positional lookup.
+/// Disk-only physical-row store with constant-memory positional lookup.
 ///
-/// Each row is encoded with the same exact tagged representation as
-/// [`SpillBuffer`]. Record offsets live in a second temporary file, so even a
-/// partition with billions of rows does not create an in-memory offset table.
-/// A single decoded row is the only input-sized allocation retained by
-/// [`Self::get`]. Both files are unlinked by `NamedTempFile` on drop.
+/// Each row retains the exact physical layout described by `schema` and is
+/// encoded with the same positional tagged representation as [`SpillBuffer`].
+/// Record offsets live in a second temporary file, so even a partition with
+/// billions of rows does not create an in-memory offset table. A single decoded
+/// physical row is the only input-sized allocation retained by [`Self::get`].
+/// Both files are unlinked by `NamedTempFile` on drop.
 pub struct IndexedSpill {
+    schema: RowSchema,
     data: NamedTempFile,
     offsets: NamedTempFile,
     rows: u64,
@@ -701,8 +762,9 @@ pub struct IndexedSpill {
 }
 
 impl IndexedSpill {
-    pub fn new() -> ExecResult<Self> {
+    pub fn new(input_schema: RowSchema) -> ExecResult<Self> {
         Ok(Self {
+            schema: input_schema,
             data: NamedTempFile::new().map_err(|error| {
                 spill_error(format!("failed to create indexed spill data: {error}"))
             })?,
@@ -726,11 +788,20 @@ impl IndexedSpill {
         self.encoded_bytes
     }
 
+    pub fn row_schema(&self) -> &RowSchema {
+        &self.schema
+    }
+
+    pub(crate) fn encoded_row_size(schema: &RowSchema, row: &PhysicalRow) -> ExecResult<usize> {
+        encoded_physical_row_record_size(row, schema.physical_width())?
+            .checked_add(RECORD_PREFIX_BYTES)
+            .ok_or_else(|| spill_error("indexed spill row size overflow"))
+    }
+
     /// Append one indivisible row. Failed writes roll both files back to their
     /// original lengths, so callers never observe a partial index entry.
-    pub fn push(&mut self, row: &ResultRow) -> ExecResult<()> {
-        let payload = serde_json::to_vec(&ExactRow(row))
-            .map_err(|error| spill_error(format!("failed to encode indexed spill row: {error}")))?;
+    pub fn push(&mut self, row: &PhysicalRow) -> ExecResult<()> {
+        let payload = encode_physical_row_record(row, self.schema.physical_width())?;
         let length = u64::try_from(payload.len())
             .map_err(|_| spill_error("indexed spill row is too large"))?;
         // Validate every piece of metadata before touching either file.  A
@@ -797,7 +868,7 @@ impl IndexedSpill {
     }
 
     /// Decode the row at `index` without loading any other row or index entry.
-    pub fn get(&mut self, index: u64) -> ExecResult<ResultRow> {
+    pub fn get(&mut self, index: u64) -> ExecResult<PhysicalRow> {
         if index >= self.rows {
             return Err(spill_error(format!(
                 "indexed spill row {index} is outside 0..{}",
@@ -884,7 +955,7 @@ impl IndexedSpill {
             .as_file_mut()
             .read_exact(&mut payload)
             .map_err(|error| spill_error(format!("failed to read indexed spill row: {error}")))?;
-        decode_row(&payload)
+        decode_physical_row_record(&payload, self.schema.physical_width())
     }
 }
 
@@ -901,6 +972,7 @@ impl<I> SpillRows<I> {
     fn new(batches: I) -> Self {
         Self {
             batches,
+            current_schema: None,
             current: Vec::new().into_iter(),
         }
     }
@@ -910,15 +982,23 @@ impl<I> Iterator for SpillRows<I>
 where
     I: Iterator<Item = ExecResult<Batch>>,
 {
-    type Item = ExecResult<ResultRow>;
+    type Item = ExecResult<OwnedPhysicalRow>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if let Some(row) = self.current.next() {
-                return Some(Ok(row));
+                let schema = self
+                    .current_schema
+                    .as_ref()
+                    .expect("spill row iterator retains the current batch schema")
+                    .clone();
+                return Some(Ok(OwnedPhysicalRow::new(schema, row)));
             }
             match self.batches.next()? {
-                Ok(batch) => self.current = batch.into_result_rows().into_iter(),
+                Ok(batch) => {
+                    self.current_schema = Some(batch.schema);
+                    self.current = batch.rows.into_iter();
+                }
                 Err(error) => return Some(Err(error)),
             }
         }

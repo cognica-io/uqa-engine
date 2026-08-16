@@ -62,6 +62,36 @@ fn merge_updates_matched_inserts_unmatched() {
 }
 
 #[test]
+fn merge_returning_exposes_postgresql_18_row_images() {
+    let eng = setup();
+    let result = eng
+        .sql(
+            "MERGE INTO inventory AS t USING deltas AS d ON t.id = d.id \
+             WHEN MATCHED THEN UPDATE SET qty = qty + change \
+             WHEN NOT MATCHED THEN INSERT (id, qty) VALUES (d.id, d.change) \
+             RETURNING merge_action() AS action, old.qty AS old_qty, new.qty AS new_qty",
+            &[],
+        )
+        .unwrap();
+
+    let update = result
+        .rows
+        .iter()
+        .find(|row| row.get("action") == Some(&Value::Str("UPDATE".into())))
+        .expect("MERGE UPDATE result");
+    assert_eq!(update.get("old_qty"), Some(&Value::Int(10)));
+    assert_eq!(update.get("new_qty"), Some(&Value::Int(15)));
+
+    let insert = result
+        .rows
+        .iter()
+        .find(|row| row.get("action") == Some(&Value::Str("INSERT".into())))
+        .expect("MERGE INSERT result");
+    assert_eq!(insert.get("old_qty"), Some(&Value::Null));
+    assert_eq!(insert.get("new_qty"), Some(&Value::Int(7)));
+}
+
+#[test]
 fn merge_when_matched_delete() {
     let eng = setup();
     let r = eng

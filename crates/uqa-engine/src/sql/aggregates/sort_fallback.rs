@@ -18,7 +18,7 @@ pub(super) fn aggregate_sorted_input(
     engine: &Engine,
     statement: &QueryBlockPlan,
     input: SpillBuffer,
-    input_schema: &[String],
+    input_schema: &RowSchema,
     output_schema: &RowSchema,
     params: &[SQLParam],
     ctes: &CteScope,
@@ -28,7 +28,7 @@ pub(super) fn aggregate_sorted_input(
     use super::super::select::EngineExpressionEvaluator;
 
     let scan: Box<dyn PhysicalOperator + '_> =
-        Box::new(SpillScan::new(input_schema.to_vec(), input));
+        Box::new(SpillScan::new(input_schema.clone(), input));
     let keys = statement
         .group_by
         .iter()
@@ -47,13 +47,22 @@ pub(super) fn aggregate_sorted_input(
     let subquery_arena = PlanSubqueryArena::new(&statement.subqueries, Some(&hook));
     let aggregate_targets = aggregate_targets(engine, statement)
         .into_iter()
-        .cloned()
+        .map(|target| {
+            uqa_execution::bind_type_introspection_with_resolver(
+                target.clone(),
+                input_schema,
+                params,
+                engine,
+            )
+        })
         .collect::<Vec<_>>();
     let output_plan = super::output::AggregateOutputPlan::compile(
         engine,
         statement,
         &aggregate_targets,
         relaxed,
+        input_schema,
+        params,
     )?;
     let accumulator_budget = (phase_budget / aggregate_targets.len().max(1)).max(1);
     let mut current_key: Option<Vec<Value>> = None;
@@ -67,7 +76,8 @@ pub(super) fn aggregate_sorted_input(
                 let view = batch.schema.view(&row);
                 let context = ScalarEvalContext::from_row_lookup(&view, params)
                     .with_function_hook(&hook)
-                    .with_subquery_runner(&subquery_arena);
+                    .with_subquery_runner(&subquery_arena)
+                    .with_physical_outer_row(&batch.schema, &row);
                 let key = statement
                     .group_by
                     .iter()
@@ -169,6 +179,7 @@ pub(super) fn observe_target(
         distinct,
         order_by,
         filter,
+        ..
     } = expression
     else {
         return Ok(());

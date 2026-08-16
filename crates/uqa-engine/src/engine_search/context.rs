@@ -13,6 +13,22 @@ impl Engine {
         &self,
         table: &str,
     ) -> Result<Option<ExecutionContext>, SQLError> {
+        self.snapshot_context_with_documents(table, None)
+    }
+
+    pub(crate) fn snapshot_context_with_document_store(
+        &self,
+        table: &str,
+        documents: std::sync::Arc<dyn uqa_storage::DocumentStore>,
+    ) -> Result<Option<ExecutionContext>, SQLError> {
+        self.snapshot_context_with_documents(table, Some(documents))
+    }
+
+    fn snapshot_context_with_documents(
+        &self,
+        table: &str,
+        documents: Option<std::sync::Arc<dyn uqa_storage::DocumentStore>>,
+    ) -> Result<Option<ExecutionContext>, SQLError> {
         let Some(t) = self
             .try_table(table)
             .map_err(|error| storage_sql_error("resolve snapshot table", error))?
@@ -24,15 +40,18 @@ impl Engine {
             .read()
             .snapshot()
             .map_err(|error| storage_sql_error("snapshot inverted index", error))?;
-        let docs = t
-            .document_store
-            .read()
-            .snapshot()
-            .map_err(|error| storage_sql_error("snapshot document store", error))?;
+        let documents = match documents {
+            Some(documents) => documents,
+            None => t
+                .document_store
+                .read()
+                .snapshot()
+                .map_err(|error| storage_sql_error("snapshot document store", error))?,
+        };
 
         let mut ctx = ExecutionContext::new()
             .with_inverted_index(inv)
-            .with_document_store(docs);
+            .with_document_store(documents);
 
         for (field, idx) in t.vector_indexes.read().iter() {
             ctx = ctx.with_vector_index(

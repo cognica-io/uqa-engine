@@ -65,6 +65,60 @@ fn legacy_view_source_binding_requires_one_catalog_identity() {
     assert!(error.to_string().contains("does not exist"));
 }
 
+fn remove_plan_field(value: &mut serde_json::Value, field: &str) {
+    match value {
+        serde_json::Value::Array(values) => {
+            for value in values {
+                remove_plan_field(value, field);
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            fields.remove(field);
+            for value in fields.values_mut() {
+                remove_plan_field(value, field);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn legacy_view_plans_restore_structured_source_qualifiers() {
+    let engine = Engine::new();
+    let mut table_json =
+        serde_json::to_value(lower_query("SELECT * FROM \"app.dot\".\"items.dot\"")).unwrap();
+    remove_plan_field(&mut table_json, "qualifier");
+    let mut table_plan: QueryPlan = serde_json::from_value(table_json).unwrap();
+    engine
+        .bind_stored_view_plan(
+            &mut table_plan,
+            &std::collections::BTreeSet::from([RelationIdentity::new("app.dot", "items.dot")]),
+        )
+        .unwrap();
+    let RelationalPlan::QueryBlock(table_block) = &table_plan.root else {
+        panic!("expected a query block");
+    };
+    let Some(SourcePlan::Table { qualifier, .. }) = table_block.from.as_ref() else {
+        panic!("expected a table source");
+    };
+    assert_eq!(qualifier, "items.dot");
+
+    let mut function_json =
+        serde_json::to_value(lower_query("SELECT * FROM application.rows_for(1)")).unwrap();
+    remove_plan_field(&mut function_json, "output_name");
+    let mut function_plan: QueryPlan = serde_json::from_value(function_json).unwrap();
+    engine
+        .bind_stored_view_plan(&mut function_plan, &std::collections::BTreeSet::new())
+        .unwrap();
+    let RelationalPlan::QueryBlock(function_block) = &function_plan.root else {
+        panic!("expected a query block");
+    };
+    let Some(SourcePlan::Function { output_name, .. }) = function_block.from.as_ref() else {
+        panic!("expected a function source");
+    };
+    assert_eq!(output_name, "rows_for");
+}
+
 #[test]
 fn stored_view_binding_preserves_cte_sources() {
     let engine = Engine::new();

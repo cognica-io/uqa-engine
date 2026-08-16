@@ -7,18 +7,25 @@
 //! INSERT and ON CONFLICT lowering.
 
 use super::{
-    compile_expr, compile_projections, compile_select, compile_with_clause, range_var_name, Expr,
-    InsertStmt, NodeEnum, Result, SQLError,
+    compile_expr, compile_returning_clause, compile_select, compile_with_clause, range_var_name,
+    Expr, InsertStmt, NodeEnum, Result, SQLError,
 };
 
 pub(in crate::compiler) fn compile_insert(
     stmt: &pg_query::protobuf::InsertStmt,
 ) -> Result<InsertStmt> {
-    let table = stmt
+    let relation = stmt
         .relation
         .as_ref()
-        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("INSERT without relation".into()))?;
+    let table = range_var_name(relation);
+    let target_qualifier = relation
+        .alias
+        .as_ref()
+        .map(|alias| alias.aliasname.as_str())
+        .filter(|alias| !alias.is_empty())
+        .unwrap_or(&relation.relname)
+        .to_string();
     let columns = stmt
         .cols
         .iter()
@@ -76,19 +83,21 @@ pub(in crate::compiler) fn compile_insert(
         .as_ref()
         .map(|c| compile_on_conflict(c.as_ref()))
         .transpose()?;
-    let returning = compile_projections(&stmt.returning_list)?;
+    let (returning, returning_aliases) = compile_returning_clause(stmt.returning_clause.as_ref())?;
     let with = match stmt.with_clause.as_ref() {
         Some(wc) => compile_with_clause(wc)?,
         None => Vec::new(),
     };
     Ok(InsertStmt {
         table,
+        target_qualifier,
         columns,
         with,
         rows,
         select_source,
         on_conflict,
         returning,
+        returning_aliases,
     })
 }
 

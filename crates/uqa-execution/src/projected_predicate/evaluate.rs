@@ -8,10 +8,13 @@
 
 use uqa_core::Value;
 use uqa_sql::ast::BinaryOp;
-use uqa_sql::expr::{cast_value, eval_binary_values, eval_comparison_truth, truthy};
+use uqa_sql::expr::{
+    cast_value_from, eval_binary_values, eval_binary_values_with_integer_width,
+    eval_comparison_truth, negate_value, truthy,
+};
 use uqa_sql::SQLError;
 
-use super::ProjectedExpr;
+use super::{ProjectedExpr, ProjectedIntPredicate};
 use crate::PhysicalRowView;
 
 static NULL_VALUE: Value = Value::Null;
@@ -62,7 +65,7 @@ fn evaluate_truth<F: FieldValues + ?Sized>(
     fields: &F,
 ) -> Result<Option<bool>, SQLError> {
     let truth = match expression {
-        ProjectedExpr::Binary { op, lhs, rhs } if is_comparison(*op) => {
+        ProjectedExpr::Binary { op, lhs, rhs, .. } if is_comparison(*op) => {
             let lhs = evaluate(lhs, fields)?;
             let rhs = evaluate(rhs, fields)?;
             eval_comparison_truth(*op, lhs.as_value(), rhs.as_value())?
@@ -75,6 +78,7 @@ fn evaluate_truth<F: FieldValues + ?Sized>(
         } => evaluate_int_comparison_truth(fields.field(*field), *op, *literal, *field_on_left)?,
         ProjectedExpr::Not(expression) => evaluate_truth(expression, fields)?.map(|value| !value),
         ProjectedExpr::And(items) => evaluate_truth_and(items, fields)?,
+        ProjectedExpr::IntFieldConjunction(items) => evaluate_int_conjunction_truth(items, fields)?,
         ProjectedExpr::Or(items) => evaluate_truth_or(items, fields)?,
         ProjectedExpr::IsNull {
             expression,
@@ -141,10 +145,25 @@ fn evaluate<'a, F: FieldValues + ?Sized>(
     let value = match expression {
         ProjectedExpr::Field(index) => ProjectedValue::Borrowed(fields.field(*index)),
         ProjectedExpr::Literal(value) => ProjectedValue::Borrowed(value),
-        ProjectedExpr::Binary { op, lhs, rhs } => {
+        ProjectedExpr::Binary {
+            op,
+            lhs,
+            rhs,
+            integer_width,
+        } => {
             let lhs = evaluate(lhs, fields)?;
             let rhs = evaluate(rhs, fields)?;
-            ProjectedValue::Owned(eval_binary_values(*op, lhs.as_value(), rhs.as_value())?)
+            ProjectedValue::Owned(eval_binary_values_with_integer_width(
+                *op,
+                lhs.as_value(),
+                rhs.as_value(),
+                *integer_width,
+            )?)
+        }
+        ProjectedExpr::UnaryMinus(expression) => {
+            let source_ty = projected_source_type(expression);
+            let value = evaluate(expression, fields)?;
+            ProjectedValue::Owned(negate_value(value.as_value(), source_ty)?)
         }
         ProjectedExpr::IntFieldComparison {
             field,
@@ -165,6 +184,9 @@ fn evaluate<'a, F: FieldValues + ?Sized>(
             })
         }
         ProjectedExpr::And(items) => ProjectedValue::Owned(evaluate_and(items, fields)?),
+        ProjectedExpr::IntFieldConjunction(items) => ProjectedValue::Owned(truth_to_value(
+            evaluate_int_conjunction_truth(items, fields)?,
+        )),
         ProjectedExpr::Or(items) => ProjectedValue::Owned(evaluate_or(items, fields)?),
         ProjectedExpr::IsNull {
             expression,
@@ -197,11 +219,30 @@ fn evaluate<'a, F: FieldValues + ?Sized>(
             })
         }
         ProjectedExpr::Cast { expression, ty } => {
+            let source_ty = match expression.as_ref() {
+                ProjectedExpr::Cast { ty, .. } => Some(ty.as_str()),
+                ProjectedExpr::Literal(Value::Int(_)) => Some("integer"),
+                ProjectedExpr::Literal(Value::Bytes(_)) => Some("bytea"),
+                _ => None,
+            };
             let value = evaluate(expression, fields)?;
-            ProjectedValue::Owned(cast_value(value.as_value(), ty)?)
+            ProjectedValue::Owned(cast_value_from(value.as_value(), ty, source_ty)?)
         }
     };
     Ok(value)
+}
+
+fn projected_source_type(expression: &ProjectedExpr) -> Option<&str> {
+    match expression {
+        ProjectedExpr::Cast { ty, .. } => Some(ty),
+        ProjectedExpr::UnaryMinus(inner) => projected_source_type(inner),
+        ProjectedExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => {
+            Some("integer")
+        }
+        ProjectedExpr::Literal(Value::Int(_)) => Some("bigint"),
+        ProjectedExpr::Literal(Value::Bytes(_)) => Some("bytea"),
+        _ => None,
+    }
 }
 
 fn evaluate_int_comparison(
@@ -287,6 +328,34 @@ fn evaluate_truth_and<F: FieldValues + ?Sized>(
     let mut saw_null = false;
     for item in items {
         match evaluate_truth(item, fields)? {
+            Some(false) => return Ok(Some(false)),
+            None => saw_null = true,
+            Some(true) => {}
+        }
+    }
+    Ok(if saw_null { None } else { Some(true) })
+}
+
+fn evaluate_int_conjunction_truth<F: FieldValues + ?Sized>(
+    items: &[ProjectedIntPredicate],
+    fields: &F,
+) -> Result<Option<bool>, SQLError> {
+    let mut saw_null = false;
+    for item in items {
+        let truth = match item {
+            ProjectedIntPredicate::Comparison {
+                field,
+                op,
+                literal,
+                field_on_left,
+            } => {
+                evaluate_int_comparison_truth(fields.field(*field), *op, *literal, *field_on_left)?
+            }
+            ProjectedIntPredicate::Between { field, low, high } => {
+                evaluate_int_between_truth(fields.field(*field), *low, *high)?
+            }
+        };
+        match truth {
             Some(false) => return Ok(Some(false)),
             None => saw_null = true,
             Some(true) => {}

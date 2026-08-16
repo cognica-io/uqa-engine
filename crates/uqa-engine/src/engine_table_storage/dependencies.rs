@@ -16,6 +16,31 @@ use super::{
 use crate::{HNSWIndexParams, VectorIndexSpec};
 
 impl Engine {
+    pub(crate) fn generated_columns_referencing_column(
+        &self,
+        table_name: &str,
+        column: &str,
+    ) -> StorageBackendResult<Vec<String>> {
+        let table = self
+            .table_entries()
+            .into_iter()
+            .find(|(name, _)| name == table_name)
+            .map(|(_, state)| state)
+            .ok_or_else(|| table_not_found(table_name))?;
+        let columns = table.columns.read();
+        let dependents = columns
+            .iter()
+            .filter(|candidate| candidate.name != column)
+            .filter(|candidate| {
+                candidate.generated.as_ref().is_some_and(|generated| {
+                    schema_expr_references_column(&generated.expression, column)
+                })
+            })
+            .map(|candidate| candidate.name.clone())
+            .collect();
+        Ok(dependents)
+    }
+
     pub(super) fn resolve_table_ddl_target(
         &self,
         name: &str,
@@ -233,13 +258,20 @@ impl Engine {
         let mut dependents = Vec::new();
         for (table_name, table) in self.table_entries() {
             for column in table.columns.read().iter() {
-                let Some(default) = &column.default else {
-                    continue;
-                };
-                if self
-                    .stored_sequence_targets_in_expr(default)?
-                    .contains(sequence)
-                {
+                let mut depends = false;
+                if let Some(default) = &column.default {
+                    depends = self
+                        .stored_sequence_targets_in_expr(default)?
+                        .contains(sequence);
+                }
+                if !depends {
+                    if let Some(generated) = &column.generated {
+                        depends = self
+                            .stored_sequence_targets_in_expr(&generated.expression)?
+                            .contains(sequence);
+                    }
+                }
+                if depends {
                     dependents.push(format!("{table_name}.{}", column.name));
                 }
             }
@@ -248,7 +280,7 @@ impl Engine {
             return Ok(());
         }
         Err(StorageBackendError::Other(format!(
-            "column default(s) `{}` depend on sequence `{sequence}`",
+            "column schema expression(s) `{}` depend on sequence `{sequence}`",
             dependents.join("`, `")
         )))
     }
@@ -266,6 +298,9 @@ impl Engine {
                     .check
                     .as_ref()
                     .is_some_and(|expr| schema_expr_references_relation(expr, target))
+                || column.generated.as_ref().is_some_and(|generated| {
+                    schema_expr_references_relation(&generated.expression, target)
+                })
         }) || table
             .table_checks
             .read()
@@ -312,6 +347,12 @@ impl Engine {
                 {
                     if schema_expr_references_relation(expression, &from_relation) {
                         rename_schema_expr_relation(expression, &from_relation, to)?;
+                        changed = true;
+                    }
+                }
+                if let Some(generated) = &mut column.generated {
+                    if schema_expr_references_relation(&generated.expression, &from_relation) {
+                        rename_schema_expr_relation(&mut generated.expression, &from_relation, to)?;
                         changed = true;
                     }
                 }
@@ -381,6 +422,22 @@ impl Engine {
                         changed = true;
                     } else if !is_target && schema_expr_references_relation(expression, &target) {
                         rename_schema_expr_qualified_column(expression, &target, from, to)?;
+                        changed = true;
+                    }
+                }
+                if let Some(generated) = &mut column.generated {
+                    if is_target && schema_expr_references_column(&generated.expression, from) {
+                        rename_schema_expr_column(&mut generated.expression, from, to)?;
+                        changed = true;
+                    } else if !is_target
+                        && schema_expr_references_relation(&generated.expression, &target)
+                    {
+                        rename_schema_expr_qualified_column(
+                            &mut generated.expression,
+                            &target,
+                            from,
+                            to,
+                        )?;
                         changed = true;
                     }
                 }
@@ -472,9 +529,12 @@ impl Engine {
                     .check
                     .as_ref()
                     .is_some_and(|expr| schema_expr_references_column(expr, column))
+                || candidate.generated.as_ref().is_some_and(|generated| {
+                    schema_expr_references_column(&generated.expression, column)
+                })
             {
                 return Err(StorageBackendError::Other(format!(
-                    "ALTER TABLE DROP COLUMN `{table_name}`.`{column}` rejected: column `{}` has a dependent DEFAULT/CHECK expression",
+                    "ALTER TABLE DROP COLUMN `{table_name}`.`{column}` rejected: column `{}` has a dependent DEFAULT/CHECK/generation expression",
                     candidate.name
                 )));
             }

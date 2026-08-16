@@ -6,11 +6,8 @@
 
 //! Engine adapter selecting adaptive or sort aggregation per grouping set.
 
-use super::{
-    projection_columns, CteScope, Engine, QueryBlockPlan, SQLError, SQLParam, SpillBuffer,
-};
-use uqa_execution::{AggregateExecutor, Batch, ExecResult, RowSchema};
-use uqa_sql::expr::RowLookup;
+use super::{CteScope, Engine, QueryBlockPlan, SQLError, SQLParam, SpillBuffer};
+use uqa_execution::{AggregateExecutor, Batch, ExecResult, ProjectedRow, RowSchema};
 
 enum AggregateSet {
     Adaptive(Box<super::adaptive::AdaptiveAggregateSet>),
@@ -27,7 +24,7 @@ pub(in crate::sql) struct PhysicalAggregateExecutor<'a> {
     engine: &'a Engine,
     params: &'a [SQLParam],
     ctes: &'a CteScope,
-    input_schema: Vec<String>,
+    input_row_schema: RowSchema,
     output_schema: RowSchema,
     output_budget: usize,
     sets: Vec<AggregateSet>,
@@ -36,10 +33,11 @@ pub(in crate::sql) struct PhysicalAggregateExecutor<'a> {
 impl<'a> PhysicalAggregateExecutor<'a> {
     pub(in crate::sql) fn new(
         engine: &'a Engine,
-        statement: &'a QueryBlockPlan,
+        statement: &QueryBlockPlan,
         params: &'a [SQLParam],
         ctes: &'a CteScope,
-        input_schema: Vec<String>,
+        input_schema: RowSchema,
+        output_schema: RowSchema,
         work_mem_bytes: usize,
     ) -> Result<Self, SQLError> {
         let statements = grouping_set_statements(statement);
@@ -54,6 +52,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
                         relaxed,
                         set_budget,
                         &input_schema,
+                        params,
                     )
                     .map(|set| AggregateSet::Adaptive(Box::new(set)));
                 }
@@ -68,6 +67,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
                                 (set_budget / 2).max(1),
                                 phase_budget,
                                 &input_schema,
+                                params,
                             )?,
                         ))
                     } else {
@@ -91,8 +91,8 @@ impl<'a> PhysicalAggregateExecutor<'a> {
             engine,
             params,
             ctes,
-            input_schema,
-            output_schema: RowSchema::new(projection_columns(&statement.projections)),
+            input_row_schema: input_schema,
+            output_schema,
             output_budget: (work_mem_bytes / 3).max(1),
             sets,
         })
@@ -124,7 +124,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
                     self.engine,
                     &statement,
                     input,
-                    &self.input_schema,
+                    &self.input_row_schema,
                     &self.output_schema,
                     self.params,
                     self.ctes,
@@ -165,7 +165,7 @@ impl AggregateExecutor for PhysicalAggregateExecutor<'_> {
         })
     }
 
-    fn consume_projected_row(&mut self, row: &dyn RowLookup) -> ExecResult<()> {
+    fn consume_projected_row(&mut self, row: &ProjectedRow<'_, '_>) -> ExecResult<()> {
         for set in &mut self.sets {
             let AggregateSet::Adaptive(set) = set else {
                 return Err(uqa_execution::ExecError::Other(

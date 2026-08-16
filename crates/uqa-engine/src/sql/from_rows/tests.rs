@@ -64,3 +64,32 @@ fn score_projection_uses_explicit_provenance_even_for_zero() {
         engine_func_intercept(None, "score_bm25", &args, &unscored_row, &mut evaluate).unwrap_err();
     assert!(error.to_string().contains("score-bearing"), "{error}");
 }
+
+#[test]
+fn qualified_score_projection_uses_structured_provenance_identity() {
+    use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema};
+
+    let row = OwnedPhysicalRow::new(
+        RowSchema::with_identities(
+            vec!["body".into(), SCORE_PROVENANCE_COLUMN.into()],
+            vec![
+                ColumnIdentity::qualified("hit", "body"),
+                ColumnIdentity::qualified("hit", SCORE_PROVENANCE_COLUMN),
+            ],
+            vec![None, None],
+        ),
+        PhysicalRow::from_values(vec![Value::Str("rust".into()), Value::Float(0.25)]),
+    );
+    let args = [
+        ScalarExpr::qualified_column("hit", "body"),
+        ScalarExpr::Literal(Value::Str("rust".into())),
+    ];
+    let mut evaluate = |expr: &ScalarExpr| match expr {
+        ScalarExpr::Literal(value) => Ok(value.clone()),
+        _ => Ok(Value::Null),
+    };
+    assert_eq!(
+        engine_func_intercept(None, "score_bm25", &args, &row, &mut evaluate).unwrap(),
+        Some(Value::Float(0.25))
+    );
+}

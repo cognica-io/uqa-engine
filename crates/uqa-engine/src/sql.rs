@@ -50,6 +50,7 @@ mod dml;
 mod driver;
 mod engine_api;
 mod from_rows;
+mod generated;
 mod mutability;
 mod plan_executor;
 mod planning;
@@ -68,13 +69,14 @@ use mutability::{is_transaction_control, query_may_mutate_engine};
 use planning::compile_logical_plans;
 use planning::lower_statement;
 pub(super) use planning::{execute_compiled_statement, optimize_engine_plan};
-pub(crate) use plpgsql_exec::call_user_scalar_function;
+pub(crate) use plpgsql_exec::{call_bound_user_scalar_function, call_user_scalar_function};
 
 use aggregates::{
     aggregate_value, contains_aggregate, has_aggregate, projection_label_at, AggregateAccumulator,
     PhysicalAggregateExecutor,
 };
 use catalog::build_info_schema_rows;
+pub(in crate::sql) use catalog::virtual_relation_schema;
 use ddl::{
     coerce_to_column_type, column_type_name, core_value_to_json, json_table_arg,
     json_table_value_to_text, json_to_core_value, run_alter_sequence, run_alter_table,
@@ -83,9 +85,8 @@ use ddl::{
 };
 pub(crate) use ddl::{convert_value_to_column_type, validate_vector_dimensions};
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
-use from_rows::{
-    build_join_spill_with_ctes, engine_func_intercept, prefix_row, ColumnPrune, QualifierFilters,
-};
+use from_rows::{build_join_spill_with_ctes, engine_func_intercept, ColumnPrune, QualifierFilters};
+pub(crate) use generated::refresh_stored_generated_columns;
 use plan_executor::UnifiedPlanExecutor;
 use row_functions::{
     execute_function, execute_function_with_top_k, execute_tree_entries, expect_column_name,
@@ -101,8 +102,8 @@ pub(crate) use row_functions::{
 };
 pub(crate) use select::CteScope;
 use select::{
-    build_projection_row_with_ctes, expand_star_columns, projection_columns, run_explain,
-    ScopedEngineHook,
+    bind_projection_output_schema, build_projection_physical_row_with_ctes, projection_columns,
+    run_explain, ScopedEngineHook,
 };
 use where_eval::execute_mixed_where;
 pub(crate) use where_eval::expr_is_null_free as expr_is_null_free_public;
@@ -122,9 +123,6 @@ const SCORE_PROVENANCE_COLUMN: &str = "\0uqa.score_bearing";
 
 fn is_score_provenance_column(column: &str) -> bool {
     column == SCORE_PROVENANCE_COLUMN
-        || column
-            .strip_suffix(SCORE_PROVENANCE_COLUMN)
-            .is_some_and(|prefix| prefix.ends_with('.'))
 }
 
 /// Resolve reserved system-schema aliases only when the local name belongs to

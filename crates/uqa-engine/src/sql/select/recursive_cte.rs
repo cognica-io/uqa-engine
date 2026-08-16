@@ -97,6 +97,7 @@ pub(in crate::sql) fn materialize_recursive_cte(
         cte.columns.clone()
     };
     let mut working = alias_query_output_to_shared(engine, anchor, &anchor_columns)?;
+    let anchor_schema = working.row_schema().clone();
 
     let work_mem = physical_work_mem_bytes(engine)?.max(1);
     // The accumulated rows and UNION duplicate state are live together. Give
@@ -137,7 +138,7 @@ pub(in crate::sql) fn materialize_recursive_cte(
     }
 
     let rows = accumulated
-        .into_shared(anchor_columns.clone())
+        .into_shared(anchor_schema)
         .map_err(physical_exec_error)?;
 
     if order_by.is_empty() && limit.is_none() && offset.is_none() {
@@ -217,10 +218,10 @@ pub(in crate::sql) fn alias_query_output_to_shared(
                         .cloned()
                         .unwrap_or_else(|| source.clone())
                 };
-                (output, source.clone())
+                (output, index)
             })
             .collect::<Vec<_>>();
-        operator = Box::new(uqa_execution::ColumnSelection::with_mapping(
+        operator = Box::new(uqa_execution::ColumnSelection::with_positions(
             operator, mapping,
         ));
     }
@@ -254,15 +255,15 @@ pub(in crate::sql) fn filter_new_recursive_rows(
     // The source is already disk-backed. Retain no cardinality-sized tail
     // while constructing the next working set.
     let mut output = uqa_execution::SpillBuffer::new(1);
-    let schema = uqa_execution::RowSchema::new(columns.to_vec());
+    let schema = input.row_schema().clone();
     let reader = input.reader().map_err(physical_exec_error)?;
     for batch in reader {
         let batch = batch.map_err(physical_exec_error)?;
         let mut rows = Vec::with_capacity(batch.rows.len().min(uqa_execution::DEFAULT_BATCH_SIZE));
         for row in batch.rows {
-            let row = batch.schema.view(&row).to_result_row();
+            let result_row = batch.schema.view(&row).to_result_row();
             if seen
-                .insert_row(&row, columns)
+                .insert_row(&result_row, columns)
                 .map_err(physical_exec_error)?
             {
                 rows.push(row);
@@ -270,11 +271,12 @@ pub(in crate::sql) fn filter_new_recursive_rows(
         }
         if !rows.is_empty() {
             output
-                .push(uqa_execution::Batch::new(schema.clone(), rows))
+                .push(uqa_execution::Batch::from_physical_rows(
+                    schema.clone(),
+                    rows,
+                ))
                 .map_err(physical_exec_error)?;
         }
     }
-    output
-        .into_shared(columns.to_vec())
-        .map_err(physical_exec_error)
+    output.into_shared(schema).map_err(physical_exec_error)
 }

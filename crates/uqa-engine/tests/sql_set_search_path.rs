@@ -112,10 +112,13 @@ fn current_schema_functions_follow_the_logical_session_catalog() {
         .unwrap();
     assert_eq!(
         explicit.rows[0]["schemas"],
-        uqa_core::Value::List(vec![
-            uqa_core::Value::Str("app".into()),
-            uqa_core::Value::Str("public".into()),
-        ])
+        uqa_core::Value::Array(
+            uqa_core::ArrayValue::try_new(vec![
+                uqa_core::Value::Str("app".into()),
+                uqa_core::Value::Str("public".into()),
+            ])
+            .unwrap()
+        )
     );
 
     let implicit = eng
@@ -123,11 +126,14 @@ fn current_schema_functions_follow_the_logical_session_catalog() {
         .unwrap();
     assert_eq!(
         implicit.rows[0]["schemas"],
-        uqa_core::Value::List(vec![
-            uqa_core::Value::Str("pg_catalog".into()),
-            uqa_core::Value::Str("app".into()),
-            uqa_core::Value::Str("public".into()),
-        ])
+        uqa_core::Value::Array(
+            uqa_core::ArrayValue::try_new(vec![
+                uqa_core::Value::Str("pg_catalog".into()),
+                uqa_core::Value::Str("app".into()),
+                uqa_core::Value::Str("public".into()),
+            ])
+            .unwrap()
+        )
     );
 }
 

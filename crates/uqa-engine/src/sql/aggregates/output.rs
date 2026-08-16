@@ -8,12 +8,12 @@
 
 use super::{
     aggregate_slot_index, aggregate_value_with_args, compile_having_aggregate_slots,
-    compile_projection_aggregate_slots, eval_scalar, expr_references_columns, exprs_match,
-    group_context_row, AggregateAccumulator, CteScope, Engine, PlanSubqueryArena, QueryBlockPlan,
-    ResultRow, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, ScopedEngineHook, SpillBuffer,
-    Value,
+    compile_projection_aggregate_slots, contains_aggregate, eval_scalar, expr_references_columns,
+    exprs_match, group_context_row, AggregateAccumulator, CteScope, Engine, PlanSubqueryArena,
+    QueryBlockPlan, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, ScopedEngineHook,
+    SpillBuffer, Value,
 };
-use uqa_execution::{Batch, PhysicalRow, RowSchema};
+use uqa_execution::{Batch, OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_sql::expr::RowLookup;
 
 pub(super) struct AggregateOutputPlan {
@@ -46,6 +46,8 @@ impl AggregateOutputPlan {
         statement: &QueryBlockPlan,
         aggregate_targets: &[ScalarExpr],
         relaxed: bool,
+        input_schema: &RowSchema,
+        params: &[SQLParam],
     ) -> Result<Self, SQLError> {
         let finalizers = aggregate_targets
             .iter()
@@ -67,17 +69,28 @@ impl AggregateOutputPlan {
             .enumerate()
             .map(|(projection_index, projection)| {
                 let first_aggregate = aggregate_cursor;
-                let expression = compile_projection_aggregate_slots(
+                let contained_aggregate = contains_aggregate(engine, &projection.expr);
+                let expression = uqa_execution::bind_type_introspection_with_resolver(
+                    projection.expr.clone(),
+                    input_schema,
+                    params,
                     engine,
-                    &projection.expr,
-                    &mut aggregate_cursor,
-                )?;
+                );
+                let expression =
+                    compile_projection_aggregate_slots(engine, &expression, &mut aggregate_cursor)?;
                 if aggregate_cursor != first_aggregate {
                     let uses_group_row = references_external_row(&expression);
                     return Ok(AggregateProjectionPlan::Evaluate(AggregateExpressionPlan {
                         expression,
                         uses_lookup: true,
                         uses_group_row,
+                    }));
+                }
+                if contained_aggregate {
+                    return Ok(AggregateProjectionPlan::Evaluate(AggregateExpressionPlan {
+                        expression,
+                        uses_lookup: false,
+                        uses_group_row: false,
                     }));
                 }
                 if !expr_references_columns(&projection.expr) {
@@ -111,7 +124,14 @@ impl AggregateOutputPlan {
             .having
             .as_ref()
             .map(|having| {
-                let expression = compile_having_aggregate_slots(engine, having, aggregate_targets)?;
+                let having = uqa_execution::bind_type_introspection_with_resolver(
+                    having.clone(),
+                    input_schema,
+                    params,
+                    engine,
+                );
+                let expression =
+                    compile_having_aggregate_slots(engine, &having, aggregate_targets)?;
                 let uses_group_row = references_external_row(&expression);
                 Ok::<_, SQLError>(AggregateExpressionPlan {
                     expression,
@@ -174,9 +194,12 @@ pub(super) fn finish_group(
                     aggregate_values: &aggregate_values,
                     row,
                 };
-                let context = ScalarEvalContext::from_row_lookup(&lookup, params)
+                let mut context = ScalarEvalContext::from_row_lookup(&lookup, params)
                     .with_function_hook(&hook)
                     .with_subquery_runner(&subquery_arena);
+                if let Some(row) = row {
+                    context = context.with_physical_outer_row(&row.schema, &row.row);
+                }
                 values.push(eval_scalar(&plan.expression, &context)?);
             }
             AggregateProjectionPlan::Evaluate(plan) => {
@@ -200,19 +223,20 @@ pub(super) fn finish_group(
 
     if let Some(having) = output_plan.having.as_ref() {
         let having_row = having.uses_group_row.then(|| {
-            let mut row = group_row
+            group_row
                 .take()
-                .unwrap_or_else(|| group_context_row(statement, group_values));
-            row.extend(labels.iter().cloned().zip(values.iter().cloned()));
-            row
+                .unwrap_or_else(|| group_context_row(statement, group_values))
         });
         let lookup = AggregateOutputLookup {
             aggregate_values: &aggregate_values,
             row: having_row.as_ref(),
         };
-        let context = ScalarEvalContext::from_row_lookup(&lookup, params)
+        let mut context = ScalarEvalContext::from_row_lookup(&lookup, params)
             .with_function_hook(&hook)
             .with_subquery_runner(&subquery_arena);
+        if let Some(row) = having_row.as_ref() {
+            context = context.with_physical_outer_row(&row.schema, &row.row);
+        }
         if !uqa_sql::expr::truthy(&eval_scalar(&having.expression, &context)?) {
             return Ok(None);
         }
@@ -222,7 +246,7 @@ pub(super) fn finish_group(
 
 struct AggregateOutputLookup<'a> {
     aggregate_values: &'a [Value],
-    row: Option<&'a ResultRow>,
+    row: Option<&'a OwnedPhysicalRow>,
 }
 
 impl RowLookup for AggregateOutputLookup<'_> {
@@ -232,9 +256,18 @@ impl RowLookup for AggregateOutputLookup<'_> {
             .or_else(|| self.row.and_then(|row| row.column(name)))
     }
 
-    fn qualified_column(&self, qualifier: &str, column: &str, key: &str) -> Option<&Value> {
+    fn column_is_ambiguous(&self, name: &str) -> bool {
+        self.row.is_some_and(|row| row.column_is_ambiguous(name))
+    }
+
+    fn qualified_column(&self, qualifier: &str, column: &str) -> Option<&Value> {
         self.row
-            .and_then(|row| row.qualified_column(qualifier, column, key))
+            .and_then(|row| row.qualified_column(qualifier, column))
+    }
+
+    fn qualified_column_is_ambiguous(&self, qualifier: &str, column: &str) -> bool {
+        self.row
+            .is_some_and(|row| row.qualified_column_is_ambiguous(qualifier, column))
     }
 
     fn visit_columns(&self, visitor: &mut dyn FnMut(&str, &Value)) {
@@ -242,35 +275,29 @@ impl RowLookup for AggregateOutputLookup<'_> {
             row.visit_columns(visitor);
         }
     }
-
-    fn visit_lookup_columns(&self, visitor: &mut dyn FnMut(&str, &Value)) {
-        if let Some(row) = self.row {
-            row.visit_lookup_columns(visitor);
-        }
-    }
-
-    fn result_row(&self) -> Option<&ResultRow> {
-        self.row
-    }
 }
 
 fn references_external_row(expression: &ScalarExpr) -> bool {
     match expression {
-        ScalarExpr::Star | ScalarExpr::QualifiedColumn { .. } => true,
+        ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
+        | ScalarExpr::Position(_)
+        | ScalarExpr::QualifiedColumn { .. } => true,
         ScalarExpr::Column(column) => aggregate_slot_index(column).is_none(),
         ScalarExpr::Func { args, filter, .. } => {
             args.iter().any(references_external_row)
                 || filter.as_deref().is_some_and(references_external_row)
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-            items.iter().any(references_external_row)
-        }
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => items.iter().any(references_external_row),
         ScalarExpr::Binary { lhs, rhs, .. } => {
             references_external_row(lhs) || references_external_row(rhs)
         }
-        ScalarExpr::Not(inner) | ScalarExpr::Cast { expr: inner, .. } => {
-            references_external_row(inner)
-        }
+        ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
+        | ScalarExpr::Cast { expr: inner, .. } => references_external_row(inner),
         ScalarExpr::IsNull { expr, .. } => references_external_row(expr),
         ScalarExpr::Between { expr, low, high } => {
             references_external_row(expr)
@@ -295,7 +322,7 @@ fn references_external_row(expression: &ScalarExpr) -> bool {
         ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }
         | ScalarExpr::InSubquery { .. } => true,
-        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => false,
+        ScalarExpr::Default | ScalarExpr::Literal(_) | ScalarExpr::Param(_) => false,
     }
 }
 

@@ -8,9 +8,10 @@
 
 use super::{
     coerce_to_column_type, ddl_storage_error, eval_lowered_expression, index_vectors_for_type,
-    rewrite_column_values_to_type, AlterTableAction, AlterTableStmt, BTreeMap, ColumnType, Engine,
-    RowUpdateVectors, SQLError, SQLResult, Value,
+    rewrite_column_values_to_type, AlterTableAction, AlterTableStmt, BTreeMap, ColumnType,
+    Document, Engine, RowUpdateVectors, SQLError, SQLResult, Value,
 };
+use uqa_sql::ast::{GeneratedColumn, GeneratedColumnKind};
 
 pub(in crate::sql) fn run_alter_table(
     engine: &Engine,
@@ -49,7 +50,7 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
     }
     match stmt.action {
         AlterTableAction::AddColumn {
-            column,
+            mut column,
             if_not_exists,
         } => {
             let col_name = column.name.clone();
@@ -64,13 +65,35 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
                     "ALTER TABLE ADD COLUMN: column `{col_name}` already exists"
                 )));
             }
+            let mut candidate_columns = engine
+                .try_describe_table(&stmt.table)
+                .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?
+                .ok_or_else(|| SQLError::UnknownTable(stmt.table.clone()))?;
+            candidate_columns.push(column.clone());
+            let key_constraints = engine
+                .try_key_constraints(&stmt.table)
+                .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?;
+            let foreign_keys = engine
+                .try_foreign_keys(&stmt.table)
+                .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?;
+            crate::sql::generated::prepare_generated_columns(
+                engine,
+                &stmt.qualifier,
+                &mut candidate_columns,
+                &key_constraints,
+                &foreign_keys,
+            )?;
+            column.generated = candidate_columns
+                .last()
+                .and_then(|candidate| candidate.generated.clone());
+            let generated_kind = column.generated.as_ref().map(|generated| generated.kind);
             match column.ty {
                 ColumnType::Vector(dim) | ColumnType::Tensor(dim) => {
                     engine
                         .create_vector_field(&stmt.table, col_name.clone(), dim)
                         .map_err(|err| ddl_storage_error("ALTER TABLE vector field", err))?;
                 }
-                ColumnType::Text => {
+                ColumnType::Text if generated_kind != Some(GeneratedColumnKind::Virtual) => {
                     if let Err(e) = engine.add_fts_field(&stmt.table, col_name.clone()) {
                         return Err(SQLError::Internal(format!("add_fts_field: {e}")));
                     }
@@ -86,21 +109,47 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
             engine
                 .try_register_column(&stmt.table, column)
                 .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN", e))?;
-            let default_expr = engine
-                .try_column_default_expr(&stmt.table, &col_name)
-                .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN default", e))?;
-            backfill_added_column(
-                engine,
-                &stmt.table,
-                &col_name,
-                default_expr.as_ref(),
-                column_not_null,
-            )?;
+            if let Some(kind) = generated_kind {
+                validate_and_rewrite_generated_rows(
+                    engine,
+                    &stmt.table,
+                    kind == GeneratedColumnKind::Stored,
+                )?;
+            } else {
+                let default_expr = engine
+                    .try_column_default_expr(&stmt.table, &col_name)
+                    .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN default", e))?;
+                backfill_added_column(
+                    engine,
+                    &stmt.table,
+                    &col_name,
+                    default_expr.as_ref(),
+                    column_not_null,
+                )?;
+            }
             engine
                 .try_persist_table_schema(&stmt.table)
                 .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN", e))?;
         }
         AlterTableAction::AddKeyConstraint { constraint } => {
+            let mut columns = engine
+                .try_describe_table(&stmt.table)
+                .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
+                .ok_or_else(|| SQLError::UnknownTable(stmt.table.clone()))?;
+            let mut key_constraints = engine
+                .try_key_constraints(&stmt.table)
+                .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
+            key_constraints.push(constraint.clone());
+            let foreign_keys = engine
+                .try_foreign_keys(&stmt.table)
+                .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
+            crate::sql::generated::prepare_generated_columns(
+                engine,
+                &stmt.qualifier,
+                &mut columns,
+                &key_constraints,
+                &foreign_keys,
+            )?;
             validate_added_key_constraint(engine, &stmt.table, &constraint)?;
             engine
                 .add_key_constraint(&stmt.table, &constraint)
@@ -168,6 +217,7 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
             }
         }
         AlterTableAction::SetDefault { name, default } => {
+            reject_default_change_on_generated_column(engine, &stmt.table, &name)?;
             if !engine
                 .set_column_default(&stmt.table, &name, Some(default))
                 .map_err(|err| ddl_storage_error("ALTER COLUMN SET DEFAULT", err))?
@@ -181,6 +231,7 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
                 .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
         }
         AlterTableAction::DropDefault { name } => {
+            reject_default_change_on_generated_column(engine, &stmt.table, &name)?;
             if !engine
                 .set_column_default(&stmt.table, &name, None)
                 .map_err(|err| ddl_storage_error("ALTER COLUMN DROP DEFAULT", err))?
@@ -192,6 +243,83 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
             engine
                 .try_persist_table_schema(&stmt.table)
                 .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
+        }
+        AlterTableAction::SetExpression { name, expression } => {
+            let mut columns = engine
+                .try_describe_table(&stmt.table)
+                .map_err(|error| ddl_storage_error("ALTER COLUMN SET EXPRESSION", error))?
+                .ok_or_else(|| SQLError::UnknownTable(stmt.table.clone()))?;
+            let column = columns
+                .iter_mut()
+                .find(|column| column.name == name)
+                .ok_or_else(|| SQLError::UnknownColumn(format!("{}.{name}", stmt.table)))?;
+            let Some(current) = column.generated.as_ref() else {
+                return Err(SQLError::TypeMismatch(format!(
+                    "column `{name}` of relation `{}` is not a generated column",
+                    stmt.table
+                )));
+            };
+            let kind = current.kind;
+            let generated = GeneratedColumn {
+                kind,
+                expression: Box::new(expression),
+                function_dependencies: Vec::new(),
+            };
+            column.generated = Some(generated.clone());
+            let key_constraints = engine
+                .try_key_constraints(&stmt.table)
+                .map_err(|error| ddl_storage_error("ALTER COLUMN SET EXPRESSION", error))?;
+            let foreign_keys = engine
+                .try_foreign_keys(&stmt.table)
+                .map_err(|error| ddl_storage_error("ALTER COLUMN SET EXPRESSION", error))?;
+            crate::sql::generated::prepare_generated_columns(
+                engine,
+                &stmt.qualifier,
+                &mut columns,
+                &key_constraints,
+                &foreign_keys,
+            )?;
+            let generated = columns
+                .iter()
+                .find(|column| column.name == name)
+                .and_then(|column| column.generated.clone())
+                .ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "generated column `{name}` disappeared during validation"
+                    ))
+                })?;
+            engine
+                .set_column_generated(&stmt.table, &name, Some(generated))
+                .map_err(|error| ddl_storage_error("ALTER COLUMN SET EXPRESSION", error))?;
+            validate_and_rewrite_generated_rows(
+                engine,
+                &stmt.table,
+                kind == GeneratedColumnKind::Stored,
+            )?;
+        }
+        AlterTableAction::DropExpression { name } => {
+            let columns = engine
+                .try_describe_table(&stmt.table)
+                .map_err(|error| ddl_storage_error("ALTER COLUMN DROP EXPRESSION", error))?
+                .ok_or_else(|| SQLError::UnknownTable(stmt.table.clone()))?;
+            let column = columns
+                .iter()
+                .find(|column| column.name == name)
+                .ok_or_else(|| SQLError::UnknownColumn(format!("{}.{name}", stmt.table)))?;
+            let Some(generated) = column.generated.as_ref() else {
+                return Err(SQLError::TypeMismatch(format!(
+                    "column `{name}` of relation `{}` is not a generated column",
+                    stmt.table
+                )));
+            };
+            if generated.kind == GeneratedColumnKind::Virtual {
+                return Err(SQLError::Unsupported(format!(
+                    "ALTER TABLE / DROP EXPRESSION is not supported for virtual generated column `{name}`"
+                )));
+            }
+            engine
+                .set_column_generated(&stmt.table, &name, None)
+                .map_err(|error| ddl_storage_error("ALTER COLUMN DROP EXPRESSION", error))?;
         }
         AlterTableAction::SetNotNull { name } => {
             ensure_column_exists(engine, &stmt.table, &name)?;
@@ -216,13 +344,48 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
                 .try_persist_table_schema(&stmt.table)
                 .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
         }
-        AlterTableAction::AlterColumnType { name, ty } => {
+        AlterTableAction::AlterColumnType { name, ty, using } => {
             ensure_column_exists(engine, &stmt.table, &name)?;
+            let mut candidate_columns = engine
+                .try_describe_table(&stmt.table)
+                .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?
+                .ok_or_else(|| SQLError::UnknownTable(stmt.table.clone()))?;
+            let candidate = candidate_columns
+                .iter_mut()
+                .find(|column| column.name == name)
+                .ok_or_else(|| SQLError::UnknownColumn(format!("{}.{name}", stmt.table)))?;
+            candidate.ty.clone_from(&ty);
+            let target_generated_kind =
+                candidate.generated.as_ref().map(|generated| generated.kind);
+            if target_generated_kind.is_none() {
+                let dependents = engine
+                    .generated_columns_referencing_column(&stmt.table, &name)
+                    .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?;
+                if !dependents.is_empty() {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "cannot alter type of column `{name}` because generated column(s) `{}` depend on it",
+                        dependents.join("`, `")
+                    )));
+                }
+            }
+            let key_constraints = engine
+                .try_key_constraints(&stmt.table)
+                .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?;
+            let foreign_keys = engine
+                .try_foreign_keys(&stmt.table)
+                .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?;
+            crate::sql::generated::prepare_generated_columns(
+                engine,
+                &stmt.qualifier,
+                &mut candidate_columns,
+                &key_constraints,
+                &foreign_keys,
+            )?;
             let old_ty = engine
                 .column_type(&stmt.table, &name)
-                .map_err(|err| ddl_storage_error("ALTER COLUMN TYPE", err))?;
-            let old_was_vector =
-                matches!(old_ty, Some(ColumnType::Vector(_) | ColumnType::Tensor(_)));
+                .map_err(|err| ddl_storage_error("ALTER COLUMN TYPE", err))?
+                .ok_or_else(|| SQLError::UnknownColumn(format!("{}.{name}", stmt.table)))?;
+            let old_was_vector = matches!(&old_ty, ColumnType::Vector(_) | ColumnType::Tensor(_));
             let new_is_vector = matches!(&ty, ColumnType::Vector(_) | ColumnType::Tensor(_));
 
             // Row rewrites maintain every currently registered vector index.
@@ -236,12 +399,21 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
                     .try_drop_vector_indexes_for_column(&stmt.table, &name)
                     .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
             }
-            rewrite_column_values_to_type(engine, &stmt.table, &name, &ty)?;
+            if target_generated_kind.is_none() {
+                rewrite_column_values_to_type(
+                    engine,
+                    &stmt.table,
+                    &name,
+                    &old_ty,
+                    &ty,
+                    using.as_ref(),
+                )?;
+            }
             engine
                 .set_column_type(&stmt.table, &name, &ty)
                 .map_err(|err| ddl_storage_error("ALTER COLUMN TYPE", err))?;
             match ty {
-                ColumnType::Text => {
+                ColumnType::Text if target_generated_kind != Some(GeneratedColumnKind::Virtual) => {
                     if let Err(e) = engine.add_fts_field(&stmt.table, name.clone()) {
                         return Err(SQLError::Internal(format!("add_fts_field: {e}")));
                     }
@@ -253,12 +425,148 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
                 }
                 _ => {}
             }
+            if let Some(kind) = target_generated_kind {
+                validate_and_rewrite_generated_rows(
+                    engine,
+                    &stmt.table,
+                    kind == GeneratedColumnKind::Stored,
+                )?;
+            }
             engine
                 .try_persist_table_schema(&stmt.table)
                 .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
         }
     }
     Ok(SQLResult::empty())
+}
+
+fn reject_default_change_on_generated_column(
+    engine: &Engine,
+    table: &str,
+    column: &str,
+) -> Result<(), SQLError> {
+    if crate::sql::generated::generated_column_kind(engine, table, column)?.is_some() {
+        return Err(SQLError::TypeMismatch(format!(
+            "column `{column}` of relation `{table}` is a generated column; use SET EXPRESSION or DROP EXPRESSION"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_and_rewrite_generated_rows(
+    engine: &Engine,
+    table: &str,
+    rewrite_physical_rows: bool,
+) -> Result<(), SQLError> {
+    let doc_ids = engine.table_doc_ids(table)?;
+    let mut rows = Vec::with_capacity(doc_ids.len());
+    for doc_id in &doc_ids {
+        let Some(mut document) = engine.get_document(table, *doc_id)? else {
+            continue;
+        };
+        crate::sql::generated::refresh_stored_generated_columns(engine, table, &mut document)?;
+        rows.push((*doc_id, document));
+    }
+    validate_key_constraint_rows(engine, table, &rows)?;
+    if rewrite_physical_rows {
+        let mut replacements = Vec::with_capacity(rows.len());
+        let mut remaps_primary_key = false;
+        for (old_doc_id, document) in rows {
+            let new_doc_id = crate::sql::dml::integer_primary_key_doc_id(engine, table, &document)?
+                .unwrap_or(old_doc_id);
+            remaps_primary_key |= new_doc_id != old_doc_id;
+            replacements.push((old_doc_id, new_doc_id, document));
+        }
+        if remaps_primary_key {
+            for (old_doc_id, _, _) in &replacements {
+                engine.delete_document(table, *old_doc_id)?;
+            }
+        }
+        for (old_doc_id, new_doc_id, document) in replacements {
+            let vectors = crate::sql::dml::document_vectors(engine, table, &document)?;
+            engine.add_prepared_document_with_vector_values(
+                table,
+                if remaps_primary_key {
+                    new_doc_id
+                } else {
+                    old_doc_id
+                },
+                document,
+                vectors,
+                remaps_primary_key,
+            )?;
+            if remaps_primary_key {
+                engine
+                    .advance_next_id(table, new_doc_id)
+                    .map_err(|error| ddl_storage_error("generated primary key rewrite", error))?;
+            }
+        }
+    }
+    validate_all_table_rows(engine)
+}
+
+fn validate_key_constraint_rows(
+    engine: &Engine,
+    table: &str,
+    rows: &[(uqa_core::DocId, Document)],
+) -> Result<(), SQLError> {
+    for constraint in engine
+        .try_key_constraints(table)
+        .map_err(|error| ddl_storage_error("generated-column validation", error))?
+    {
+        let mut seen = std::collections::BTreeSet::new();
+        for (_, document) in rows {
+            let values = constraint
+                .columns
+                .iter()
+                .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
+                .collect::<Vec<_>>();
+            let contains_null = values.iter().any(|value| matches!(value, Value::Null));
+            if constraint.kind == uqa_sql::ast::TableKeyConstraintKind::PrimaryKey && contains_null
+            {
+                return Err(SQLError::TypeMismatch(format!(
+                    "PRIMARY KEY constraint contains NULL values on table `{table}`"
+                )));
+            }
+            if constraint.kind == uqa_sql::ast::TableKeyConstraintKind::Unique
+                && contains_null
+                && !constraint.nulls_not_distinct
+            {
+                continue;
+            }
+            if !seen.insert(values) {
+                return Err(SQLError::TypeMismatch(format!(
+                    "{} constraint would be violated by generated values on table `{table}`",
+                    match constraint.kind {
+                        uqa_sql::ast::TableKeyConstraintKind::PrimaryKey => "PRIMARY KEY",
+                        uqa_sql::ast::TableKeyConstraintKind::Unique => "UNIQUE",
+                    }
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_all_table_rows(engine: &Engine) -> Result<(), SQLError> {
+    for table in engine
+        .table_names()
+        .map_err(|error| ddl_storage_error("generated-column validation", error))?
+    {
+        for doc_id in engine.table_doc_ids(&table)? {
+            let Some(document) = engine.get_document(&table, doc_id)? else {
+                continue;
+            };
+            crate::sql::dml::validate_document_constraints(
+                engine,
+                &table,
+                &document,
+                &[],
+                Some(doc_id),
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn ensure_column_exists(engine: &Engine, table: &str, column: &str) -> Result<(), SQLError> {
@@ -320,10 +628,10 @@ fn validate_added_key_constraint(
         .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
     if let Some(name) = constraint.name.as_deref() {
         let check_name_exists = engine
-            .try_check_constraints(table)
+            .try_check_constraint_definitions(table)
             .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
             .iter()
-            .any(|(existing, _)| existing.as_deref() == Some(name));
+            .any(|existing| existing.name.as_deref() == Some(name));
         let foreign_name_exists = engine
             .try_foreign_keys(table)
             .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?

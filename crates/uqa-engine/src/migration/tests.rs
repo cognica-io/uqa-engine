@@ -127,10 +127,15 @@ fn python_array_types_preserve_elements_and_dimensions() {
             ty: ColumnType::Array(Box::new(ColumnType::Text)),
             primary_key: false,
             not_null: false,
+            not_null_explicit: false,
+            not_null_name: None,
             auto_increment: false,
             unique: false,
             default: None,
+            generated: None,
             check: None,
+            check_name: None,
+            check_enforced: true,
             references: None,
         },
         ColumnDef {
@@ -138,20 +143,71 @@ fn python_array_types_preserve_elements_and_dimensions() {
             ty: ColumnType::Array(Box::new(ColumnType::Integer)),
             primary_key: false,
             not_null: false,
+            not_null_explicit: false,
+            not_null_name: None,
             auto_increment: false,
             unique: false,
             default: None,
+            generated: None,
             check: None,
+            check_name: None,
+            check_enforced: true,
             references: None,
         },
     ];
     let document = coerce_migrated_document(document, &columns).unwrap();
     assert_eq!(
         document["tags"],
-        Value::List(vec![Value::Str("1".into()), Value::Str("2".into())])
+        Value::Array(
+            uqa_core::ArrayValue::try_new(vec![Value::Str("1".into()), Value::Str("2".into()),])
+                .expect("one-dimensional text array")
+        )
     );
     assert_eq!(
         document["numbers"],
-        Value::List(vec![Value::Int(3), Value::Int(4)])
+        Value::Array(
+            uqa_core::ArrayValue::try_new(vec![Value::Int(3), Value::Int(4)])
+                .expect("one-dimensional integer array")
+        )
     );
+}
+
+#[test]
+fn python_schema_migration_preserves_postgresql_scalar_type_identity() {
+    let mut column = PythonColumnDef {
+        name: "value".into(),
+        type_name: String::new(),
+        primary_key: false,
+        not_null: false,
+        auto_increment: false,
+        default: None,
+        vector_dimensions: None,
+        unique: false,
+        numeric_precision: None,
+        numeric_scale: None,
+    };
+    for (name, expected) in [
+        ("smallint", ColumnType::SmallInteger),
+        ("integer", ColumnType::Integer),
+        ("bigint", ColumnType::BigInteger),
+        ("oid", ColumnType::Oid),
+        ("xid", ColumnType::Xid),
+        ("real", ColumnType::Real),
+        ("double precision", ColumnType::DoublePrecision),
+        ("text", ColumnType::Text),
+        ("name", ColumnType::Name),
+        ("uuid", ColumnType::Uuid),
+        ("varchar", ColumnType::Varchar(None)),
+        ("bpchar", ColumnType::Bpchar),
+        ("interval", ColumnType::Interval),
+    ] {
+        column.type_name = name.into();
+        assert_eq!(rust_column_type(&column).unwrap(), expected, "{name}");
+    }
+
+    column.type_name = "vendor_specific_type".into();
+    let error = rust_column_type(&column).expect_err("unknown types must not become text");
+    let message = error.to_string();
+    assert!(message.contains("vendor_specific_type"), "{message}");
+    assert!(message.contains("value"), "{message}");
 }

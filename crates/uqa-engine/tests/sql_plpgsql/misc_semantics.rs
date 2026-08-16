@@ -30,7 +30,7 @@ fn nested_blocks_and_exception_recovery() {
          END;
          $$ LANGUAGE plpgsql",
     );
-    // PG17: abcd - the inner handler recovers, outer code continues.
+    // PG18: abcd - the inner handler recovers, outer code continues.
     assert_eq!(
         scalar(&eng, "SELECT nested() AS v"),
         Value::Str("abcd".into())
@@ -48,7 +48,7 @@ fn variable_defaults_and_declarations() {
            b int DEFAULT 20;
            c int;
          BEGIN
-           -- c defaults to NULL (PG17).
+           -- c defaults to NULL (PG18).
            IF c IS NULL THEN
              RETURN a + b;
            END IF;
@@ -97,7 +97,7 @@ fn return_query_execute_dynamic() {
          END;
          $$ LANGUAGE plpgsql",
     );
-    // PG17: 5, 10
+    // PG18: 5, 10
     let result = exec(&eng, "SELECT * FROM rqe(5)");
     let values: Vec<Value> = result
         .rows
@@ -110,7 +110,7 @@ fn return_query_execute_dynamic() {
 #[test]
 fn positional_dollar_references_in_body() {
     let eng = engine();
-    // Unnamed parameters are only addressable as $n (PG17: 304).
+    // Unnamed parameters are only addressable as $n (PG18: 304).
     exec(
         &eng,
         "CREATE FUNCTION dollar_ref(int, int) RETURNS int AS $$
@@ -142,7 +142,7 @@ fn call_procedure_inside_function_body() {
          END;
          $$ LANGUAGE plpgsql",
     );
-    // PG17: 1
+    // PG18: 1
     assert_eq!(scalar(&eng, "SELECT call_proc() AS v"), Value::Int(1));
 }
 
@@ -155,10 +155,10 @@ fn named_arguments_and_aliases_in_from() {
            SELECT g FROM generate_series(1, n) AS g
          $$ LANGUAGE sql",
     );
-    // Named argument in FROM position (PG17: 1, 2).
+    // Named argument in FROM position (PG18: 1, 2).
     let result = exec(&eng, "SELECT * FROM gen5(n => 2)");
     assert_eq!(result.rows.len(), 2);
-    // Column alias list renames the output column (PG17: val = 2).
+    // Column alias list renames the output column (PG18: val = 2).
     assert_eq!(
         scalar(
             &eng,
@@ -179,7 +179,7 @@ fn default_arguments_make_overloads_ambiguous() {
         &eng,
         "CREATE FUNCTION amb(a int, b int DEFAULT 1) RETURNS int AS $$ SELECT 2 $$ LANGUAGE sql",
     );
-    // PG17: function amb(integer) is not unique.
+    // PG18: function amb(integer) is not unique.
     let err = exec_err(&eng, "SELECT amb(9) AS v");
     assert!(
         err.to_string()
@@ -191,11 +191,10 @@ fn default_arguments_make_overloads_ambiguous() {
 }
 
 #[test]
-fn percent_type_declarations_are_best_effort() {
+fn percent_type_declarations_resolve_and_enforce_the_referenced_column_type() {
     let eng = engine();
-    exec(&eng, "CREATE TABLE typed (id INTEGER, name TEXT)");
+    exec(&eng, "CREATE TABLE typed (id SMALLINT, name TEXT)");
     exec(&eng, "INSERT INTO typed VALUES (7, 'seven')");
-    // %TYPE resolves to no cast (best effort); values pass through.
     exec(
         &eng,
         "CREATE FUNCTION typed_lookup(which int) RETURNS text AS $$
@@ -209,6 +208,79 @@ fn percent_type_declarations_are_best_effort() {
     assert_eq!(
         scalar(&eng, "SELECT typed_lookup(7) AS v"),
         Value::Str("seven".into())
+    );
+
+    exec(
+        &eng,
+        "CREATE FUNCTION typed_overflow() RETURNS typed.id%TYPE AS $$
+         DECLARE v typed.id%TYPE;
+         BEGIN
+           v := 40000;
+           RETURN v;
+         END;
+         $$ LANGUAGE plpgsql",
+    );
+    let error = exec_err(&eng, "SELECT typed_overflow() AS v");
+    assert_eq!(error.sqlstate(), Some("22003"));
+    assert!(error.to_string().contains("smallint out of range"));
+}
+
+#[test]
+fn percent_type_preserves_quoted_dotted_schema_relation_and_column_identities() {
+    let eng = engine();
+    exec(&eng, "CREATE SCHEMA \"app.dot\"");
+    exec(
+        &eng,
+        "CREATE TABLE \"app.dot\".\"typed.dot\" (\"id.dot\" SMALLINT)",
+    );
+    exec(
+        &eng,
+        "CREATE FUNCTION quoted_percent_type(input_value \"app.dot\".\"typed.dot\".\"id.dot\"%TYPE)
+         RETURNS \"app.dot\".\"typed.dot\".\"id.dot\"%TYPE AS $$
+         DECLARE local_value \"app.dot\".\"typed.dot\".\"id.dot\"%TYPE;
+         BEGIN
+           local_value := input_value;
+           RETURN local_value;
+         END;
+         $$ LANGUAGE plpgsql",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT quoted_percent_type(7::smallint) AS v"),
+        Value::Int(7)
+    );
+    let mismatch = exec_err(&eng, "SELECT quoted_percent_type(40000) AS v");
+    assert_eq!(mismatch.sqlstate(), Some("42883"));
+    exec(
+        &eng,
+        "CREATE FUNCTION quoted_percent_type_overflow()
+         RETURNS \"app.dot\".\"typed.dot\".\"id.dot\"%TYPE AS $$
+         DECLARE local_value \"app.dot\".\"typed.dot\".\"id.dot\"%TYPE;
+         BEGIN
+           local_value := 40000;
+           RETURN local_value;
+         END;
+         $$ LANGUAGE plpgsql",
+    );
+    let error = exec_err(&eng, "SELECT quoted_percent_type_overflow() AS v");
+    assert_eq!(error.sqlstate(), Some("22003"));
+}
+
+#[test]
+fn select_into_assigns_duplicate_dotted_labels_by_position() {
+    let eng = engine();
+    exec(
+        &eng,
+        "CREATE FUNCTION positional_into() RETURNS int AS $$
+         DECLARE first_value int; second_value int;
+         BEGIN
+           SELECT 11 AS \"dup.name\", 22 AS \"dup.name\" INTO first_value, second_value;
+           RETURN first_value * 100 + second_value;
+         END;
+         $$ LANGUAGE plpgsql",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT positional_into() AS v"),
+        Value::Int(1122)
     );
 }
 

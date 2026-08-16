@@ -13,10 +13,15 @@ fn integer_column(name: &str, default: Option<Expr>) -> ColumnDef {
         ty: ColumnType::Integer,
         primary_key: false,
         not_null: false,
+        not_null_explicit: false,
+        not_null_name: None,
         auto_increment: false,
         unique: false,
         default,
+        generated: None,
         check: None,
+        check_name: None,
+        check_enforced: true,
         references: None,
     }
 }

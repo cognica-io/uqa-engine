@@ -108,6 +108,60 @@ fn correlated_scalar_subquery_resolves_unaliased_outer_table_name() {
     );
 }
 
+#[test]
+fn correlated_subquery_keeps_quoted_dotted_qualifier_and_column_structured() {
+    let engine = Engine::new();
+    engine
+        .sql("CREATE TABLE \"outer.table\" (\"column.dot\" INTEGER)", &[])
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO \"outer.table\" (\"column.dot\") VALUES (7)",
+            &[],
+        )
+        .unwrap();
+    let result = engine
+        .sql(
+            "SELECT (SELECT \"outer.alias\".\"column.dot\" + 1) AS value
+             FROM \"outer.table\" AS \"outer.alias\"",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows[0]["value"], uqa_core::Value::Int(8));
+}
+
+#[test]
+fn correlated_subquery_rejects_an_ambiguous_current_scope_column() {
+    let engine = seeded();
+    let error = engine
+        .sql(
+            "SELECT id FROM papers
+             WHERE (
+                 SELECT id
+                 FROM allowed a JOIN allowed b ON a.id = b.id
+                 WHERE papers.id > 0
+                 LIMIT 1
+             ) = papers.id",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42702"));
+}
+
+#[test]
+fn correlated_subquery_preserves_outer_scope_ambiguity() {
+    let engine = seeded();
+    let error = engine
+        .sql(
+            "SELECT 1
+             FROM papers p JOIN allowed a ON true
+             WHERE EXISTS (SELECT 1 WHERE id = 1)",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42702"));
+}
+
 /// The outer reference must bind to the outer row, not to the inner relation's
 /// identically named column. If `papers.id` bound to `allowed.id` this would
 /// return every row instead of only the seeded one.
@@ -149,4 +203,75 @@ fn outer_only_column_still_resolves() {
         ),
         vec![1]
     );
+}
+
+#[test]
+fn correlated_subquery_in_window_partition_uses_the_physical_outer_row() {
+    let engine = Engine::new();
+    engine
+        .sql("CREATE TABLE window_outer (n INTEGER)", &[])
+        .unwrap();
+    engine
+        .sql("CREATE TABLE window_inner (x INTEGER)", &[])
+        .unwrap();
+    engine
+        .sql("INSERT INTO window_outer VALUES (1), (3)", &[])
+        .unwrap();
+    engine
+        .sql("INSERT INTO window_inner VALUES (1), (2), (3)", &[])
+        .unwrap();
+
+    let result = engine
+        .sql(
+            "SELECT window_outer.n,
+                    row_number() OVER (
+                        PARTITION BY (
+                            SELECT count(*) FROM window_inner
+                            WHERE window_inner.x <= window_outer.n
+                        )
+                        ORDER BY window_outer.n
+                    ) AS rn
+             FROM window_outer
+             ORDER BY window_outer.n",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.value_at(0, 0), Some(&uqa_core::Value::Int(1)));
+    assert_eq!(result.value_at(0, 1), Some(&uqa_core::Value::Int(1)));
+    assert_eq!(result.value_at(1, 0), Some(&uqa_core::Value::Int(3)));
+    assert_eq!(result.value_at(1, 1), Some(&uqa_core::Value::Int(1)));
+}
+
+#[test]
+fn correlated_subquery_in_group_key_uses_the_physical_outer_row() {
+    let engine = Engine::new();
+    engine
+        .sql("CREATE TABLE group_outer (id INTEGER)", &[])
+        .unwrap();
+    engine
+        .sql("CREATE TABLE group_inner (id INTEGER)", &[])
+        .unwrap();
+    engine
+        .sql("INSERT INTO group_outer VALUES (1), (3)", &[])
+        .unwrap();
+    engine
+        .sql("INSERT INTO group_inner VALUES (1), (2), (3)", &[])
+        .unwrap();
+
+    let result = engine
+        .sql(
+            "SELECT count(*) AS c
+             FROM group_outer
+             GROUP BY (
+                 SELECT count(*) FROM group_inner
+                 WHERE group_inner.id <= group_outer.id
+             )
+             ORDER BY c",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.value_at(0, 0), Some(&uqa_core::Value::Int(1)));
+    assert_eq!(result.value_at(1, 0), Some(&uqa_core::Value::Int(1)));
 }

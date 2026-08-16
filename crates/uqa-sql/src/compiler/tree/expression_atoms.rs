@@ -79,9 +79,10 @@ pub(in crate::compiler) fn compile_column_ref(c: &pg_query::protobuf::ColumnRef)
             }
             NodeEnum::AStar(_) if c.fields.len() == 1 && index == 0 => return Ok(Expr::Star),
             NodeEnum::AStar(_) => {
-                return Err(SQLError::Unsupported(
-                    "qualified wildcard projections are not represented by Expr::Star".into(),
-                ));
+                let qualifier = parts.pop().ok_or_else(|| {
+                    SQLError::Internal("qualified wildcard has no relation name".into())
+                })?;
+                return Ok(Expr::QualifiedStar(qualifier));
             }
             other => {
                 return Err(SQLError::Internal(format!(
@@ -186,6 +187,7 @@ pub(in crate::compiler) fn compile_func_call(f: &pg_query::protobuf::FuncCall) -
         None => None,
     };
     Ok(Expr::Func {
+        binding: None,
         name: raw_name,
         args,
         distinct: f.agg_distinct,

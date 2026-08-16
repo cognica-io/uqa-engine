@@ -40,6 +40,7 @@ pub(in crate::compiler) fn compile_select(
     }
     let from = compile_from_list(&stmt.from_clause)?;
     let projections = compile_projections(&stmt.target_list)?;
+    let values = compile_values_lists(&stmt.values_lists)?;
     let r#where = stmt
         .where_clause
         .as_ref()
@@ -80,47 +81,51 @@ pub(in crate::compiler) fn compile_select(
     //     lives in `stmt.larg`. We preserve that full subtree on `SetOp::left`
     //     and mirror its basic clauses on the parent for output-column
     //     discovery and backward compatibility with serialized AST users.
-    let (projections, from, r#where, group_by, order_by, limit, offset) = if set_op.is_some() {
-        // Promote the outer (combined) clauses onto the SetOp and
-        // replace the parent's clauses with the LHS branch's.
-        if let Some(so) = set_op.as_mut() {
-            so.combined_order_by = order_by;
-            so.combined_limit = limit;
-            so.combined_offset = offset;
-        }
-        let lhs_node = stmt
-            .larg
-            .as_deref()
-            .ok_or_else(|| SQLError::Internal("set op missing left".into()))?;
-        let lhs = compile_select(lhs_node)?;
-        if let Some(so) = set_op.as_mut() {
-            so.left = Some(Box::new(lhs.clone()));
-        }
-        (
-            lhs.projections,
-            lhs.from,
-            lhs.r#where,
-            lhs.group_by,
-            lhs.order_by,
-            lhs.limit,
-            lhs.offset,
-        )
-    } else {
-        (
-            projections,
-            from,
-            r#where,
-            group_by,
-            order_by,
-            limit,
-            offset,
-        )
-    };
+    let (projections, values, from, r#where, group_by, order_by, limit, offset) =
+        if set_op.is_some() {
+            // Promote the outer (combined) clauses onto the SetOp and
+            // replace the parent's clauses with the LHS branch's.
+            if let Some(so) = set_op.as_mut() {
+                so.combined_order_by = order_by;
+                so.combined_limit = limit;
+                so.combined_offset = offset;
+            }
+            let lhs_node = stmt
+                .larg
+                .as_deref()
+                .ok_or_else(|| SQLError::Internal("set op missing left".into()))?;
+            let lhs = compile_select(lhs_node)?;
+            if let Some(so) = set_op.as_mut() {
+                so.left = Some(Box::new(lhs.clone()));
+            }
+            (
+                lhs.projections,
+                lhs.values,
+                lhs.from,
+                lhs.r#where,
+                lhs.group_by,
+                lhs.order_by,
+                lhs.limit,
+                lhs.offset,
+            )
+        } else {
+            (
+                projections,
+                values,
+                from,
+                r#where,
+                group_by,
+                order_by,
+                limit,
+                offset,
+            )
+        };
 
     let (distinct, distinct_on) = compile_distinct_clause(&stmt.distinct_clause)?;
 
     Ok(SelectStmt {
         projections,
+        values,
         from,
         r#where,
         group_by,
@@ -134,6 +139,18 @@ pub(in crate::compiler) fn compile_select(
         distinct,
         distinct_on,
     })
+}
+
+pub(in crate::compiler) fn compile_values_lists(nodes: &[Node]) -> Result<Vec<Vec<Expr>>> {
+    nodes
+        .iter()
+        .map(|node| {
+            let Some(NodeEnum::List(list)) = node.node.as_ref() else {
+                return Err(SQLError::Internal("VALUES contains a malformed row".into()));
+            };
+            list.items.iter().map(compile_expr).collect()
+        })
+        .collect()
 }
 
 pub(in crate::compiler) fn compile_distinct_clause(nodes: &[Node]) -> Result<(bool, Vec<Expr>)> {
@@ -165,6 +182,8 @@ pub(in crate::compiler) fn compile_from_list(nodes: &[Node]) -> Result<Option<Fr
             right: Box::new(compile_from_node(node)?),
             kind: JoinKind::Cross,
             on: None,
+            using: None,
+            natural: false,
             lateral,
         };
     }

@@ -39,7 +39,7 @@ fn sql_language_scalar_and_setof() {
     );
     let result = exec(&eng, "SELECT * FROM above(1)");
     assert_eq!(result.rows.len(), 2);
-    // An empty SETOF result produces zero rows in FROM (PG17).
+    // An empty SETOF result produces zero rows in FROM (PG18).
     assert_eq!(
         scalar(&eng, "SELECT count(*) AS n FROM above(100)"),
         Value::Int(0)
@@ -55,6 +55,32 @@ fn sql_language_scalar_and_setof() {
     );
     assert_eq!(scalar(&eng, "SELECT log_and_count(1) AS v"), Value::Int(1));
     assert_eq!(scalar(&eng, "SELECT log_and_count(2) AS v"), Value::Int(2));
+}
+
+#[test]
+fn sql_language_preserves_quoted_parameter_case() {
+    let eng = engine();
+    exec(
+        &eng,
+        "CREATE FUNCTION sql_quoted_parameter(\"InputValue\" int) RETURNS int AS $$
+           SELECT \"InputValue\"
+         $$ LANGUAGE sql",
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT sql_quoted_parameter(\"InputValue\" => 9) AS value",
+        ),
+        Value::Int(9)
+    );
+    assert_eq!(
+        exec_err(
+            &eng,
+            "SELECT sql_quoted_parameter(inputvalue => 9) AS value",
+        )
+        .sqlstate(),
+        Some("42883")
+    );
 }
 
 #[test]

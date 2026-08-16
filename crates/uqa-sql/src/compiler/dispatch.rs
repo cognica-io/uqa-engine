@@ -21,8 +21,8 @@ use super::relations::{
 use super::routines::{compile_call, compile_create_function, compile_do};
 use super::sequences::{compile_alter_sequence, compile_create_sequence};
 use super::{
-    compile_create_index, compile_create_table, compile_expr, compile_insert, compile_select, Expr,
-    Node, NodeEnum, Result, SQLError, Statement,
+    compile_create_index, compile_create_table, compile_insert, compile_select,
+    compile_values_lists, Node, NodeEnum, Result, SQLError, Statement,
 };
 
 pub fn compile(sql: &str) -> Result<Vec<Statement>> {
@@ -50,18 +50,7 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
             // with empty target_list + populated values_lists. Treat
             // it as a relation-producing statement directly.
             if stmt.target_list.is_empty() && !stmt.values_lists.is_empty() {
-                let mut rows: Vec<Vec<Expr>> = Vec::new();
-                for r in &stmt.values_lists {
-                    let Some(NodeEnum::List(list)) = r.node.as_ref() else {
-                        return Err(SQLError::Internal("VALUES contains a malformed row".into()));
-                    };
-                    let row: Vec<Expr> = list
-                        .items
-                        .iter()
-                        .map(compile_expr)
-                        .collect::<Result<Vec<_>>>()?;
-                    rows.push(row);
-                }
+                let rows = compile_values_lists(&stmt.values_lists)?;
                 return Ok(Statement::Values { rows });
             }
             compile_select(stmt).map(|s| Statement::Select(Box::new(s)))

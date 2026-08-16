@@ -18,26 +18,24 @@ pub(super) fn lower_scalar_expression(
 ) -> ScalarExpr {
     match expression {
         Expr::Star => ScalarExpr::Star,
+        Expr::QualifiedStar(qualifier) => ScalarExpr::QualifiedStar(qualifier),
+        Expr::Default => ScalarExpr::Default,
         Expr::Column(column) => ScalarExpr::Column(column),
-        Expr::QualifiedColumn {
-            qualifier,
-            column,
-            key,
-        } => ScalarExpr::QualifiedColumn {
-            qualifier,
-            column,
-            key,
-        },
+        Expr::QualifiedColumn { qualifier, column } => {
+            ScalarExpr::QualifiedColumn { qualifier, column }
+        }
         Expr::Literal(value) => ScalarExpr::Literal(value),
         Expr::Param(index) => ScalarExpr::Param(index),
         Expr::Func {
             name,
+            binding,
             args,
             distinct,
             order_by,
             filter,
         } => ScalarExpr::Func {
             name,
+            binding,
             args: args
                 .into_iter()
                 .map(|argument| lower_scalar_expression(argument, aggregates, subqueries))
@@ -56,11 +54,22 @@ pub(super) fn lower_scalar_expression(
                 .map(|item| lower_scalar_expression(item, aggregates, subqueries))
                 .collect(),
         ),
+        Expr::Row(items) => ScalarExpr::Row(
+            items
+                .into_iter()
+                .map(|item| lower_scalar_expression(item, aggregates, subqueries))
+                .collect(),
+        ),
         Expr::Binary { op, lhs, rhs } => ScalarExpr::Binary {
             op,
             lhs: Box::new(lower_scalar_expression(*lhs, aggregates, subqueries)),
             rhs: Box::new(lower_scalar_expression(*rhs, aggregates, subqueries)),
         },
+        Expr::UnaryMinus(expression) => ScalarExpr::UnaryMinus(Box::new(lower_scalar_expression(
+            *expression,
+            aggregates,
+            subqueries,
+        ))),
         Expr::Not(expression) => ScalarExpr::Not(Box::new(lower_scalar_expression(
             *expression,
             aggregates,

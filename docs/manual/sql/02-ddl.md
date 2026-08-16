@@ -28,7 +28,31 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 ```
 
-Implemented table properties include columns, defaults, generated serial values, nullability, key constraints, checks, foreign keys, and vector or tensor dimensions. Temporary, unlogged, inherited, partitioned, typed, or tablespace-bound relations are not implemented.
+Implemented table properties include columns, defaults, generated serial values, virtual and stored generated columns, nullability, key constraints, checks, foreign keys, and vector or tensor dimensions. Temporary, unlogged, inherited, partitioned, typed, or tablespace-bound relations are not implemented.
+
+## Generated columns
+
+PostgreSQL 18 generated-column syntax is supported with `VIRTUAL` as the default when neither kind is written:
+
+```sql execute
+CREATE TABLE generated_totals (
+    quantity INTEGER,
+    unit_price NUMERIC(10, 2),
+    display_quantity INTEGER GENERATED ALWAYS AS (quantity + 1),
+    line_total NUMERIC(12, 2) GENERATED ALWAYS AS (quantity * unit_price) STORED
+);
+
+INSERT INTO generated_totals VALUES (2, 4.50, DEFAULT, DEFAULT);
+SELECT display_quantity, line_total FROM generated_totals;
+```
+
+A generation expression can reference non-generated columns in the same row and must be immutable. Subqueries, aggregate or window functions, parameters, `DEFAULT`, whole-row references, and references to another generated column are rejected before the table is created. The implemented expression surface is statically typed before catalog mutation. Stored SQL routine calls bind and persist the exact overload signature used for later evaluation and dependency checks. A generated column cannot also have a default or identity definition.
+
+Virtual generated values are absent from physical row storage and are evaluated only when a logical projection or enforced constraint requires them. Stored generated values are recomputed exactly once at the prepared-write boundary of every insert, update, upsert, merge, referential action, and direct document replacement. Assigning a generated column directly is rejected; `DEFAULT` requests recomputation and is the only accepted explicit assignment.
+
+Virtual generated columns cannot use user-defined routines or UQA-RS engine-defined types and cannot own primary-key, unique, foreign-key, or index constraints. Stored generated columns can participate in those constraints and indexes.
+
+`ALTER TABLE ADD COLUMN` supports both generated kinds, and `ALTER COLUMN ... SET EXPRESSION AS (...)` replaces a generation expression. `DROP EXPRESSION` is available for a stored generated column and retains its last stored values; PostgreSQL 18 rejects that operation for a virtual generated column.
 
 ## Key and uniqueness constraints
 
@@ -90,6 +114,7 @@ Implemented changes include:
 - Rename a column
 - Rename a table
 - Set or drop a column default
+- Set or drop a stored generation expression
 - Set or drop `NOT NULL`
 - Change a column type
 
@@ -101,6 +126,7 @@ ALTER TABLE orders ALTER COLUMN note SET DEFAULT '';
 ALTER TABLE orders ALTER COLUMN state SET NOT NULL;
 ALTER TABLE orders RENAME COLUMN note TO customer_note;
 ALTER TABLE orders ALTER COLUMN total TYPE NUMERIC(20, 2);
+ALTER TABLE generated_totals ALTER COLUMN line_total SET EXPRESSION AS (quantity * unit_price * 2);
 ```
 
 Type changes validate existing values before publishing the new schema. `DROP COLUMN CASCADE` is rejected without changing the table.

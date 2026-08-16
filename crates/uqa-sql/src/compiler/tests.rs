@@ -5,7 +5,34 @@
 //
 
 use super::*;
-use crate::ast::{ColumnType, FromClause, TableKeyConstraintKind};
+use crate::ast::{ColumnType, FromClause, JoinKind, Projection, TableKeyConstraintKind};
+
+#[test]
+fn bundled_parser_is_postgresql_18_4() {
+    let parsed = pg_query::parse("SELECT 1").expect("parser accepts a scalar query");
+    assert_eq!(parsed.protobuf.version, 180_004);
+}
+
+#[test]
+fn returning_row_aliases_preserve_quoted_identifier_case() {
+    let Statement::Insert(insert) = first(
+        "INSERT INTO items VALUES (1) RETURNING WITH (OLD AS \"Image\", NEW AS \"image\") \"Image\".*, \"image\".*",
+    ) else {
+        panic!("expected INSERT");
+    };
+    assert_eq!(insert.returning_aliases.old, "Image");
+    assert_eq!(insert.returning_aliases.new, "image");
+    assert!(insert.returning_aliases.old_explicit);
+    assert!(insert.returning_aliases.new_explicit);
+
+    let error =
+        compile("INSERT INTO items VALUES (1) RETURNING WITH (OLD AS image, NEW AS IMAGE) image.*")
+            .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42712"));
+    assert!(error
+        .to_string()
+        .contains("table name \"image\" specified more than once"));
+}
 
 fn first(sql: &str) -> Statement {
     let mut v = compile(sql).unwrap();
@@ -77,6 +104,21 @@ fn malformed_operator_name_is_not_silently_discarded() {
 }
 
 #[test]
+fn prefix_minus_preserves_the_cast_operand() {
+    let Statement::Select(select) = first("SELECT -1::smallint") else {
+        panic!("expected SELECT");
+    };
+    let [projection] = select.projections.as_slice() else {
+        panic!("expected one projection");
+    };
+    assert!(matches!(
+        &projection.expr,
+        Expr::UnaryMinus(inner)
+            if matches!(inner.as_ref(), Expr::Cast { ty, .. } if ty == "smallint")
+    ));
+}
+
+#[test]
 fn sequence_options_do_not_truncate_or_ignore_values() {
     assert!(compile("CREATE SEQUENCE s START 1.5").is_err());
     let error = compile("CREATE SEQUENCE s CACHE 10").unwrap_err();
@@ -114,6 +156,70 @@ fn create_table_preserves_fixed_character_length() {
 }
 
 #[test]
+fn create_table_preserves_postgresql_scalar_type_identity() {
+    let Statement::CreateTable(table) = first(
+        "CREATE TABLE typed_values (
+            small_value SMALLINT,
+            integer_value INTEGER,
+            big_value BIGINT,
+            oid_value OID,
+            xid_value XID,
+            real_value REAL,
+            double_value DOUBLE PRECISION,
+            text_value TEXT,
+            name_value NAME,
+            uuid_value UUID,
+            varying_value VARCHAR(12),
+            interval_value INTERVAL
+        )",
+    ) else {
+        panic!("not CREATE TABLE");
+    };
+    assert_eq!(
+        table
+            .columns
+            .iter()
+            .map(|column| column.ty.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            ColumnType::SmallInteger,
+            ColumnType::Integer,
+            ColumnType::BigInteger,
+            ColumnType::Oid,
+            ColumnType::Xid,
+            ColumnType::Real,
+            ColumnType::DoublePrecision,
+            ColumnType::Text,
+            ColumnType::Name,
+            ColumnType::Uuid,
+            ColumnType::Varchar(Some(12)),
+            ColumnType::Interval,
+        ]
+    );
+}
+
+#[test]
+fn serial_family_preserves_width_and_sequence_semantics() {
+    let Statement::CreateTable(table) =
+        first("CREATE TABLE generated_ids (small_id SMALLSERIAL, id SERIAL4, big_id SERIAL8)")
+    else {
+        panic!("not CREATE TABLE");
+    };
+    assert_eq!(
+        table
+            .columns
+            .iter()
+            .map(|column| (column.ty.clone(), column.auto_increment))
+            .collect::<Vec<_>>(),
+        vec![
+            (ColumnType::SmallInteger, true),
+            (ColumnType::Integer, true),
+            (ColumnType::BigInteger, true),
+        ]
+    );
+}
+
+#[test]
 fn create_table_preserves_array_element_types_and_dimensions() {
     let Statement::CreateTable(table) =
         first("CREATE TABLE arrays (tags TEXT[], matrix INTEGER[][])")
@@ -127,6 +233,66 @@ fn create_table_preserves_array_element_types_and_dimensions() {
     assert_eq!(
         table.columns[1].ty,
         ColumnType::Array(Box::new(ColumnType::Array(Box::new(ColumnType::Integer))))
+    );
+}
+
+#[test]
+fn routine_type_names_preserve_percent_type_and_named_type_qualification() {
+    let Statement::CreateFunction(function) = first(
+        "CREATE FUNCTION typed_value(v app.items.value%TYPE, d app.amount_domain)
+         RETURNS app.items.id%TYPE LANGUAGE sql AS $$ SELECT 1 $$",
+    ) else {
+        panic!("not CREATE FUNCTION");
+    };
+    assert_eq!(function.params[0].type_name, "app.items.value%type");
+    assert_eq!(
+        function.params[0].type_reference,
+        Some(crate::ast::RoutineColumnTypeReference::new(
+            Some("app".into()),
+            "items".into(),
+            "value".into()
+        ))
+    );
+    assert_eq!(function.params[1].type_name, "app.amount_domain");
+    assert!(matches!(
+        function.returns,
+        crate::ast::FunctionReturns::Scalar { type_name }
+            if type_name == "app.items.id%type"
+    ));
+}
+
+#[test]
+fn routine_builtin_array_names_use_sql_array_spelling() {
+    let Statement::CreateFunction(function) = first(
+        "CREATE FUNCTION array_names(integer[]) RETURNS text[] LANGUAGE sql AS $$ SELECT ARRAY['x'] $$",
+    ) else {
+        panic!("not CREATE FUNCTION");
+    };
+    assert_eq!(function.params[0].type_name, "int4[]");
+    assert!(matches!(
+        function.returns,
+        crate::ast::FunctionReturns::Scalar { type_name } if type_name == "text[]"
+    ));
+}
+
+#[test]
+fn routine_percent_type_keeps_quoted_dotted_components_structured() {
+    let Statement::CreateFunction(function) = first(
+        "CREATE FUNCTION typed_dot(v \"app.dot\".\"items.dot\".\"value.dot\"%TYPE)
+         RETURNS \"app.dot\".\"items.dot\".\"value.dot\"%TYPE LANGUAGE sql AS $$ SELECT $1 $$",
+    ) else {
+        panic!("not CREATE FUNCTION");
+    };
+    let expected = crate::ast::RoutineColumnTypeReference::new(
+        Some("app.dot".into()),
+        "items.dot".into(),
+        "value.dot".into(),
+    );
+    assert_eq!(function.params[0].type_reference, Some(expected.clone()));
+    assert_eq!(function.return_type_reference, Some(expected));
+    assert_eq!(
+        function.params[0].type_name,
+        "\"app.dot\".\"items.dot\".\"value.dot\"%type"
     );
 }
 
@@ -304,6 +470,21 @@ fn table_commands_preserve_qualified_relation_names() {
 }
 
 #[test]
+fn alter_column_type_preserves_the_using_expression() {
+    let Statement::AlterTable(alter) =
+        first("ALTER TABLE metrics ALTER COLUMN value TYPE text USING (value + delta)::text")
+    else {
+        panic!("not ALTER TABLE ALTER COLUMN TYPE");
+    };
+    let crate::ast::AlterTableAction::AlterColumnType { name, ty, using } = alter.action else {
+        panic!("not ALTER COLUMN TYPE");
+    };
+    assert_eq!(name, "value");
+    assert_eq!(ty, ColumnType::Text);
+    assert!(matches!(using, Some(Expr::Cast { ty, .. }) if ty == "text"));
+}
+
+#[test]
 fn insert_with_array_literal() {
     let stmt = first(
         "INSERT INTO docs (id, title, embedding) VALUES \
@@ -385,14 +566,6 @@ fn unsupported_select_clauses_fail_instead_of_losing_semantics() {
 fn unsupported_from_forms_fail_instead_of_becoming_cross_joins() {
     for (sql, expected) in [
         (
-            "SELECT * FROM left_table NATURAL JOIN right_table",
-            "NATURAL JOIN",
-        ),
-        (
-            "SELECT * FROM left_table JOIN right_table USING (id)",
-            "JOIN USING",
-        ),
-        (
             "SELECT * FROM ROWS FROM (generate_series(1, 2), generate_series(3, 4)) AS f(a, b)",
             "ROWS FROM",
         ),
@@ -407,6 +580,47 @@ fn unsupported_from_forms_fail_instead_of_becoming_cross_joins() {
             "unexpected error for {sql}: {error}"
         );
     }
+}
+
+#[test]
+fn join_using_and_natural_metadata_survive_compilation() {
+    let Statement::Select(using_select) =
+        first("SELECT * FROM left_table l FULL JOIN right_table r USING (id, tenant_id) AS joined")
+    else {
+        panic!("expected SELECT");
+    };
+    let Some(FromClause::Join {
+        kind,
+        on,
+        using,
+        natural,
+        ..
+    }) = using_select.from
+    else {
+        panic!("expected USING join");
+    };
+    assert_eq!(kind, JoinKind::Full);
+    assert!(on.is_none());
+    assert!(!natural);
+    let using = using.expect("USING metadata");
+    assert_eq!(using.columns, ["id", "tenant_id"]);
+    assert_eq!(using.alias.as_deref(), Some("joined"));
+
+    let Statement::Select(natural_select) =
+        first("SELECT * FROM left_table NATURAL LEFT JOIN right_table")
+    else {
+        panic!("expected SELECT");
+    };
+    assert!(matches!(
+        natural_select.from,
+        Some(FromClause::Join {
+            kind: JoinKind::Left,
+            on: None,
+            using: None,
+            natural: true,
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -469,6 +683,20 @@ fn ordinary_table_function_keeps_scalar_identifier_arguments() {
 }
 
 #[test]
+fn qualified_wildcard_preserves_its_structured_relation_identity() {
+    let Statement::Select(select) = first("SELECT source.* FROM source") else {
+        panic!("not SELECT");
+    };
+    assert!(matches!(
+        select.projections.as_slice(),
+        [Projection {
+            expr: Expr::QualifiedStar(qualifier),
+            alias: None,
+        }] if qualifier == "source"
+    ));
+}
+
+#[test]
 fn unsupported_cte_control_clauses_fail_explicitly() {
     let not_materialized =
         compile("WITH c AS NOT MATERIALIZED (SELECT 1) SELECT * FROM c").unwrap_err();
@@ -496,6 +724,19 @@ fn unsupported_cte_control_clauses_fail_explicitly() {
         cycle,
         SQLError::Unsupported(message) if message.contains("CYCLE")
     ));
+}
+
+#[test]
+fn cte_values_body_is_preserved() {
+    let Statement::Select(select) =
+        first("WITH rows(id, label) AS (VALUES (1, 'one'), (2, 'two')) SELECT * FROM rows")
+    else {
+        panic!("expected SELECT");
+    };
+    let cte = &select.with[0];
+    assert_eq!(cte.columns, ["id", "label"]);
+    assert_eq!(cte.query.values.len(), 2);
+    assert!(cte.query.projections.is_empty());
 }
 
 #[test]

@@ -11,6 +11,7 @@
 
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLParam};
+use uqa_sql::{ast::ColumnType, SQLError};
 
 fn engine() -> Engine {
     let eng = Engine::new();
@@ -216,6 +217,48 @@ fn multi_branch_union_all_preserves_every_branch() {
         })
         .collect::<Vec<_>>();
     assert_eq!(branches, vec![1, 2, 3, 4]);
+}
+
+#[test]
+fn set_operations_coerce_rows_and_expose_the_postgresql_common_type() {
+    let eng = Engine::new();
+
+    let integers = eng
+        .sql(
+            "SELECT 1::smallint AS value UNION ALL SELECT 2::bigint AS value",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(integers.column_types, [Some(ColumnType::BigInteger)]);
+    assert_eq!(integers.rows[0]["value"], Value::Int(1));
+    assert_eq!(integers.rows[1]["value"], Value::Int(2));
+
+    let unknown_integer = eng
+        .sql("SELECT 1 AS value UNION ALL SELECT '2' AS value", &[])
+        .unwrap();
+    assert_eq!(unknown_integer.column_types, [Some(ColumnType::Integer)]);
+    assert_eq!(unknown_integer.rows[1]["value"], Value::Int(2));
+
+    let dates = eng
+        .sql(
+            "SELECT DATE '2020-01-01' AS value UNION ALL SELECT '2020-01-02' AS value",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(dates.column_types, [Some(ColumnType::Date)]);
+    assert!(dates
+        .rows
+        .iter()
+        .all(|row| matches!(row["value"], Value::Temporal(_))));
+
+    let invalid = eng
+        .sql(
+            "SELECT 1 AS value UNION ALL SELECT 'not-an-int' AS value",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(invalid.sqlstate(), Some("22P02"));
+    assert!(!matches!(invalid, SQLError::Internal(_)));
 }
 
 #[test]

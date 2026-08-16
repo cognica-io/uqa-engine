@@ -5,7 +5,7 @@
 //
 
 use crate::codec::{i16_len, i32_len, Writer};
-use crate::protocol::{FormatCode, PgWireError, TransactionStatus};
+use crate::protocol::{CancelKey, FormatCode, PgWireError, ProtocolVersion, TransactionStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Authentication {
@@ -13,6 +13,9 @@ pub enum Authentication {
     KerberosV5,
     CleartextPassword,
     Md5Password([u8; 4]),
+    Gss,
+    GssContinue(Vec<u8>),
+    Sspi,
     Sasl { mechanisms: Vec<String> },
     SaslContinue(Vec<u8>),
     SaslFinal(Vec<u8>),
@@ -48,17 +51,34 @@ impl GSSEncResponse {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendKeyData {
     pub process_id: i32,
-    pub secret_key: i32,
+    pub secret_key: CancelKey,
+}
+
+impl BackendKeyData {
+    #[must_use]
+    pub fn legacy(process_id: i32, secret_key: i32) -> Self {
+        Self {
+            process_id,
+            secret_key: CancelKey::from_i32(secret_key),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendMessage {
     Authentication(Authentication),
     BackendKeyData(BackendKeyData),
-    ParameterStatus { name: String, value: String },
+    NegotiateProtocolVersion {
+        newest_protocol_version: ProtocolVersion,
+        unrecognized_options: Vec<String>,
+    },
+    ParameterStatus {
+        name: String,
+        value: String,
+    },
     ReadyForQuery(TransactionStatus),
     RowDescription(Vec<FieldDescription>),
     DataRow(Vec<Option<Vec<u8>>>),
@@ -77,7 +97,8 @@ pub enum BackendMessage {
     CopyBothResponse(CopyResponse),
     CopyData(Vec<u8>),
     CopyDone,
-    CopyFail(String),
+    FunctionCallResponse(Option<Vec<u8>>),
+    NotificationResponse(NotificationResponse),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,6 +130,13 @@ impl FieldDescription {
 pub struct CopyResponse {
     pub overall_format: FormatCode,
     pub column_formats: Vec<FormatCode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationResponse {
+    pub process_id: i32,
+    pub channel: String,
+    pub payload: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,9 +209,20 @@ impl ErrorOrNotice {
 
 impl BackendMessage {
     pub fn encode(&self) -> Result<Vec<u8>, PgWireError> {
+        self.encode_for_protocol(ProtocolVersion::LATEST)
+    }
+
+    pub fn encode_for_protocol(
+        &self,
+        protocol_version: ProtocolVersion,
+    ) -> Result<Vec<u8>, PgWireError> {
         match self {
             Self::Authentication(auth) => encode_authentication(auth),
-            Self::BackendKeyData(data) => encode_backend_key_data(*data),
+            Self::BackendKeyData(data) => encode_backend_key_data(data, protocol_version),
+            Self::NegotiateProtocolVersion {
+                newest_protocol_version,
+                unrecognized_options,
+            } => encode_negotiate_protocol_version(*newest_protocol_version, unrecognized_options),
             Self::ParameterStatus { name, value } => encode_parameter_status(name, value),
             Self::ReadyForQuery(status) => encode_ready_for_query(*status),
             Self::RowDescription(fields) => encode_row_description(fields),
@@ -203,15 +242,23 @@ impl BackendMessage {
             Self::CopyBothResponse(response) => encode_copy_response(b'W', response),
             Self::CopyData(bytes) => Writer::frame(b'd', bytes),
             Self::CopyDone => encode_empty_body(b'c'),
-            Self::CopyFail(message) => encode_copy_fail(message),
+            Self::FunctionCallResponse(value) => encode_function_call_response(value.as_deref()),
+            Self::NotificationResponse(notification) => encode_notification_response(notification),
         }
     }
 }
 
 pub fn encode_all(messages: &[BackendMessage]) -> Result<Vec<u8>, PgWireError> {
+    encode_all_for_protocol(messages, ProtocolVersion::LATEST)
+}
+
+pub fn encode_all_for_protocol(
+    messages: &[BackendMessage],
+    protocol_version: ProtocolVersion,
+) -> Result<Vec<u8>, PgWireError> {
     let mut out = Vec::new();
     for message in messages {
-        out.extend(message.encode()?);
+        out.extend(message.encode_for_protocol(protocol_version)?);
     }
     Ok(out)
 }
@@ -245,6 +292,7 @@ pub mod sqlstate {
     pub const PROTOCOL_VIOLATION: &str = "08P01";
     pub const FEATURE_NOT_SUPPORTED: &str = "0A000";
     pub const INVALID_PARAMETER_VALUE: &str = "22023";
+    pub const QUERY_CANCELED: &str = "57014";
     pub const SYNTAX_ERROR: &str = "42601";
     pub const UNDEFINED_TABLE: &str = "42P01";
     pub const INTERNAL_ERROR: &str = "XX000";
@@ -260,6 +308,12 @@ fn encode_authentication(auth: &Authentication) -> Result<Vec<u8>, PgWireError> 
             body.write_i32(5);
             body.write_bytes(salt);
         }
+        Authentication::Gss => body.write_i32(7),
+        Authentication::GssContinue(data) => {
+            body.write_i32(8);
+            body.write_bytes(data);
+        }
+        Authentication::Sspi => body.write_i32(9),
         Authentication::Sasl { mechanisms } => {
             body.write_i32(10);
             for mechanism in mechanisms {
@@ -279,11 +333,37 @@ fn encode_authentication(auth: &Authentication) -> Result<Vec<u8>, PgWireError> 
     Writer::frame(b'R', &body.into_inner())
 }
 
-fn encode_backend_key_data(data: BackendKeyData) -> Result<Vec<u8>, PgWireError> {
+fn encode_backend_key_data(
+    data: &BackendKeyData,
+    protocol_version: ProtocolVersion,
+) -> Result<Vec<u8>, PgWireError> {
+    data.secret_key
+        .validate_for_backend_key_data(protocol_version)?;
     let mut body = Writer::new();
     body.write_i32(data.process_id);
-    body.write_i32(data.secret_key);
+    body.write_bytes(data.secret_key.as_bytes());
     Writer::frame(b'K', &body.into_inner())
+}
+
+fn encode_negotiate_protocol_version(
+    newest_protocol_version: ProtocolVersion,
+    unrecognized_options: &[String],
+) -> Result<Vec<u8>, PgWireError> {
+    if newest_protocol_version.negotiate()? != newest_protocol_version {
+        return Err(PgWireError::UnsupportedProtocolVersion(
+            newest_protocol_version.raw(),
+        ));
+    }
+    let mut body = Writer::new();
+    body.write_i32(newest_protocol_version.raw());
+    body.write_i32(i32_len(
+        unrecognized_options.len(),
+        "NegotiateProtocolVersion option count",
+    )?);
+    for option in unrecognized_options {
+        body.write_cstring(option, "NegotiateProtocolVersion option")?;
+    }
+    Writer::frame(b'v', &body.into_inner())
 }
 
 fn encode_parameter_status(name: &str, value: &str) -> Result<Vec<u8>, PgWireError> {
@@ -385,6 +465,16 @@ fn encode_parameter_description(oids: &[u32]) -> Result<Vec<u8>, PgWireError> {
 }
 
 fn encode_copy_response(tag: u8, response: &CopyResponse) -> Result<Vec<u8>, PgWireError> {
+    if response.overall_format == FormatCode::Text {
+        if let Some((index, _)) = response
+            .column_formats
+            .iter()
+            .enumerate()
+            .find(|(_, format)| **format == FormatCode::Binary)
+        {
+            return Err(PgWireError::BinaryColumnInTextCopy { column: index + 1 });
+        }
+    }
     let mut body = Writer::new();
     body.write_byte(match response.overall_format {
         FormatCode::Text => 0,
@@ -400,10 +490,26 @@ fn encode_copy_response(tag: u8, response: &CopyResponse) -> Result<Vec<u8>, PgW
     Writer::frame(tag, &body.into_inner())
 }
 
-fn encode_copy_fail(message: &str) -> Result<Vec<u8>, PgWireError> {
+fn encode_function_call_response(value: Option<&[u8]>) -> Result<Vec<u8>, PgWireError> {
     let mut body = Writer::new();
-    body.write_cstring(message, "CopyFail message")?;
-    Writer::frame(b'f', &body.into_inner())
+    match value {
+        Some(bytes) => {
+            body.write_i32(i32_len(bytes.len(), "FunctionCallResponse value")?);
+            body.write_bytes(bytes);
+        }
+        None => body.write_i32(-1),
+    }
+    Writer::frame(b'V', &body.into_inner())
+}
+
+fn encode_notification_response(
+    notification: &NotificationResponse,
+) -> Result<Vec<u8>, PgWireError> {
+    let mut body = Writer::new();
+    body.write_i32(notification.process_id);
+    body.write_cstring(&notification.channel, "NotificationResponse channel")?;
+    body.write_cstring(&notification.payload, "NotificationResponse payload")?;
+    Writer::frame(b'A', &body.into_inner())
 }
 
 fn encode_empty_body(tag: u8) -> Result<Vec<u8>, PgWireError> {

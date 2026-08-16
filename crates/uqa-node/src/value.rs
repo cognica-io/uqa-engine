@@ -61,11 +61,28 @@ pub(super) unsafe fn value_to_napi(env: sys::napi_env, value: Value) -> Result<s
             Value::Float(value) => f64::to_napi_value(env, value),
             Value::Decimal(value) => String::to_napi_value(env, value.to_sql_string()),
             Value::Str(value) | Value::FixedChar(value) => String::to_napi_value(env, value),
+            Value::Json(value) | Value::JsonB(value) => {
+                let parsed = serde_json::from_str(&value).map_err(|error| {
+                    Error::from_reason(format!("invalid SQL JSON value: {error}"))
+                })?;
+                value_to_napi(env, value_from_json(parsed))
+            }
             Value::Bytes(value) => Buffer::to_napi_value(env, Buffer::from(value)),
             Value::Temporal(value) => String::to_napi_value(env, value.to_sql_string()),
-            Value::List(values) => {
+            Value::Array(array) => Vec::<JSValue>::to_napi_value(
+                env,
+                array.into_elements().into_iter().map(JSValue).collect(),
+            ),
+            Value::List(values) | Value::Row(values) => {
                 Vec::<JSValue>::to_napi_value(env, values.into_iter().map(JSValue).collect())
             }
+            Value::Record(values) => BTreeMap::<String, JSValue>::to_napi_value(
+                env,
+                values
+                    .into_iter()
+                    .map(|(key, value)| (key, JSValue(value)))
+                    .collect(),
+            ),
             Value::Map(values) => BTreeMap::<String, JSValue>::to_napi_value(
                 env,
                 values
@@ -74,6 +91,27 @@ pub(super) unsafe fn value_to_napi(env: sys::napi_env, value: Value) -> Result<s
                     .collect(),
             ),
         }
+    }
+}
+
+fn value_from_json(value: serde_json::Value) -> Value {
+    match value {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(value) => Value::Bool(value),
+        serde_json::Value::Number(value) => value.as_i64().map_or_else(
+            || Value::Float(value.as_f64().unwrap_or(f64::NAN)),
+            Value::Int,
+        ),
+        serde_json::Value::String(value) => Value::Str(value),
+        serde_json::Value::Array(values) => {
+            Value::List(values.into_iter().map(value_from_json).collect())
+        }
+        serde_json::Value::Object(values) => Value::Map(
+            values
+                .into_iter()
+                .map(|(key, value)| (key, value_from_json(value)))
+                .collect(),
+        ),
     }
 }
 

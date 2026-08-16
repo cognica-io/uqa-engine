@@ -11,14 +11,13 @@ use std::collections::BTreeMap;
 use uqa_core::Value;
 use uqa_sql::ResultRow;
 
-use crate::RowSchema;
+use crate::{Batch, RowSchema};
 
 /// A column vector preserves its position in the declared output schema.
 ///
-/// The current physical row carrier is the map-backed [`ResultRow`], so two
-/// differently-valued expressions with the same output label have already
-/// collapsed before this conversion boundary. Duplicate schema labels remain
-/// visible as separate slots, but they cannot recover values lost upstream.
+/// Duplicate labels remain distinct because conversion from a physical batch
+/// reads each logical position directly. The named-row compatibility
+/// constructor cannot recover values that were already collapsed by a map.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColumnVector {
     pub name: String,
@@ -35,6 +34,50 @@ pub struct ColumnarBatch {
 }
 
 impl ColumnarBatch {
+    /// Convert a positional physical batch without crossing the legacy
+    /// map-backed row boundary. Repeated output labels are matched to repeated
+    /// logical schema positions in order, so differently-valued duplicate
+    /// columns remain distinct for wire and cursor consumers.
+    pub fn from_batch(schema: &[String], batch: Batch) -> Self {
+        let row_count = batch.rows.len();
+        let mut occurrences = BTreeMap::<&str, usize>::new();
+        let positions = schema
+            .iter()
+            .map(|name| {
+                let occurrence = occurrences.entry(name.as_str()).or_default();
+                let position = batch
+                    .schema
+                    .columns()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, input)| input == &name)
+                    .nth(*occurrence)
+                    .map(|(position, _)| position);
+                *occurrence += 1;
+                position
+            })
+            .collect::<Vec<_>>();
+        let mut columns = schema
+            .iter()
+            .map(|name| ColumnVector {
+                name: name.clone(),
+                values: Vec::with_capacity(row_count),
+            })
+            .collect::<Vec<_>>();
+        for row in &batch.rows {
+            let view = batch.schema.view(row);
+            for (column, position) in columns.iter_mut().zip(&positions) {
+                column.values.push(
+                    position
+                        .and_then(|position| view.value_at(position))
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                );
+            }
+        }
+        Self { columns, row_count }
+    }
+
     /// Move map-backed rows into positional columns. A missing projected value
     /// has SQL `NULL` semantics.
     pub fn from_rows(schema: &[String], rows: Vec<ResultRow>) -> Self {
@@ -99,6 +142,20 @@ impl ColumnarBatch {
         self.row_count == 0
     }
 
+    /// Convert the column vectors to row-major positional values without
+    /// passing through a name-keyed map.
+    pub fn into_positional_rows(self) -> Vec<Vec<Value>> {
+        let mut rows = (0..self.row_count)
+            .map(|_| Vec::with_capacity(self.columns.len()))
+            .collect::<Vec<_>>();
+        for column in self.columns {
+            for (row, value) in rows.iter_mut().zip(column.values) {
+                row.push(value);
+            }
+        }
+        rows
+    }
+
     /// Convert back to the legacy named-row representation. Duplicate output
     /// labels necessarily collapse because [`ResultRow`] is a map.
     pub fn into_rows(self) -> Vec<ResultRow> {
@@ -145,5 +202,37 @@ mod tests {
         let batch = ColumnarBatch::from_rows(&["value".into(), "value".into()], vec![row]);
         assert_eq!(batch.columns().len(), 2);
         assert_eq!(batch.columns()[0].values, batch.columns()[1].values);
+    }
+
+    #[test]
+    fn physical_batch_preserves_different_duplicate_values() {
+        let schema = RowSchema::new(vec!["value".into(), "value".into()]);
+        let batch = Batch::from_physical_rows(
+            schema,
+            vec![crate::PhysicalRow::from_values(vec![
+                Value::Int(1),
+                Value::Int(2),
+            ])],
+        );
+        let batch = ColumnarBatch::from_batch(&["value".into(), "value".into()], batch);
+        assert_eq!(batch.columns()[0].values, [Value::Int(1)]);
+        assert_eq!(batch.columns()[1].values, [Value::Int(2)]);
+    }
+
+    #[test]
+    fn positional_rows_preserve_duplicate_values() {
+        let schema = RowSchema::new(vec!["value".into(), "value".into()]);
+        let batch = Batch::from_physical_rows(
+            schema,
+            vec![crate::PhysicalRow::from_values(vec![
+                Value::Int(1),
+                Value::Int(2),
+            ])],
+        );
+        assert_eq!(
+            ColumnarBatch::from_batch(&["value".into(), "value".into()], batch)
+                .into_positional_rows(),
+            [vec![Value::Int(1), Value::Int(2)]]
+        );
     }
 }

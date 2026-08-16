@@ -9,7 +9,7 @@
 
 use std::borrow::Cow;
 
-use uqa_core::{DecimalValue, TemporalValue, Value};
+use uqa_core::{ArrayValue, DecimalValue, TemporalValue, Value};
 
 use crate::ast::{BinaryOp, Expr};
 use crate::error::{Result, SQLError};
@@ -21,16 +21,17 @@ mod json;
 mod time;
 
 use encoding::{base64_decode, base64_encode, md5_hex};
+pub use json::value_to_json_text;
 use json::{
-    json_build_array, json_build_object, json_concat, json_contained_by, json_contains,
-    json_delete, json_delete_path, json_extract_path, json_has_key, json_has_keys, json_to_value,
-    json_typeof, jsonb_insert, jsonb_set, jsonpath_candidate, jsonpath_exists, jsonpath_match,
-    parse_json, strip_nulls, value_to_json,
+    format_jsonb_pretty, json_build_array_value, json_build_object_value, json_concat,
+    json_contained_by, json_contains, json_delete, json_delete_path, json_extract_path,
+    json_has_key, json_has_keys, json_typeof, jsonb_insert, jsonb_set, jsonpath_candidate,
+    jsonpath_exists, jsonpath_match, parse_json, strip_nulls, typed_json_value, value_to_json,
 };
 use time::{
     age_between, coerce_temporal, date_trunc_value, extract_from_value, format_pg_number,
-    format_temporal, generate_random_uuid, hex_encode, make_timestamp, parse_timestamp,
-    pg_to_chrono_fmt,
+    format_temporal, generate_random_uuid, generate_uuid_v7, hex_encode, make_timestamp,
+    parse_timestamp, pg_to_chrono_fmt,
 };
 mod binary;
 mod casting;
@@ -46,17 +47,22 @@ mod scalar_postgres;
 mod scalar_temporal;
 
 use binary::{
-    compare, compare_nullable, eval_binary, eval_comparison_op, row_column_value, values_equal,
-    values_equal_nullable,
+    compare, compare_nullable, eval_binary, eval_comparison_op, values_equal, values_equal_nullable,
 };
 pub(crate) use binary::{division_by_zero, out_of_range};
-pub use binary::{eval_binary_values, eval_comparison_truth, truthy};
-pub use casting::{array_dimensions, cast_value, parse_pg_array_literal};
+pub use binary::{
+    eval_binary_values, eval_binary_values_with_integer_width, eval_comparison_truth,
+    integer_width_for_literal, integer_width_for_type, truthy, IntegerWidth,
+};
+pub use casting::{
+    array_dimensions, cast_value, cast_value_from, negate_value, parse_pg_array_literal,
+};
 pub(crate) use conversion::to_f64;
 use conversion::{
     allocation_error, coerce_i64, expect_str, float1, float_to_i64_rounded, float_to_i64_trunc,
-    gcd_i64, initcap_str, nonnegative_usize, string1, to_decimal, to_i64, value_to_string,
+    gcd_i64, initcap_str, nonnegative_usize, string1, to_decimal, to_i64,
 };
+pub use conversion::{array_value_to_string, value_to_string};
 pub use conversion::{value_to_tensor, value_to_vector};
 use scalar_dispatch::{eval_scalar_function, eval_sequence_function};
 pub use scalar_helpers::CompiledLikePattern;
@@ -120,6 +126,14 @@ pub trait EngineHook {
     ) -> Option<Result<Value>> {
         None
     }
+
+    fn call_bound_user_function(
+        &self,
+        _binding: &crate::ast::FunctionBinding,
+        _args: &[(Option<String>, Value)],
+    ) -> Option<Result<Value>> {
+        None
+    }
 }
 
 /// Read-only row interface used by the expression evaluator. Most callers
@@ -128,7 +142,19 @@ pub trait EngineHook {
 pub trait RowLookup {
     fn column(&self, name: &str) -> Option<&Value>;
 
-    fn qualified_column(&self, qualifier: &str, column: &str, key: &str) -> Option<&Value>;
+    /// Whether an unqualified name identifies more than one visible input
+    /// column. Callers must report SQLSTATE 42702 instead of selecting an
+    /// arbitrary suffix match.
+    fn column_is_ambiguous(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn qualified_column(&self, qualifier: &str, column: &str) -> Option<&Value>;
+
+    /// Whether a qualified identity names more than one visible input column.
+    fn qualified_column_is_ambiguous(&self, _qualifier: &str, _column: &str) -> bool {
+        false
+    }
 
     /// Return a value by the physical schema position used to construct this
     /// row view. Materialized named rows do not expose positional access;
@@ -143,40 +169,15 @@ pub trait RowLookup {
     /// map. The default keeps narrow projected lookup implementations source
     /// compatible when they deliberately do not expose whole-row semantics.
     fn visit_columns(&self, _visitor: &mut dyn FnMut(&str, &Value)) {}
-
-    /// Visit logical output columns plus hidden lookup aliases. Physical rows
-    /// use this only when a genuinely correlated lateral fallback must cross a
-    /// named-row boundary; ordinary projection/materialization remains limited
-    /// to [`Self::visit_columns`].
-    fn visit_lookup_columns(&self, visitor: &mut dyn FnMut(&str, &Value)) {
-        self.visit_columns(visitor);
-    }
-
-    /// Physical correlated subqueries require the concrete outer row passed
-    /// to `ScalarSubqueryRunner`. Projected row views return `None`; planners
-    /// only use them for expressions that cannot contain subqueries.
-    fn result_row(&self) -> Option<&ResultRow> {
-        None
-    }
 }
 
 impl RowLookup for ResultRow {
     fn column(&self, name: &str) -> Option<&Value> {
-        row_column_value(self, name)
+        self.get(name)
     }
 
-    fn qualified_column(&self, qualifier: &str, column: &str, key: &str) -> Option<&Value> {
-        let value = if key.is_empty() {
-            let qualified_key = format!("{qualifier}.{column}");
-            self.get(&qualified_key)
-        } else {
-            self.get(key)
-        };
-        value.or_else(|| unqualified_fallback(self, column))
-    }
-
-    fn result_row(&self) -> Option<&ResultRow> {
-        Some(self)
+    fn qualified_column(&self, _qualifier: &str, _column: &str) -> Option<&Value> {
+        None
     }
 
     fn visit_columns(&self, visitor: &mut dyn FnMut(&str, &Value)) {
@@ -229,6 +230,9 @@ impl<'a> EvalContext<'a> {
     /// the AST evaluator. Physical scalar IR evaluators call this instead of
     /// reconstructing an [`Expr::Column`] carrier.
     pub fn column_value(&self, name: &str) -> Result<Value> {
+        if self.row_lookup()?.column_is_ambiguous(name) {
+            return Err(SQLError::AmbiguousColumn(name.to_string()));
+        }
         Ok(self
             .row_lookup()?
             .column(name)
@@ -237,15 +241,16 @@ impl<'a> EvalContext<'a> {
     }
 
     /// Resolve a qualified column without constructing an AST expression.
-    pub fn qualified_column_value(
-        &self,
-        qualifier: &str,
-        column: &str,
-        key: &str,
-    ) -> Result<Value> {
+    pub fn qualified_column_value(&self, qualifier: &str, column: &str) -> Result<Value> {
+        if self
+            .row_lookup()?
+            .qualified_column_is_ambiguous(qualifier, column)
+        {
+            return Err(SQLError::AmbiguousColumn(format!("{qualifier}.{column}")));
+        }
         Ok(self
             .row_lookup()?
-            .qualified_column(qualifier, column, key)
+            .qualified_column(qualifier, column)
             .cloned()
             .unwrap_or(Value::Null))
     }
@@ -257,6 +262,9 @@ impl<'a> EvalContext<'a> {
 /// `Unsupported` so latent function-in-projection bugs surface loudly.
 pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
     match expr {
+        Expr::Default => Err(SQLError::Internal(
+            "DEFAULT reached scalar expression evaluation without a mutation target".into(),
+        )),
         Expr::Literal(v) => Ok(v.clone()),
         Expr::Param(i) => match i.checked_sub(1).and_then(|index| ctx.params.get(index)) {
             Some(SQLParam::Scalar(v)) => Ok(v.clone()),
@@ -277,32 +285,68 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             // Plain column refs match either an unqualified key or the
             // suffix of a qualified `table.col` key, so the same row
             // shape works for single-table SELECTs and JOIN tuples.
+            if ctx.row_lookup()?.column_is_ambiguous(name) {
+                return Err(SQLError::AmbiguousColumn(name.clone()));
+            }
             Ok(ctx
                 .row_lookup()?
                 .column(name)
                 .cloned()
                 .unwrap_or(Value::Null))
         }
-        Expr::QualifiedColumn {
-            qualifier,
-            column,
-            key,
-        } => Ok(ctx
-            .row_lookup()?
-            .qualified_column(qualifier, column, key)
-            .cloned()
-            .unwrap_or(Value::Null)),
+        Expr::QualifiedColumn { qualifier, column } => {
+            if ctx
+                .row_lookup()?
+                .qualified_column_is_ambiguous(qualifier, column)
+            {
+                return Err(SQLError::AmbiguousColumn(format!("{qualifier}.{column}")));
+            }
+            Ok(ctx
+                .row_lookup()?
+                .qualified_column(qualifier, column)
+                .cloned()
+                .unwrap_or(Value::Null))
+        }
         Expr::Array(elements) => {
             let mut out = Vec::with_capacity(elements.len());
             for e in elements {
                 out.push(eval(e, ctx)?);
             }
-            Ok(Value::List(out))
+            ArrayValue::try_new(out).map(Value::Array).ok_or_else(|| {
+                SQLError::TypeMismatch(
+                    "multidimensional arrays must have matching dimensions".into(),
+                )
+            })
         }
-        Expr::Star => Err(SQLError::Internal("`*` cannot be evaluated".into())),
-        Expr::Func { name, args, .. } => {
+        Expr::Row(elements) => {
+            let mut out = Vec::with_capacity(elements.len());
+            for element in elements {
+                out.push(eval(element, ctx)?);
+            }
+            Ok(Value::Row(out))
+        }
+        Expr::Star | Expr::QualifiedStar(_) => {
+            Err(SQLError::Internal("`*` cannot be evaluated".into()))
+        }
+        Expr::Func {
+            name,
+            binding,
+            args,
+            ..
+        } => {
             let call_args = evaluate_call_args(args, ctx)?;
-            eval_function_call(name, call_args, ctx)
+            if let Some(binding) = binding {
+                let engine = ctx.engine.ok_or_else(|| {
+                    SQLError::Unsupported(
+                        "bound user function requires a logical engine session".into(),
+                    )
+                })?;
+                engine
+                    .call_bound_user_function(binding, &call_args)
+                    .unwrap_or_else(|| Err(SQLError::UnknownFunction(binding.name.clone())))
+            } else {
+                eval_function_call(name, call_args, ctx)
+            }
         }
         Expr::WindowCall { name, .. } => Err(SQLError::Unsupported(format!(
             "window function `{name}` must be evaluated by the window-aware executor"
@@ -331,8 +375,9 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             }
         }
         Expr::Cast { expr, ty } => {
+            let source_ty = explicit_expr_type(expr);
             let v = eval(expr, ctx)?;
-            cast_value(&v, ty)
+            cast_value_from(&v, ty, source_ty)
         }
         Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => {
             Err(SQLError::Unsupported(
@@ -341,6 +386,11 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             ))
         }
         Expr::Binary { op, lhs, rhs } => eval_binary(*op, lhs, rhs, ctx),
+        Expr::UnaryMinus(inner) => {
+            let source_ty = explicit_expr_type(inner);
+            let value = eval(inner, ctx)?;
+            negate_value(&value, source_ty)
+        }
         Expr::Not(inner) => {
             // SQL three-valued logic: NOT NULL -> NULL.
             let v = eval(inner, ctx)?;
@@ -417,6 +467,16 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
     }
 }
 
+fn explicit_expr_type(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Cast { ty, .. } => Some(ty),
+        Expr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => Some("integer"),
+        Expr::Literal(Value::Int(_)) => Some("bigint"),
+        Expr::Literal(Value::Bytes(_)) => Some("bytea"),
+        _ => None,
+    }
+}
+
 /// `expr BETWEEN low AND high` under three-valued logic: a definite
 /// FALSE on either bound wins over a NULL on the other.
 fn eval_between(v: &Value, lo: &Value, hi: &Value) -> Result<Value> {
@@ -427,21 +487,6 @@ fn eval_between(v: &Value, lo: &Value, hi: &Value) -> Result<Value> {
         (Some(true), Some(true)) => Value::Bool(true),
         _ => Value::Null,
     })
-}
-
-/// Fallback for a qualified column reference against a row keyed by
-/// bare column names (single-relation result rows). Declines when a
-/// different qualifier owns the column so join rows never
-/// mis-resolve.
-pub fn unqualified_fallback<'a>(row: &'a ResultRow, column: &str) -> Option<&'a Value> {
-    let claimed_by_other = row.keys().any(|key| {
-        key.rsplit_once('.')
-            .is_some_and(|(_, suffix)| suffix == column)
-    });
-    if claimed_by_other {
-        return None;
-    }
-    row.get(column)
 }
 
 fn normalized_function_name(name: &str) -> Cow<'_, str> {
@@ -474,7 +519,7 @@ pub fn evaluate_call_args(
                 let value_expr = inner
                     .get(1)
                     .ok_or_else(|| SQLError::Internal("named argument without a value".into()))?;
-                Ok((Some(arg_name.to_ascii_lowercase()), eval(value_expr, ctx)?))
+                Ok((Some(arg_name.clone()), eval(value_expr, ctx)?))
             }
             other => Ok((None, eval(other, ctx)?)),
         })
@@ -564,7 +609,9 @@ pub fn eval_function_call(
                 schemas.push("public".to_string());
                 schemas
             });
-        return Ok(Value::List(schemas.into_iter().map(Value::Str).collect()));
+        return ArrayValue::try_new(schemas.into_iter().map(Value::Str).collect())
+            .map(Value::Array)
+            .ok_or_else(|| SQLError::TypeMismatch("invalid current_schemas result".into()));
     }
 
     // Functions registered in the operator registry (text_match,
@@ -580,12 +627,8 @@ pub fn eval_function_call(
     }
 
     if call_args.iter().any(|(name, _)| name.is_some()) {
-        // `make_interval` is the one built-in that accepts named
-        // arguments; PostgreSQL declares defaults for every parameter.
-        if lower == "make_interval" {
-            if let Some(positional) = make_interval_named_args(&call_args) {
-                return eval_scalar_function(lower, &positional);
-            }
+        if let Some(positional) = builtin_named_args(lower, &call_args) {
+            return eval_scalar_function(lower, &positional);
         }
         if let Some(engine) = ctx.engine {
             if let Some(result) = engine.call_user_function(lower, &call_args) {
@@ -620,17 +663,120 @@ pub fn eval_function_call(
     }
 }
 
+fn builtin_named_args(function: &str, call_args: &[(Option<String>, Value)]) -> Option<Vec<Value>> {
+    let names: &[&str] = match function {
+        "regexp_count" => match call_args.len() {
+            2 => &["string", "pattern"],
+            3 => &["string", "pattern", "start"],
+            4 => &["string", "pattern", "start", "flags"],
+            _ => return None,
+        },
+        "regexp_like" => match call_args.len() {
+            2 => &["string", "pattern"],
+            3 => &["string", "pattern", "flags"],
+            _ => return None,
+        },
+        "regexp_substr" => match call_args.len() {
+            2 => &["string", "pattern"],
+            3 => &["string", "pattern", "start"],
+            4 => &["string", "pattern", "start", "N"],
+            5 => &["string", "pattern", "start", "N", "flags"],
+            6 => &["string", "pattern", "start", "N", "flags", "subexpr"],
+            _ => return None,
+        },
+        "regexp_instr" => match call_args.len() {
+            2 => &["string", "pattern"],
+            3 => &["string", "pattern", "start"],
+            4 => &["string", "pattern", "start", "N"],
+            5 => &["string", "pattern", "start", "N", "endoption"],
+            6 => &["string", "pattern", "start", "N", "endoption", "flags"],
+            7 => &[
+                "string",
+                "pattern",
+                "start",
+                "N",
+                "endoption",
+                "flags",
+                "subexpr",
+            ],
+            _ => return None,
+        },
+        "regexp_replace" => match call_args.len() {
+            3 => &["string", "pattern", "replacement"],
+            4 if call_args
+                .iter()
+                .any(|(name, _)| name.as_deref() == Some("flags")) =>
+            {
+                &["string", "pattern", "replacement", "flags"]
+            }
+            4 => &["string", "pattern", "replacement", "start"],
+            5 => &["string", "pattern", "replacement", "start", "N"],
+            6 => &["string", "pattern", "replacement", "start", "N", "flags"],
+            _ => return None,
+        },
+        "make_interval" => return make_interval_named_args(call_args),
+        _ => return None,
+    };
+    reorder_named_args(call_args, names)
+}
+
+fn reorder_named_args(
+    call_args: &[(Option<String>, Value)],
+    parameter_names: &[&str],
+) -> Option<Vec<Value>> {
+    if call_args.len() != parameter_names.len() {
+        return None;
+    }
+    let mut slots = vec![None; parameter_names.len()];
+    let mut positional_index = 0;
+    let mut saw_named = false;
+    for (name, value) in call_args {
+        let slot = if let Some(name) = name {
+            saw_named = true;
+            parameter_names
+                .iter()
+                .position(|candidate| candidate == name)?
+        } else {
+            if saw_named {
+                return None;
+            }
+            let slot = positional_index;
+            positional_index += 1;
+            slot
+        };
+        if slots.get(slot)?.is_some() {
+            return None;
+        }
+        slots[slot] = Some(value.clone());
+    }
+    slots.into_iter().collect()
+}
+
 /// Map `make_interval(name => value, ...)` onto the positional
 /// `(years, months, weeks, days, hours, mins, secs)` argument list.
 /// Returns `None` when an unknown parameter name appears.
 fn make_interval_named_args(call_args: &[(Option<String>, Value)]) -> Option<Vec<Value>> {
     const NAMES: [&str; 7] = ["years", "months", "weeks", "days", "hours", "mins", "secs"];
     let mut positional = vec![Value::Int(0); NAMES.len()];
-    for (idx, (name, value)) in call_args.iter().enumerate() {
-        let slot = match name {
-            Some(name) => NAMES.iter().position(|n| n == name)?,
-            None => idx,
+    let mut positional_index = 0;
+    let mut saw_named = false;
+    let mut assigned = [false; NAMES.len()];
+    for (name, value) in call_args {
+        let slot = if let Some(name) = name {
+            saw_named = true;
+            NAMES.iter().position(|candidate| candidate == name)?
+        } else {
+            if saw_named {
+                return None;
+            }
+            let slot = positional_index;
+            positional_index += 1;
+            slot
         };
+        if slot >= NAMES.len() || assigned[slot] {
+            return None;
+        }
+        assigned[slot] = true;
         positional[slot] = value.clone();
     }
     Some(positional)
@@ -649,8 +795,12 @@ pub fn value_type_name(v: &Value) -> &'static str {
         Value::Temporal(TemporalValue::Interval { .. }) => "interval",
         Value::Temporal(_) => "timestamp",
         Value::Decimal(_) => "numeric",
+        Value::Json(_) => "json",
+        Value::JsonB(_) => "jsonb",
+        Value::Array(_) => "anyarray",
         Value::List(_) => "anyarray",
-        Value::Map(_) => "record",
+        Value::Row(_) | Value::Record(_) => "record",
+        Value::Map(_) => "jsonb",
     }
 }
 

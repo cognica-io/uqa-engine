@@ -162,7 +162,18 @@ impl Engine {
         &self,
         table: &str,
         doc_id: DocId,
-        document: Document,
+        mut document: Document,
+        known_new: bool,
+    ) -> Result<(), SQLError> {
+        crate::sql::refresh_stored_generated_columns(self, table, &mut document)?;
+        self.add_prepared_document_impl(table, doc_id, document, known_new)
+    }
+
+    pub(crate) fn add_prepared_document_impl(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        mut document: Document,
         known_new: bool,
     ) -> Result<(), SQLError> {
         let Some(table_name) = self
@@ -219,6 +230,8 @@ impl Engine {
         });
         let persistent_indexed =
             self.persistent_value_index_document_values(&table_name, &document)?;
+        let columns = t.columns.read().clone();
+        crate::engine_generated::strip_virtual_generated_columns(&columns, &mut document);
         let mut store = t.document_store.write();
         store
             .put(doc_id, document)

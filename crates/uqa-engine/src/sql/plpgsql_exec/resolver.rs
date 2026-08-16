@@ -46,10 +46,10 @@ impl VariableResolver for DatumResolver<'_> {
         };
         match &self.datums[idx] {
             PLpgSQLDatum::Rec { name } => match &self.values[idx] {
-                Value::Map(map) => {
-                    let value = map
+                Value::Record(fields) => {
+                    let value = fields
                         .iter()
-                        .find(|(key, _)| key.eq_ignore_ascii_case(column))
+                        .find(|(name, _)| name == column)
                         .map(|(_, value)| value.clone());
                     match value {
                         Some(value) => Ok(Some(value)),

@@ -280,6 +280,9 @@ impl Engine {
             if let Some(default) = &mut column.default {
                 self.resolve_stored_sequence_references_in_expr(default)?;
             }
+            if let Some(generated) = &mut column.generated {
+                self.resolve_stored_sequence_references_in_expr(&mut generated.expression)?;
+            }
         }
         Ok(Some(columns))
     }

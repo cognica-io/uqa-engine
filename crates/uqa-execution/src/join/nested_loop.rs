@@ -108,9 +108,11 @@ impl<'a> NestedLoopJoin<'a> {
     fn matches(&self, row: &PhysicalRow) -> ExecResult<bool> {
         match self.predicate.as_ref() {
             None => Ok(true),
-            Some(predicate) => Ok(truthy(
-                &self.evaluator.evaluate(predicate, &self.schema.view(row))?,
-            )),
+            Some(predicate) => Ok(truthy(&self.evaluator.evaluate_physical(
+                predicate,
+                &self.schema,
+                row,
+            )?)),
         }
     }
 }

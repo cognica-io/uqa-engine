@@ -7,9 +7,12 @@
 //! Declared-column coercion, temporal conversion, and JSON bridges.
 
 use super::{
-    ddl_storage_error, index_vectors_for_type, value_to_tensor, value_to_vector, BTreeMap,
-    ColumnType, DecimalValue, Engine, RowUpdateVectors, SQLError, TemporalValue, Value,
+    ddl_storage_error, eval_lowered_expression, index_vectors_for_type, value_to_tensor,
+    value_to_vector, BTreeMap, ColumnType, DecimalValue, Engine, RowUpdateVectors, SQLError,
+    TemporalValue, Value,
 };
+use uqa_core::ArrayValue;
+use uqa_sql::ast::Expr;
 
 /// Coerce a write value to fit the column's declared type.
 pub(in crate::sql) fn coerce_to_column_type(
@@ -31,52 +34,99 @@ pub(in crate::sql) fn coerce_to_column_type(
     convert_value_to_column_type(value, &def.ty)
 }
 
-pub(super) fn coerce_json_value(value: Value) -> Result<Value, SQLError> {
-    match value {
-        Value::Str(s) => serde_json::from_str::<serde_json::Value>(&s)
-            .map(json_to_core_value)
-            .map_err(|error| {
-                SQLError::TypeMismatch(format!("cannot cast string to JSON: {error}"))
-            }),
-        other => Ok(other),
-    }
-}
-
-pub(super) fn float_to_integer(value: f64) -> Result<i64, SQLError> {
-    // `i64::MAX as f64` rounds to 2^63, which itself is outside the range.
-    const I64_UPPER_EXCLUSIVE: f64 = 9_223_372_036_854_775_808.0;
-    const I64_LOWER_INCLUSIVE: f64 = -9_223_372_036_854_775_808.0;
-    if !value.is_finite() || !(I64_LOWER_INCLUSIVE..I64_UPPER_EXCLUSIVE).contains(&value) {
-        return Err(SQLError::TypeMismatch(format!(
-            "cannot cast {value:?} to integer: value is outside BIGINT range"
-        )));
-    }
-    Ok(value as i64)
+pub(super) fn coerce_json_value(value: Value, jsonb: bool) -> Result<Value, SQLError> {
+    uqa_sql::expr::cast_value(&value, if jsonb { "jsonb" } else { "json" })
 }
 
 pub(super) fn rewrite_column_values_to_type(
     engine: &Engine,
     table: &str,
     column: &str,
-    ty: &ColumnType,
+    source_ty: &ColumnType,
+    target_ty: &ColumnType,
+    using: Option<&Expr>,
 ) -> Result<(), SQLError> {
     for doc_id in engine.table_doc_ids(table)? {
         let Some(doc) = engine.get_document(table, doc_id)? else {
             continue;
         };
-        let Some(value) = doc.get(column).cloned() else {
-            continue;
+        let converted = if let Some(expression) = using {
+            let value = eval_lowered_expression(engine, expression, Some(&doc), &[])?;
+            convert_value_to_column_type(value, target_ty)?
+        } else {
+            let Some(value) = doc.get(column).cloned() else {
+                continue;
+            };
+            convert_declared_value_to_column_type(value, source_ty, target_ty)?
         };
-        let converted = convert_value_to_column_type(value, ty)?;
         let mut updates: BTreeMap<String, Value> = BTreeMap::new();
         updates.insert(column.to_string(), converted.clone());
         let mut vectors: RowUpdateVectors = BTreeMap::new();
-        if matches!(ty, ColumnType::Vector(_) | ColumnType::Tensor(_)) {
-            vectors.insert(column.to_string(), index_vectors_for_type(&converted, ty)?);
+        if matches!(target_ty, ColumnType::Vector(_) | ColumnType::Tensor(_)) {
+            vectors.insert(
+                column.to_string(),
+                index_vectors_for_type(&converted, target_ty)?,
+            );
         }
         engine.update_document_fields_with_vector_values(table, doc_id, updates, vectors)?;
     }
     Ok(())
+}
+
+fn convert_declared_value_to_column_type(
+    value: Value,
+    source_ty: &ColumnType,
+    target_ty: &ColumnType,
+) -> Result<Value, SQLError> {
+    match (source_ty, target_ty) {
+        (ColumnType::Domain { base, .. }, target) => {
+            convert_declared_value_to_column_type(value, base, target)
+        }
+        (source, ColumnType::Domain { base, .. }) => {
+            convert_declared_value_to_column_type(value, source, base)
+        }
+        (ColumnType::Array(source), ColumnType::Array(target)) => {
+            let Value::Array(array) = value else {
+                return Err(SQLError::TypeMismatch(format!(
+                    "cannot cast a non-array value to {}[]",
+                    column_type_name(target)
+                )));
+            };
+            let source = array_scalar_type(source);
+            let target = array_scalar_type(target);
+            let converted = convert_declared_array_elements(array.elements(), source, target)?;
+            ArrayValue::with_lower_bounds(converted, array.lower_bounds().to_vec())
+                .map(Value::Array)
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(
+                        "multidimensional arrays must have matching dimensions".into(),
+                    )
+                })
+        }
+        (source, ColumnType::Oid)
+            if matches!(
+                source,
+                ColumnType::SmallInteger
+                    | ColumnType::Integer
+                    | ColumnType::BigInteger
+                    | ColumnType::Oid
+                    | ColumnType::Regproc
+                    | ColumnType::Regtype
+            ) =>
+        {
+            uqa_sql::expr::cast_value_from(&value, "oid", Some(column_type_name(source)))
+        }
+        (ColumnType::Xid, ColumnType::Xid) => Ok(value),
+        (ColumnType::Bytea, ColumnType::Bytea) => Ok(value),
+        (_, ColumnType::Oid | ColumnType::Xid | ColumnType::Bytea) => {
+            Err(SQLError::TypeMismatch(format!(
+                "column cannot be cast automatically from type {} to type {}",
+                column_type_name(source_ty),
+                column_type_name(target_ty)
+            )))
+        }
+        _ => convert_value_to_column_type(value, target_ty),
+    }
 }
 
 pub(crate) fn convert_value_to_column_type(
@@ -87,22 +137,22 @@ pub(crate) fn convert_value_to_column_type(
         return Ok(Value::Null);
     }
     match ty {
-        ColumnType::Integer => match value {
-            Value::Int(_) => Ok(value),
-            Value::Float(f) => float_to_integer(f).map(Value::Int),
-            Value::Decimal(d) => d
-                .to_i64_trunc()
-                .map(Value::Int)
-                .ok_or_else(|| SQLError::TypeMismatch("cannot cast decimal to integer".into())),
-            Value::Bool(b) => Ok(Value::Int(i64::from(b))),
-            Value::Str(s) => s
-                .parse::<i64>()
-                .map(Value::Int)
-                .map_err(|e| SQLError::TypeMismatch(format!("cannot cast `{s}` to integer: {e}"))),
-            other => Err(SQLError::TypeMismatch(format!(
-                "cannot cast {other:?} to integer"
-            ))),
-        },
+        ColumnType::SmallInteger => uqa_sql::expr::cast_value(&value, "smallint"),
+        ColumnType::Integer => uqa_sql::expr::cast_value(&value, "integer"),
+        ColumnType::BigInteger => uqa_sql::expr::cast_value(&value, "bigint"),
+        ColumnType::Oid | ColumnType::Xid => {
+            let Value::Int(value) = uqa_sql::expr::cast_value(&value, "bigint")? else {
+                unreachable!("bigint cast returned a non-integer value")
+            };
+            u32::try_from(value)
+                .map(|value| Value::Int(i64::from(value)))
+                .map_err(|_| {
+                    SQLError::TypeMismatch(format!(
+                        "value {value} is out of range for type {}",
+                        column_type_name(ty)
+                    ))
+                })
+        }
         ColumnType::Boolean => match value {
             Value::Bool(_) => Ok(value),
             Value::Str(text) => parse_boolean_text(&text)
@@ -113,6 +163,11 @@ pub(crate) fn convert_value_to_column_type(
             ))),
         },
         ColumnType::Text => Ok(Value::Str(value_to_text(&value))),
+        ColumnType::Name => uqa_sql::expr::cast_value(&value, "name"),
+        ColumnType::Uuid => uqa_sql::expr::cast_value(&value, "uuid"),
+        ColumnType::Varchar(None) => Ok(Value::Str(value_to_text(&value))),
+        ColumnType::Varchar(Some(length)) => convert_varying_character(value, *length),
+        ColumnType::Bpchar => Ok(Value::FixedChar(value_to_text(&value))),
         ColumnType::Character(length) => {
             let length = usize::try_from(*length).map_err(|_| {
                 SQLError::TypeMismatch(format!(
@@ -138,7 +193,7 @@ pub(crate) fn convert_value_to_column_type(
             padded.extend(std::iter::repeat_n(' ', padding));
             Ok(Value::FixedChar(padded))
         }
-        ColumnType::Real => match value {
+        ColumnType::Real | ColumnType::DoublePrecision => match value {
             Value::Float(_) => Ok(value),
             Value::Int(i) => Ok(Value::Float(i as f64)),
             Value::Decimal(d) => d
@@ -188,15 +243,64 @@ pub(crate) fn convert_value_to_column_type(
             }
             Ok(Value::Decimal(rounded))
         }
-        ColumnType::Json | ColumnType::JsonB => coerce_json_value(value),
+        ColumnType::Json => coerce_json_value(value, false),
+        ColumnType::JsonB => coerce_json_value(value, true),
         ColumnType::Bytea => Ok(match value {
             Value::Bytes(_) => value,
             Value::Str(s) => Value::Bytes(s.into_bytes()),
             other => Value::Bytes(value_to_text(&other).into_bytes()),
         }),
+        ColumnType::InternalChar => {
+            let text = value_to_text(&value);
+            if text.len() == 1 {
+                Ok(Value::Str(text))
+            } else {
+                Err(SQLError::TypeMismatch(format!(
+                    "value `{text}` must be exactly one byte for type \"char\""
+                )))
+            }
+        }
+        ColumnType::Regproc
+        | ColumnType::Regtype
+        | ColumnType::PgNodeTree
+        | ColumnType::AclItem => Ok(match value {
+            Value::Int(_) | Value::Str(_) => value,
+            other => Value::Str(value_to_text(&other)),
+        }),
+        ColumnType::Int2Vector => convert_value_to_column_type(
+            value,
+            &ColumnType::Array(Box::new(ColumnType::SmallInteger)),
+        ),
+        ColumnType::OidVector => {
+            convert_value_to_column_type(value, &ColumnType::Array(Box::new(ColumnType::Oid)))
+        }
+        ColumnType::AnyArray => match value {
+            Value::Array(_) => Ok(value),
+            other => Err(SQLError::TypeMismatch(format!(
+                "cannot cast {other:?} to anyarray"
+            ))),
+        },
+        ColumnType::Record => match value {
+            Value::Record(_) => Ok(value),
+            Value::Row(values) => Ok(Value::Record(
+                values
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, value)| (format!("f{}", index + 1), value))
+                    .collect(),
+            )),
+            other => Err(SQLError::TypeMismatch(format!(
+                "cannot cast {other:?} to record"
+            ))),
+        },
         ColumnType::Array(element_type) => {
-            let items = match value {
-                Value::List(items) => items,
+            let array = match value {
+                Value::Array(array) => array,
+                Value::List(elements) => ArrayValue::try_new(elements).ok_or_else(|| {
+                    SQLError::TypeMismatch(
+                        "multidimensional arrays must have matching dimensions".into(),
+                    )
+                })?,
                 Value::Str(text) => uqa_sql::expr::parse_pg_array_literal(&text)?,
                 other => {
                     return Err(SQLError::TypeMismatch(format!(
@@ -205,18 +309,21 @@ pub(crate) fn convert_value_to_column_type(
                     )))
                 }
             };
-            let converted = items
-                .into_iter()
-                .map(|item| convert_value_to_column_type(item, element_type))
-                .collect::<Result<Vec<_>, _>>()?;
-            uqa_sql::expr::array_dimensions(&converted)?;
-            Ok(Value::List(converted))
+            let converted = convert_array_elements(array.elements(), element_type)?;
+            ArrayValue::with_lower_bounds(converted, array.lower_bounds().to_vec())
+                .map(Value::Array)
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(
+                        "multidimensional arrays must have matching dimensions".into(),
+                    )
+                })
         }
         ColumnType::Date
         | ColumnType::Time
         | ColumnType::TimeTz
         | ColumnType::Timestamp
-        | ColumnType::TimestampTz => convert_temporal_value(value, ty),
+        | ColumnType::TimestampTz
+        | ColumnType::Interval => convert_temporal_value(value, ty),
         ColumnType::Vector(dim) => {
             let vector = value_to_vector(&value)?;
             validate_vector_dimensions(*dim, vector.len())?;
@@ -231,6 +338,67 @@ pub(crate) fn convert_value_to_column_type(
                 tensor.into_iter().map(vector_to_value).collect(),
             ))
         }
+        ColumnType::Domain { base, .. } => convert_value_to_column_type(value, base),
+    }
+}
+
+fn convert_array_elements(
+    elements: &[Value],
+    element_type: &ColumnType,
+) -> Result<Vec<Value>, SQLError> {
+    let element_type = array_scalar_type(element_type);
+    elements
+        .iter()
+        .cloned()
+        .map(|element| match element {
+            Value::List(nested) => convert_array_elements(&nested, element_type).map(Value::List),
+            scalar => convert_value_to_column_type(scalar, element_type),
+        })
+        .collect()
+}
+
+fn convert_declared_array_elements(
+    elements: &[Value],
+    source_type: &ColumnType,
+    target_type: &ColumnType,
+) -> Result<Vec<Value>, SQLError> {
+    elements
+        .iter()
+        .cloned()
+        .map(|element| match element {
+            Value::List(nested) => {
+                convert_declared_array_elements(&nested, source_type, target_type).map(Value::List)
+            }
+            scalar => convert_declared_value_to_column_type(scalar, source_type, target_type),
+        })
+        .collect()
+}
+
+fn array_scalar_type(mut ty: &ColumnType) -> &ColumnType {
+    while let ColumnType::Array(element) = ty {
+        ty = element;
+    }
+    ty
+}
+
+fn convert_varying_character(value: Value, length: u32) -> Result<Value, SQLError> {
+    let length = usize::try_from(length).map_err(|_| {
+        SQLError::TypeMismatch(format!(
+            "character varying length {length} exceeds the platform addressable range"
+        ))
+    })?;
+    let text = value_to_text(&value);
+    if text.chars().count() <= length {
+        return Ok(Value::Str(text));
+    }
+    let retained = text.chars().take(length).collect::<String>();
+    let discarded = text.chars().skip(length).collect::<String>();
+    if discarded.chars().all(|character| character == ' ') {
+        Ok(Value::Str(retained))
+    } else {
+        Err(SQLError::TypeMismatch(format!(
+            "value too long for type character varying({length})"
+        )))
     }
 }
 
@@ -256,25 +424,45 @@ pub(crate) fn validate_vector_dimensions(expected: u32, actual: usize) -> Result
     }
 }
 
-pub(in crate::sql) fn column_type_name(ty: &ColumnType) -> &'static str {
+pub(in crate::sql) fn column_type_name(ty: &ColumnType) -> &str {
     match ty {
+        ColumnType::SmallInteger => "smallint",
         ColumnType::Integer => "integer",
+        ColumnType::BigInteger => "bigint",
+        ColumnType::Oid => "oid",
+        ColumnType::Xid => "xid",
         ColumnType::Boolean => "boolean",
         ColumnType::Text => "text",
+        ColumnType::Name => "name",
+        ColumnType::Uuid => "uuid",
+        ColumnType::Varchar(_) => "character varying",
+        ColumnType::Bpchar => "character",
         ColumnType::Character(_) => "character",
         ColumnType::Real => "real",
+        ColumnType::DoublePrecision => "double precision",
         ColumnType::Numeric { .. } => "numeric",
         ColumnType::Json => "json",
         ColumnType::JsonB => "jsonb",
         ColumnType::Bytea => "bytea",
+        ColumnType::InternalChar => "\"char\"",
+        ColumnType::Regproc => "regproc",
+        ColumnType::Regtype => "regtype",
+        ColumnType::PgNodeTree => "pg_node_tree",
+        ColumnType::AclItem => "aclitem",
+        ColumnType::Int2Vector => "int2vector",
+        ColumnType::OidVector => "oidvector",
+        ColumnType::AnyArray => "anyarray",
+        ColumnType::Record => "record",
         ColumnType::Array(_) => "array",
         ColumnType::Date => "date",
         ColumnType::Time => "time",
         ColumnType::TimeTz => "time with time zone",
         ColumnType::Timestamp => "timestamp",
         ColumnType::TimestampTz => "timestamp with time zone",
+        ColumnType::Interval => "interval",
         ColumnType::Vector(_) => "vector",
         ColumnType::Tensor(_) => "tensor",
+        ColumnType::Domain { name, .. } => name,
     }
 }
 
@@ -287,56 +475,7 @@ fn parse_boolean_text(text: &str) -> Option<bool> {
 }
 
 fn convert_temporal_value(value: Value, ty: &ColumnType) -> Result<Value, SQLError> {
-    match value {
-        Value::Temporal(temporal) => coerce_temporal_kind(temporal, ty)
-            .map(Value::Temporal)
-            .ok_or_else(|| {
-                SQLError::TypeMismatch(format!(
-                    "cannot cast temporal value to {}",
-                    column_type_name(ty)
-                ))
-            }),
-        other => {
-            let text = value_to_text(&other);
-            let parsed = parse_temporal_text_for_type(&text, ty);
-            parsed.map(Value::Temporal).ok_or_else(|| {
-                SQLError::TypeMismatch(format!("cannot cast `{text}` to {}", column_type_name(ty)))
-            })
-        }
-    }
-}
-
-fn coerce_temporal_kind(value: TemporalValue, ty: &ColumnType) -> Option<TemporalValue> {
-    match (ty, value) {
-        (ColumnType::Date, value @ TemporalValue::Date { .. })
-        | (ColumnType::Time, value @ TemporalValue::Time { .. })
-        | (ColumnType::TimeTz, value @ TemporalValue::TimeTz { .. })
-        | (ColumnType::Timestamp, value @ TemporalValue::Timestamp { .. })
-        | (ColumnType::TimestampTz, value @ TemporalValue::TimestampTz { .. }) => Some(value),
-        (ColumnType::Timestamp, TemporalValue::TimestampTz { micros }) => {
-            Some(TemporalValue::Timestamp { micros })
-        }
-        (ColumnType::TimestampTz, TemporalValue::Timestamp { micros }) => {
-            Some(TemporalValue::TimestampTz { micros })
-        }
-        _ => None,
-    }
-}
-
-fn parse_temporal_text_for_type(text: &str, ty: &ColumnType) -> Option<TemporalValue> {
-    match ty {
-        ColumnType::Date => TemporalValue::parse_date(text),
-        ColumnType::Time => TemporalValue::parse_time(text),
-        ColumnType::TimeTz => TemporalValue::parse_time_tz(text),
-        ColumnType::Timestamp => TemporalValue::parse_timestamp(text).or_else(|| {
-            TemporalValue::parse_timestamp_tz(text).and_then(|value| match value {
-                TemporalValue::TimestampTz { micros } => Some(TemporalValue::Timestamp { micros }),
-                _ => None,
-            })
-        }),
-        ColumnType::TimestampTz => TemporalValue::parse_timestamp_tz(text),
-        _ => None,
-    }
+    uqa_sql::expr::cast_value(&value, column_type_name(ty))
 }
 
 pub(in crate::sql) fn value_to_text(value: &Value) -> String {
@@ -350,8 +489,11 @@ pub(in crate::sql) fn value_to_text(value: &Value) -> String {
         Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
         Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
         Value::Temporal(t) => t.to_sql_string(),
+        Value::Json(text) | Value::JsonB(text) => text.clone(),
+        Value::Array(array) => uqa_sql::expr::array_value_to_string(array),
         Value::List(_) | Value::Map(_) => serde_json::to_string(&core_value_to_json(value))
             .unwrap_or_else(|_| format!("{value:?}")),
+        Value::Row(_) | Value::Record(_) => uqa_sql::expr::value_to_string(value),
     }
 }
 
@@ -419,9 +561,28 @@ pub(in crate::sql) fn core_value_to_json(value: &Value) -> serde_json::Value {
         Value::FixedChar(s) => serde_json::Value::String(s.trim_end_matches(' ').to_string()),
         Value::Bytes(bytes) => serde_json::Value::String(String::from_utf8_lossy(bytes).into()),
         Value::Temporal(t) => serde_json::Value::String(t.to_sql_string()),
+        Value::Json(text) | Value::JsonB(text) => {
+            serde_json::from_str(text).unwrap_or_else(|_| serde_json::Value::String(text.clone()))
+        }
+        Value::Array(array) => {
+            serde_json::Value::Array(array.elements().iter().map(core_value_to_json).collect())
+        }
         Value::List(items) => {
             serde_json::Value::Array(items.iter().map(core_value_to_json).collect())
         }
+        Value::Row(values) => serde_json::Value::Object(
+            values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (format!("f{}", index + 1), core_value_to_json(value)))
+                .collect(),
+        ),
+        Value::Record(fields) => serde_json::Value::Object(
+            fields
+                .iter()
+                .map(|(name, value)| (name.clone(), core_value_to_json(value)))
+                .collect(),
+        ),
         Value::Map(map) => serde_json::Value::Object(
             map.iter()
                 .map(|(k, v)| (k.clone(), core_value_to_json(v)))
@@ -445,8 +606,10 @@ pub(in crate::sql) fn json_table_arg(
     name: &str,
 ) -> Result<serde_json::Value, SQLError> {
     match value {
-        Value::Str(s) => serde_json::from_str::<serde_json::Value>(s)
-            .map_err(|e| SQLError::TypeMismatch(format!("{name}: invalid JSON: {e}"))),
+        Value::Json(s) | Value::JsonB(s) | Value::Str(s) => {
+            serde_json::from_str::<serde_json::Value>(s)
+                .map_err(|e| SQLError::TypeMismatch(format!("{name}: invalid JSON: {e}")))
+        }
         other => Ok(core_value_to_json(other)),
     }
 }

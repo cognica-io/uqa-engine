@@ -7,16 +7,23 @@
 //! UPDATE and DELETE statement lowering.
 
 use super::{
-    compile_expr, compile_from_node, compile_projections, compile_with_clause, range_var_name,
+    compile_expr, compile_from_node, compile_returning_clause, compile_with_clause, range_var_name,
     DeleteStmt, NodeEnum, Result, SQLError, UpdateStmt,
 };
 
 pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<UpdateStmt> {
-    let table = stmt
+    let relation = stmt
         .relation
         .as_ref()
-        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("UPDATE without relation".into()))?;
+    let table = range_var_name(relation);
+    let target_qualifier = relation
+        .alias
+        .as_ref()
+        .map(|alias| alias.aliasname.as_str())
+        .filter(|alias| !alias.is_empty())
+        .unwrap_or(&relation.relname)
+        .to_string();
     let mut assignments = Vec::new();
     for target_node in &stmt.target_list {
         let inner = target_node
@@ -43,27 +50,36 @@ pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<Up
         Some(node) => Some(compile_from_node(node)?),
         None => None,
     };
-    let returning = compile_projections(&stmt.returning_list)?;
+    let (returning, returning_aliases) = compile_returning_clause(stmt.returning_clause.as_ref())?;
     let with = match stmt.with_clause.as_ref() {
         Some(wc) => compile_with_clause(wc)?,
         None => Vec::new(),
     };
     Ok(UpdateStmt {
         table,
+        target_qualifier,
         assignments,
         r#where,
         with,
         from,
         returning,
+        returning_aliases,
     })
 }
 
 pub(super) fn compile_delete(stmt: &pg_query::protobuf::DeleteStmt) -> Result<DeleteStmt> {
-    let table = stmt
+    let relation = stmt
         .relation
         .as_ref()
-        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("DELETE without relation".into()))?;
+    let table = range_var_name(relation);
+    let target_qualifier = relation
+        .alias
+        .as_ref()
+        .map(|alias| alias.aliasname.as_str())
+        .filter(|alias| !alias.is_empty())
+        .unwrap_or(&relation.relname)
+        .to_string();
     let r#where = stmt
         .where_clause
         .as_ref()
@@ -73,16 +89,18 @@ pub(super) fn compile_delete(stmt: &pg_query::protobuf::DeleteStmt) -> Result<De
         Some(node) => Some(compile_from_node(node)?),
         None => None,
     };
-    let returning = compile_projections(&stmt.returning_list)?;
+    let (returning, returning_aliases) = compile_returning_clause(stmt.returning_clause.as_ref())?;
     let with = match stmt.with_clause.as_ref() {
         Some(wc) => compile_with_clause(wc)?,
         None => Vec::new(),
     };
     Ok(DeleteStmt {
         table,
+        target_qualifier,
         r#where,
         with,
         using,
         returning,
+        returning_aliases,
     })
 }

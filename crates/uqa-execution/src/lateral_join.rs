@@ -10,39 +10,34 @@ use uqa_sql::ast::JoinKind;
 use uqa_sql::ResultRow;
 
 use crate::batch::DEFAULT_BATCH_SIZE;
-use crate::{Batch, ExecError, ExecResult, PhysicalOperator, RowSchema};
+use crate::{
+    Batch, ExecError, ExecResult, OwnedPhysicalRow, PhysicalOperator, PhysicalRow, RowSchema,
+};
 
 /// Engine seam for a correlated right-hand relation.
 ///
 /// The physical operator owns join iteration, `ON` filtering, and outer-row
 /// preservation. The engine callback only evaluates the right relation and
 /// scalar predicate in the current correlated scope.
-pub type LateralRows = Box<dyn Iterator<Item = ExecResult<ResultRow>> + Send>;
+pub type LateralRows = Box<dyn Iterator<Item = ExecResult<OwnedPhysicalRow>> + Send>;
 
 pub trait LateralSource: Send {
-    fn rows_for(&mut self, left: &ResultRow) -> ExecResult<LateralRows>;
+    fn rows_for(&mut self, left: &OwnedPhysicalRow) -> ExecResult<LateralRows>;
 
-    fn matches(&mut self, joined: &ResultRow) -> ExecResult<bool>;
+    fn matches(&mut self, joined: &OwnedPhysicalRow) -> ExecResult<bool>;
 }
 
-fn output_schema(left: &[String], left_nulls: &ResultRow, right_nulls: &ResultRow) -> RowSchema {
-    let mut columns = left.to_vec();
-    for column in left_nulls.keys().chain(right_nulls.keys()) {
-        if !columns.contains(column) {
-            columns.push(column.clone());
-        }
-    }
-    RowSchema::new(columns)
-}
-
-fn merge_rows(left: &ResultRow, right: &ResultRow) -> ResultRow {
-    let mut output = left.clone();
-    output.extend(
-        right
-            .iter()
-            .map(|(name, value)| (name.clone(), value.clone())),
-    );
-    output
+fn output_schema(
+    left: &RowSchema,
+    right: &RowSchema,
+    left_nulls: &ResultRow,
+    right_nulls: &ResultRow,
+) -> RowSchema {
+    RowSchema::join(
+        left,
+        right,
+        left_nulls.keys().chain(right_nulls.keys()).cloned(),
+    )
 }
 
 /// Streaming physical implementation of a SQL `LATERAL` join.
@@ -54,11 +49,11 @@ pub struct LateralJoin<'a> {
     left: Box<dyn PhysicalOperator + 'a>,
     source: Box<dyn LateralSource + 'a>,
     kind: JoinKind,
-    left_nulls: ResultRow,
-    right_nulls: ResultRow,
     schema: RowSchema,
-    left_rows: std::vec::IntoIter<ResultRow>,
-    current_left: Option<ResultRow>,
+    left_schema: RowSchema,
+    right_schema: RowSchema,
+    left_rows: std::vec::IntoIter<OwnedPhysicalRow>,
+    current_left: Option<OwnedPhysicalRow>,
     right_rows: Option<LateralRows>,
     matched_left: bool,
     exhausted: bool,
@@ -72,14 +67,27 @@ impl<'a> LateralJoin<'a> {
         left_nulls: ResultRow,
         right_nulls: ResultRow,
     ) -> Self {
-        let schema = output_schema(left.schema(), &left_nulls, &right_nulls);
+        let right_schema = RowSchema::new(right_nulls.keys().cloned().collect());
+        Self::new_with_right_schema(left, source, kind, left_nulls, right_nulls, right_schema)
+    }
+
+    pub fn new_with_right_schema(
+        left: Box<dyn PhysicalOperator + 'a>,
+        source: Box<dyn LateralSource + 'a>,
+        kind: JoinKind,
+        left_nulls: ResultRow,
+        right_nulls: ResultRow,
+        right_schema: RowSchema,
+    ) -> Self {
+        let schema = output_schema(left.row_schema(), &right_schema, &left_nulls, &right_nulls);
+        let left_schema = left.row_schema().clone();
         Self {
             left,
             source,
             kind,
-            left_nulls,
-            right_nulls,
             schema,
+            left_schema,
+            right_schema,
             left_rows: Vec::new().into_iter(),
             current_left: None,
             right_rows: None,
@@ -88,7 +96,7 @@ impl<'a> LateralJoin<'a> {
         }
     }
 
-    fn next_left(&mut self) -> ExecResult<Option<ResultRow>> {
+    fn next_left(&mut self) -> ExecResult<Option<OwnedPhysicalRow>> {
         loop {
             if let Some(row) = self.left_rows.next() {
                 return Ok(Some(row));
@@ -96,11 +104,11 @@ impl<'a> LateralJoin<'a> {
             let Some(batch) = self.left.next()? else {
                 return Ok(None);
             };
-            self.left_rows = batch.into_result_rows().into_iter();
+            self.left_rows = batch.into_owned_rows().into_iter();
         }
     }
 
-    fn begin_left_row(&mut self, left: ResultRow) -> ExecResult<()> {
+    fn begin_left_row(&mut self, left: OwnedPhysicalRow) -> ExecResult<()> {
         self.right_rows = Some(self.source.rows_for(&left)?);
         self.current_left = Some(left);
         self.matched_left = false;
@@ -150,14 +158,20 @@ impl PhysicalOperator for LateralJoin<'_> {
                         "lateral join produced a right row without a current left row".into(),
                     )
                 })?;
-                let joined = merge_rows(left, &right);
+                let joined = OwnedPhysicalRow::new(
+                    self.schema.clone(),
+                    PhysicalRow::concat(&left.row, &right.row),
+                );
                 let matched =
                     matches!(self.kind, JoinKind::Cross) || self.source.matches(&joined)?;
                 if matched {
                     self.matched_left = true;
-                    output.push(joined);
+                    output.push(joined.row);
                 } else if matches!(self.kind, JoinKind::Right | JoinKind::Full) {
-                    output.push(merge_rows(&self.left_nulls, &right));
+                    output.push(PhysicalRow::concat(
+                        &PhysicalRow::nulls(self.left_schema.physical_width()),
+                        &right.row,
+                    ));
                 }
                 continue;
             }
@@ -169,7 +183,10 @@ impl PhysicalOperator for LateralJoin<'_> {
                         "lateral join completed a right stream without a current left row".into(),
                     )
                 })?;
-                output.push(merge_rows(&left, &self.right_nulls));
+                output.push(PhysicalRow::concat(
+                    &left.row,
+                    &PhysicalRow::nulls(self.right_schema.physical_width()),
+                ));
             } else {
                 self.current_left = None;
             }
@@ -178,7 +195,7 @@ impl PhysicalOperator for LateralJoin<'_> {
         if output.is_empty() {
             return Ok(None);
         }
-        Ok(Some(Batch::new(self.schema.clone(), output)))
+        Ok(Some(Batch::from_physical_rows(self.schema.clone(), output)))
     }
 
     fn close(&mut self) -> ExecResult<()> {
@@ -205,19 +222,23 @@ mod tests {
             .collect()
     }
 
+    fn right_row(value: i64) -> OwnedPhysicalRow {
+        let schema = RowSchema::new(vec!["r.n".into()]);
+        let row = PhysicalRow::from_values(vec![Value::Int(value)]);
+        OwnedPhysicalRow::new(schema, row)
+    }
+
     struct RangeSource;
 
     impl LateralSource for RangeSource {
-        fn rows_for(&mut self, left: &ResultRow) -> ExecResult<LateralRows> {
+        fn rows_for(&mut self, left: &OwnedPhysicalRow) -> ExecResult<LateralRows> {
             let Value::Int(end) = left.get("l.n").cloned().unwrap_or(Value::Null) else {
                 return Ok(Box::new(std::iter::empty()));
             };
-            Ok(Box::new(
-                (1..=end).map(|value| Ok(row(&[("r.n", Value::Int(value))]))),
-            ))
+            Ok(Box::new((1..=end).map(|value| Ok(right_row(value)))))
         }
 
-        fn matches(&mut self, joined: &ResultRow) -> ExecResult<bool> {
+        fn matches(&mut self, joined: &OwnedPhysicalRow) -> ExecResult<bool> {
             Ok(joined.get("r.n") == Some(&Value::Int(2)))
         }
     }
@@ -249,13 +270,11 @@ mod tests {
     struct LargeRangeSource;
 
     impl LateralSource for LargeRangeSource {
-        fn rows_for(&mut self, _left: &ResultRow) -> ExecResult<LateralRows> {
-            Ok(Box::new(
-                (0..10_000).map(|value| Ok(row(&[("r.n", Value::Int(value))]))),
-            ))
+        fn rows_for(&mut self, _left: &OwnedPhysicalRow) -> ExecResult<LateralRows> {
+            Ok(Box::new((0..10_000).map(|value| Ok(right_row(value)))))
         }
 
-        fn matches(&mut self, _joined: &ResultRow) -> ExecResult<bool> {
+        fn matches(&mut self, _joined: &OwnedPhysicalRow) -> ExecResult<bool> {
             Ok(true)
         }
     }
@@ -279,17 +298,17 @@ mod tests {
     struct FailingSource;
 
     impl LateralSource for FailingSource {
-        fn rows_for(&mut self, _left: &ResultRow) -> ExecResult<LateralRows> {
+        fn rows_for(&mut self, _left: &OwnedPhysicalRow) -> ExecResult<LateralRows> {
             Ok(Box::new(
                 vec![
-                    Ok(row(&[("r.n", Value::Int(1))])),
+                    Ok(right_row(1)),
                     Err(crate::ExecError::Other("injected lateral failure".into())),
                 ]
                 .into_iter(),
             ))
         }
 
-        fn matches(&mut self, _joined: &ResultRow) -> ExecResult<bool> {
+        fn matches(&mut self, _joined: &OwnedPhysicalRow) -> ExecResult<bool> {
             Ok(true)
         }
     }

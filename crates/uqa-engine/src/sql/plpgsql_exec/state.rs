@@ -7,7 +7,7 @@
 //! Interpreter activation state, expression binding, and routine lifecycle.
 
 use super::{
-    best_effort_cast, bind_expr, bind_statement, eval_lowered_expression,
+    bind_expr, bind_statement, coerce_routine_value, eval_lowered_expression,
     execute_compiled_statement, BTreeSet, CreateFunction, DatumResolver, Engine, Expr, Flow,
     FunctionReturns, HashMap, Interpreter, PLpgSQLBlock, PLpgSQLDatum, PLpgSQLFunction,
     RoutineOutcome, SQLError, SQLResult, Statement, Value,
@@ -35,9 +35,10 @@ impl<'a> Interpreter<'a> {
             )));
         }
         let loop_vars: BTreeSet<usize> = parsed.fori_variable_datums();
+        let cursor_arguments: BTreeSet<usize> = parsed.cursor_argument_datums();
         let mut bindings: HashMap<String, Vec<usize>> = HashMap::new();
         for (idx, datum) in datums.iter().enumerate() {
-            if loop_vars.contains(&idx) {
+            if loop_vars.contains(&idx) || cursor_arguments.contains(&idx) {
                 continue;
             }
             if let Some(name) = datum.name() {
@@ -70,6 +71,8 @@ impl<'a> Interpreter<'a> {
             found: parsed.found_datum,
             last_row_count: 0,
             is_set: def.returns_set(),
+            cursors: HashMap::new(),
+            next_cursor_id: 1,
         };
         // Bind call arguments onto the leading parameter datums.
         // Procedure OUT arguments start NULL (the placeholder value a
@@ -118,7 +121,7 @@ impl<'a> Interpreter<'a> {
             }
             if let Some(default) = &var.default {
                 let value = interpreter.eval_expr(default)?;
-                let value = best_effort_cast(&value, &var.type_name)?;
+                let value = coerce_routine_value(&value, &var.type_name)?;
                 interpreter.values[idx] = value;
             }
             if var.not_null && matches!(interpreter.values[idx], Value::Null) {
@@ -175,7 +178,14 @@ impl<'a> Interpreter<'a> {
             Flow::Continue(_) => Err(SQLError::Internal(
                 "CONTINUE escaped every enclosing loop".into(),
             )),
+        }?;
+        if !self.cursors.is_empty() {
+            return Err(SQLError::Unsupported(
+                "PL/pgSQL cursors that remain open after routine exit require session portal state"
+                    .into(),
+            ));
         }
+        Ok(())
     }
 
     // -- expression / query plumbing -----------------------------------

@@ -10,6 +10,7 @@
 
 use uqa_core::Value;
 use uqa_engine::Engine;
+use uqa_sql::ast::ColumnType;
 
 fn values(result: &uqa_engine::SQLResult, column: &str) -> Vec<Value> {
     result.rows.iter().map(|row| row[column].clone()).collect()
@@ -45,6 +46,36 @@ fn pg_catalog_qualified_generate_series_uses_the_builtin() {
     assert_eq!(
         values(&result, "n"),
         vec![Value::Int(1), Value::Int(2), Value::Int(3)]
+    );
+}
+
+#[test]
+fn table_function_default_column_keeps_the_local_identifier_structured() {
+    let eng = Engine::new();
+    let builtin = eng
+        .sql(
+            "SELECT generate_series FROM pg_catalog.generate_series(1, 2)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        values(&builtin, "generate_series"),
+        vec![Value::Int(1), Value::Int(2)]
+    );
+
+    eng.sql(
+        "CREATE FUNCTION \"series.dot\"(n integer) RETURNS SETOF integer AS $$
+           SELECT generate_series(1, n)
+         $$ LANGUAGE sql",
+        &[],
+    )
+    .unwrap();
+    let quoted = eng
+        .sql("SELECT \"series.dot\" FROM \"series.dot\"(2)", &[])
+        .unwrap();
+    assert_eq!(
+        values(&quoted, "series.dot"),
+        vec![Value::Int(1), Value::Int(2)]
     );
 }
 
@@ -157,6 +188,56 @@ fn unnest_text_array() {
 }
 
 #[test]
+fn multi_array_unnest_zips_to_the_longest_input_and_null_pads() {
+    let eng = Engine::new();
+    let aliased = eng
+        .sql(
+            "SELECT a, b
+             FROM unnest(ARRAY[1, 2], ARRAY['foo', 'bar', 'baz']) AS u(a, b)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(aliased.columns, ["a", "b"]);
+    assert_eq!(aliased.rows.len(), 3);
+    assert_eq!(aliased.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(aliased.value_at(1, 0), Some(&Value::Int(2)));
+    assert_eq!(aliased.value_at(2, 0), Some(&Value::Null));
+    assert_eq!(aliased.value_at(2, 1), Some(&Value::Str("baz".into())));
+
+    let default_names = eng
+        .sql(
+            "SELECT * FROM unnest(ARRAY[1, 2], ARRAY['foo', 'bar', 'baz'])",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(default_names.columns, ["unnest", "unnest"]);
+    assert_eq!(default_names.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(
+        default_names.value_at(0, 1),
+        Some(&Value::Str("foo".into()))
+    );
+    assert_eq!(default_names.value_at(2, 0), Some(&Value::Null));
+    assert_eq!(
+        default_names.value_at(2, 1),
+        Some(&Value::Str("baz".into()))
+    );
+
+    let partially_aliased = eng
+        .sql("SELECT * FROM unnest(ARRAY[1], ARRAY['foo']) AS u(a)", &[])
+        .unwrap();
+    assert_eq!(partially_aliased.columns, ["a", "unnest"]);
+}
+
+#[test]
+fn multi_array_unnest_is_rejected_outside_from() {
+    let eng = Engine::new();
+    let error = eng
+        .sql("SELECT unnest(ARRAY[1], ARRAY[2])", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42883"));
+}
+
+#[test]
 fn values_in_from_with_aliased_columns() {
     let eng = Engine::new();
     let r = eng
@@ -172,4 +253,38 @@ fn standalone_values_returns_rows() {
     assert_eq!(r.rows.len(), 2);
     assert_eq!(r.rows[0].get("column1"), Some(&Value::Int(1)));
     assert_eq!(r.rows[1].get("column2"), Some(&Value::Str("b".into())));
+}
+
+#[test]
+fn values_coerce_unknown_literals_to_the_postgresql_common_type() {
+    let eng = Engine::new();
+
+    let dates = eng
+        .sql("VALUES (DATE '2020-01-01'), ('2020-01-02')", &[])
+        .unwrap();
+    assert_eq!(dates.column_types, [Some(ColumnType::Date)]);
+    assert!(dates
+        .rows
+        .iter()
+        .all(|row| matches!(row["column1"], Value::Temporal(_))));
+
+    let dates_from = eng
+        .sql(
+            "SELECT value FROM (VALUES (DATE '2020-01-01'), ('2020-01-02')) AS source(value)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(dates_from.column_types, [Some(ColumnType::Date)]);
+    assert!(dates_from
+        .rows
+        .iter()
+        .all(|row| matches!(row["value"], Value::Temporal(_))));
+
+    let integers = eng.sql("VALUES (1), ('2')", &[]).unwrap();
+    assert_eq!(integers.column_types, [Some(ColumnType::Integer)]);
+    assert_eq!(integers.rows[1]["column1"], Value::Int(2));
+
+    let booleans = eng.sql("VALUES (TRUE), ('false')", &[]).unwrap();
+    assert_eq!(booleans.column_types, [Some(ColumnType::Boolean)]);
+    assert_eq!(booleans.rows[1]["column1"], Value::Bool(false));
 }

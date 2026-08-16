@@ -12,6 +12,7 @@ use super::{
     CreateIndex, CreateTable, Expr, NodeEnum, Result, SQLError, TableKeyConstraint,
     TableKeyConstraintKind,
 };
+use crate::ast::{GeneratedColumn, GeneratedColumnKind};
 
 pub(in crate::compiler) fn compile_create_table(
     stmt: &pg_query::protobuf::CreateStmt,
@@ -52,6 +53,11 @@ pub(in crate::compiler) fn compile_create_table(
                     register_constraint_name(&mut named_constraints, &cstr.conname)?;
                     let kind = match cstr.contype() {
                         pg_query::protobuf::ConstrType::ConstrPrimary => {
+                            if cstr.without_overlaps {
+                                return Err(SQLError::Unsupported(
+                                    "PRIMARY KEY ... WITHOUT OVERLAPS is not implemented".into(),
+                                ));
+                            }
                             if primary_key_seen {
                                 return Err(SQLError::TypeMismatch(
                                     "multiple PRIMARY KEY constraints are not allowed".into(),
@@ -61,6 +67,11 @@ pub(in crate::compiler) fn compile_create_table(
                             Some(TableKeyConstraintKind::PrimaryKey)
                         }
                         pg_query::protobuf::ConstrType::ConstrUnique => {
+                            if cstr.without_overlaps {
+                                return Err(SQLError::Unsupported(
+                                    "UNIQUE ... WITHOUT OVERLAPS is not implemented".into(),
+                                ));
+                            }
                             Some(TableKeyConstraintKind::Unique)
                         }
                         _ => None,
@@ -90,9 +101,19 @@ pub(in crate::compiler) fn compile_create_table(
                         } else {
                             Some(cstr.conname.clone())
                         };
-                        checks.push(TableCheck { name: cname, expr });
+                        checks.push(TableCheck {
+                            name: cname,
+                            expr,
+                            enforced: cstr.is_enforced,
+                        });
                     }
                     pg_query::protobuf::ConstrType::ConstrForeign => {
+                        if cstr.fk_with_period || cstr.pk_with_period {
+                            return Err(SQLError::Unsupported(
+                                "temporal FOREIGN KEY ... PERIOD constraints are not implemented"
+                                    .into(),
+                            ));
+                        }
                         let local_columns = extract_strings(&cstr.fk_attrs)?;
                         let ref_table =
                             cstr.pktable.as_ref().map(range_var_name).ok_or_else(|| {
@@ -131,10 +152,17 @@ pub(in crate::compiler) fn compile_create_table(
                             on_delete: compile_foreign_key_action(&cstr.fk_del_action)?,
                             on_delete_set_columns,
                             match_type: compile_foreign_key_match(&cstr.fk_matchtype)?,
+                            enforced: cstr.is_enforced,
                         });
                     }
                     pg_query::protobuf::ConstrType::ConstrPrimary
                     | pg_query::protobuf::ConstrType::ConstrUnique => {
+                        if cstr.without_overlaps {
+                            return Err(SQLError::Unsupported(
+                                "PRIMARY KEY or UNIQUE ... WITHOUT OVERLAPS is not implemented"
+                                    .into(),
+                            ));
+                        }
                         let kind =
                             if cstr.contype() == pg_query::protobuf::ConstrType::ConstrPrimary {
                                 if primary_key_seen {
@@ -218,6 +246,7 @@ pub(in crate::compiler) fn compile_create_table(
     }
     Ok(CreateTable {
         name,
+        qualifier: relation.relname.clone(),
         columns,
         if_not_exists: stmt.if_not_exists,
         checks,
@@ -255,13 +284,27 @@ pub(in crate::compiler) fn compile_column_def(
     let name = col.colname.clone();
     let raw_type = raw_type_name(col)?;
     let ty = compile_type_name(col)?;
-    let mut auto_increment = matches!(raw_type.as_deref(), Some("serial" | "bigserial"));
+    let mut auto_increment = matches!(
+        raw_type.as_deref(),
+        Some("smallserial" | "serial2" | "serial" | "serial4" | "bigserial" | "serial8")
+    );
     let mut primary_key = false;
     let mut not_null = false;
+    let mut not_null_explicit = false;
+    let mut not_null_name = None;
     let mut unique = false;
     let mut default: Option<Expr> = None;
+    let mut generated: Option<GeneratedColumn> = None;
     let mut check: Option<Expr> = None;
+    let mut check_name = None;
+    let mut check_enforced = true;
     let mut references: Option<crate::ast::ForeignKeyRef> = None;
+    #[derive(Clone, Copy)]
+    enum EnforceableConstraint {
+        Check,
+        ForeignKey,
+    }
+    let mut last_enforceable = None;
     for c in &col.constraints {
         let inner = c
             .node
@@ -272,15 +315,48 @@ pub(in crate::compiler) fn compile_column_def(
                 pg_query::protobuf::ConstrType::ConstrPrimary => {
                     primary_key = true;
                     not_null = true;
+                    last_enforceable = None;
                 }
-                pg_query::protobuf::ConstrType::ConstrNotnull => not_null = true,
-                pg_query::protobuf::ConstrType::ConstrUnique => unique = true,
-                pg_query::protobuf::ConstrType::ConstrIdentity => auto_increment = true,
+                pg_query::protobuf::ConstrType::ConstrNotnull => {
+                    not_null = true;
+                    not_null_explicit = true;
+                    not_null_name = constraint_name(&cstr.conname);
+                    last_enforceable = None;
+                }
+                pg_query::protobuf::ConstrType::ConstrUnique => {
+                    unique = true;
+                    last_enforceable = None;
+                }
+                pg_query::protobuf::ConstrType::ConstrIdentity => {
+                    auto_increment = true;
+                    last_enforceable = None;
+                }
                 pg_query::protobuf::ConstrType::ConstrDefault => {
                     let raw = cstr.raw_expr.as_deref().ok_or_else(|| {
                         SQLError::Internal("DEFAULT constraint without expression".into())
                     })?;
                     default = Some(compile_expr(raw)?);
+                    last_enforceable = None;
+                }
+                pg_query::protobuf::ConstrType::ConstrGenerated => {
+                    let raw = cstr.raw_expr.as_deref().ok_or_else(|| {
+                        SQLError::Internal("generated column without expression".into())
+                    })?;
+                    let kind = match cstr.generated_kind.as_str() {
+                        "v" => GeneratedColumnKind::Virtual,
+                        "s" => GeneratedColumnKind::Stored,
+                        other => {
+                            return Err(SQLError::Internal(format!(
+                                "generated column has unknown kind {other:?}"
+                            )));
+                        }
+                    };
+                    generated = Some(GeneratedColumn {
+                        kind,
+                        expression: Box::new(compile_expr(raw)?),
+                        function_dependencies: Vec::new(),
+                    });
+                    last_enforceable = None;
                 }
                 pg_query::protobuf::ConstrType::ConstrCheck => {
                     let raw = cstr
@@ -288,8 +364,16 @@ pub(in crate::compiler) fn compile_column_def(
                         .as_deref()
                         .ok_or_else(|| SQLError::Internal("CHECK without expression".into()))?;
                     check = Some(compile_expr(raw)?);
+                    check_name = constraint_name(&cstr.conname);
+                    check_enforced = cstr.is_enforced;
+                    last_enforceable = Some(EnforceableConstraint::Check);
                 }
                 pg_query::protobuf::ConstrType::ConstrForeign => {
+                    if cstr.fk_with_period || cstr.pk_with_period {
+                        return Err(SQLError::Unsupported(
+                            "temporal REFERENCES ... PERIOD constraints are not implemented".into(),
+                        ));
+                    }
                     let table =
                         cstr.pktable.as_ref().map(range_var_name).ok_or_else(|| {
                             SQLError::Internal("REFERENCES without a table".into())
@@ -301,14 +385,42 @@ pub(in crate::compiler) fn compile_column_def(
                         ));
                     };
                     references = Some(crate::ast::ForeignKeyRef {
+                        name: constraint_name(&cstr.conname),
                         table,
                         column: column.clone(),
                         on_update: compile_foreign_key_action(&cstr.fk_upd_action)?,
                         on_delete: compile_foreign_key_action(&cstr.fk_del_action)?,
                         match_type: compile_foreign_key_match(&cstr.fk_matchtype)?,
+                        enforced: cstr.is_enforced,
                     });
+                    last_enforceable = Some(EnforceableConstraint::ForeignKey);
                 }
-                pg_query::protobuf::ConstrType::ConstrNull => {}
+                pg_query::protobuf::ConstrType::ConstrAttrEnforced
+                | pg_query::protobuf::ConstrType::ConstrAttrNotEnforced => {
+                    let enforced =
+                        cstr.contype() == pg_query::protobuf::ConstrType::ConstrAttrEnforced;
+                    match last_enforceable {
+                        Some(EnforceableConstraint::Check) => check_enforced = enforced,
+                        Some(EnforceableConstraint::ForeignKey) => {
+                            references
+                                .as_mut()
+                                .ok_or_else(|| {
+                                    SQLError::Internal(
+                                        "REFERENCES enforcement attribute lost its constraint"
+                                            .into(),
+                                    )
+                                })?
+                                .enforced = enforced;
+                        }
+                        None => {
+                            return Err(SQLError::Unsupported(
+                                "constraint enforcement attribute without CHECK or FOREIGN KEY"
+                                    .into(),
+                            ));
+                        }
+                    }
+                }
+                pg_query::protobuf::ConstrType::ConstrNull => last_enforceable = None,
                 other => {
                     return Err(SQLError::Unsupported(format!(
                         "column constraint {other:?} is not supported"
@@ -331,10 +443,15 @@ pub(in crate::compiler) fn compile_column_def(
         ty,
         primary_key,
         not_null,
+        not_null_explicit,
+        not_null_name,
         auto_increment,
         unique,
         default,
+        generated,
         check,
+        check_name,
+        check_enforced,
         references,
     })
 }

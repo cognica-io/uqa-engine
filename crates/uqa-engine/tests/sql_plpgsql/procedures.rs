@@ -15,10 +15,11 @@ fn procedure_with_inout_via_call() {
          BEGIN x := x + y; END;
          $$ LANGUAGE plpgsql",
     );
-    // PG17: CALL returns a result row named after the INOUT param.
+    // PG18: CALL returns a result row named after the INOUT param.
     let result = exec(&eng, "CALL p_inout(10, 5)");
     assert_eq!(result.rows.len(), 1);
     assert_eq!(result.rows[0].get("x"), Some(&Value::Int(15)));
+    assert_eq!(result.column_types, [Some(ColumnType::Integer)]);
     // Procedure with OUT parameter: PG14+ requires a placeholder
     // argument in CALL.
     exec(
@@ -29,7 +30,8 @@ fn procedure_with_inout_via_call() {
     );
     let result = exec(&eng, "CALL p_out(21, NULL)");
     assert_eq!(result.rows[0].get("doubled"), Some(&Value::Int(42)));
-    // PG17 error shapes for kind confusion.
+    assert_eq!(result.column_types, [Some(ColumnType::Integer)]);
+    // PG18 error shapes for kind confusion.
     let err = exec_err(&eng, "SELECT p_inout(1, 2) AS v");
     assert!(err.to_string().contains("is a procedure"), "got: {err}");
     exec(
@@ -38,7 +40,7 @@ fn procedure_with_inout_via_call() {
     );
     let err = exec_err(&eng, "CALL plainf(1)");
     assert!(err.to_string().contains("is not a procedure"), "got: {err}");
-    // PG17: CALL with the wrong arity names the procedure.
+    // PG18: CALL with the wrong arity names the procedure.
     let err = exec_err(&eng, "CALL p_inout(1)");
     assert!(
         err.to_string()
@@ -87,7 +89,7 @@ fn do_block_side_effects() {
         &eng,
         "DO LANGUAGE plpgsql $$ BEGIN INSERT INTO do_target VALUES (1); END $$",
     );
-    // PG17: only procedural languages work in DO.
+    // PG18: only procedural languages work in DO.
     let err = exec_err(&eng, "DO LANGUAGE sql $$ SELECT 1 $$");
     assert!(
         err.to_string().contains("language \"sql\" does not exist"),

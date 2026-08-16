@@ -63,31 +63,41 @@ pub mod columnar_batch;
 pub mod distinct;
 pub mod external_sort;
 pub mod join;
+pub mod join_output;
 pub mod lateral_join;
 pub mod map_rows;
 pub mod physical;
 pub mod project_set;
 pub mod projected_predicate;
+pub mod projected_row;
 pub mod relational;
 pub mod scalar;
 pub mod scan;
+pub mod scope_overlay;
 pub mod set_operation;
 pub mod spill;
 pub mod spill_scan;
+pub mod type_resolution;
 
-pub use batch::{Batch, PhysicalRow, PhysicalRowView, RowSchema, DEFAULT_BATCH_SIZE};
+pub use batch::{
+    Batch, ColumnIdentity, OwnedPhysicalRow, PhysicalRow, PhysicalRowView, RowSchema,
+    DEFAULT_BATCH_SIZE,
+};
 pub use column_selection::ColumnSelection;
 pub use columnar_batch::{ColumnVector, ColumnarBatch};
 pub use distinct::{hash_canonical_row, CanonicalRowHashSet, Distinct, ExactRowSet};
 pub use external_sort::{ExternalSort, EXTERNAL_SORT_MERGE_FAN_IN};
 pub use join::{HashJoin, NestedLoopJoin};
+pub use join_output::{JoinOutput, JoinOutputSource};
 pub use lateral_join::{LateralJoin, LateralRows, LateralSource};
 pub use map_rows::{MapRows, SharedRowMapper};
 pub use physical::{
-    ordering_satisfies, ExecError, ExecResult, OperatorBatchCursor, PhysicalOperator, PhysicalOrder,
+    order_expression_position, ordering_satisfies, ExecError, ExecResult, OperatorBatchCursor,
+    PhysicalOperator, PhysicalOrder,
 };
 pub use project_set::{ProjectRows, ProjectSet, SetProjector};
 pub use projected_predicate::ProjectedPredicate;
+pub use projected_row::{ProjectedRow, ProjectedValueSlot};
 pub use relational::{
     AggregateExecutor, AggregateKind, AggregateSpec, ExpressionEvaluator, Filter, HashAggregate,
     Limit, Project, RowPredicate, SetOperation, SharedExpressionEvaluator, SharedRowPredicate,
@@ -98,6 +108,12 @@ pub use scalar::{
     ScalarSubqueryRunner, ScalarWindowFrame, ScalarWindowSpec, SubqueryId, SubqueryResult,
 };
 pub use scan::{RowIteratorScan, RowSource, TableScan};
+pub use scope_overlay::ScopeOverlay;
 pub use set_operation::ExternalSetOperation;
 pub use spill::{IndexedSpill, SharedSpill, SharedSpillReader, SpillBuffer};
 pub use spill_scan::{SharedSpillScan, SpillScan};
+pub use type_resolution::{
+    bind_type_introspection, bind_type_introspection_with_resolver, common_context_expression_type,
+    common_type, equality_operand_type, scalar_type, scalar_type_with_resolver,
+    values_column_types, FunctionTypeResolver,
+};

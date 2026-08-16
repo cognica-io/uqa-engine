@@ -163,6 +163,7 @@ fn rewrite_conjunction(parts: Vec<ScalarExpr>, allow_unqualified_signals: bool) 
 
     let fusion = ScalarExpr::Func {
         name: "fuse_bayesian_evidence".to_string(),
+        binding: None,
         args: fusion_signals,
         distinct: false,
         order_by: Vec::new(),
@@ -241,6 +242,7 @@ fn classify_signal(expression: &ScalarExpr) -> Option<(RetrievalSignalKind, Opti
         distinct,
         order_by,
         filter,
+        ..
     } = expression
     else {
         return None;
@@ -315,13 +317,15 @@ fn contains_explicit_fusion(expression: &ScalarExpr) -> bool {
                     .any(|order| contains_explicit_fusion(&order.expr))
                 || filter.as_deref().is_some_and(contains_explicit_fusion)
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-            items.iter().any(contains_explicit_fusion)
-        }
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => items.iter().any(contains_explicit_fusion),
         ScalarExpr::Binary { lhs, rhs, .. } => {
             contains_explicit_fusion(lhs) || contains_explicit_fusion(rhs)
         }
-        ScalarExpr::Not(inner)
+        ScalarExpr::UnaryMinus(inner)
+        | ScalarExpr::Not(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => contains_explicit_fusion(inner),
         ScalarExpr::Between { expr, low, high } => {
@@ -352,8 +356,11 @@ fn contains_explicit_fusion(expression: &ScalarExpr) -> bool {
                 || else_branch.as_deref().is_some_and(contains_explicit_fusion)
         }
         ScalarExpr::InSubquery { expr, .. } => contains_explicit_fusion(expr),
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)

@@ -7,6 +7,14 @@
 use super::temporal::{MICROS_PER_DAY, MICROS_PER_SECOND};
 use super::*;
 
+#[test]
+fn dynamic_value_keeps_variable_width_payloads_indirect() {
+    let pointer_bytes = std::mem::size_of::<usize>();
+    assert_eq!(std::mem::size_of::<ArrayValue>(), pointer_bytes);
+    assert_eq!(std::mem::size_of::<DecimalValue>(), pointer_bytes);
+    assert!(std::mem::size_of::<Value>() <= 4 * pointer_bytes);
+}
+
 struct HostileEmptySequence;
 
 impl<'de> serde::de::SeqAccess<'de> for HostileEmptySequence {
@@ -88,6 +96,43 @@ fn value_ordering_within_variant() {
 }
 
 #[test]
+fn container_ordering_uses_postgresql_nulls_high_semantics() {
+    let non_null = Value::List(vec![Value::Int(1), Value::Int(2)]);
+    let with_null = Value::List(vec![Value::Int(1), Value::Null]);
+    assert!(non_null < with_null);
+
+    let nested_non_null = Value::List(vec![non_null]);
+    let nested_with_null = Value::List(vec![with_null]);
+    assert!(nested_non_null < nested_with_null);
+}
+
+#[test]
+fn array_ordering_compares_row_major_contents_before_dimensions_and_bounds() {
+    let one_dimensional = Value::Array(
+        ArrayValue::try_new(vec![Value::Int(1), Value::Int(2)]).expect("one-dimensional array"),
+    );
+    let two_dimensional = Value::Array(
+        ArrayValue::try_new(vec![Value::List(vec![Value::Int(1), Value::Int(2)])])
+            .expect("two-dimensional array"),
+    );
+    let different_contents = Value::Array(
+        ArrayValue::try_new(vec![Value::Int(2), Value::Int(0)]).expect("one-dimensional array"),
+    );
+    let nested_contents = Value::Array(
+        ArrayValue::try_new(vec![Value::List(vec![Value::Int(1), Value::Int(9)])])
+            .expect("two-dimensional array"),
+    );
+    let shifted = Value::Array(
+        ArrayValue::with_lower_bounds(vec![Value::Int(1)], vec![2]).expect("shifted array"),
+    );
+    let one_based = Value::Array(ArrayValue::try_new(vec![Value::Int(1)]).expect("array"));
+
+    assert!(one_dimensional < two_dimensional);
+    assert!(different_contents > nested_contents);
+    assert!(one_based < shifted);
+}
+
+#[test]
 fn value_ordering_across_variants_is_stable() {
     assert!(Value::Null < Value::Bool(false));
     // Numeric coercion: Bool(true) == 1 > Int(0).
@@ -130,6 +175,71 @@ fn decimal_division_uses_postgresql_display_scale() {
     assert_eq!(divide("10.00", "4"), "2.5000000000000000");
     assert_eq!(divide("37569624.64", "1478"), "25419.231826792963");
     assert_eq!(divide("75.18", "1478"), "0.05086603518267929635");
+    let underflow = DecimalValue::parse("0e-16383")
+        .unwrap()
+        .checked_div_postgres(&DecimalValue::from_i64(4))
+        .unwrap();
+    assert!(underflow.is_zero());
+    assert_eq!(underflow.display_scale(), Some(1_000));
+}
+
+#[test]
+fn decimal_scaled_division_and_square_root_keep_guard_digits() {
+    let two = DecimalValue::from_i64(2);
+    let three = DecimalValue::from_i64(3);
+    assert_eq!(
+        two.checked_div_to_scale(&three, 20)
+            .unwrap()
+            .to_sql_string(),
+        "0.66666666666666666667"
+    );
+    assert_eq!(
+        two.sqrt_to_scale(16).unwrap().to_sql_string(),
+        "1.4142135623730950"
+    );
+    assert_eq!(
+        DecimalValue::parse("2.0000000000000000000000000000000000000000")
+            .unwrap()
+            .sqrt_to_scale(16)
+            .unwrap()
+            .to_sql_string(),
+        "1.4142135623730950"
+    );
+}
+
+#[test]
+fn decimal_power_preserves_postgresql_scale_and_significant_digits() {
+    let power = |base: &str, exponent: &str| {
+        DecimalValue::parse(base)
+            .unwrap()
+            .checked_pow_postgres(&DecimalValue::parse(exponent).unwrap())
+            .unwrap()
+            .to_sql_string()
+    };
+
+    assert_eq!(power("2", "0.5"), "1.4142135623730950");
+    assert_eq!(power("2", "0.1"), "1.0717734625362932");
+    assert_eq!(power("4", "0.25"), "1.4142135623730950");
+    assert_eq!(
+        power("0.000001", "3"),
+        "0.0000000000000000010000000000000000"
+    );
+    assert_eq!(power("4", "3"), "64.000000000000000");
+    assert_eq!(
+        power("2.0000000000000000000000000000000000000000", "0.5"),
+        "1.4142135623730950488016887242096980785697"
+    );
+    assert_eq!(power("-2", "NaN"), "NaN");
+    assert_eq!(power("-2", "Infinity"), "Infinity");
+    assert_eq!(power("-2", "-Infinity"), "0");
+    assert_eq!(
+        power("1e-1000", "-17"),
+        format!("1{}.{}", "0".repeat(17_000), "0".repeat(1_000))
+    );
+
+    let high_scale_base = format!("1.{}1", "0".repeat(16_382));
+    let high_scale_result = power(&high_scale_base, "0.5");
+    assert_eq!(high_scale_result, format!("1.{}", "0".repeat(1_000)));
 }
 
 #[test]
@@ -153,7 +263,7 @@ fn decimal_metadata_matches_display_and_numeric_equality() {
     );
     assert_eq!(
         DecimalValue::parse("0.00").unwrap().canonical_parts(),
-        (0, 0)
+        ("0".into(), 0)
     );
 }
 
@@ -482,44 +592,61 @@ fn value_json_decoding_keeps_arrays_as_lists() {
     );
 }
 
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(untagged)]
+enum UntaggedValue {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Str(String),
+    Bytes(Vec<u8>),
+    Temporal(TemporalValue),
+    Decimal(DecimalValue),
+    List(Vec<UntaggedValue>),
+    Map(BTreeMap<String, UntaggedValue>),
+}
+
+fn to_value(untagged: UntaggedValue) -> Value {
+    match untagged {
+        UntaggedValue::Null => Value::Null,
+        UntaggedValue::Bool(value) => Value::Bool(value),
+        UntaggedValue::Int(value) => Value::Int(value),
+        UntaggedValue::Float(value) => Value::Float(value),
+        UntaggedValue::Str(value) => Value::Str(value),
+        UntaggedValue::Bytes(value) => Value::Bytes(value),
+        UntaggedValue::Temporal(value) => Value::Temporal(value),
+        UntaggedValue::Decimal(value) => Value::Decimal(value),
+        UntaggedValue::List(items) => Value::List(items.into_iter().map(to_value).collect()),
+        UntaggedValue::Map(map) => {
+            if map.len() == 1 {
+                if let Some(UntaggedValue::Str(number)) = map.get("$serde_json::private::Number") {
+                    if let Ok(integer) = number.parse::<i64>() {
+                        return Value::Int(integer);
+                    }
+                    if let Ok(float) = number.parse::<f64>() {
+                        if float.is_finite() {
+                            return Value::Float(float);
+                        }
+                    }
+                    if let Some(decimal) = DecimalValue::parse(number) {
+                        return Value::Decimal(decimal);
+                    }
+                }
+            }
+            Value::Map(
+                map.into_iter()
+                    .map(|(key, value)| (key, to_value(value)))
+                    .collect(),
+            )
+        }
+    }
+}
+
 /// Differential check against the previous implementation for shapes
 /// unaffected by the deliberate ordinary-array/explicit-bytes change.
 #[test]
 fn value_json_decoding_matches_untagged_derive() {
-    #[derive(Debug, PartialEq, serde::Deserialize)]
-    #[serde(untagged)]
-    enum UntaggedValue {
-        Null,
-        Bool(bool),
-        Int(i64),
-        Float(f64),
-        Str(String),
-        Bytes(Vec<u8>),
-        Temporal(TemporalValue),
-        Decimal(DecimalValue),
-        List(Vec<UntaggedValue>),
-        Map(BTreeMap<String, UntaggedValue>),
-    }
-
-    fn to_value(untagged: UntaggedValue) -> Value {
-        match untagged {
-            UntaggedValue::Null => Value::Null,
-            UntaggedValue::Bool(value) => Value::Bool(value),
-            UntaggedValue::Int(value) => Value::Int(value),
-            UntaggedValue::Float(value) => Value::Float(value),
-            UntaggedValue::Str(value) => Value::Str(value),
-            UntaggedValue::Bytes(value) => Value::Bytes(value),
-            UntaggedValue::Temporal(value) => Value::Temporal(value),
-            UntaggedValue::Decimal(value) => Value::Decimal(value),
-            UntaggedValue::List(items) => Value::List(items.into_iter().map(to_value).collect()),
-            UntaggedValue::Map(map) => Value::Map(
-                map.into_iter()
-                    .map(|(key, value)| (key, to_value(value)))
-                    .collect(),
-            ),
-        }
-    }
-
     let corpus = [
         "null",
         "true",
@@ -593,7 +720,14 @@ fn value_json_round_trips_every_variant() {
             micros: 4_000_000,
         }),
         Value::Decimal(DecimalValue::parse("-12.75").unwrap()),
+        Value::Json("{\"b\":2,\"a\":1}".into()),
+        Value::JsonB("{\"a\": 1, \"b\": 2}".into()),
         Value::List(vec![Value::Str("a".into()), Value::Int(300)]),
+        Value::Row(vec![Value::Int(1), Value::Null]),
+        Value::Record(vec![
+            ("key".into(), Value::Str("a".into())),
+            ("value".into(), Value::Json("1".into())),
+        ]),
         Value::Map(BTreeMap::from([(
             "k".to_string(),
             Value::List(vec![Value::Float(0.5)]),
@@ -607,4 +741,33 @@ fn value_json_round_trips_every_variant() {
             "round trip failed for {json}"
         );
     }
+}
+
+#[test]
+fn jsonb_equality_and_ordering_follow_postgresql_structure() {
+    let jsonb = |text: &str| Value::JsonB(text.into());
+    assert_eq!(jsonb("1"), jsonb("1.0"));
+    assert_eq!(jsonb("1e2"), jsonb("100.00"));
+    assert_eq!(jsonb("{\"b\":2,\"a\":1}"), jsonb("{\"a\":1.0,\"b\":2}"));
+    assert!(jsonb("null") < jsonb("\"text\""));
+    assert!(jsonb("\"text\"") < jsonb("2"));
+    assert!(jsonb("2") < jsonb("true"));
+    assert!(jsonb("[]") < jsonb("null"));
+    assert!(jsonb("true") < jsonb("[false]"));
+    assert!(jsonb("[1,9]") < jsonb("[1,10]"));
+    assert!(jsonb("{\"a\":9}") < jsonb("{\"a\":0,\"b\":0}"));
+    assert!(jsonb("{\"b\":1,\"zz\":1}") < jsonb("{\"c\":1,\"aa\":1}"));
+    assert_eq!(
+        super::jsonb_equality_key("{\"a\":1,\"b\":[2.0]}").unwrap(),
+        super::jsonb_equality_key("{\"b\":[2],\"a\":1.00}").unwrap()
+    );
+    assert_eq!(
+        jsonb("123456789012345678901234567890.123456789012345678900"),
+        jsonb("123456789012345678901234567890.1234567890123456789")
+    );
+    assert!(
+        jsonb("123456789012345678901234567890.12345678901234567891")
+            > jsonb("123456789012345678901234567890.12345678901234567890")
+    );
+    assert_eq!(jsonb("{\"a\":1,\"a\":2}"), jsonb("{\"a\":2}"));
 }

@@ -52,6 +52,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
             }
             Ok(FromClause::Table {
                 name: range_var_name(r),
+                qualifier: r.relname.clone(),
                 alias: r.alias.as_ref().and_then(|a| {
                     if a.aliasname.is_empty() {
                         None
@@ -62,14 +63,6 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
             })
         }
         NodeEnum::JoinExpr(j) => {
-            if j.is_natural {
-                return Err(SQLError::Unsupported(
-                    "NATURAL JOIN is not supported".into(),
-                ));
-            }
-            if !j.using_clause.is_empty() || j.join_using_alias.is_some() {
-                return Err(SQLError::Unsupported("JOIN USING is not supported".into()));
-            }
             if j.alias.is_some() {
                 return Err(SQLError::Unsupported(
                     "aliases on parenthesized JOIN expressions are not supported".into(),
@@ -93,12 +86,35 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                 }
             };
             let on = j.quals.as_deref().map(compile_expr).transpose()?;
+            let using = if j.using_clause.is_empty() {
+                None
+            } else {
+                let columns = extract_strings(&j.using_clause)?;
+                let alias = j.join_using_alias.as_ref().and_then(|alias| {
+                    (!alias.aliasname.is_empty()).then(|| alias.aliasname.clone())
+                });
+                Some(crate::ast::JoinUsing { columns, alias })
+            };
+            if j.join_using_alias.is_some() && using.is_none() {
+                return Err(SQLError::Internal(
+                    "JOIN USING alias has no USING column list".into(),
+                ));
+            }
+            if usize::from(on.is_some()) + usize::from(using.is_some()) + usize::from(j.is_natural)
+                > 1
+            {
+                return Err(SQLError::Internal(
+                    "JOIN contains more than one of ON, USING, or NATURAL".into(),
+                ));
+            }
             let lateral = right_is_lateral(right);
             Ok(FromClause::Join {
                 left: Box::new(compile_from_node(left)?),
                 right: Box::new(compile_from_node(right)?),
                 kind,
                 on,
+                using,
+                natural: j.is_natural,
                 lateral,
             })
         }
@@ -129,20 +145,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                 .ok_or_else(|| SQLError::Internal("subquery body empty".into()))?;
             if let NodeEnum::SelectStmt(s) = body_inner {
                 if !s.values_lists.is_empty() {
-                    let mut rows: Vec<Vec<Expr>> = Vec::new();
-                    for r in &s.values_lists {
-                        let Some(NodeEnum::List(list)) = r.node.as_ref() else {
-                            return Err(SQLError::Internal(
-                                "VALUES subquery contains a malformed row".into(),
-                            ));
-                        };
-                        let row: Vec<Expr> = list
-                            .items
-                            .iter()
-                            .map(compile_expr)
-                            .collect::<Result<Vec<_>>>()?;
-                        rows.push(row);
-                    }
+                    let rows = super::compile_values_lists(&s.values_lists)?;
                     return Ok(FromClause::Values {
                         rows,
                         alias,
@@ -184,6 +187,15 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                     .ok_or_else(|| SQLError::Internal("RangeFunction empty pair".into()))?,
                 _ => first_node,
             };
+            let Some(NodeEnum::FuncCall(raw_call)) = call.node.as_ref() else {
+                return Err(SQLError::Internal(
+                    "RangeFunction lost its function-call parse node".into(),
+                ));
+            };
+            let output_name = extract_strings(&raw_call.funcname)?
+                .into_iter()
+                .last()
+                .ok_or_else(|| SQLError::Internal("RangeFunction has an empty name".into()))?;
             let expr = compile_expr(call)?;
             let (name, mut args) = match expr {
                 Expr::Func { name, args, .. } => (name, args),
@@ -194,11 +206,6 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                 }
             };
             let relation = if crate::registry::is_operator_join_table_function(&name) {
-                let Some(NodeEnum::FuncCall(raw_call)) = call.node.as_ref() else {
-                    return Err(SQLError::Internal(format!(
-                        "operator join `{name}` lost its function-call parse node"
-                    )));
-                };
                 let relation_node = raw_call.args.first().ok_or_else(|| SQLError::BadArity {
                     name: name.clone(),
                     expected: "a relation identifier followed by operator operands".into(),
@@ -216,6 +223,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
             let coldef_aliases: Vec<String> = coldefs.into_iter().map(|(name, _)| name).collect();
             Ok(FromClause::Function {
                 name,
+                output_name,
                 relation,
                 args,
                 alias,

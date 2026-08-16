@@ -25,13 +25,13 @@ fn show_search_path_returns_current_resolution_order() {
 }
 
 #[test]
-fn show_server_version_reports_postgresql_17_compatibility() {
+fn show_server_version_reports_postgresql_18_compatibility() {
     let eng = Engine::new();
     let r = eng.sql("SHOW server_version", &[]).unwrap();
     assert_eq!(r.columns, vec!["server_version".to_string()]);
     assert_eq!(
         r.rows[0].get("server_version"),
-        Some(&Value::Str("17.0-uqa".into()))
+        Some(&Value::Str("18.0-uqa".into()))
     );
 
     let settings = eng
@@ -42,7 +42,7 @@ fn show_server_version_reports_postgresql_17_compatibility() {
         .unwrap();
     assert_eq!(
         settings.rows[0].get("setting"),
-        Some(&Value::Str("17.0-uqa".into()))
+        Some(&Value::Str("18.0-uqa".into()))
     );
 }
 

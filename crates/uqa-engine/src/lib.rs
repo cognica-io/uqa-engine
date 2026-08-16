@@ -81,6 +81,7 @@ mod engine_cancellation;
 mod engine_catalog_indexes;
 mod engine_fdw;
 mod engine_fts;
+mod engine_generated;
 mod engine_graphs;
 mod engine_models;
 mod engine_open;
@@ -545,7 +546,7 @@ impl Engine {
 
 fn default_runtime_parameter(name: &str) -> Option<&'static str> {
     if name.eq_ignore_ascii_case("server_version") {
-        return Some("17.0-uqa");
+        return Some("18.0-uqa");
     }
     if name.eq_ignore_ascii_case("server_encoding") || name.eq_ignore_ascii_case("client_encoding")
     {
@@ -678,6 +679,22 @@ fn value_to_f64_vec(value: &Value) -> Result<Vec<f64>, String> {
                 other => Err(format!("expected numeric feature, got {other:?}")),
             })
             .collect(),
+        Value::Array(array) if array.dimensions().len() <= 1 => array
+            .elements()
+            .iter()
+            .map(|item| match item {
+                Value::Float(value) => Ok(*value),
+                Value::Int(value) => Ok(*value as f64),
+                Value::Decimal(value) => value
+                    .to_f64()
+                    .ok_or_else(|| "decimal feature is outside f64 range".to_string()),
+                other => Err(format!("expected numeric feature, got {other:?}")),
+            })
+            .collect(),
+        Value::Array(array) => Err(format!(
+            "expected one-dimensional feature array, got {} dimensions",
+            array.dimensions().len()
+        )),
         other => Err(format!("expected feature array, got {other:?}")),
     }
 }

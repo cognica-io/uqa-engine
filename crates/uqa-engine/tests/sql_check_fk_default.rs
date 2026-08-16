@@ -77,6 +77,38 @@ fn foreign_key_accepts_existing_parent() {
 }
 
 #[test]
+fn postgresql_18_not_enforced_constraints_are_metadata_only() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE parent (id INTEGER PRIMARY KEY)", &[])
+        .unwrap();
+    eng.sql(
+        "CREATE TABLE child (\
+             id INTEGER PRIMARY KEY, \
+             label TEXT CONSTRAINT label_nn NOT NULL, \
+             score INTEGER CONSTRAINT score_positive CHECK (score > 0) NOT ENFORCED, \
+             parent_id INTEGER CONSTRAINT parent_ref REFERENCES parent(id) NOT ENFORCED, \
+             CONSTRAINT row_positive CHECK (score < 100) NOT ENFORCED, \
+             CONSTRAINT row_parent FOREIGN KEY (parent_id) REFERENCES parent(id) NOT ENFORCED\
+         )",
+        &[],
+    )
+    .unwrap();
+
+    eng.sql(
+        "INSERT INTO child (id, label, score, parent_id) VALUES (1, 'ok', -5, 999)",
+        &[],
+    )
+    .unwrap();
+    let err = eng
+        .sql(
+            "INSERT INTO child (id, label, score, parent_id) VALUES (2, NULL, -5, 999)",
+            &[],
+        )
+        .unwrap_err();
+    assert!(format!("{err:?}").contains("NOT NULL"));
+}
+
+#[test]
 fn delete_parent_blocked_when_child_references_it() {
     let eng = Engine::new();
     eng.sql("CREATE TABLE parent (id INTEGER PRIMARY KEY)", &[])

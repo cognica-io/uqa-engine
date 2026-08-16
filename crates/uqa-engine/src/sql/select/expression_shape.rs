@@ -11,13 +11,15 @@ use super::{collect_from_qualifiers, BTreeSet, ScalarExpr, SourcePlan};
 pub(in crate::sql) fn expr_contains_function(expression: &ScalarExpr) -> bool {
     match expression {
         ScalarExpr::Func { .. } | ScalarExpr::WindowCall { .. } => true,
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-            items.iter().any(expr_contains_function)
-        }
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => items.iter().any(expr_contains_function),
         ScalarExpr::Binary { lhs, rhs, .. } => {
             expr_contains_function(lhs) || expr_contains_function(rhs)
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => expr_contains_function(inner),
         ScalarExpr::Between { expr, low, high } => {
@@ -40,8 +42,11 @@ pub(in crate::sql) fn expr_contains_function(expression: &ScalarExpr) -> bool {
                 || else_branch.as_deref().is_some_and(expr_contains_function)
         }
         ScalarExpr::InSubquery { expr, .. } => expr_contains_function(expr),
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
@@ -74,10 +79,13 @@ pub(in crate::sql) fn collect_expr_qualifiers(
     qualifiers: &mut BTreeSet<String>,
 ) {
     match expr {
-        ScalarExpr::QualifiedColumn { qualifier, .. } => {
+        ScalarExpr::QualifiedColumn { qualifier, .. } | ScalarExpr::QualifiedStar(qualifier) => {
             qualifiers.insert(qualifier.clone());
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => {
             for item in items {
                 collect_expr_qualifiers(item, qualifiers);
             }
@@ -103,6 +111,7 @@ pub(in crate::sql) fn collect_expr_qualifiers(
             collect_expr_qualifiers(rhs, qualifiers);
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => {
             collect_expr_qualifiers(inner, qualifiers);
@@ -146,7 +155,9 @@ pub(in crate::sql) fn collect_expr_qualifiers(
             }
         }
         ScalarExpr::InSubquery { expr, .. } => collect_expr_qualifiers(expr, qualifiers),
-        ScalarExpr::Column(_)
+        ScalarExpr::Default
+        | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::Star
@@ -158,9 +169,10 @@ pub(in crate::sql) fn collect_expr_qualifiers(
 pub(in crate::sql) fn expr_has_unqualified_column(expr: &ScalarExpr) -> bool {
     match expr {
         ScalarExpr::Column(_) => true,
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-            items.iter().any(expr_has_unqualified_column)
-        }
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => items.iter().any(expr_has_unqualified_column),
         ScalarExpr::Func {
             args,
             order_by,
@@ -179,6 +191,7 @@ pub(in crate::sql) fn expr_has_unqualified_column(expr: &ScalarExpr) -> bool {
             expr_has_unqualified_column(lhs) || expr_has_unqualified_column(rhs)
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => expr_has_unqualified_column(inner),
         ScalarExpr::Between { expr, low, high } => {
@@ -212,7 +225,10 @@ pub(in crate::sql) fn expr_has_unqualified_column(expr: &ScalarExpr) -> bool {
                     .is_some_and(|expr| expr_has_unqualified_column(expr))
         }
         ScalarExpr::InSubquery { expr, .. } => expr_has_unqualified_column(expr),
-        ScalarExpr::QualifiedColumn { .. }
+        ScalarExpr::Default
+        | ScalarExpr::Position(_)
+        | ScalarExpr::QualifiedColumn { .. }
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::Star
@@ -227,11 +243,20 @@ pub(in crate::sql) fn qualify_unqualified_columns(
 ) -> ScalarExpr {
     match expr {
         ScalarExpr::Column(column) => ScalarExpr::qualified_column(qualifier, column),
-        ScalarExpr::QualifiedColumn { .. }
+        ScalarExpr::Default
+        | ScalarExpr::Position(_)
+        | ScalarExpr::QualifiedColumn { .. }
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::Star => expr.clone(),
         ScalarExpr::Array(items) => ScalarExpr::Array(
+            items
+                .iter()
+                .map(|item| qualify_unqualified_columns(item, qualifier))
+                .collect(),
+        ),
+        ScalarExpr::Row(items) => ScalarExpr::Row(
             items
                 .iter()
                 .map(|item| qualify_unqualified_columns(item, qualifier))
@@ -257,6 +282,9 @@ pub(in crate::sql) fn qualify_unqualified_columns(
         ScalarExpr::Not(inner) => {
             ScalarExpr::Not(Box::new(qualify_unqualified_columns(inner, qualifier)))
         }
+        ScalarExpr::UnaryMinus(inner) => {
+            ScalarExpr::UnaryMinus(Box::new(qualify_unqualified_columns(inner, qualifier)))
+        }
         ScalarExpr::IsNull { expr, negated } => ScalarExpr::IsNull {
             expr: Box::new(qualify_unqualified_columns(expr, qualifier)),
             negated: *negated,
@@ -280,12 +308,14 @@ pub(in crate::sql) fn qualify_unqualified_columns(
         },
         ScalarExpr::Func {
             name,
+            binding,
             args,
             distinct,
             order_by,
             filter,
         } => ScalarExpr::Func {
             name: name.clone(),
+            binding: binding.clone(),
             args: args
                 .iter()
                 .map(|arg| qualify_unqualified_columns(arg, qualifier))

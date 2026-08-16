@@ -419,7 +419,7 @@ fn in_list_lowers_to_filter_with_inset_predicate() {
 fn not_in_list_lowers_to_complement_filter() {
     // `NOT IN` keeps SQL three-valued semantics: the complement of the
     // match set intersected with `IS NOT NULL`, so NULL rows never
-    // slip in (PostgreSQL 17 behavior).
+    // slip in (PostgreSQL 18 behavior).
     let expr = where_of("SELECT id FROM notes WHERE year NOT IN (2024)");
     let lowered = lower_where(&expr, &[]).expect("lowers");
     let OperatorTree::Intersect(parts) = lowered else {

@@ -7,7 +7,8 @@
 //! Dynamic document values, serialization, and cross-numeric ordering.
 
 use super::{
-    BTreeMap, DecimalValue, Deserialize, Deserializer, Serialize, Serializer, TemporalValue,
+    jsonb::compare_jsonb_text, ArrayValue, BTreeMap, DecimalValue, Deserialize, Deserializer,
+    Serialize, Serializer, TemporalValue,
 };
 
 /// Dynamic value type for document fields and posting payload extras.
@@ -28,8 +29,60 @@ pub enum Value {
     Bytes(Vec<u8>),
     Temporal(TemporalValue),
     Decimal(DecimalValue),
+    /// Validated `PostgreSQL` `json` text. Unlike `jsonb`, the original
+    /// whitespace and object-key order are preserved.
+    Json(String),
+    /// Canonical `PostgreSQL` `jsonb` text. Keeping a distinct carrier
+    /// preserves JSON scalars and arrays across SQL, storage, and bindings.
+    JsonB(String),
+    /// SQL array value with `PostgreSQL` dimension lower bounds.
+    Array(ArrayValue),
+    /// Internal generic sequence carrier for vectors, tensors, JSON arrays,
+    /// graph lists, and callback payloads. SQL arrays use [`Value::Array`].
     List(Vec<Value>),
+    /// Anonymous `ROW(...)` constructor. This stays distinct from arrays so
+    /// row comparisons retain SQL three-valued NULL semantics.
+    Row(Vec<Value>),
+    /// Named composite/record value in physical field order.
+    Record(Vec<(String, Value)>),
+    /// JSON/document object value. This is not a SQL composite record.
     Map(BTreeMap<String, Value>),
+}
+
+#[derive(Serialize)]
+struct TaggedText<'a> {
+    #[serde(rename = "$uqa_type")]
+    kind: &'static str,
+    value: &'a str,
+}
+
+#[derive(Serialize)]
+struct TaggedBytes<'a> {
+    #[serde(rename = "$uqa_type")]
+    kind: &'static str,
+    hex: &'a str,
+}
+
+#[derive(Serialize)]
+struct TaggedArray<'a> {
+    #[serde(rename = "$uqa_type")]
+    kind: &'static str,
+    lower_bounds: &'a [i32],
+    values: &'a [Value],
+}
+
+#[derive(Serialize)]
+struct TaggedRow<'a> {
+    #[serde(rename = "$uqa_type")]
+    kind: &'static str,
+    values: &'a [Value],
+}
+
+#[derive(Serialize)]
+struct TaggedRecord<'a> {
+    #[serde(rename = "$uqa_type")]
+    kind: &'static str,
+    fields: &'a [(String, Value)],
 }
 
 impl Serialize for Value {
@@ -43,29 +96,13 @@ impl Serialize for Value {
             Self::Int(value) => serializer.serialize_i64(*value),
             Self::Float(value) => serializer.serialize_f64(*value),
             Self::Str(value) => serializer.serialize_str(value),
-            Self::FixedChar(value) => {
-                #[derive(Serialize)]
-                struct TaggedFixedChar<'a> {
-                    #[serde(rename = "$uqa_type")]
-                    kind: &'static str,
-                    value: &'a str,
-                }
-
-                TaggedFixedChar {
-                    kind: "fixed_char",
-                    value,
-                }
-                .serialize(serializer)
+            Self::FixedChar(value) => TaggedText {
+                kind: "fixed_char",
+                value,
             }
+            .serialize(serializer),
             Self::Bytes(value) => {
                 const DIGITS: &[u8; 16] = b"0123456789abcdef";
-
-                #[derive(Serialize)]
-                struct TaggedBytes<'a> {
-                    #[serde(rename = "$uqa_type")]
-                    kind: &'static str,
-                    hex: &'a str,
-                }
 
                 let capacity = value.len().checked_mul(2).ok_or_else(|| {
                     <S::Error as serde::ser::Error>::custom(
@@ -90,9 +127,68 @@ impl Serialize for Value {
             }
             Self::Temporal(value) => value.serialize(serializer),
             Self::Decimal(value) => value.serialize(serializer),
+            Self::Json(value) | Self::JsonB(value) => TaggedText {
+                kind: if matches!(self, Self::Json(_)) {
+                    "json"
+                } else {
+                    "jsonb"
+                },
+                value,
+            }
+            .serialize(serializer),
+            Self::Array(value) => TaggedArray {
+                kind: "array",
+                lower_bounds: value.lower_bounds(),
+                values: value.elements(),
+            }
+            .serialize(serializer),
             Self::List(value) => value.serialize(serializer),
+            Self::Row(values) => TaggedRow {
+                kind: "row",
+                values,
+            }
+            .serialize(serializer),
+            Self::Record(fields) => TaggedRecord {
+                kind: "record",
+                fields,
+            }
+            .serialize(serializer),
             Self::Map(value) => value.serialize(serializer),
         }
+    }
+}
+
+fn int_field<T: TryFrom<i64>>(map: &BTreeMap<String, Value>, key: &str) -> Option<T> {
+    match map.get(key)? {
+        Value::Int(number) => T::try_from(*number).ok(),
+        _ => None,
+    }
+}
+
+fn tagged_temporal_value(tag: &str, map: &BTreeMap<String, Value>) -> Option<TemporalValue> {
+    match tag {
+        "date" if map.len() == 2 => Some(TemporalValue::Date {
+            days: int_field(map, "days")?,
+        }),
+        "time" if map.len() == 2 => Some(TemporalValue::Time {
+            micros: int_field(map, "micros")?,
+        }),
+        "time_tz" if map.len() == 3 => Some(TemporalValue::TimeTz {
+            micros: int_field(map, "micros")?,
+            offset_minutes: int_field(map, "offset_minutes")?,
+        }),
+        "timestamp" if map.len() == 2 => Some(TemporalValue::Timestamp {
+            micros: int_field(map, "micros")?,
+        }),
+        "timestamp_tz" if map.len() == 2 => Some(TemporalValue::TimestampTz {
+            micros: int_field(map, "micros")?,
+        }),
+        "interval" if map.len() == 4 => Some(TemporalValue::Interval {
+            months: int_field(map, "months")?,
+            days: int_field(map, "days")?,
+            micros: int_field(map, "micros")?,
+        }),
+        _ => None,
     }
 }
 
@@ -109,84 +205,85 @@ fn value_from_tagged_map(
     tag: &str,
     map: &BTreeMap<String, Value>,
 ) -> Result<Option<Value>, String> {
-    fn int_field<T: TryFrom<i64>>(map: &BTreeMap<String, Value>, key: &str) -> Option<T> {
-        match map.get(key)? {
-            Value::Int(number) => T::try_from(*number).ok(),
-            _ => None,
-        }
+    if matches!(
+        tag,
+        "date" | "time" | "time_tz" | "timestamp" | "timestamp_tz" | "interval"
+    ) {
+        return Ok(tagged_temporal_value(tag, map).map(Value::Temporal));
     }
-
-    let temporal = match tag {
-        "date" if map.len() == 2 => {
-            let Some(days) = int_field(map, "days") else {
-                return Ok(None);
-            };
-            TemporalValue::Date { days }
-        }
-        "time" if map.len() == 2 => {
-            let Some(micros) = int_field(map, "micros") else {
-                return Ok(None);
-            };
-            TemporalValue::Time { micros }
-        }
-        "time_tz" if map.len() == 3 => {
-            let (Some(micros), Some(offset_minutes)) =
-                (int_field(map, "micros"), int_field(map, "offset_minutes"))
-            else {
-                return Ok(None);
-            };
-            TemporalValue::TimeTz {
-                micros,
-                offset_minutes,
-            }
-        }
-        "timestamp" if map.len() == 2 => {
-            let Some(micros) = int_field(map, "micros") else {
-                return Ok(None);
-            };
-            TemporalValue::Timestamp { micros }
-        }
-        "timestamp_tz" if map.len() == 2 => {
-            let Some(micros) = int_field(map, "micros") else {
-                return Ok(None);
-            };
-            TemporalValue::TimestampTz { micros }
-        }
-        "interval" if map.len() == 4 => {
-            let (Some(months), Some(days), Some(micros)) = (
-                int_field(map, "months"),
-                int_field(map, "days"),
-                int_field(map, "micros"),
-            ) else {
-                return Ok(None);
-            };
-            TemporalValue::Interval {
-                months,
-                days,
-                micros,
-            }
-        }
+    match tag {
         "decimal" => {
             let Some(Value::Str(text)) = map.get("value") else {
                 return Ok(None);
             };
-            return Ok(DecimalValue::parse(text).map(Value::Decimal));
+            Ok(DecimalValue::parse(text).map(Value::Decimal))
         }
         "fixed_char" if map.len() == 2 => {
             let Some(Value::Str(text)) = map.get("value") else {
                 return Ok(None);
             };
-            return Ok(Some(Value::FixedChar(text.clone())));
+            Ok(Some(Value::FixedChar(text.clone())))
         }
         "bytes" if map.len() == 2 => {
             let Some(Value::Str(hex)) = map.get("hex") else {
                 return Ok(None);
             };
-            return decode_hex_bytes(hex).map(|bytes| bytes.map(Value::Bytes));
+            decode_hex_bytes(hex).map(|bytes| bytes.map(Value::Bytes))
         }
-        _ => return Ok(None),
-    };
-    Ok(Some(Value::Temporal(temporal)))
+        "json" | "jsonb" if map.len() == 2 => {
+            let Some(Value::Str(text)) = map.get("value") else {
+                return Ok(None);
+            };
+            Ok(Some(if tag == "json" {
+                Value::Json(text.clone())
+            } else {
+                Value::JsonB(text.clone())
+            }))
+        }
+        "array" if map.len() == 3 => {
+            let (Some(Value::List(lower_bounds)), Some(Value::List(values))) =
+                (map.get("lower_bounds"), map.get("values"))
+            else {
+                return Ok(None);
+            };
+            let lower_bounds = lower_bounds
+                .iter()
+                .map(|value| match value {
+                    Value::Int(value) => i32::try_from(*value).ok(),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>();
+            Ok(lower_bounds.and_then(|lower_bounds| {
+                ArrayValue::with_lower_bounds(values.clone(), lower_bounds).map(Value::Array)
+            }))
+        }
+        "row" if map.len() == 2 => {
+            let Some(Value::List(values)) = map.get("values") else {
+                return Ok(None);
+            };
+            Ok(Some(Value::Row(values.clone())))
+        }
+        "record" if map.len() == 2 => {
+            let Some(Value::List(encoded_fields)) = map.get("fields") else {
+                return Ok(None);
+            };
+            let mut fields = Vec::new();
+            fields
+                .try_reserve_exact(encoded_fields.len())
+                .map_err(|error| format!("cannot allocate decoded record fields: {error}"))?;
+            for encoded in encoded_fields {
+                let Value::List(pair) = encoded else {
+                    return Ok(None);
+                };
+                let [Value::Str(name), value] = pair.as_slice() else {
+                    return Ok(None);
+                };
+                fields.push((name.clone(), value.clone()));
+            }
+            Ok(Some(Value::Record(fields)))
+        }
+        _ => Ok(None),
+    }
 }
 
 fn decode_hex_bytes(hex: &str) -> Result<Option<Vec<u8>>, String> {
@@ -223,116 +320,134 @@ fn decode_hex_bytes(hex: &str) -> Result<Option<Vec<u8>>, String> {
 /// that does not match; profiling showed that error construction alone
 /// consuming a quarter of `SQLite` read time. The visitor dispatches on
 /// the self-describing input directly instead.
+struct ValueVisitor;
+
+impl<'de> serde::de::Visitor<'de> for ValueVisitor {
+    type Value = Value;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a UQA value")
+    }
+
+    fn visit_unit<E>(self) -> std::result::Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_none<E>(self) -> std::result::Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> std::result::Result<Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Value::deserialize(deserializer)
+    }
+
+    fn visit_bool<E>(self, value: bool) -> std::result::Result<Value, E> {
+        Ok(Value::Bool(value))
+    }
+
+    fn visit_i64<E>(self, value: i64) -> std::result::Result<Value, E> {
+        Ok(Value::Int(value))
+    }
+
+    fn visit_u64<E>(self, value: u64) -> std::result::Result<Value, E> {
+        // The untagged order tries Int(i64) before Float, so
+        // only out-of-range magnitudes land on Float.
+        Ok(i64::try_from(value).map_or(Value::Float(value as f64), Value::Int))
+    }
+
+    fn visit_f64<E>(self, value: f64) -> std::result::Result<Value, E> {
+        Ok(Value::Float(value))
+    }
+
+    fn visit_str<E>(self, value: &str) -> std::result::Result<Value, E> {
+        Ok(Value::Str(value.to_owned()))
+    }
+
+    fn visit_string<E>(self, value: String) -> std::result::Result<Value, E> {
+        Ok(Value::Str(value))
+    }
+
+    fn visit_bytes<E>(self, value: &[u8]) -> std::result::Result<Value, E> {
+        Ok(Value::Bytes(value.to_vec()))
+    }
+
+    fn visit_byte_buf<E>(self, value: Vec<u8>) -> std::result::Result<Value, E> {
+        Ok(Value::Bytes(value))
+    }
+
+    fn visit_seq<A>(self, mut access: A) -> std::result::Result<Value, A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        // `SeqAccess::size_hint` is supplied by the input decoder and
+        // is not trustworthy enough to hand directly to an infallible
+        // allocation. Reserve a bounded useful prefix, then make every
+        // subsequent growth fallible as elements actually arrive.
+        let initial = access.size_hint().unwrap_or(0).min(4_096);
+        let mut items: Vec<Value> = Vec::new();
+        items.try_reserve_exact(initial).map_err(|error| {
+            <A::Error as serde::de::Error>::custom(format!(
+                "cannot allocate UQA value sequence: {error}"
+            ))
+        })?;
+        while let Some(item) = access.next_element::<Value>()? {
+            if items.len() == items.capacity() {
+                items.try_reserve(1).map_err(|error| {
+                    <A::Error as serde::de::Error>::custom(format!(
+                        "cannot grow UQA value sequence: {error}"
+                    ))
+                })?;
+            }
+            items.push(item);
+        }
+        Ok(Value::List(items))
+    }
+
+    fn visit_map<A>(self, mut access: A) -> std::result::Result<Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut map = BTreeMap::new();
+        while let Some((key, value)) = access.next_entry::<String, Value>()? {
+            map.insert(key, value);
+        }
+        if map.len() == 1 {
+            if let Some(Value::Str(number)) = map.get("$serde_json::private::Number") {
+                if let Ok(integer) = number.parse::<i64>() {
+                    return Ok(Value::Int(integer));
+                }
+                if let Ok(float) = number.parse::<f64>() {
+                    if float.is_finite() {
+                        return Ok(Value::Float(float));
+                    }
+                }
+                if let Some(decimal) = DecimalValue::parse(number) {
+                    return Ok(Value::Decimal(decimal));
+                }
+                return Err(<A::Error as serde::de::Error>::custom(
+                    "invalid arbitrary-precision JSON number",
+                ));
+            }
+        }
+        if let Some(Value::Str(tag)) = map.get("$uqa_type") {
+            if let Some(value) =
+                value_from_tagged_map(tag, &map).map_err(<A::Error as serde::de::Error>::custom)?
+            {
+                return Ok(value);
+            }
+        }
+        Ok(Value::Map(map))
+    }
+}
+
 impl<'de> Deserialize<'de> for Value {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        struct ValueVisitor;
-
-        impl<'de> serde::de::Visitor<'de> for ValueVisitor {
-            type Value = Value;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a UQA value")
-            }
-
-            fn visit_unit<E>(self) -> std::result::Result<Value, E> {
-                Ok(Value::Null)
-            }
-
-            fn visit_none<E>(self) -> std::result::Result<Value, E> {
-                Ok(Value::Null)
-            }
-
-            fn visit_some<D>(self, deserializer: D) -> std::result::Result<Value, D::Error>
-            where
-                D: Deserializer<'de>,
-            {
-                Value::deserialize(deserializer)
-            }
-
-            fn visit_bool<E>(self, value: bool) -> std::result::Result<Value, E> {
-                Ok(Value::Bool(value))
-            }
-
-            fn visit_i64<E>(self, value: i64) -> std::result::Result<Value, E> {
-                Ok(Value::Int(value))
-            }
-
-            fn visit_u64<E>(self, value: u64) -> std::result::Result<Value, E> {
-                // The untagged order tries Int(i64) before Float, so
-                // only out-of-range magnitudes land on Float.
-                Ok(i64::try_from(value).map_or(Value::Float(value as f64), Value::Int))
-            }
-
-            fn visit_f64<E>(self, value: f64) -> std::result::Result<Value, E> {
-                Ok(Value::Float(value))
-            }
-
-            fn visit_str<E>(self, value: &str) -> std::result::Result<Value, E> {
-                Ok(Value::Str(value.to_owned()))
-            }
-
-            fn visit_string<E>(self, value: String) -> std::result::Result<Value, E> {
-                Ok(Value::Str(value))
-            }
-
-            fn visit_bytes<E>(self, value: &[u8]) -> std::result::Result<Value, E> {
-                Ok(Value::Bytes(value.to_vec()))
-            }
-
-            fn visit_byte_buf<E>(self, value: Vec<u8>) -> std::result::Result<Value, E> {
-                Ok(Value::Bytes(value))
-            }
-
-            fn visit_seq<A>(self, mut access: A) -> std::result::Result<Value, A::Error>
-            where
-                A: serde::de::SeqAccess<'de>,
-            {
-                // `SeqAccess::size_hint` is supplied by the input decoder and
-                // is not trustworthy enough to hand directly to an infallible
-                // allocation. Reserve a bounded useful prefix, then make every
-                // subsequent growth fallible as elements actually arrive.
-                let initial = access.size_hint().unwrap_or(0).min(4_096);
-                let mut items: Vec<Value> = Vec::new();
-                items.try_reserve_exact(initial).map_err(|error| {
-                    <A::Error as serde::de::Error>::custom(format!(
-                        "cannot allocate UQA value sequence: {error}"
-                    ))
-                })?;
-                while let Some(item) = access.next_element::<Value>()? {
-                    if items.len() == items.capacity() {
-                        items.try_reserve(1).map_err(|error| {
-                            <A::Error as serde::de::Error>::custom(format!(
-                                "cannot grow UQA value sequence: {error}"
-                            ))
-                        })?;
-                    }
-                    items.push(item);
-                }
-                Ok(Value::List(items))
-            }
-
-            fn visit_map<A>(self, mut access: A) -> std::result::Result<Value, A::Error>
-            where
-                A: serde::de::MapAccess<'de>,
-            {
-                let mut map = BTreeMap::new();
-                while let Some((key, value)) = access.next_entry::<String, Value>()? {
-                    map.insert(key, value);
-                }
-                if let Some(Value::Str(tag)) = map.get("$uqa_type") {
-                    if let Some(value) = value_from_tagged_map(tag, &map)
-                        .map_err(<A::Error as serde::de::Error>::custom)?
-                    {
-                        return Ok(value);
-                    }
-                }
-                Ok(Value::Map(map))
-            }
-        }
-
         deserializer.deserialize_any(ValueVisitor)
     }
 }
@@ -376,42 +491,87 @@ fn compare_integer_float(integer: i64, float: f64) -> std::cmp::Ordering {
 }
 
 fn compare_float_decimal(float: f64, decimal: &DecimalValue) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
-    if float.is_nan() || float == f64::INFINITY {
-        return Ordering::Greater;
-    }
-    if float == f64::NEG_INFINITY {
-        return Ordering::Less;
-    }
     if let Some(float_decimal) = DecimalValue::from_f64_lossy(float) {
         return float_decimal.cmp(decimal);
     }
+    float.total_cmp(&0.0)
+}
 
-    // A finite f64 that rust_decimal cannot represent is either outside its
-    // magnitude or below its scale. Compare such subnormal/supernormal values
-    // against zero and the decimal sign without manufacturing an equality.
-    let decimal_vs_zero = decimal.cmp(&DecimalValue::from_i64(0));
-    if float > 0.0 {
-        if float > 1.0 {
-            Ordering::Greater
-        } else if decimal_vs_zero == Ordering::Greater {
-            Ordering::Less
-        } else {
-            Ordering::Greater
+fn compare_postgres_container_values(left: &[Value], right: &[Value]) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    for (left, right) in left.iter().zip(right) {
+        let ordering = match (left, right) {
+            (Value::Null, Value::Null) => Ordering::Equal,
+            (Value::Null, _) => Ordering::Greater,
+            (_, Value::Null) => Ordering::Less,
+            _ => left.cmp(right),
+        };
+        if ordering != Ordering::Equal {
+            return ordering;
         }
-    } else if float < -1.0 {
-        Ordering::Less
-    } else if decimal_vs_zero == Ordering::Less {
-        Ordering::Greater
-    } else {
-        Ordering::Less
     }
+    left.len().cmp(&right.len())
+}
+
+struct FlattenedArrayValues<'a> {
+    stack: Vec<std::slice::Iter<'a, Value>>,
+}
+
+impl<'a> FlattenedArrayValues<'a> {
+    fn new(values: &'a [Value]) -> Self {
+        Self {
+            stack: vec![values.iter()],
+        }
+    }
+}
+
+impl<'a> Iterator for FlattenedArrayValues<'a> {
+    type Item = &'a Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let current = self.stack.last_mut()?;
+            match current.next() {
+                Some(Value::List(values)) => self.stack.push(values.iter()),
+                Some(Value::Array(array)) => self.stack.push(array.elements().iter()),
+                Some(value) => return Some(value),
+                None => {
+                    self.stack.pop();
+                }
+            }
+        }
+    }
+}
+
+fn compare_postgres_arrays(left: &ArrayValue, right: &ArrayValue) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let mut left_values = FlattenedArrayValues::new(left.elements());
+    let mut right_values = FlattenedArrayValues::new(right.elements());
+    loop {
+        let ordering = match (left_values.next(), right_values.next()) {
+            (Some(Value::Null), Some(Value::Null)) => Ordering::Equal,
+            (Some(Value::Null), Some(_)) | (Some(_), None) => Ordering::Greater,
+            (Some(_), Some(Value::Null)) | (None, Some(_)) => Ordering::Less,
+            (Some(left), Some(right)) => left.cmp(right),
+            (None, None) => break,
+        };
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+    }
+    left.dimensions()
+        .len()
+        .cmp(&right.dimensions().len())
+        .then_with(|| left.dimensions().cmp(right.dimensions()))
+        .then_with(|| left.lower_bounds().cmp(right.lower_bounds()))
 }
 
 // `Value` carries `f64`, so equality and ordering are implemented together.
 // NaN compares equal to NaN and greater than finite values, signed zeroes are
 // equal, and cross-numeric variants use numeric rather than discriminant order.
-// This keeps `Eq`/`Ord` consistent for BTree keys used by joins and DISTINCT.
+// PostgreSQL's B-tree ordering for array/composite fields considers NULL equal
+// to NULL and greater than a non-NULL field. This keeps `Eq`/`Ord` consistent
+// for BTree keys used by joins, DISTINCT, array_sort, and MIN/MAX.
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == std::cmp::Ordering::Equal
@@ -451,13 +611,18 @@ impl Ord for Value {
             (Value::Float(a), Value::Bool(b)) => compare_integer_float(i64::from(*b), *a).reverse(),
             (Value::Bool(a), Value::Decimal(b)) => DecimalValue::from_bool(*a).cmp(b),
             (Value::Decimal(a), Value::Bool(b)) => a.cmp(&DecimalValue::from_bool(*b)),
-            (Value::Str(a), Value::Str(b)) => a.cmp(b),
+            (Value::Str(a), Value::Str(b)) | (Value::Json(a), Value::Json(b)) => a.cmp(b),
+            (Value::JsonB(a), Value::JsonB(b)) => compare_jsonb_text(a, b),
             (Value::FixedChar(a), Value::FixedChar(b)) => {
                 fixed_char_text(a).cmp(fixed_char_text(b))
             }
             (Value::Bytes(a), Value::Bytes(b)) => a.cmp(b),
             (Value::Temporal(a), Value::Temporal(b)) => a.cmp(b),
-            (Value::List(a), Value::List(b)) => a.cmp(b),
+            (Value::Array(a), Value::Array(b)) => compare_postgres_arrays(a, b),
+            (Value::List(a), Value::List(b)) | (Value::Row(a), Value::Row(b)) => {
+                compare_postgres_container_values(a, b)
+            }
+            (Value::Record(a), Value::Record(b)) => compare_postgres_record_values(a, b),
             (Value::Map(a), Value::Map(b)) => a.cmp(b),
             _ => discriminant(self).cmp(&discriminant(other)),
         }
@@ -472,9 +637,33 @@ fn discriminant(v: &Value) -> u8 {
         Value::FixedChar(_) => 3,
         Value::Bytes(_) => 4,
         Value::Temporal(_) => 5,
-        Value::List(_) => 6,
-        Value::Map(_) => 7,
+        Value::Json(_) => 6,
+        Value::JsonB(_) => 7,
+        Value::Array(_) => 8,
+        Value::List(_) => 9,
+        Value::Row(_) => 10,
+        Value::Record(_) => 11,
+        Value::Map(_) => 12,
     }
+}
+
+fn compare_postgres_record_values(
+    left: &[(String, Value)],
+    right: &[(String, Value)],
+) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    for ((_, left), (_, right)) in left.iter().zip(right) {
+        let ordering = match (left, right) {
+            (Value::Null, Value::Null) => Ordering::Equal,
+            (Value::Null, _) => Ordering::Greater,
+            (_, Value::Null) => Ordering::Less,
+            _ => left.cmp(right),
+        };
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+    }
+    left.len().cmp(&right.len())
 }
 
 fn fixed_char_text(value: &str) -> &str {

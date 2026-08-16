@@ -28,7 +28,7 @@ use uqa_core::Value;
 
 use crate::ast::{
     CreateFunction, Expr, FromClause, FunctionBody, FunctionParamMode, FunctionReturns, MergeWhen,
-    Projection, SelectStmt, Statement, CTE,
+    Projection, RoutineColumnTypeReference, SelectStmt, Statement, CTE,
 };
 use crate::error::{Result, SQLError};
 
@@ -53,6 +53,25 @@ impl PLpgSQLFunction {
     pub fn fori_variable_datums(&self) -> std::collections::BTreeSet<usize> {
         let mut out = std::collections::BTreeSet::new();
         collect_fori_vars_block(&self.action, &mut out);
+        out
+    }
+
+    /// Datum indices used as bound-cursor arguments. They are visible only
+    /// while the cursor query is bound, not throughout the routine body.
+    pub fn cursor_argument_datums(&self) -> std::collections::BTreeSet<usize> {
+        let mut out = std::collections::BTreeSet::new();
+        for datum in &self.datums {
+            let PLpgSQLDatum::Var(var) = datum else {
+                continue;
+            };
+            let Some(argument_row) = var.cursor.as_ref().and_then(|cursor| cursor.argument_row)
+            else {
+                continue;
+            };
+            if let Some(PLpgSQLDatum::Row { fields }) = self.datums.get(argument_row) {
+                out.extend(fields.iter().map(|field| field.varno));
+            }
+        }
         out
     }
 }
@@ -109,7 +128,7 @@ fn collect_fori_vars_stmts(stmts: &[PLpgSQLStmt], out: &mut std::collections::BT
 /// references inside statements index into this table.
 #[derive(Debug, Clone)]
 pub enum PLpgSQLDatum {
-    Var(PLpgSQLVar),
+    Var(Box<PLpgSQLVar>),
     /// `RECORD` variable (also `FOR rec IN ...` loop targets).
     Rec {
         name: String,
@@ -140,16 +159,31 @@ impl PLpgSQLDatum {
 #[derive(Debug, Clone)]
 pub struct PLpgSQLVar {
     pub name: String,
-    /// Normalized type name (`integer`, `text`, ...). Types the value
-    /// layer cannot cast (e.g. `%type`, `record`) are kept verbatim
-    /// and skipped at assignment time.
+    /// Normalized type name (`integer`, `text`, ...). The engine resolves
+    /// catalog-backed references such as `%TYPE` before execution.
     pub type_name: String,
+    /// Exact relation-column identity emitted by the PL/pgSQL parser for a table-backed `%TYPE` declaration.
+    pub type_reference: Option<RoutineColumnTypeReference>,
     pub default: Option<Expr>,
     pub constant: bool,
     pub not_null: bool,
+    /// Definition of a bound cursor declared with `CURSOR (...) FOR query`.
+    pub cursor: Option<PLpgSQLCursor>,
     /// Source line of the declaration; used to disambiguate loop
     /// variables that shadow outer names.
     pub lineno: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PLpgSQLCursor {
+    pub query: Statement,
+    pub argument_row: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PLpgSQLCursorArgument {
+    pub name: Option<String>,
+    pub expr: Expr,
 }
 
 /// `name -> datum` slot of a row target.
@@ -268,12 +302,12 @@ pub enum PLpgSQLStmt {
         cond: Option<Expr>,
     },
     Return {
-        expr: Option<Expr>,
+        value: Option<PLpgSQLReturnValue>,
     },
     /// `RETURN NEXT [expr]` - bare form emits the current OUT /
     /// TABLE column values.
     ReturnNext {
-        expr: Option<Expr>,
+        value: Option<PLpgSQLReturnValue>,
     },
     ReturnQuery {
         query: Statement,
@@ -304,10 +338,31 @@ pub enum PLpgSQLStmt {
     Perform {
         query: Statement,
     },
+    OpenCursor {
+        cursor: usize,
+        arguments: Vec<PLpgSQLCursorArgument>,
+    },
+    FetchCursor {
+        cursor: usize,
+        target: IntoTarget,
+        direction: i64,
+        count: i64,
+    },
+    CloseCursor {
+        cursor: usize,
+    },
     /// `GET DIAGNOSTICS var = KIND [, ...]` as `(kind, target datum)`.
     GetDiagnostics {
         items: Vec<(String, usize)>,
     },
+}
+
+/// Value source for `RETURN` and `RETURN NEXT`. `PostgreSQL` 18 stores a simple
+/// datum reference in `retvarno`, distinct from a general SQL expression.
+#[derive(Debug, Clone)]
+pub enum PLpgSQLReturnValue {
+    Expr(Expr),
+    Datum(usize),
 }
 
 // ---------------------------------------------------------------------

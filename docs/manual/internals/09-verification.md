@@ -24,7 +24,7 @@ flowchart TD
 | Storage tests | Catalog round trips, document stores, B-tree indexes, clustered postings, SQLite and redb parity |
 | Atomicity tests | Catalog, document, schema, graph, index, callback, transaction, and savepoint failure paths |
 | Reopen tests | SQLite DML, vector indexes, graph path indexes, analyzers, scoring parameters, routines |
-| Compatibility fixtures | PostgreSQL AGE shapes, TPC-H-derived PostgreSQL 17 results, SQL golden files |
+| Compatibility fixtures | PostgreSQL AGE shapes, TPC-H-derived PostgreSQL 18 results, SQL golden files |
 | Binding tests | CLI integration and parity, Python, Node.js, and WASM package checks in their build workflows |
 
 ## Standard workspace gates
@@ -43,10 +43,10 @@ The workspace declares `unsafe_code = "deny"` and `unused_must_use = "deny"`. Cl
 Integration domains can be selected by test harness and module path:
 
 ```sh
-cargo test -p uqa-engine --test engine_queries sql_joins::
-cargo test -p uqa-engine --test sql_tpch
-cargo test -p uqa-scoring --test wand_exactness
-cargo test -p uqa-graph --test rpq
+cargo test -p uqa-engine --test integration engine_queries::sql_joins::
+cargo test -p uqa-engine --test integration sql_tpch::
+cargo test -p uqa-scoring --test integration wand_exactness::
+cargo test -p uqa-graph --test integration rpq::
 cargo test -p uqa-sql --test integration parser_fuzz::
 ```
 
@@ -73,10 +73,10 @@ An optimization may reduce work only after its result is compared with the exact
 
 ## Compatibility evidence
 
-The TPC-H-derived fixture runs all 22 queries and compares exact columns, row order, NULLs, text bytes, and type-aware canonical numeric values with checked-in PostgreSQL 17.10 output:
+The TPC-H-derived fixture runs all 22 queries and compares exact columns, row order, NULLs, text bytes, and type-aware canonical numeric values with checked-in PostgreSQL 18.4 output:
 
 ```sh
-cargo test -p uqa-engine --test sql_tpch
+cargo test -p uqa-engine --test integration sql_tpch::
 ```
 
 Graph compatibility tests exercise AGE-shaped `cypher` calls and `agtype` behavior. SQL golden fixtures cover deterministic engine output. The [parity design](../../design/parity.md) records fixture provenance and update rules.

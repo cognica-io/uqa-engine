@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the checked-in TPC-H query set against UQA and PostgreSQL 17."""
+"""Run the checked-in TPC-H query set against UQA and PostgreSQL 18."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FIXTURE = ROOT / "benchmarks" / "tpch"
-DEFAULT_REPORT = ROOT / "target" / "benchmark-runs" / "tpch-pg17.json"
-DEFAULT_EXPECTED = FIXTURE / "expected" / "pg17.json"
+DEFAULT_REPORT = ROOT / "target" / "benchmark-runs" / "tpch-pg18.json"
+DEFAULT_EXPECTED = FIXTURE / "expected" / "pg18.json"
 TABLES = (
     "region",
     "nation",
@@ -91,9 +91,9 @@ def postgres_version(container: str, database: str) -> dict[str, str]:
         "SHOW server_version_num; SHOW server_version; SELECT version();",
     ).decode()
     lines = [line for line in output.splitlines() if line]
-    if len(lines) != 3 or not lines[0].startswith("17"):
+    if len(lines) != 3 or not lines[0].startswith("18"):
         raise RuntimeError(
-            f"container {container!r} is not PostgreSQL 17: {output.strip()}"
+            f"container {container!r} is not PostgreSQL 18: {output.strip()}"
         )
     return {
         "server_version_num": lines[0],
@@ -284,7 +284,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--container",
-        default=os.environ.get("UQA_TPCH_PG_CONTAINER", "uqa-tpch-pg17"),
+        default=os.environ.get("UQA_TPCH_PG_CONTAINER", "uqa-tpch-pg18"),
     )
     parser.add_argument(
         "--database", default=os.environ.get("UQA_TPCH_PG_DATABASE", "uqa_tpch")
@@ -294,7 +294,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--write-expected",
         action="store_true",
-        help="replace the checked-in PG17 result fixture after a successful match",
+        help="replace the checked-in PG18 result fixture after a successful match",
     )
     return parser.parse_args()
 
@@ -318,7 +318,7 @@ def main() -> int:
             for _ in range(args.iterations)
         ]
         pg_times.append(samples)
-        print(f"PG17 Q{index:02}: {statistics.median(samples):.3f} ms", flush=True)
+        print(f"PG18 Q{index:02}: {statistics.median(samples):.3f} ms", flush=True)
 
     uqa = run_uqa(args.iterations)
     if len(uqa.get("queries", [])) != len(workload):

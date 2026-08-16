@@ -548,3 +548,25 @@ fn conflict_update_returning_reports_a_rewritten_integer_primary_key_doc_id() {
     assert!(eng.get_document("keyed_rows", 1).unwrap().is_none());
     assert!(eng.get_document("keyed_rows", 4).unwrap().is_some());
 }
+
+#[test]
+fn conflict_update_returning_exposes_postgresql_18_row_images() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE counters (id INTEGER PRIMARY KEY, value INTEGER)",
+        &[],
+    )
+    .unwrap();
+    eng.sql("INSERT INTO counters VALUES (1, 10)", &[]).unwrap();
+
+    let result = eng
+        .sql(
+            "INSERT INTO counters VALUES (1, 20) \
+             ON CONFLICT (id) DO UPDATE SET value = EXCLUDED.value \
+             RETURNING old.value AS old_value, new.value AS new_value",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows[0].get("old_value"), Some(&Value::Int(10)));
+    assert_eq!(result.rows[0].get("new_value"), Some(&Value::Int(20)));
+}

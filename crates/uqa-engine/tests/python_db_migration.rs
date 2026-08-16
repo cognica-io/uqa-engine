@@ -68,7 +68,10 @@ fn migrates_python_uqa_catalog_from_directory() {
         .unwrap()
         .expect("migrated document");
     assert_eq!(doc.get("title"), Some(&Value::Str("Rust migration".into())));
-    assert!(matches!(doc.get("payload"), Some(Value::Map(_))));
+    assert_eq!(
+        doc.get("payload"),
+        Some(&Value::JsonB("{\"kind\": \"guide\"}".into()))
+    );
     assert!(matches!(
         doc.get("published_at"),
         Some(Value::Temporal(TemporalValue::Timestamp { .. }))

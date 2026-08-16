@@ -119,6 +119,8 @@ pub enum JoinExecutionStrategy {
 pub enum SourcePlan {
     Table {
         name: String,
+        #[serde(default)]
+        qualifier: String,
         alias: Option<String>,
     },
     Join {
@@ -126,6 +128,10 @@ pub enum SourcePlan {
         right: Box<SourcePlan>,
         kind: uqa_sql::ast::JoinKind,
         on: Option<ScalarExpr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        using: Option<uqa_sql::ast::JoinUsing>,
+        #[serde(default)]
+        natural: bool,
         lateral: bool,
         #[serde(default)]
         strategy: JoinExecutionStrategy,
@@ -137,6 +143,8 @@ pub enum SourcePlan {
     },
     Function {
         name: String,
+        #[serde(default)]
+        output_name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         relation: Option<String>,
         args: Vec<ScalarExpr>,
@@ -188,12 +196,14 @@ pub struct AssignmentPlan {
 #[derive(Debug, Clone)]
 pub struct InsertPlan {
     pub table: String,
+    pub target_qualifier: String,
     pub columns: Vec<String>,
     pub ctes: Vec<CtePlan>,
     pub rows: Vec<Vec<ScalarExpr>>,
     pub source: Option<Box<QueryPlan>>,
     pub on_conflict: Option<ConflictPlan>,
     pub returning: Vec<ProjectionPlan>,
+    pub returning_aliases: uqa_sql::ast::ReturningAliases,
     pub subqueries: Vec<QueryPlan>,
 }
 
@@ -215,32 +225,38 @@ pub enum ConflictActionPlan {
 #[derive(Debug, Clone)]
 pub struct UpdatePlan {
     pub table: String,
+    pub target_qualifier: String,
     pub assignments: Vec<AssignmentPlan>,
     pub predicate: Option<ScalarExpr>,
     pub ctes: Vec<CtePlan>,
     pub source: Option<Box<SourcePlan>>,
     pub returning: Vec<ProjectionPlan>,
+    pub returning_aliases: uqa_sql::ast::ReturningAliases,
     pub subqueries: Vec<QueryPlan>,
 }
 
 #[derive(Debug, Clone)]
 pub struct DeletePlan {
     pub table: String,
+    pub target_qualifier: String,
     pub predicate: Option<ScalarExpr>,
     pub ctes: Vec<CtePlan>,
     pub source: Option<Box<SourcePlan>>,
     pub returning: Vec<ProjectionPlan>,
+    pub returning_aliases: uqa_sql::ast::ReturningAliases,
     pub subqueries: Vec<QueryPlan>,
 }
 
 #[derive(Debug, Clone)]
 pub struct MergePlan {
     pub target: String,
+    pub target_qualifier: String,
     pub target_alias: Option<String>,
     pub source: Box<SourcePlan>,
     pub join_condition: ScalarExpr,
     pub when_clauses: Vec<MergeWhenPlan>,
     pub returning: Vec<ProjectionPlan>,
+    pub returning_aliases: uqa_sql::ast::ReturningAliases,
     pub subqueries: Vec<QueryPlan>,
 }
 

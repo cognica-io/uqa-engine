@@ -6,13 +6,14 @@
 
 //! Block, statement, INTO-target, and statement-list lowering.
 
+use super::lowering_expression::lower_cursor_arguments;
 use super::{
     ensure_single_tag, expect_tag, json_bool_or_false, json_kind, json_optional_i64,
     json_optional_str, json_optional_usize, json_usize_or_zero, lower_expr, lower_expr_list,
     lower_full_statement, lower_row_fields, normalize_condition, optional_array, require,
     require_i64, require_nonempty_str, validate_assignable_datum, validate_record_datum,
     validate_scalar_datum, IntoTarget, JSONValue, PLpgSQLBlock, PLpgSQLDatum, PLpgSQLExceptionArm,
-    PLpgSQLStmt, RaiseLevel, Result, SQLError,
+    PLpgSQLReturnValue, PLpgSQLStmt, RaiseLevel, Result, SQLError,
 };
 
 pub(super) fn lower_block(block: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLpgSQLBlock> {
@@ -233,18 +234,14 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_return") {
-        let expr = match stmt.get("expr") {
-            Some(node) => Some(lower_expr(node)?),
-            None => None,
-        };
-        return Ok(PLpgSQLStmt::Return { expr });
+        return Ok(PLpgSQLStmt::Return {
+            value: lower_return_value(stmt, datums, "RETURN")?,
+        });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_return_next") {
-        let expr = match stmt.get("expr") {
-            Some(node) => Some(lower_expr(node)?),
-            None => None,
-        };
-        return Ok(PLpgSQLStmt::ReturnNext { expr });
+        return Ok(PLpgSQLStmt::ReturnNext {
+            value: lower_return_value(stmt, datums, "RETURN NEXT")?,
+        });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_return_query") {
         if let Some(query) = stmt.get("query") {
@@ -354,6 +351,45 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
             query: lower_full_statement(require(stmt, "expr")?)?,
         });
     }
+    if let Some(stmt) = raw.get("PLpgSQL_stmt_open") {
+        let cursor = json_usize_or_zero(stmt, "curvar")?;
+        validate_cursor_datum(datums, cursor, "OPEN")?;
+        if stmt.get("query").is_some() || stmt.get("dynquery").is_some() {
+            return Err(SQLError::Unsupported(
+                "PL/pgSQL OPEN FOR query cursors".into(),
+            ));
+        }
+        if !matches!(
+            datums.get(cursor),
+            Some(PLpgSQLDatum::Var(variable)) if variable.cursor.is_some()
+        ) {
+            return Err(SQLError::Unsupported(
+                "PL/pgSQL OPEN without FOR requires a bound cursor".into(),
+            ));
+        }
+        return Ok(PLpgSQLStmt::OpenCursor {
+            cursor,
+            arguments: lower_cursor_arguments(stmt.get("argquery"))?,
+        });
+    }
+    if let Some(stmt) = raw.get("PLpgSQL_stmt_fetch") {
+        if json_bool_or_false(stmt, "is_move")? {
+            return Err(SQLError::Unsupported("PL/pgSQL MOVE cursor".into()));
+        }
+        let cursor = json_usize_or_zero(stmt, "curvar")?;
+        validate_cursor_datum(datums, cursor, "FETCH")?;
+        return Ok(PLpgSQLStmt::FetchCursor {
+            cursor,
+            target: lower_into_target(require(stmt, "target")?, datums)?,
+            direction: require_i64(stmt, "direction", "FETCH direction")?,
+            count: require_i64(stmt, "how_many", "FETCH count")?,
+        });
+    }
+    if let Some(stmt) = raw.get("PLpgSQL_stmt_close") {
+        let cursor = json_usize_or_zero(stmt, "curvar")?;
+        validate_cursor_datum(datums, cursor, "CLOSE")?;
+        return Ok(PLpgSQLStmt::CloseCursor { cursor });
+    }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_call") {
         // CALL inside a body: run the CALL statement; INOUT results
         // flow back through the target row like an INTO clause.
@@ -394,6 +430,52 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
         "PL/pgSQL statement {}",
         json_kind(raw)
     )))
+}
+
+fn lower_return_value(
+    stmt: &JSONValue,
+    datums: &[PLpgSQLDatum],
+    context: &str,
+) -> Result<Option<PLpgSQLReturnValue>> {
+    let expr = stmt.get("expr");
+    let datum = json_optional_usize(stmt, "retvarno")?;
+    match (expr, datum) {
+        (Some(_), Some(_)) => Err(SQLError::Internal(format!(
+            "PL/pgSQL {context} contains both expr and retvarno"
+        ))),
+        (Some(expr), None) => Ok(Some(PLpgSQLReturnValue::Expr(lower_expr(expr)?))),
+        (None, Some(index)) => {
+            match datums.get(index) {
+                Some(
+                    PLpgSQLDatum::Var(_) | PLpgSQLDatum::Rec { .. } | PLpgSQLDatum::Row { .. },
+                ) => {}
+                Some(_) => {
+                    return Err(SQLError::Internal(format!(
+                        "PL/pgSQL {context} retvarno {index} is not a returnable datum"
+                    )));
+                }
+                None => {
+                    return Err(SQLError::Internal(format!(
+                        "PL/pgSQL {context} references missing retvarno datum {index}"
+                    )));
+                }
+            }
+            Ok(Some(PLpgSQLReturnValue::Datum(index)))
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+fn validate_cursor_datum(datums: &[PLpgSQLDatum], index: usize, context: &str) -> Result<()> {
+    match datums.get(index) {
+        Some(PLpgSQLDatum::Var(variable)) if variable.type_name == "refcursor" => Ok(()),
+        Some(_) => Err(SQLError::Internal(format!(
+            "PL/pgSQL {context} datum {index} is not a refcursor"
+        ))),
+        None => Err(SQLError::Internal(format!(
+            "PL/pgSQL {context} references missing cursor datum {index}"
+        ))),
+    }
 }
 
 /// Resolve a loop variable to its datum index. The JSON dump omits

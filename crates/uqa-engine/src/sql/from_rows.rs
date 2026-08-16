@@ -9,16 +9,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::Value;
-use uqa_execution::{
-    eval_call_arguments, eval_scalar, ScalarEvalContext, ScalarExpr, ScalarSubqueryRunner,
-};
+use uqa_execution::{eval_call_arguments, eval_scalar, ScalarEvalContext, ScalarExpr};
 use uqa_planner::{
     AccessPathPlan, ComputePlan, JoinExecutionStrategy, QueryBlockPlan, QueryPlan, RelationalPlan,
     SourcePlan,
 };
 use uqa_sql::ast::JoinKind;
 use uqa_sql::{ResultRow, SQLError, SQLParam};
-use uqa_storage::document_store::Document;
 
 use crate::{Engine, SQLTableFunctionResult, SQLTableFunctionStream};
 
@@ -51,27 +48,8 @@ where
     })
 }
 
-fn qualifier_for(name: &str, alias: Option<&str>) -> String {
-    alias.unwrap_or(name).to_string()
-}
-
-fn qualified_key(qual: &str, column: &str) -> String {
-    let mut key = String::with_capacity(qual.len() + 1 + column.len());
-    key.push_str(qual);
-    key.push('.');
-    key.push_str(column);
-    key
-}
-
-/// Synthesize rows for `information_schema` / `pg_catalog` virtual
-/// views. Returns `None` for any unknown name so the caller falls back
-/// to the regular table lookup.
-pub(super) fn prefix_row(qual: &str, doc: &Document) -> ResultRow {
-    let mut out = ResultRow::new();
-    for (k, v) in doc {
-        out.insert(qualified_key(qual, k), v.clone());
-    }
-    out
+fn qualifier_for(qualifier: &str, alias: Option<&str>) -> String {
+    alias.unwrap_or(qualifier).to_string()
 }
 
 fn has_filters_for_qualifier(filters: Option<&QualifierFilters>, qual: &str) -> bool {
@@ -228,58 +206,19 @@ fn from_qualifiers(from: &SourcePlan) -> BTreeSet<String> {
 
 fn collect_from_qualifiers(from: &SourcePlan, out: &mut BTreeSet<String>) {
     match from {
-        SourcePlan::Table { name, alias } => {
-            out.insert(alias.clone().unwrap_or_else(|| name.clone()));
-        }
         SourcePlan::Join { left, right, .. } => {
             collect_from_qualifiers(left, out);
             collect_from_qualifiers(right, out);
         }
-        SourcePlan::Values { alias, .. }
-        | SourcePlan::Function { alias, .. }
-        | SourcePlan::Subquery { alias, .. } => {
-            if let Some(alias) = alias {
-                out.insert(alias.clone());
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::Subquery { .. } => {
+            if let Some(qualifier) = from.visible_qualifier() {
+                out.insert(qualifier.to_string());
             }
         }
     }
-}
-
-fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> Result<ResultRow, SQLError> {
-    let qual = qualifier_for(table, alias);
-    let mut out = ResultRow::new();
-    if engine
-        .try_table(table)
-        .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
-        .is_none()
-    {
-        for column in engine
-            .foreign_table_columns(table)
-            .map_err(SQLError::Unsupported)?
-        {
-            out.insert(qualified_key(&qual, &column), Value::Null);
-        }
-        return Ok(out);
-    }
-    // Emit NULLs for any column that ever appeared in the table; for an
-    // empty table we still know the keys via document_count, but the
-    // safe default is just an empty row - a missing key resolves to
-    // NULL through ScalarExpr::Column / QualifiedColumn lookup anyway.
-    let mut sample_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for id in engine.table_doc_ids(table)? {
-        if let Some(doc) = engine.get_document(table, id)? {
-            for k in doc.keys() {
-                sample_keys.insert(k.clone());
-            }
-        }
-        if sample_keys.len() > 16 {
-            break;
-        }
-    }
-    for k in sample_keys {
-        out.insert(qualified_key(&qual, &k), Value::Null);
-    }
-    Ok(out)
 }
 
 /// Pull-based local-table source used by join leaves. It advances through the
@@ -289,6 +228,7 @@ fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> Result<Res
 mod cte_spill;
 mod engine_functions;
 mod join_predicates;
+mod join_using;
 mod lateral;
 mod local_table;
 mod source_qualification;
@@ -299,6 +239,7 @@ mod table_function_values;
 pub(in crate::sql) use cte_spill::*;
 pub(in crate::sql) use engine_functions::*;
 pub(in crate::sql) use join_predicates::*;
+pub(in crate::sql) use join_using::*;
 pub(in crate::sql) use lateral::*;
 pub(in crate::sql) use local_table::*;
 pub(in crate::sql) use source_qualification::*;

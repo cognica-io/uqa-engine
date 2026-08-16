@@ -7,7 +7,7 @@
 //! SQL aggregate planning, bounded execution, and finalization.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::sync::Arc;
@@ -15,12 +15,13 @@ use std::sync::Arc;
 use uqa_core::{DecimalValue, Value};
 use uqa_execution::{eval_scalar, ScalarEvalContext, ScalarExpr, ScalarOrder, SpillBuffer};
 use uqa_planner::{ProjectionPlan, QueryBlockPlan};
+use uqa_sql::expr::{cast_value, value_to_json_text};
 use uqa_sql::{ResultRow, SQLError, SQLParam};
 
 use crate::{Engine, SQLAggregateFunction, SQLAggregateState};
 
 use super::scalar::PlanSubqueryArena;
-use super::{core_value_to_json, projection_columns, CteScope, ScopedEngineHook};
+use super::{core_value_to_json, CteScope, ScopedEngineHook};
 
 const AGGREGATE_MERGE_FAN_IN: usize = 16;
 

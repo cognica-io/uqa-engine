@@ -8,9 +8,10 @@
 
 use super::{
     compare_values, eval_scalar, value_to_f64, Batch, DefaultExpressionEvaluator, ExecError,
-    ExecResult, PhysicalOperator, ResultRow, RowSchema, SQLParam, ScalarEvalContext, ScalarExpr,
-    SortKey, Value,
+    ExecResult, PhysicalOperator, RowSchema, SQLParam, ScalarEvalContext, ScalarExpr, SortKey,
+    Value,
 };
+use uqa_sql::expr::RowLookup;
 
 #[derive(Debug, Clone)]
 pub enum WindowKind {
@@ -76,13 +77,11 @@ impl Window<'static> {
         params: Vec<SQLParam>,
         work_mem_bytes: usize,
     ) -> Self {
-        let mut cols = child.schema().to_vec();
-        for (name, _) in &functions {
-            if !cols.contains(name) {
-                cols.push(name.clone());
-            }
-        }
-        let schema = RowSchema::new(cols);
+        let names = functions
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        let (schema, _) = RowSchema::append(child.row_schema(), &names).canonical_projection();
         Self {
             child,
             spec,
@@ -105,6 +104,16 @@ impl<'a> Window<'a> {
         output_schema: Vec<String>,
         executor: Box<dyn WindowExecutor + 'a>,
     ) -> Self {
+        let types = vec![None; output_schema.len()];
+        Self::with_typed_executor(child, output_schema, types, executor)
+    }
+
+    pub fn with_typed_executor(
+        child: Box<dyn PhysicalOperator + 'a>,
+        output_schema: Vec<String>,
+        output_types: Vec<Option<uqa_sql::ast::ColumnType>>,
+        executor: Box<dyn WindowExecutor + 'a>,
+    ) -> Self {
         Self {
             child,
             spec: WindowSpec {
@@ -113,7 +122,7 @@ impl<'a> Window<'a> {
             },
             functions: Vec::new(),
             params: Vec::new(),
-            schema: RowSchema::new(output_schema),
+            schema: RowSchema::with_types(output_schema, output_types),
             executor: Some(executor),
             work_mem_bytes: 0,
             output: None,
@@ -129,11 +138,11 @@ impl<'a> Window<'a> {
 }
 
 fn builtin_window_order_key(
-    row: &ResultRow,
+    row: &dyn RowLookup,
     spec: &WindowSpec,
     params: &[SQLParam],
 ) -> ExecResult<Vec<Value>> {
-    let context = ScalarEvalContext::new(Some(row), params);
+    let context = ScalarEvalContext::from_row_lookup(row, params);
     spec.order_by
         .iter()
         .map(|key| Ok(eval_scalar(&key.expr, &context)?))
@@ -157,12 +166,15 @@ fn builtin_window_partition_value(
         WindowKind::AggCount(expression) => expression.as_ref(),
         _ => return Ok(None),
     };
+    let partition_schema = partition.row_schema().clone();
     for index in 0..partition.len() {
         let row = partition.get(index)?;
+        let view = partition_schema.view(&row);
         let value = match expression {
-            Some(expression) => {
-                eval_scalar(expression, &ScalarEvalContext::new(Some(&row), params))?
-            }
+            Some(expression) => eval_scalar(
+                expression,
+                &ScalarEvalContext::from_row_lookup(&view, params),
+            )?,
             None => Value::Int(1),
         };
         if matches!(value, Value::Null) {
@@ -269,6 +281,20 @@ fn emit_builtin_window_partition(
     schema: &RowSchema,
     output: &mut crate::spill::SpillBuffer,
 ) -> ExecResult<()> {
+    let aliases = functions
+        .iter()
+        .map(|(alias, _)| alias.clone())
+        .collect::<Vec<_>>();
+    let partition_schema = partition.row_schema().clone();
+    let appended_schema = RowSchema::append(&partition_schema, &aliases);
+    let (physical_output_schema, output_slots) = appended_schema.canonical_projection();
+    if &physical_output_schema != schema {
+        return Err(ExecError::Other(format!(
+            "window output schema mismatch: expected {:?}, got {:?}",
+            schema.columns(),
+            physical_output_schema.columns()
+        )));
+    }
     let aggregate_values = functions
         .iter()
         .map(|(_, kind)| builtin_window_partition_value(kind, partition, params))
@@ -278,8 +304,9 @@ fn emit_builtin_window_partition(
     let mut dense_rank = 0_i64;
     let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
     for index in 0..partition.len() {
-        let mut row = partition.get(index)?;
-        let order_key = builtin_window_order_key(&row, spec, params)?;
+        let row = partition.get(index)?;
+        let row_view = partition_schema.view(&row);
+        let order_key = builtin_window_order_key(&row_view, spec, params)?;
         if previous_order_key.as_ref() != Some(&order_key) {
             rank = i64::try_from(
                 index
@@ -291,7 +318,8 @@ fn emit_builtin_window_partition(
                 .checked_add(1)
                 .ok_or_else(|| ExecError::Other("window dense rank overflow".into()))?;
         }
-        for ((alias, kind), aggregate_value) in functions.iter().zip(&aggregate_values) {
+        let mut window_values = Vec::with_capacity(functions.len());
+        for ((_, kind), aggregate_value) in functions.iter().zip(&aggregate_values) {
             let value = match kind {
                 WindowKind::RowNumber => {
                     Value::Int(
@@ -318,9 +346,10 @@ fn emit_builtin_window_partition(
                         let target_row = partition.get(u64::try_from(target).map_err(|_| {
                             ExecError::Other("window offset target is out of range".into())
                         })?)?;
+                        let target_view = partition_schema.view(&target_row);
                         eval_scalar(
                             expression,
-                            &ScalarEvalContext::new(Some(&target_row), params),
+                            &ScalarEvalContext::from_row_lookup(&target_view, params),
                         )?
                     }
                 }
@@ -333,17 +362,23 @@ fn emit_builtin_window_partition(
                     ExecError::Other("aggregate window value was not precomputed".into())
                 })?,
             };
-            row.insert(alias.clone(), value);
+            window_values.push(value);
         }
         previous_order_key = Some(order_key);
-        pending.push(row);
+        pending.push(
+            row.append_values(window_values)
+                .project_slots(&output_slots),
+        );
         if pending.len() == crate::batch::DEFAULT_BATCH_SIZE {
-            output.push(Batch::new(schema.clone(), std::mem::take(&mut pending)))?;
+            output.push(Batch::from_physical_rows(
+                schema.clone(),
+                std::mem::take(&mut pending),
+            ))?;
             pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
         }
     }
     if !pending.is_empty() {
-        output.push(Batch::new(schema.clone(), pending))?;
+        output.push(Batch::from_physical_rows(schema.clone(), pending))?;
     }
     Ok(())
 }
@@ -392,14 +427,15 @@ impl PhysicalOperator for Window<'_> {
             crate::external_sort::ExternalSort::new(scan, keys, evaluator, None, phase_budget);
         sorted.open()?;
 
+        let partition_schema = sorted.row_schema().clone();
         let mut current_partition_key: Option<Vec<Value>> = None;
-        let mut partition = crate::spill::IndexedSpill::new()?;
+        let mut partition = crate::spill::IndexedSpill::new(partition_schema.clone())?;
         let mut output = crate::spill::SpillBuffer::new(phase_budget);
         let execution = (|| -> ExecResult<()> {
             while let Some(batch) = sorted.next()? {
                 for row in batch.rows {
-                    let named_row = batch.schema.view(&row).to_result_row();
-                    let context = ScalarEvalContext::new(Some(&named_row), &self.params);
+                    let view = batch.schema.view(&row);
+                    let context = ScalarEvalContext::from_row_lookup(&view, &self.params);
                     let key = self
                         .spec
                         .partition_by
@@ -418,10 +454,10 @@ impl PhysicalOperator for Window<'_> {
                             &self.schema,
                             &mut output,
                         )?;
-                        partition = crate::spill::IndexedSpill::new()?;
+                        partition = crate::spill::IndexedSpill::new(partition_schema.clone())?;
                     }
                     current_partition_key = Some(key);
-                    partition.push(&named_row)?;
+                    partition.push(&row)?;
                 }
             }
             if !partition.is_empty() {

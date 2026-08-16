@@ -38,15 +38,17 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
             Some(value) => Expr::Literal(value),
             None => expr.clone(),
         },
-        Expr::Literal(_) | Expr::Star => expr.clone(),
+        Expr::Default | Expr::Literal(_) | Expr::Star | Expr::QualifiedStar(_) => expr.clone(),
         Expr::Func {
             name,
+            binding,
             args,
             distinct,
             order_by,
             filter,
         } => Expr::Func {
             name: name.clone(),
+            binding: binding.clone(),
             args: bind_exprs(args, r)?,
             distinct: *distinct,
             order_by: bind_order_by(order_by, r)?,
@@ -56,11 +58,13 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
             },
         },
         Expr::Array(items) => Expr::Array(bind_exprs(items, r)?),
+        Expr::Row(items) => Expr::Row(bind_exprs(items, r)?),
         Expr::Binary { op, lhs, rhs } => Expr::Binary {
             op: *op,
             lhs: Box::new(bind_expr(lhs, r)?),
             rhs: Box::new(bind_expr(rhs, r)?),
         },
+        Expr::UnaryMinus(inner) => Expr::UnaryMinus(Box::new(bind_expr(inner, r)?)),
         Expr::Not(inner) => Expr::Not(Box::new(bind_expr(inner, r)?)),
         Expr::And(items) => Expr::And(bind_exprs(items, r)?),
         Expr::Or(items) => Expr::Or(bind_exprs(items, r)?),
@@ -210,6 +214,7 @@ pub(super) fn bind_rows(
 pub fn bind_select(stmt: &SelectStmt, r: &mut dyn VariableResolver) -> Result<SelectStmt> {
     Ok(SelectStmt {
         projections: bind_projections(&stmt.projections, r)?,
+        values: bind_rows(&stmt.values, r)?,
         from: match stmt.from.as_ref() {
             Some(f) => Some(bind_from(f, r)?),
             None => None,
@@ -255,12 +260,16 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             right,
             kind,
             on,
+            using,
+            natural,
             lateral,
         } => FromClause::Join {
             left: Box::new(bind_from(left, r)?),
             right: Box::new(bind_from(right, r)?),
             kind: *kind,
             on: bind_opt_expr(on.as_ref(), r)?,
+            using: using.clone(),
+            natural: *natural,
             lateral: *lateral,
         },
         FromClause::Values {
@@ -274,6 +283,7 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
         },
         FromClause::Function {
             name,
+            output_name,
             relation,
             args,
             alias,
@@ -281,6 +291,7 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             column_types,
         } => FromClause::Function {
             name: name.clone(),
+            output_name: output_name.clone(),
             relation: relation.clone(),
             args: bind_exprs(args, r)?,
             alias: alias.clone(),

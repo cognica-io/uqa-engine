@@ -19,11 +19,25 @@ pub(super) fn render_value(value: &Value) -> Result<String, SQLError> {
         }
         Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) | Value::FixedChar(s) => quote_str(s),
+        Value::Json(text) => format!("{}::json", quote_str(text)),
+        Value::JsonB(text) => format!("{}::jsonb", quote_str(text)),
         Value::Bytes(bytes) => format!("decode('{}', 'hex')", hex_encode(bytes)?),
         Value::Temporal(t) => quote_str(&t.to_sql_string()),
+        Value::Array(array) => quote_str(&uqa_sql::expr::array_value_to_string(array)),
         Value::List(items) => {
             let inner: Vec<String> = items.iter().map(render_value).collect::<Result<_, _>>()?;
             format!("ARRAY[{}]", inner.join(", "))
+        }
+        Value::Row(items) => {
+            let inner: Vec<String> = items.iter().map(render_value).collect::<Result<_, _>>()?;
+            format!("ROW({})", inner.join(", "))
+        }
+        Value::Record(fields) => {
+            let inner: Vec<String> = fields
+                .iter()
+                .map(|(_, value)| render_value(value))
+                .collect::<Result<_, _>>()?;
+            format!("ROW({})", inner.join(", "))
         }
         Value::Map(_) => {
             return Err(SQLError::TypeMismatch(

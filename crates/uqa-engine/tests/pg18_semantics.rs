@@ -4,14 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `PostgreSQL` 17 semantics encoded as engine tests.
+//! `PostgreSQL` 18 semantics encoded as engine tests.
 //!
 //! Every expectation in this file was verified against a live
-//! `PostgreSQL` 17.7 instance (the `uqa-pg17-age` differential-testing
-//! container driven by `tests/parity/pg17/run_diff.py`); the tests
+//! `PostgreSQL` 18.4 instance (the `uqa-pg18` differential-testing
+//! container driven by `tests/parity/pg18/run_diff.py`); the tests
 //! themselves run without docker.
 
-use uqa_core::{DecimalValue, TemporalValue, Value};
+use uqa_core::{ArrayValue, DecimalValue, TemporalValue, Value};
 use uqa_engine::Engine;
 
 fn engine() -> Engine {
@@ -41,6 +41,14 @@ fn dec(text: &str) -> Value {
     Value::Decimal(DecimalValue::parse(text).unwrap())
 }
 
+fn array(elements: Vec<Value>) -> Value {
+    Value::Array(ArrayValue::try_new(elements).unwrap())
+}
+
+fn bounded_array(elements: Vec<Value>, lower_bounds: Vec<i32>) -> Value {
+    Value::Array(ArrayValue::with_lower_bounds(elements, lower_bounds).unwrap())
+}
+
 // ---------------------------------------------------------------------
 // Three-valued logic
 // ---------------------------------------------------------------------
@@ -53,6 +61,37 @@ fn null_comparisons_yield_null() {
     assert_eq!(scalar(&eng, "SELECT NULL <> 1"), Value::Null);
     assert_eq!(scalar(&eng, "SELECT NULL < 1"), Value::Null);
     assert_eq!(scalar(&eng, "SELECT NOT NULL"), Value::Null);
+}
+
+#[test]
+fn row_constructors_are_records_and_keep_postgresql_null_comparison_semantics() {
+    let eng = engine();
+
+    assert_eq!(
+        scalar(&eng, "SELECT ROW(1, 2)"),
+        Value::Row(vec![Value::Int(1), Value::Int(2)])
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT pg_typeof(ROW(1, 2))"),
+        Value::Str("record".into())
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT pg_typeof(ARRAY[1, 2])"),
+        Value::Str("integer[]".into())
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT ROW(1, NULL) = ROW(1, NULL)"),
+        Value::Null
+    );
+    assert_eq!(scalar(&eng, "SELECT ROW(1, NULL) < ROW(1, 2)"), Value::Null);
+    assert_eq!(
+        scalar(&eng, "SELECT ARRAY[1, NULL] = ARRAY[1, NULL]"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT ROW(1, NULL)::text"),
+        Value::Str("(1,)".into())
+    );
 }
 
 #[test]
@@ -211,6 +250,41 @@ fn bigint_overflow_errors() {
     assert!(scalar_err(&eng, "SELECT 9223372036854775807 * 2").contains("bigint out of range"));
 }
 
+#[test]
+fn integer_arithmetic_preserves_postgresql_width() {
+    let eng = engine();
+    assert!(scalar_err(&eng, "SELECT 2147483647 + 1").contains("integer out of range"));
+    assert!(
+        scalar_err(&eng, "SELECT 32767::smallint + 1::smallint").contains("smallint out of range")
+    );
+    assert!(scalar_err(&eng, "SELECT (2147483646 + 1) + 1").contains("integer out of range"));
+    assert_eq!(
+        scalar(&eng, "SELECT 2147483647::bigint + 1"),
+        Value::Int(2_147_483_648)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 32767::smallint + 1"),
+        Value::Int(32_768)
+    );
+}
+
+#[test]
+fn array_concatenation_stays_a_sql_array() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT ARRAY[1,2] || ARRAY[3]"),
+        array(vec![Value::Int(1), Value::Int(2), Value::Int(3)])
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT ARRAY[1,2] || 3"),
+        array(vec![Value::Int(1), Value::Int(2), Value::Int(3)])
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 0 || ARRAY[1,2]"),
+        array(vec![Value::Int(0), Value::Int(1), Value::Int(2)])
+    );
+}
+
 // ---------------------------------------------------------------------
 // Casts
 // ---------------------------------------------------------------------
@@ -341,11 +415,11 @@ fn array_literal_cast() {
     let eng = engine();
     assert_eq!(
         scalar(&eng, "SELECT '{1,2,3}'::int[]"),
-        Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)])
+        array(vec![Value::Int(1), Value::Int(2), Value::Int(3)])
     );
     assert_eq!(
         scalar(&eng, "SELECT '{a,\"b c\",NULL}'::text[]"),
-        Value::List(vec![
+        array(vec![
             Value::Str("a".into()),
             Value::Str("b c".into()),
             Value::Null
@@ -362,6 +436,90 @@ fn integer_range_checks() {
         scalar(&eng, "SELECT 3000000000::bigint"),
         Value::Int(3_000_000_000)
     );
+}
+
+#[test]
+fn unary_minus_preserves_postgresql_18_operand_type_and_overflow() {
+    let eng = engine();
+    assert_eq!(text(&eng, "SELECT pg_typeof(-(1::smallint))"), "smallint");
+    assert_eq!(text(&eng, "SELECT pg_typeof(-(1::integer))"), "integer");
+    assert_eq!(text(&eng, "SELECT pg_typeof(-(1::bigint))"), "bigint");
+    assert_eq!(
+        text(&eng, "SELECT encode((-1::smallint)::bytea, 'hex')"),
+        "ffff"
+    );
+    for sql in [
+        "SELECT -('-32768'::smallint)",
+        "SELECT -('-2147483648'::integer)",
+        "SELECT -('-9223372036854775808'::bigint)",
+    ] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("22003"), "{sql}: {error}");
+    }
+}
+
+#[test]
+fn oid_and_xid_casts_preserve_postgresql_18_source_type_rules() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT '-1'::oid"),
+        Value::Int(i64::from(u32::MAX))
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT '-2147483648'::xid"),
+        Value::Int(i64::from(i32::MIN as u32))
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT (-1::smallint)::oid"),
+        Value::Int(i64::from(u32::MAX))
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT (-1::integer)::oid"),
+        Value::Int(i64::from(u32::MAX))
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT (4294967295::bigint)::oid"),
+        Value::Int(i64::from(u32::MAX))
+    );
+    let error = eng.sql("SELECT (-1::bigint)::oid", &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22003"));
+    assert_eq!(error.to_string(), "OID out of range");
+    for sql in [
+        "SELECT true::oid",
+        "SELECT (1.0::numeric)::oid",
+        "SELECT (1.0::double precision)::oid",
+        "SELECT (1::integer)::xid",
+        "SELECT ('1'::oid)::xid",
+        "SELECT ('1'::xid)::oid",
+    ] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42846"), "{sql}: {error}");
+    }
+    for sql in ["SELECT '-2147483649'::oid", "SELECT '4294967296'::xid"] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("22003"), "{sql}: {error}");
+    }
+
+    eng.sql(
+        "CREATE TABLE oid_cast_sources (s SMALLINT, i INTEGER, b BIGINT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql("INSERT INTO oid_cast_sources VALUES (-1, -1, -1)", &[])
+        .unwrap();
+    let row = eng
+        .sql("SELECT s::oid AS s, i::oid AS i FROM oid_cast_sources", &[])
+        .unwrap();
+    assert_eq!(row.rows[0].get("s"), Some(&Value::Int(i64::from(u32::MAX))));
+    assert_eq!(row.rows[0].get("i"), Some(&Value::Int(i64::from(u32::MAX))));
+    let error = eng
+        .sql("SELECT b::oid FROM oid_cast_sources", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22003"));
+    let error = eng
+        .sql("SELECT i::xid FROM oid_cast_sources", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42846"));
 }
 
 // ---------------------------------------------------------------------
@@ -448,7 +606,7 @@ fn string_to_array_pg_semantics() {
     let eng = engine();
     assert_eq!(
         scalar(&eng, "SELECT string_to_array('a,b,c', ',')"),
-        Value::List(vec![
+        array(vec![
             Value::Str("a".into()),
             Value::Str("b".into()),
             Value::Str("c".into())
@@ -457,21 +615,21 @@ fn string_to_array_pg_semantics() {
     // NULL separator: one element per character.
     assert_eq!(
         scalar(&eng, "SELECT string_to_array('ab', NULL)"),
-        Value::List(vec![Value::Str("a".into()), Value::Str("b".into())])
+        array(vec![Value::Str("a".into()), Value::Str("b".into())])
     );
     // Empty separator: whole string; empty input: empty array.
     assert_eq!(
         scalar(&eng, "SELECT string_to_array('abc', '')"),
-        Value::List(vec![Value::Str("abc".into())])
+        array(vec![Value::Str("abc".into())])
     );
     assert_eq!(
         scalar(&eng, "SELECT string_to_array('', ',')"),
-        Value::List(vec![])
+        array(vec![])
     );
     // Third argument marks NULL elements.
     assert_eq!(
         scalar(&eng, "SELECT string_to_array('a,b,c', ',', 'b')"),
-        Value::List(vec![
+        array(vec![
             Value::Str("a".into()),
             Value::Null,
             Value::Str("c".into())
@@ -495,6 +653,10 @@ fn decode_produces_bytes() {
         "616263"
     );
     assert_eq!(text(&eng, "SELECT encode('abc'::bytea, 'base64')"), "YWJj");
+    assert_eq!(
+        scalar(&eng, "SELECT reverse(decode('00ff10', 'hex'))"),
+        Value::Bytes(vec![0x10, 0xff, 0x00])
+    );
 }
 
 // ---------------------------------------------------------------------
@@ -673,6 +835,45 @@ fn timestamp_text_uses_pg_format() {
         ),
         "13:05"
     );
+    assert_eq!(text(&eng, "SELECT to_char(1234.5, '9999.99')"), " 1234.50");
+    assert_eq!(text(&eng, "SELECT to_char(2.5::numeric, '9')"), " 3");
+    assert_eq!(text(&eng, "SELECT to_char(2.5::float8, '9')"), " 2");
+    assert_eq!(text(&eng, "SELECT to_char(-2.5::numeric, '9')"), "-3");
+    assert_eq!(text(&eng, "SELECT to_char(1.25::numeric, '9.9')"), " 1.3");
+    assert_eq!(text(&eng, "SELECT to_char(12::numeric, 'fm000')"), "012");
+    assert_eq!(text(&eng, "SELECT to_char(-1.2::numeric, 'S9')"), "-1");
+    assert_eq!(text(&eng, "SELECT to_char(1::numeric, 'FM090')"), "001");
+}
+
+#[test]
+fn integer_avg_remains_exact_numeric() {
+    let eng = engine();
+    assert_eq!(
+        text(
+            &eng,
+            "SELECT avg(x) FROM (VALUES (9007199254740992::bigint), (9007199254740993::bigint)) AS t(x)"
+        ),
+        "9007199254740992.5000"
+    );
+    assert_eq!(
+        text(&eng, "SELECT avg(x) FROM (VALUES (1), (2)) AS t(x)"),
+        "1.5000000000000000"
+    );
+}
+
+#[test]
+fn array_dimension_errors_and_concatenation_match_postgresql_18() {
+    let eng = engine();
+    let bounds = eng.sql("SELECT '[0:-1]={}'::int[]", &[]).unwrap_err();
+    assert_eq!(bounds.sqlstate(), Some("2202E"));
+
+    let incompatible = eng
+        .sql(
+            "SELECT array_cat('[0:0][2:3]={{1,2}}'::int[], '[5:5][9:10]={{3,4}}'::int[])",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(incompatible.sqlstate(), Some("2202E"));
 }
 
 // ---------------------------------------------------------------------
@@ -826,15 +1027,66 @@ fn array_subscripts_and_slices() {
     assert_eq!(scalar(&eng, "SELECT (ARRAY[1, 2, 3])[4]"), Value::Null);
     assert_eq!(
         scalar(&eng, "SELECT (ARRAY[1, 2, 3])[1:2]"),
-        Value::List(vec![Value::Int(1), Value::Int(2)])
+        array(vec![Value::Int(1), Value::Int(2)])
     );
     assert_eq!(
         scalar(&eng, "SELECT (ARRAY[1, 2, 3])[2:]"),
-        Value::List(vec![Value::Int(2), Value::Int(3)])
+        array(vec![Value::Int(2), Value::Int(3)])
     );
     assert_eq!(
         scalar(&eng, "SELECT (regexp_match('foo123', '[0-9]+'))[1]"),
         Value::Str("123".into())
+    );
+}
+
+#[test]
+fn array_bounds_survive_storage_sorting_and_dimension_aware_access() {
+    let eng = engine();
+    let sorted = bounded_array(vec![Value::Int(1), Value::Int(2), Value::Int(3)], vec![0]);
+    assert_eq!(
+        scalar(&eng, "SELECT array_sort('[0:2]={3,1,2}'::int[])"),
+        sorted
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT array_dims(array_sort('[0:2]={3,1,2}'::int[]))"
+        ),
+        Value::Str("[0:2]".into())
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT array_lower('[0:2]={3,1,2}'::int[], 1)"),
+        Value::Int(0)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT array_upper('[0:2]={3,1,2}'::int[], 1)"),
+        Value::Int(2)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT ('[0:2]={3,1,2}'::int[])[0]"),
+        Value::Int(3)
+    );
+
+    eng.sql("CREATE TABLE bounded_arrays (v int[])", &[])
+        .unwrap();
+    eng.sql(
+        "INSERT INTO bounded_arrays VALUES ('[0:2]={3,1,2}'::int[])",
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        scalar(&eng, "SELECT v FROM bounded_arrays"),
+        bounded_array(vec![Value::Int(3), Value::Int(1), Value::Int(2)], vec![0],)
+    );
+
+    assert_eq!(scalar(&eng, "SELECT (ARRAY[[1,2],[3,4]])[1]"), Value::Null);
+    assert_eq!(
+        scalar(&eng, "SELECT (ARRAY[[1,2],[3,4]])[1][2]"),
+        Value::Int(2)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT (ARRAY[[1,2],[3,4]])[1:1][2]"),
+        array(vec![Value::List(vec![Value::Int(1), Value::Int(2)])])
     );
 }
 
@@ -852,18 +1104,6 @@ fn array_length_of_empty_array_is_null() {
     assert_eq!(
         scalar(&eng, "SELECT cardinality(ARRAY[]::int[])"),
         Value::Int(0)
-    );
-}
-
-#[test]
-fn power_and_root_operators() {
-    let eng = engine();
-    assert_eq!(scalar(&eng, "SELECT 2 ^ 10"), Value::Float(1024.0));
-    assert_eq!(scalar(&eng, "SELECT |/ 16.0"), Value::Float(4.0));
-    // glibc-compatible cbrt (PostgreSQL on Linux): last-ulp artifact.
-    assert_eq!(
-        scalar(&eng, "SELECT cbrt(27)"),
-        Value::Float(3.000_000_000_000_000_4)
     );
 }
 
@@ -904,3 +1144,341 @@ fn interval_column_round_trip() {
         })
     );
 }
+
+// ---------------------------------------------------------------------
+// PostgreSQL 18 additions
+// ---------------------------------------------------------------------
+
+#[test]
+fn pg18_array_sort_and_reverse() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT array_sort(ARRAY[3,NULL,1,2])"),
+        array(vec![
+            Value::Int(1),
+            Value::Int(2),
+            Value::Int(3),
+            Value::Null,
+        ])
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT array_sort(ARRAY[3,NULL,1,2], true)"),
+        array(vec![
+            Value::Null,
+            Value::Int(3),
+            Value::Int(2),
+            Value::Int(1),
+        ])
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT array_sort(ARRAY[3,NULL,1,2], false, true)"),
+        array(vec![
+            Value::Null,
+            Value::Int(1),
+            Value::Int(2),
+            Value::Int(3),
+        ])
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT array_reverse(ARRAY[[1,2],[3,4]])"),
+        array(vec![
+            Value::List(vec![Value::Int(3), Value::Int(4)]),
+            Value::List(vec![Value::Int(1), Value::Int(2)]),
+        ])
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT array_sort(ARRAY[ARRAY[1,NULL],ARRAY[1,2]])"),
+        array(vec![
+            Value::List(vec![Value::Int(1), Value::Int(2)]),
+            Value::List(vec![Value::Int(1), Value::Null]),
+        ])
+    );
+}
+
+#[test]
+fn pg18_json_strip_nulls_can_strip_array_elements() {
+    let eng = engine();
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT jsonb_strip_nulls('{\"a\":null,\"b\":[1,null,{\"c\":null}]}'::jsonb) = '{\"b\":[1,null,{}]}'::jsonb"
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT jsonb_strip_nulls('{\"a\":null,\"b\":[1,null,{\"c\":null}]}'::jsonb, true) = '{\"b\":[1,{}]}'::jsonb"
+        ),
+        Value::Bool(true)
+    );
+}
+
+#[test]
+fn pg18_jsonb_numbers_use_postgresql_numeric_range() {
+    let eng = engine();
+    for sql in [
+        "SELECT '1e131072'::jsonb",
+        "SELECT '1e-16384'::jsonb",
+        "SELECT '[1e131072]'::jsonb",
+        "SELECT '{\"n\":1e131072}'::jsonb",
+    ] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("22003"), "{sql}");
+    }
+    assert_eq!(
+        scalar(&eng, "SELECT '1e131071'::jsonb > '0'::jsonb"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT '0e200000'::jsonb = '0'::jsonb"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT json_typeof('1e200000'::json)"),
+        Value::Str("number".into())
+    );
+}
+
+#[test]
+fn pg18_casefold_uses_full_unicode_mapping() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT casefold('Straße')"),
+        Value::Str("strasse".into())
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT casefold('Σςσ')"),
+        Value::Str("σσσ".into())
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT casefold('İIıi')"),
+        Value::Str("i\u{307}iıi".into())
+    );
+}
+
+#[test]
+fn pg18_checksums_and_gamma_functions() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT crc32('123456789'::bytea)"),
+        Value::Int(3_421_780_262)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT crc32c('123456789'::bytea)"),
+        Value::Int(3_808_858_755)
+    );
+    for (sql, expected) in [
+        ("SELECT gamma(5)", 24.0),
+        ("SELECT gamma(0.5)", 1.772_453_850_905_516),
+        ("SELECT lgamma(5)", 3.178_053_830_347_945_8),
+        ("SELECT lgamma(-0.5)", 1.265_512_123_484_645_4),
+    ] {
+        let Value::Float(actual) = scalar(&eng, sql) else {
+            panic!("expected float from {sql}");
+        };
+        assert!((actual - expected).abs() < 1e-14, "{sql}: {actual}");
+    }
+    assert_eq!(
+        scalar(&eng, "SELECT gamma('Infinity'::float8)"),
+        Value::Float(f64::INFINITY)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT lgamma('-Infinity'::float8)"),
+        Value::Float(f64::INFINITY)
+    );
+    assert!(matches!(
+        scalar(&eng, "SELECT gamma('NaN'::float8)"),
+        Value::Float(value) if value.is_nan()
+    ));
+    for sql in [
+        "SELECT gamma('-Infinity'::float8)",
+        "SELECT gamma(0::float8)",
+        "SELECT gamma(-200.5::float8)",
+        "SELECT lgamma(0::float8)",
+    ] {
+        assert!(scalar_err(&eng, sql).contains("out of range"), "{sql}");
+    }
+}
+
+#[test]
+fn pg18_interval_extract_week_and_negative_quarter() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT extract(week FROM interval '20 days')"),
+        Value::Int(2)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT extract(week FROM interval '-20 days')"),
+        Value::Int(-2)
+    );
+    for months in [-14, -12, -1] {
+        assert_eq!(
+            scalar(
+                &eng,
+                &format!("SELECT extract(quarter FROM interval '{months} months')")
+            ),
+            Value::Int(-1)
+        );
+    }
+}
+
+#[test]
+fn pg18_to_number_parses_the_postgresql_roman_prefix() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT to_number(' MCMLXXXIV ', 'RN')"),
+        dec("1984")
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT to_number('mcmlxxxiv', 'rn')"),
+        dec("1984")
+    );
+    assert_eq!(scalar(&eng, "SELECT to_number('XIVjunk', 'RN')"), dec("14"));
+    assert_eq!(
+        scalar(&eng, "SELECT to_number('MMMDCCCLXXXVIIII', 'RN')"),
+        dec("3888")
+    );
+    for input in ["IIII", "MCMCM", "IL", "ABC"] {
+        let error = eng
+            .sql(&format!("SELECT to_number('{input}', 'RN')"), &[])
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("22P02"), "{input}: {error}");
+        assert!(error.to_string().contains("invalid Roman numeral"));
+    }
+}
+
+#[test]
+fn pg18_uuid_generators_set_rfc_bits_and_monotonic_submillisecond_time() {
+    let eng = engine();
+    for (sql, version) in [("SELECT uuidv4()", '4'), ("SELECT uuidv7()", '7')] {
+        let Value::Str(uuid) = scalar(&eng, sql) else {
+            panic!("expected UUID text from {sql}");
+        };
+        assert_eq!(uuid.len(), 36);
+        assert_eq!(uuid.as_bytes()[14], version as u8);
+        assert!(matches!(uuid.as_bytes()[19], b'8' | b'9' | b'a' | b'b'));
+    }
+    let mut generated = Vec::new();
+    for _ in 0..128 {
+        let Value::Str(uuid) = scalar(&eng, "SELECT uuidv7()") else {
+            panic!("expected UUIDv7 text");
+        };
+        generated.push(uuid);
+    }
+    assert!(
+        generated.windows(2).all(|pair| pair[0] < pair[1]),
+        "UUIDv7 values must be strictly ascending within a backend"
+    );
+
+    let Value::Str(unshifted) = scalar(&eng, "SELECT uuidv7()") else {
+        panic!("expected unshifted UUIDv7");
+    };
+    let Value::Str(shifted) = scalar(&eng, "SELECT uuidv7(interval '1 day')") else {
+        panic!("expected shifted UUIDv7");
+    };
+    assert_eq!(shifted.as_bytes()[14], b'7');
+    assert!(unshifted < shifted);
+    assert!(scalar_err(&eng, "SELECT uuidv7(interval '-100 years')").contains("out of range"));
+}
+
+#[test]
+fn pg18_min_and_max_accept_arrays() {
+    let eng = engine();
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT min(v) FROM (VALUES (ARRAY[2,1]),(ARRAY[1,9]),(ARRAY[2,0])) AS q(v)"
+        ),
+        array(vec![Value::Int(1), Value::Int(9)])
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT max(v) FROM (VALUES (ARRAY[2,1]),(ARRAY[1,9]),(ARRAY[2,0])) AS q(v)"
+        ),
+        array(vec![Value::Int(2), Value::Int(1)])
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT min(v) FROM (VALUES (ARRAY[1,NULL]),(ARRAY[1,2])) AS q(v)"
+        ),
+        array(vec![Value::Int(1), Value::Int(2)])
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT max(v) FROM (VALUES (ARRAY[1,NULL]),(ARRAY[1,2])) AS q(v)"
+        ),
+        array(vec![Value::Int(1), Value::Null])
+    );
+}
+
+#[test]
+fn pg18_regex_functions_accept_named_arguments() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT regexp_like(E'\\n', '[^a]', 'n')"),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT regexp_like(E'\\n', '[^\\n]', 'en')"),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT regexp_count(pattern => '[a-z]+', string => '123abc456def')"
+        ),
+        Value::Int(2)
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT regexp_replace(replacement => 'X', string => 'abc123def456', pattern => '[0-9]+')"
+        ),
+        Value::Str("abcXdef456".into())
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT regexp_replace(flags => 'g', replacement => 'X', string => 'abc123def456', pattern => '[0-9]+')"
+        ),
+        Value::Str("abcXdefX".into())
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT regexp_substr(string => 'abc123', pattern => '([0-9]+)', start => 1, \"N\" => 1, flags => '', subexpr => 1)"
+        ),
+        Value::Str("123".into())
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT regexp_instr('αβ12γ34','[0-9]+',1,2,0)"),
+        Value::Int(6)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT regexp_instr('αβ12γ34','[0-9]+',1,2,1)"),
+        Value::Int(8)
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT regexp_replace('abc123','([a-z]+)([0-9]+)',E'\\\\2-\\\\1-\\\\&')"
+        ),
+        Value::Str("123-abc-abc123".into())
+    );
+}
+
+#[path = "pg18_semantics/numeric_exactness.rs"]
+mod numeric_exactness;
+
+#[path = "pg18_semantics/numeric_power_statistics.rs"]
+mod numeric_power_statistics;
+
+#[path = "pg18_semantics/array_containment.rs"]
+mod array_containment;
+
+#[path = "pg18_semantics/review_regressions.rs"]
+mod review_regressions;

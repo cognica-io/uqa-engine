@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use uqa_core::Value;
 
-use super::SelectStmt;
+use super::{FunctionBinding, SelectStmt};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Projection {
@@ -67,14 +67,18 @@ pub enum FrameBound {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Star,
+    /// Relation-qualified wildcard projection (`table.*` or `alias.*`).
+    QualifiedStar(String),
+    /// `DEFAULT` in an INSERT/UPDATE assignment. This is a mutation marker,
+    /// not a scalar value, and must be resolved against the target column
+    /// before expression evaluation.
+    Default,
     /// Unqualified column reference (`col`).
     Column(String),
     /// Qualified column reference (`table.col` or `alias.col`).
     QualifiedColumn {
         qualifier: String,
         column: String,
-        #[serde(default)]
-        key: String,
     },
     Literal(Value),
     /// A positional bind parameter (`$1`, `$2`, ...).
@@ -83,6 +87,8 @@ pub enum Expr {
     /// the function registry.
     Func {
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<FunctionBinding>,
         args: Vec<Expr>,
         /// `func(DISTINCT expr)` - only meaningful for aggregate
         /// functions. Mirrors `PostgreSQL`'s `agg_distinct`.
@@ -96,12 +102,17 @@ pub enum Expr {
     /// `ARRAY[1.0, 2.0, ...]` literal - currently restricted to numeric
     /// elements (vectors).
     Array(Vec<Expr>),
+    /// Anonymous SQL row constructor (`ROW(...)` or `(a, b)`).
+    Row(Vec<Expr>),
     /// `lhs op rhs` - comparison or arithmetic.
     Binary {
         op: BinaryOp,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
+    /// `PostgreSQL` prefix `-`, kept distinct from binary subtraction so the
+    /// operand's declared numeric width and overflow behavior survive lowering.
+    UnaryMinus(Box<Expr>),
     /// `NOT expr`.
     Not(Box<Expr>),
     /// `cond_1 AND cond_2 AND ...` (n-ary).
@@ -167,13 +178,9 @@ pub enum Expr {
 
 impl Expr {
     pub fn qualified_column(qualifier: impl Into<String>, column: impl Into<String>) -> Self {
-        let qualifier = qualifier.into();
-        let column = column.into();
-        let key = format!("{qualifier}.{column}");
         Self::QualifiedColumn {
-            qualifier,
-            column,
-            key,
+            qualifier: qualifier.into(),
+            column: column.into(),
         }
     }
 }

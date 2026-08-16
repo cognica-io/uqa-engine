@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "scope": "PostgreSQL 18 compatibility evidence and remaining gates",
+  "complete_compatibility_claim": false,
+  "oracle": {
+    "major": 18,
+    "verified_patch": "18.4",
+    "differential_probes": "tests/parity/pg18/probes.sql",
+    "tpch_fixture": "benchmarks/tpch/expected/pg18.json"
+  },
+  "parser_chain": {
+    "wrapper_repository": "https://github.com/jaepil/pg_query.rs",
+    "wrapper_revision": "516b3a03fed42e606ce01bc8b5a864a1698c210d",
+    "library_repository": "https://github.com/jaepil/libpg_query",
+    "library_revision": "898cd71c96375d6d4219916996701571dbe2b239"
+  },
+  "milestones": {
+    "M0": "in_progress",
+    "M1": "complete",
+    "M2": "complete",
+    "M3": "not_started",
+    "M4": "not_started",
+    "M5": "not_started",
+    "M6": "not_started"
+  },
+  "items": [
+    {
+      "id": "baseline.pg18-differential-probes",
+      "postgresql_reference": "PostgreSQL 18.4 results for tests/parity/pg18/probes.sql",
+      "uqa_test": "python3 tests/parity/pg18/run_diff.py",
+      "supported_version": "PostgreSQL 18.4",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "baseline.tpch-derived-queries",
+      "postgresql_reference": "PostgreSQL 18.4 provenance in benchmarks/tpch/expected/pg18.json",
+      "uqa_test": "python3 scripts/run-tpch-pg18.py --iterations 3",
+      "supported_version": "PostgreSQL 18.4",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "parser.pg18-chain",
+      "postgresql_reference": "PostgreSQL 18 parser sources pinned by parser_chain",
+      "uqa_test": "cargo test -p uqa-sql --test integration",
+      "supported_version": "PostgreSQL 18",
+      "status": "partial",
+      "open_issue": "The top-level statement and semantically relevant option inventory is not complete."
+    },
+    {
+      "id": "query.join-using-natural",
+      "postgresql_reference": "PostgreSQL 18.4 SELECT and table-expression documentation plus live qualified-join results and SQLSTATEs",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_queries::sql_joins::; tests/parity/pg18/probes.sql",
+      "supported_version": "PostgreSQL 18.4 binding, common-type coercion for implemented scalar types, output shape, qualification, and outer-join semantics",
+      "status": "partial",
+      "open_issue": "Collations, domains, user-defined equality operators, and the complete PostgreSQL common-type matrix remain."
+    },
+    {
+      "id": "dml.returning-row-images",
+      "postgresql_reference": "PostgreSQL 18 SQL DML RETURNING documentation",
+      "uqa_test": "crates/uqa-engine/tests/sql_update_delete.rs",
+      "supported_version": "PostgreSQL 18",
+      "status": "partial",
+      "open_issue": "Trigger, partition, and complete MERGE-action differential coverage remains."
+    },
+    {
+      "id": "ddl.constraint-metadata",
+      "postgresql_reference": "PostgreSQL 18 CREATE TABLE constraint grammar and catalogs",
+      "uqa_test": "crates/uqa-engine/tests/sql_check_fk_default.rs; crates/uqa-engine/tests/sql_information_schema.rs",
+      "supported_version": "PostgreSQL 18",
+      "status": "partial",
+      "open_issue": "NOT VALID, ALTER CONSTRAINT, and complete dump/reopen coverage remain."
+    },
+    {
+      "id": "functions.identified-pg18-additions",
+      "postgresql_reference": "PostgreSQL 18 functions and operators covered by the PG18 semantic suite",
+      "uqa_test": "crates/uqa-engine/tests/pg18_semantics.rs; tests/parity/pg18/probes.sql",
+      "supported_version": "PostgreSQL 18.4",
+      "status": "partial",
+      "open_issue": "The complete PostgreSQL 18 function, type, overload, and catalog matrix remains."
+    },
+    {
+      "id": "execution.static-row-schema-and-spill-v1",
+      "postgresql_reference": "PostgreSQL 18 declared row descriptions and name-resolution behavior across relational operators",
+      "uqa_test": "cargo test -p uqa-execution --lib; cargo test -p uqa-engine --test integration engine_queries::sql_joins::; cargo test -p uqa-engine --test integration engine_queries::sql_prepared::",
+      "supported_version": "Static declared schemas through implemented scans, projections, filters, joins, CTEs, aggregates, windows, DML RETURNING, cursors, foreign tables, and spill format version 1 logical identities",
+      "status": "partial",
+      "open_issue": "Every remaining expression/operator and persistent relation kind must retain exact declared metadata, and the complete wire row-description matrix remains."
+    },
+    {
+      "id": "types.declared-identity-casts-and-catalog",
+      "postgresql_reference": "PostgreSQL 18.4 pg_cast, pg_type, pg_class, pg_attribute, scalar cast results, errors, and SQLSTATEs",
+      "uqa_test": "cargo test -p uqa-sql expr::casting::tests; cargo test -p uqa-engine --test integration engine_functions::pg18_semantics::; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::",
+      "supported_version": "Implemented scalar width identities, source-sensitive OID/XID/bytea casts, built-in/domain/pseudo/composite pg_type metadata, and information_schema_catalog_name identity",
+      "status": "partial",
+      "open_issue": "The full assignment-cast matrix, pg_proc rows for every type I/O routine, collations, user composites, enums, ranges, typmods, domain constraints, and binary formats remain."
+    },
+    {
+      "id": "ddl.alter-type-and-migration",
+      "postgresql_reference": "PostgreSQL 18.4 ALTER TABLE ALTER COLUMN TYPE and type conversion behavior",
+      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::alter_column_type_preserves_the_using_expression; cargo test -p uqa-engine --test integration engine_catalog::sql_ddl::alter_column_type_; cargo test -p uqa-engine --lib migration::tests",
+      "supported_version": "Structural USING expressions evaluated per old row, atomic rollback, source-sensitive OID widths, supported migration type identity, and explicit rejection of unknown migration types",
+      "status": "partial",
+      "open_issue": "The complete PostgreSQL assignment-cast matrix, dependency and collation rewrites, domain checks, and upstream ALTER TYPE regression cases remain."
+    },
+    {
+      "id": "catalog.pg-database-locale",
+      "postgresql_reference": "PostgreSQL 18 pg_database catalog",
+      "uqa_test": "crates/uqa-engine/tests/sql_information_schema.rs",
+      "supported_version": "PostgreSQL 18",
+      "status": "partial",
+      "open_issue": "Complete collation, locale-provider, ownership, ACL, and database lifecycle behavior remains."
+    },
+    {
+      "id": "plpgsql.datum-slots-and-bound-cursors",
+      "postgresql_reference": "PostgreSQL 18 PL/pgSQL statements and cursor documentation",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::",
+      "supported_version": "PostgreSQL 18 datum slots, qualified named types, table-backed %TYPE resolution, strict scalar coercion, and bound cursor subset",
+      "status": "partial",
+      "open_issue": "Session portal state is required for refcursor parameters, returns, and cursors surviving routine exit."
+    },
+    {
+      "id": "protocol.frontend-backend-3.2",
+      "postgresql_reference": "PostgreSQL 18 frontend/backend protocol 3.2 message formats and flow",
+      "uqa_test": "crates/uqa-pg-wire/tests/protocol.rs",
+      "supported_version": "PostgreSQL 18.4 byte-exact messages, negotiation, cancellation, COPY validation, FunctionCall, GSS/SSPI message shapes, notifications, and live extended-query flow",
+      "status": "partial",
+      "open_issue": "Credentialed GSS, non-trust authentication, extended-query binary formats, and broader live-driver coverage remain."
+    },
+    {
+      "id": "ddl.generated-columns",
+      "postgresql_reference": "PostgreSQL 18 CREATE TABLE and ALTER TABLE generated columns",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_generated_columns::",
+      "supported_version": "PostgreSQL 18 core generated-column semantics",
+      "status": "partial",
+      "open_issue": "The complete PostgreSQL built-in function and operator overload matrix, privileges, inheritance and partition propagation, dump/restore, and complete upstream regression coverage remain."
+    },
+    {
+      "id": "ddl.temporal-constraints",
+      "postgresql_reference": "PostgreSQL 18 CREATE TABLE WITHOUT OVERLAPS and PERIOD constraints",
+      "uqa_test": "crates/uqa-engine/tests/sql_ddl_extensions.rs",
+      "supported_version": "PostgreSQL 18",
+      "status": "explicitly_rejected",
+      "open_issue": "Range and multirange carriers, operators, indexes, and temporal constraint enforcement are not implemented."
+    },
+    {
+      "id": "regression.core-and-isolation",
+      "postgresql_reference": "PostgreSQL 18 core regression and isolation schedules",
+      "uqa_test": "No complete harness yet",
+      "supported_version": "PostgreSQL 18",
+      "status": "not_audited",
+      "open_issue": "The complete core regression and isolation schedules have not been imported and classified."
+    },
+    {
+      "id": "clients.driver-and-operations-matrix",
+      "postgresql_reference": "PostgreSQL 18 client-visible SQL, protocol, dump/restore, and operational behavior",
+      "uqa_test": "crates/uqa-pg-wire/tests/protocol/libpq_interop.rs",
+      "supported_version": "PostgreSQL 18.4 libpq subset",
+      "status": "partial",
+      "open_issue": "JDBC, Npgsql, psycopg, pgx, node-postgres, migration, introspection, dump/restore, pooling, recovery, and administration coverage remain."
+    }
+  ]
+}

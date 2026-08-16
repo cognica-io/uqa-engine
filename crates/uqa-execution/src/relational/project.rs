@@ -6,9 +6,11 @@
 
 //! Scalar projection and star expansion.
 
+use uqa_core::Value;
+
 use super::{
-    Batch, DefaultExpressionEvaluator, ExecResult, PhysicalOperator, ResultRow, RowSchema,
-    SQLParam, ScalarExpr, SharedExpressionEvaluator,
+    Batch, DefaultExpressionEvaluator, ExecResult, PhysicalOperator, RowSchema, SQLParam,
+    ScalarExpr, SharedExpressionEvaluator,
 };
 use crate::PhysicalRow;
 
@@ -61,19 +63,50 @@ impl<'a> Project<'a> {
         projections: Vec<(String, ScalarExpr)>,
         evaluator: SharedExpressionEvaluator<'a>,
     ) -> Self {
+        let params = evaluator.parameters();
+        let projections = projections
+            .into_iter()
+            .map(|(name, expression)| {
+                (
+                    name,
+                    crate::bind_type_introspection(expression, child.row_schema(), params),
+                )
+            })
+            .collect::<Vec<_>>();
         let mut columns = Vec::new();
+        let mut types = Vec::new();
         for (name, expression) in &projections {
-            if matches!(expression, ScalarExpr::Star) {
-                for column in child.schema() {
-                    if !columns.contains(column) {
-                        columns.push(column.clone());
+            if let ScalarExpr::QualifiedStar(qualifier) = expression {
+                for (column, _, ty) in child.row_schema().qualified_star_layout(qualifier) {
+                    if evaluator.star_column_visible(&column) {
+                        columns.push(column);
+                        types.push(ty);
+                    }
+                }
+            } else if matches!(expression, ScalarExpr::Star) {
+                for (position, column) in child.schema().iter().enumerate() {
+                    if evaluator.star_column_visible(column) {
+                        columns.push(
+                            child
+                                .row_schema()
+                                .public_name(position)
+                                .unwrap_or(column)
+                                .to_string(),
+                        );
+                        types.push(child.row_schema().column_type(position).cloned());
                     }
                 }
             } else {
                 columns.push(name.clone());
+                types.push(
+                    evaluator
+                        .expression_type(expression, child.row_schema())
+                        .ok()
+                        .flatten(),
+                );
             }
         }
-        let schema = RowSchema::new(columns);
+        let schema = RowSchema::with_types(columns, types);
         Self {
             child,
             projections,
@@ -89,24 +122,50 @@ impl<'a> Project<'a> {
         projections: Vec<(String, ScalarExpr)>,
         evaluator: SharedExpressionEvaluator<'a>,
     ) -> Self {
+        let params = evaluator.parameters();
+        let projections = projections
+            .into_iter()
+            .map(|(name, expression)| {
+                (
+                    name,
+                    crate::bind_type_introspection(expression, child.row_schema(), params),
+                )
+            })
+            .collect::<Vec<_>>();
         let ordering = child
             .output_ordering()
             .iter()
             .take_while(|order| {
                 projections.iter().all(|(name, expression)| {
-                    name != &order.column
-                        || matches!(expression, ScalarExpr::Star)
-                        || matches!(expression, ScalarExpr::Column(source) if source == name)
+                    child
+                        .row_schema()
+                        .columns()
+                        .iter()
+                        .position(|column| column == name)
+                        != Some(order.position)
+                        || matches!(expression, ScalarExpr::Star | ScalarExpr::QualifiedStar(_))
+                        || crate::order_expression_position(child.row_schema(), expression)
+                            == Some(order.position)
                 })
             })
             .cloned()
             .collect();
         let appended = projections
             .iter()
-            .filter(|(_, expression)| !matches!(expression, ScalarExpr::Star))
-            .map(|(name, _)| name.clone())
+            .filter(|(_, expression)| {
+                !matches!(expression, ScalarExpr::Star | ScalarExpr::QualifiedStar(_))
+            })
+            .map(|(name, expression)| {
+                (
+                    name.clone(),
+                    evaluator
+                        .expression_type(expression, child.row_schema())
+                        .ok()
+                        .flatten(),
+                )
+            })
             .collect::<Vec<_>>();
-        let schema = RowSchema::append(child.row_schema(), &appended);
+        let schema = RowSchema::append_typed(child.row_schema(), &appended);
         Self {
             child,
             projections,
@@ -141,33 +200,53 @@ impl PhysicalOperator for Project<'_> {
             if self.pass_through {
                 let mut computed = Vec::with_capacity(self.projections.len());
                 for (_, expr) in &self.projections {
-                    if !matches!(expr, ScalarExpr::Star) {
-                        computed.push(self.evaluator.evaluate(expr, &view)?);
+                    if !matches!(expr, ScalarExpr::Star | ScalarExpr::QualifiedStar(_)) {
+                        computed.push(self.evaluator.evaluate_physical(
+                            expr,
+                            &batch.schema,
+                            &row,
+                        )?);
                     }
                 }
                 out.push(row.append_values(computed));
                 continue;
             }
-            if self
-                .projections
-                .iter()
-                .any(|(_, expression)| matches!(expression, ScalarExpr::Star))
-            {
-                let mut new_row = ResultRow::new();
+            if self.projections.iter().any(|(_, expression)| {
+                matches!(expression, ScalarExpr::Star | ScalarExpr::QualifiedStar(_))
+            }) {
+                let mut values = Vec::with_capacity(self.schema.len());
                 for (name, expr) in &self.projections {
-                    if matches!(expr, ScalarExpr::Star) {
-                        new_row.extend(self.evaluator.project_star(&view)?);
+                    if let ScalarExpr::QualifiedStar(qualifier) = expr {
+                        for (column, slot, _) in batch.schema.qualified_star_layout(qualifier) {
+                            if self.evaluator.star_column_visible(&column) {
+                                values.push(row.value(slot).cloned().unwrap_or(Value::Null));
+                            }
+                        }
+                    } else if matches!(expr, ScalarExpr::Star) {
+                        for (position, column) in batch.schema.iter().enumerate() {
+                            if self.evaluator.star_column_visible(column) {
+                                values
+                                    .push(view.value_at(position).cloned().unwrap_or(Value::Null));
+                            }
+                        }
                     } else {
-                        new_row.insert(name.clone(), self.evaluator.evaluate(expr, &view)?);
+                        let _ = name;
+                        values.push(
+                            self.evaluator
+                                .evaluate_physical(expr, &batch.schema, &row)?,
+                        );
                     }
                 }
-                out.push(PhysicalRow::from_result_row(&self.schema, new_row));
+                out.push(PhysicalRow::from_values(values));
                 continue;
             }
             let values = self
                 .projections
                 .iter()
-                .map(|(_, expression)| self.evaluator.evaluate(expression, &view))
+                .map(|(_, expression)| {
+                    self.evaluator
+                        .evaluate_physical(expression, &batch.schema, &row)
+                })
                 .collect::<ExecResult<Vec<_>>>()?;
             out.push(PhysicalRow::from_values(values));
         }

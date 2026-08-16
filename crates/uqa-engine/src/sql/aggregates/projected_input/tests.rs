@@ -22,9 +22,8 @@ impl RowLookup for TestRow {
             .and_then(|index| self.values.get(index))
     }
 
-    fn qualified_column(&self, _qualifier: &str, column: &str, key: &str) -> Option<&Value> {
-        self.column(if key.is_empty() { column } else { key })
-            .or_else(|| self.column(column))
+    fn qualified_column(&self, _qualifier: &str, column: &str) -> Option<&Value> {
+        self.column(column)
     }
 
     fn positional_column(&self, index: usize) -> Option<&Value> {
@@ -35,6 +34,7 @@ impl RowLookup for TestRow {
 fn aggregate(name: &str, argument: ScalarExpr) -> ScalarExpr {
     ScalarExpr::Func {
         name: name.into(),
+        binding: None,
         args: vec![argument],
         distinct: false,
         order_by: Vec::new(),
@@ -55,7 +55,8 @@ fn integer_expression_and_count_use_positional_state_updates() {
         aggregate("count", ScalarExpr::Star),
         aggregate("avg", ScalarExpr::Column("a".into())),
     ];
-    let plans = ProjectedAggregatePlans::compile(&engine, &targets, &["a".into(), "b".into()]);
+    let schema = RowSchema::new(vec!["a".into(), "b".into()]);
+    let plans = ProjectedAggregatePlans::compile(&engine, &targets, &schema);
     let mut accumulators = vec![
         AggregateAccumulator::builtin("sum"),
         AggregateAccumulator::builtin("count"),
@@ -84,7 +85,8 @@ fn non_integer_input_falls_back_to_canonical_expression_evaluation() {
         rhs: Box::new(ScalarExpr::Column("b".into())),
     };
     let targets = vec![aggregate("sum", expression)];
-    let plans = ProjectedAggregatePlans::compile(&engine, &targets, &["a".into(), "b".into()]);
+    let schema = RowSchema::new(vec!["a".into(), "b".into()]);
+    let plans = ProjectedAggregatePlans::compile(&engine, &targets, &schema);
     let mut accumulators = vec![AggregateAccumulator::builtin("sum")];
     let row = TestRow {
         schema: vec!["a".into(), "b".into()],
@@ -95,4 +97,26 @@ fn non_integer_input_falls_back_to_canonical_expression_evaluation() {
 
     assert_eq!(accumulators[0].count, 1);
     assert_eq!(accumulators[0].sum, 3.0);
+}
+
+#[test]
+fn positional_compilation_resolves_duplicate_names_by_structured_qualifier() {
+    use uqa_execution::ColumnIdentity;
+
+    let schema = RowSchema::with_identities(
+        vec!["name".into(), "name".into()],
+        vec![
+            ColumnIdentity::qualified("employee", "name"),
+            ColumnIdentity::qualified("department", "name"),
+        ],
+        vec![None, None],
+    );
+    assert_eq!(
+        column_slot(&ScalarExpr::qualified_column("department", "name"), &schema),
+        Some(1)
+    );
+    assert_eq!(
+        column_slot(&ScalarExpr::Column("name".into()), &schema),
+        None
+    );
 }

@@ -19,14 +19,14 @@ fn lateral_cross_join_with_generate_series() {
         .unwrap();
     let r = eng
         .sql(
-            "SELECT t.id, gs.generate_series
+            "SELECT t.id, gs.gs
              FROM t, LATERAL generate_series(1, t.n) AS gs
-             ORDER BY t.id, gs.generate_series",
+             ORDER BY t.id, gs.gs",
             &[],
         )
         .unwrap();
     assert_eq!(
-        int_pairs(&r, "id", "generate_series"),
+        int_pairs(&r, "id", "gs"),
         vec![(1, 1), (1, 2), (2, 1), (2, 2), (2, 3)]
     );
 }

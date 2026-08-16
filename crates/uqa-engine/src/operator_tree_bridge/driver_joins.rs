@@ -7,10 +7,9 @@
 //! Text, vector, hybrid, and cross-paradigm join execution.
 
 use super::{
-    first_structured_field, operator_execution_error, require_graph_name,
-    require_shared_structured_field, require_shared_vector_field, require_text_field,
-    require_vector_field, DriverResult, EngineDriver, GeneralizedPostingList, OperatorTree,
-    PostingEntry, PostingList, SQLError,
+    first_structured_field, require_graph_name, require_shared_structured_field,
+    require_shared_vector_field, require_text_field, require_vector_field, DriverResult,
+    EngineDriver, GeneralizedPostingList, OperatorTree, PostingEntry, PostingList, SQLError,
 };
 
 impl EngineDriver<'_> {
@@ -134,56 +133,33 @@ impl EngineDriver<'_> {
         field: &str,
         alias: &str,
     ) -> DriverResult<PostingList> {
-        let document_store = self
-            .engine
-            .table(self.table)
-            .map_err(|error| operator_execution_error("resolve join table", error))?
-            .map(|table| {
-                table
-                    .document_store
-                    .read()
-                    .snapshot()
-                    .map_err(|error| operator_execution_error("document snapshot", error))
-            })
-            .transpose()?;
-        let requires_document_lookup = source
+        let lookup_doc_ids = source
             .entries()
             .iter()
-            .any(|entry| !entry.payload.fields.contains_key(field));
-        if requires_document_lookup && document_store.is_none() {
-            return Err(SQLError::UnknownTable(self.table.to_string()));
-        }
-        if requires_document_lookup {
+            .filter(|entry| !entry.payload.fields.contains_key(field))
+            .map(|entry| entry.doc_id)
+            .collect::<Vec<_>>();
+        let projected = if lookup_doc_ids.is_empty() {
+            std::collections::BTreeMap::new()
+        } else {
             self.require_column(field)?;
-        }
+            self.engine
+                .get_document_fields(self.table, &lookup_doc_ids, field)?
+        };
         let mut entries = Vec::with_capacity(source.len());
         for entry in source.entries() {
             let mut payload = entry.payload.clone();
             let value = if let Some(value) = payload.fields.get(field) {
-                Some(value.clone())
-            } else if let Some(store) = document_store.as_ref() {
-                let value = store
-                    .get_field(entry.doc_id, field)
-                    .map_err(|error| operator_execution_error("document field lookup", error))?;
-                if value.is_none()
-                    && !store
-                        .contains_doc_id(entry.doc_id)
-                        .map_err(|error| operator_execution_error("document lookup", error))?
-                {
-                    return Err(SQLError::Internal(format!(
-                        "join operand references document {} missing from table `{}`",
-                        entry.doc_id, self.table
-                    )));
-                }
-                value
+                value.clone()
+            } else if let Some(value) = projected.get(&entry.doc_id) {
+                value.clone()
             } else {
-                return Err(SQLError::Internal(
-                    "join document store disappeared after validation".to_string(),
-                ));
+                return Err(SQLError::Internal(format!(
+                    "join operand references document {} missing from table `{}`",
+                    entry.doc_id, self.table
+                )));
             };
-            if let Some(value) = value {
-                payload.fields.insert(alias.to_string(), value);
-            }
+            payload.fields.insert(alias.to_string(), value);
             entries.push(PostingEntry::new(entry.doc_id, payload));
         }
         Ok(PostingList::from_sorted_unchecked(entries))

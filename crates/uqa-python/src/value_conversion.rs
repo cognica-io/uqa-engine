@@ -9,7 +9,7 @@
 use super::{
     BTreeMap, Bound, DecimalValue, IntoPyObjectExt, Py, PyAny, PyAnyMethods, PyBool, PyBytes,
     PyBytesMethods, PyDict, PyDictMethods, PyFloat, PyInt, PyIterator, PyList, PyListMethods,
-    PyResult, PyString, PyTypeError, PyValueError, Python, TemporalValue, Value,
+    PyResult, PyString, PyTuple, PyTypeError, PyValueError, Python, TemporalValue, Value,
 };
 
 pub(super) fn value_from_py(value: &Bound<'_, PyAny>) -> PyResult<Value> {
@@ -60,8 +60,18 @@ pub(super) fn value_to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> 
         Value::Float(value) => value.into_py_any(py),
         Value::Decimal(value) => decimal_to_py(py, value),
         Value::Str(value) | Value::FixedChar(value) => value.into_py_any(py),
+        Value::Json(value) | Value::JsonB(value) => {
+            Ok(py.import("json")?.call_method1("loads", (value,))?.unbind())
+        }
         Value::Bytes(value) => Ok(PyBytes::new(py, value).into_any().unbind()),
         Value::Temporal(value) => temporal_to_string(value).into_py_any(py),
+        Value::Array(array) => {
+            let list = PyList::empty(py);
+            for value in array.elements() {
+                list.append(value_to_py(py, value)?)?;
+            }
+            Ok(list.into_any().unbind())
+        }
         Value::List(values) => {
             let list = PyList::empty(py);
             for value in values {
@@ -69,8 +79,24 @@ pub(super) fn value_to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> 
             }
             Ok(list.into_any().unbind())
         }
+        Value::Row(values) => {
+            let items = values
+                .iter()
+                .map(|value| value_to_py(py, value))
+                .collect::<PyResult<Vec<_>>>()?;
+            Ok(PyTuple::new(py, items)?.into_any().unbind())
+        }
+        Value::Record(values) => record_to_py(py, values),
         Value::Map(values) => map_to_py(py, values),
     }
+}
+
+fn record_to_py(py: Python<'_>, values: &[(String, Value)]) -> PyResult<Py<PyAny>> {
+    let dict = PyDict::new(py);
+    for (key, value) in values {
+        dict.set_item(key, value_to_py(py, value)?)?;
+    }
+    Ok(dict.into_any().unbind())
 }
 
 pub(super) fn temporal_to_string(value: &TemporalValue) -> String {

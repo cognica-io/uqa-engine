@@ -202,12 +202,27 @@ pub(super) struct Session {
     pub(super) history_path: Option<PathBuf>,
     pub(super) show_timing: bool,
     pub(super) expanded: bool,
+    pub(super) copy_text: bool,
     pub(super) output_path: Option<PathBuf>,
 }
 
 impl Session {
     pub(super) fn new(db_path: Option<PathBuf>, key: Option<&str>) -> Result<Self, String> {
-        let history_path = history_path();
+        Self::new_with_history_path(db_path, key, history_path())
+    }
+
+    pub(super) fn new_without_history(
+        db_path: Option<PathBuf>,
+        key: Option<&str>,
+    ) -> Result<Self, String> {
+        Self::new_with_history_path(db_path, key, None)
+    }
+
+    fn new_with_history_path(
+        db_path: Option<PathBuf>,
+        key: Option<&str>,
+        history_path: Option<PathBuf>,
+    ) -> Result<Self, String> {
         let history = match history_path.as_ref() {
             Some(path) => match std::fs::read_to_string(path) {
                 Ok(text) => text
@@ -235,6 +250,7 @@ impl Session {
             history_path,
             show_timing: false,
             expanded: false,
+            copy_text: false,
             output_path: None,
         })
     }
@@ -375,13 +391,15 @@ impl Session {
         let elapsed = start.elapsed();
         let result = match outcome {
             Ok(result) => self.write_query_output(out, |writer| {
-                if self.expanded {
+                if self.copy_text {
+                    print_result_copy_text(&result, writer);
+                } else if self.expanded {
                     print_result_expanded(&result, writer);
                 } else {
                     print_result(&result, writer);
                 }
             }),
-            Err(err) => Err(err.to_string()),
+            Err(err) => Err(format!("{}: {err}", err.sqlstate().unwrap_or("XX000"))),
         };
         let timing_result = if self.show_timing {
             let ms = elapsed.as_secs_f64() * 1000.0;

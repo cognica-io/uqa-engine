@@ -6,7 +6,7 @@
 
 //! SQL type-system coverage.
 
-use uqa_core::{DecimalValue, Value};
+use uqa_core::{ArrayValue, DecimalValue, Value};
 use uqa_engine::{Engine, SQLResult};
 
 fn exec(engine: &Engine, sql: &str) -> SQLResult {
@@ -36,6 +36,10 @@ fn engine_with_table() -> Engine {
 
 fn dec(value: &str) -> Value {
     Value::Decimal(DecimalValue::parse(value).unwrap())
+}
+
+fn array(values: Vec<Value>) -> Value {
+    Value::Array(ArrayValue::try_new(values).unwrap())
 }
 
 #[test]
@@ -141,7 +145,7 @@ fn select_array_literal() {
     let result = exec(&engine, "SELECT ARRAY[1, 2, 3] AS v FROM t WHERE id = 1");
     assert_eq!(
         result.rows[0]["v"],
-        Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)])
+        array(vec![Value::Int(1), Value::Int(2), Value::Int(3)])
     );
 }
 
@@ -154,7 +158,7 @@ fn select_text_array_literal() {
     );
     assert_eq!(
         result.rows[0]["v"],
-        Value::List(vec![
+        array(vec![
             Value::Str("a".into()),
             Value::Str("b".into()),
             Value::Str("c".into()),
@@ -169,7 +173,7 @@ fn select_empty_array_literal() {
         &engine,
         "SELECT ARRAY[]::integer[] AS v FROM t WHERE id = 1",
     );
-    assert_eq!(result.rows[0]["v"], Value::List(Vec::new()));
+    assert_eq!(result.rows[0]["v"], array(Vec::new()));
 }
 
 #[test]
@@ -186,7 +190,7 @@ fn text_array_column_create_insert_round_trip() {
     let result = exec(&engine, "SELECT tags FROM arr_test WHERE id = 1");
     assert_eq!(
         result.rows[0]["tags"],
-        Value::List(vec![Value::Str("python".into()), Value::Str("sql".into())])
+        array(vec![Value::Str("python".into()), Value::Str("sql".into())])
     );
 }
 
@@ -204,7 +208,7 @@ fn integer_array_column_create_insert_round_trip() {
     let result = exec(&engine, "SELECT nums FROM int_arr WHERE id = 1");
     assert_eq!(
         result.rows[0]["nums"],
-        Value::List(vec![Value::Int(10), Value::Int(20), Value::Int(30)])
+        array(vec![Value::Int(10), Value::Int(20), Value::Int(30)])
     );
 }
 
@@ -262,15 +266,15 @@ fn array_types_coerce_elements_and_survive_engine_reopen() {
     );
     assert_eq!(
         result.rows[0]["tags"],
-        Value::List(vec![Value::Str("1".into()), Value::Str("2".into())])
+        array(vec![Value::Str("1".into()), Value::Str("2".into())])
     );
     assert_eq!(
         result.rows[0]["nums"],
-        Value::List(vec![Value::Int(10), Value::Int(20)])
+        array(vec![Value::Int(10), Value::Int(20)])
     );
     assert_eq!(
         result.rows[0]["matrix"],
-        Value::List(vec![
+        array(vec![
             Value::List(vec![Value::Int(1), Value::Int(2)]),
             Value::List(vec![Value::Int(3), Value::Int(4)]),
         ])
@@ -326,7 +330,7 @@ fn array_cat_concatenates() {
     );
     assert_eq!(
         result.rows[0]["v"],
-        Value::List(vec![
+        array(vec![
             Value::Int(1),
             Value::Int(2),
             Value::Int(3),
@@ -344,7 +348,7 @@ fn array_append_appends() {
     );
     assert_eq!(
         result.rows[0]["v"],
-        Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)])
+        array(vec![Value::Int(1), Value::Int(2), Value::Int(3)])
     );
 }
 
@@ -357,7 +361,7 @@ fn array_remove_removes_matching_values() {
     );
     assert_eq!(
         result.rows[0]["v"],
-        Value::List(vec![Value::Int(1), Value::Int(3)])
+        array(vec![Value::Int(1), Value::Int(3)])
     );
 }
 

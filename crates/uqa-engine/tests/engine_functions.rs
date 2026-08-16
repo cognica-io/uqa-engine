@@ -6,8 +6,8 @@
 
 //! Consolidated expression, type, routine, and `PostgreSQL` semantics tests.
 
-#[path = "pg17_semantics.rs"]
-mod pg17_semantics;
+#[path = "pg18_semantics.rs"]
+mod pg18_semantics;
 #[path = "pg_operator_equivalence.rs"]
 mod pg_operator_equivalence;
 #[path = "sql_datetime_functions.rs"]

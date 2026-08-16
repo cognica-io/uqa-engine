@@ -7,8 +7,8 @@
 //! MERGE source, predicate, and WHEN-clause lowering.
 
 use super::{
-    compile_expr, compile_from_node, compile_projections, range_var_name, Expr, NodeEnum, Result,
-    SQLError,
+    compile_expr, compile_from_node, compile_returning_clause, range_var_name, Expr, NodeEnum,
+    Result, SQLError,
 };
 
 pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crate::ast::MergeStmt> {
@@ -25,6 +25,12 @@ pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crat
         .and_then(|r| r.alias.as_ref())
         .map(|a| a.aliasname.clone())
         .filter(|s| !s.is_empty());
+    let target_qualifier = target_alias.clone().unwrap_or_else(|| {
+        stmt.relation
+            .as_ref()
+            .map(|relation| relation.relname.clone())
+            .unwrap_or_default()
+    });
     let source_node = stmt
         .source_relation
         .as_deref()
@@ -137,13 +143,15 @@ pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crat
         }
     }
 
-    let returning = compile_projections(&stmt.returning_list)?;
+    let (returning, returning_aliases) = compile_returning_clause(stmt.returning_clause.as_ref())?;
     Ok(MergeStmt {
         target,
+        target_qualifier,
         target_alias,
         source,
         join_condition,
         when_clauses,
         returning,
+        returning_aliases,
     })
 }

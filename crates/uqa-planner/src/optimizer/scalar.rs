@@ -9,7 +9,10 @@
 use super::{
     AssignmentPlan, BTreeMap, OptimizerConfig, ProjectionPlan, ScalarExpr, ScalarFrameBound, Value,
 };
-use uqa_sql::expr::{cast_value, eval_binary_values, truthy};
+use uqa_core::ArrayValue;
+use uqa_sql::expr::{
+    cast_value, eval_binary_values_with_integer_width, integer_width_for_literal, truthy,
+};
 
 pub(super) fn optimize_assignments(assignments: &mut [AssignmentPlan], config: &OptimizerConfig) {
     for assignment in assignments {
@@ -45,6 +48,9 @@ fn optimize_scalar(expression: ScalarExpr, config: &OptimizerConfig) -> ScalarEx
             lhs: Box::new(optimize_scalar(*lhs, config)),
             rhs: Box::new(optimize_scalar(*rhs, config)),
         },
+        ScalarExpr::UnaryMinus(inner) => {
+            ScalarExpr::UnaryMinus(Box::new(optimize_scalar(*inner, config)))
+        }
         ScalarExpr::Not(inner) => {
             let inner = optimize_scalar(*inner, config);
             if config.enable_boolean_simplify {
@@ -104,6 +110,7 @@ fn optimize_scalar(expression: ScalarExpr, config: &OptimizerConfig) -> ScalarEx
         },
         ScalarExpr::Func {
             name,
+            binding,
             args,
             distinct,
             mut order_by,
@@ -117,6 +124,7 @@ fn optimize_scalar(expression: ScalarExpr, config: &OptimizerConfig) -> ScalarEx
             }
             ScalarExpr::Func {
                 name,
+                binding,
                 args: args
                     .into_iter()
                     .map(|argument| optimize_scalar(argument, config))
@@ -196,12 +204,21 @@ fn optimize_scalar(expression: ScalarExpr, config: &OptimizerConfig) -> ScalarEx
 fn fold_literal_expression(expression: ScalarExpr) -> ScalarExpr {
     match expression {
         ScalarExpr::Cast { expr, ty } => match *expr {
-            ScalarExpr::Literal(value) => cast_value(&value, &ty)
-                .map(ScalarExpr::Literal)
-                .unwrap_or_else(|_| ScalarExpr::Cast {
-                    expr: Box::new(ScalarExpr::Literal(value)),
+            ScalarExpr::Literal(value) if is_integer_type(&ty) => ScalarExpr::Cast {
+                expr: Box::new(ScalarExpr::Literal(value)),
+                ty,
+            },
+            ScalarExpr::Literal(value) => {
+                let folded = cast_value(&value, &ty).unwrap_or(value);
+                // The cast is also the static type identity of this constant.
+                // Dropping it makes later binding reconstruct a declaration
+                // from the runtime carrier, which cannot distinguish int2,
+                // int4, int8, varchar, bpchar, or float widths.
+                ScalarExpr::Cast {
+                    expr: Box::new(ScalarExpr::Literal(folded)),
                     ty,
-                }),
+                }
+            }
             expr => ScalarExpr::Cast {
                 expr: Box::new(expr),
                 ty,
@@ -209,7 +226,13 @@ fn fold_literal_expression(expression: ScalarExpr) -> ScalarExpr {
         },
         ScalarExpr::Binary { op, lhs, rhs } => match (*lhs, *rhs) {
             (ScalarExpr::Literal(lhs), ScalarExpr::Literal(rhs)) => {
-                eval_binary_values(op, &lhs, &rhs)
+                let integer_width = match (&lhs, &rhs) {
+                    (Value::Int(lhs), Value::Int(rhs)) => {
+                        Some(integer_width_for_literal(*lhs).max(integer_width_for_literal(*rhs)))
+                    }
+                    _ => None,
+                };
+                eval_binary_values_with_integer_width(op, &lhs, &rhs, integer_width)
                     .map(ScalarExpr::Literal)
                     .unwrap_or_else(|_| ScalarExpr::Binary {
                         op,
@@ -222,6 +245,12 @@ fn fold_literal_expression(expression: ScalarExpr) -> ScalarExpr {
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
             },
+        },
+        ScalarExpr::UnaryMinus(inner) => match *inner {
+            ScalarExpr::Literal(value) => uqa_sql::expr::negate_value(&value, None)
+                .map(ScalarExpr::Literal)
+                .unwrap_or_else(|_| ScalarExpr::UnaryMinus(Box::new(ScalarExpr::Literal(value)))),
+            inner => ScalarExpr::UnaryMinus(Box::new(inner)),
         },
         ScalarExpr::Not(inner) => match *inner {
             ScalarExpr::Literal(Value::Null) => ScalarExpr::Literal(Value::Null),
@@ -243,18 +272,44 @@ fn fold_literal_expression(expression: ScalarExpr) -> ScalarExpr {
                 .iter()
                 .all(|item| matches!(item, ScalarExpr::Literal(_))) =>
         {
-            ScalarExpr::Literal(Value::List(
-                items
-                    .into_iter()
-                    .filter_map(|item| match item {
-                        ScalarExpr::Literal(value) => Some(value),
-                        _ => None,
-                    })
-                    .collect(),
-            ))
+            let values = items
+                .into_iter()
+                .filter_map(|item| match item {
+                    ScalarExpr::Literal(value) => Some(value),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            ArrayValue::try_new(values.clone()).map_or_else(
+                || ScalarExpr::Array(values.into_iter().map(ScalarExpr::Literal).collect()),
+                |array| ScalarExpr::Literal(Value::Array(array)),
+            )
         }
         other => other,
     }
+}
+
+fn is_integer_type(ty: &str) -> bool {
+    matches!(
+        ty,
+        "smallint"
+            | "int2"
+            | "pg_catalog.int2"
+            | "integer"
+            | "int"
+            | "int4"
+            | "serial"
+            | "serial4"
+            | "pg_catalog.int4"
+            | "bigint"
+            | "int8"
+            | "bigserial"
+            | "serial8"
+            | "pg_catalog.int8"
+            | "oid"
+            | "pg_catalog.oid"
+            | "xid"
+            | "pg_catalog.xid"
+    )
 }
 
 fn optimize_frame_bound(bound: &mut ScalarFrameBound, config: &OptimizerConfig) {
@@ -361,7 +416,7 @@ mod tests {
     use uqa_sql::ast::BinaryOp;
 
     #[test]
-    fn folds_literal_date_cast_before_row_execution() {
+    fn folds_literal_date_value_without_erasing_its_declared_type() {
         let mut expression = ScalarExpr::Cast {
             expr: Box::new(ScalarExpr::Literal(Value::Str("1993-07-01".into()))),
             ty: "date".into(),
@@ -371,7 +426,8 @@ mod tests {
 
         assert!(matches!(
             expression,
-            ScalarExpr::Literal(Value::Temporal(_))
+            ScalarExpr::Cast { expr, ty }
+                if ty == "date" && matches!(*expr, ScalarExpr::Literal(Value::Temporal(_)))
         ));
     }
 

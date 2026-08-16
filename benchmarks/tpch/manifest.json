@@ -23,8 +23,8 @@
     "count": 22,
     "parameter_set": "TPC-H default substitutions",
     "source": "DuckDB tpch extension 1.5.3 tpch_queries()",
-    "semantic_reference": "PostgreSQL 17",
-    "expected_results": "expected/pg17.json",
+    "semantic_reference": "PostgreSQL 18",
+    "expected_results": "expected/pg18.json",
     "comparison": "Exact columns, row order, NULLs, text bytes, and type-aware canonical numeric values"
   }
 }

@@ -8,6 +8,7 @@
 
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult};
+use uqa_sql::{ColumnType, SQLParam};
 
 fn exec(engine: &Engine, sql: &str) -> SQLResult {
     engine.sql(sql, &[]).unwrap()
@@ -48,6 +49,230 @@ fn prepare_select_registers_statement() {
         "PREPARE get_by_id (INTEGER) AS SELECT name FROM employees WHERE id = $1",
     );
     assert!(engine.lookup_prepared("get_by_id").is_some());
+}
+
+#[test]
+fn direct_parameters_retain_static_type_during_projection_binding() {
+    let engine = Engine::new();
+    let result = engine
+        .sql(
+            "SELECT pg_typeof($1) AS ty",
+            &[SQLParam::Scalar(Value::Int(1))],
+        )
+        .unwrap();
+    assert_eq!(result.rows[0]["ty"], Value::Str("integer".into()));
+    assert_eq!(result.column_types, [Some(ColumnType::Regtype)]);
+}
+
+#[test]
+fn operator_and_builtin_results_use_postgresql_return_types() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT
+            '2020-01-01'::date + 1 AS next_date,
+            '2020-01-02'::date - '2020-01-01'::date AS elapsed_days,
+            '2020-01-02'::timestamp - '2020-01-01'::timestamp AS elapsed_time,
+            CRC32('abc'::bytea) AS checksum,
+            REGEXP_MATCH('abc', '(b)') AS captures,
+            ARRAY_REVERSE(ARRAY[1::smallint, 2::smallint]) AS reversed,
+            CURRENT_DATABASE() AS database_name,
+            UUIDV4() AS generated_uuid",
+    );
+    assert_eq!(
+        result.column_types,
+        [
+            Some(ColumnType::Date),
+            Some(ColumnType::Integer),
+            Some(ColumnType::Interval),
+            Some(ColumnType::BigInteger),
+            Some(ColumnType::Array(Box::new(ColumnType::Text))),
+            Some(ColumnType::Array(Box::new(ColumnType::SmallInteger))),
+            Some(ColumnType::Name),
+            Some(ColumnType::Uuid),
+        ]
+    );
+}
+
+#[test]
+fn user_function_declarations_bind_empty_and_nested_result_types() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE SCHEMA typed_functions");
+    exec(
+        &engine,
+        "CREATE FUNCTION typed_functions.pick(value SMALLINT) RETURNS SMALLINT
+         LANGUAGE SQL IMMUTABLE AS 'SELECT value'",
+    );
+    exec(
+        &engine,
+        "CREATE FUNCTION typed_functions.pick(value INTEGER) RETURNS BIGINT
+         LANGUAGE SQL IMMUTABLE AS 'SELECT value::bigint'",
+    );
+    exec(
+        &engine,
+        "CREATE FUNCTION typed_functions.named(value INTEGER, extra BIGINT DEFAULT 0)
+         RETURNS REAL LANGUAGE SQL IMMUTABLE AS 'SELECT value::real'",
+    );
+
+    let result = exec(
+        &engine,
+        "SELECT
+            typed_functions.pick(1::smallint) AS small_result,
+            typed_functions.pick(1::integer) AS big_result,
+            COALESCE(typed_functions.pick(NULL::smallint), 2::smallint) AS nested_result,
+            typed_functions.named(extra => 1::bigint, value => 1::integer) AS named_result
+         WHERE FALSE",
+    );
+    assert!(result.rows.is_empty());
+    assert_eq!(
+        result.column_types,
+        [
+            Some(ColumnType::SmallInteger),
+            Some(ColumnType::BigInteger),
+            Some(ColumnType::SmallInteger),
+            Some(ColumnType::Real),
+        ]
+    );
+}
+
+#[test]
+fn result_and_cursor_expose_statically_bound_output_types() {
+    let engine = Engine::new();
+    let sql = "SELECT
+        1::smallint AS small_value,
+        2::bigint AS big_value,
+        3::real AS real_value,
+        4::double precision AS double_value,
+        'x'::varchar(5) AS varying_value,
+        '550e8400-e29b-41d4-a716-446655440000'::uuid AS uuid_value";
+    let expected = vec![
+        Some(ColumnType::SmallInteger),
+        Some(ColumnType::BigInteger),
+        Some(ColumnType::Real),
+        Some(ColumnType::DoublePrecision),
+        Some(ColumnType::Varchar(Some(5))),
+        Some(ColumnType::Uuid),
+    ];
+    let result = engine.sql(sql, &[]).unwrap();
+    assert_eq!(result.column_types, expected);
+
+    let cursor = engine.sql_cursor(sql, &[]).unwrap();
+    assert_eq!(cursor.column_types(), expected);
+}
+
+#[test]
+fn aggregate_results_preserve_postgresql_return_types() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE aggregate_types (
+            small_value SMALLINT,
+            big_value BIGINT,
+            real_value REAL
+        )",
+    );
+    exec(
+        &engine,
+        "INSERT INTO aggregate_types VALUES (1, 10, 1.5), (2, 20, 2.5)",
+    );
+    let result = exec(
+        &engine,
+        "SELECT
+            COUNT(*) AS count_value,
+            SUM(small_value) AS small_sum,
+            AVG(small_value) AS small_avg,
+            SUM(big_value) AS big_sum,
+            AVG(real_value) AS real_avg,
+            MIN(small_value) AS small_min,
+            ARRAY_AGG(small_value) AS small_array
+         FROM aggregate_types",
+    );
+    assert_eq!(
+        result.column_types,
+        [
+            Some(ColumnType::BigInteger),
+            Some(ColumnType::BigInteger),
+            Some(ColumnType::Numeric {
+                precision: None,
+                scale: None,
+            }),
+            Some(ColumnType::Numeric {
+                precision: None,
+                scale: None,
+            }),
+            Some(ColumnType::DoublePrecision),
+            Some(ColumnType::SmallInteger),
+            Some(ColumnType::Array(Box::new(ColumnType::SmallInteger))),
+        ]
+    );
+    let types = exec(
+        &engine,
+        "SELECT
+            pg_typeof(COUNT(*)) AS count_type,
+            pg_typeof(SUM(small_value)) AS small_sum_type,
+            pg_typeof(AVG(small_value)) AS small_avg_type,
+            pg_typeof(SUM(big_value)) AS big_sum_type,
+            pg_typeof(AVG(real_value)) AS real_avg_type,
+            pg_typeof(MIN(small_value)) AS small_min_type,
+            pg_typeof(ARRAY_AGG(small_value)) AS small_array_type
+         FROM aggregate_types",
+    );
+    assert_eq!(types.rows[0]["count_type"], Value::Str("bigint".into()));
+    assert_eq!(types.rows[0]["small_sum_type"], Value::Str("bigint".into()));
+    assert_eq!(
+        types.rows[0]["small_avg_type"],
+        Value::Str("numeric".into())
+    );
+    assert_eq!(types.rows[0]["big_sum_type"], Value::Str("numeric".into()));
+    assert_eq!(
+        types.rows[0]["real_avg_type"],
+        Value::Str("double precision".into())
+    );
+    assert_eq!(
+        types.rows[0]["small_min_type"],
+        Value::Str("smallint".into())
+    );
+    assert_eq!(
+        types.rows[0]["small_array_type"],
+        Value::Str("smallint[]".into())
+    );
+}
+
+#[test]
+fn window_results_preserve_postgresql_return_types_through_spill() {
+    let engine = Engine::new();
+    engine
+        .set_variable("work_mem", "1kB")
+        .expect("set tiny window spill budget");
+    exec(
+        &engine,
+        "CREATE TABLE window_types (small_value SMALLINT, real_value REAL)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO window_types VALUES (1, 1.5), (2, 2.5), (3, 3.5)",
+    );
+    let result = exec(
+        &engine,
+        "SELECT
+            small_value,
+            ROW_NUMBER() OVER (ORDER BY small_value) AS row_index,
+            LAG(small_value) OVER (ORDER BY small_value) AS previous_value,
+            SUM(small_value) OVER () AS total_value,
+            AVG(real_value) OVER () AS average_value
+         FROM window_types
+         ORDER BY small_value",
+    );
+    assert_eq!(
+        result.column_types,
+        [
+            Some(ColumnType::SmallInteger),
+            Some(ColumnType::BigInteger),
+            Some(ColumnType::SmallInteger),
+            Some(ColumnType::BigInteger),
+            Some(ColumnType::DoublePrecision),
+        ]
+    );
 }
 
 #[test]

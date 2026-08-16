@@ -7,11 +7,15 @@
 use uqa_pg_wire::backend::{sqlstate, TYPE_INT4, TYPE_TEXT};
 use uqa_pg_wire::{
     decode_frontend, decode_startup, encode_all, Authentication, BackendKeyData, BackendMessage,
-    Bind, CloseTarget, CopyResponse, DescribeTarget, ErrorOrNotice, FieldDescription, FormatCode,
-    FrontendMessage, GSSEncResponse, Parse, PgWireError, SSLResponse, StartupFrame,
-    TransactionStatus, CANCEL_REQUEST_CODE, GSSENC_REQUEST_CODE, PROTOCOL_VERSION_3_0,
+    Bind, CancelKey, CloseTarget, CopyResponse, DescribeTarget, ErrorOrNotice, FieldDescription,
+    FormatCode, FrontendMessage, FunctionCall, GSSEncResponse, NotificationResponse, Parse,
+    PgWireError, ProtocolVersion, SSLResponse, StartupFrame, TransactionStatus,
+    CANCEL_REQUEST_CODE, GSSENC_REQUEST_CODE, PROTOCOL_VERSION_3_0, PROTOCOL_VERSION_3_2,
     SSL_REQUEST_CODE,
 };
+
+#[path = "protocol/libpq_interop.rs"]
+mod libpq_interop;
 
 fn startup_packet(code_or_version: i32, body: &[u8]) -> Vec<u8> {
     let length = i32::try_from(8 + body.len()).expect("test packet fits");
@@ -90,7 +94,259 @@ fn decodes_startup_special_requests() {
     };
     assert_eq!(consumed, 16);
     assert_eq!(process_id, 123);
-    assert_eq!(secret_key, 456);
+    assert_eq!(secret_key.as_bytes(), &456_i32.to_be_bytes());
+}
+
+#[test]
+fn negotiates_postgresql_32_and_reports_unsupported_protocol_options() {
+    let requested = ProtocolVersion { major: 3, minor: 3 };
+    let body = b"user\0alice\0_pq_.supported\0yes\0_pq_.unknown\0yes\0\0";
+    let packet = startup_packet(requested.raw(), body);
+    let Some((StartupFrame::Startup(startup), consumed)) =
+        decode_startup(&packet).expect("newer 3.x startup decodes")
+    else {
+        panic!("expected startup frame");
+    };
+    assert_eq!(consumed, packet.len());
+
+    let negotiation = startup
+        .negotiate(&["_pq_.supported"])
+        .expect("major version 3 negotiates");
+    assert_eq!(negotiation.requested_version, requested);
+    assert_eq!(negotiation.negotiated_version, ProtocolVersion::V3_2);
+    assert_eq!(negotiation.unrecognized_options, ["_pq_.unknown"]);
+    let response = negotiation
+        .response()
+        .expect("downgrade and unsupported option require a response")
+        .encode()
+        .expect("negotiation response encodes");
+    assert_eq!(response[0], b'v');
+    assert_eq!(&response[5..9], &PROTOCOL_VERSION_3_2.to_be_bytes());
+    assert_eq!(&response[9..13], &1_i32.to_be_bytes());
+    assert!(response.ends_with(b"_pq_.unknown\0"));
+
+    let packet = startup_packet(PROTOCOL_VERSION_3_2, b"user\0alice\0\0");
+    let Some((StartupFrame::Startup(startup), _)) =
+        decode_startup(&packet).expect("3.2 startup decodes")
+    else {
+        panic!("expected startup frame");
+    };
+    assert!(startup
+        .negotiate(&[])
+        .expect("3.2 negotiates")
+        .response()
+        .is_none());
+
+    let packet = startup_packet(
+        ProtocolVersion { major: 3, minor: 1 }.raw(),
+        b"user\0alice\0\0",
+    );
+    let Some((StartupFrame::Startup(startup), _)) =
+        decode_startup(&packet).expect("3.1 startup decodes")
+    else {
+        panic!("expected startup frame");
+    };
+    let negotiation = startup.negotiate(&[]).expect("3.1 remains selected");
+    assert_eq!(negotiation.negotiated_version.minor, 1);
+    assert!(negotiation.response().is_none());
+}
+
+#[test]
+fn rejects_unsupported_startup_major_versions() {
+    let version = ProtocolVersion { major: 4, minor: 0 };
+    assert_eq!(
+        decode_startup(&startup_packet(version.raw(), b"user\0alice\0\0")),
+        Err(PgWireError::UnsupportedProtocolVersion(version.raw()))
+    );
+}
+
+#[test]
+fn postgresql_32_supports_variable_length_cancellation_keys() {
+    let key_bytes: Vec<u8> = (0_u8..32).collect();
+    let key = CancelKey::new(key_bytes.clone()).expect("32-byte key is valid");
+    let backend_key = BackendMessage::BackendKeyData(BackendKeyData {
+        process_id: 12,
+        secret_key: key.clone(),
+    });
+    let encoded = backend_key
+        .encode_for_protocol(ProtocolVersion::V3_2)
+        .expect("3.2 key encodes");
+    assert_eq!(encoded[0], b'K');
+    assert_eq!(&encoded[5..9], &12_i32.to_be_bytes());
+    assert_eq!(&encoded[9..], key_bytes);
+    assert_eq!(
+        backend_key.encode_for_protocol(ProtocolVersion::V3_0),
+        Err(PgWireError::CancelKeyLengthForProtocol {
+            length: 32,
+            major: 3,
+            minor: 0,
+        })
+    );
+
+    let mut cancel_body = Vec::new();
+    cancel_body.extend_from_slice(&12_i32.to_be_bytes());
+    cancel_body.extend_from_slice(key.as_bytes());
+    let Some((StartupFrame::CancelRequest { secret_key, .. }, consumed)) =
+        decode_startup(&startup_packet(CANCEL_REQUEST_CODE, &cancel_body))
+            .expect("variable-length cancel request decodes")
+    else {
+        panic!("expected cancel request");
+    };
+    assert_eq!(consumed, 44);
+    assert_eq!(secret_key.as_bytes(), key_bytes);
+}
+
+#[test]
+fn cancellation_key_lengths_are_validated_at_both_protocol_boundaries() {
+    assert_eq!(
+        CancelKey::new(Vec::new()),
+        Err(PgWireError::InvalidCancelKeyLength {
+            length: 0,
+            minimum: 1,
+            maximum: 256,
+        })
+    );
+    assert_eq!(
+        CancelKey::new(vec![0; 257]),
+        Err(PgWireError::InvalidCancelKeyLength {
+            length: 257,
+            minimum: 1,
+            maximum: 256,
+        })
+    );
+
+    let mut short_body = 12_i32.to_be_bytes().to_vec();
+    short_body.extend_from_slice(&[1, 2, 3]);
+    let Some((StartupFrame::CancelRequest { secret_key, .. }, _)) =
+        decode_startup(&startup_packet(CANCEL_REQUEST_CODE, &short_body))
+            .expect("PostgreSQL 18 accepts a three-byte CancelRequest key")
+    else {
+        panic!("expected cancel request");
+    };
+    assert_eq!(secret_key.as_bytes(), [1, 2, 3]);
+
+    let short_backend_key = BackendMessage::BackendKeyData(BackendKeyData {
+        process_id: 12,
+        secret_key: secret_key.clone(),
+    });
+    assert_eq!(
+        short_backend_key.encode_for_protocol(ProtocolVersion::V3_2),
+        Err(PgWireError::InvalidCancelKeyLength {
+            length: 3,
+            minimum: 4,
+            maximum: 256,
+        })
+    );
+
+    let backend_key = BackendMessage::BackendKeyData(BackendKeyData {
+        process_id: 12,
+        secret_key: CancelKey::new(vec![0; 5]).expect("five-byte key is valid for 3.2"),
+    });
+    assert_eq!(
+        backend_key.encode_for_protocol(ProtocolVersion { major: 3, minor: 1 }),
+        Err(PgWireError::CancelKeyLengthForProtocol {
+            length: 5,
+            major: 3,
+            minor: 1,
+        })
+    );
+}
+
+#[test]
+fn negotiation_preserves_duplicate_unsupported_protocol_options_in_wire_order() {
+    let body = b"user\0alice\0_pq_.zeta\x001\0_pq_.alpha\x002\0_pq_.zeta\x003\0\0";
+    let packet = startup_packet(PROTOCOL_VERSION_3_2, body);
+    let Some((StartupFrame::Startup(startup), _)) =
+        decode_startup(&packet).expect("startup options decode")
+    else {
+        panic!("expected startup frame");
+    };
+
+    assert_eq!(startup.get("_pq_.zeta"), Some("3"));
+    let negotiation = startup.negotiate(&[]).expect("3.2 negotiates");
+    assert_eq!(
+        negotiation.unrecognized_options,
+        ["_pq_.zeta", "_pq_.alpha", "_pq_.zeta"]
+    );
+}
+
+#[test]
+fn negotiation_response_cannot_advertise_a_newer_unsupported_minor() {
+    let version = ProtocolVersion { major: 3, minor: 3 };
+    assert_eq!(
+        BackendMessage::NegotiateProtocolVersion {
+            newest_protocol_version: version,
+            unrecognized_options: Vec::new(),
+        }
+        .encode(),
+        Err(PgWireError::UnsupportedProtocolVersion(version.raw()))
+    );
+}
+
+#[test]
+fn negotiation_can_downgrade_to_an_embedding_servers_implemented_version() {
+    let packet = startup_packet(PROTOCOL_VERSION_3_2, b"user\0alice\0\0");
+    let Some((StartupFrame::Startup(startup), _)) =
+        decode_startup(&packet).expect("3.2 startup decodes")
+    else {
+        panic!("expected startup message");
+    };
+
+    let negotiation = startup
+        .negotiate_with_max(ProtocolVersion::V3_0, &[])
+        .expect("3.2 can downgrade to 3.0");
+    assert_eq!(negotiation.requested_version, ProtocolVersion::V3_2);
+    assert_eq!(negotiation.negotiated_version, ProtocolVersion::V3_0);
+    assert!(negotiation.requires_response());
+    assert_eq!(
+        negotiation.response(),
+        Some(BackendMessage::NegotiateProtocolVersion {
+            newest_protocol_version: ProtocolVersion::V3_0,
+            unrecognized_options: Vec::new(),
+        })
+    );
+}
+
+#[test]
+fn reserved_protocol_31_cannot_be_configured_as_the_server_maximum() {
+    let reserved = ProtocolVersion { major: 3, minor: 1 };
+    let packet = startup_packet(PROTOCOL_VERSION_3_2, b"user\0alice\0\0");
+    let Some((StartupFrame::Startup(startup), _)) =
+        decode_startup(&packet).expect("3.2 startup decodes")
+    else {
+        panic!("expected startup message");
+    };
+    assert_eq!(
+        startup.negotiate_with_max(reserved, &[]),
+        Err(PgWireError::UnsupportedProtocolVersion(reserved.raw()))
+    );
+}
+
+#[test]
+fn postgresql_18_can_echo_a_31_request_when_reporting_unknown_options() {
+    let reserved = ProtocolVersion { major: 3, minor: 1 };
+    let packet = startup_packet(reserved.raw(), b"user\0alice\0_pq_.unknown\0enabled\0\0");
+    let Some((StartupFrame::Startup(startup), _)) =
+        decode_startup(&packet).expect("3.1 startup decodes")
+    else {
+        panic!("expected startup message");
+    };
+
+    let negotiation = startup.negotiate(&[]).expect("3.1 remains selected");
+    assert_eq!(negotiation.negotiated_version, reserved);
+    assert_eq!(negotiation.unrecognized_options, ["_pq_.unknown"]);
+    assert_eq!(
+        negotiation.response(),
+        Some(BackendMessage::NegotiateProtocolVersion {
+            newest_protocol_version: reserved,
+            unrecognized_options: vec!["_pq_.unknown".to_owned()],
+        })
+    );
+    negotiation
+        .response()
+        .expect("unknown option requires response")
+        .encode()
+        .expect("PostgreSQL 18 emits selected 3.1 for this edge case");
 }
 
 #[test]
@@ -189,6 +445,59 @@ fn decodes_extended_query_messages() {
 }
 
 #[test]
+fn decodes_function_call_fields_and_formats() {
+    let body = {
+        let mut body = Vec::new();
+        body.extend_from_slice(&42_u32.to_be_bytes());
+        body.extend_from_slice(&1_i16.to_be_bytes());
+        body.extend_from_slice(&1_i16.to_be_bytes());
+        body.extend_from_slice(&2_i16.to_be_bytes());
+        body.extend_from_slice(&4_i32.to_be_bytes());
+        body.extend_from_slice(&7_i32.to_be_bytes());
+        body.extend_from_slice(&(-1_i32).to_be_bytes());
+        body.extend_from_slice(&0_i16.to_be_bytes());
+        body
+    };
+    let Some((FrontendMessage::FunctionCall(call), consumed)) =
+        decode_frontend(&frontend_packet(b'F', &body)).expect("function call decodes")
+    else {
+        panic!("expected function call");
+    };
+
+    assert_eq!(consumed, body.len() + 5);
+    assert_eq!(
+        call,
+        FunctionCall {
+            function_oid: 42,
+            argument_formats: vec![FormatCode::Binary],
+            arguments: vec![Some(7_i32.to_be_bytes().to_vec()), None],
+            result_format: FormatCode::Text,
+        }
+    );
+}
+
+#[test]
+fn rejects_mismatched_function_call_argument_formats() {
+    let body = {
+        let mut body = Vec::new();
+        body.extend_from_slice(&42_u32.to_be_bytes());
+        body.extend_from_slice(&2_i16.to_be_bytes());
+        body.extend_from_slice(&0_i16.to_be_bytes());
+        body.extend_from_slice(&1_i16.to_be_bytes());
+        body.extend_from_slice(&1_i16.to_be_bytes());
+        body
+    };
+
+    assert_eq!(
+        decode_frontend(&frontend_packet(b'F', &body)),
+        Err(PgWireError::FunctionArgumentFormatCountMismatch {
+            format_count: 2,
+            argument_count: 1,
+        })
+    );
+}
+
+#[test]
 fn rejects_malformed_frontend_lengths() {
     let mut packet = Vec::new();
     packet.push(b'Q');
@@ -237,7 +546,7 @@ fn encodes_startup_backend_messages() {
         BackendMessage::Authentication(Authentication::Ok),
         BackendMessage::BackendKeyData(BackendKeyData {
             process_id: 12,
-            secret_key: 34,
+            secret_key: 34.into(),
         }),
         BackendMessage::ReadyForQuery(TransactionStatus::Idle),
     ];
@@ -249,6 +558,28 @@ fn encodes_startup_backend_messages() {
             b'R', 0, 0, 0, 8, 0, 0, 0, 0, b'K', 0, 0, 0, 12, 0, 0, 0, 12, 0, 0, 0, 34, b'Z', 0, 0,
             0, 5, b'I',
         ]
+    );
+}
+
+#[test]
+fn encodes_gss_and_sspi_authentication_requests() {
+    assert_eq!(
+        BackendMessage::Authentication(Authentication::Gss)
+            .encode()
+            .expect("GSS authentication request encodes"),
+        [b'R', 0, 0, 0, 8, 0, 0, 0, 7]
+    );
+    assert_eq!(
+        BackendMessage::Authentication(Authentication::GssContinue(vec![1, 2, 3]))
+            .encode()
+            .expect("GSS continuation encodes"),
+        [b'R', 0, 0, 0, 11, 0, 0, 0, 8, 1, 2, 3]
+    );
+    assert_eq!(
+        BackendMessage::Authentication(Authentication::Sspi)
+            .encode()
+            .expect("SSPI authentication request encodes"),
+        [b'R', 0, 0, 0, 8, 0, 0, 0, 9]
     );
 }
 
@@ -346,4 +677,42 @@ fn encodes_copy_responses_without_io_runtime() {
     .expect("copy response encodes");
 
     assert_eq!(encoded, [b'H', 0, 0, 0, 11, 1, 0, 2, 0, 0, 0, 1]);
+
+    assert_eq!(
+        BackendMessage::CopyOutResponse(CopyResponse {
+            overall_format: FormatCode::Text,
+            column_formats: vec![FormatCode::Text, FormatCode::Binary],
+        })
+        .encode(),
+        Err(PgWireError::BinaryColumnInTextCopy { column: 2 })
+    );
+}
+
+#[test]
+fn encodes_function_call_and_notification_responses() {
+    assert_eq!(
+        BackendMessage::FunctionCallResponse(Some(vec![1, 2]))
+            .encode()
+            .expect("function result encodes"),
+        [b'V', 0, 0, 0, 10, 0, 0, 0, 2, 1, 2]
+    );
+    assert_eq!(
+        BackendMessage::FunctionCallResponse(None)
+            .encode()
+            .expect("NULL function result encodes"),
+        [b'V', 0, 0, 0, 8, 255, 255, 255, 255]
+    );
+    assert_eq!(
+        BackendMessage::NotificationResponse(NotificationResponse {
+            process_id: 12,
+            channel: "events".to_owned(),
+            payload: "ready".to_owned(),
+        })
+        .encode()
+        .expect("notification encodes"),
+        [
+            b'A', 0, 0, 0, 21, 0, 0, 0, 12, b'e', b'v', b'e', b'n', b't', b's', 0, b'r', b'e',
+            b'a', b'd', b'y', 0,
+        ]
+    );
 }

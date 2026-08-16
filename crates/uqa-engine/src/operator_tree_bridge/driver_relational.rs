@@ -100,10 +100,15 @@ impl EngineDriver<'_> {
 
         self.require_column(field)?;
         let source = source
-            .map(|child| self.execute_posting_node(child).map(static_operator))
+            .map(|child| self.execute_posting_node(child))
             .transpose()?;
-        let op = FacetOperator::new(field, source);
-        op.execute(&self.bridge_context()?)
+        let doc_ids = source.as_ref().map_or_else(
+            || self.engine.table_doc_ids(self.table),
+            |posting| Ok(posting.entries().iter().map(|entry| entry.doc_id).collect()),
+        )?;
+        let context = self.bridge_context_for_projection(&doc_ids, &[field])?;
+        let op = FacetOperator::new(field, source.map(static_operator));
+        op.execute(&context)
             .map_err(|error| operator_execution_error("Facet", error))
     }
 
@@ -152,10 +157,15 @@ impl EngineDriver<'_> {
 
         self.require_column(field)?;
         let source = source
-            .map(|child| self.execute_posting_node(child).map(static_operator))
+            .map(|child| self.execute_posting_node(child))
             .transpose()?;
-        let op = AggregateOperator::new(source, field, monoid.clone());
-        op.execute(&self.bridge_context()?)
+        let doc_ids = source.as_ref().map_or_else(
+            || self.engine.table_doc_ids(self.table),
+            |posting| Ok(posting.entries().iter().map(|entry| entry.doc_id).collect()),
+        )?;
+        let context = self.bridge_context_for_projection(&doc_ids, &[field])?;
+        let op = AggregateOperator::new(source.map(static_operator), field, monoid.clone());
+        op.execute(&context)
             .map_err(|error| operator_execution_error("Aggregate", error))
     }
 
@@ -170,9 +180,20 @@ impl EngineDriver<'_> {
 
         self.require_column(group_field)?;
         self.require_column(agg_field)?;
-        let source = static_operator(self.execute_posting_node(source)?);
-        let op = GroupByOperator::new(source, group_field, agg_field, monoid.clone());
-        op.execute(&self.bridge_context()?)
+        let source = self.execute_posting_node(source)?;
+        let doc_ids = source
+            .entries()
+            .iter()
+            .map(|entry| entry.doc_id)
+            .collect::<Vec<_>>();
+        let context = self.bridge_context_for_projection(&doc_ids, &[group_field, agg_field])?;
+        let op = GroupByOperator::new(
+            static_operator(source),
+            group_field,
+            agg_field,
+            monoid.clone(),
+        );
+        op.execute(&context)
             .map_err(|error| operator_execution_error("GroupBy", error))
     }
 

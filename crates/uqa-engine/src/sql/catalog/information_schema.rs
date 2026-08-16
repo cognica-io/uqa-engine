@@ -7,14 +7,19 @@
 //! Virtual `information_schema` relation builders.
 
 use super::helpers::{
-    all_schema_names, catalog_name, catalog_ordinal, column_constraint_rows, current_user_name,
-    default_expr_text, info_character_maximum_length, info_character_octet_length, info_data_type,
-    info_datetime_precision, info_numeric_precision, info_numeric_scale, info_udt_name, int_value,
-    row, split_schema_name, stable_oid, str_value,
+    all_schema_names, catalog_name, catalog_ordinal, catalog_type_name, constraint_catalog_rows,
+    current_user_name, default_expr_text, info_character_maximum_length,
+    info_character_octet_length, info_data_type, info_datetime_precision, info_numeric_precision,
+    info_numeric_scale, info_udt_name, int_value, row, schema_expr_text, split_schema_name,
+    stable_oid, str_value, ConstraintCatalogKind, PG18_BUILTIN_ROUTINES,
 };
 use super::{
     registered_names, routine_signature_types, value_to_text, Engine, ResultRow, SQLError, Value,
 };
+
+pub(super) fn build_info_catalog_name() -> Vec<ResultRow> {
+    vec![row([("catalog_name", catalog_name())])]
+}
 
 pub(super) fn build_info_schemata(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     Ok(all_schema_names(engine)?
@@ -185,8 +190,20 @@ pub(super) fn build_info_columns(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
                 ("identity_maximum", Value::Null),
                 ("identity_minimum", Value::Null),
                 ("identity_cycle", str_value("NO")),
-                ("is_generated", str_value("NEVER")),
-                ("generation_expression", Value::Null),
+                (
+                    "is_generated",
+                    str_value(if col.generated.is_some() {
+                        "ALWAYS"
+                    } else {
+                        "NEVER"
+                    }),
+                ),
+                (
+                    "generation_expression",
+                    col.generated.as_ref().map_or(Value::Null, |generated| {
+                        str_value(schema_expr_text(&generated.expression))
+                    }),
+                ),
                 ("is_updatable", str_value("YES")),
             ]));
         }
@@ -218,38 +235,88 @@ pub(super) fn build_info_views(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
 }
 
 pub(super) fn build_info_routines(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    let mut rows: Vec<ResultRow> = registered_names()
-        .into_iter()
-        .map(|name| {
+    let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINES
+        .iter()
+        .map(|routine| {
             row([
                 ("specific_catalog", catalog_name()),
                 ("specific_schema", str_value("pg_catalog")),
-                ("specific_name", str_value(format!("{name}_0"))),
+                (
+                    "specific_name",
+                    str_value(format!("{}_{}", routine.name, routine.oid)),
+                ),
                 ("routine_catalog", catalog_name()),
                 ("routine_schema", str_value("pg_catalog")),
-                ("routine_name", str_value(name)),
-                ("routine_type", str_value("FUNCTION")),
+                ("routine_name", str_value(routine.name)),
+                (
+                    "routine_type",
+                    if routine.kind == "f" {
+                        str_value("FUNCTION")
+                    } else {
+                        Value::Null
+                    },
+                ),
                 ("module_catalog", Value::Null),
                 ("module_schema", Value::Null),
                 ("module_name", Value::Null),
-                ("udt_catalog", catalog_name()),
-                ("udt_schema", str_value("pg_catalog")),
-                ("udt_name", str_value("text")),
-                ("data_type", str_value("text")),
+                ("udt_catalog", Value::Null),
+                ("udt_schema", Value::Null),
+                ("udt_name", Value::Null),
+                (
+                    "data_type",
+                    str_value(catalog_type_name(routine.return_type)),
+                ),
                 ("routine_body", str_value("EXTERNAL")),
                 ("routine_definition", Value::Null),
                 ("external_name", Value::Null),
-                ("external_language", str_value("rust")),
-                ("is_deterministic", str_value("NO")),
-                ("sql_data_access", str_value("READS SQL DATA")),
-                ("is_null_call", str_value("YES")),
+                ("external_language", str_value("INTERNAL")),
+                (
+                    "is_deterministic",
+                    str_value(if routine.volatility == "i" {
+                        "YES"
+                    } else {
+                        "NO"
+                    }),
+                ),
+                ("sql_data_access", str_value("MODIFIES")),
+                (
+                    "is_null_call",
+                    str_value(if routine.strict { "YES" } else { "NO" }),
+                ),
                 ("schema_level_routine", str_value("YES")),
                 ("max_dynamic_result_sets", Value::Int(0)),
                 ("is_udt_dependent", str_value("NO")),
-                ("result_cast_from_null", str_value("NO")),
             ])
         })
         .collect();
+    rows.extend(registered_names().into_iter().map(|name| {
+        row([
+            ("specific_catalog", catalog_name()),
+            ("specific_schema", str_value("pg_catalog")),
+            ("specific_name", str_value(format!("{name}_0"))),
+            ("routine_catalog", catalog_name()),
+            ("routine_schema", str_value("pg_catalog")),
+            ("routine_name", str_value(name)),
+            ("routine_type", str_value("FUNCTION")),
+            ("module_catalog", Value::Null),
+            ("module_schema", Value::Null),
+            ("module_name", Value::Null),
+            ("udt_catalog", catalog_name()),
+            ("udt_schema", str_value("pg_catalog")),
+            ("udt_name", str_value("text")),
+            ("data_type", str_value("text")),
+            ("routine_body", str_value("EXTERNAL")),
+            ("routine_definition", Value::Null),
+            ("external_name", Value::Null),
+            ("external_language", str_value("rust")),
+            ("is_deterministic", str_value("NO")),
+            ("sql_data_access", str_value("READS SQL DATA")),
+            ("is_null_call", str_value("YES")),
+            ("schema_level_routine", str_value("YES")),
+            ("max_dynamic_result_sets", Value::Int(0)),
+            ("is_udt_dependent", str_value("NO")),
+        ])
+    }));
     for function in engine.list_sql_functions() {
         let def = &function.def;
         let (routine_schema, routine_name) = split_schema_name(&def.name)?;
@@ -328,7 +395,6 @@ pub(super) fn build_info_routines(engine: &Engine) -> Result<Vec<ResultRow>, SQL
             ("schema_level_routine", str_value("YES")),
             ("max_dynamic_result_sets", Value::Int(0)),
             ("is_udt_dependent", str_value("NO")),
-            ("result_cast_from_null", Value::Null),
         ]));
     }
     Ok(rows)
@@ -360,41 +426,80 @@ pub(super) fn build_info_sequences(engine: &Engine) -> Result<Vec<ResultRow>, SQ
 }
 
 pub(super) fn build_info_table_constraints(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    Ok(column_constraint_rows(engine)?
+    Ok(constraint_catalog_rows(engine)?
         .into_iter()
-        .map(|(schema, table, _column, constraint, kind, _ordinal)| {
+        .map(|constraint| {
+            let constraint_type = if constraint.kind == ConstraintCatalogKind::NotNull {
+                "CHECK"
+            } else {
+                constraint.kind.label()
+            };
+            let nulls_distinct = constraint
+                .kind
+                .nulls_distinct()
+                .map_or(Value::Null, |value| {
+                    str_value(if value { "YES" } else { "NO" })
+                });
             row([
                 ("constraint_catalog", catalog_name()),
-                ("constraint_schema", str_value(schema.clone())),
-                ("constraint_name", str_value(constraint)),
-                ("table_schema", str_value(schema)),
-                ("table_name", str_value(table)),
-                ("constraint_type", str_value(kind)),
+                ("constraint_schema", str_value(constraint.schema.clone())),
+                ("constraint_name", str_value(constraint.name)),
+                ("table_schema", str_value(constraint.schema)),
+                ("table_name", str_value(constraint.table)),
+                ("constraint_type", str_value(constraint_type)),
                 ("is_deferrable", str_value("NO")),
                 ("initially_deferred", str_value("NO")),
-                ("enforced", str_value("YES")),
-                ("nulls_distinct", str_value("YES")),
+                (
+                    "enforced",
+                    str_value(if constraint.enforced { "YES" } else { "NO" }),
+                ),
+                ("nulls_distinct", nulls_distinct),
             ])
         })
         .collect())
 }
 
 pub(super) fn build_info_key_column_usage(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    Ok(column_constraint_rows(engine)?
-        .into_iter()
-        .filter(|(_, _, _, _, kind, _)| kind != "CHECK")
-        .map(|(schema, table, column, constraint, _kind, ordinal)| {
-            row([
+    let mut rows = Vec::new();
+    for constraint in constraint_catalog_rows(engine)? {
+        if !matches!(
+            constraint.kind,
+            ConstraintCatalogKind::PrimaryKey
+                | ConstraintCatalogKind::Unique { .. }
+                | ConstraintCatalogKind::ForeignKey
+        ) {
+            continue;
+        }
+        for (index, column) in constraint.columns.iter().enumerate() {
+            let position_in_unique_constraint = constraint
+                .foreign_key
+                .as_ref()
+                .and_then(|foreign_key| {
+                    foreign_key
+                        .positions_in_unique_constraint
+                        .get(index)
+                        .copied()
+                        .flatten()
+                })
+                .map_or(Value::Null, int_value);
+            rows.push(row([
                 ("constraint_catalog", catalog_name()),
-                ("constraint_schema", str_value(schema.clone())),
-                ("constraint_name", str_value(constraint)),
+                ("constraint_schema", str_value(constraint.schema.clone())),
+                ("constraint_name", str_value(constraint.name.clone())),
                 ("table_catalog", catalog_name()),
-                ("table_schema", str_value(schema)),
-                ("table_name", str_value(table)),
-                ("column_name", str_value(column)),
-                ("ordinal_position", int_value(ordinal)),
-                ("position_in_unique_constraint", Value::Null),
-            ])
-        })
-        .collect())
+                ("table_schema", str_value(constraint.schema.clone())),
+                ("table_name", str_value(constraint.table.clone())),
+                ("column_name", str_value(column.name.clone())),
+                (
+                    "ordinal_position",
+                    int_value(catalog_ordinal(index, "key constraint column")?),
+                ),
+                (
+                    "position_in_unique_constraint",
+                    position_in_unique_constraint,
+                ),
+            ]));
+        }
+    }
+    Ok(rows)
 }

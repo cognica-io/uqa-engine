@@ -6,7 +6,25 @@
 
 //! Schema-only projection used after an expression-producing stage.
 
-use crate::{Batch, ExecResult, PhysicalOperator, PhysicalOrder, RowSchema};
+use crate::{Batch, ColumnIdentity, ExecResult, PhysicalOperator, PhysicalOrder, RowSchema};
+
+fn remap_ordering(
+    ordering: &[PhysicalOrder],
+    input_positions: &[Option<usize>],
+) -> Vec<PhysicalOrder> {
+    ordering
+        .iter()
+        .map_while(|order| {
+            let position = input_positions
+                .iter()
+                .position(|input| *input == Some(order.position))?;
+            Some(PhysicalOrder {
+                position,
+                ..order.clone()
+            })
+        })
+        .collect()
+}
 
 /// Select already-computed columns without evaluating expressions again.
 ///
@@ -38,22 +56,57 @@ impl<'a> ColumnSelection<'a> {
         child: Box<dyn PhysicalOperator + 'a>,
         columns: Vec<(String, String)>,
     ) -> Self {
-        let ordering = child
-            .output_ordering()
+        let input_positions = columns
             .iter()
-            .map_while(|order| {
-                let output = columns
-                    .iter()
-                    .find(|(_, input)| input == &order.column)?
-                    .0
-                    .clone();
-                Some(PhysicalOrder {
-                    column: output,
-                    ..order.clone()
-                })
-            })
-            .collect();
+            .map(|(_, input)| child.row_schema().position(input))
+            .collect::<Vec<_>>();
+        let ordering = remap_ordering(child.output_ordering(), &input_positions);
         let schema = RowSchema::select(child.row_schema(), &columns);
+        Self {
+            child,
+            schema,
+            ordering,
+        }
+    }
+
+    /// Select and rename logical input positions without resolving them by
+    /// name. SQL result shaping uses this when repeated public labels must
+    /// remain distinct even though their qualified input names differ.
+    pub fn with_positions(
+        child: Box<dyn PhysicalOperator + 'a>,
+        columns: Vec<(String, usize)>,
+    ) -> Self {
+        let input_positions = columns
+            .iter()
+            .map(|(_, position)| Some(*position))
+            .collect::<Vec<_>>();
+        let ordering = remap_ordering(child.output_ordering(), &input_positions);
+        let schema = RowSchema::remap_positions(child.row_schema(), &columns, &[]);
+        Self {
+            child,
+            schema,
+            ordering,
+        }
+    }
+
+    /// Select logical input positions and assign explicit structured SQL identities without encoding qualifiers into output labels.
+    pub fn with_identities(
+        child: Box<dyn PhysicalOperator + 'a>,
+        columns: Vec<(String, ColumnIdentity, usize)>,
+    ) -> Self {
+        let input_positions = columns
+            .iter()
+            .map(|(_, _, position)| Some(*position))
+            .collect::<Vec<_>>();
+        let ordering = remap_ordering(child.output_ordering(), &input_positions);
+        let columns = columns
+            .into_iter()
+            .map(|(label, identity, position)| {
+                let ty = child.row_schema().column_type(position).cloned();
+                (label, identity, position, ty)
+            })
+            .collect::<Vec<_>>();
+        let schema = RowSchema::remap_typed_identities(child.row_schema(), &columns, &[]);
         Self {
             child,
             schema,
@@ -131,5 +184,38 @@ mod tests {
         let (schema, rows) = run_to_rows(&mut selection).unwrap();
         assert_eq!(schema, vec!["source"]);
         assert_eq!(rows[0], BTreeMap::from([("source".into(), Value::Int(2))]));
+    }
+
+    #[test]
+    fn renames_repeated_columns_by_position() {
+        let scan = TableScan::from_rows(
+            vec!["left.value".into(), "right.value".into()],
+            vec![BTreeMap::from([
+                ("left.value".into(), Value::Int(1)),
+                ("right.value".into(), Value::Int(2)),
+            ])],
+        );
+        let mut selection = ColumnSelection::with_positions(
+            Box::new(scan),
+            vec![("value".into(), 0), ("value".into(), 1)],
+        );
+        let batches = crate::physical::run_to_batches(&mut selection).unwrap();
+        assert_eq!(batches[0].schema.columns(), ["value", "value"]);
+        let row = batches[0].schema.view(&batches[0].rows[0]);
+        assert_eq!(row.value_at(0), Some(&Value::Int(1)));
+        assert_eq!(row.value_at(1), Some(&Value::Int(2)));
+    }
+
+    #[test]
+    fn ordering_is_remapped_by_selected_position() {
+        let ordering = vec![PhysicalOrder {
+            position: 2,
+            descending: false,
+            nulls_first: None,
+            nullable: false,
+        }];
+        let remapped = remap_ordering(&ordering, &[Some(2), Some(0)]);
+        assert_eq!(remapped[0].position, 0);
+        assert!(remap_ordering(&ordering, &[Some(0), Some(1)]).is_empty());
     }
 }

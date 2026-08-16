@@ -34,12 +34,12 @@ fn assert_exception_block_rollback(engine: &Engine) {
 #[test]
 fn raise_notice_formatting_and_sink() {
     let eng = engine();
-    // PG17: 'v=% w=%% x=%', 1, 'two' => "v=1 w=% x=two"
+    // PG18: 'v=% w=%% x=%', 1, 'two' => "v=1 w=% x=two"
     exec(
         &eng,
         "DO $$ BEGIN RAISE NOTICE 'v=% w=%% x=%', 1, 'two'; END $$",
     );
-    // PG17: NULL renders as <NULL>.
+    // PG18: NULL renders as <NULL>.
     exec(
         &eng,
         "DO $$ DECLARE v int; BEGIN RAISE WARNING 'v=%', v; END $$",
@@ -53,7 +53,7 @@ fn raise_notice_formatting_and_sink() {
         ]
     );
     assert!(eng.take_sql_notices().is_empty());
-    // PG17: too few parameters specified for RAISE.
+    // PG18: too few parameters specified for RAISE.
     let err = exec_err(&eng, "DO $$ BEGIN RAISE NOTICE 'v=%'; END $$");
     assert!(
         err.to_string()
@@ -73,7 +73,7 @@ fn raise_exception_and_handlers() {
          END;
          $$ LANGUAGE plpgsql",
     );
-    // PG17: message "bad value 42", SQLSTATE P0001.
+    // PG18: message "bad value 42", SQLSTATE P0001.
     let err = exec_err(&eng, "SELECT boom(42) AS v");
     assert_eq!(err.to_string(), "bad value 42");
     assert_eq!(err.sqlstate(), Some("P0001"));
@@ -94,7 +94,7 @@ fn raise_exception_and_handlers() {
         Value::Str("P0001:bad value 7".into())
     );
     // Named conditions raised explicitly match their handler
-    // (PG17: SQLERRM is the condition name, state 22012).
+    // (PG18: SQLERRM is the condition name, state 22012).
     exec(
         &eng,
         "CREATE FUNCTION div_guard() RETURNS text AS $$
@@ -128,7 +128,7 @@ fn raise_exception_and_handlers() {
         scalar(&eng, "SELECT rethrow() AS v"),
         Value::Str("re:inner boom".into())
     );
-    // PG17: bare RAISE outside a handler is an error.
+    // PG18: bare RAISE outside a handler is an error.
     let err = exec_err(&eng, "DO $$ BEGIN RAISE; END $$");
     assert!(
         err.to_string()
@@ -196,7 +196,7 @@ fn exception_block_rolls_back_database_changes_before_handler() {
 #[test]
 fn constant_assignment_rejected() {
     let eng = engine();
-    // PG17 rejects this at compile time; the engine rejects the
+    // PG18 rejects this at compile time; the engine rejects the
     // assignment when it runs.
     let err = exec_err(
         &eng,
@@ -216,7 +216,7 @@ fn control_reached_end_without_return() {
         &eng,
         "CREATE FUNCTION noret() RETURNS int AS $$ BEGIN END; $$ LANGUAGE plpgsql",
     );
-    // PG17: control reached end of function without RETURN.
+    // PG18: control reached end of function without RETURN.
     let err = exec_err(&eng, "SELECT noret() AS v");
     assert!(
         err.to_string()

@@ -8,11 +8,13 @@
 
 use super::{
     build_returning_row, coerce_to_column_type, dml_returning_result, dml_storage_error,
-    doc_id_value, document_supplied_id, eval_lowered_expression, eval_mutation_expr,
+    doc_id_value, document_supplied_id, eval_lowered_expression, eval_mutation_assignment,
     index_vectors_for_type, insert_identity_columns, resolve_insert_conflict,
     validate_document_constraints, validate_document_non_key_constraints, validate_key_constraints,
-    validate_mutation_columns, BTreeMap, ColumnType, ConflictActionPlan, ConflictPlan, CteScope,
-    DocId, Document, Engine, InsertConflictResolution, InsertPlan, SQLError, SQLParam, SQLResult,
+    validate_mutation_columns, validate_returning_alias_relations, BTreeMap, ColumnType,
+    ConflictActionPlan, ConflictPlan, CteScope, DmlReturningShape, DocId, Document, Engine,
+    InsertConflictResolution, InsertPlan, MutationAssignmentTarget, ReturningProjectionRow,
+    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult,
 };
 
 pub(in crate::sql) fn run_insert(
@@ -29,6 +31,7 @@ pub(in crate::sql) fn run_insert_inner(
     stmt: &InsertPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    validate_returning_alias_relations(&stmt.target_qualifier, &stmt.returning_aliases, None)?;
     let mut scope = CteScope::new();
     crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut scope)?;
     scope.scalar_subqueries.clone_from(&stmt.subqueries);
@@ -54,16 +57,21 @@ pub(in crate::sql) fn run_insert_inner(
         )?;
     }
 
-    // INSERT ... SELECT: materialise the inner SELECT first, then
-    // route each row through the standard add_document path under
-    // the named columns.
+    // INSERT ... SELECT: seal the inner SELECT into a positional spill first, then route each physical row through the standard add_document path by output position. The sealed source preserves statement-snapshot behavior while repeated PostgreSQL output labels never cross a named-map boundary.
     if let Some(source) = stmt.source.as_deref() {
-        let result =
-            crate::sql::select::execute_query_plan_with_ctes(engine, source, params, &mut scope)?;
-        let columns: Vec<String> = if stmt.columns.is_empty() {
+        let result = crate::sql::select::execute_query_plan_output(
+            engine,
+            source,
+            params,
+            &mut scope,
+            crate::sql::select::QueryOutputMode::SharedSpill,
+        )?;
+        let result_width = result.columns.len();
+        let implicit_columns = stmt.columns.is_empty();
+        let columns: Vec<String> = if implicit_columns {
             let target_columns = engine
                 .try_table_columns(&stmt.table)
-                .map_err(|err| dml_storage_error("INSERT SELECT", err))?;
+                .map_err(|error| dml_storage_error("INSERT SELECT", error))?;
             if target_columns.is_empty() {
                 result.columns.clone()
             } else {
@@ -78,106 +86,163 @@ pub(in crate::sql) fn run_insert_inner(
             columns.iter().map(String::as_str),
             "INSERT SELECT",
         )?;
-        if result.columns.len() != columns.len() {
-            return Err(SQLError::Internal(format!(
+        if result_width > columns.len() || (!implicit_columns && result_width != columns.len()) {
+            return Err(SQLError::TypeMismatch(format!(
                 "INSERT SELECT width {} != column count {}",
-                result.columns.len(),
+                result_width,
                 columns.len()
             )));
         }
+        let crate::sql::select::QueryRows::SharedSpill(source_rows) = result.rows else {
+            return Err(SQLError::Internal(
+                "INSERT SELECT source did not retain its positional spill".into(),
+            ));
+        };
         let mut affected = 0u64;
         let mut returning_rows = Vec::new();
         let cancel = engine.cancellation_token();
-        for source_row in result.rows {
-            cancel.check()?;
-            let mut document = Document::new();
-            for (idx, col) in columns.iter().enumerate() {
-                let source_col = &result.columns[idx];
-                if let Some(v) = source_row.get(source_col) {
+        let source_reader = source_rows
+            .into_reader()
+            .map_err(crate::sql::select::physical_exec_error)?;
+        for batch in source_reader {
+            let batch = batch.map_err(crate::sql::select::physical_exec_error)?;
+            for source_row in batch.into_owned_rows() {
+                cancel.check()?;
+                let mut document = Document::new();
+                let source_row = source_row.view();
+                for (idx, col) in columns.iter().take(result_width).enumerate() {
+                    if crate::sql::generated::generated_column_kind(engine, &stmt.table, col)?
+                        .is_some()
+                    {
+                        return Err(SQLError::TypeMismatch(format!(
+                            "column `{col}` is a generated column; only DEFAULT may be assigned"
+                        )));
+                    }
+                    let value = source_row
+                        .value_at(idx)
+                        .cloned()
+                        .unwrap_or(super::Value::Null);
                     document.insert(
                         col.clone(),
-                        coerce_to_column_type(engine, &stmt.table, col, v.clone())?,
+                        coerce_to_column_type(engine, &stmt.table, col, value)?,
                     );
                 }
-            }
 
-            // INSERT ... SELECT must follow the same constraint and
-            // conflict path as INSERT ... VALUES.  In particular,
-            // defaults participate in conflict-key inference, while
-            // non-key constraints are checked before a conflicting row
-            // can be rewritten or skipped.
-            apply_missing_column_defaults(engine, &stmt.table, &mut document, params)?;
-            validate_document_non_key_constraints(engine, &stmt.table, &document, params)?;
-            if let Some(on_conflict) = stmt.on_conflict.as_ref() {
-                match resolve_insert_conflict(
+                // INSERT ... SELECT must follow the same constraint and conflict path as INSERT ... VALUES. In particular, defaults participate in conflict-key inference, while non-key constraints are checked before a conflicting row can be rewritten or skipped.
+                apply_missing_column_defaults(engine, &stmt.table, &mut document, params)?;
+                crate::sql::generated::refresh_stored_generated_columns(
                     engine,
                     &stmt.table,
-                    on_conflict,
-                    &document,
-                    params,
-                    &scope,
-                )? {
-                    InsertConflictResolution::Insert => {}
-                    InsertConflictResolution::Skip => continue,
-                    InsertConflictResolution::Updated { doc_id, document } => {
-                        if !stmt.returning.is_empty() {
-                            returning_rows.push(build_returning_row(
-                                engine,
-                                &stmt.table,
-                                doc_id,
-                                &document,
-                                &stmt.returning,
-                                params,
-                                &scope,
-                            )?);
+                    &mut document,
+                )?;
+                validate_document_non_key_constraints(engine, &stmt.table, &document, params)?;
+                if let Some(on_conflict) = stmt.on_conflict.as_ref() {
+                    match resolve_insert_conflict(
+                        engine,
+                        &stmt.table,
+                        &stmt.target_qualifier,
+                        on_conflict,
+                        &document,
+                        params,
+                        &scope,
+                    )? {
+                        InsertConflictResolution::Insert => {}
+                        InsertConflictResolution::Skip => continue,
+                        InsertConflictResolution::Updated {
+                            old_doc_id,
+                            doc_id,
+                            old_document,
+                            document,
+                        } => {
+                            if !stmt.returning.is_empty() {
+                                returning_rows.push(build_returning_row(
+                                    engine,
+                                    ReturningProjectionRow {
+                                        table: &stmt.table,
+                                        target_qualifier: &stmt.target_qualifier,
+                                        images: ReturningRowImages {
+                                            old: Some(ReturningRowImage {
+                                                doc_id: old_doc_id,
+                                                document: &old_document,
+                                            }),
+                                            new: Some(ReturningRowImage {
+                                                doc_id,
+                                                document: &document,
+                                            }),
+                                        },
+                                        aliases: &stmt.returning_aliases,
+                                        context: None,
+                                    },
+                                    &stmt.returning,
+                                    params,
+                                    &scope,
+                                )?);
+                            }
+                            affected += 1;
+                            continue;
                         }
-                        affected += 1;
-                        continue;
                     }
                 }
-            }
 
-            let supplied_id = document_supplied_id(
-                &document,
-                &id_column,
-                auto_id_col.as_deref() == Some(id_column.as_str()),
-            )?;
-            let doc_id = match supplied_id {
-                Some(doc_id) => doc_id,
-                None => engine.allocate_next_id(&stmt.table)?,
-            };
-            if auto_id_col.as_deref() == Some(id_column.as_str()) {
-                document.insert(id_column.clone(), doc_id_value(doc_id)?);
-            }
-            engine
-                .advance_next_id(&stmt.table, doc_id)
-                .map_err(|err| dml_storage_error("INSERT SELECT", err))?;
-            let document = insert_document_with_constraints(
-                engine,
-                &stmt.table,
-                doc_id,
-                document,
-                params,
-                false,
-            )?;
-            if !stmt.returning.is_empty() {
-                returning_rows.push(build_returning_row(
+                let supplied_id = document_supplied_id(
+                    &document,
+                    &id_column,
+                    auto_id_col.as_deref() == Some(id_column.as_str()),
+                )?;
+                let doc_id = match supplied_id {
+                    Some(doc_id) => doc_id,
+                    None => engine.allocate_next_id(&stmt.table)?,
+                };
+                if auto_id_col.as_deref() == Some(id_column.as_str()) {
+                    document.insert(id_column.clone(), doc_id_value(doc_id)?);
+                }
+                engine
+                    .advance_next_id(&stmt.table, doc_id)
+                    .map_err(|err| dml_storage_error("INSERT SELECT", err))?;
+                let document = insert_prepared_document_with_constraints(
                     engine,
                     &stmt.table,
                     doc_id,
-                    &document,
-                    &stmt.returning,
+                    document,
                     params,
-                    &scope,
-                )?);
+                    false,
+                )?;
+                if !stmt.returning.is_empty() {
+                    returning_rows.push(build_returning_row(
+                        engine,
+                        ReturningProjectionRow {
+                            table: &stmt.table,
+                            target_qualifier: &stmt.target_qualifier,
+                            images: ReturningRowImages {
+                                old: None,
+                                new: Some(ReturningRowImage {
+                                    doc_id,
+                                    document: &document,
+                                }),
+                            },
+                            aliases: &stmt.returning_aliases,
+                            context: None,
+                        },
+                        &stmt.returning,
+                        params,
+                        &scope,
+                    )?);
+                }
+                affected += 1;
             }
-            affected += 1;
         }
         if !stmt.returning.is_empty() {
             return dml_returning_result(
                 engine,
-                &stmt.table,
-                &stmt.returning,
+                DmlReturningShape {
+                    table: &stmt.table,
+                    target_qualifier: &stmt.target_qualifier,
+                    aliases: &stmt.returning_aliases,
+                    returning: &stmt.returning,
+                    params,
+                    ctes: &scope,
+                    supplemental_schema: None,
+                },
                 returning_rows,
                 affected,
             );
@@ -194,11 +259,12 @@ pub(in crate::sql) fn run_insert_inner(
         .map_err(|err| dml_storage_error("INSERT", err))?
         .contains(&id_column);
 
-    let columns: Vec<String> = if stmt.columns.is_empty() {
+    let implicit_columns = stmt.columns.is_empty();
+    let columns: Vec<String> = if implicit_columns {
         // INSERT without explicit column list: project the table schema.
         let cols = engine
             .try_table_columns(&stmt.table)
-            .map_err(|err| dml_storage_error("INSERT", err))?;
+            .map_err(|error| dml_storage_error("INSERT", error))?;
         if cols.is_empty() {
             return Err(SQLError::Unsupported(
                 "INSERT without column list against a table with no schema".into(),
@@ -224,18 +290,29 @@ pub(in crate::sql) fn run_insert_inner(
     let cancel = engine.cancellation_token();
     for row in &stmt.rows {
         cancel.check()?;
-        if row.len() != columns.len() {
-            return Err(SQLError::Internal(format!(
+        if row.len() > columns.len() || (!implicit_columns && row.len() != columns.len()) {
+            return Err(SQLError::TypeMismatch(format!(
                 "row width {} != column count {}",
                 row.len(),
                 columns.len()
             )));
         }
         let mut document = Document::new();
-        for (i, col) in columns.iter().enumerate() {
-            let mut v = eval_mutation_expr(engine, &scope, &row[i], None, params)?;
-            v = coerce_to_column_type(engine, &stmt.table, col, v)?;
-            document.insert(col.clone(), v);
+        for (i, col) in columns.iter().take(row.len()).enumerate() {
+            if let Some(value) = eval_mutation_assignment(
+                engine,
+                &scope,
+                MutationAssignmentTarget {
+                    table: &stmt.table,
+                    column: col,
+                    action: "INSERT",
+                },
+                &row[i],
+                None,
+                params,
+            )? {
+                document.insert(col.clone(), value);
+            }
         }
 
         // Defaults and all non-key constraints are shared with
@@ -243,6 +320,11 @@ pub(in crate::sql) fn run_insert_inner(
         // an integer primary-key DEFAULT cannot diverge from the row's
         // physical document id.
         apply_missing_column_defaults(engine, &stmt.table, &mut document, params)?;
+        crate::sql::generated::refresh_stored_generated_columns(
+            engine,
+            &stmt.table,
+            &mut document,
+        )?;
         validate_document_non_key_constraints(engine, &stmt.table, &document, params)?;
         let doc_id = document_supplied_id(
             &document,
@@ -267,6 +349,7 @@ pub(in crate::sql) fn run_insert_inner(
             match resolve_insert_conflict(
                 engine,
                 &stmt.table,
+                &stmt.target_qualifier,
                 on_conflict,
                 &document,
                 params,
@@ -274,13 +357,31 @@ pub(in crate::sql) fn run_insert_inner(
             )? {
                 InsertConflictResolution::Insert => {}
                 InsertConflictResolution::Skip => continue,
-                InsertConflictResolution::Updated { doc_id, document } => {
+                InsertConflictResolution::Updated {
+                    old_doc_id,
+                    doc_id,
+                    old_document,
+                    document,
+                } => {
                     if !stmt.returning.is_empty() {
                         returning_rows.push(build_returning_row(
                             engine,
-                            &stmt.table,
-                            doc_id,
-                            &document,
+                            ReturningProjectionRow {
+                                table: &stmt.table,
+                                target_qualifier: &stmt.target_qualifier,
+                                images: ReturningRowImages {
+                                    old: Some(ReturningRowImage {
+                                        doc_id: old_doc_id,
+                                        document: &old_document,
+                                    }),
+                                    new: Some(ReturningRowImage {
+                                        doc_id,
+                                        document: &document,
+                                    }),
+                                },
+                                aliases: &stmt.returning_aliases,
+                                context: None,
+                            },
                             &stmt.returning,
                             params,
                             &scope,
@@ -318,7 +419,7 @@ pub(in crate::sql) fn run_insert_inner(
         // CONFLICT skips the pre-check, and its target can miss the
         // primary key, so that path keeps the replacement-aware write.
         let known_new = stmt.on_conflict.is_none() && (!supplied_id || id_column_is_unique_key);
-        let document = insert_document_with_constraints(
+        let document = insert_prepared_document_with_constraints(
             engine,
             &stmt.table,
             doc_id,
@@ -329,9 +430,19 @@ pub(in crate::sql) fn run_insert_inner(
         if !stmt.returning.is_empty() {
             returning_rows.push(build_returning_row(
                 engine,
-                &stmt.table,
-                doc_id,
-                &document,
+                ReturningProjectionRow {
+                    table: &stmt.table,
+                    target_qualifier: &stmt.target_qualifier,
+                    images: ReturningRowImages {
+                        old: None,
+                        new: Some(ReturningRowImage {
+                            doc_id,
+                            document: &document,
+                        }),
+                    },
+                    aliases: &stmt.returning_aliases,
+                    context: None,
+                },
                 &stmt.returning,
                 params,
                 &scope,
@@ -342,8 +453,15 @@ pub(in crate::sql) fn run_insert_inner(
     if !stmt.returning.is_empty() {
         return dml_returning_result(
             engine,
-            &stmt.table,
-            &stmt.returning,
+            DmlReturningShape {
+                table: &stmt.table,
+                target_qualifier: &stmt.target_qualifier,
+                aliases: &stmt.returning_aliases,
+                returning: &stmt.returning,
+                params,
+                ctes: &scope,
+                supplemental_schema: None,
+            },
             returning_rows,
             affected,
         );
@@ -356,7 +474,7 @@ pub(in crate::sql) fn run_insert_inner(
 /// ran). Paths that can legitimately overwrite an existing document -
 /// MERGE inserts and INSERT ... SELECT with caller-supplied ids - must
 /// pass `false` so value-index maintenance unindexes the old values.
-pub(in crate::sql) fn insert_document_with_constraints(
+pub(in crate::sql) fn insert_prepared_document_with_constraints(
     engine: &Engine,
     table: &str,
     doc_id: DocId,
@@ -366,21 +484,13 @@ pub(in crate::sql) fn insert_document_with_constraints(
 ) -> Result<Document, SQLError> {
     apply_missing_column_defaults(engine, table, &mut document, params)?;
     validate_document_constraints(engine, table, &document, params, None)?;
-    if known_new {
-        engine.add_document_with_vector_values_known_new(
-            table,
-            doc_id,
-            document.clone(),
-            document_vectors(engine, table, &document)?,
-        )?;
-    } else {
-        engine.add_document_with_vector_values(
-            table,
-            doc_id,
-            document.clone(),
-            document_vectors(engine, table, &document)?,
-        )?;
-    }
+    engine.add_prepared_document_with_vector_values(
+        table,
+        doc_id,
+        document.clone(),
+        document_vectors(engine, table, &document)?,
+        known_new,
+    )?;
     Ok(document)
 }
 

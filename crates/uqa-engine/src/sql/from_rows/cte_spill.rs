@@ -7,9 +7,9 @@
 //! CTE spill materialization and scoped cache restoration.
 
 use super::{
-    build_join_operator_with_ctes, eval_scalar, prefix_row, query_output_shared, BTreeSet,
-    CteScope, Engine, PhysicalSubqueryRunner, PlanSubqueryArena, QueryOutputMode, QueryPlan,
-    RelationalPlan, ResultRow, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, SourcePlan,
+    build_join_operator_with_ctes, eval_scalar, query_output_shared, BTreeSet, CteScope, Engine,
+    PlanSubqueryArena, QueryOutputMode, QueryPlan, RelationalPlan, ResultRow, SQLError, SQLParam,
+    ScalarEvalContext, ScalarExpr, SourceEvalContext, SourcePlan,
 };
 
 /// Materialize a repeatable FROM input under the session work-memory budget.
@@ -99,13 +99,10 @@ pub(in crate::sql) fn collect_source_query_cte_names(
 }
 
 pub(in crate::sql) fn build_values_rows(
+    context: &SourceEvalContext<'_>,
     rows: &[Vec<ScalarExpr>],
-    alias: Option<&str>,
     column_aliases: &[String],
-    params: &[SQLParam],
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
-    subquery_runner: &dyn PhysicalSubqueryRunner,
-    subqueries: &[QueryPlan],
+    column_types: &[Option<uqa_sql::ast::ColumnType>],
 ) -> Result<Vec<ResultRow>, SQLError> {
     if rows.is_empty() {
         return Ok(Vec::new());
@@ -119,21 +116,28 @@ pub(in crate::sql) fn build_values_rows(
                 .unwrap_or_else(|| format!("column{}", i + 1))
         })
         .collect();
-    let subquery_arena = PlanSubqueryArena::new(subqueries, Some(subquery_runner));
-    let ctx = ScalarEvalContext::new(None, params)
-        .with_function_hook(eval_hook)
+    let subquery_arena = PlanSubqueryArena::new(context.subqueries, Some(context.subquery_runner));
+    let ctx = ScalarEvalContext::new(None, context.params)
+        .with_function_hook(context.eval_hook)
         .with_subquery_runner(&subquery_arena);
+    let empty_schema = uqa_execution::RowSchema::default();
     let mut out: Vec<ResultRow> = Vec::with_capacity(rows.len());
     for row in rows {
         let mut r = ResultRow::new();
         for (i, expr) in row.iter().enumerate() {
-            let v = eval_scalar(expr, &ctx)?;
+            let source_type = uqa_execution::common_context_expression_type(
+                expr,
+                &empty_schema,
+                context.params,
+                Some(context.engine),
+            )?;
+            let v = crate::sql::select::coerce_common_context_value(
+                eval_scalar(expr, &ctx)?,
+                source_type.as_ref(),
+                column_types.get(i).and_then(Option::as_ref),
+            )?;
             r.insert(columns[i].clone(), v);
         }
-        let r = match alias {
-            Some(a) => prefix_row(a, &r),
-            None => r,
-        };
         out.push(r);
     }
     Ok(out)

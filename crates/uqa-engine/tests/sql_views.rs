@@ -600,3 +600,19 @@ fn persisted_view_sequence_binding_survives_reopen() {
     let error = engine.drop_sequence("s1.ids").unwrap_err();
     assert!(error.contains("public.sequence_value"), "{error}");
 }
+
+#[test]
+fn builtin_uuid_generators_are_not_hidden_by_view_cache() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE VIEW generated_uuid AS SELECT uuidv4() AS value",
+    );
+
+    let result = exec(
+        &engine,
+        "SELECT left_view.value = right_view.value AS same_value FROM generated_uuid AS left_view CROSS JOIN generated_uuid AS right_view",
+    );
+
+    assert_eq!(result.rows[0]["same_value"], Value::Bool(false));
+}

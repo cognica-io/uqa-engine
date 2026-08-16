@@ -21,7 +21,7 @@ fn drop_function_variants() {
         &eng,
         "CREATE FUNCTION d1(a int, b int) RETURNS int AS $$ BEGIN RETURN 2; END; $$ LANGUAGE plpgsql",
     );
-    // PG17: bare name with two overloads is ambiguous.
+    // PG18: bare name with two overloads is ambiguous.
     let err = exec_err(&eng, "DROP FUNCTION d1");
     assert!(
         err.to_string()
@@ -35,14 +35,14 @@ fn drop_function_variants() {
     exec(&eng, "DROP FUNCTION d1");
     let err = exec_err(&eng, "SELECT d1(1, 2) AS v");
     assert!(err.to_string().contains("does not exist"), "got: {err}");
-    // PG17: DROP FUNCTION of an unknown bare name.
+    // PG18: DROP FUNCTION of an unknown bare name.
     let err = exec_err(&eng, "DROP FUNCTION never_existed");
     assert!(
         err.to_string()
             .contains("could not find a function named \"never_existed\""),
         "got: {err}"
     );
-    // IF EXISTS produces a notice, not an error (PG17).
+    // IF EXISTS produces a notice, not an error (PG18).
     exec(&eng, "DROP FUNCTION IF EXISTS never_existed");
     let notices = eng.take_sql_notices();
     assert_eq!(notices.len(), 1);

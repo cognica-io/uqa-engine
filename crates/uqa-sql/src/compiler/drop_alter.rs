@@ -89,11 +89,12 @@ pub(super) fn compile_alter_table(
     stmt: &pg_query::protobuf::AlterTableStmt,
 ) -> Result<AlterTableStmt> {
     use pg_query::protobuf::{AlterTableType, DropBehavior};
-    let table = stmt
+    let relation = stmt
         .relation
         .as_ref()
-        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("ALTER TABLE without relation".into()))?;
+    let table = range_var_name(relation);
+    let qualifier = relation.relname.clone();
     let if_exists = stmt.missing_ok;
     let cmd = stmt
         .cmds
@@ -198,6 +199,19 @@ pub(super) fn compile_alter_table(
                 }
             }
         }
+        AlterTableType::AtSetExpression => {
+            let expression = cmd
+                .def
+                .as_deref()
+                .ok_or_else(|| SQLError::Internal("SET EXPRESSION without expression".into()))?;
+            AlterTableAction::SetExpression {
+                name: cmd.name.clone(),
+                expression: compile_expr(expression)?,
+            }
+        }
+        AlterTableType::AtDropExpression => AlterTableAction::DropExpression {
+            name: cmd.name.clone(),
+        },
         AlterTableType::AtSetNotNull => AlterTableAction::SetNotNull {
             name: cmd.name.clone(),
         },
@@ -210,9 +224,18 @@ pub(super) fn compile_alter_table(
                 .as_ref()
                 .and_then(|d| d.node.as_ref())
                 .ok_or_else(|| SQLError::Internal("ALTER COLUMN TYPE without type".into()))?;
-            let ty = match def_inner {
-                NodeEnum::ColumnDef(c) => compile_column_def(c)?.ty,
-                NodeEnum::TypeName(t) => compile_pg_type_name(t, &cmd.name)?,
+            let (ty, using) = match def_inner {
+                NodeEnum::ColumnDef(column) => (
+                    compile_column_def(column)?.ty,
+                    column
+                        .raw_default
+                        .as_deref()
+                        .map(compile_expr)
+                        .transpose()?,
+                ),
+                NodeEnum::TypeName(type_name) => {
+                    (compile_pg_type_name(type_name, &cmd.name)?, None)
+                }
                 other => {
                     return Err(SQLError::Internal(format!(
                         "ALTER COLUMN TYPE expected ColumnDef/TypeName, got {other:?}"
@@ -222,6 +245,7 @@ pub(super) fn compile_alter_table(
             AlterTableAction::AlterColumnType {
                 name: cmd.name.clone(),
                 ty,
+                using,
             }
         }
         other => {
@@ -232,6 +256,7 @@ pub(super) fn compile_alter_table(
     };
     Ok(AlterTableStmt {
         table,
+        qualifier,
         if_exists,
         action,
     })
@@ -239,11 +264,11 @@ pub(super) fn compile_alter_table(
 
 pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<AlterTableStmt> {
     use pg_query::protobuf::ObjectType;
-    let table = stmt
+    let relation = stmt
         .relation
         .as_ref()
-        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("RENAME without relation".into()))?;
+    let table = range_var_name(relation);
     let action = match stmt.rename_type() {
         ObjectType::ObjectColumn => AlterTableAction::RenameColumn {
             from: stmt.subname.clone(),
@@ -260,6 +285,7 @@ pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Al
     };
     Ok(AlterTableStmt {
         table,
+        qualifier: relation.relname.clone(),
         if_exists: stmt.missing_ok,
         action,
     })

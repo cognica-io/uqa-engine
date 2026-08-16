@@ -92,18 +92,24 @@ pub(super) fn sql_result_to_record_batch(result: &SQLResult) -> Result<RecordBat
     let fields: Vec<Field> = result
         .columns
         .iter()
-        .map(|column| Field::new(column, infer_arrow_type(column, result), true))
+        .enumerate()
+        .map(|(column_index, column)| {
+            Field::new(column, infer_arrow_type(column_index, column, result), true)
+        })
         .collect();
     let arrays: Vec<ArrayRef> = result
         .columns
         .iter()
         .zip(fields.iter())
-        .map(|(column, field)| build_arrow_array(column, field.data_type(), result))
+        .enumerate()
+        .map(|(column_index, (column, field))| {
+            build_arrow_array(column_index, column, field.data_type(), result)
+        })
         .collect::<Result<_, _>>()?;
     RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays)
 }
 
-pub(super) fn infer_arrow_type(column: &str, result: &SQLResult) -> DataType {
+pub(super) fn infer_arrow_type(column_index: usize, column: &str, result: &SQLResult) -> DataType {
     if column == "_doc_id" {
         return DataType::Int64;
     }
@@ -112,8 +118,8 @@ pub(super) fn infer_arrow_type(column: &str, result: &SQLResult) -> DataType {
     }
 
     let mut ty: Option<DataType> = None;
-    for row in &result.rows {
-        let Some(value) = row.get(column) else {
+    for row_index in 0..result.rows.len() {
+        let Some(value) = result.value_at(row_index, column_index) else {
             continue;
         };
         let next = match value {
@@ -124,16 +130,21 @@ pub(super) fn infer_arrow_type(column: &str, result: &SQLResult) -> DataType {
             Value::Decimal(_)
             | Value::Str(_)
             | Value::FixedChar(_)
+            | Value::Json(_)
+            | Value::JsonB(_)
             | Value::Bytes(_)
             | Value::Temporal(_)
+            | Value::Array(_)
             | Value::List(_)
+            | Value::Row(_)
+            | Value::Record(_)
             | Value::Map(_) => DataType::Utf8,
         };
         ty = Some(match (ty, next) {
             (None, dt) => dt,
             (Some(DataType::Int64), DataType::Float64)
             | (Some(DataType::Float64), DataType::Int64) => {
-                if column_integers_fit_f64(column, result) {
+                if column_integers_fit_f64(column_index, result) {
                     DataType::Float64
                 } else {
                     DataType::Utf8
@@ -151,12 +162,14 @@ pub(super) fn infer_arrow_type(column: &str, result: &SQLResult) -> DataType {
 }
 
 fn build_arrow_array(
+    column_index: usize,
     column: &str,
     data_type: &DataType,
     result: &SQLResult,
 ) -> Result<ArrayRef, ArrowError> {
     let array: ArrayRef = match data_type {
         DataType::Boolean => Arc::new(BooleanArray::from(collect_typed_column(
+            column_index,
             column,
             result,
             |value| match value {
@@ -166,6 +179,7 @@ fn build_arrow_array(
             "boolean",
         )?)),
         DataType::Int64 => Arc::new(Int64Array::from(collect_typed_column(
+            column_index,
             column,
             result,
             |value| match value {
@@ -174,12 +188,18 @@ fn build_arrow_array(
             },
             "int64",
         )?)),
-        DataType::Float64 => Arc::new(Float64Array::from(collect_float_column(column, result)?)),
+        DataType::Float64 => Arc::new(Float64Array::from(collect_float_column(
+            column_index,
+            column,
+            result,
+        )?)),
         _ => Arc::new(StringArray::from(
-            result
-                .rows
-                .iter()
-                .map(|row| row.get(column).and_then(value_to_arrow_string))
+            (0..result.rows.len())
+                .map(|row_index| {
+                    result
+                        .value_at(row_index, column_index)
+                        .and_then(value_to_arrow_string)
+                })
                 .collect::<Vec<_>>(),
         )),
     };
@@ -187,6 +207,7 @@ fn build_arrow_array(
 }
 
 fn collect_typed_column<T, F>(
+    column_index: usize,
     column: &str,
     result: &SQLResult,
     convert: F,
@@ -198,42 +219,52 @@ where
     result
         .rows
         .iter()
-        .map(|row| match row.get(column) {
-            None | Some(Value::Null) => Ok(None),
-            Some(value) => convert(value).map(Some).ok_or_else(|| {
-                ArrowError::CastError(format!(
-                    "column `{column}` contains {} where {expected} was inferred",
-                    value_kind(value)
-                ))
-            }),
-        })
+        .enumerate()
+        .map(
+            |(row_index, _)| match result.value_at(row_index, column_index) {
+                None | Some(Value::Null) => Ok(None),
+                Some(value) => convert(value).map(Some).ok_or_else(|| {
+                    ArrowError::CastError(format!(
+                        "column `{column}` contains {} where {expected} was inferred",
+                        value_kind(value)
+                    ))
+                }),
+            },
+        )
         .collect()
 }
 
-fn collect_float_column(column: &str, result: &SQLResult) -> Result<Vec<Option<f64>>, ArrowError> {
+fn collect_float_column(
+    column_index: usize,
+    column: &str,
+    result: &SQLResult,
+) -> Result<Vec<Option<f64>>, ArrowError> {
     result
         .rows
         .iter()
-        .map(|row| match row.get(column) {
-            None | Some(Value::Null) => Ok(None),
-            Some(Value::Float(value)) => Ok(Some(*value)),
-            Some(Value::Int(value)) => i64_to_f64_exact(*value).map(Some).ok_or_else(|| {
-                ArrowError::CastError(format!(
+        .enumerate()
+        .map(
+            |(row_index, _)| match result.value_at(row_index, column_index) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::Float(value)) => Ok(Some(*value)),
+                Some(Value::Int(value)) => i64_to_f64_exact(*value).map(Some).ok_or_else(|| {
+                    ArrowError::CastError(format!(
                     "column `{column}` integer {value} cannot be represented exactly as float64"
                 ))
-            }),
-            Some(value) => Err(ArrowError::CastError(format!(
-                "column `{column}` contains {} where float64 was inferred",
-                value_kind(value)
-            ))),
-        })
+                }),
+                Some(value) => Err(ArrowError::CastError(format!(
+                    "column `{column}` contains {} where float64 was inferred",
+                    value_kind(value)
+                ))),
+            },
+        )
         .collect()
 }
 
-fn column_integers_fit_f64(column: &str, result: &SQLResult) -> bool {
-    result.rows.iter().all(|row| {
+fn column_integers_fit_f64(column_index: usize, result: &SQLResult) -> bool {
+    result.rows.iter().enumerate().all(|(row_index, _)| {
         !matches!(
-            row.get(column),
+            result.value_at(row_index, column_index),
             Some(Value::Int(value)) if i64_to_f64_exact(*value).is_none()
         )
     })
@@ -254,9 +285,14 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Float(_) => "float",
         Value::Decimal(_) => "decimal",
         Value::Str(_) | Value::FixedChar(_) => "string",
+        Value::Json(_) => "json",
+        Value::JsonB(_) => "jsonb",
         Value::Bytes(_) => "bytes",
         Value::Temporal(_) => "temporal",
+        Value::Array(_) => "array",
         Value::List(_) => "list",
+        Value::Row(_) => "row",
+        Value::Record(_) => "record",
         Value::Map(_) => "map",
     }
 }
@@ -268,10 +304,12 @@ fn value_to_arrow_string(value: &Value) -> Option<String> {
         Value::Int(v) => Some(v.to_string()),
         Value::Float(v) => Some(v.to_string()),
         Value::Decimal(v) => Some(v.to_sql_string()),
-        Value::Str(v) | Value::FixedChar(v) => Some(v.clone()),
+        Value::Str(v) | Value::FixedChar(v) | Value::Json(v) | Value::JsonB(v) => Some(v.clone()),
         Value::Bytes(v) => Some(format!("{v:?}")),
         Value::Temporal(v) => Some(v.to_sql_string()),
+        Value::Array(v) => Some(uqa_sql::expr::array_value_to_string(v)),
         Value::List(v) => Some(format!("{v:?}")),
+        Value::Row(_) | Value::Record(_) => Some(uqa_sql::expr::value_to_string(value)),
         Value::Map(v) => Some(format!("{v:?}")),
     }
 }

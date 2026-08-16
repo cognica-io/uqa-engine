@@ -4,13 +4,10 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Join conjunct analysis, side selection, and null padding.
+//! Join conjunct analysis and structural side binding.
 
-use super::{
-    eval_scalar, null_row_for, Engine, ResultRow, SQLError, SQLParam, ScalarEvalContext,
-    ScalarExpr, ScalarSubqueryRunner, SourcePlan, Value,
-};
-use crate::sql::select::from_clause_output_columns;
+use super::ScalarExpr;
+use uqa_execution::RowSchema;
 
 pub(in crate::sql) fn join_conjuncts(expr: &ScalarExpr) -> Vec<&ScalarExpr> {
     match expr {
@@ -25,149 +22,133 @@ pub(in crate::sql) fn join_conjuncts(expr: &ScalarExpr) -> Vec<&ScalarExpr> {
     }
 }
 
-/// Pick which expression evaluates over the left side and which over
-/// the right by sampling the first row of each side. Returns
-/// `(left_key_expr, right_key_expr)` when one direction works,
-/// `None` when the predicate isn't separable across sides.
+/// Determine the input side of two equality operands from structured schema identities. Planning does not synthesize a sample row, and punctuation in a quoted identifier is never interpreted as a relation boundary.
 pub(in crate::sql) fn decide_join_sides<'a>(
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
-    subquery_runner: &dyn ScalarSubqueryRunner,
-    left_rows: &[ResultRow],
-    right_rows: &[ResultRow],
+    left: &RowSchema,
+    right: &RowSchema,
     lhs: &'a ScalarExpr,
     rhs: &'a ScalarExpr,
-    params: &[SQLParam],
 ) -> Option<(&'a ScalarExpr, &'a ScalarExpr)> {
-    if left_rows.is_empty() || right_rows.is_empty() {
-        return None;
-    }
-    let l_sample = &left_rows[0];
-    let r_sample = &right_rows[0];
-    let lhs_on_left = eval_yields_value(eval_hook, subquery_runner, l_sample, lhs, params);
-    let rhs_on_right = eval_yields_value(eval_hook, subquery_runner, r_sample, rhs, params);
-    if lhs_on_left && rhs_on_right {
+    if expression_binds_to(lhs, left) && expression_binds_to(rhs, right) {
         return Some((lhs, rhs));
     }
-    let rhs_on_left = eval_yields_value(eval_hook, subquery_runner, l_sample, rhs, params);
-    let lhs_on_right = eval_yields_value(eval_hook, subquery_runner, r_sample, lhs, params);
-    if rhs_on_left && lhs_on_right {
+    if expression_binds_to(rhs, left) && expression_binds_to(lhs, right) {
         return Some((rhs, lhs));
     }
     None
 }
 
-/// Bind a join key's column lookup to the exact physical schema key whenever
-/// the side schema identifies it unambiguously. Parsed SQL commonly carries
-/// bare column names (for example `l_orderkey`) while joined rows store
-/// qualified keys (`lineitem.l_orderkey`). Leaving the bare name in the hot
-/// probe loop makes every lookup scan all row keys for a matching suffix.
-pub(in crate::sql) fn bind_join_key_to_schema(
-    expression: &ScalarExpr,
-    schema: &[String],
-) -> ScalarExpr {
+fn expression_binds_to(expression: &ScalarExpr, schema: &RowSchema) -> bool {
+    let (valid, has_column) = expression_binding(expression, schema);
+    valid && has_column
+}
+
+fn expression_binding(expression: &ScalarExpr, schema: &RowSchema) -> (bool, bool) {
     match expression {
-        ScalarExpr::Column(name) => unique_physical_column(name, schema)
-            .map_or_else(|| expression.clone(), ScalarExpr::Column),
-        ScalarExpr::QualifiedColumn {
-            qualifier,
-            column,
-            key,
-        } => {
-            let expected = if key.is_empty() {
-                format!("{qualifier}.{column}")
-            } else {
-                key.clone()
-            };
-            unique_physical_column(&expected, schema).map_or_else(
-                || expression.clone(),
-                |key| ScalarExpr::QualifiedColumn {
-                    qualifier: qualifier.clone(),
-                    column: column.clone(),
-                    key,
-                },
-            )
+        ScalarExpr::Column(column) => (schema.unqualified_position(column).is_some(), true),
+        ScalarExpr::QualifiedColumn { qualifier, column } => {
+            (schema.qualified_position(qualifier, column).is_some(), true)
         }
-        ScalarExpr::Cast { expr, ty } => ScalarExpr::Cast {
-            expr: Box::new(bind_join_key_to_schema(expr, schema)),
-            ty: ty.clone(),
-        },
-        _ => expression.clone(),
+        ScalarExpr::Position(position) => (*position < schema.len(), true),
+        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => (true, false),
+        ScalarExpr::Func {
+            args,
+            order_by,
+            filter,
+            ..
+        } => combine_bindings(
+            args.iter()
+                .chain(order_by.iter().map(|order| &order.expr))
+                .chain(filter.as_deref()),
+            schema,
+        ),
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => combine_bindings(items, schema),
+        ScalarExpr::Binary { lhs, rhs, .. } => {
+            combine_bindings([lhs.as_ref(), rhs.as_ref()], schema)
+        }
+        ScalarExpr::UnaryMinus(expr)
+        | ScalarExpr::Not(expr)
+        | ScalarExpr::IsNull { expr, .. }
+        | ScalarExpr::Cast { expr, .. }
+        | ScalarExpr::InSubquery { expr, .. } => expression_binding(expr, schema),
+        ScalarExpr::Between { expr, low, high } => {
+            combine_bindings([expr.as_ref(), low.as_ref(), high.as_ref()], schema)
+        }
+        ScalarExpr::InList { expr, list, .. } => {
+            combine_bindings(std::iter::once(expr.as_ref()).chain(list), schema)
+        }
+        ScalarExpr::Case {
+            base,
+            when,
+            else_branch,
+        } => combine_bindings(
+            base.as_deref()
+                .into_iter()
+                .chain(
+                    when.iter()
+                        .flat_map(|(condition, value)| [condition, value]),
+                )
+                .chain(else_branch.as_deref()),
+            schema,
+        ),
+        ScalarExpr::WindowCall { .. }
+        | ScalarExpr::Default
+        | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. } => (false, false),
     }
 }
 
-fn unique_physical_column(name: &str, schema: &[String]) -> Option<String> {
-    if schema.iter().any(|column| column == name) {
-        return Some(name.to_string());
-    }
-    let mut matches = schema.iter().filter(|key| {
-        key.rsplit_once('.')
-            .is_some_and(|(_, column)| column == name)
-    });
-    let first = matches.next()?;
-    matches.next().is_none().then(|| first.clone())
-}
-
-pub(in crate::sql) fn eval_yields_value(
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
-    subquery_runner: &dyn ScalarSubqueryRunner,
-    row: &ResultRow,
-    expr: &ScalarExpr,
-    params: &[SQLParam],
-) -> bool {
-    let ctx = ScalarEvalContext::new(Some(row), params)
-        .with_function_hook(eval_hook)
-        .with_subquery_runner(subquery_runner);
-    matches!(eval_scalar(expr, &ctx), Ok(v) if v != uqa_core::Value::Null)
-}
-
-pub(in crate::sql) fn pad_nulls_for_from(
-    row: &mut ResultRow,
-    from: &SourcePlan,
-    engine: &Engine,
-) -> Result<(), SQLError> {
-    match from {
-        SourcePlan::Table { name, alias } => {
-            for (column, value) in null_row_for(name, alias.as_deref(), engine)? {
-                row.entry(column).or_insert(value);
-            }
-        }
-        SourcePlan::Join { left, right, .. } => {
-            pad_nulls_for_from(row, left, engine)?;
-            pad_nulls_for_from(row, right, engine)?;
-        }
-        SourcePlan::Values { .. } | SourcePlan::Function { .. } | SourcePlan::Subquery { .. } => {
-            for column in from_clause_output_columns(engine, from) {
-                row.entry(column).or_insert(Value::Null);
-            }
-        }
-    }
-    Ok(())
-}
-
-pub(in crate::sql) fn join_schema_sample(columns: &[String]) -> ResultRow {
-    columns
-        .iter()
-        .map(|column| (column.clone(), Value::Int(1)))
-        .collect()
+fn combine_bindings<'a>(
+    expressions: impl IntoIterator<Item = &'a ScalarExpr>,
+    schema: &RowSchema,
+) -> (bool, bool) {
+    expressions
+        .into_iter()
+        .map(|expression| expression_binding(expression, schema))
+        .fold((true, false), |(valid, has_column), binding| {
+            (valid && binding.0, has_column || binding.1)
+        })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uqa_execution::ColumnIdentity;
 
     #[test]
-    fn join_key_binding_uses_unique_exact_physical_column() {
-        let schema = vec!["orders.o_orderkey".into(), "orders.o_custkey".into()];
+    fn join_side_binding_uses_structured_identities() {
+        let left = RowSchema::with_identities(
+            vec!["order.key".into()],
+            vec![ColumnIdentity::qualified("left.alias", "order.key")],
+            vec![None],
+        );
+        let right = RowSchema::with_qualified_types("right.alias", vec!["id".into()], vec![None]);
+        let lhs = ScalarExpr::qualified_column("left.alias", "order.key");
+        let rhs = ScalarExpr::qualified_column("right.alias", "id");
         assert_eq!(
-            bind_join_key_to_schema(&ScalarExpr::Column("o_orderkey".into()), &schema),
-            ScalarExpr::Column("orders.o_orderkey".into())
+            decide_join_sides(&left, &right, &lhs, &rhs),
+            Some((&lhs, &rhs))
         );
     }
 
     #[test]
-    fn join_key_binding_keeps_ambiguous_bare_column() {
-        let schema = vec!["left.id".into(), "right.id".into()];
-        let expression = ScalarExpr::Column("id".into());
-        assert_eq!(bind_join_key_to_schema(&expression, &schema), expression);
+    fn ambiguous_unqualified_join_key_is_not_assigned_arbitrarily() {
+        let left = RowSchema::with_identities(
+            vec!["id".into(), "id".into()],
+            vec![
+                ColumnIdentity::qualified("left", "id"),
+                ColumnIdentity::qualified("other", "id"),
+            ],
+            vec![None, None],
+        );
+        let right = RowSchema::with_qualified_types("right", vec!["id".into()], vec![None]);
+        let lhs = ScalarExpr::Column("id".into());
+        let rhs = ScalarExpr::qualified_column("right", "id");
+        assert_eq!(decide_join_sides(&left, &right, &lhs, &rhs), None);
     }
 }

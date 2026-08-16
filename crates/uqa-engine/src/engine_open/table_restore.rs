@@ -44,7 +44,36 @@ impl Engine {
         if !schemas.iter().any(|name| name == "public") {
             catalog.save_schema("public")?;
         }
+        Self::migrate_constraint_names_from_metadata(catalog)?;
         Self::migrate_legacy_sequences_from_metadata(catalog)
+    }
+
+    fn migrate_constraint_names_from_metadata(
+        catalog: &dyn CatalogFacade,
+    ) -> StorageBackendResult<()> {
+        for mut schema in catalog.load_tables()? {
+            let mut columns: Vec<uqa_sql::ast::ColumnDef> = if schema.columns_json.is_empty() {
+                Vec::new()
+            } else {
+                serde_json::from_str(&schema.columns_json)?
+            };
+            let mut constraints: uqa_sql::ast::TableConstraintSet =
+                if schema.constraints_json.is_empty() {
+                    uqa_sql::ast::TableConstraintSet::default()
+                } else {
+                    serde_json::from_str(&schema.constraints_json)?
+                };
+            if crate::engine_table_storage::materialize_constraint_names(
+                &schema.relation,
+                &mut columns,
+                &mut constraints,
+            )? {
+                schema.columns_json = serde_json::to_string(&columns)?;
+                schema.constraints_json = serde_json::to_string(&constraints)?;
+                catalog.save_table(&schema)?;
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn load_session_table(

@@ -15,16 +15,28 @@ mod expressions;
 
 pub use expressions::*;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ColumnType {
+    SmallInteger,
     Integer,
+    BigInteger,
+    /// `PostgreSQL` object identifier (`pg_catalog.oid`).
+    Oid,
+    /// `PostgreSQL` transaction identifier (`pg_catalog.xid`).
+    Xid,
     Boolean,
     Text,
+    Name,
+    Uuid,
+    Varchar(Option<u32>),
+    /// Internal unconstrained `bpchar` type used after common-type selection.
+    Bpchar,
     /// `PostgreSQL` blank-padded `CHARACTER(n)` / `CHAR(n)` (`bpchar`).
     /// The length counts Unicode scalar values and defaults to one when the
     /// declaration omits an explicit modifier.
     Character(u32),
     Real,
+    DoublePrecision,
     /// `NUMERIC(precision, scale)` -- exact decimal storage. When
     /// `scale` is `Some(s)` the engine rounds `INSERT` values to `s`
     /// fractional digits. `precision` is captured for round-tripping
@@ -39,6 +51,17 @@ pub enum ColumnType {
     JsonB,
     /// `BYTEA` columns store opaque bytes.
     Bytea,
+    /// `PostgreSQL`'s internal single-byte `"char"` catalog type.
+    InternalChar,
+    Regproc,
+    Regtype,
+    PgNodeTree,
+    AclItem,
+    Int2Vector,
+    OidVector,
+    AnyArray,
+    /// `PostgreSQL`'s anonymous composite pseudo-type (OID 2249).
+    Record,
     /// A `PostgreSQL` array whose elements retain their declared SQL type.
     /// Nested array bounds are represented recursively.
     Array(Box<ColumnType>),
@@ -54,13 +77,287 @@ pub enum ColumnType {
     /// `TIMESTAMP WITH TIME ZONE` columns store UTC microseconds since
     /// 1970-01-01 00:00:00Z.
     TimestampTz,
+    Interval,
     /// `VECTOR(N)` columns store an `N`-dimensional `f32` embedding.
     Vector(u32),
     /// `TENSOR(N)` columns store an array of `N`-dimensional `f32`
     /// embeddings. The row remains the retrieval identity; vector
     /// indexes score against the best element in the tensor.
     Tensor(u32),
+    /// A named `PostgreSQL` domain retaining both its own type identity and the
+    /// base type used for value conversion and operator selection.
+    Domain {
+        schema: String,
+        name: String,
+        oid: u32,
+        base: Box<ColumnType>,
+    },
 }
+
+pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str> {
+    Some(match type_name {
+        "_bool" => "bool",
+        "_bytea" => "bytea",
+        "_char" => "\"char\"",
+        "_name" => "name",
+        "_int8" => "int8",
+        "_int2" => "int2",
+        "_int2vector" => "int2vector",
+        "_int4" => "int4",
+        "_regproc" => "regproc",
+        "_text" => "text",
+        "_oid" => "oid",
+        "_oidvector" => "oidvector",
+        "_bpchar" => "bpchar",
+        "_varchar" => "varchar",
+        "_float4" => "float4",
+        "_float8" => "float8",
+        "_aclitem" => "aclitem",
+        "_date" => "date",
+        "_time" => "time",
+        "_timestamp" => "timestamp",
+        "_timestamptz" => "timestamptz",
+        "_interval" => "interval",
+        "_numeric" => "numeric",
+        "_timetz" => "timetz",
+        "_record" => "record",
+        "_uuid" => "uuid",
+        "_json" => "json",
+        "_jsonb" => "jsonb",
+        "_regtype" => "regtype",
+        "_xid" => "xid",
+        "_pg_node_tree" => "pg_node_tree",
+        _ => return None,
+    })
+}
+
+impl ColumnType {
+    #[must_use]
+    pub fn is_integer(&self) -> bool {
+        match self {
+            Self::SmallInteger | Self::Integer | Self::BigInteger | Self::Oid | Self::Xid => true,
+            Self::Domain { base, .. } => base.is_integer(),
+            _ => false,
+        }
+    }
+
+    #[must_use]
+    pub fn is_character_string(&self) -> bool {
+        match self {
+            Self::Text
+            | Self::Name
+            | Self::Varchar(_)
+            | Self::Bpchar
+            | Self::Character(_)
+            | Self::InternalChar
+            | Self::PgNodeTree
+            | Self::AclItem => true,
+            Self::Domain { base, .. } => base.is_character_string(),
+            _ => false,
+        }
+    }
+
+    /// Parse the canonical or accepted spelling of one implemented SQL type.
+    /// This is shared by expression binding and row-schema propagation so a
+    /// cast's declared type is not reconstructed from its runtime value.
+    pub fn from_sql_name(name: &str) -> Result<Self, crate::SQLError> {
+        let normalized = name.trim().to_ascii_lowercase();
+        if let Some(element) = builtin_array_element_name(&normalized) {
+            return Self::from_sql_name(element).map(|ty| Self::Array(Box::new(ty)));
+        }
+        if let Some(element) = normalized.strip_suffix("[]") {
+            return Self::from_sql_name(element).map(|ty| Self::Array(Box::new(ty)));
+        }
+        let (base, modifier) = normalized
+            .strip_suffix(')')
+            .and_then(|prefix| prefix.rsplit_once('('))
+            .map_or((normalized.as_str(), None), |(base, modifier)| {
+                (base.trim(), Some(modifier.trim()))
+            });
+        let base = base.strip_prefix("pg_catalog.").unwrap_or(base);
+        let character_length = || -> Result<Option<u32>, crate::SQLError> {
+            modifier
+                .map(|value| {
+                    value
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|length| *length > 0)
+                        .ok_or_else(|| {
+                            crate::SQLError::TypeMismatch(format!(
+                                "character length must be greater than zero, got {value}"
+                            ))
+                        })
+                })
+                .transpose()
+        };
+        match base {
+            "smallint" | "int2" | "smallserial" | "serial2" => Ok(Self::SmallInteger),
+            "integer" | "int" | "int4" | "serial" | "serial4" => Ok(Self::Integer),
+            "bigint" | "int8" | "bigserial" | "serial8" => Ok(Self::BigInteger),
+            "oid" => Ok(Self::Oid),
+            "xid" => Ok(Self::Xid),
+            "boolean" | "bool" => Ok(Self::Boolean),
+            "text" => Ok(Self::Text),
+            "name" => Ok(Self::Name),
+            "uuid" => Ok(Self::Uuid),
+            "varchar" | "character varying" => Ok(Self::Varchar(character_length()?)),
+            "character" | "char" => Ok(Self::Character(character_length()?.unwrap_or(1))),
+            "bpchar" => Ok(character_length()?.map_or(Self::Bpchar, Self::Character)),
+            "real" | "float4" => Ok(Self::Real),
+            "double" | "double precision" | "float8" => Ok(Self::DoublePrecision),
+            "numeric" | "decimal" => {
+                let (precision, scale) = match modifier {
+                    None => (None, None),
+                    Some(modifier) => {
+                        let mut parts = modifier.split(',').map(str::trim);
+                        let precision = parts
+                            .next()
+                            .and_then(|value| value.parse::<u32>().ok())
+                            .ok_or_else(|| {
+                                crate::SQLError::TypeMismatch(format!(
+                                    "invalid numeric modifier `{modifier}`"
+                                ))
+                            })?;
+                        let scale = parts
+                            .next()
+                            .map(|value| value.parse::<i32>())
+                            .transpose()
+                            .map_err(|_| {
+                                crate::SQLError::TypeMismatch(format!(
+                                    "invalid numeric modifier `{modifier}`"
+                                ))
+                            })?
+                            .unwrap_or(0);
+                        if parts.next().is_some() {
+                            return Err(crate::SQLError::TypeMismatch(format!(
+                                "invalid numeric modifier `{modifier}`"
+                            )));
+                        }
+                        (Some(precision), Some(scale))
+                    }
+                };
+                Ok(Self::Numeric { precision, scale })
+            }
+            "json" => Ok(Self::Json),
+            "jsonb" => Ok(Self::JsonB),
+            "bytea" => Ok(Self::Bytea),
+            "\"char\"" => Ok(Self::InternalChar),
+            "regproc" => Ok(Self::Regproc),
+            "regtype" => Ok(Self::Regtype),
+            "pg_node_tree" => Ok(Self::PgNodeTree),
+            "aclitem" => Ok(Self::AclItem),
+            "int2vector" => Ok(Self::Int2Vector),
+            "oidvector" => Ok(Self::OidVector),
+            "anyarray" => Ok(Self::AnyArray),
+            "record" => Ok(Self::Record),
+            "date" => Ok(Self::Date),
+            "time" | "time without time zone" => Ok(Self::Time),
+            "timetz" | "time with time zone" => Ok(Self::TimeTz),
+            "timestamp" | "datetime" | "timestamp without time zone" => Ok(Self::Timestamp),
+            "timestamptz" | "timestamp with time zone" => Ok(Self::TimestampTz),
+            "interval" => Ok(Self::Interval),
+            "vector" => modifier
+                .and_then(|value| value.parse::<u32>().ok())
+                .filter(|dimension| *dimension > 0)
+                .map(Self::Vector)
+                .ok_or_else(|| crate::SQLError::TypeMismatch("VECTOR requires a dimension".into())),
+            "tensor" => modifier
+                .and_then(|value| value.parse::<u32>().ok())
+                .filter(|dimension| *dimension > 0)
+                .map(Self::Tensor)
+                .ok_or_else(|| crate::SQLError::TypeMismatch("TENSOR requires a dimension".into())),
+            other => Err(crate::SQLError::Unsupported(format!(
+                "SQL type `{other}` is not supported"
+            ))),
+        }
+    }
+
+    #[must_use]
+    pub fn sql_name(&self) -> String {
+        match self {
+            Self::SmallInteger => "smallint".into(),
+            Self::Integer => "integer".into(),
+            Self::BigInteger => "bigint".into(),
+            Self::Oid => "oid".into(),
+            Self::Xid => "xid".into(),
+            Self::Boolean => "boolean".into(),
+            Self::Text => "text".into(),
+            Self::Name => "name".into(),
+            Self::Uuid => "uuid".into(),
+            Self::Varchar(Some(length)) => format!("character varying({length})"),
+            Self::Varchar(None) => "character varying".into(),
+            Self::Bpchar => "bpchar".into(),
+            Self::Character(length) => format!("character({length})"),
+            Self::Real => "real".into(),
+            Self::DoublePrecision => "double precision".into(),
+            Self::Numeric {
+                precision: Some(precision),
+                scale: Some(scale),
+            } => format!("numeric({precision},{scale})"),
+            Self::Numeric { .. } => "numeric".into(),
+            Self::Json => "json".into(),
+            Self::JsonB => "jsonb".into(),
+            Self::Bytea => "bytea".into(),
+            Self::InternalChar => "\"char\"".into(),
+            Self::Regproc => "regproc".into(),
+            Self::Regtype => "regtype".into(),
+            Self::PgNodeTree => "pg_node_tree".into(),
+            Self::AclItem => "aclitem".into(),
+            Self::Int2Vector => "int2vector".into(),
+            Self::OidVector => "oidvector".into(),
+            Self::AnyArray => "anyarray".into(),
+            Self::Record => "record".into(),
+            Self::Array(element) => format!("{}[]", element.sql_name()),
+            Self::Date => "date".into(),
+            Self::Time => "time without time zone".into(),
+            Self::TimeTz => "time with time zone".into(),
+            Self::Timestamp => "timestamp without time zone".into(),
+            Self::TimestampTz => "timestamp with time zone".into(),
+            Self::Interval => "interval".into(),
+            Self::Vector(dimension) => format!("vector({dimension})"),
+            Self::Tensor(dimension) => format!("tensor({dimension})"),
+            Self::Domain { schema, name, .. } => format!("{schema}.{name}"),
+        }
+    }
+
+    /// Name emitted by `PostgreSQL`'s `regtype` output, including
+    /// `pg_typeof(...)`.
+    #[must_use]
+    pub fn regtype_name(&self) -> String {
+        match self {
+            Self::Varchar(_) => "character varying".into(),
+            Self::Bpchar | Self::Character(_) => "character".into(),
+            Self::Numeric { .. } => "numeric".into(),
+            Self::Vector(_) => "vector".into(),
+            Self::Tensor(_) => "tensor".into(),
+            Self::Domain { schema, name, .. } => format!("{schema}.{name}"),
+            Self::Array(element) => format!("{}[]", element.regtype_name()),
+            other => other.sql_name(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GeneratedColumnKind {
+    Virtual,
+    Stored,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneratedColumn {
+    pub kind: GeneratedColumnKind,
+    pub expression: Box<Expr>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub function_dependencies: Vec<GeneratedFunctionDependency>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FunctionBinding {
+    pub name: String,
+    pub argument_types: Vec<String>,
+}
+
+pub type GeneratedFunctionDependency = FunctionBinding;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
@@ -69,6 +366,15 @@ pub struct ColumnDef {
     pub ty: ColumnType,
     pub primary_key: bool,
     pub not_null: bool,
+    /// Whether `NOT NULL` was declared as its own constraint instead of being
+    /// implied by `PRIMARY KEY` or an auto-incrementing identity.
+    #[serde(default)]
+    pub not_null_explicit: bool,
+    /// Durable `PostgreSQL` 18 `NOT NULL` constraint name. Parsing leaves an
+    /// unnamed declaration as `None`; table registration assigns and persists
+    /// `PostgreSQL`'s generated name before the constraint becomes visible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_null_name: Option<String>,
     /// `SERIAL` / `BIGSERIAL` columns auto-allocate from a per-table
     /// monotonic counter when the value is omitted from `INSERT`.
     #[serde(default)]
@@ -82,10 +388,19 @@ pub struct ColumnDef {
     /// reopened engines keep the same INSERT semantics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Expr>,
+    /// `PostgreSQL` 18 generated-column definition. Stored values are refreshed
+    /// on every row write; virtual values are evaluated from the physical row
+    /// only when a logical row is read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated: Option<GeneratedColumn>,
     /// `CHECK (<expr>)` column-level constraint. Evaluated at INSERT
     /// (and UPDATE-replace) time against the row being written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_name: Option<String>,
+    #[serde(default = "default_true")]
+    pub check_enforced: bool,
     /// `REFERENCES parent(col)` column-level FOREIGN KEY. The engine
     /// rejects INSERT / UPDATE whose value is not present in the
     /// referenced (table, column) pair.
@@ -96,6 +411,8 @@ pub struct ColumnDef {
 /// `REFERENCES table(column)` reference target.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignKeyRef {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub table: String,
     pub column: String,
     #[serde(default)]
@@ -104,11 +421,15 @@ pub struct ForeignKeyRef {
     pub on_delete: ForeignKeyAction,
     #[serde(default)]
     pub match_type: ForeignKeyMatch,
+    #[serde(default = "default_true")]
+    pub enforced: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateTable {
     pub name: String,
+    /// Local SQL relation identifier used while binding expressions declared inside the table definition.
+    pub qualifier: String,
     pub columns: Vec<ColumnDef>,
     /// `CREATE TABLE IF NOT EXISTS` - silently ignore the statement
     /// when a table with this name already exists.
@@ -165,6 +486,8 @@ pub struct TableConstraintSet {
 pub struct TableCheck {
     pub name: Option<String>,
     pub expr: Expr,
+    #[serde(default = "default_true")]
+    pub enforced: bool,
 }
 
 /// Table-level foreign key. `local_columns.len()` matches
@@ -187,6 +510,12 @@ pub struct ForeignKey {
     pub on_delete_set_columns: Vec<String>,
     #[serde(default)]
     pub match_type: ForeignKeyMatch,
+    #[serde(default = "default_true")]
+    pub enforced: bool,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -262,10 +591,66 @@ pub struct FunctionParam {
     /// Raw type name as written (last segment, lower-cased by the
     /// compiler; e.g. `int4`, `text`, `numeric`).
     pub type_name: String,
+    /// Parsed relation and column identity for `%TYPE`; ordinary types have no reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_reference: Option<RoutineColumnTypeReference>,
     pub mode: FunctionParamMode,
     /// `DEFAULT <expr>` for trailing input parameters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Expr>,
+}
+
+/// Structured relation-column identity carried by a routine `%TYPE` declaration until catalog binding resolves it to a concrete SQL type.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoutineColumnTypeReference {
+    pub schema: Option<String>,
+    pub relation: String,
+    pub column: String,
+}
+
+impl RoutineColumnTypeReference {
+    pub fn new(schema: Option<String>, relation: String, column: String) -> Self {
+        Self {
+            schema,
+            relation,
+            column,
+        }
+    }
+
+    pub fn relation_reference(&self) -> String {
+        match self.schema.as_deref() {
+            Some(schema) => format!(
+                "{}.{}",
+                render_identifier_component(schema),
+                render_identifier_component(&self.relation)
+            ),
+            None => render_identifier_component(&self.relation),
+        }
+    }
+
+    pub fn type_reference(&self) -> String {
+        format!(
+            "{}.{}%type",
+            self.relation_reference(),
+            render_identifier_component(&self.column)
+        )
+    }
+}
+
+fn render_identifier_component(component: &str) -> String {
+    let can_render_bare = component
+        .bytes()
+        .enumerate()
+        .all(|(index, byte)| match byte {
+            b'a'..=b'z' | b'_' => true,
+            b'0'..=b'9' | b'$' => index != 0,
+            _ => false,
+        });
+    if can_render_bare && !component.is_empty() {
+        component.to_string()
+    } else {
+        format!("\"{}\"", component.replace('"', "\"\""))
+    }
 }
 
 /// Declared result shape of a user-defined function.
@@ -312,6 +697,9 @@ pub struct CreateFunction {
     pub is_procedure: bool,
     pub params: Vec<FunctionParam>,
     pub returns: FunctionReturns,
+    /// Parsed `%TYPE` identity for a scalar or set return declaration until registration resolves it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub return_type_reference: Option<RoutineColumnTypeReference>,
     /// Lower-cased language name (`plpgsql`, `sql`).
     pub language: String,
     pub body: FunctionBody,
@@ -406,6 +794,8 @@ pub struct DropFunctionStmt {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlterTableStmt {
     pub table: String,
+    /// Local SQL relation identifier used while binding new or replaced generation expressions.
+    pub qualifier: String,
     pub if_exists: bool,
     pub action: AlterTableAction,
 }
@@ -439,6 +829,13 @@ pub enum AlterTableAction {
     DropDefault {
         name: String,
     },
+    SetExpression {
+        name: String,
+        expression: Expr,
+    },
+    DropExpression {
+        name: String,
+    },
     SetNotNull {
         name: String,
     },
@@ -448,12 +845,16 @@ pub enum AlterTableAction {
     AlterColumnType {
         name: String,
         ty: ColumnType,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        using: Option<Expr>,
     },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InsertStmt {
     pub table: String,
+    /// SQL-visible target relation name: explicit alias, otherwise the local relation name.
+    pub target_qualifier: String,
     pub columns: Vec<String>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
     pub with: Vec<CTE>,
@@ -470,6 +871,30 @@ pub struct InsertStmt {
     pub on_conflict: Option<OnConflict>,
     /// `RETURNING ...` projection list. Empty when absent.
     pub returning: Vec<Projection>,
+    /// `PostgreSQL` 18 names for the old and new row images visible to
+    /// `RETURNING`. The defaults are `old` and `new`.
+    pub returning_aliases: ReturningAliases,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReturningAliases {
+    pub old: String,
+    pub new: String,
+    #[serde(default)]
+    pub old_explicit: bool,
+    #[serde(default)]
+    pub new_explicit: bool,
+}
+
+impl Default for ReturningAliases {
+    fn default() -> Self {
+        Self {
+            old: "old".into(),
+            new: "new".into(),
+            old_explicit: false,
+            new_explicit: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -497,6 +922,11 @@ pub enum OnConflictAction {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SelectStmt {
     pub projections: Vec<Projection>,
+    /// Rows owned by a `VALUES` query body. `PostgreSQL` represents `VALUES`
+    /// through the same query node used for `SELECT`, so nested query bodies
+    /// such as CTEs and set-operation branches must retain them here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub values: Vec<Vec<Expr>>,
     pub from: Option<FromClause>,
     pub r#where: Option<Expr>,
     pub group_by: Vec<Expr>,
@@ -569,7 +999,13 @@ pub enum SetOpKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FromClause {
     /// `FROM <table> [AS <alias>]`.
-    Table { name: String, alias: Option<String> },
+    Table {
+        /// Durable catalog identity, including an explicit schema when present.
+        name: String,
+        /// Relation name visible to SQL column binding before an alias is applied.
+        qualifier: String,
+        alias: Option<String>,
+    },
     /// `FROM left <kind> right ON predicate`. `lateral` is true when
     /// the right side is a LATERAL subquery / function -- the engine
     /// re-evaluates it for every left row.
@@ -577,7 +1013,18 @@ pub enum FromClause {
         left: Box<FromClause>,
         right: Box<FromClause>,
         kind: JoinKind,
+        /// Boolean qualification supplied by `ON`. This is mutually
+        /// exclusive with `using` and `natural` in parser-produced trees.
         on: Option<Expr>,
+        /// `PostgreSQL` `USING (column, ...) [AS alias]` metadata. The column
+        /// list must remain explicit until both input row types are known so
+        /// binding can validate each side and construct the merged output.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        using: Option<JoinUsing>,
+        /// `NATURAL` derives its `USING` list from the visible columns of both
+        /// input row types at binding time.
+        #[serde(default)]
+        natural: bool,
         #[allow(dead_code)]
         lateral: bool,
     },
@@ -593,6 +1040,8 @@ pub enum FromClause {
     /// dispatches by name.
     Function {
         name: String,
+        /// Local function identifier used as `PostgreSQL`'s default output column label. Kept separate from the catalog-qualified lookup name so quoted identifiers containing `.` remain indivisible.
+        output_name: String,
         /// Catalog relation bound to a relation-aware table function.
         /// Kept separate from scalar arguments so name resolution,
         /// dependency tracking, and planning never treat it as text data.
@@ -618,12 +1067,26 @@ pub enum FromClause {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JoinUsing {
+    pub columns: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
+}
+
 impl FromClause {
     /// All table names referenced under this clause, in declaration
     /// order. Used by the compiler to resolve unqualified column refs.
     pub fn collect_tables(&self, out: &mut Vec<(String, Option<String>)>) {
         match self {
-            FromClause::Table { name, alias } => out.push((name.clone(), alias.clone())),
+            FromClause::Table {
+                name,
+                qualifier,
+                alias,
+            } => out.push((
+                name.clone(),
+                Some(alias.as_ref().unwrap_or(qualifier).clone()),
+            )),
             FromClause::Join { left, right, .. } => {
                 left.collect_tables(out);
                 right.collect_tables(out);
@@ -660,6 +1123,7 @@ pub enum DiscardTarget {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateStmt {
     pub table: String,
+    pub target_qualifier: String,
     pub assignments: Vec<(String, Expr)>,
     pub r#where: Option<Expr>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
@@ -669,11 +1133,13 @@ pub struct UpdateStmt {
     pub from: Option<FromClause>,
     /// `RETURNING ...` projection list. Empty when absent.
     pub returning: Vec<Projection>,
+    pub returning_aliases: ReturningAliases,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteStmt {
     pub table: String,
+    pub target_qualifier: String,
     pub r#where: Option<Expr>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
     pub with: Vec<CTE>,
@@ -683,6 +1149,7 @@ pub struct DeleteStmt {
     pub using: Option<FromClause>,
     /// `RETURNING ...` projection list. Empty when absent.
     pub returning: Vec<Projection>,
+    pub returning_aliases: ReturningAliases,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -810,12 +1277,14 @@ pub enum Statement {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeStmt {
     pub target: String,
+    pub target_qualifier: String,
     pub target_alias: Option<String>,
     pub source: FromClause,
     pub join_condition: Expr,
     pub when_clauses: Vec<MergeWhen>,
     /// `MERGE ... RETURNING ...` projection list. Empty when absent.
     pub returning: Vec<Projection>,
+    pub returning_aliases: ReturningAliases,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -932,7 +1401,28 @@ pub enum TransactionStmt {
 
 #[cfg(test)]
 mod tests {
-    use super::{AlterSequence, SequenceRestart};
+    use super::{AlterSequence, ColumnType, SequenceRestart};
+
+    #[test]
+    fn regtype_output_omits_type_modifiers() {
+        assert_eq!(
+            ColumnType::Varchar(Some(7)).regtype_name(),
+            "character varying"
+        );
+        assert_eq!(
+            ColumnType::Numeric {
+                precision: Some(10),
+                scale: Some(2),
+            }
+            .regtype_name(),
+            "numeric"
+        );
+        assert_eq!(ColumnType::Vector(3).regtype_name(), "vector");
+        assert_eq!(
+            ColumnType::Array(Box::new(ColumnType::Character(4))).regtype_name(),
+            "character[]"
+        );
+    }
 
     #[test]
     fn alter_sequence_restart_reads_legacy_and_current_serde_shapes() {

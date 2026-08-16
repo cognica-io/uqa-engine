@@ -29,10 +29,10 @@ pub(super) fn print_result_expanded(result: &SQLResult, out: &mut (impl Write + 
         result.columns.clone()
     };
     let label_width = columns.iter().map(String::len).max().unwrap_or(0);
-    for (idx, row) in result.rows.iter().enumerate() {
+    for (idx, _) in result.rows.iter().enumerate() {
         let _ = writeln!(out, "-[ RECORD {} ]-", idx + 1);
-        for col in &columns {
-            let value = value_to_display(row.get(col));
+        for (column, col) in columns.iter().enumerate() {
+            let value = value_to_display(result.value_at(idx, column));
             let _ = writeln!(out, "{col:<label_width$} | {value}");
         }
     }
@@ -63,10 +63,12 @@ pub(super) fn print_result(result: &SQLResult, out: &mut (impl Write + ?Sized)) 
     let stringified_rows: Vec<Vec<String>> = result
         .rows
         .iter()
-        .map(|row| {
+        .enumerate()
+        .map(|(row_index, _)| {
             columns
                 .iter()
-                .map(|c| value_to_display(row.get(c)))
+                .enumerate()
+                .map(|(column_index, _)| value_to_display(result.value_at(row_index, column_index)))
                 .collect()
         })
         .collect();
@@ -90,6 +92,52 @@ pub(super) fn print_result(result: &SQLResult, out: &mut (impl Write + ?Sized)) 
         write_row(out, row, &widths);
     }
     let _ = writeln!(out, "({} row(s))", result.rows.len());
+}
+
+/// Emit rows in `PostgreSQL` `COPY TO STDOUT` text format.
+pub(super) fn print_result_copy_text(result: &SQLResult, out: &mut (impl Write + ?Sized)) {
+    let columns: Vec<String> = if result.columns.is_empty() {
+        let mut keys: std::collections::BTreeSet<&String> = std::collections::BTreeSet::new();
+        for row in &result.rows {
+            keys.extend(row.keys());
+        }
+        keys.into_iter().cloned().collect()
+    } else {
+        result.columns.clone()
+    };
+    for row_index in 0..result.rows.len() {
+        let cells = columns
+            .iter()
+            .enumerate()
+            .map(|(column_index, _)| copy_text_cell(result.value_at(row_index, column_index)))
+            .collect::<Vec<_>>();
+        let _ = writeln!(out, "{}", cells.join("\t"));
+    }
+}
+
+fn copy_text_cell(value: Option<&Value>) -> String {
+    let Some(value) = value.filter(|value| !matches!(value, Value::Null)) else {
+        return "\\N".to_string();
+    };
+    let text = match value {
+        Value::Bool(true) => "t".to_string(),
+        Value::Bool(false) => "f".to_string(),
+        other => value_to_display(Some(other)),
+    };
+    let mut escaped = String::new();
+    for character in text.chars() {
+        match character {
+            '\u{0008}' => escaped.push_str("\\b"),
+            '\u{000c}' => escaped.push_str("\\f"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\u{000b}' => escaped.push_str("\\v"),
+            '\\' => escaped.push_str("\\\\"),
+            other => escaped.push(other),
+        }
+    }
+    escaped
 }
 
 pub(super) fn write_row(out: &mut (impl Write + ?Sized), cells: &[String], widths: &[usize]) {
@@ -127,7 +175,7 @@ pub(super) fn value_to_display(v: Option<&Value>) -> String {
         Some(Value::Null) | None => "NULL".to_string(),
         Some(Value::Bool(b)) => b.to_string(),
         Some(Value::Int(n)) => n.to_string(),
-        Some(Value::Float(f)) => format!("{f}"),
+        Some(Value::Float(f)) => uqa_graph::agtype::format_float_pg(*f),
         Some(Value::Decimal(d)) => d.to_sql_string(),
         Some(Value::Str(s) | Value::FixedChar(s)) => s.clone(),
         // PostgreSQL bytea hex output form.
@@ -142,19 +190,10 @@ pub(super) fn value_to_display(v: Option<&Value>) -> String {
             out
         }
         Some(Value::Temporal(t)) => t.to_sql_string(),
-        // Lists are SQL arrays unless they contain JSON objects (the
-        // engine only produces Map elements from JSON values): SQL
-        // arrays print PostgreSQL array-literal syntax `{...}`, JSON
-        // arrays print canonical jsonb text. A jsonb array of plain
-        // scalars is indistinguishable from a SQL array without type
-        // metadata and renders in array syntax - documented divergence.
-        Some(value @ Value::List(items)) => {
-            if items.iter().any(|item| matches!(item, Value::Map(_))) {
-                json_value_display(value)
-            } else {
-                pg_array_display(items)
-            }
-        }
+        Some(Value::Json(text) | Value::JsonB(text)) => text.clone(),
+        Some(Value::Array(array)) => uqa_sql::expr::array_value_to_string(array),
+        Some(Value::List(items)) => pg_array_display(items),
+        Some(value @ (Value::Row(_) | Value::Record(_))) => uqa_sql::expr::value_to_string(value),
         // Maps come from JSON/JSONB values: render canonical JSON the
         // way psql prints jsonb, not a Rust-debug-ish map.
         Some(value @ Value::Map(_)) => json_value_display(value),
@@ -197,15 +236,34 @@ pub(super) fn json_value_display(v: &Value) -> String {
         Value::Null => "null".to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Int(n) => n.to_string(),
-        Value::Float(f) => format!("{f}"),
+        Value::Float(f) => uqa_graph::agtype::format_float_pg(*f),
         Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) | Value::FixedChar(s) => serde_json::Value::String(s.clone()).to_string(),
         Value::Bytes(_) | Value::Temporal(_) => {
             serde_json::Value::String(value_to_display(Some(v))).to_string()
         }
-        Value::List(items) => {
+        Value::Json(text) | Value::JsonB(text) => text.clone(),
+        Value::Array(array) => {
+            let inner = array
+                .elements()
+                .iter()
+                .map(json_value_display)
+                .collect::<Vec<_>>();
+            format!("[{}]", inner.join(", "))
+        }
+        Value::List(items) | Value::Row(items) => {
             let inner: Vec<String> = items.iter().map(json_value_display).collect();
             format!("[{}]", inner.join(", "))
+        }
+        Value::Record(fields) => {
+            let inner: Vec<String> = fields
+                .iter()
+                .map(|(key, value)| {
+                    let key = serde_json::Value::String(key.clone()).to_string();
+                    format!("{key}: {}", json_value_display(value))
+                })
+                .collect();
+            format!("{{{}}}", inner.join(", "))
         }
         Value::Map(m) => {
             let inner: Vec<String> = m
@@ -217,5 +275,39 @@ pub(super) fn json_value_display(v: &Value) -> String {
                 .collect();
             format!("{{{}}}", inner.join(", "))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{copy_text_cell, value_to_display};
+    use uqa_core::Value;
+
+    #[test]
+    fn float_output_matches_postgresql_special_and_scientific_spelling() {
+        assert_eq!(value_to_display(Some(&Value::Float(f64::NAN))), "NaN");
+        assert_eq!(
+            value_to_display(Some(&Value::Float(f64::INFINITY))),
+            "Infinity"
+        );
+        assert_eq!(
+            value_to_display(Some(&Value::Float(f64::NEG_INFINITY))),
+            "-Infinity"
+        );
+        assert_eq!(
+            value_to_display(Some(&Value::Float(7.257_415_615_307_999e306))),
+            "7.257415615307999e+306"
+        );
+    }
+
+    #[test]
+    fn copy_text_cells_distinguish_null_empty_and_literal_marker() {
+        assert_eq!(copy_text_cell(Some(&Value::Null)), "\\N");
+        assert_eq!(copy_text_cell(Some(&Value::Str(String::new()))), "");
+        assert_eq!(copy_text_cell(Some(&Value::Str("\\N".into()))), "\\\\N");
+        assert_eq!(
+            copy_text_cell(Some(&Value::Str("a\tb\nc\\d".into()))),
+            "a\\tb\\nc\\\\d"
+        );
     }
 }

@@ -7,41 +7,46 @@
 //! Foreign-table pushdown and execution.
 
 use super::{
-    eval_scalar, execute_query_block_operator_output, expand_star_columns, projection_columns,
-    BinaryOp, ComputePlan, CteScope, Engine, QueryBlockPlan, QueryOutput, QueryOutputMode,
-    SQLError, SQLParam, ScalarEvalContext, ScalarExpr, Value,
+    eval_scalar, execute_query_block_operator_output, expand_from_star_columns, projection_columns,
+    BinaryOp, CteScope, Engine, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam,
+    ScalarEvalContext, ScalarExpr, SingleRelation, Value,
 };
 
-#[allow(clippy::too_many_arguments)]
 pub(in crate::sql) fn run_single_foreign_select_output(
     engine: &Engine,
-    table: &str,
+    relation: SingleRelation<'_>,
     block: &QueryBlockPlan,
     stmt: &QueryBlockPlan,
     params: &[SQLParam],
     ctes: &CteScope,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
+    let SingleRelation {
+        storage_name: table,
+        qualifier,
+    } = relation;
     let predicates = fdw_predicates_from_where(stmt.r#where.as_ref(), params);
     let scanned = engine
         .scan_foreign_table_stream(table, None, &predicates, None)
         .map_err(SQLError::Unsupported)?;
-    let columns = if matches!(block.compute, ComputePlan::Project) {
-        expand_star_columns(
-            projection_columns(&stmt.projections),
-            &stmt.projections,
-            engine,
-            Some(table),
-        )?
-    } else {
-        projection_columns(&stmt.projections)
-    };
-    let source_columns = engine
-        .foreign_table_columns(table)
+    let typed_columns = engine
+        .foreign_table_typed_columns(table)
         .map_err(SQLError::Unsupported)?;
+    let source_columns = typed_columns
+        .iter()
+        .map(|(column, _)| column.clone())
+        .collect();
+    let source_types = typed_columns.into_iter().map(|(_, ty)| Some(ty)).collect();
+    let source_schema =
+        uqa_execution::RowSchema::with_qualified_types(qualifier, source_columns, source_types);
+    let columns = expand_from_star_columns(
+        projection_columns(&stmt.projections),
+        &stmt.projections,
+        &source_schema,
+    )?;
     let source: Box<dyn uqa_execution::PhysicalOperator + '_> =
-        Box::new(uqa_execution::RowIteratorScan::new(
-            source_columns,
+        Box::new(uqa_execution::RowIteratorScan::with_row_schema(
+            source_schema,
             Box::new(scanned.map(|row| {
                 row.map_err(SQLError::Unsupported)
                     .map_err(uqa_execution::ExecError::from)

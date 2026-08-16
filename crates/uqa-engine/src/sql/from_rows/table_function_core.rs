@@ -8,14 +8,13 @@
 
 use super::{
     build_table_function_rows_with_row, eval_call_arguments, generate_series_values,
-    is_json_array_table_function, json_array_values, json_each_row_stream, prefix_row,
-    regexp_split_values, registered_table_function_row_stream,
-    scalar_table_function_default_column, string_to_table_values, Engine, PhysicalSubqueryRunner,
-    PlanSubqueryArena, QueryPlan, ResultRow, SQLError, SQLParam, ScalarEvalContext, ScalarExpr,
-    Value,
+    json_array_values, json_each_row_stream, json_object_key_values, regexp_split_values,
+    registered_table_function_row_stream, scalar_table_function_default_column,
+    string_to_table_values, unnest_row_stream, Engine, PhysicalSubqueryRunner, PlanSubqueryArena,
+    QueryPlan, ResultRow, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, Value,
 };
 
-pub(in crate::sql) struct TableFunctionEvalContext<'a> {
+pub(in crate::sql) struct SourceEvalContext<'a> {
     pub(super) engine: &'a Engine,
     pub(super) params: &'a [SQLParam],
     pub(super) eval_hook: &'a dyn uqa_sql::expr::EngineHook,
@@ -23,7 +22,7 @@ pub(in crate::sql) struct TableFunctionEvalContext<'a> {
     pub(super) subqueries: &'a [QueryPlan],
 }
 
-impl<'a> TableFunctionEvalContext<'a> {
+impl<'a> SourceEvalContext<'a> {
     pub(in crate::sql) fn new(
         engine: &'a Engine,
         params: &'a [SQLParam],
@@ -44,6 +43,7 @@ impl<'a> TableFunctionEvalContext<'a> {
 #[derive(Clone, Copy)]
 pub(in crate::sql) struct TableFunctionCall<'a> {
     pub(super) name: &'a str,
+    pub(super) output_name: &'a str,
     pub(super) relation: Option<&'a str>,
     pub(super) args: &'a [ScalarExpr],
     pub(super) alias: Option<&'a str>,
@@ -54,6 +54,7 @@ pub(in crate::sql) struct TableFunctionCall<'a> {
 impl<'a> TableFunctionCall<'a> {
     pub(in crate::sql) fn new(
         name: &'a str,
+        output_name: &'a str,
         relation: Option<&'a str>,
         args: &'a [ScalarExpr],
         alias: Option<&'a str>,
@@ -62,6 +63,7 @@ impl<'a> TableFunctionCall<'a> {
     ) -> Self {
         Self {
             name,
+            output_name,
             relation,
             args,
             alias,
@@ -76,7 +78,7 @@ impl<'a> TableFunctionCall<'a> {
 /// functions keep their existing vector-valued API and are adapted at this
 /// explicit extension boundary.
 pub(in crate::sql) fn build_table_function_row_stream(
-    context: &TableFunctionEvalContext<'_>,
+    context: &SourceEvalContext<'_>,
     call: TableFunctionCall<'_>,
 ) -> Result<uqa_execution::ProjectRows, SQLError> {
     build_table_function_row_stream_with_row(context, call, None)
@@ -84,12 +86,13 @@ pub(in crate::sql) fn build_table_function_row_stream(
 
 #[allow(clippy::similar_names)]
 pub(in crate::sql) fn build_table_function_row_stream_with_row(
-    context: &TableFunctionEvalContext<'_>,
+    context: &SourceEvalContext<'_>,
     call: TableFunctionCall<'_>,
-    row: Option<&ResultRow>,
+    row: Option<&uqa_execution::OwnedPhysicalRow>,
 ) -> Result<uqa_execution::ProjectRows, SQLError> {
     let TableFunctionCall {
         name,
+        output_name,
         args,
         alias,
         column_aliases,
@@ -107,6 +110,8 @@ pub(in crate::sql) fn build_table_function_row_stream_with_row(
             | "jsonb_array_elements"
             | "json_array_elements_text"
             | "jsonb_array_elements_text"
+            | "json_object_keys"
+            | "jsonb_object_keys"
             | "json_each"
             | "jsonb_each"
             | "json_each_text"
@@ -114,7 +119,12 @@ pub(in crate::sql) fn build_table_function_row_stream_with_row(
     ) {
         let subquery_arena =
             PlanSubqueryArena::new(context.subqueries, Some(context.subquery_runner));
-        let scalar_context = ScalarEvalContext::new(row, context.params)
+        let scalar_context = match row {
+            Some(row) => ScalarEvalContext::from_row_lookup(row, context.params)
+                .with_physical_outer_row(&row.schema, &row.row),
+            None => ScalarEvalContext::new(None, context.params),
+        };
+        let scalar_context = scalar_context
             .with_function_hook(context.eval_hook)
             .with_subquery_runner(&subquery_arena);
         let call_args = eval_call_arguments(args, &scalar_context)?;
@@ -122,29 +132,22 @@ pub(in crate::sql) fn build_table_function_row_stream_with_row(
             return Err(uqa_sql::expr::unknown_function_error(&lower, &call_args));
         }
         let evaluated: Vec<Value> = call_args.into_iter().map(|(_, value)| value).collect();
-        let json_array_function = is_json_array_table_function(&lower);
-        let default_col = scalar_table_function_default_column(&lower, alias, column_aliases);
-        let row_builder = ScalarFunctionRowBuilder {
-            default_col,
-            function_name: lower.clone(),
-            qualifier: alias.map(str::to_string),
-            preserve_function_name: !json_array_function
-                && column_aliases.is_empty()
-                && alias.is_some(),
-        };
+        if lower == "unnest" {
+            return unnest_row_stream(evaluated, output_name, alias, column_aliases);
+        }
+        let default_col =
+            scalar_table_function_default_column(&lower, output_name, alias, column_aliases);
+        let row_builder = ScalarFunctionRowBuilder { default_col };
 
         let values: Box<dyn Iterator<Item = Value> + Send> = match lower.as_str() {
             "generate_series" => generate_series_values(evaluated)?,
-            "unnest" => Box::new(evaluated.into_iter().flat_map(|value| match value {
-                Value::List(items) => items,
-                value => vec![value],
-            })),
             "regexp_split_to_table" => regexp_split_values(evaluated)?,
             "string_to_table" => string_to_table_values(evaluated)?,
             "json_array_elements"
             | "jsonb_array_elements"
             | "json_array_elements_text"
             | "jsonb_array_elements_text" => json_array_values(&lower, evaluated)?,
+            "json_object_keys" | "jsonb_object_keys" => json_object_key_values(&lower, evaluated)?,
             "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
                 return json_each_row_stream(&lower, evaluated, alias, column_aliases);
             }
@@ -162,7 +165,12 @@ pub(in crate::sql) fn build_table_function_row_stream_with_row(
     if context.engine.has_registered_table_function(&identity) {
         let subquery_arena =
             PlanSubqueryArena::new(context.subqueries, Some(context.subquery_runner));
-        let scalar_context = ScalarEvalContext::new(row, context.params)
+        let scalar_context = match row {
+            Some(row) => ScalarEvalContext::from_row_lookup(row, context.params)
+                .with_physical_outer_row(&row.schema, &row.row),
+            None => ScalarEvalContext::new(None, context.params),
+        };
+        let scalar_context = scalar_context
             .with_function_hook(context.eval_hook)
             .with_subquery_runner(&subquery_arena);
         let call_args = eval_call_arguments(args, &scalar_context)?;
@@ -191,20 +199,12 @@ pub(in crate::sql) fn build_table_function_row_stream_with_row(
 #[derive(Clone)]
 pub(in crate::sql) struct ScalarFunctionRowBuilder {
     default_col: String,
-    function_name: String,
-    qualifier: Option<String>,
-    preserve_function_name: bool,
 }
 
 impl ScalarFunctionRowBuilder {
     fn row(&self, value: Value) -> ResultRow {
         let mut row = ResultRow::new();
-        row.insert(self.default_col.clone(), value.clone());
-        if self.preserve_function_name && self.default_col != self.function_name {
-            row.insert(self.function_name.clone(), value);
-        }
-        self.qualifier
-            .as_deref()
-            .map_or(row.clone(), |qualifier| prefix_row(qualifier, &row))
+        row.insert(self.default_col.clone(), value);
+        row
     }
 }

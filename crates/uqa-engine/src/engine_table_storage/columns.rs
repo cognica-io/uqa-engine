@@ -6,7 +6,10 @@
 
 //! Column registration, index rebuild, and table or column rename.
 
-use super::{table_not_found, Engine, RelationIdentity, StorageBackendError, StorageBackendResult};
+use super::{
+    materialize_constraint_names, table_not_found, Engine, RelationIdentity, StorageBackendError,
+    StorageBackendResult,
+};
 use crate::VectorIndexSpec;
 
 impl Engine {
@@ -45,24 +48,36 @@ impl Engine {
         if let Some(default) = &mut column.default {
             self.bind_sequence_references_in_expr(default)?;
         }
+        if let Some(generated) = &mut column.generated {
+            self.bind_sequence_references_in_expr(&mut generated.expression)?;
+        }
         if let Some(reference) = &mut column.references {
             reference.table = self.canonical_foreign_key_target(&reference.table)?;
         }
-        let mut columns = t.columns.write();
+        let mut columns = t.columns.read().clone();
         if columns.iter().any(|c| c.name == column.name) {
             return Err(StorageBackendError::Other(format!(
                 "column `{}` already exists on table `{table_name}`",
                 column.name
             )));
         }
-        let mut next = columns.clone();
-        next.push(column);
+        columns.push(column);
+        let mut constraints = uqa_sql::ast::TableConstraintSet {
+            checks: t.table_checks.read().clone(),
+            foreign_keys: t.foreign_keys.read().clone(),
+            key_constraints: t.key_constraints.read().clone(),
+        };
+        let relation =
+            RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
+        materialize_constraint_names(&relation, &mut columns, &mut constraints)?;
         self.mark_column_stats_dirty(&table_name, &t)?;
         if self.is_persistent() {
-            self.try_save_table_schema_with_columns(&table_name, &t, &next)?;
+            self.try_save_table_schema_with_components(&table_name, &t, &columns, &constraints)?;
         }
-        *columns = next;
-        drop(columns);
+        *t.columns.write() = columns;
+        *t.table_checks.write() = constraints.checks;
+        *t.foreign_keys.write() = constraints.foreign_keys;
+        *t.key_constraints.write() = constraints.key_constraints;
         self.refresh_value_indexes_for_table(&table_name)?;
         Ok(())
     }

@@ -6,6 +6,7 @@
 
 //! Borrowed positional-row aggregation paths.
 
+use uqa_execution::ProjectedRow;
 use uqa_sql::expr::RowLookup;
 
 use super::{
@@ -13,18 +14,18 @@ use super::{
     ScalarEvalContext, ScopedEngineHook, Value,
 };
 
-struct BorrowedGroupProbe<'a> {
-    group_index: &'a super::GroupIndex,
+struct BorrowedGroupProbe<'probe, Row> {
+    group_index: &'probe super::GroupIndex,
     hash: u64,
-    columns: &'a [super::super::projected::ProjectedGroupColumn],
-    row: &'a dyn RowLookup,
+    columns: &'probe [super::super::projected::ProjectedGroupColumn],
+    row: &'probe Row,
 }
 
 impl AdaptiveAggregateSet {
     pub(in crate::sql::aggregates) fn consume_projected_row(
         &mut self,
         engine: &Engine,
-        row: &dyn RowLookup,
+        row: &ProjectedRow<'_, '_>,
         params: &[SQLParam],
         ctes: &CteScope,
     ) -> Result<(), SQLError> {
@@ -44,7 +45,7 @@ impl AdaptiveAggregateSet {
 
     fn consume_direct_projected(
         &mut self,
-        row: &dyn RowLookup,
+        row: &ProjectedRow<'_, '_>,
         params: &[SQLParam],
     ) -> Result<bool, SQLError> {
         if self.statement.group_by.is_empty() {
@@ -93,7 +94,7 @@ impl AdaptiveAggregateSet {
 
     fn observe_direct_borrowed(
         groups: &mut [super::GroupEntry],
-        probe: BorrowedGroupProbe<'_>,
+        probe: BorrowedGroupProbe<'_, ProjectedRow<'_, '_>>,
         plans: &super::super::projected_input::ProjectedAggregatePlans,
         variable_state: bool,
         retained_bytes: &mut usize,
@@ -124,7 +125,7 @@ impl AdaptiveAggregateSet {
         &mut self,
         hash: u64,
         key: &[Value],
-        row: &dyn RowLookup,
+        row: &ProjectedRow<'_, '_>,
         params: &[SQLParam],
     ) -> Result<bool, SQLError> {
         let Some(index) = super::matching_group_index(&self.group_index, &self.groups, hash, key)
@@ -143,9 +144,9 @@ impl AdaptiveAggregateSet {
         Ok(true)
     }
 
-    pub(super) fn consume_projected_group(
+    pub(super) fn consume_projected_group<Row: RowLookup>(
         &mut self,
-        row: &dyn RowLookup,
+        row: &Row,
         context: &ScalarEvalContext<'_>,
     ) -> Result<bool, SQLError> {
         let Some(columns) = self
@@ -184,9 +185,9 @@ impl AdaptiveAggregateSet {
         Ok(true)
     }
 
-    fn observe_projected_borrowed(
+    fn observe_projected_borrowed<Row: RowLookup>(
         groups: &mut [super::GroupEntry],
-        probe: BorrowedGroupProbe<'_>,
+        probe: BorrowedGroupProbe<'_, Row>,
         plans: &super::super::projected_input::ProjectedAggregatePlans,
         aggregate_targets: &[uqa_execution::ScalarExpr],
         variable_state: bool,
@@ -215,11 +216,11 @@ impl AdaptiveAggregateSet {
         Ok(true)
     }
 
-    fn observe_projected_key(
+    fn observe_projected_key<Row: RowLookup>(
         &mut self,
         hash: u64,
         key: &[Value],
-        row: &dyn RowLookup,
+        row: &Row,
         context: &ScalarEvalContext<'_>,
     ) -> Result<bool, SQLError> {
         let Some(index) = super::matching_group_index(&self.group_index, &self.groups, hash, key)
@@ -239,9 +240,9 @@ impl AdaptiveAggregateSet {
         Ok(true)
     }
 
-    fn consume_projected_context(
+    fn consume_projected_context<Row: RowLookup>(
         &mut self,
-        row: &dyn RowLookup,
+        row: &Row,
         context: &ScalarEvalContext<'_>,
     ) -> Result<(), SQLError> {
         let key = self
@@ -263,12 +264,12 @@ impl AdaptiveAggregateSet {
     }
 }
 
-fn borrowed_group_index(
+fn borrowed_group_index<Row: RowLookup>(
     group_index: &super::GroupIndex,
     groups: &[super::GroupEntry],
     hash: u64,
     columns: &[super::super::projected::ProjectedGroupColumn],
-    row: &dyn RowLookup,
+    row: &Row,
 ) -> Option<usize> {
     group_index.get(&hash).and_then(|bucket| {
         bucket
@@ -283,7 +284,7 @@ fn observe_direct_entry(
     variable_state: bool,
     retained_bytes: &mut usize,
     entry: &mut super::GroupEntry,
-    row: &dyn RowLookup,
+    row: &ProjectedRow<'_, '_>,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
     let state = &mut entry.state;
@@ -292,13 +293,13 @@ fn observe_direct_entry(
     update_entry_size(variable_state, retained_bytes, entry, previous_bytes)
 }
 
-fn observe_projected_entry(
+fn observe_projected_entry<Row: RowLookup>(
     plans: &super::super::projected_input::ProjectedAggregatePlans,
     aggregate_targets: &[uqa_execution::ScalarExpr],
     variable_state: bool,
     retained_bytes: &mut usize,
     entry: &mut super::GroupEntry,
-    row: &dyn RowLookup,
+    row: &Row,
     context: &ScalarEvalContext<'_>,
 ) -> Result<(), SQLError> {
     let state = &mut entry.state;

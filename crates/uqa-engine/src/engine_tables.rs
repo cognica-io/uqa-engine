@@ -561,19 +561,35 @@ impl Engine {
         Ok(())
     }
 
-    /// [`Engine::add_document_with_vector_values`] for a document id
-    /// the caller has proven absent. This skips the per-row old-value
-    /// lookup used when replacing an existing document.
-    pub(crate) fn add_document_with_vector_values_known_new(
+    pub(crate) fn add_prepared_document_with_vector_values(
         &self,
         table: &str,
         doc_id: DocId,
         document: Document,
         vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
+        known_new: bool,
     ) -> Result<(), SQLError> {
         self.with_implicit_transaction(|engine| {
-            engine.add_document_with_vector_values_inner(table, doc_id, document, vectors, true)
+            engine.add_prepared_document_with_vector_values_inner(
+                table, doc_id, document, vectors, known_new,
+            )
         })
+    }
+
+    pub(crate) fn add_prepared_document_with_vector_values_inner(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+        vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
+        known_new: bool,
+    ) -> Result<(), SQLError> {
+        self.validate_vector_values(table, &vectors)?;
+        self.add_prepared_document_impl(table, doc_id, document, known_new)?;
+        for (field, vectors) in vectors {
+            self.add_vector_values(table, doc_id, &field, vectors)?;
+        }
+        Ok(())
     }
 
     pub fn create_default_table(

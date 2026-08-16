@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use uqa_core::{DocId, Value};
 use uqa_operators::{base::Direction, ExecutionContext, Operator};
 
@@ -22,7 +22,7 @@ use crate::deep_fusion::{
 pub type PredictResult = (Vec<(DocId, f64)>, BTreeMap<DocId, Vec<f64>>);
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DeepLayerSpec {
     /// Runtime feature-vector input. Used by trained models and batched
@@ -110,6 +110,121 @@ pub enum DeepLayerSpec {
         input_channels: usize,
         return_sequences: bool,
     },
+}
+
+impl<'de> Deserialize<'de> for DeepLayerSpec {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let mut fields = BTreeMap::<String, serde_json::Value>::deserialize(deserializer)?;
+        let kind = take_layer_field::<String, D::Error>(&mut fields, "layer", "kind")?;
+        macro_rules! field {
+            ($name:literal) => {
+                take_layer_field::<_, D::Error>(&mut fields, &kind, $name)
+            };
+        }
+        Ok(match kind.as_str() {
+            "input" => Self::Input {
+                dimensions: field!("dimensions")?,
+            },
+            "embed" => Self::Embed {
+                embedding: field!("embedding")?,
+            },
+            "dense" => Self::Dense {
+                weights: field!("weights")?,
+                bias: field!("bias")?,
+                output_channels: field!("output_channels")?,
+                input_channels: field!("input_channels")?,
+            },
+            "flatten" => Self::Flatten,
+            "global_pool" => Self::GlobalPool {
+                method: field!("method")?,
+            },
+            "softmax" => Self::Softmax,
+            "batch_norm" => Self::BatchNorm {
+                epsilon: field!("epsilon")?,
+            },
+            "dropout" => Self::Dropout { p: field!("p")? },
+            "cnn_1d" => Self::CNN1D {
+                weights: field!("weights")?,
+                bias: field!("bias")?,
+                output_channels: field!("output_channels")?,
+                input_channels: field!("input_channels")?,
+                kernel_size: field!("kernel_size")?,
+                stride: field!("stride")?,
+                padding: field!("padding")?,
+            },
+            "cnn_2d" => Self::CNN2D {
+                weights: field!("weights")?,
+                bias: field!("bias")?,
+                output_channels: field!("output_channels")?,
+                input_channels: field!("input_channels")?,
+                input_height: field!("input_height")?,
+                input_width: field!("input_width")?,
+                kernel_height: field!("kernel_height")?,
+                kernel_width: field!("kernel_width")?,
+                stride_height: field!("stride_height")?,
+                stride_width: field!("stride_width")?,
+                padding_height: field!("padding_height")?,
+                padding_width: field!("padding_width")?,
+            },
+            "propagate" => Self::Propagate {
+                edge_label: field!("edge_label")?,
+                aggregation: field!("aggregation")?,
+                direction: field!("direction")?,
+            },
+            "conv" => Self::Conv {
+                edge_label: field!("edge_label")?,
+                hop_weights: field!("hop_weights")?,
+                direction: field!("direction")?,
+            },
+            "pool" => Self::Pool {
+                edge_label: field!("edge_label")?,
+                pool_size: field!("pool_size")?,
+                method: field!("method")?,
+                direction: field!("direction")?,
+            },
+            "attention" => Self::Attention,
+            "rnn" => Self::RNN {
+                weights_input: field!("weights_input")?,
+                weights_hidden: field!("weights_hidden")?,
+                bias: field!("bias")?,
+                hidden_channels: field!("hidden_channels")?,
+                input_channels: field!("input_channels")?,
+                return_sequences: field!("return_sequences")?,
+            },
+            "lstm" => Self::LSTM {
+                weights_input: field!("weights_input")?,
+                weights_hidden: field!("weights_hidden")?,
+                bias: field!("bias")?,
+                hidden_channels: field!("hidden_channels")?,
+                input_channels: field!("input_channels")?,
+                return_sequences: field!("return_sequences")?,
+            },
+            other => {
+                return Err(serde::de::Error::custom(format!(
+                    "unknown deep layer kind `{other}`"
+                )))
+            }
+        })
+    }
+}
+
+fn take_layer_field<T, E>(
+    fields: &mut BTreeMap<String, serde_json::Value>,
+    kind: &str,
+    name: &'static str,
+) -> Result<T, E>
+where
+    T: DeserializeOwned,
+    E: serde::de::Error,
+{
+    let value = fields
+        .remove(name)
+        .ok_or_else(|| E::custom(format!("{kind} layer is missing `{name}`")))?;
+    serde_json::from_value(value)
+        .map_err(|error| E::custom(format!("invalid `{name}` in {kind} layer: {error}")))
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -553,6 +668,24 @@ mod tests {
         };
         let cnn_json = serde_json::to_value(&cnn).unwrap();
         assert_eq!(cnn_json["kind"], "cnn_1d");
+    }
+
+    #[test]
+    fn internally_tagged_layers_with_float_fields_round_trip_through_json() {
+        let model = DeepModel {
+            layers: vec![DeepLayerSpec::Dense {
+                weights: vec![1.0, 0.0],
+                bias: vec![0.5],
+                output_channels: 1,
+                input_channels: 2,
+            }],
+            alpha: 0.25,
+            gating: GatingSpec::None,
+        };
+        let json = serde_json::to_string(&model).unwrap();
+        let decoded = serde_json::from_str::<DeepModel>(&json)
+            .unwrap_or_else(|error| panic!("failed to decode {json}: {error}"));
+        assert_eq!(decoded, model);
     }
 
     #[test]

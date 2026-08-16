@@ -10,6 +10,246 @@ use super::{
     column_not_found, table_not_found, DocId, Engine, RelationIdentity, SQLError,
     StorageBackendError, StorageBackendResult,
 };
+use std::collections::BTreeSet;
+
+pub(crate) fn materialize_constraint_names(
+    relation: &RelationIdentity,
+    columns: &mut [uqa_sql::ast::ColumnDef],
+    constraints: &mut uqa_sql::ast::TableConstraintSet,
+) -> StorageBackendResult<bool> {
+    let mut used = BTreeSet::new();
+    for column in columns.iter() {
+        record_constraint_name(&mut used, column.not_null_name.as_deref())?;
+        record_constraint_name(&mut used, column.check_name.as_deref())?;
+        record_constraint_name(
+            &mut used,
+            column
+                .references
+                .as_ref()
+                .and_then(|reference| reference.name.as_deref()),
+        )?;
+    }
+    for constraint in &constraints.key_constraints {
+        record_constraint_name(&mut used, constraint.name.as_deref())?;
+    }
+    for constraint in &constraints.checks {
+        record_constraint_name(&mut used, constraint.name.as_deref())?;
+    }
+    for constraint in &constraints.foreign_keys {
+        record_constraint_name(&mut used, constraint.name.as_deref())?;
+    }
+
+    let mut changed = false;
+    for column in columns.iter_mut() {
+        if column.not_null {
+            changed |= assign_constraint_name(
+                &mut column.not_null_name,
+                format!("{}_{}_not_null", relation.name, column.name),
+                &mut used,
+            )?;
+        }
+        if column.check.is_some() {
+            changed |= assign_constraint_name(
+                &mut column.check_name,
+                format!("{}_{}_check", relation.name, column.name),
+                &mut used,
+            )?;
+        }
+        if let Some(reference) = &mut column.references {
+            changed |= assign_constraint_name(
+                &mut reference.name,
+                format!("{}_{}_fkey", relation.name, column.name),
+                &mut used,
+            )?;
+        }
+    }
+    for constraint in &mut constraints.key_constraints {
+        let base = match constraint.kind {
+            uqa_sql::ast::TableKeyConstraintKind::PrimaryKey => {
+                format!("{}_pkey", relation.name)
+            }
+            uqa_sql::ast::TableKeyConstraintKind::Unique => format!(
+                "{}_{}_key",
+                relation.name,
+                constraint_column_component(&constraint.columns, relation)?
+            ),
+        };
+        changed |= assign_constraint_name(&mut constraint.name, base, &mut used)?;
+    }
+    for constraint in &mut constraints.checks {
+        let mut referenced_columns = Vec::new();
+        collect_constraint_columns(&constraint.expr, &mut referenced_columns);
+        let base = if referenced_columns.len() == 1 {
+            format!("{}_{}_check", relation.name, referenced_columns[0])
+        } else {
+            format!("{}_check", relation.name)
+        };
+        changed |= assign_constraint_name(&mut constraint.name, base, &mut used)?;
+    }
+    for constraint in &mut constraints.foreign_keys {
+        let component = constraint_column_component(&constraint.local_columns, relation)?;
+        changed |= assign_constraint_name(
+            &mut constraint.name,
+            format!("{}_{}_fkey", relation.name, component),
+            &mut used,
+        )?;
+    }
+    Ok(changed)
+}
+
+fn record_constraint_name(
+    used: &mut BTreeSet<String>,
+    name: Option<&str>,
+) -> StorageBackendResult<()> {
+    let Some(name) = name else {
+        return Ok(());
+    };
+    if name.is_empty() {
+        return Err(StorageBackendError::Other(
+            "constraint name must not be empty".into(),
+        ));
+    }
+    if !used.insert(name.to_string()) {
+        return Err(StorageBackendError::Other(format!(
+            "constraint `{name}` is declared more than once"
+        )));
+    }
+    Ok(())
+}
+
+fn assign_constraint_name(
+    target: &mut Option<String>,
+    base: String,
+    used: &mut BTreeSet<String>,
+) -> StorageBackendResult<bool> {
+    if target.is_some() {
+        return Ok(false);
+    }
+    if used.insert(base.clone()) {
+        *target = Some(base);
+        return Ok(true);
+    }
+    for suffix in 1_u64.. {
+        let candidate = format!("{base}{suffix}");
+        if used.insert(candidate.clone()) {
+            *target = Some(candidate);
+            return Ok(true);
+        }
+    }
+    Err(StorageBackendError::Other(format!(
+        "constraint name suffix space exhausted for `{base}`"
+    )))
+}
+
+fn constraint_column_component(
+    columns: &[String],
+    relation: &RelationIdentity,
+) -> StorageBackendResult<String> {
+    if columns.is_empty() {
+        return Err(StorageBackendError::Other(format!(
+            "constraint on table `{}` has no columns",
+            relation.qualified_name()
+        )));
+    }
+    Ok(columns.join("_"))
+}
+
+fn collect_constraint_columns(expression: &uqa_sql::ast::Expr, output: &mut Vec<String>) {
+    use uqa_sql::ast::{Expr, FrameBound};
+    match expression {
+        Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } => {
+            if !output.contains(name) {
+                output.push(name.clone());
+            }
+        }
+        Expr::Func {
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            for argument in args {
+                collect_constraint_columns(argument, output);
+            }
+            for order in order_by {
+                collect_constraint_columns(&order.expr, output);
+            }
+            if let Some(filter) = filter {
+                collect_constraint_columns(filter, output);
+            }
+        }
+        Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
+            for item in items {
+                collect_constraint_columns(item, output);
+            }
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            collect_constraint_columns(lhs, output);
+            collect_constraint_columns(rhs, output);
+        }
+        Expr::Not(inner)
+        | Expr::UnaryMinus(inner)
+        | Expr::IsNull { expr: inner, .. }
+        | Expr::Cast { expr: inner, .. } => {
+            collect_constraint_columns(inner, output);
+        }
+        Expr::Between { expr, low, high } => {
+            collect_constraint_columns(expr, output);
+            collect_constraint_columns(low, output);
+            collect_constraint_columns(high, output);
+        }
+        Expr::InList { expr, list, .. } => {
+            collect_constraint_columns(expr, output);
+            for item in list {
+                collect_constraint_columns(item, output);
+            }
+        }
+        Expr::WindowCall { args, spec, .. } => {
+            for argument in args {
+                collect_constraint_columns(argument, output);
+            }
+            for expression in &spec.partition_by {
+                collect_constraint_columns(expression, output);
+            }
+            for order in &spec.order_by {
+                collect_constraint_columns(&order.expr, output);
+            }
+            if let Some(frame) = &spec.frame {
+                for bound in [&frame.start, &frame.end] {
+                    if let FrameBound::Preceding(expression) | FrameBound::Following(expression) =
+                        bound
+                    {
+                        collect_constraint_columns(expression, output);
+                    }
+                }
+            }
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            if let Some(base) = base {
+                collect_constraint_columns(base, output);
+            }
+            for (condition, result) in when {
+                collect_constraint_columns(condition, output);
+                collect_constraint_columns(result, output);
+            }
+            if let Some(else_branch) = else_branch {
+                collect_constraint_columns(else_branch, output);
+            }
+        }
+        Expr::InSubquery { expr, .. } => collect_constraint_columns(expr, output),
+        Expr::Default
+        | Expr::Star
+        | Expr::QualifiedStar(_)
+        | Expr::Literal(_)
+        | Expr::Param(_)
+        | Expr::ScalarSubquery(_)
+        | Expr::Exists { .. } => {}
+    }
+}
 
 impl Engine {
     pub fn set_column_default(
@@ -53,6 +293,47 @@ impl Engine {
         Ok(true)
     }
 
+    pub(crate) fn set_column_generated(
+        &self,
+        table: &str,
+        column: &str,
+        generated: Option<uqa_sql::ast::GeneratedColumn>,
+    ) -> StorageBackendResult<bool> {
+        self.with_implicit_storage_transaction(|engine| {
+            engine.set_column_generated_inner(table, column, generated)
+        })
+    }
+
+    pub(super) fn set_column_generated_inner(
+        &self,
+        table: &str,
+        column: &str,
+        mut generated: Option<uqa_sql::ast::GeneratedColumn>,
+    ) -> StorageBackendResult<bool> {
+        let table_name = self
+            .try_resolve_table_name(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let t = self
+            .try_table(&table_name)?
+            .ok_or_else(|| table_not_found(&table_name))?;
+        if let Some(generated) = &mut generated {
+            self.bind_sequence_references_in_expr(&mut generated.expression)?;
+        }
+        let mut columns = t.columns.write();
+        let mut next = columns.clone();
+        let col = next
+            .iter_mut()
+            .find(|col| col.name == column)
+            .ok_or_else(|| column_not_found(&table_name, column))?;
+        col.generated = generated;
+        self.mark_column_stats_dirty(&table_name, &t)?;
+        if self.is_persistent() {
+            self.try_save_table_schema_with_columns(&table_name, &t, &next)?;
+        }
+        *columns = next;
+        Ok(true)
+    }
+
     pub fn set_column_not_null(
         &self,
         table: &str,
@@ -76,18 +357,32 @@ impl Engine {
         let t = self
             .try_table(&table_name)?
             .ok_or_else(|| table_not_found(&table_name))?;
-        let mut columns = t.columns.write();
-        let mut next = columns.clone();
+        let mut next = t.columns.read().clone();
         let col = next
             .iter_mut()
             .find(|col| col.name == column)
             .ok_or_else(|| column_not_found(&table_name, column))?;
         col.not_null = not_null;
+        col.not_null_explicit = not_null;
+        if !not_null {
+            col.not_null_name = None;
+        }
+        let mut constraints = uqa_sql::ast::TableConstraintSet {
+            checks: t.table_checks.read().clone(),
+            foreign_keys: t.foreign_keys.read().clone(),
+            key_constraints: t.key_constraints.read().clone(),
+        };
+        let relation =
+            RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
+        materialize_constraint_names(&relation, &mut next, &mut constraints)?;
         self.mark_column_stats_dirty(&table_name, &t)?;
         if self.is_persistent() {
-            self.try_save_table_schema_with_columns(&table_name, &t, &next)?;
+            self.try_save_table_schema_with_components(&table_name, &t, &next, &constraints)?;
         }
-        *columns = next;
+        *t.columns.write() = next;
+        *t.table_checks.write() = constraints.checks;
+        *t.foreign_keys.write() = constraints.foreign_keys;
+        *t.key_constraints.write() = constraints.key_constraints;
         Ok(true)
     }
 
@@ -163,15 +458,19 @@ impl Engine {
         for foreign_key in &mut foreign_keys {
             foreign_key.ref_table = self.canonical_foreign_key_target(&foreign_key.ref_table)?;
         }
-        let constraints = uqa_sql::ast::TableConstraintSet {
+        let mut constraints = uqa_sql::ast::TableConstraintSet {
             checks,
             foreign_keys,
             key_constraints,
         };
+        let relation =
+            RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
+        let mut columns = t.columns.read().clone();
+        materialize_constraint_names(&relation, &mut columns, &mut constraints)?;
         if self.is_persistent() {
-            let columns = t.columns.read().clone();
             self.try_save_table_schema_with_components(&table_name, &t, &columns, &constraints)?;
         }
+        *t.columns.write() = columns;
         *t.table_checks.write() = constraints.checks;
         *t.foreign_keys.write() = constraints.foreign_keys;
         *t.key_constraints.write() = constraints.key_constraints;
@@ -214,25 +513,30 @@ impl Engine {
                 column.not_null = true;
             }
         }
-        let constraints = uqa_sql::ast::TableConstraintSet {
+        let mut constraints = uqa_sql::ast::TableConstraintSet {
             checks: t.table_checks.read().clone(),
             foreign_keys: t.foreign_keys.read().clone(),
             key_constraints,
         };
+        let relation =
+            RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
+        materialize_constraint_names(&relation, &mut columns, &mut constraints)?;
         if self.is_persistent() {
             self.try_save_table_schema_with_components(&table_name, &t, &columns, &constraints)?;
         }
         *t.columns.write() = columns;
+        *t.table_checks.write() = constraints.checks;
+        *t.foreign_keys.write() = constraints.foreign_keys;
         *t.key_constraints.write() = constraints.key_constraints;
         self.refresh_value_indexes_for_table(&table_name)?;
         Ok(())
     }
 
-    /// Snapshot of every CHECK constraint that applies to `table`,
-    /// merging the column-level CHECKs into the table-level list.
-    /// Returns `(name, expr)` pairs where `name` is the constraint
-    /// name when one was supplied (synthesised as `<col>_check` for
-    /// column-level constraints).
+    /// Snapshot of every CHECK constraint that applies to `table`, merging the
+    /// column-level CHECKs into the table-level list. Returns `(name, expr)`
+    /// pairs for backward API compatibility; use
+    /// [`Self::try_check_constraint_definitions`] when enforcement metadata is
+    /// required.
     pub fn check_constraints(
         &self,
         table: &str,
@@ -244,19 +548,58 @@ impl Engine {
         &self,
         table: &str,
     ) -> StorageBackendResult<Vec<(Option<String>, uqa_sql::ast::Expr)>> {
+        Ok(self
+            .try_check_constraint_definitions(table)?
+            .into_iter()
+            .map(|constraint| (constraint.name, constraint.expr))
+            .collect())
+    }
+
+    /// Snapshot of every CHECK constraint, including `PostgreSQL` 18 enforcement
+    /// metadata.
+    pub fn try_check_constraint_definitions(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Vec<uqa_sql::ast::TableCheck>> {
         let t = self
             .try_table(table)?
             .ok_or_else(|| table_not_found(table))?;
-        let mut out: Vec<(Option<String>, uqa_sql::ast::Expr)> = Vec::new();
+        let mut out = Vec::new();
         for col in t.columns.read().iter() {
             if let Some(expr) = col.check.clone() {
-                out.push((Some(format!("{}_check", col.name)), expr));
+                out.push(uqa_sql::ast::TableCheck {
+                    name: col
+                        .check_name
+                        .clone()
+                        .or_else(|| Some(format!("{}_check", col.name))),
+                    expr,
+                    enforced: col.check_enforced,
+                });
             }
         }
-        for c in t.table_checks.read().iter() {
-            out.push((c.name.clone(), c.expr.clone()));
-        }
+        out.extend(t.table_checks.read().iter().cloned());
         Ok(out)
+    }
+
+    /// Snapshot of constraints declared at table scope, without lifting the
+    /// column-level forms into the result. Catalog synthesis uses this together
+    /// with the column definitions so every physical constraint is represented
+    /// exactly once.
+    pub(crate) fn try_declared_table_constraints(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<uqa_sql::ast::TableConstraintSet> {
+        let t = self
+            .try_table(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let checks = t.table_checks.read().clone();
+        let foreign_keys = t.foreign_keys.read().clone();
+        let key_constraints = t.key_constraints.read().clone();
+        Ok(uqa_sql::ast::TableConstraintSet {
+            checks,
+            foreign_keys,
+            key_constraints,
+        })
     }
 
     /// Snapshot of every FOREIGN KEY constraint that applies to
@@ -277,7 +620,10 @@ impl Engine {
         for col in t.columns.read().iter() {
             if let Some(reference) = col.references.clone() {
                 out.push(uqa_sql::ast::ForeignKey {
-                    name: Some(format!("{}_fkey", col.name)),
+                    name: reference
+                        .name
+                        .clone()
+                        .or_else(|| Some(format!("{}_fkey", col.name))),
                     local_columns: vec![col.name.clone()],
                     ref_table: reference.table,
                     ref_columns: vec![reference.column],
@@ -285,6 +631,7 @@ impl Engine {
                     on_delete: reference.on_delete,
                     on_delete_set_columns: Vec::new(),
                     match_type: reference.match_type,
+                    enforced: reference.enforced,
                 });
             }
         }
@@ -325,7 +672,7 @@ impl Engine {
             .collect();
         for other in names {
             for fk in self.try_foreign_keys(&other)? {
-                if Self::foreign_key_targets(&fk, &target) {
+                if fk.enforced && Self::foreign_key_targets(&fk, &target) {
                     out.push((other.clone(), fk));
                 }
             }

@@ -66,6 +66,33 @@ fn lateral_engine() -> Engine {
     engine
 }
 
+fn using_engine() -> Engine {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE join_left (id INTEGER, shared TEXT, l_only TEXT)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE join_right (id INTEGER, shared TEXT, r_only TEXT)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO join_left VALUES
+            (1, 'same', 'l1'),
+            (2, 'left', 'l2'),
+            (NULL, 'null-left', 'ln')",
+    );
+    exec(
+        &engine,
+        "INSERT INTO join_right VALUES
+            (1, 'same', 'r1'),
+            (3, 'right', 'r3'),
+            (NULL, 'null-right', 'rn')",
+    );
+    engine
+}
+
 fn str_set(result: &uqa_sql::SQLResult, column: &str) -> BTreeSet<String> {
     result
         .rows
@@ -135,7 +162,7 @@ fn inner_join_uses_composite_expression_key() {
         &engine,
         "CREATE TABLE tiles (x INTEGER, y INTEGER, label TEXT)",
     );
-    // Coordinates chosen so PostgreSQL 17 float -> int casts (round
+    // Coordinates chosen so PostgreSQL 18 float -> int casts (round
     // half to even, not truncation) land on the intended tiles.
     exec(
         &engine,
@@ -178,7 +205,7 @@ fn left_join_uses_composite_expression_key_and_pads_unmatched() {
         &engine,
         "CREATE TABLE tiles (x INTEGER, y INTEGER, label TEXT)",
     );
-    // Coordinates chosen so PostgreSQL 17 float -> int casts (round
+    // Coordinates chosen so PostgreSQL 18 float -> int casts (round
     // half to even, not truncation) land on the intended tiles.
     exec(
         &engine,
@@ -335,6 +362,478 @@ fn full_join_no_overlap() {
 }
 
 #[test]
+fn ordinary_join_star_uses_public_labels_and_preserves_repeated_values() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE star_left (id INTEGER, value TEXT)");
+    exec(&engine, "CREATE TABLE star_right (id INTEGER, value TEXT)");
+    exec(&engine, "INSERT INTO star_left VALUES (1, 'left')");
+    exec(&engine, "INSERT INTO star_right VALUES (1, 'right')");
+    let result = query(
+        &engine,
+        "SELECT * FROM star_left l JOIN star_right r ON l.id = r.id",
+    );
+    assert_eq!(result.columns, ["id", "value", "id", "value"]);
+    assert_eq!(result.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(result.value_at(0, 1), Some(&Value::Str("left".into())));
+    assert_eq!(result.value_at(0, 2), Some(&Value::Int(1)));
+    assert_eq!(result.value_at(0, 3), Some(&Value::Str("right".into())));
+}
+
+#[test]
+fn join_using_merges_the_key_and_retains_input_qualification() {
+    let engine = using_engine();
+    let result = query(
+        &engine,
+        "SELECT id, l.id AS left_id, r.id AS right_id, l.l_only, r.r_only
+         FROM join_left l JOIN join_right r USING (id)",
+    );
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["id"], Value::Int(1));
+    assert_eq!(result.rows[0]["left_id"], Value::Int(1));
+    assert_eq!(result.rows[0]["right_id"], Value::Int(1));
+    assert_eq!(result.rows[0]["l_only"], Value::Str("l1".into()));
+    assert_eq!(result.rows[0]["r_only"], Value::Str("r1".into()));
+}
+
+#[test]
+fn join_using_keeps_binding_columns_when_projection_does_not_reference_them() {
+    let engine = using_engine();
+    let result = query(
+        &engine,
+        "SELECT l.l_only FROM join_left l JOIN join_right r USING (id)",
+    );
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["l_only"], Value::Str("l1".into()));
+}
+
+#[test]
+fn nested_join_using_rebinds_the_merged_row_type() {
+    let engine = using_engine();
+    exec(&engine, "CREATE TABLE join_third (id INTEGER, t_only TEXT)");
+    exec(
+        &engine,
+        "INSERT INTO join_third VALUES (1, 't1'), (4, 't4')",
+    );
+    let result = query(
+        &engine,
+        "SELECT id, l.id AS left_id, r.id AS right_id, t.id AS third_id, t.t_only
+         FROM join_left l
+         JOIN join_right r USING (id)
+         JOIN join_third t USING (id)",
+    );
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["id"], Value::Int(1));
+    assert_eq!(result.rows[0]["left_id"], Value::Int(1));
+    assert_eq!(result.rows[0]["right_id"], Value::Int(1));
+    assert_eq!(result.rows[0]["third_id"], Value::Int(1));
+    assert_eq!(result.rows[0]["t_only"], Value::Str("t1".into()));
+}
+
+#[test]
+fn join_using_outer_variants_choose_the_postgresql_merged_value() {
+    let engine = using_engine();
+    for (join, expected) in [
+        ("LEFT JOIN", vec![Value::Int(1), Value::Int(2), Value::Null]),
+        (
+            "RIGHT JOIN",
+            vec![Value::Int(1), Value::Int(3), Value::Null],
+        ),
+        (
+            "FULL JOIN",
+            vec![
+                Value::Int(1),
+                Value::Int(2),
+                Value::Int(3),
+                Value::Null,
+                Value::Null,
+            ],
+        ),
+    ] {
+        let result = query(
+            &engine,
+            &format!(
+                "SELECT id FROM join_left l {join} join_right r USING (id) ORDER BY id NULLS LAST"
+            ),
+        );
+        assert_eq!(
+            result
+                .rows
+                .iter()
+                .map(|row| row["id"].clone())
+                .collect::<Vec<_>>(),
+            expected,
+            "{join}"
+        );
+    }
+}
+
+#[test]
+fn natural_join_derives_common_columns_in_left_order() {
+    let engine = using_engine();
+    let result = query(
+        &engine,
+        "SELECT * FROM join_left l NATURAL JOIN join_right r",
+    );
+    assert_eq!(result.columns, ["id", "shared", "l_only", "r_only"]);
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["id"], Value::Int(1));
+    assert_eq!(result.rows[0]["shared"], Value::Str("same".into()));
+    assert_eq!(result.rows[0]["l_only"], Value::Str("l1".into()));
+    assert_eq!(result.rows[0]["r_only"], Value::Str("r1".into()));
+}
+
+#[test]
+fn natural_join_keeps_all_binding_columns_when_projection_omits_them() {
+    let engine = using_engine();
+    let result = query(
+        &engine,
+        "SELECT l.l_only FROM join_left l NATURAL JOIN join_right r",
+    );
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["l_only"], Value::Str("l1".into()));
+}
+
+#[test]
+fn natural_join_binds_a_materialized_cte_row_type() {
+    let engine = using_engine();
+    let result = query(
+        &engine,
+        "WITH left_cte AS (SELECT id, shared, l_only FROM join_left)
+         SELECT l.l_only
+         FROM left_cte l NATURAL JOIN join_right r",
+    );
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["l_only"], Value::Str("l1".into()));
+}
+
+#[test]
+fn natural_join_without_common_columns_is_cartesian() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE natural_left (a INTEGER)");
+    exec(&engine, "CREATE TABLE natural_right (b TEXT)");
+    exec(&engine, "INSERT INTO natural_left VALUES (1), (2)");
+    exec(&engine, "INSERT INTO natural_right VALUES ('x'), ('y')");
+    let result = query(
+        &engine,
+        "SELECT * FROM natural_left NATURAL JOIN natural_right",
+    );
+    assert_eq!(result.columns, ["a", "b"]);
+    assert_eq!(result.rows.len(), 4);
+}
+
+#[test]
+fn join_using_alias_names_only_the_merged_columns() {
+    let engine = using_engine();
+    let result = query(
+        &engine,
+        "SELECT joined.id, l.id AS left_id, r.id AS right_id
+         FROM join_left l FULL JOIN join_right r USING (id) AS joined
+         WHERE joined.id = 3",
+    );
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["id"], Value::Int(3));
+    assert_eq!(result.rows[0]["left_id"], Value::Null);
+    assert_eq!(result.rows[0]["right_id"], Value::Int(3));
+}
+
+#[test]
+fn join_using_and_natural_bind_a_lateral_row_type() {
+    let engine = using_engine();
+    for qualification in ["USING (id)", "NATURAL JOIN"] {
+        let sql = if qualification == "NATURAL JOIN" {
+            "SELECT id, l.id AS left_id, r.id AS right_id, r.note
+             FROM join_left l NATURAL JOIN LATERAL
+                  (SELECT l.id AS id, 'seen' AS note) r
+             ORDER BY id"
+                .to_string()
+        } else {
+            format!(
+                "SELECT id, l.id AS left_id, r.id AS right_id, r.note
+                 FROM join_left l JOIN LATERAL
+                      (SELECT l.id AS id, 'seen' AS note) r {qualification}
+                 ORDER BY id"
+            )
+        };
+        let result = query(&engine, &sql);
+        assert_eq!(result.rows.len(), 2, "{qualification}");
+        assert_eq!(result.rows[0]["id"], Value::Int(1));
+        assert_eq!(result.rows[1]["id"], Value::Int(2));
+        assert_eq!(result.rows[0]["left_id"], Value::Int(1));
+        assert_eq!(result.rows[0]["right_id"], Value::Int(1));
+        assert_eq!(result.rows[0]["note"], Value::Str("seen".into()));
+    }
+}
+
+#[test]
+fn join_using_reports_postgresql_column_errors() {
+    let engine = using_engine();
+    let missing = engine
+        .sql(
+            "SELECT * FROM join_left JOIN join_right USING (missing)",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(missing.sqlstate(), Some("42703"));
+    assert!(missing.to_string().contains("does not exist in left table"));
+
+    let duplicate = engine
+        .sql(
+            "SELECT * FROM join_left JOIN join_right USING (id, id)",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(duplicate.sqlstate(), Some("42701"));
+}
+
+#[test]
+fn join_using_resolves_postgresql_common_types_before_execution() {
+    let engine = Engine::new();
+    let result = query(
+        &engine,
+        "SELECT pg_typeof(id) AS ty, id
+         FROM (VALUES (1::smallint)) AS l(id)
+         FULL JOIN (VALUES (1::bigint)) AS r(id) USING (id)",
+    );
+    assert_eq!(result.rows[0]["ty"], Value::Str("bigint".into()));
+    assert_eq!(result.rows[0]["id"], Value::Int(1));
+
+    let varchar_left = query(
+        &engine,
+        "SELECT pg_typeof(id) AS ty
+         FROM (VALUES ('x'::varchar)) AS l(id)
+         FULL JOIN (VALUES ('x'::text)) AS r(id) USING (id)",
+    );
+    assert_eq!(
+        varchar_left.rows[0]["ty"],
+        Value::Str("character varying".into())
+    );
+
+    let text_left = query(
+        &engine,
+        "SELECT pg_typeof(id) AS ty
+         FROM (VALUES ('x'::text)) AS l(id)
+         FULL JOIN (VALUES ('x'::varchar)) AS r(id) USING (id)",
+    );
+    assert_eq!(text_left.rows[0]["ty"], Value::Str("text".into()));
+
+    let temporal = query(
+        &engine,
+        "SELECT pg_typeof(id) AS ty, id::text AS value
+         FROM (VALUES ('2020-01-01'::date)) AS l(id)
+         FULL JOIN (VALUES ('2020-01-01 00:00:00'::timestamp)) AS r(id) USING (id)",
+    );
+    assert_eq!(
+        temporal.rows[0]["ty"],
+        Value::Str("timestamp without time zone".into())
+    );
+    assert_eq!(
+        temporal.rows[0]["value"],
+        Value::Str("2020-01-01 00:00:00".into())
+    );
+
+    for sql in [
+        "SELECT pg_typeof(id) AS ty, id FROM (VALUES (1::oid)) AS l(id) FULL JOIN (VALUES (1::integer)) AS r(id) USING (id)",
+        "SELECT pg_typeof(id) AS ty, id FROM (VALUES (1::bigint)) AS l(id) FULL JOIN (VALUES (1::oid)) AS r(id) USING (id)",
+    ] {
+        let oid = query(&engine, sql);
+        assert_eq!(oid.rows[0]["ty"], Value::Str("oid".into()), "{sql}");
+        assert_eq!(oid.rows[0]["id"], Value::Int(1), "{sql}");
+    }
+}
+
+#[test]
+fn join_using_preserves_types_through_tables_subqueries_and_cte_spill() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE typed_left (id SMALLINT)");
+    exec(&engine, "CREATE TABLE typed_right (id BIGINT)");
+    exec(&engine, "INSERT INTO typed_left VALUES (1)");
+    exec(&engine, "INSERT INTO typed_right VALUES (1)");
+
+    for sql in [
+        "SELECT pg_typeof(id) AS ty FROM typed_left FULL JOIN typed_right USING (id)",
+        "SELECT pg_typeof(id) AS ty
+         FROM (SELECT id FROM typed_left) l
+         FULL JOIN (SELECT id FROM typed_right) r USING (id)",
+        "WITH l AS (SELECT id FROM typed_left), r AS (SELECT id FROM typed_right)
+         SELECT pg_typeof(id) AS ty FROM l FULL JOIN r USING (id)",
+    ] {
+        let result = query(&engine, sql);
+        assert_eq!(result.rows[0]["ty"], Value::Str("bigint".into()), "{sql}");
+    }
+}
+
+#[test]
+fn join_using_resolves_static_table_function_types() {
+    let engine = Engine::new();
+    let result = query(
+        &engine,
+        "SELECT pg_typeof(id) AS ty, id
+         FROM (VALUES (1::smallint)) AS l(id)
+         JOIN generate_series(1::bigint, 1::bigint) AS r(id) USING (id)",
+    );
+    assert_eq!(result.rows[0]["ty"], Value::Str("bigint".into()));
+    assert_eq!(result.rows[0]["id"], Value::Int(1));
+
+    let json = query(
+        &engine,
+        "SELECT pg_typeof(key) AS key_type, pg_typeof(value) AS value_type
+         FROM json_each('{\"a\": 1}'::json)",
+    );
+    assert_eq!(json.rows[0]["key_type"], Value::Str("text".into()));
+    assert_eq!(json.rows[0]["value_type"], Value::Str("json".into()));
+}
+
+#[test]
+fn join_using_rejects_undefined_postgresql_equality_operators() {
+    let engine = Engine::new();
+    for sql in [
+        "SELECT * FROM (VALUES (true)) l(id) JOIN (VALUES (1)) r(id) USING (id)",
+        "SELECT * FROM (VALUES ('{}'::json)) l(id) JOIN (VALUES ('{}'::json)) r(id) USING (id)",
+        "SELECT * FROM (VALUES (ARRAY[1]::integer[])) l(id)
+         JOIN (VALUES (ARRAY[1]::bigint[])) r(id) USING (id)",
+    ] {
+        let error = engine.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42883"), "{sql}: {error}");
+    }
+}
+
+#[test]
+fn ordinary_join_rejects_an_ambiguous_unqualified_column() {
+    let engine = using_engine();
+    let error = engine
+        .sql("SELECT id FROM join_left l JOIN join_right r ON true", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42702"));
+}
+
+#[test]
+fn cursor_preserves_different_duplicate_non_using_columns() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE cursor_left (id INTEGER, shared TEXT)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE cursor_right (id INTEGER, shared TEXT)",
+    );
+    exec(&engine, "INSERT INTO cursor_left VALUES (1, 'left-value')");
+    exec(
+        &engine,
+        "INSERT INTO cursor_right VALUES (1, 'right-value')",
+    );
+    let result = query(
+        &engine,
+        "SELECT * FROM cursor_left l JOIN cursor_right r USING (id)",
+    );
+    assert_eq!(result.columns, ["id", "shared", "shared"]);
+    assert_eq!(result.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(
+        result.value_at(0, 1),
+        Some(&Value::Str("left-value".into()))
+    );
+    assert_eq!(
+        result.value_at(0, 2),
+        Some(&Value::Str("right-value".into()))
+    );
+    let mut cursor = engine
+        .sql_cursor(
+            "SELECT * FROM cursor_left l JOIN cursor_right r USING (id)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(cursor.columns(), ["id", "shared", "shared"]);
+    let batch = cursor.next().unwrap().unwrap();
+    assert_eq!(batch.columns()[0].values, [Value::Int(1)]);
+    assert_eq!(batch.columns()[1].values, [Value::Str("left-value".into())]);
+    assert_eq!(
+        batch.columns()[2].values,
+        [Value::Str("right-value".into())]
+    );
+}
+
+#[test]
+fn duplicate_join_columns_survive_ordering_derived_tables_and_cte_aliases() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE duplicate_left (id INTEGER, left_value TEXT)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE duplicate_right (id INTEGER, right_value TEXT)",
+    );
+    exec(&engine, "INSERT INTO duplicate_left VALUES (1, 'left')");
+    exec(&engine, "INSERT INTO duplicate_right VALUES (2, 'right')");
+
+    for sql in [
+        "SELECT * FROM duplicate_left l CROSS JOIN duplicate_right r ORDER BY l.id",
+        "SELECT nested.* FROM (SELECT * FROM duplicate_left l CROSS JOIN duplicate_right r) nested",
+    ] {
+        let result = query(&engine, sql);
+        assert_eq!(
+            result.columns,
+            ["id", "left_value", "id", "right_value"],
+            "{sql}"
+        );
+        assert_eq!(result.value_at(0, 0), Some(&Value::Int(1)), "{sql}");
+        assert_eq!(
+            result.value_at(0, 1),
+            Some(&Value::Str("left".into())),
+            "{sql}"
+        );
+        assert_eq!(result.value_at(0, 2), Some(&Value::Int(2)), "{sql}");
+        assert_eq!(
+            result.value_at(0, 3),
+            Some(&Value::Str("right".into())),
+            "{sql}"
+        );
+    }
+
+    let aliased = query(
+        &engine,
+        "WITH joined(first_id, left_value, second_id, right_value) AS (
+             SELECT * FROM duplicate_left l CROSS JOIN duplicate_right r
+         )
+         SELECT first_id, second_id FROM joined",
+    );
+    assert_eq!(aliased.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(aliased.value_at(0, 1), Some(&Value::Int(2)));
+
+    let ambiguous = engine
+        .sql(
+            "SELECT nested.id FROM (SELECT * FROM duplicate_left l CROSS JOIN duplicate_right r) nested",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(ambiguous.sqlstate(), Some("42702"));
+}
+
+#[test]
+fn duplicate_projection_labels_remain_positional_and_order_alias_is_ambiguous() {
+    let engine = Engine::new();
+    let result = query(
+        &engine,
+        "SELECT l.id AS x, r.id AS x
+         FROM (VALUES (1)) l(id) CROSS JOIN (VALUES (2)) r(id)
+         ORDER BY 1",
+    );
+    assert_eq!(result.columns, ["x", "x"]);
+    assert_eq!(result.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(result.value_at(0, 1), Some(&Value::Int(2)));
+
+    let error = engine
+        .sql(
+            "SELECT l.id AS x, r.id AS x
+             FROM (VALUES (1)) l(id) CROSS JOIN (VALUES (2)) r(id)
+             ORDER BY x",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42702"));
+}
+
+#[test]
 fn implicit_cross_join() {
     let engine = Engine::new();
     exec(&engine, "CREATE TABLE a (id INTEGER PRIMARY KEY, val TEXT)");
@@ -451,4 +950,133 @@ fn lateral_with_count() {
     assert_eq!(result.rows[0]["emp_count"], Value::Int(2));
     assert_eq!(result.rows[1]["dept_name"], Value::Str("Sales".into()));
     assert_eq!(result.rows[1]["emp_count"], Value::Int(2));
+}
+
+#[test]
+fn lateral_subqueries_preserve_outer_and_output_type_identity() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE lateral_types (v SMALLINT, label VARCHAR(7), score REAL)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO lateral_types VALUES (7, 'seven', 1.5)",
+    );
+
+    let outer_types = query(
+        &engine,
+        "SELECT s.v_type, s.label_type, s.score_type
+         FROM lateral_types AS l
+         CROSS JOIN LATERAL (
+             SELECT pg_typeof(l.v) AS v_type,
+                    pg_typeof(l.label) AS label_type,
+                    pg_typeof(l.score) AS score_type
+         ) AS s",
+    );
+    assert_eq!(outer_types.rows[0]["v_type"], Value::Str("smallint".into()));
+    assert_eq!(
+        outer_types.rows[0]["label_type"],
+        Value::Str("character varying".into())
+    );
+    assert_eq!(outer_types.rows[0]["score_type"], Value::Str("real".into()));
+
+    let output_types = query(
+        &engine,
+        "SELECT s.v, s.label, s.score
+         FROM lateral_types AS l
+         CROSS JOIN LATERAL (
+             SELECT l.v::bigint AS v,
+                    l.label::varchar(3) AS label,
+                    l.score::double precision AS score
+         ) AS s",
+    );
+    assert_eq!(
+        output_types.column_types,
+        [
+            Some(uqa_sql::ColumnType::BigInteger),
+            Some(uqa_sql::ColumnType::Varchar(Some(3))),
+            Some(uqa_sql::ColumnType::DoublePrecision),
+        ]
+    );
+}
+
+#[test]
+fn empty_cte_lateral_source_keeps_its_declared_type() {
+    let engine = Engine::new();
+    let result = query(
+        &engine,
+        "WITH c AS (SELECT 1::smallint AS v WHERE false)
+         SELECT pg_typeof(s.v) AS ty, s.v
+         FROM (VALUES (1)) AS seed(n)
+         LEFT JOIN LATERAL (SELECT v FROM c) AS s ON true",
+    );
+    assert_eq!(result.rows[0]["ty"], Value::Str("smallint".into()));
+    assert_eq!(result.rows[0]["v"], Value::Null);
+    assert_eq!(
+        result.column_types,
+        [
+            Some(uqa_sql::ColumnType::Regtype),
+            Some(uqa_sql::ColumnType::SmallInteger),
+        ]
+    );
+}
+
+#[test]
+fn qualified_star_projects_only_the_named_relation() {
+    let engine = engine_with_orders();
+    let result = query(
+        &engine,
+        "SELECT u.*, o.product
+         FROM users AS u JOIN orders AS o ON o.user_id = u.id
+         WHERE o.oid = 10",
+    );
+    assert_eq!(result.columns, ["id", "name", "product"]);
+    assert_eq!(result.rows[0]["id"], Value::Int(1));
+    assert_eq!(result.rows[0]["name"], Value::Str("Alice".into()));
+    assert_eq!(result.rows[0]["product"], Value::Str("Book".into()));
+}
+
+#[test]
+fn qualified_star_preserves_using_side_values() {
+    let engine = using_engine();
+    let result = query(
+        &engine,
+        "SELECT r.*
+         FROM join_left AS l LEFT JOIN join_right AS r USING (id)
+         WHERE l.id IN (1, 2)
+         ORDER BY l.id",
+    );
+    assert_eq!(result.columns, ["id", "shared", "r_only"]);
+    assert_eq!(result.rows[0]["id"], Value::Int(1));
+    assert_eq!(result.rows[0]["shared"], Value::Str("same".into()));
+    assert_eq!(result.rows[1]["id"], Value::Null);
+    assert_eq!(result.rows[1]["shared"], Value::Null);
+    assert_eq!(result.rows[1]["r_only"], Value::Null);
+}
+
+#[test]
+fn qualified_star_keeps_dots_inside_quoted_identifiers() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE dotted_star (\"c.d\" INTEGER, plain TEXT)",
+    );
+    exec(&engine, "INSERT INTO dotted_star VALUES (7, 'seven')");
+    let result = query(
+        &engine,
+        "SELECT \"a.b\".* FROM dotted_star AS \"a.b\" ORDER BY \"a.b\".\"c.d\"",
+    );
+    assert_eq!(result.columns, ["c.d", "plain"]);
+    assert_eq!(result.rows[0]["c.d"], Value::Int(7));
+    assert_eq!(result.rows[0]["plain"], Value::Str("seven".into()));
+}
+
+#[test]
+fn qualified_star_rejects_an_unknown_relation() {
+    let engine = engine_with_orders();
+    let error = engine
+        .sql("SELECT missing.* FROM users AS u", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42P01"));
 }

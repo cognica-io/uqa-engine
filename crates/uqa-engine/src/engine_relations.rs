@@ -197,10 +197,12 @@ impl Engine {
             .try_table(table)
             .map_err(|err| SQLError::Internal(format!("resolve table `{table}`: {err}")))?
             .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-        let store = table_state.document_store.read();
-        let documents = store
-            .iter_all()
-            .map_err(|err| SQLError::Internal(format!("scan deep_learn table `{table}`: {err}")))?;
+        let doc_ids =
+            table_state.document_store.read().doc_ids().map_err(|err| {
+                SQLError::Internal(format!("scan deep_learn table `{table}`: {err}"))
+            })?;
+        let projection = vec![features_field.to_string(), label_field.to_string()];
+        let documents = self.get_documents_with_virtual_projection(table, &doc_ids, &projection)?;
         let mut examples = Vec::new();
         for (doc_id, document) in documents {
             let features = document.get(features_field).ok_or_else(|| {

@@ -175,7 +175,7 @@ struct ExpectedQuery {
 }
 
 pub fn load_expected_results() -> Vec<CanonicalResult> {
-    let path = fixture_root().join("expected/pg17.json");
+    let path = fixture_root().join("expected/pg18.json");
     let fixture: ExpectedFixture = serde_json::from_str(
         &std::fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("read {}: {error}", path.display())),
@@ -230,7 +230,9 @@ fn canonical_value(value: &Value) -> String {
         Value::Int(value) => value.to_string(),
         Value::Float(value) => value.to_string(),
         Value::Decimal(value) => value.to_canonical_string(),
-        Value::Str(value) | Value::FixedChar(value) => value.clone(),
+        Value::Str(value) | Value::FixedChar(value) | Value::Json(value) | Value::JsonB(value) => {
+            value.clone()
+        }
         Value::Temporal(value) => value.to_sql_string(),
         Value::Bytes(value) => {
             let mut encoded = String::with_capacity(value.len() * 2);
@@ -239,7 +241,7 @@ fn canonical_value(value: &Value) -> String {
             }
             encoded
         }
-        Value::List(_) | Value::Map(_) => {
+        Value::Array(_) | Value::List(_) | Value::Row(_) | Value::Record(_) | Value::Map(_) => {
             serde_json::to_string(value).expect("serialize canonical TPC-H value")
         }
     }

@@ -9,7 +9,7 @@
 use super::{
     collect_query_operator, contains_aggregate, eval_physical_scalar, expect_column_name,
     expr_contains_volatile_function, has_aggregate, physical_exec_error, physical_projections,
-    physical_work_mem_bytes, projection_label_at, ComputePlan, CteScope, Document, Engine,
+    physical_work_mem_bytes, projection_label_at, ComputePlan, CteScope, Engine,
     EngineExpressionEvaluator, PhysicalEvalContext, ProjectionPlan, QueryBlockPlan, QueryOutput,
     QueryOutputMode, QueryRows, ResultRow, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
     ScoredDocumentSource, ScoredInput, Value, SCORE_COLUMN,
@@ -152,55 +152,6 @@ pub(in crate::sql) fn build_facet_output(
     let mut columns = facet_columns;
     columns.push("facet_count".into());
     collect_query_operator(engine, columns, sorted, execution.output_mode)
-}
-
-/// When a projection list contains `ScalarExpr::Star`, replace the synthetic
-/// `*` placeholder in the result column list with the source schema.
-/// Empty result sets still report the correct column shape, matching
-/// `PostgreSQL`'s behaviour of `SELECT * FROM empty_table`.
-pub(in crate::sql) fn expand_star_columns(
-    columns: Vec<String>,
-    projections: &[ProjectionPlan],
-    engine: &Engine,
-    table: Option<&str>,
-) -> Result<Vec<String>, SQLError> {
-    let has_star = projections
-        .iter()
-        .any(|p| matches!(p.expr, ScalarExpr::Star));
-    if !has_star {
-        return Ok(columns);
-    }
-    let schema_cols: Vec<String> = match table {
-        Some(t) => {
-            let cols = engine.try_table_columns(t).map_err(|error| {
-                SQLError::Internal(format!("read table columns for `{t}`: {error}"))
-            })?;
-            if cols.is_empty() {
-                engine
-                    .foreign_table_columns(t)
-                    .map_err(SQLError::Unsupported)?
-            } else {
-                cols
-            }
-        }
-        None => Vec::new(),
-    };
-    if schema_cols.is_empty() {
-        return Ok(columns);
-    }
-    let mut out: Vec<String> = Vec::with_capacity(columns.len() + schema_cols.len());
-    for c in columns {
-        if c == "*" {
-            for sc in &schema_cols {
-                if !out.iter().any(|x| x == sc) {
-                    out.push(sc.clone());
-                }
-            }
-        } else if !out.iter().any(|x| x == &c) {
-            out.push(c);
-        }
-    }
-    Ok(out)
 }
 
 pub(in crate::sql) fn order_by_references_field(stmt: &QueryBlockPlan) -> bool {
@@ -361,39 +312,37 @@ pub(in crate::sql) fn float_limit_offset(value: f64, label: &str) -> Result<u64,
 }
 
 pub(in crate::sql) fn projection_columns(projections: &[ProjectionPlan]) -> Vec<String> {
-    let mut out = Vec::with_capacity(projections.len());
-    for proj in projections {
-        let base = projection_label_at(proj);
-        let mut label = base.clone();
-        let mut suffix = 1usize;
-        while out.iter().any(|existing: &String| existing == &label) {
-            label = format!("{base}_{suffix}");
-            suffix += 1;
-        }
-        out.push(label);
-    }
-    out
+    projections.iter().map(projection_label_at).collect()
 }
 
-pub(in crate::sql) fn build_projection_row_with_ctes(
+pub(in crate::sql) fn build_projection_physical_row_with_ctes(
     engine: &Engine,
-    document: &Document,
+    input: &uqa_execution::OwnedPhysicalRow,
     projections: &[ProjectionPlan],
     params: &[SQLParam],
     ctes: &CteScope,
-) -> Result<ResultRow, SQLError> {
-    use uqa_execution::physical::run_to_rows;
+) -> Result<uqa_execution::OwnedPhysicalRow, SQLError> {
+    use uqa_execution::physical::run_to_batches;
     use uqa_execution::scan::TableScan;
     use uqa_execution::{PhysicalOperator, Project};
 
-    let source = document.clone();
-    let columns = source.keys().cloned().collect();
-    let scan: Box<dyn PhysicalOperator + '_> =
-        Box::new(TableScan::from_rows(columns, vec![source]));
+    let scan: Box<dyn PhysicalOperator + '_> = Box::new(TableScan::from_physical_rows(
+        input.schema.clone(),
+        vec![input.row.clone()],
+    ));
     let evaluator = EngineExpressionEvaluator::shared(engine, params, ctes);
     let mut project = Project::with_evaluator(scan, physical_projections(projections), evaluator);
-    let (_, mut rows) = run_to_rows(&mut project).map_err(physical_exec_error)?;
-    rows.pop().ok_or_else(|| {
+    let mut rows = run_to_batches(&mut project)
+        .map_err(physical_exec_error)?
+        .into_iter()
+        .flat_map(uqa_execution::Batch::into_owned_rows);
+    let row = rows.next().ok_or_else(|| {
         SQLError::Internal("physical projection produced no row for a single-row input".into())
-    })
+    })?;
+    if rows.next().is_some() {
+        return Err(SQLError::Internal(
+            "physical projection produced multiple rows for a single-row input".into(),
+        ));
+    }
+    Ok(row)
 }

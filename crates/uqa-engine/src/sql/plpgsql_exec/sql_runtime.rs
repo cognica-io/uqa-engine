@@ -8,8 +8,8 @@
 
 use super::{
     condition_sqlstate, format_raise_message, looks_like_sqlstate, result_row_count,
-    strict_into_check, Expr, Flow, Interpreter, IntoTarget, RaiseLevel, SQLError, SQLParam,
-    SQLResult, Statement, Value,
+    result_row_values, strict_into_check, Expr, Flow, Interpreter, IntoTarget, RaiseLevel,
+    SQLError, SQLParam, SQLResult, Statement, Value,
 };
 
 impl Interpreter<'_> {
@@ -115,7 +115,8 @@ impl Interpreter<'_> {
             if strict {
                 strict_into_check(row_count)?;
             }
-            self.assign_into(target, &result.columns, result.rows.first())?;
+            let values = result_row_values(result, 0);
+            self.assign_into(target, &result.columns, values.as_deref())?;
         }
         // CALL statements leave FOUND untouched.
         if !matches!(statement, Statement::Call { .. }) {

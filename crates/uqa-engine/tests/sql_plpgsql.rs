@@ -7,11 +7,11 @@
 //! User-defined function and procedure coverage: `CREATE FUNCTION` /
 //! `CREATE PROCEDURE` / `DO` / `CALL` with `LANGUAGE plpgsql` and
 //! `LANGUAGE sql`. Expected outcomes were verified against
-//! `PostgreSQL` 17.7 unless a comment states a documented divergence.
+//! `PostgreSQL` 18.4.
 
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult};
-use uqa_sql::SQLError;
+use uqa_sql::{ColumnType, SQLError};
 
 fn exec(engine: &Engine, sql: &str) -> SQLResult {
     match engine.sql(sql, &[]) {

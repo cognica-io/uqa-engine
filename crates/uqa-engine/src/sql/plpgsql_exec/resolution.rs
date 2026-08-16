@@ -7,8 +7,9 @@
 //! Routine overload resolution, argument binding, and coercion.
 
 use super::{
-    canonical_routine_type_name, cast_value, eval_lowered_expression, value_type_name, Arc,
-    CreateFunction, Engine, SQLError, SQLUserFunction, Value,
+    canonical_routine_type_name, cast_value, eval_lowered_expression, routine_signature_types,
+    value_type_name, Arc, CreateFunction, Engine, FunctionBinding, SQLError, SQLUserFunction,
+    Value,
 };
 
 pub(super) fn output_column_names(def: &CreateFunction) -> Vec<String> {
@@ -79,9 +80,9 @@ fn argument_type_cost(value: &Value, declared_type: &str) -> Option<u32> {
         "int2" | "int4" | "int8" | "float4" | "float8" | "numeric"
     );
     if actual_is_numeric && declared_is_numeric {
-        return best_effort_cast(value, declared_type).ok().map(|_| 1);
+        return coerce_routine_value(value, declared_type).ok().map(|_| 1);
     }
-    best_effort_cast(value, declared_type).ok().map(|_| 2)
+    coerce_routine_value(value, declared_type).ok().map(|_| 2)
 }
 
 fn overload_match_cost(def: &CreateFunction, slots: &[ArgSlot]) -> Option<u32> {
@@ -119,9 +120,7 @@ fn try_match_arguments(
             }
             Some(arg_name) => {
                 seen_named = true;
-                let idx = signature
-                    .iter()
-                    .position(|p| p.name.eq_ignore_ascii_case(arg_name))?;
+                let idx = signature.iter().position(|p| p.name == *arg_name)?;
                 if slots[idx].is_some() {
                     return None;
                 }
@@ -190,6 +189,32 @@ pub(super) fn resolve_routine(
     Ok(Some((function, bound)))
 }
 
+pub(super) fn resolve_bound_routine(
+    engine: &Engine,
+    binding: &FunctionBinding,
+    args: &[(Option<String>, Value)],
+) -> Result<Option<ResolvedRoutine>, SQLError> {
+    let Some(overloads) = engine.lookup_sql_functions(&binding.name) else {
+        return Ok(None);
+    };
+    let function = overloads
+        .into_iter()
+        .find(|function| routine_signature_types(&function.def) == binding.argument_types)
+        .ok_or_else(|| SQLError::Routine {
+            sqlstate: "42883".into(),
+            message: format!(
+                "bound function {}({}) does not exist",
+                binding.name,
+                binding.argument_types.join(", ")
+            ),
+        })?;
+    let slots = try_match_arguments(&function.def, args).ok_or_else(|| {
+        routine_resolution_error("function", &binding.name, args, "does not exist")
+    })?;
+    let bound = materialize_arguments(engine, &function.def, slots)?;
+    Ok(Some((function, bound)))
+}
+
 /// Evaluate defaults and apply declared-type casts for the winning
 /// overload.
 fn materialize_arguments(
@@ -209,17 +234,50 @@ fn materialize_arguments(
                 eval_lowered_expression(engine, default, None, &[])?
             }
         };
-        bound.push(best_effort_cast(&value, &signature[idx].type_name)?);
+        bound.push(coerce_routine_value(&value, &signature[idx].type_name)?);
     }
     Ok(bound)
 }
 
-/// Cast through the SQL value layer; unknown target types keep the
-/// value unchanged (`%TYPE`, `record`, domain names, ...).
-pub(super) fn best_effort_cast(value: &Value, type_name: &str) -> Result<Value, SQLError> {
-    match cast_value(value, type_name) {
-        Ok(value) => Ok(value),
-        Err(SQLError::Unsupported(_)) => Ok(value.clone()),
-        Err(e) => Err(e),
+/// Apply a routine declaration's already-resolved SQL type. Pseudo-types use
+/// their own carrier validation; every scalar type goes through the SQL cast
+/// layer and an unsupported declaration remains an error.
+pub(super) fn coerce_routine_value(value: &Value, type_name: &str) -> Result<Value, SQLError> {
+    match canonical_routine_type_name(type_name).as_str() {
+        "record" => match value {
+            Value::Record(_) | Value::Null => Ok(value.clone()),
+            Value::Row(values) => Ok(Value::Record(
+                values
+                    .iter()
+                    .cloned()
+                    .enumerate()
+                    .map(|(index, value)| (format!("f{}", index + 1), value))
+                    .collect(),
+            )),
+            _ => Err(SQLError::Routine {
+                sqlstate: "42804".into(),
+                message: "cannot cast non-composite value to type record".into(),
+            }),
+        },
+        "anyarray" => match value {
+            Value::Array(_) | Value::List(_) | Value::Null => Ok(value.clone()),
+            _ => Err(SQLError::Routine {
+                sqlstate: "42804".into(),
+                message: "cannot cast non-array value to type anyarray".into(),
+            }),
+        },
+        "refcursor" => match value {
+            Value::Str(_) | Value::Null => Ok(value.clone()),
+            _ => Err(SQLError::Routine {
+                sqlstate: "42804".into(),
+                message: "cannot cast value to type refcursor".into(),
+            }),
+        },
+        "void" if matches!(value, Value::Null) => Ok(Value::Null),
+        "void" => Err(SQLError::Routine {
+            sqlstate: "42804".into(),
+            message: "cannot cast non-null value to type void".into(),
+        }),
+        _ => cast_value(value, type_name),
     }
 }

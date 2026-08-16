@@ -6,7 +6,8 @@
 
 //! HAVING resolution, aggregate discovery, and group-row context.
 
-use super::{Engine, ProjectionPlan, QueryBlockPlan, ResultRow, ScalarExpr, Value};
+use super::{Engine, ProjectionPlan, QueryBlockPlan, ScalarExpr, Value};
+use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema};
 
 pub(in crate::sql) fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
     match (lhs, rhs) {
@@ -31,6 +32,7 @@ pub(in crate::sql) fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
         (
             ScalarExpr::Func {
                 name: an,
+                binding: ab,
                 args: aa,
                 distinct: ad,
                 order_by: ao,
@@ -38,6 +40,7 @@ pub(in crate::sql) fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
             },
             ScalarExpr::Func {
                 name: bn,
+                binding: bb,
                 args: ba,
                 distinct: bd,
                 order_by: bo,
@@ -45,6 +48,7 @@ pub(in crate::sql) fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
             },
         ) => {
             an.eq_ignore_ascii_case(bn)
+                && ab == bb
                 && ad == bd
                 && aa.len() == ba.len()
                 && aa.iter().zip(ba.iter()).all(|(x, y)| exprs_match(x, y))
@@ -75,7 +79,8 @@ pub(in crate::sql) fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
         (ScalarExpr::And(a), ScalarExpr::And(b)) | (ScalarExpr::Or(a), ScalarExpr::Or(b)) => {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| exprs_match(x, y))
         }
-        (ScalarExpr::Not(a), ScalarExpr::Not(b)) => exprs_match(a, b),
+        (ScalarExpr::Not(a), ScalarExpr::Not(b))
+        | (ScalarExpr::UnaryMinus(a), ScalarExpr::UnaryMinus(b)) => exprs_match(a, b),
         (ScalarExpr::Cast { expr: a, ty: at }, ScalarExpr::Cast { expr: b, ty: bt }) => {
             at == bt && exprs_match(a, b)
         }
@@ -185,7 +190,10 @@ pub(in crate::sql) fn collect_aggregate_exprs<'a>(
                 collect_aggregate_exprs(engine, filter, out);
             }
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => {
             for item in items {
                 collect_aggregate_exprs(engine, item, out);
             }
@@ -194,7 +202,9 @@ pub(in crate::sql) fn collect_aggregate_exprs<'a>(
             collect_aggregate_exprs(engine, lhs, out);
             collect_aggregate_exprs(engine, rhs, out);
         }
-        ScalarExpr::Not(inner) | ScalarExpr::Cast { expr: inner, .. } => {
+        ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
+        | ScalarExpr::Cast { expr: inner, .. } => {
             collect_aggregate_exprs(engine, inner, out);
         }
         ScalarExpr::IsNull { expr, .. } => collect_aggregate_exprs(engine, expr, out),
@@ -226,8 +236,11 @@ pub(in crate::sql) fn collect_aggregate_exprs<'a>(
             }
         }
         ScalarExpr::InSubquery { expr, .. } => collect_aggregate_exprs(engine, expr, out),
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
@@ -249,20 +262,25 @@ pub(in crate::sql) fn contains_aggregate(engine: &Engine, expr: &ScalarExpr) -> 
 /// whole documents.
 pub(in crate::sql) fn expr_references_columns(expr: &ScalarExpr) -> bool {
     match expr {
-        ScalarExpr::Star | ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. } => true,
+        ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
+        | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
+        | ScalarExpr::QualifiedColumn { .. } => true,
         ScalarExpr::Func { args, filter, .. } => {
             args.iter().any(expr_references_columns)
                 || filter.as_deref().is_some_and(expr_references_columns)
         }
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-            items.iter().any(expr_references_columns)
-        }
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => items.iter().any(expr_references_columns),
         ScalarExpr::Binary { lhs, rhs, .. } => {
             expr_references_columns(lhs) || expr_references_columns(rhs)
         }
-        ScalarExpr::Not(inner) | ScalarExpr::Cast { expr: inner, .. } => {
-            expr_references_columns(inner)
-        }
+        ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
+        | ScalarExpr::Cast { expr: inner, .. } => expr_references_columns(inner),
         ScalarExpr::IsNull { expr, .. } => expr_references_columns(expr),
         ScalarExpr::Between { expr, low, high } => {
             expr_references_columns(expr)
@@ -286,34 +304,32 @@ pub(in crate::sql) fn expr_references_columns(expr: &ScalarExpr) -> bool {
         }
         ScalarExpr::InSubquery { expr, .. } => expr_references_columns(expr),
         ScalarExpr::ScalarSubquery(_) | ScalarExpr::Exists { .. } => true,
-        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => false,
+        ScalarExpr::Default | ScalarExpr::Literal(_) | ScalarExpr::Param(_) => false,
     }
 }
 
 pub(in crate::sql) fn group_context_row(
     stmt: &QueryBlockPlan,
     group_values: &[Value],
-) -> ResultRow {
-    let mut row = ResultRow::new();
+) -> OwnedPhysicalRow {
+    let mut columns = Vec::new();
+    let mut identities = Vec::new();
+    let mut values = Vec::new();
     for (expr, value) in stmt.group_by.iter().zip(group_values) {
         match expr {
             ScalarExpr::Column(column) => {
-                row.insert(column.clone(), value.clone());
+                columns.push(column.clone());
+                identities.push(ColumnIdentity::unqualified(column.clone()));
+                values.push(value.clone());
             }
-            ScalarExpr::QualifiedColumn {
-                qualifier,
-                column,
-                key,
-            } => {
-                if key.is_empty() {
-                    row.insert(format!("{qualifier}.{column}"), value.clone());
-                } else {
-                    row.insert(key.clone(), value.clone());
-                }
-                row.insert(column.clone(), value.clone());
+            ScalarExpr::QualifiedColumn { qualifier, column } => {
+                columns.push(column.clone());
+                identities.push(ColumnIdentity::qualified(qualifier.clone(), column.clone()));
+                values.push(value.clone());
             }
             _ => {}
         }
     }
-    row
+    let schema = RowSchema::with_identities(columns, identities, vec![None; values.len()]);
+    OwnedPhysicalRow::new(schema, PhysicalRow::from_values(values))
 }

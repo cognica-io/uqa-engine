@@ -11,7 +11,7 @@ use super::{
     PhysicalOperator, ResultRow, RowSchema, SQLParam, ScalarEvalContext, ScalarExpr, SortKey,
     Value,
 };
-use uqa_sql::expr::RowLookup;
+use crate::ProjectedRow;
 
 mod adaptive;
 mod fold;
@@ -61,7 +61,7 @@ pub trait AggregateExecutor: Send {
 
     /// Fold one projected row. Implementations advertising support must
     /// preserve the same expression and aggregate semantics as [`Self::consume`].
-    fn consume_projected_row(&mut self, _row: &dyn RowLookup) -> ExecResult<()> {
+    fn consume_projected_row(&mut self, _row: &ProjectedRow<'_, '_>) -> ExecResult<()> {
         Err(ExecError::Other(
             "aggregate executor does not accept projected rows".into(),
         ))
@@ -139,12 +139,22 @@ impl<'a> HashAggregate<'a> {
         output_schema: Vec<String>,
         executor: Box<dyn AggregateExecutor + 'a>,
     ) -> Self {
+        let types = vec![None; output_schema.len()];
+        Self::with_typed_executor(child, output_schema, types, executor)
+    }
+
+    pub fn with_typed_executor(
+        child: Box<dyn PhysicalOperator + 'a>,
+        output_schema: Vec<String>,
+        output_types: Vec<Option<uqa_sql::ast::ColumnType>>,
+        executor: Box<dyn AggregateExecutor + 'a>,
+    ) -> Self {
         Self {
             child,
             group_keys: Vec::new(),
             aggregates: Vec::new(),
             params: Vec::new(),
-            schema: RowSchema::new(output_schema),
+            schema: RowSchema::with_types(output_schema, output_types),
             executor: Some(executor),
             work_mem_bytes: 0,
             output: None,

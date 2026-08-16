@@ -80,6 +80,18 @@ pub(super) fn const_vector(expr: &ScalarExpr, params: &[SQLParam]) -> Option<Vec
             Some(out)
         }
         other => match const_value(other, params)? {
+            Value::Array(array) if array.dimensions().len() <= 1 => {
+                let mut out: Vec<f32> = Vec::with_capacity(array.elements().len());
+                for value in array.elements() {
+                    match value {
+                        Value::Int(number) => out.push(*number as f32),
+                        Value::Float(number) => out.push(*number as f32),
+                        Value::Decimal(number) => out.push(number.to_f64()? as f32),
+                        _ => return None,
+                    }
+                }
+                Some(out)
+            }
             Value::List(items) => {
                 let mut out: Vec<f32> = Vec::with_capacity(items.len());
                 for v in items {
@@ -101,6 +113,16 @@ pub(super) fn const_f64_vector(expr: &ScalarExpr, params: &[SQLParam]) -> Option
     match expr {
         ScalarExpr::Array(items) => items.iter().map(|value| const_f64(value, params)).collect(),
         other => match const_value(other, params)? {
+            Value::Array(array) if array.dimensions().len() <= 1 => array
+                .elements()
+                .iter()
+                .map(|value| match value {
+                    Value::Int(number) => Some(*number as f64),
+                    Value::Float(number) => Some(*number),
+                    Value::Decimal(number) => number.to_f64(),
+                    _ => None,
+                })
+                .collect(),
             Value::List(items) => items
                 .into_iter()
                 .map(|value| match value {

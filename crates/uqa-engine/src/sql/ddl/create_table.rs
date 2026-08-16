@@ -7,6 +7,7 @@
 //! CREATE TABLE execution.
 
 use super::{ddl_storage_error, ColumnType, CreateTable, Engine, SQLError, SQLResult};
+use crate::sql::generated::prepare_generated_columns;
 
 // -------------------------------------------------------------------------
 
@@ -17,7 +18,7 @@ pub(in crate::sql) fn run_create_table(
     engine.transaction(move |engine| run_create_table_inner(engine, c))
 }
 
-fn run_create_table_inner(engine: &Engine, c: CreateTable) -> Result<SQLResult, SQLError> {
+fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResult, SQLError> {
     if engine
         .try_has_table(&c.name)
         .map_err(|err| ddl_storage_error("CREATE TABLE", err))?
@@ -30,6 +31,13 @@ fn run_create_table_inner(engine: &Engine, c: CreateTable) -> Result<SQLResult, 
             c.name
         )));
     }
+    prepare_generated_columns(
+        engine,
+        &c.qualifier,
+        &mut c.columns,
+        &c.key_constraints,
+        &c.foreign_keys,
+    )?;
     let mut vector_fields: Vec<(String, u32)> = Vec::new();
     for col in &c.columns {
         match &col.ty {

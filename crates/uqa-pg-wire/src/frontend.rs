@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 
 use crate::codec::{message_total_len, DecodeLen, Reader, MESSAGE_HEADER_LEN};
 use crate::protocol::{
-    DecodeOutcome, FormatCode, PgWireError, ProtocolVersion, CANCEL_REQUEST_CODE,
-    GSSENC_REQUEST_CODE, PROTOCOL_VERSION_3_0, SSL_REQUEST_CODE,
+    CancelKey, DecodeOutcome, FormatCode, PgWireError, ProtocolVersion, CANCEL_REQUEST_CODE,
+    GSSENC_REQUEST_CODE, SSL_REQUEST_CODE,
 };
 
 pub const DEFAULT_MAX_MESSAGE_LEN: usize = 16 * 1024 * 1024;
@@ -17,7 +17,10 @@ pub const DEFAULT_MAX_MESSAGE_LEN: usize = 16 * 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartupFrame {
     Startup(StartupMessage),
-    CancelRequest { process_id: i32, secret_key: i32 },
+    CancelRequest {
+        process_id: i32,
+        secret_key: CancelKey,
+    },
     SSLRequest,
     GSSEncRequest,
 }
@@ -26,6 +29,32 @@ pub enum StartupFrame {
 pub struct StartupMessage {
     pub version: ProtocolVersion,
     pub parameters: BTreeMap<String, String>,
+    /// Startup parameter pairs in wire order, including duplicate names.
+    pub parameter_pairs: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartupNegotiation {
+    pub requested_version: ProtocolVersion,
+    pub negotiated_version: ProtocolVersion,
+    pub unrecognized_options: Vec<String>,
+}
+
+impl StartupNegotiation {
+    #[must_use]
+    pub fn requires_response(&self) -> bool {
+        self.requested_version != self.negotiated_version || !self.unrecognized_options.is_empty()
+    }
+
+    #[must_use]
+    pub fn response(&self) -> Option<crate::backend::BackendMessage> {
+        self.requires_response().then(
+            || crate::backend::BackendMessage::NegotiateProtocolVersion {
+                newest_protocol_version: self.negotiated_version,
+                unrecognized_options: self.unrecognized_options.clone(),
+            },
+        )
+    }
 }
 
 impl StartupMessage {
@@ -44,6 +73,39 @@ impl StartupMessage {
     pub fn application_name(&self) -> Option<&str> {
         self.get("application_name")
     }
+
+    /// Negotiate a `PostgreSQL` 3.x minor version and report every `_pq_.`
+    /// startup option the embedding server has not implemented.
+    pub fn negotiate(
+        &self,
+        supported_protocol_options: &[&str],
+    ) -> Result<StartupNegotiation, PgWireError> {
+        self.negotiate_with_max(ProtocolVersion::LATEST, supported_protocol_options)
+    }
+
+    /// Negotiate against the newest protocol version implemented by the
+    /// embedding server.
+    pub fn negotiate_with_max(
+        &self,
+        newest_supported: ProtocolVersion,
+        supported_protocol_options: &[&str],
+    ) -> Result<StartupNegotiation, PgWireError> {
+        let negotiated_version = self.version.negotiate_with_max(newest_supported)?;
+        let unrecognized_options = self
+            .parameter_pairs
+            .iter()
+            .map(|(name, _)| name)
+            .filter(|name| {
+                name.starts_with("_pq_.") && !supported_protocol_options.contains(&name.as_str())
+            })
+            .cloned()
+            .collect();
+        Ok(StartupNegotiation {
+            requested_version: self.version,
+            negotiated_version,
+            unrecognized_options,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,7 +123,7 @@ pub enum FrontendMessage {
     CopyData(Vec<u8>),
     CopyDone,
     CopyFail(String),
-    FunctionCall(Vec<u8>),
+    FunctionCall(FunctionCall),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +160,14 @@ pub enum CloseTarget {
     Portal(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionCall {
+    pub function_oid: u32,
+    pub argument_formats: Vec<FormatCode>,
+    pub arguments: Vec<Option<Vec<u8>>>,
+    pub result_format: FormatCode,
+}
+
 pub fn decode_startup(input: &[u8]) -> DecodeOutcome<StartupFrame> {
     decode_startup_with_max(input, DEFAULT_MAX_MESSAGE_LEN)
 }
@@ -123,18 +193,23 @@ pub fn decode_startup_with_max(input: &[u8], max_len: usize) -> DecodeOutcome<St
         }
         CANCEL_REQUEST_CODE => {
             let process_id = reader.read_i32("cancel request process id")?;
-            let secret_key = reader.read_i32("cancel request secret key")?;
+            let key_length = reader.remaining();
+            let secret_key = CancelKey::new(
+                reader
+                    .read_exact(key_length, "cancel request secret key")?
+                    .to_vec(),
+            )?;
             reader.ensure_empty("cancel request")?;
             StartupFrame::CancelRequest {
                 process_id,
                 secret_key,
             }
         }
-        PROTOCOL_VERSION_3_0 => StartupFrame::Startup(parse_startup_message(
-            ProtocolVersion::from_raw(version_or_code),
-            reader,
-        )?),
-        other => return Err(PgWireError::UnsupportedProtocolVersion(other)),
+        other => {
+            let version = ProtocolVersion::from_raw(other);
+            version.negotiate()?;
+            StartupFrame::Startup(parse_startup_message(version, reader)?)
+        }
     };
     Ok(Some((frame, total)))
 }
@@ -161,6 +236,7 @@ fn parse_startup_message(
     mut reader: Reader<'_>,
 ) -> Result<StartupMessage, PgWireError> {
     let mut parameters = BTreeMap::new();
+    let mut parameter_pairs = Vec::new();
     loop {
         if reader.remaining() == 0 {
             return Err(PgWireError::MissingNul {
@@ -183,11 +259,13 @@ fn parse_startup_message(
             break;
         }
         let value = reader.read_cstring("startup parameter value")?;
+        parameter_pairs.push((key.clone(), value.clone()));
         parameters.insert(key, value);
     }
     Ok(StartupMessage {
         version,
         parameters,
+        parameter_pairs,
     })
 }
 
@@ -219,7 +297,7 @@ fn parse_frontend_message(tag: u8, body: &[u8]) -> Result<FrontendMessage, PgWir
             FrontendMessage::CopyDone
         }
         b'f' => FrontendMessage::CopyFail(parse_single_cstring(&mut reader, "CopyFail")?),
-        b'F' => FrontendMessage::FunctionCall(body.to_vec()),
+        b'F' => FrontendMessage::FunctionCall(parse_function_call(&mut reader)?),
         other => return Err(PgWireError::UnknownFrontendTag(other)),
     };
     Ok(message)
@@ -317,6 +395,46 @@ fn parse_close(reader: &mut Reader<'_>) -> Result<CloseTarget, PgWireError> {
         b'P' => Ok(CloseTarget::Portal(name)),
         other => Err(PgWireError::UnknownFrontendTag(other)),
     }
+}
+
+fn parse_function_call(reader: &mut Reader<'_>) -> Result<FunctionCall, PgWireError> {
+    let function_oid = reader.read_u32("FunctionCall function oid")?;
+    let argument_format_count = read_count(reader, "FunctionCall argument format count")?;
+    let mut argument_formats = Vec::with_capacity(argument_format_count);
+    for _ in 0..argument_format_count {
+        argument_formats.push(FormatCode::from_i16(
+            reader.read_i16("FunctionCall argument format code")?,
+        )?);
+    }
+
+    let argument_count = read_count(reader, "FunctionCall argument count")?;
+    if argument_format_count > 1 && argument_format_count != argument_count {
+        return Err(PgWireError::FunctionArgumentFormatCountMismatch {
+            format_count: argument_format_count,
+            argument_count,
+        });
+    }
+    let mut arguments = Vec::with_capacity(argument_count);
+    for _ in 0..argument_count {
+        let value = match reader.read_len_i32("FunctionCall argument value length")? {
+            Some(length) => Some(
+                reader
+                    .read_exact(length, "FunctionCall argument value")?
+                    .to_vec(),
+            ),
+            None => None,
+        };
+        arguments.push(value);
+    }
+
+    let result_format = FormatCode::from_i16(reader.read_i16("FunctionCall result format code")?)?;
+    reader.ensure_empty("FunctionCall")?;
+    Ok(FunctionCall {
+        function_oid,
+        argument_formats,
+        arguments,
+        result_format,
+    })
 }
 
 fn parse_single_cstring(

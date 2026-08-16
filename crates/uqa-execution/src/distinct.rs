@@ -317,22 +317,23 @@ impl<'a> Distinct<'a> {
         self.seen = SeenKeySet::new(self.work_mem_bytes, self.spill_directory.clone());
     }
 
-    fn key(&self, row: &dyn uqa_sql::expr::RowLookup) -> ExecResult<Vec<Value>> {
+    fn key(&self, schema: &RowSchema, row: &crate::PhysicalRow) -> ExecResult<Vec<Value>> {
         if let Some(keys) = self.keys.as_ref() {
             let evaluator = self.evaluator.as_ref().ok_or_else(|| {
                 ExecError::Other("DISTINCT ON evaluator is not configured".into())
             })?;
             return keys
                 .iter()
-                .map(|expression| evaluator.evaluate(expression, row))
+                .map(|expression| evaluator.evaluate_physical(expression, schema, row))
                 .collect();
         }
+        let row = schema.view(row);
         Ok(self
             .schema
             .columns()
             .iter()
             .enumerate()
-            .map(|(index, _)| row.positional_column(index).cloned().unwrap_or(Value::Null))
+            .map(|(index, _)| row.value_at(index).cloned().unwrap_or(Value::Null))
             .collect())
     }
 }
@@ -354,8 +355,7 @@ impl PhysicalOperator for Distinct<'_> {
             };
             let mut rows = Vec::with_capacity(batch.rows.len());
             for row in batch.rows {
-                let view = batch.schema.view(&row);
-                let key = encode_key(&self.key(&view)?)?;
+                let key = encode_key(&self.key(&batch.schema, &row)?)?;
                 if self.seen.insert(key)? {
                     rows.push(row);
                 }
@@ -707,10 +707,14 @@ impl<H: Hasher> KeyOutput for HasherOutput<'_, H> {
 fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
     match value {
         Value::Null => output.push_byte(0),
-        Value::Bool(value) => encode_numeric_parts(i128::from(*value), 0, output),
-        Value::Int(value) => encode_numeric_parts(i128::from(*value), 0, output),
+        Value::Bool(value) => {
+            encode_decimal_numeric(&DecimalValue::from_bool(*value), output)?;
+        }
+        Value::Int(value) => {
+            encode_decimal_numeric(&DecimalValue::from_i64(*value), output)?;
+        }
         Value::Float(value) => encode_float_numeric(*value, output)?,
-        Value::Decimal(value) => encode_decimal_numeric(value, output),
+        Value::Decimal(value) => encode_decimal_numeric(value, output)?,
         Value::Str(value) => {
             output.push_byte(2);
             encode_bytes(value.as_bytes(), output)?;
@@ -724,10 +728,45 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
             encode_bytes(value, output)?;
         }
         Value::Temporal(value) => encode_temporal(value, output),
+        Value::Json(value) => {
+            output.push_byte(8);
+            encode_bytes(value.as_bytes(), output)?;
+        }
+        Value::JsonB(value) => {
+            output.push_byte(9);
+            let canonical = uqa_core::jsonb_equality_key(value)
+                .ok_or_else(|| ExecError::Other("stored JSONB value is not valid JSON".into()))?;
+            encode_bytes(&canonical, output)?;
+        }
+        Value::Array(array) => {
+            output.push_byte(12);
+            encode_len(array.lower_bounds().len(), output)?;
+            for lower_bound in array.lower_bounds() {
+                output.extend_bytes(&lower_bound.to_le_bytes());
+            }
+            encode_len(array.elements().len(), output)?;
+            for value in array.elements() {
+                encode_value(value, output)?;
+            }
+        }
         Value::List(values) => {
             output.push_byte(5);
             encode_len(values.len(), output)?;
             for value in values {
+                encode_value(value, output)?;
+            }
+        }
+        Value::Row(values) => {
+            output.push_byte(10);
+            encode_len(values.len(), output)?;
+            for value in values {
+                encode_value(value, output)?;
+            }
+        }
+        Value::Record(fields) => {
+            output.push_byte(11);
+            encode_len(fields.len(), output)?;
+            for (_, value) in fields {
                 encode_value(value, output)?;
             }
         }
@@ -743,15 +782,18 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
     Ok(())
 }
 
-fn encode_decimal_numeric(value: &DecimalValue, output: &mut impl KeyOutput) {
-    let (coefficient, scale) = value.canonical_parts();
-    encode_numeric_parts(coefficient, scale, output);
-}
-
-fn encode_numeric_parts(coefficient: i128, scale: u32, output: &mut impl KeyOutput) {
-    output.extend_bytes(&[1, 0]);
-    output.extend_bytes(&coefficient.to_be_bytes());
-    output.extend_bytes(&scale.to_be_bytes());
+fn encode_decimal_numeric(value: &DecimalValue, output: &mut impl KeyOutput) -> ExecResult<()> {
+    if value.is_nan() {
+        output.extend_bytes(&[1, 1]);
+    } else if value.is_negative_infinity() {
+        output.extend_bytes(&[1, 2]);
+    } else if value.is_positive_infinity() {
+        output.extend_bytes(&[1, 3]);
+    } else {
+        output.extend_bytes(&[1, 0]);
+        encode_bytes(value.to_canonical_string().as_bytes(), output)?;
+    }
+    Ok(())
 }
 
 fn encode_float_numeric(value: f64, output: &mut impl KeyOutput) -> ExecResult<()> {
@@ -763,10 +805,10 @@ fn encode_float_numeric(value: f64, output: &mut impl KeyOutput) -> ExecResult<(
     } else if value == f64::INFINITY {
         output.extend_bytes(&[1, 3]);
     } else if let Some(decimal) = DecimalValue::from_f64_lossy(value) {
-        encode_decimal_numeric(&decimal, output);
+        encode_decimal_numeric(&decimal, output)?;
     } else {
-        // A finite f64 outside rust_decimal's exponent range still needs a
-        // lossless representation. Normalize signed zero before storing bits.
+        // Preserve a finite value that cannot enter PostgreSQL's NUMERIC
+        // domain. Normalize signed zero before storing bits.
         output.extend_bytes(&[1, 4]);
         let normalized = if value == 0.0 { 0.0 } else { value };
         output.extend_bytes(&normalized.to_bits().to_be_bytes());

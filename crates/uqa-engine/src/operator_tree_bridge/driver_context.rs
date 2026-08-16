@@ -158,52 +158,79 @@ impl EngineDriver<'_> {
             .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))
     }
 
+    /// Build an operator context whose document snapshot exposes the requested
+    /// virtual generated columns. Only those columns are evaluated, and only
+    /// for the candidate documents the consuming operator can visit.
+    pub(super) fn bridge_context_for_projection(
+        &self,
+        doc_ids: &[DocId],
+        fields: &[&str],
+    ) -> DriverResult<uqa_operators::base::ExecutionContext> {
+        let columns = self
+            .engine
+            .describe_table(self.table)
+            .map_err(|error| operator_execution_error("resolve projected operator table", error))?
+            .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))?;
+        let projection = fields
+            .iter()
+            .map(|field| (*field).to_string())
+            .collect::<Vec<_>>();
+        if !crate::engine_generated::projection_contains_virtual_generated_column(
+            &columns,
+            &projection,
+        ) {
+            return self.bridge_context();
+        }
+
+        let documents =
+            self.engine
+                .get_documents_with_virtual_projection(self.table, doc_ids, &projection)?;
+        let mut store = uqa_storage::MemoryDocumentStore::new();
+        for (doc_id, document) in documents {
+            uqa_storage::DocumentStore::put(&mut store, doc_id, document).map_err(|error| {
+                operator_execution_error("build projected operator snapshot", error)
+            })?;
+        }
+        self.engine
+            .snapshot_context_with_document_store(self.table, std::sync::Arc::new(store))?
+            .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))
+    }
+
     pub(super) fn facet_vector_inline(
         &self,
         vec_pl: &PostingList,
         facet_field: &str,
     ) -> DriverResult<PostingList> {
         use std::collections::BTreeMap;
-        let state = self
-            .engine
-            .table(self.table)
-            .map_err(|error| operator_execution_error("resolve facet table", error))?
-            .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))?;
         self.require_column(facet_field)?;
-        let snapshot = state
-            .document_store
-            .read()
-            .snapshot()
-            .map_err(|error| operator_execution_error("document snapshot", error))?;
+        let doc_ids = vec_pl
+            .entries()
+            .iter()
+            .map(|entry| entry.doc_id)
+            .collect::<Vec<_>>();
+        let values = self
+            .engine
+            .get_document_fields(self.table, &doc_ids, facet_field)?;
         let mut counts: BTreeMap<String, u64> = BTreeMap::new();
         for entry in vec_pl.entries() {
-            let value = snapshot
-                .get_field(entry.doc_id, facet_field)
-                .map_err(|error| operator_execution_error("facet field lookup", error))?;
-            if value.is_none()
-                && !snapshot
-                    .contains_doc_id(entry.doc_id)
-                    .map_err(|error| operator_execution_error("facet document lookup", error))?
-            {
+            let Some(value) = values.get(&entry.doc_id) else {
                 return Err(SQLError::Internal(format!(
                     "vector facet candidate {} is missing from table `{}`",
                     entry.doc_id, self.table
                 )));
-            }
-            if let Some(value) = value {
-                if !matches!(value, Value::Null) {
-                    let key = match value {
-                        Value::Str(s) => s,
-                        Value::Int(n) => n.to_string(),
-                        Value::Float(f) => format!("{f}"),
-                        Value::Bool(b) => b.to_string(),
-                        other => format!("{other:?}"),
-                    };
-                    let count = counts.entry(key).or_insert(0);
-                    *count = count.checked_add(1).ok_or_else(|| {
-                        SQLError::Internal("vector facet count overflowed u64".to_string())
-                    })?;
-                }
+            };
+            if !matches!(value, Value::Null) {
+                let key = match value {
+                    Value::Str(s) => s.clone(),
+                    Value::Int(n) => n.to_string(),
+                    Value::Float(f) => format!("{f}"),
+                    Value::Bool(b) => b.to_string(),
+                    other => format!("{other:?}"),
+                };
+                let count = counts.entry(key).or_insert(0);
+                *count = count.checked_add(1).ok_or_else(|| {
+                    SQLError::Internal("vector facet count overflowed u64".to_string())
+                })?;
             }
         }
         let mut entries: Vec<PostingEntry> = Vec::with_capacity(counts.len());

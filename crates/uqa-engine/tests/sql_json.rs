@@ -10,26 +10,22 @@ use std::collections::BTreeMap;
 
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult};
+use uqa_sql::ast::ColumnType;
 
 fn exec(engine: &Engine, sql: &str) -> SQLResult {
     engine.sql(sql, &[]).unwrap()
 }
 
-fn map<const N: usize>(pairs: [(&str, Value); N]) -> Value {
-    Value::Map(
-        pairs
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect::<BTreeMap<_, _>>(),
-    )
-}
-
-fn list(items: impl IntoIterator<Item = Value>) -> Value {
-    Value::List(items.into_iter().collect())
-}
-
 fn s(v: &str) -> Value {
     Value::Str(v.to_string())
+}
+
+fn json(v: &str) -> Value {
+    Value::Json(v.to_string())
+}
+
+fn jsonb(v: &str) -> Value {
+    Value::JsonB(v.to_string())
 }
 
 fn engine_with_json() -> Engine {
@@ -128,18 +124,17 @@ fn json_and_jsonb_catalog_types_are_distinct() {
 }
 
 #[test]
-fn insert_json_string_round_trips_as_map() {
+fn insert_json_string_preserves_json_text() {
     let engine = engine_with_json();
     let result = exec(&engine, "SELECT data FROM docs WHERE id = 1");
-    let Value::Map(data) = &result.rows[0]["data"] else {
-        panic!("expected map, got {:?}", result.rows[0]["data"]);
-    };
-    assert_eq!(data["name"], s("Alice"));
-    assert_eq!(data["age"], Value::Int(30));
+    assert_eq!(
+        result.rows[0]["data"],
+        json("{\"name\": \"Alice\", \"age\": 30, \"tags\": [\"a\", \"b\"]}")
+    );
 }
 
 #[test]
-fn insert_json_array_round_trips_as_list() {
+fn insert_json_array_preserves_json_type() {
     let engine = Engine::new();
     exec(
         &engine,
@@ -147,10 +142,44 @@ fn insert_json_array_round_trips_as_list() {
     );
     exec(&engine, "INSERT INTO t (id, items) VALUES (1, '[1, 2, 3]')");
     let result = exec(&engine, "SELECT items FROM t WHERE id = 1");
-    assert_eq!(
-        result.rows[0]["items"],
-        list([Value::Int(1), Value::Int(2), Value::Int(3)])
+    assert_eq!(result.rows[0]["items"], json("[1, 2, 3]"));
+}
+
+#[test]
+fn json_preserves_input_text_while_jsonb_canonicalizes() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT '{\"b\":2,\"a\":1}'::json AS raw,
+                '{\"b\":2,\"a\":1}'::jsonb AS bin",
     );
+    assert_eq!(result.rows[0]["raw"], json("{\"b\":2,\"a\":1}"));
+    assert_eq!(result.rows[0]["bin"], jsonb("{\"a\": 1, \"b\": 2}"));
+}
+
+#[test]
+fn jsonb_comparison_uses_postgresql_structural_semantics() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT '1'::jsonb = '1.0'::jsonb AS numeric_equal,
+                '{\"b\":2,\"a\":1}'::jsonb = '{\"a\":1.0,\"b\":2}'::jsonb AS object_equal,
+                '[10]'::jsonb > '[2]'::jsonb AS numeric_order",
+    );
+    assert_eq!(result.rows[0]["numeric_equal"], Value::Bool(true));
+    assert_eq!(result.rows[0]["object_equal"], Value::Bool(true));
+    assert_eq!(result.rows[0]["numeric_order"], Value::Bool(true));
+}
+
+#[test]
+fn jsonb_distinct_uses_postgresql_numeric_equality() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT DISTINCT value
+         FROM (VALUES ('1'::jsonb), ('1.0'::jsonb)) AS source(value)",
+    );
+    assert_eq!(result.rows.len(), 1);
 }
 
 #[test]
@@ -160,7 +189,7 @@ fn arrow_text_key() {
         &engine,
         "SELECT data->'name' AS name FROM docs WHERE id = 1",
     );
-    assert_eq!(result.rows[0]["name"], s("Alice"));
+    assert_eq!(result.rows[0]["name"], json("\"Alice\""));
 }
 
 #[test]
@@ -180,7 +209,7 @@ fn arrow_integer_key() {
         &engine,
         "SELECT data->'tags'->0 AS first_tag FROM docs WHERE id = 1",
     );
-    assert_eq!(result.rows[0]["first_tag"], s("a"));
+    assert_eq!(result.rows[0]["first_tag"], json("\"a\""));
 }
 
 #[test]
@@ -190,7 +219,7 @@ fn arrow_nested_object() {
         &engine,
         "SELECT data->'nested'->'x' AS x FROM docs WHERE id = 3",
     );
-    assert_eq!(result.rows[0]["x"], Value::Int(10));
+    assert_eq!(result.rows[0]["x"], json("10"));
 }
 
 #[test]
@@ -207,6 +236,16 @@ fn double_arrow_returns_text_for_nested() {
 }
 
 #[test]
+fn jsonb_double_arrow_uses_jsonb_output_text() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT '{\"a\": {\"b\": 2}}'::jsonb ->> 'a' AS value",
+    );
+    assert_eq!(result.rows[0]["value"], s("{\"b\": 2}"));
+}
+
+#[test]
 fn arrow_missing_key_returns_null() {
     let engine = engine_with_json();
     let result = exec(
@@ -220,7 +259,7 @@ fn arrow_missing_key_returns_null() {
 fn jsonb_negative_index_extracts_from_end() {
     let engine = Engine::new();
     let result = exec(&engine, "SELECT '[\"a\", \"b\", \"c\"]'::jsonb -> -1 AS v");
-    assert_eq!(result.rows[0]["v"], s("c"));
+    assert_eq!(result.rows[0]["v"], jsonb("\"c\""));
 }
 
 #[test]
@@ -247,11 +286,11 @@ fn jsonb_delete_key_and_path() {
     );
     assert_eq!(
         result.rows[0]["removed_key"],
-        map([("b", map([("c", Value::Int(2)), ("d", Value::Int(3))]))])
+        jsonb("{\"b\": {\"c\": 2, \"d\": 3}}")
     );
     assert_eq!(
         result.rows[0]["removed_path"],
-        map([("a", Value::Int(1)), ("b", map([("d", Value::Int(3))]))])
+        jsonb("{\"a\": 1, \"b\": {\"d\": 3}}")
     );
 }
 
@@ -262,10 +301,7 @@ fn jsonb_concat_objects() {
         &engine,
         "SELECT '{\"a\":1}'::jsonb || '{\"b\":2}'::jsonb AS v",
     );
-    assert_eq!(
-        result.rows[0]["v"],
-        map([("a", Value::Int(1)), ("b", Value::Int(2))])
-    );
+    assert_eq!(result.rows[0]["v"], jsonb("{\"a\": 1, \"b\": 2}"));
 }
 
 #[test]
@@ -275,7 +311,7 @@ fn jsonb_set_respects_create_missing_false() {
         &engine,
         "SELECT jsonb_set('{\"a\":1}'::jsonb, ARRAY['b'], '2'::jsonb, false) AS v",
     );
-    assert_eq!(result.rows[0]["v"], map([("a", Value::Int(1))]));
+    assert_eq!(result.rows[0]["v"], jsonb("{\"a\": 1}"));
 }
 
 #[test]
@@ -286,20 +322,8 @@ fn jsonb_insert_array_before_and_after() {
         "SELECT jsonb_insert('{\"a\":[0,1,2]}'::jsonb, ARRAY['a','1'], '9'::jsonb) AS before,
                 jsonb_insert('{\"a\":[0,1,2]}'::jsonb, ARRAY['a','1'], '9'::jsonb, true) AS after",
     );
-    assert_eq!(
-        result.rows[0]["before"],
-        map([(
-            "a",
-            list([Value::Int(0), Value::Int(9), Value::Int(1), Value::Int(2)])
-        )])
-    );
-    assert_eq!(
-        result.rows[0]["after"],
-        map([(
-            "a",
-            list([Value::Int(0), Value::Int(1), Value::Int(9), Value::Int(2)])
-        )])
-    );
+    assert_eq!(result.rows[0]["before"], jsonb("{\"a\": [0, 9, 1, 2]}"));
+    assert_eq!(result.rows[0]["after"], jsonb("{\"a\": [0, 1, 9, 2]}"));
 }
 
 #[test]
@@ -310,11 +334,8 @@ fn jsonb_insert_object_only_when_key_is_missing() {
         "SELECT jsonb_insert('{\"a\":1}'::jsonb, ARRAY['b'], '2'::jsonb) AS inserted,
                 jsonb_insert('{\"a\":1}'::jsonb, ARRAY['a'], '2'::jsonb) AS unchanged",
     );
-    assert_eq!(
-        result.rows[0]["inserted"],
-        map([("a", Value::Int(1)), ("b", Value::Int(2))])
-    );
-    assert_eq!(result.rows[0]["unchanged"], map([("a", Value::Int(1))]));
+    assert_eq!(result.rows[0]["inserted"], jsonb("{\"a\": 1, \"b\": 2}"));
+    assert_eq!(result.rows[0]["unchanged"], jsonb("{\"a\": 1}"));
 }
 
 #[test]
@@ -324,8 +345,7 @@ fn jsonb_pretty_returns_indented_text() {
     let Value::Str(text) = &result.rows[0]["v"] else {
         panic!("expected text");
     };
-    assert!(text.contains('\n'));
-    assert!(text.contains("\"a\""));
+    assert_eq!(text, "{\n    \"a\": [\n        1,\n        2\n    ]\n}");
 }
 
 #[test]
@@ -390,7 +410,7 @@ fn json_in_where() {
 }
 
 #[test]
-fn json_build_object_returns_map() {
+fn json_build_object_returns_json() {
     let engine = Engine::new();
     exec(&engine, "CREATE TABLE t (id INTEGER PRIMARY KEY)");
     exec(&engine, "INSERT INTO t (id) VALUES (1)");
@@ -398,52 +418,40 @@ fn json_build_object_returns_map() {
         &engine,
         "SELECT json_build_object('a', 1, 'b', 2) AS obj FROM t",
     );
-    assert_eq!(
-        result.rows[0]["obj"],
-        map([("a", Value::Int(1)), ("b", Value::Int(2))])
-    );
+    assert_eq!(result.rows[0]["obj"], json("{\"a\" : 1, \"b\" : 2}"));
 }
 
 #[test]
-fn json_build_array_returns_list() {
+fn json_build_array_returns_json() {
     let engine = Engine::new();
     exec(&engine, "CREATE TABLE t (id INTEGER PRIMARY KEY)");
     exec(&engine, "INSERT INTO t (id) VALUES (1)");
     let result = exec(&engine, "SELECT json_build_array(1, 2, 3) AS arr FROM t");
-    assert_eq!(
-        result.rows[0]["arr"],
-        list([Value::Int(1), Value::Int(2), Value::Int(3)])
-    );
+    assert_eq!(result.rows[0]["arr"], json("[1, 2, 3]"));
 }
 
 #[test]
-fn json_build_array_mixed_types_stringifies() {
+fn json_build_array_mixed_types_preserves_types() {
     let engine = Engine::new();
     let result = exec(&engine, "SELECT json_build_array(1, 2, 3, 'four') AS arr");
-    assert_eq!(
-        result.rows[0]["arr"],
-        list([s("1"), s("2"), s("3"), s("four")])
-    );
+    assert_eq!(result.rows[0]["arr"], json("[1, 2, 3, \"four\"]"));
 }
 
 #[test]
-fn json_build_array_mixed_int_float_str_bool_stringifies() {
+fn json_build_array_mixed_int_float_str_bool_preserves_types() {
     let engine = Engine::new();
     let result = exec(
         &engine,
         "SELECT json_build_array(1, 2.5, 'hello', true) AS arr",
     );
-    assert_eq!(
-        result.rows[0]["arr"],
-        list([s("1"), s("2.5"), s("hello"), s("true")])
-    );
+    assert_eq!(result.rows[0]["arr"], json("[1, 2.5, \"hello\", true]"));
 }
 
 #[test]
 fn json_build_array_empty() {
     let engine = Engine::new();
     let result = exec(&engine, "SELECT json_build_array() AS arr");
-    assert_eq!(result.rows[0]["arr"], list([]));
+    assert_eq!(result.rows[0]["arr"], json("[]"));
 }
 
 #[test]
@@ -493,7 +501,7 @@ fn json_extract_path() {
         &engine,
         "SELECT json_extract_path(data, 'nested', 'x') AS v FROM docs WHERE id = 3",
     );
-    assert_eq!(result.rows[0]["v"], Value::Int(10));
+    assert_eq!(result.rows[0]["v"], json("10"));
 }
 
 #[test]
@@ -515,29 +523,27 @@ fn cast_to_json() {
         &engine,
         "SELECT CAST(raw AS json)->'x' AS v FROM t WHERE id = 1",
     );
-    assert_eq!(result.rows[0]["v"], Value::Int(42));
+    assert_eq!(result.rows[0]["v"], json("42"));
 }
 
 #[test]
 fn json_object_agg_basic() {
     let engine = engine_with_table();
     let result = exec(&engine, "SELECT json_object_agg(name, val) AS v FROM t");
-    let Value::Map(v) = &result.rows[0]["v"] else {
-        panic!("expected map");
-    };
-    assert_eq!(v["alpha"], Value::Int(10));
-    assert_eq!(v["bravo"], Value::Int(20));
-    assert_eq!(v["charlie"], Value::Int(30));
+    assert_eq!(
+        result.rows[0]["v"],
+        json("{ \"alpha\" : 10, \"bravo\" : 20, \"charlie\" : 30 }")
+    );
 }
 
 #[test]
 fn jsonb_object_agg_variant() {
     let engine = engine_with_table();
     let result = exec(&engine, "SELECT jsonb_object_agg(name, val) AS v FROM t");
-    let Value::Map(v) = &result.rows[0]["v"] else {
-        panic!("expected map");
-    };
-    assert_eq!(v["alpha"], Value::Int(10));
+    assert_eq!(
+        result.rows[0]["v"],
+        jsonb("{\"alpha\": 10, \"bravo\": 20, \"charlie\": 30}")
+    );
 }
 
 #[test]
@@ -547,10 +553,7 @@ fn json_agg_orders_values() {
         &engine,
         "SELECT json_agg(data->>'name' ORDER BY id) AS v FROM docs",
     );
-    assert_eq!(
-        result.rows[0]["v"],
-        list([s("Alice"), s("Bob"), s("Carol")])
-    );
+    assert_eq!(result.rows[0]["v"], json("[\"Alice\", \"Bob\", \"Carol\"]"));
 }
 
 #[test]
@@ -562,10 +565,7 @@ fn json_agg_includes_null_inputs() {
         "INSERT INTO t (id, v) VALUES (1, 'alpha'), (2, NULL), (3, 'charlie')",
     );
     let result = exec(&engine, "SELECT json_agg(v ORDER BY id) AS v FROM t");
-    assert_eq!(
-        result.rows[0]["v"],
-        list([s("alpha"), Value::Null, s("charlie")])
-    );
+    assert_eq!(result.rows[0]["v"], json("[\"alpha\", null, \"charlie\"]"));
 }
 
 #[test]
@@ -577,7 +577,7 @@ fn jsonb_agg_collects_json_values() {
     );
     assert_eq!(
         result.rows[0]["v"],
-        list([list([s("a"), s("b")]), list([s("c")]), Value::Null,])
+        jsonb("[[\"a\", \"b\"], [\"c\"], null]")
     );
 }
 
@@ -596,7 +596,7 @@ fn hash_gt_path_operator() {
         &engine,
         "SELECT data #> '{a,b}' AS v FROM jdoc WHERE id = 1",
     );
-    assert_eq!(result.rows[0]["v"], Value::Int(42));
+    assert_eq!(result.rows[0]["v"], jsonb("42"));
 }
 
 #[test]
@@ -628,6 +628,21 @@ fn json_contains_operator() {
 }
 
 #[test]
+fn jsonb_containment_compares_numbers_semantically() {
+    let engine = engine_with_table();
+    let result = exec(
+        &engine,
+        "SELECT '{\"a\": 1}'::jsonb @> '{\"a\": 1.0}'::jsonb AS equal_number, '[1.0]'::jsonb @> '1'::jsonb AS top_level_scalar, '[{\"a\": 1}]'::jsonb @> '{\"a\": 1}'::jsonb AS top_level_object, '{\"a\": [1.0]}'::jsonb @> '{\"a\": 1}'::jsonb AS nested_object_scalar, '[[1.0]]'::jsonb @> '[1]'::jsonb AS nested_array_scalar, '{\"a\": [1.0]}'::jsonb @> '{\"a\": [1]}'::jsonb AS matching_structure FROM t WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["equal_number"], Value::Bool(true));
+    assert_eq!(result.rows[0]["top_level_scalar"], Value::Bool(true));
+    assert_eq!(result.rows[0]["top_level_object"], Value::Bool(false));
+    assert_eq!(result.rows[0]["nested_object_scalar"], Value::Bool(false));
+    assert_eq!(result.rows[0]["nested_array_scalar"], Value::Bool(false));
+    assert_eq!(result.rows[0]["matching_structure"], Value::Bool(true));
+}
+
+#[test]
 fn json_not_contains_operator() {
     let engine = engine_with_table();
     let result = exec(
@@ -654,10 +669,7 @@ fn jsonb_set_basic() {
         &engine,
         "SELECT jsonb_set('{\"a\": 1}'::jsonb, '{b}', '2'::jsonb) AS v FROM t WHERE id = 1",
     );
-    assert_eq!(
-        result.rows[0]["v"],
-        map([("a", Value::Int(1)), ("b", Value::Int(2))])
-    );
+    assert_eq!(result.rows[0]["v"], jsonb("{\"a\": 1, \"b\": 2}"));
 }
 
 #[test]
@@ -667,10 +679,7 @@ fn jsonb_set_replace() {
         &engine,
         "SELECT jsonb_set('{\"a\": 1}'::jsonb, '{a}', '99'::jsonb) AS v FROM t WHERE id = 1",
     );
-    let Value::Map(v) = &result.rows[0]["v"] else {
-        panic!("expected map");
-    };
-    assert_eq!(v["a"], Value::Int(99));
+    assert_eq!(result.rows[0]["v"], jsonb("{\"a\": 99}"));
 }
 
 #[test]
@@ -680,11 +689,9 @@ fn json_object_keys_basic() {
         &engine,
         "SELECT json_object_keys('{\"a\": 1, \"b\": 2}'::json) AS v FROM t WHERE id = 1",
     );
-    let Value::List(keys) = &result.rows[0]["v"] else {
-        panic!("expected list");
-    };
-    let got: std::collections::BTreeSet<_> = keys.iter().cloned().collect();
-    assert_eq!(got, [s("a"), s("b")].into_iter().collect());
+    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows[0]["v"], s("a"));
+    assert_eq!(result.rows[1]["v"], s("b"));
 }
 
 #[test]
@@ -788,6 +795,20 @@ fn json_each_key_value_pairs() {
         .collect();
     assert_eq!(kv[&s("x")], s("10"));
     assert_eq!(kv[&s("y")], s("20"));
+}
+
+#[test]
+fn json_each_in_the_select_list_returns_a_typed_record() {
+    let engine = Engine::new();
+    let result = exec(&engine, "SELECT json_each('{\"a\": 1}'::json) AS pair");
+    assert_eq!(result.column_types, [Some(ColumnType::Record)]);
+    assert_eq!(
+        result.rows[0]["pair"],
+        Value::Record(vec![
+            ("key".into(), Value::Str("a".into())),
+            ("value".into(), Value::Str("1".into())),
+        ])
+    );
 }
 
 #[test]

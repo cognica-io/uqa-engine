@@ -62,12 +62,14 @@ fn rewrite_aggregates(
     match expr {
         ScalarExpr::Func {
             name,
+            binding,
             args,
             distinct,
             order_by,
             filter,
         } => Ok(ScalarExpr::Func {
             name: name.clone(),
+            binding: binding.clone(),
             args: args
                 .iter()
                 .map(|arg| rewrite_aggregates(engine, arg, replace))
@@ -85,12 +87,21 @@ fn rewrite_aggregates(
                 .map(|item| rewrite_aggregates(engine, item, replace))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
+        ScalarExpr::Row(items) => Ok(ScalarExpr::Row(
+            items
+                .iter()
+                .map(|item| rewrite_aggregates(engine, item, replace))
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
         ScalarExpr::Binary { op, lhs, rhs } => Ok(ScalarExpr::Binary {
             op: *op,
             lhs: Box::new(rewrite_aggregates(engine, lhs, replace)?),
             rhs: Box::new(rewrite_aggregates(engine, rhs, replace)?),
         }),
         ScalarExpr::Not(inner) => Ok(ScalarExpr::Not(Box::new(rewrite_aggregates(
+            engine, inner, replace,
+        )?))),
+        ScalarExpr::UnaryMinus(inner) => Ok(ScalarExpr::UnaryMinus(Box::new(rewrite_aggregates(
             engine, inner, replace,
         )?))),
         ScalarExpr::And(parts) => Ok(ScalarExpr::And(

@@ -8,10 +8,13 @@
 
 use super::{
     build_returning_row, coerce_to_column_type, dml_returning_result, dml_storage_error,
-    eval_mutation_expr, index_vectors_for_type, missing_document_error, referrers_to_for_actions,
-    rewrite_document_with_referential_actions, run_update_from, validate_mutation_columns,
-    BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope, Engine, RowIndependentUpdateValues,
-    SQLError, SQLParam, SQLResult, ScalarExpr, UpdatePlan, Value,
+    dml_target_row, eval_mutation_assignment, eval_mutation_expr, index_vectors_for_type,
+    missing_document_error, referrers_to_for_actions, rewrite_document_with_referential_actions,
+    run_update_from, validate_dml_expression_qualifiers, validate_mutation_columns,
+    validate_returning_alias_relations, BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope,
+    DmlReturningShape, Engine, MutationAssignmentTarget, ReturningProjectionRow, ReturningRowImage,
+    ReturningRowImages, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, ScalarExpr,
+    UpdatePlan, Value,
 };
 
 pub(in crate::sql) fn run_update(
@@ -27,6 +30,7 @@ pub(in crate::sql) fn run_update_inner(
     stmt: &UpdatePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    validate_returning_alias_relations(&stmt.target_qualifier, &stmt.returning_aliases, None)?;
     validate_mutation_columns(
         engine,
         &stmt.table,
@@ -38,6 +42,16 @@ pub(in crate::sql) fn run_update_inner(
     let mut ctes = CteScope::new();
     crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
+
+    if stmt.source.is_none() {
+        let allowed = BTreeSet::from([stmt.target_qualifier.clone()]);
+        if let Some(predicate) = stmt.predicate.as_ref() {
+            validate_dml_expression_qualifiers(predicate, &allowed)?;
+        }
+        for assignment in &stmt.assignments {
+            validate_dml_expression_qualifiers(&assignment.value, &allowed)?;
+        }
+    }
 
     // UPDATE ... FROM other [WHERE ...]: build the joined relation,
     // evaluate WHERE against each joined row, and apply assignments to the
@@ -62,7 +76,14 @@ pub(in crate::sql) fn run_update_inner(
         let filter = stmt.predicate.as_ref().ok_or_else(|| {
             SQLError::Internal("UPDATE preselection is missing its predicate".into())
         })?;
-        crate::sql::where_eval::collect_where_doc_ids(engine, &stmt.table, filter, params, &ctes)?
+        crate::sql::where_eval::collect_where_doc_ids(
+            engine,
+            &stmt.table,
+            &stmt.target_qualifier,
+            filter,
+            params,
+            &ctes,
+        )?
     } else {
         engine.table_doc_ids(&stmt.table)?
     };
@@ -72,13 +93,20 @@ pub(in crate::sql) fn run_update_inner(
             return Err(missing_document_error("UPDATE scan", &stmt.table, doc_id));
         };
         let original_doc = doc.clone();
+        let target_row = dml_target_row(
+            engine,
+            &stmt.table,
+            &stmt.target_qualifier,
+            doc_id,
+            &original_doc,
+        )?;
         if !preselected {
             if let Some(filter) = stmt.predicate.as_ref() {
                 if !uqa_sql::expr::truthy(&eval_mutation_expr(
                     engine,
                     &ctes,
                     filter,
-                    Some(&doc),
+                    Some(&target_row),
                     params,
                 )?) {
                     continue;
@@ -86,28 +114,51 @@ pub(in crate::sql) fn run_update_inner(
             }
         }
         for assignment in &stmt.assignments {
-            let value = coerce_to_column_type(
+            let value = eval_mutation_assignment(
                 engine,
-                &stmt.table,
-                &assignment.column,
-                eval_mutation_expr(engine, &ctes, &assignment.value, Some(&doc), params)?,
+                &ctes,
+                MutationAssignmentTarget {
+                    table: &stmt.table,
+                    column: &assignment.column,
+                    action: "UPDATE",
+                },
+                &assignment.value,
+                Some(&target_row),
+                params,
             )?;
-            doc.insert(assignment.column.clone(), value);
+            if let Some(value) = value {
+                doc.insert(assignment.column.clone(), value);
+            } else {
+                doc.remove(&assignment.column);
+            }
         }
         let rewritten_doc_id = rewrite_document_with_referential_actions(
             engine,
             &stmt.table,
             doc_id,
             &original_doc,
-            doc.clone(),
+            &mut doc,
             params,
         )?;
         if !stmt.returning.is_empty() {
             returning_rows.push(build_returning_row(
                 engine,
-                &stmt.table,
-                rewritten_doc_id,
-                &doc,
+                ReturningProjectionRow {
+                    table: &stmt.table,
+                    target_qualifier: &stmt.target_qualifier,
+                    images: ReturningRowImages {
+                        old: Some(ReturningRowImage {
+                            doc_id,
+                            document: &original_doc,
+                        }),
+                        new: Some(ReturningRowImage {
+                            doc_id: rewritten_doc_id,
+                            document: &doc,
+                        }),
+                    },
+                    aliases: &stmt.returning_aliases,
+                    context: None,
+                },
                 &stmt.returning,
                 params,
                 &ctes,
@@ -118,8 +169,15 @@ pub(in crate::sql) fn run_update_inner(
     if !stmt.returning.is_empty() {
         return dml_returning_result(
             engine,
-            &stmt.table,
-            &stmt.returning,
+            DmlReturningShape {
+                table: &stmt.table,
+                target_qualifier: &stmt.target_qualifier,
+                aliases: &stmt.returning_aliases,
+                returning: &stmt.returning,
+                params,
+                ctes: &ctes,
+                supplemental_schema: None,
+            },
             returning_rows,
             affected,
         );
@@ -132,6 +190,13 @@ pub(in crate::sql) fn try_run_point_update(
     stmt: &UpdatePlan,
     params: &[SQLParam],
 ) -> Result<Option<SQLResult>, SQLError> {
+    if engine
+        .try_describe_table(&stmt.table)
+        .map_err(|error| dml_storage_error("UPDATE", error))?
+        .is_some_and(|columns| columns.iter().any(|column| column.generated.is_some()))
+    {
+        return Ok(None);
+    }
     if !stmt.returning.is_empty() {
         return Ok(None);
     }
@@ -236,13 +301,14 @@ pub(in crate::sql) fn row_independent_update_values(
 pub(in crate::sql) fn expr_is_row_independent(expr: &ScalarExpr) -> bool {
     match expr {
         ScalarExpr::Literal(_) | ScalarExpr::Param(_) => true,
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-            items.iter().all(expr_is_row_independent)
-        }
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => items.iter().all(expr_is_row_independent),
         ScalarExpr::Binary { lhs, rhs, .. } => {
             expr_is_row_independent(lhs) && expr_is_row_independent(rhs)
         }
-        ScalarExpr::Not(inner) => expr_is_row_independent(inner),
+        ScalarExpr::Not(inner) | ScalarExpr::UnaryMinus(inner) => expr_is_row_independent(inner),
         ScalarExpr::IsNull { expr, .. } => expr_is_row_independent(expr),
         ScalarExpr::Between { expr, low, high } => {
             expr_is_row_independent(expr)
@@ -264,8 +330,11 @@ pub(in crate::sql) fn expr_is_row_independent(expr: &ScalarExpr) -> bool {
                 && else_branch.as_deref().map_or(true, expr_is_row_independent)
         }
         ScalarExpr::Cast { expr, .. } => expr_is_row_independent(expr),
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Func { .. }
         | ScalarExpr::WindowCall { .. }
@@ -280,10 +349,11 @@ pub(in crate::sql) fn can_patch_update_without_full_row(
     table: &str,
     updates: &BTreeMap<String, Value>,
 ) -> Result<bool, SQLError> {
-    if !engine
-        .try_check_constraints(table)
+    if engine
+        .try_check_constraint_definitions(table)
         .map_err(|err| dml_storage_error("UPDATE", err))?
-        .is_empty()
+        .iter()
+        .any(|constraint| constraint.enforced)
     {
         return Ok(false);
     }
@@ -318,6 +388,7 @@ pub(in crate::sql) fn can_patch_update_without_full_row(
         .try_foreign_keys(table)
         .map_err(|err| dml_storage_error("UPDATE", err))?
         .iter()
+        .filter(|fk| fk.enforced)
         .any(|fk| {
             fk.local_columns
                 .iter()

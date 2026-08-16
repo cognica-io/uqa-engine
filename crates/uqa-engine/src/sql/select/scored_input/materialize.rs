@@ -10,7 +10,6 @@ use uqa_core::Value;
 use uqa_execution::ExecResult;
 use uqa_sql::ResultRow;
 
-use super::projected_row::ProjectedDocumentRow;
 use super::{ScoredDocumentSource, ScoredEntry};
 use crate::sql::{DocId, SQLError};
 
@@ -29,11 +28,6 @@ impl ScoredDocumentSource {
                 .zip(values)
                 .map(|(field, value)| ((*field).to_string(), (*value).clone()))
                 .collect::<ResultRow>();
-            if let Some(qualifier) = self.outer_qualifier.as_deref() {
-                for (field, value) in fields.iter().zip(values) {
-                    row.insert(format!("{qualifier}.{field}"), (*value).clone());
-                }
-            }
             self.row_metadata(doc_id, entry.score)
                 .insert_into(&mut row)?;
             rows.push(row);
@@ -48,12 +42,18 @@ impl ScoredDocumentSource {
     ) -> ExecResult<Vec<uqa_execution::PhysicalRow>> {
         let mut rows = Vec::with_capacity(entries.len());
         self.for_each_kept_entry(entries, &mut |doc_id, entry, _fields, values| {
-            let row = ProjectedDocumentRow::new(
-                &self.projected_fields,
+            let metadata = self.row_metadata(doc_id, entry.score);
+            let extras = [
+                metadata.doc_id()?,
+                metadata.score(),
+                metadata.score_provenance(),
+            ];
+            let row = uqa_execution::ProjectedRow::new(
+                &self.schema,
                 &self.projected_slots,
                 values,
-                self.row_metadata(doc_id, entry.score),
-            )?;
+                &extras,
+            );
             rows.push(uqa_execution::PhysicalRow::from_values(row.into_values()));
             Ok(())
         })?;
@@ -83,6 +83,46 @@ impl ScoredDocumentSource {
         }
         let doc_ids = entries.iter().map(|entry| entry.doc_id).collect::<Vec<_>>();
         let store = self.table.document_store.read();
+        if crate::engine_generated::projection_contains_virtual_generated_column(
+            &self.column_definitions,
+            &self.projected_fields,
+        ) {
+            let mut documents =
+                store
+                    .get_many(&doc_ids)
+                    .map_err(|error| -> uqa_execution::ExecError {
+                        SQLError::Internal(format!(
+                            "read `{}` generated documents: {error}",
+                            self.table_name
+                        ))
+                        .into()
+                    })?;
+            for entry in entries {
+                let mut document = documents.remove(&entry.doc_id).ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "access path returned document {}, but table `{}` omitted it",
+                        entry.doc_id, self.table_name
+                    ))
+                })?;
+                crate::engine_generated::materialize_projected_virtual_generated_columns(
+                    &self.column_definitions,
+                    &mut document,
+                    &self.projected_fields,
+                )?;
+                let values = fields
+                    .iter()
+                    .map(|field| document.get(*field).cloned().unwrap_or(Value::Null))
+                    .collect::<Vec<_>>();
+                let value_refs = values.iter().collect::<Vec<_>>();
+                if let Some(predicate) = self.predicate.as_ref() {
+                    if !predicate.keep(&value_refs)? {
+                        continue;
+                    }
+                }
+                visitor(entry.doc_id, entry, &fields, &value_refs)?;
+            }
+            return Ok(());
+        }
         let mut index = 0usize;
         let mut materialization_error = None;
         store
@@ -162,12 +202,18 @@ impl ScoredDocumentSource {
         executor: &mut dyn uqa_execution::AggregateExecutor,
     ) -> ExecResult<()> {
         self.for_each_kept_entry(entries, &mut |doc_id, entry, _fields, values| {
-            let row = ProjectedDocumentRow::new(
-                &self.projected_fields,
+            let metadata = self.row_metadata(doc_id, entry.score);
+            let extras = [
+                metadata.doc_id()?,
+                metadata.score(),
+                metadata.score_provenance(),
+            ];
+            let row = uqa_execution::ProjectedRow::new(
+                &self.schema,
                 &self.projected_slots,
                 values,
-                self.row_metadata(doc_id, entry.score),
-            )?;
+                &extras,
+            );
             executor.consume_projected_row(&row)
         })
     }

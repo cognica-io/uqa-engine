@@ -1,4 +1,4 @@
--- PG17 differential probes: one SELECT per line, no DDL required.
+-- PG18 differential probes: one SELECT per line, no DDL required.
 -- Lines starting with -- are skipped.
 -- arithmetic
 SELECT 7 / 2
@@ -7,7 +7,7 @@ SELECT 7 % 3
 SELECT -7 % 3
 SELECT 7.0 / 2
 SELECT 2 ^ 10
-SELECT 2 ^ 0.5
+SELECT 2 ^ 0.5, pg_typeof(2 ^ 0.5)
 SELECT |/ 16.0
 SELECT 10 / 4.0
 SELECT round(2.5)
@@ -36,6 +36,8 @@ SELECT log(100)
 SELECT log(2, 8)
 SELECT pi()
 SELECT power(2, -1)
+SELECT power(2.0000000000000000000000000000000000000000::numeric, 0.5::numeric)
+SELECT power((-2)::numeric, 'NaN'::numeric), power((-2)::numeric, 'Infinity'::numeric), power((-2)::numeric, '-Infinity'::numeric)
 SELECT 5 // this is invalid syntax test
 SELECT 1 / 0
 SELECT 1.0 / 0
@@ -101,6 +103,15 @@ SELECT 'abc' ~* 'A.C'
 SELECT 'abc' !~ 'x'
 SELECT regexp_replace('foo123bar', '[0-9]+', 'X')
 SELECT regexp_replace('foo123bar456', '[0-9]+', 'X', 'g')
+SELECT regexp_replace('a b', 'a b', 'X', 1, 0, 'x')
+SELECT regexp_instr('a b', 'a b', 1, 1, 0, 'x')
+SELECT regexp_substr('ab', 'a b', 1, 1, 'x')
+SELECT regexp_like(E'a\nb', 'a.b')
+SELECT regexp_like(E'a\nb', 'a.b', 'n')
+SELECT regexp_like(' ', '[ ]', 'x')
+SELECT regexp_like('a+', 'a+', 'b')
+SELECT regexp_like('aa', 'a+', 'e'), regexp_like('a+', 'a+', 'e')
+SELECT regexp_like('aa', $re$a\{1,\}$re$, 'b')
 SELECT (regexp_match('foo123', '[0-9]+'))[1]
 SELECT regexp_count('a1b2c3', '[0-9]')
 SELECT regexp_like('hello', 'ell')
@@ -108,6 +119,7 @@ SELECT to_hex(255)
 SELECT encode('abc'::bytea, 'base64')
 SELECT decode('YWJj', 'base64')
 -- null semantics
+SELECT ''::text, NULL, 'NULL'::text
 SELECT NULL IS NULL
 SELECT NULL = NULL
 SELECT NULL IS DISTINCT FROM NULL
@@ -165,6 +177,16 @@ SELECT '{1,2,3}'::int[]
 SELECT '2024-01-15'::date
 SELECT '15:30:00'::time
 SELECT '2024-01-15 10:30:00'::timestamp
+SELECT (-1::smallint)::oid
+SELECT (-1::integer)::oid
+SELECT (-1::bigint)::oid
+SELECT '-1'::xid
+SELECT 1::xid
+SELECT encode((-1::smallint)::bytea, 'hex')
+SELECT encode((-1::integer)::bytea, 'hex')
+SELECT encode((-1::bigint)::bytea, 'hex')
+SELECT true::bytea
+SELECT encode('\\x6162'::bytea, 'hex')
 -- date and time
 SELECT date '2024-01-31' + 1
 SELECT date '2024-03-01' - date '2024-02-01'
@@ -193,6 +215,8 @@ SELECT make_timestamp(2024, 1, 15, 10, 30, 0)
 SELECT to_char(date '2024-06-15', 'YYYY-MM-DD')
 SELECT to_char(timestamp '2024-06-15 13:05:00', 'HH24:MI')
 SELECT to_char(1234.5, '9999.99')
+SELECT to_char(-0.04::numeric, '9.9'), to_char(-0.04::float8, '9.9')
+SELECT to_char('NaN'::numeric, '99999999.99'), to_char('Infinity'::numeric, '99999999.99'), to_char('-Infinity'::numeric, '99999999.99')
 SELECT to_date('15-06-2024', 'DD-MM-YYYY')
 SELECT age(date '2024-06-15', date '2023-01-10')
 SELECT date '2024-02-30'
@@ -217,6 +241,7 @@ SELECT '{"a":1,"b":2}'::jsonb ?| array['x','b']
 SELECT '{"a":1,"b":2}'::jsonb ?& array['a','b']
 SELECT '{"a":1}'::jsonb @> '{"a":1}'
 SELECT '{"a":1,"b":2}'::jsonb @> '{"a":1}'
+SELECT '{"a":1}'::jsonb @> '{"a":1.0}'::jsonb
 SELECT '{"a":1}'::jsonb <@ '{"a":1,"b":2}'
 SELECT '{"a":1}'::jsonb || '{"b":2}'::jsonb
 SELECT '{"a":1,"b":2}'::jsonb - 'a'
@@ -286,6 +311,8 @@ SELECT bool_or(x) FROM (VALUES (true), (false)) AS t(x)
 SELECT variance(x) FROM (VALUES (1), (2), (3)) AS t(x)
 SELECT var_pop(x) FROM (VALUES (1), (2), (3)) AS t(x)
 SELECT stddev_samp(x) FROM (VALUES (1), (2), (3)) AS t(x)
+SELECT var_pop(x), stddev_pop(x) FROM (VALUES (1::numeric), (1::numeric)) AS t(x)
+SELECT var_pop(x), stddev_pop(x) FROM (VALUES ('Infinity'::numeric), (1::numeric)) AS t(x)
 SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY x) FROM (VALUES (1), (2), (3), (4)) AS t(x)
 SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY x) FROM (VALUES (1), (2), (3), (4)) AS t(x)
 SELECT mode() WITHIN GROUP (ORDER BY x) FROM (VALUES (1), (1), (2)) AS t(x)
@@ -294,6 +321,32 @@ SELECT jsonb_object_agg(k, v) FROM (VALUES ('a', 1), ('b', 2)) AS t(k, v)
 -- rows / set returning / misc
 SELECT * FROM generate_series(1, 3)
 SELECT generate_series(1, 3)
+SELECT abs(generate_series(-2, 0))
+SELECT generate_series(1, 2), generate_series(10, 12)
+SELECT generate_series(1, generate_series(1, 2))
+SELECT id, generate_series(1, id) AS n FROM (VALUES (2), (1)) AS t(id) ORDER BY id, n
+SELECT generate_series(1, 5) AS n LIMIT 2
+SELECT generate_series(1, CASE WHEN id = 1 THEN 2 ELSE 10 / (id - id) END) AS n FROM (VALUES (1), (2)) AS t(id) LIMIT 2
+SELECT jsonb_object_keys('{"b":1,"a":2}'::jsonb)
+SELECT count(*), generate_series(1, 2) FROM (VALUES (1), (2)) AS t(x)
+SELECT count(*) + generate_series(1, 2) FROM (VALUES (1), (2)) AS t(x)
+SELECT row_number() OVER (ORDER BY x), generate_series(1, 2) FROM (VALUES (1), (2)) AS t(x)
+SELECT 1 ORDER BY generate_series(1, 2)
+SELECT DISTINCT ON (generate_series(1, 2)) 1 ORDER BY generate_series(1, 2)
+SELECT generate_series(1, 2) AS x ORDER BY generate_series(10, 12)
+SELECT count(*) FROM (VALUES (1), (2)) AS t(x) ORDER BY generate_series(1, 2)
+SELECT row_number() OVER () FROM (VALUES (1), (2)) AS t(x) ORDER BY generate_series(1, 2)
+SELECT generate_series(1, 2), count(*) FROM (VALUES (1), (2)) AS t(x) GROUP BY generate_series(1, 2) ORDER BY 1
+SELECT generate_series(1, 2), count(*) FROM (VALUES (1)) AS t(x) GROUP BY generate_series(1, 3) ORDER BY 1
+SELECT CASE WHEN true THEN generate_series(1, 2) END
+SELECT coalesce(generate_series(1, 2), 0)
+SELECT 1 WHERE generate_series(1, 2) > 0
+SELECT 1 HAVING generate_series(1, 2) > 0
+SELECT 1 LIMIT generate_series(1, 2)
+SELECT 1 OFFSET generate_series(1, 2)
+SELECT 1 FROM (VALUES (1)) AS t(x) JOIN (VALUES (1)) AS u(y) ON generate_series(1, 2) > 0
+VALUES (generate_series(1, 2))
+SELECT * FROM generate_series(1, generate_series(1, 2))
 SELECT * FROM generate_series(5, 1, -2)
 SELECT * FROM unnest(ARRAY['x', 'y'])
 SELECT x FROM (VALUES (1), (2)) AS t(x) ORDER BY x DESC LIMIT 1
@@ -321,7 +374,16 @@ SELECT pg_typeof('x'::text)
 SELECT pg_typeof(now())
 SELECT width_bucket(5.35, 0, 10, 5)
 SELECT setseed(0.5)
--- appended: PG17 semantics round (3VL edges, intervals, operators)
+-- qualified joins
+SELECT * FROM (VALUES (1, 'left-value')) AS l(id, shared) JOIN (VALUES (1, 'right-value')) AS r(id, shared) USING (id)
+SELECT * FROM (VALUES (1, 'l1'), (2, 'l2')) AS l(id, lval) FULL JOIN (VALUES (1, 'r1'), (3, 'r3')) AS r(id, rval) USING (id) ORDER BY id
+SELECT * FROM (VALUES (2, 'b', 'left')) AS l(id, shared, lval) NATURAL JOIN (VALUES ('b', 2, 'right')) AS r(shared, id, rval)
+SELECT merged.id, l.id, r.id FROM (VALUES (1), (2)) AS l(id) FULL JOIN (VALUES (1), (3)) AS r(id) USING (id) AS merged ORDER BY merged.id
+SELECT id, l.id, r.id, t.id FROM (VALUES (1), (2)) AS l(id) JOIN (VALUES (1), (3)) AS r(id) USING (id) JOIN (VALUES (1), (4)) AS t(id) USING (id)
+WITH left_cte(id, shared, lval) AS (VALUES (1, 'same', 'l1'), (2, 'left', 'l2')) SELECT l.lval FROM left_cte l NATURAL JOIN (VALUES (1, 'same', 'r1'), (3, 'right', 'r3')) AS r(id, shared, rval)
+SELECT * FROM (VALUES (1)) AS l(id) JOIN (VALUES (1)) AS r(id) USING (id, id)
+SELECT * FROM (VALUES (1)) AS l(id) JOIN (VALUES (1)) AS r(id) USING (missing)
+-- appended: PG18 semantics round (3VL edges, intervals, operators)
 SELECT interval '-1 day 3 hours'
 SELECT interval '1 day -3 hours'
 SELECT interval '1.5 mons'
@@ -372,3 +434,71 @@ SELECT date '2024-01-31' - 1
 SELECT factorial(0)
 SELECT cbrt(-27)
 SELECT num_nonnulls(NULL, NULL)
+-- independent review regressions
+SELECT to_char(2.5::numeric, '9'), to_char(2.5::float8, '9'), to_char(-2.5::numeric, '9'), to_char(1.25::numeric, '9.9')
+SELECT avg(x), pg_typeof(avg(x)) FROM (VALUES (9007199254740992::bigint), (9007199254740993::bigint)) AS t(x)
+SELECT '[0:-1]={}'::int[]
+SELECT array_cat('[0:0][2:3]={{1,2}}'::int[], '[5:5][9:10]={{3,4}}'::int[])
+SELECT array_append('{}'::int[], 1)
+SELECT array_prepend(1, '{}'::int[])
+SELECT ARRAY[1] < ARRAY[2]
+SELECT ARRAY[1,2] < ARRAY[[1,2]]
+SELECT ARRAY[2,0] > ARRAY[[1,9]]
+SELECT ARRAY[1] < '[2:2]={1}'::int[]
+SELECT encode((ARRAY[1::smallint]::bytea[])[1], 'hex')
+SELECT '-+1'::numeric
+SELECT '+NaN'::numeric
+SELECT pg_typeof(ARRAY['x', 'y'::varchar])
+SELECT pg_typeof(CASE WHEN true THEN 'x' ELSE 'y'::varchar END)
+SELECT pg_typeof(COALESCE('x', 'y'::varchar))
+SELECT 1e-9000::numeric * 1e-9000::numeric = 0
+SELECT 0e200000::numeric = 0
+SELECT ('{\ a}'::text[])[1] = ' a'
+SELECT ('{N\ULL}'::text[])[1] = 'NULL'
+SELECT * FROM (VALUES (1)) AS l(id) FULL JOIN (VALUES (1)) AS r(id) USING (id) AS l
+SELECT true, false, ROW(true, false)
+SELECT to_char(12::numeric, 'fm000'), to_char(-1.2::numeric, 'S9'), to_char(1::numeric, 'FM090'), to_char(12345.6::numeric, 'FM9999.99')
+SELECT regexp_like('a', 'a', 'qn')
+SELECT power(0.000001::numeric, 3::numeric), power(2::numeric, 0.1::numeric), power(4::numeric, 0.25::numeric)
+SELECT power((-2)::numeric, 0.1::numeric)
+SELECT power(0::numeric, (-0.1)::numeric)
+SELECT regexp_like('a^b', 'a^b', 'b'), regexp_like('a$b', 'a$b', 'e')
+SELECT pg_typeof(power(2::numeric, '0.5')), pg_typeof(power('2', 0.5::numeric)), pg_typeof(power('2', '0.5'))
+SELECT power(2, NULL::text)
+SELECT var_pop(x) FROM (VALUES (1e70000::numeric), (1e70000::numeric)) AS t(x)
+SELECT var_pop(x) FROM (VALUES (1e70000::numeric), (1e70000::numeric + 1)) AS t(x)
+SELECT regexp_like(E'\n', '[^a]', 'n'), regexp_like(E'\n', '[^\n]', 'en')
+SELECT to_char('NaN'::numeric, '000MI'), to_char('Infinity'::numeric, '000PL'), to_char('-Infinity'::numeric, '99999999.99PR')
+SELECT to_char(1e20::float8, '9.9'), to_char(-1e20::float8, '9.9MI'), to_char(1e20::float8, 'FM9.9PL')
+SELECT to_char(12::numeric, 'fM000'), to_char(-1.2::numeric, '9Mi'), to_char(12::numeric, '"USD"000')
+SELECT jsonb_pretty('[]'::jsonb), jsonb_pretty('{}'::jsonb), jsonb_pretty('{"zz":1,"b":[],"aa":{"long":3,"x":2}}'::jsonb)
+SELECT regexp_like('b', '[^]a]', 'n'), regexp_like('d', '\d', 'b'), regexp_like('1', '\d', 'e')
+SELECT to_char(12::numeric, '9999.'), to_char(-12::numeric, 'FM9999.')
+SELECT 0e-16383::numeric / 4
+SELECT var_pop(x), stddev_pop(x) FROM (VALUES ('Infinity'::numeric), (1e100000::numeric)) AS t(x)
+SELECT var_pop(x) FROM (VALUES (0::numeric), (1e-10000::numeric)) AS t(x)
+SELECT regexp_like(' ', '[[:digit:] ]', 'x'), regexp_like('#', '[[:digit:]#]', 'x')
+SELECT regexp_like('ab', 'a' || chr(160) || 'b', 'x'), regexp_like('a' || chr(160) || 'b', 'a' || chr(160) || 'b', 'x'), regexp_like('ab', 'a' || chr(8195) || 'b', 'x')
+SELECT power(1::numeric + 1e-16383::numeric, 0.5::numeric)
+SELECT to_char(9.99::numeric, '9.'), to_char(-9.99::numeric, '9.S'), to_char(-2.5::numeric, '9.S'), to_char(0.5::numeric, '.9'), to_char(0.5::numeric, 'FM.9')
+SELECT to_char(12::numeric, 'SFM999'), to_char(-12::numeric, 'FMS999'), to_char(12::numeric, '999FMS'), to_char('NaN'::numeric, 'SFM999'), to_char(12::numeric, '"USD"SFM999')
+SELECT jsonb_pretty('1e-1000'::jsonb), jsonb_pretty('-0'::jsonb), jsonb_pretty('1.00'::jsonb)
+SELECT regexp_like('1', '[^-a]', 'n'), regexp_like('[', '[[]'), regexp_like('1', '[^[]', 'n')
+SELECT to_char(-1.25::numeric, 'S.9'), to_char(-1.25::numeric, '9S.9'), to_char(-1.2::numeric, '9SG'), to_char(-1e20::float8, 'FM9.9MI'), to_char(1e20::float8, 'FM9.0PL')
+SELECT to_char(12::numeric, 'PL999'), to_char(-12::numeric, 'PL999'), to_char(12::numeric, 'SG999'), to_char(-12::numeric, 'SG999'), to_char(12::numeric, '9SG99'), to_char(-12::numeric, '9MI99')
+SELECT to_char(12::numeric, '9S9.9'), to_char(-12::numeric, '99S.9'), to_char(12::numeric, '9MI99SG'), to_char(-12::numeric, '9MI99SG')
+SELECT to_char(12::numeric, 'PR999')
+SELECT to_char(12::numeric, '9S99MI')
+SELECT to_char(1::numeric, 'FM9.9MIPL'), to_char(-1::numeric, 'FM9.9MIPL'), to_char(-12::numeric, '999S,'), to_char(-12::numeric, '999,S'), to_char(-12::numeric, '999PR,'), to_char(12::numeric, '999PR,')
+SELECT '[2147483647:2147483647]={1}'::int[]
+SELECT '[1.0]'::jsonb @> '1'::jsonb, '[{"a":1}]'::jsonb @> '{"a":1}'::jsonb, '{"a":[1.0]}'::jsonb @> '{"a":1}'::jsonb, '[[1.0]]'::jsonb @> '[1]'::jsonb, '{"a":[1.0]}'::jsonb @> '{"a":[1]}'::jsonb
+SELECT power(1e-1000::numeric, -17::numeric) = 1e17000::numeric, length(power(1e-1000::numeric, -17::numeric)::text)
+SELECT to_char(1e20::float8, 'FM09.90PL'), to_char(-1e20::float8, 'FM09.90MI'), to_char(-1e20::float8, 'FM09.90SG')
+SELECT to_char(1485::numeric, '9,999'), to_char(3148.5::numeric, '9G999D999'), to_char(485::numeric, 'L999'), to_char(12::numeric, 'FM00L')
+SELECT to_char(12.45::numeric, '99V9'), to_char(482::numeric, '999th'), to_char(0.5::numeric, 'FM00TH'), to_char(12::numeric, 'SP')
+SELECT to_char(485::numeric, 'RN'), to_char(5.2::numeric, 'FMRN'), to_char(0.0004859::numeric, '9.99EEEE'), to_char(9.99::float8, '9.9EEEE')
+SELECT '1e131072'::jsonb
+SELECT '1e-16384'::jsonb
+SELECT '[1e131072]'::jsonb
+SELECT '{"n":1e131072}'::jsonb
+SELECT '1e131071'::jsonb > '0'::jsonb, '0e200000'::jsonb = '0'::jsonb, json_typeof('1e200000'::json)

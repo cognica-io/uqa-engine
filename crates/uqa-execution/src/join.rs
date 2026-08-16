@@ -109,10 +109,10 @@ impl HybridRowStore {
 
     fn push(&mut self, row: PhysicalRow) -> ExecResult<()> {
         if let Some(disk) = self.disk.as_mut() {
-            return disk.push(&self.schema.view(&row).to_result_row());
+            return disk.push(&row);
         }
 
-        let row_bytes = SpillBuffer::encoded_single_row_size(&self.schema, &row)?;
+        let row_bytes = IndexedSpill::encoded_row_size(&self.schema, &row)?;
         let next_rows = self
             .rows
             .checked_add(1)
@@ -131,11 +131,11 @@ impl HybridRowStore {
         // Build the complete disk representation before publishing it. If any
         // append fails, the original in-memory rows remain available and the
         // operator aborts without exposing a partial positional store.
-        let mut disk = IndexedSpill::new()?;
+        let mut disk = IndexedSpill::new(self.schema.clone())?;
         for existing in &self.memory {
-            disk.push(&self.schema.view(existing).to_result_row())?;
+            disk.push(existing)?;
         }
-        disk.push(&self.schema.view(&row).to_result_row())?;
+        disk.push(&row)?;
         self.memory.clear();
         self.rows = disk.len();
         self.memory_bytes = 0;
@@ -150,7 +150,6 @@ impl HybridRowStore {
     ) -> ExecResult<T> {
         if let Some(disk) = self.disk.as_mut() {
             let row = disk.get(index)?;
-            let row = PhysicalRow::from_result_row(&self.schema, row);
             return visitor(&row);
         }
 
@@ -657,17 +656,8 @@ fn simple_key_positions(schema: &RowSchema, expressions: &[ScalarExpr]) -> Optio
         .iter()
         .map(|expression| match expression {
             ScalarExpr::Column(column) => schema.position(column),
-            ScalarExpr::QualifiedColumn {
-                qualifier,
-                column,
-                key,
-            } => {
-                let resolved = if key.is_empty() {
-                    format!("{qualifier}.{column}")
-                } else {
-                    key.clone()
-                };
-                schema.position(&resolved)
+            ScalarExpr::QualifiedColumn { qualifier, column } => {
+                schema.qualified_position(qualifier, column)
             }
             _ => None,
         })
@@ -828,7 +818,7 @@ impl<'a> HashJoin<'a> {
                 JoinKind::Cross => left.saturating_mul(right),
             });
         let prepared_predicate = predicate.as_ref().and_then(|predicate| {
-            ProjectedPredicate::compile(predicate, schema.columns(), &[])
+            ProjectedPredicate::compile_with_schema(predicate, &schema, &[])
                 .ok()
                 .flatten()
         });
@@ -889,7 +879,9 @@ impl<'a> HashJoin<'a> {
         join.prepared_predicate = join
             .predicate
             .as_ref()
-            .map(|predicate| ProjectedPredicate::compile(predicate, join.schema.columns(), params))
+            .map(|predicate| {
+                ProjectedPredicate::compile_with_schema(predicate, &join.schema, params)
+            })
             .transpose()?
             .flatten();
         Ok(join)
@@ -1071,13 +1063,13 @@ impl<'a> HashJoin<'a> {
         row: &PhysicalRow,
         schema: &RowSchema,
     ) -> ExecResult<Option<EncodedKey>> {
-        let view = schema.view(row);
         if let Some(positions) = positions {
+            let view = schema.view(row);
             return encode_non_null_key(positions.iter().map(|position| view.value_at(*position)));
         }
         let mut values = SmallVec::<[Value; 4]>::with_capacity(expressions.len());
         for expression in expressions {
-            let value = self.evaluator.evaluate(expression, &view)?;
+            let value = self.evaluator.evaluate_physical(expression, schema, row)?;
             if matches!(value, Value::Null) {
                 return Ok(None);
             }
@@ -1091,9 +1083,11 @@ impl<'a> HashJoin<'a> {
             return Ok(predicate.keep_row(&self.schema.view(row))?);
         }
         self.predicate.as_ref().map_or(Ok(true), |predicate| {
-            Ok(truthy(
-                &self.evaluator.evaluate(predicate, &self.schema.view(row))?,
-            ))
+            Ok(truthy(&self.evaluator.evaluate_physical(
+                predicate,
+                &self.schema,
+                row,
+            )?))
         })
     }
 

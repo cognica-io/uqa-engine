@@ -25,7 +25,7 @@ fn bench_tpch_sf0001(c: &mut Criterion) {
         assert_eq!(
             tpch_fixture::canonical_result(&actual),
             expected,
-            "TPC-H Q{:02} validation differs from PostgreSQL 17",
+            "TPC-H Q{:02} validation differs from PostgreSQL 18",
             index + 1
         );
     }

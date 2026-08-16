@@ -97,12 +97,14 @@ impl UnifiedPlan {
                     .collect();
                 Self::Command(Box::new(CommandPlan::Insert(Box::new(InsertPlan {
                     table: statement.table,
+                    target_qualifier: statement.target_qualifier,
                     columns: statement.columns,
                     ctes,
                     rows,
                     source,
                     on_conflict,
                     returning,
+                    returning_aliases: statement.returning_aliases,
                     subqueries,
                 }))))
             }
@@ -126,11 +128,13 @@ impl UnifiedPlan {
                     .collect();
                 Self::Command(Box::new(CommandPlan::Update(Box::new(UpdatePlan {
                     table: statement.table,
+                    target_qualifier: statement.target_qualifier,
                     assignments,
                     predicate,
                     ctes,
                     source: source.map(Box::new),
                     returning,
+                    returning_aliases: statement.returning_aliases,
                     subqueries,
                 }))))
             }
@@ -152,10 +156,12 @@ impl UnifiedPlan {
                     .collect();
                 Self::Command(Box::new(CommandPlan::Delete(Box::new(DeletePlan {
                     table: statement.table,
+                    target_qualifier: statement.target_qualifier,
                     predicate,
                     ctes,
                     source: source.map(Box::new),
                     returning,
+                    returning_aliases: statement.returning_aliases,
                     subqueries,
                 }))))
             }
@@ -263,11 +269,13 @@ impl UnifiedPlan {
                     .collect();
                 Self::Command(Box::new(CommandPlan::Merge(Box::new(MergePlan {
                     target: statement.target,
+                    target_qualifier: statement.target_qualifier,
                     target_alias: statement.target_alias,
                     source: Box::new(source),
                     join_condition,
                     when_clauses,
                     returning,
+                    returning_aliases: statement.returning_aliases,
                     subqueries,
                 }))))
             }

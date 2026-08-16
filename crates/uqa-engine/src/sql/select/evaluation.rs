@@ -10,8 +10,8 @@ use super::{
     engine_func_intercept, eval_physical_scalar, execute_lateral_subquery_output,
     execute_query_plan_output, is_score_provenance_column, physical_exec_error,
     query_contains_volatile_function, Arc, AtomicU64, BTreeMap, Engine, ExecResult,
-    ExpressionEvaluator, Ordering, PhysicalEvalContext, PhysicalSubqueryRunner, QueryOutputMode,
-    QueryPlan, QueryRows, ResultRow, SQLError, SQLParam, ScalarExpr, ScalarFrameBound,
+    ExpressionEvaluator, Ordering, PhysicalEvalContext, PhysicalOuterRow, PhysicalSubqueryRunner,
+    QueryOutputMode, QueryPlan, QueryRows, SQLError, SQLParam, ScalarExpr, ScalarFrameBound,
     SharedExpressionEvaluator, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN, SCORE_COLUMN,
 };
 use uqa_sql::expr::RowLookup;
@@ -137,25 +137,16 @@ impl CorrelatedExistsOuterKeys {
 /// instead of cloning it through the general expression evaluator.
 pub(in crate::sql) enum DirectColumnKey {
     Column(String),
-    Qualified {
-        qualifier: String,
-        column: String,
-        key: String,
-    },
+    Qualified { qualifier: String, column: String },
 }
 
 impl DirectColumnKey {
     pub(in crate::sql) fn compile(expression: &ScalarExpr) -> Option<Self> {
         match expression {
             ScalarExpr::Column(column) => Some(Self::Column(column.clone())),
-            ScalarExpr::QualifiedColumn {
-                qualifier,
-                column,
-                key,
-            } => Some(Self::Qualified {
+            ScalarExpr::QualifiedColumn { qualifier, column } => Some(Self::Qualified {
                 qualifier: qualifier.clone(),
                 column: column.clone(),
-                key: key.clone(),
             }),
             _ => None,
         }
@@ -164,11 +155,7 @@ impl DirectColumnKey {
     pub(in crate::sql) fn value<'a>(&self, row: &'a dyn RowLookup) -> Option<&'a Value> {
         match self {
             Self::Column(column) => row.column(column),
-            Self::Qualified {
-                qualifier,
-                column,
-                key,
-            } => row.qualified_column(qualifier, column, key),
+            Self::Qualified { qualifier, column } => row.qualified_column(qualifier, column),
         }
     }
 }
@@ -216,11 +203,7 @@ impl CachedScalarSubquery {
             .rows
             .read_rows()
             .map_err(physical_exec_error)?
-            .map(|row| {
-                let mut row = row.map_err(physical_exec_error)?;
-                row.retain(|column, _| !is_score_provenance_column(column));
-                Ok(row)
-            });
+            .map(|row| row.map_err(physical_exec_error));
         Ok(uqa_execution::SubqueryResult {
             columns: self.columns.clone(),
             rows: Box::new(rows),
@@ -296,9 +279,17 @@ struct PreparedCorrelatedExistsPredicate<'a> {
 }
 
 impl uqa_execution::RowPredicate for PreparedCorrelatedExistsPredicate<'_> {
-    fn keep(&self, row: &dyn RowLookup) -> ExecResult<bool> {
+    fn keep_physical(
+        &self,
+        schema: &uqa_execution::RowSchema,
+        row: &uqa_execution::PhysicalRow,
+    ) -> ExecResult<bool> {
         let hook = ScopedEngineHook::new(self.engine, &self.ctes);
-        let exists = hook.correlated_exists_matches(&self.lookup, Some(row), self.params)?;
+        let exists = hook.correlated_exists_matches(
+            &self.lookup,
+            PhysicalOuterRow::Physical { schema, row },
+            self.params,
+        )?;
         Ok(if self.negated { !exists } else { exists })
     }
 }
@@ -375,16 +366,50 @@ impl ExpressionEvaluator for EngineExpressionEvaluator<'_> {
         )?)
     }
 
-    fn project_star(&self, row: &dyn RowLookup) -> ExecResult<ResultRow> {
-        let mut output = ResultRow::new();
-        row.visit_columns(&mut |column, value| {
-            if !matches!(column, SCORE_COLUMN | DOC_ID_COLUMN | MERGE_ACTION_COLUMN)
-                && !is_score_provenance_column(column)
+    fn evaluate_physical(
+        &self,
+        expression: &ScalarExpr,
+        schema: &uqa_execution::RowSchema,
+        row: &uqa_execution::PhysicalRow,
+    ) -> ExecResult<Value> {
+        let view = schema.view(row);
+        let hook = ScopedEngineHook::new(self.engine, &self.ctes);
+        let context = PhysicalEvalContext::from_row_lookup(&view, self.params)
+            .with_function_hook(&hook)
+            .with_subquery_runner(&hook)
+            .with_physical_outer_row(schema, row);
+        if let ScalarExpr::Func { name, args, .. } = expression {
+            let mut evaluate = |expr: &ScalarExpr| {
+                eval_physical_scalar(expr, &self.ctes.scalar_subqueries, &context)
+            };
+            if let Some(value) =
+                engine_func_intercept(Some(self.engine), name, args, &view, &mut evaluate)?
             {
-                output.insert(column.to_string(), value.clone());
+                return Ok(value);
             }
-        });
-        Ok(output)
+        }
+        Ok(eval_physical_scalar(
+            expression,
+            &self.ctes.scalar_subqueries,
+            &context,
+        )?)
+    }
+
+    fn star_column_visible(&self, column: &str) -> bool {
+        !matches!(column, SCORE_COLUMN | DOC_ID_COLUMN | MERGE_ACTION_COLUMN)
+            && !is_score_provenance_column(column)
+    }
+
+    fn parameters(&self) -> &[SQLParam] {
+        self.params
+    }
+
+    fn expression_type(
+        &self,
+        expression: &ScalarExpr,
+        schema: &uqa_execution::RowSchema,
+    ) -> Result<Option<uqa_sql::ast::ColumnType>, SQLError> {
+        uqa_execution::scalar_type_with_resolver(expression, schema, self.params, self.engine)
     }
 }
 
@@ -445,6 +470,14 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
     ) -> Option<std::result::Result<Value, SQLError>> {
         crate::sql::call_user_scalar_function(self.engine, name, args)
     }
+
+    fn call_bound_user_function(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+        args: &[(Option<String>, Value)],
+    ) -> Option<std::result::Result<Value, SQLError>> {
+        crate::sql::call_bound_user_scalar_function(self.engine, binding, args)
+    }
 }
 
 impl PhysicalSubqueryRunner for ScopedEngineHook<'_> {
@@ -452,7 +485,7 @@ impl PhysicalSubqueryRunner for ScopedEngineHook<'_> {
         &self,
         subquery: usize,
         plan: &QueryPlan,
-        outer_row: Option<&dyn RowLookup>,
+        outer_row: PhysicalOuterRow<'_>,
         params: &[SQLParam],
     ) -> Result<uqa_execution::SubqueryResult, SQLError> {
         let cache_key = (self.ctes.scalar_subquery_arena, subquery);
@@ -499,7 +532,7 @@ impl PhysicalSubqueryRunner for ScopedEngineHook<'_> {
         &self,
         subquery: usize,
         plan: &QueryPlan,
-        outer_row: Option<&dyn RowLookup>,
+        outer_row: PhysicalOuterRow<'_>,
         params: &[SQLParam],
     ) -> Result<Value, SQLError> {
         let cache_key = (self.ctes.scalar_subquery_arena, subquery);
@@ -549,7 +582,7 @@ impl PhysicalSubqueryRunner for ScopedEngineHook<'_> {
         &self,
         subquery: usize,
         plan: &QueryPlan,
-        outer_row: Option<&dyn RowLookup>,
+        outer_row: PhysicalOuterRow<'_>,
         params: &[SQLParam],
     ) -> Result<bool, SQLError> {
         let cache_key = (self.ctes.scalar_subquery_arena, subquery);
@@ -612,7 +645,7 @@ impl PhysicalSubqueryRunner for ScopedEngineHook<'_> {
         subquery: usize,
         plan: &QueryPlan,
         needle: &Value,
-        outer_row: Option<&dyn RowLookup>,
+        outer_row: PhysicalOuterRow<'_>,
         params: &[SQLParam],
     ) -> Result<Option<bool>, SQLError> {
         let cache_key = (self.ctes.scalar_subquery_arena, subquery);
@@ -697,13 +730,10 @@ impl ScopedEngineHook<'_> {
     fn correlated_exists_matches(
         &self,
         lookup: &CachedCorrelatedExists,
-        outer_row: Option<&dyn RowLookup>,
+        outer_row: PhysicalOuterRow<'_>,
         params: &[SQLParam],
     ) -> Result<bool, SQLError> {
-        let outer_row = outer_row.ok_or_else(|| {
-            SQLError::Internal("correlated EXISTS lookup requires an outer row".into())
-        })?;
-        match &lookup.outer_keys {
+        Self::with_outer_lookup(outer_row, |outer_row| match &lookup.outer_keys {
             CorrelatedExistsOuterKeys::Direct(columns) => {
                 let mut key = smallvec::SmallVec::<[&Value; 4]>::with_capacity(columns.len());
                 for column in columns {
@@ -738,7 +768,7 @@ impl ScopedEngineHook<'_> {
                     .contains_values(&key)
                     .map_err(physical_exec_error)
             }
-        }
+        })
     }
 
     fn execute_uncorrelated_subquery(
@@ -768,26 +798,31 @@ impl ScopedEngineHook<'_> {
     fn execute_correlated_subquery(
         &self,
         plan: &QueryPlan,
-        outer_row: Option<&dyn RowLookup>,
+        outer_row: PhysicalOuterRow<'_>,
         params: &[SQLParam],
     ) -> Result<uqa_execution::SubqueryResult, SQLError> {
-        if let Some(outer_row) = outer_row {
-            let mut named = ResultRow::new();
-            outer_row.visit_lookup_columns(&mut |column, value| {
-                named.insert(column.to_string(), value.clone());
-            });
-            return execute_lateral_subquery_output(self.engine, plan, &named, params, self.ctes)?
-                .into_subquery_result();
+        match outer_row {
+            PhysicalOuterRow::Physical { schema, row } => {
+                let outer_row = uqa_execution::OwnedPhysicalRow::new(schema.clone(), row.clone());
+                execute_lateral_subquery_output(self.engine, plan, &outer_row, params, self.ctes)?
+                    .into_subquery_result()
+            }
+            PhysicalOuterRow::Absent => Err(SQLError::Internal(
+                "correlated subquery reached execution without a positional outer row".into(),
+            )),
         }
-        let mut scoped_ctes = self.ctes.clone();
-        execute_query_plan_output(
-            self.engine,
-            plan,
-            params,
-            &mut scoped_ctes,
-            QueryOutputMode::SharedSpill,
-        )?
-        .into_subquery_result()
+    }
+
+    fn with_outer_lookup<T>(
+        outer_row: PhysicalOuterRow<'_>,
+        evaluate: impl FnOnce(&dyn RowLookup) -> Result<T, SQLError>,
+    ) -> Result<T, SQLError> {
+        match outer_row {
+            PhysicalOuterRow::Physical { schema, row } => evaluate(&schema.view(row)),
+            PhysicalOuterRow::Absent => Err(SQLError::Internal(
+                "correlated subquery requires an outer row".into(),
+            )),
+        }
     }
 }
 
@@ -796,9 +831,10 @@ pub(in crate::sql) fn expr_contains_subquery(expr: &ScalarExpr) -> bool {
         ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }
         | ScalarExpr::InSubquery { .. } => true,
-        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-            items.iter().any(expr_contains_subquery)
-        }
+        ScalarExpr::Array(items)
+        | ScalarExpr::Row(items)
+        | ScalarExpr::And(items)
+        | ScalarExpr::Or(items) => items.iter().any(expr_contains_subquery),
         ScalarExpr::Func {
             args,
             order_by,
@@ -817,6 +853,7 @@ pub(in crate::sql) fn expr_contains_subquery(expr: &ScalarExpr) -> bool {
             expr_contains_subquery(lhs) || expr_contains_subquery(rhs)
         }
         ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => expr_contains_subquery(inner),
         ScalarExpr::Between { expr, low, high } => {
@@ -853,8 +890,11 @@ pub(in crate::sql) fn expr_contains_subquery(expr: &ScalarExpr) -> bool {
                     .as_ref()
                     .is_some_and(|expr| expr_contains_subquery(expr))
         }
-        ScalarExpr::Star
+        ScalarExpr::Default
+        | ScalarExpr::Star
+        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_) => false,

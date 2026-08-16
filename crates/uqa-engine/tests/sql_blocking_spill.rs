@@ -56,9 +56,10 @@ fn tiny_work_mem_spills_group_map_distinct_and_ordered_collection_state() {
         assert_eq!(row.get("g"), Some(&Value::Int(group as i64)));
         assert_eq!(row.get("total"), Some(&Value::Int(40)));
         assert_eq!(row.get("unique_values"), Some(&Value::Int(10)));
-        let Some(Value::List(values)) = row.get("ordered_values") else {
+        let Some(Value::Array(array)) = row.get("ordered_values") else {
             panic!("ordered array aggregate missing: {row:?}");
         };
+        let values = array.elements();
         assert_eq!(values.len(), 40);
         assert!(values.windows(2).all(|pair| pair[0] >= pair[1]));
     }

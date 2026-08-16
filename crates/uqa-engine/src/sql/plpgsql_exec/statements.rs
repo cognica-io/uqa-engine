@@ -7,8 +7,8 @@
 //! PL/pgSQL statement dispatch.
 
 use super::{
-    result_row_count, return_query_context_error, strict_into_check, truthy, Flow, Interpreter,
-    LoopSignal, PLpgSQLStmt, SQLError, Value,
+    result_row_count, result_row_values, return_query_context_error, strict_into_check, truthy,
+    Flow, Interpreter, LoopSignal, PLpgSQLStmt, SQLError, Value,
 };
 
 impl Interpreter<'_> {
@@ -112,9 +112,10 @@ impl Interpreter<'_> {
                 let result = self.exec_query(query)?;
                 let mut iterated = false;
                 let mut outcome = Flow::Normal;
-                for row in &result.rows {
+                for row_index in 0..result.rows.len() {
                     iterated = true;
-                    self.assign_into(target, &result.columns, Some(row))?;
+                    let values = result_row_values(&result, row_index);
+                    self.assign_into(target, &result.columns, values.as_deref())?;
                     match self.exec_loop_body(label.as_deref(), body)? {
                         LoopSignal::Continue => {}
                         LoopSignal::Break => break,
@@ -143,8 +144,8 @@ impl Interpreter<'_> {
                     Ok(Flow::Continue(label.clone()))
                 }
             }
-            PLpgSQLStmt::Return { expr } => self.exec_return(expr.as_ref()),
-            PLpgSQLStmt::ReturnNext { expr } => self.exec_return_next(expr.as_ref()),
+            PLpgSQLStmt::Return { value } => self.exec_return(value.as_ref()),
+            PLpgSQLStmt::ReturnNext { value } => self.exec_return_next(value.as_ref()),
             PLpgSQLStmt::ReturnQuery { query } => {
                 if !self.is_set {
                     return Err(return_query_context_error());
@@ -188,7 +189,8 @@ impl Interpreter<'_> {
                     if *strict {
                         strict_into_check(row_count)?;
                     }
-                    self.assign_into(target, &result.columns, result.rows.first())?;
+                    let values = result_row_values(&result, 0);
+                    self.assign_into(target, &result.columns, values.as_deref())?;
                 }
                 // PostgreSQL: EXECUTE never changes FOUND.
                 Ok(Flow::Normal)
@@ -198,6 +200,23 @@ impl Interpreter<'_> {
                 let row_count = result_row_count(&result)?;
                 self.last_row_count = row_count;
                 self.set_found(row_count > 0);
+                Ok(Flow::Normal)
+            }
+            PLpgSQLStmt::OpenCursor { cursor, arguments } => {
+                self.exec_open_cursor(*cursor, arguments)?;
+                Ok(Flow::Normal)
+            }
+            PLpgSQLStmt::FetchCursor {
+                cursor,
+                target,
+                direction,
+                count,
+            } => {
+                self.exec_fetch_cursor(*cursor, target, *direction, *count)?;
+                Ok(Flow::Normal)
+            }
+            PLpgSQLStmt::CloseCursor { cursor } => {
+                self.exec_close_cursor(*cursor)?;
                 Ok(Flow::Normal)
             }
             PLpgSQLStmt::GetDiagnostics { items } => {

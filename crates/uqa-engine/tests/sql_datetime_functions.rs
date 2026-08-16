@@ -142,7 +142,7 @@ fn date_ordering() {
 fn now_returns_timestamp_string() {
     let engine = Engine::new();
     let result = exec(&engine, "SELECT NOW() AS ts");
-    // PostgreSQL 17 renders timestamptz as `YYYY-MM-DD HH:MM:SS.ffffff+00`.
+    // PostgreSQL 18 renders timestamptz as `YYYY-MM-DD HH:MM:SS.ffffff+00`.
     let text = temporal_text(&result.rows[0]["ts"]);
     assert!(text.contains(' '), "expected PG text form, got {text}");
     assert!(text.ends_with("+00"), "expected +00 suffix, got {text}");
@@ -203,7 +203,7 @@ fn extract_dow() {
 fn extract_epoch() {
     let engine = ts_table();
     let result = exec(&engine, "SELECT EXTRACT(epoch FROM ts) AS e FROM log");
-    // extract(epoch ...) returns numeric with 6 decimals in PostgreSQL 17.
+    // extract(epoch ...) returns numeric with 6 decimals in PostgreSQL 18.
     match &result.rows[0]["e"] {
         Value::Decimal(d) => {
             assert!(d.to_f64().unwrap() > 0.0);
@@ -224,7 +224,7 @@ fn date_part() {
 fn date_trunc_year() {
     let engine = ts_table();
     let result = exec(&engine, "SELECT DATE_TRUNC('year', ts) AS t FROM log");
-    // PostgreSQL 17 date_trunc renders `2024-01-01 00:00:00`.
+    // PostgreSQL 18 date_trunc renders `2024-01-01 00:00:00`.
     assert_eq!(temporal_text(&result.rows[0]["t"]), "2024-01-01 00:00:00");
 }
 
@@ -304,7 +304,7 @@ fn make_timestamp_end_of_day() {
 fn make_interval_days_hours_minutes() {
     let engine = Engine::new();
     let result = exec(&engine, "SELECT make_interval(0, 0, 0, 1, 2, 30, 0) AS iv");
-    // PostgreSQL 17 renders this interval as `1 day 02:30:00`.
+    // PostgreSQL 18 renders this interval as `1 day 02:30:00`.
     assert_eq!(temporal_text(&result.rows[0]["iv"]), "1 day 02:30:00");
 }
 

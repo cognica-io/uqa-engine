@@ -52,7 +52,7 @@ fn execute_dynamic_sql_with_using_and_into() {
         err.to_string().contains("query returned no rows"),
         "got: {err}"
     );
-    // PG17: EXECUTE of a NULL query string fails.
+    // PG18: EXECUTE of a NULL query string fails.
     let err = exec_err(&eng, "DO $$ DECLARE q text; BEGIN EXECUTE q; END $$");
     assert!(
         err.to_string()
@@ -91,7 +91,7 @@ fn infinite_recursion_hits_depth_limit() {
          BEGIN RETURN inf_rec(n + 1); END;
          $$ LANGUAGE plpgsql",
     );
-    // PG17: stack depth limit exceeded. The default guard (frame cap
+    // PG18: stack depth limit exceeded. The default guard (frame cap
     // plus native stack budget) must fire before the thread stack is
     // exhausted.
     let err = exec_err(&eng, "SELECT inf_rec(0) AS v");

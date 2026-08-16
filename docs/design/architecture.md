@@ -218,9 +218,11 @@ The optimizer propagates ordering only through operations that preserve the rele
 
 Sort, distinct, set operations, ordered aggregates, windows, grouping output, joins, and result materialization use disk-backed structures after `work_mem` is exceeded. Unique-key inner equijoins with direct column keys hash borrowed physical slots and retain only hash-to-build-row positions; every hash candidate is verified against the original slots. If the row store or direct index exceeds its budget, the join rebuilds the canonical encoded-key index and preserves the exact disk-spill path. General and outer hash joins retain that exact encoded path, RIGHT/FULL match state remains outside unbounded memory, and output spills through the same execution layer.
 
+The private spill format is version 1 and has no compatibility reader for earlier temporary files. A batch stores its exact physical width and one mapping from logical columns and hidden `(qualifier, column)` aliases to physical slots, then positional values; indexed random-access spill keeps that exact layout in its owner and stores only positional row records and offsets. No spill implementation converts intermediate rows to string-keyed maps.
+
 `Engine::sql` returns a fully materialized `SQLResult`. `Engine::sql_cursor` and `Engine::sql_columnar` seal the result through `SharedSpill`, release the statement snapshot, and yield schema-ordered `ColumnarBatch` values; a uniquely owned in-memory cursor moves batches instead of cloning them, while shared CTE readers remain repeatable.
 
-Duplicate schema labels remain distinct logical and physical slots throughout operator execution and at the columnar boundary. The map-backed `SQLResult` compatibility boundary still applies its established duplicate-key overwrite behavior because a `ResultRow` cannot expose two values under one string key.
+Duplicate schema labels remain distinct logical and physical slots throughout operator execution and at the columnar boundary. The final `SQLResult` boundary retains named map rows for existing callers and adds positional rows only when labels repeat, so `SQLResult::value_at`, cursor, CLI, columnar, and wire consumers preserve distinct values without introducing an intermediate map materialization.
 
 ## Join planning
 

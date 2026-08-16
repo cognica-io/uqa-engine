@@ -7,21 +7,23 @@
 //! Local table scans and recursive physical source assembly.
 
 use super::{
-    attach_qualifier_filter, bind_join_key_to_schema, build_info_schema_rows,
-    build_table_function_row_stream, build_values_rows, combine_filters, decide_join_sides,
-    execute_query_plan_output, execute_view_plan_output_with_parent_cache,
-    has_filters_for_qualifier, is_score_provenance_column, join_conjuncts, join_schema_sample,
-    null_row_for_schema, pad_nulls_for_from, physical_work_mem_bytes, propagated_join_filters,
-    push_output_filter_into_query_plan, qualified_key, qualifier_filter, qualifier_for,
+    attach_qualifier_filter, build_info_schema_rows, build_table_function_row_stream,
+    build_values_rows, combine_filters, decide_join_sides, execute_query_plan_output,
+    execute_view_plan_output_with_parent_cache, has_filters_for_qualifier,
+    is_score_provenance_column, join_conjuncts, join_using_predicate,
+    multi_unnest_internal_columns, null_row_for_schema, physical_work_mem_bytes,
+    propagated_join_filters, push_output_filter_into_query_plan, qualifier_filter, qualifier_for,
     qualify_source_operator, qualify_source_operator_with_columns,
-    query_contains_volatile_function, query_cte_names, query_output_shared,
-    table_function_empty_schema, ColumnPrune, CteScope, Engine, EngineExpressionEvaluator,
-    EngineLateralSource, JoinExecutionStrategy, JoinKind, PlanSubqueryArena, QualifierFilters,
-    QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
-    ScoredDocumentSource, ScoredInput, SourcePlan, TableFunctionCall, TableFunctionEvalContext,
-    Value,
+    query_contains_volatile_function, query_cte_names, query_output_shared, resolve_join_using,
+    shape_join_using_output, table_function_column_types, table_function_empty_schema, ColumnPrune,
+    CteScope, Engine, EngineExpressionEvaluator, EngineLateralSource, JoinExecutionStrategy,
+    JoinKind, QualifierFilters, QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr,
+    ScopedEngineHook, ScoredDocumentSource, ScoredInput, SourceEvalContext, SourcePlan,
+    TableFunctionCall, Value,
 };
 
+use crate::sql::select::bind_source_plan_schema;
+use crate::sql::virtual_relation_schema;
 use uqa_planner::{AccessPathPlan, ComputePlan, RelationalPlan};
 
 type StreamingLocalTableScan<'a> = (Box<dyn uqa_execution::PhysicalOperator + 'a>, bool);
@@ -29,8 +31,10 @@ type StreamingLocalTableScan<'a> = (Box<dyn uqa_execution::PhysicalOperator + 'a
 pub(in crate::sql) struct EngineTableRowSource {
     table_name: String,
     table: std::sync::Arc<crate::TableState>,
+    column_definitions: Vec<uqa_sql::ast::ColumnDef>,
     columns: Vec<String>,
     schema: Vec<String>,
+    physical_schema: uqa_execution::RowSchema,
     predicate: Option<uqa_execution::ProjectedPredicate>,
     estimated_cardinality: u64,
     after: Option<uqa_core::DocId>,
@@ -43,6 +47,12 @@ impl EngineTableRowSource {
     ) -> uqa_execution::ExecResult<Vec<uqa_execution::PhysicalRow>> {
         if max_rows == 0 {
             return Ok(Vec::new());
+        }
+        if crate::engine_generated::projection_contains_virtual_generated_column(
+            &self.column_definitions,
+            &self.columns,
+        ) {
+            return self.next_virtual_physical_rows_batch(max_rows);
         }
         let store = self.table.document_store.read();
         let fields = self.columns.iter().map(String::as_str).collect::<Vec<_>>();
@@ -180,11 +190,68 @@ impl EngineTableRowSource {
         }
         Ok(rows)
     }
+
+    fn next_virtual_physical_rows_batch(
+        &mut self,
+        max_rows: usize,
+    ) -> uqa_execution::ExecResult<Vec<uqa_execution::PhysicalRow>> {
+        let store = self.table.document_store.read();
+        let mut rows = Vec::with_capacity(max_rows);
+        while rows.len() < max_rows {
+            let remaining = max_rows - rows.len();
+            let doc_ids = store.next_doc_ids(self.after, remaining).map_err(|error| {
+                SQLError::Internal(format!(
+                    "scan generated rows from `{}`: {error}",
+                    self.table_name
+                ))
+            })?;
+            let Some(last) = doc_ids.last().copied() else {
+                break;
+            };
+            self.after = Some(last);
+            let mut documents = store.get_many(&doc_ids).map_err(|error| {
+                SQLError::Internal(format!(
+                    "read generated rows from `{}`: {error}",
+                    self.table_name
+                ))
+            })?;
+            for doc_id in doc_ids {
+                let mut document = documents.remove(&doc_id).ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "table `{}` listed document {doc_id} but did not return it",
+                        self.table_name
+                    ))
+                })?;
+                crate::engine_generated::materialize_projected_virtual_generated_columns(
+                    &self.column_definitions,
+                    &mut document,
+                    &self.columns,
+                )?;
+                let values = self
+                    .columns
+                    .iter()
+                    .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
+                    .collect::<Vec<_>>();
+                let value_refs = values.iter().collect::<Vec<_>>();
+                if let Some(predicate) = self.predicate.as_ref() {
+                    if !predicate.keep(&value_refs)? {
+                        continue;
+                    }
+                }
+                rows.push(uqa_execution::PhysicalRow::from_values(values));
+            }
+        }
+        Ok(rows)
+    }
 }
 
 impl uqa_execution::RowSource for EngineTableRowSource {
     fn schema(&self) -> &[String] {
         &self.schema
+    }
+
+    fn physical_schema(&self) -> Option<&uqa_execution::RowSchema> {
+        Some(&self.physical_schema)
     }
 
     fn estimated_cardinality(&self) -> Option<u64> {
@@ -197,10 +264,9 @@ impl uqa_execution::RowSource for EngineTableRowSource {
 
     fn next_batch(&mut self, max_rows: usize) -> uqa_execution::ExecResult<Vec<ResultRow>> {
         let rows = self.next_physical_rows_batch(max_rows)?;
-        let schema = uqa_execution::RowSchema::new(self.schema.clone());
         Ok(rows
             .iter()
-            .map(|row| schema.view(row).to_result_row())
+            .map(|row| self.physical_schema.view(row).to_result_row())
             .collect())
     }
 
@@ -220,39 +286,43 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
     filters: Option<&QualifierFilters>,
     params: &[SQLParam],
 ) -> Result<Option<StreamingLocalTableScan<'a>>, SQLError> {
-    let SourcePlan::Table { name, alias } = source else {
+    let SourcePlan::Table {
+        name,
+        qualifier,
+        alias,
+    } = source
+    else {
         return Ok(None);
     };
-    let qualifier = qualifier_for(name, alias.as_deref());
+    let qualifier = qualifier_for(qualifier, alias.as_deref());
     if let Some(materialized) = ctes.rows.get(name).cloned() {
         if has_filters_for_qualifier(filters, &qualifier) {
             return Ok(None);
         }
         let mapping = materialized
-            .schema()
+            .row_schema()
+            .identities()
             .iter()
-            .filter_map(|source| {
-                let column = if is_score_provenance_column(source) {
-                    source.as_str()
-                } else {
-                    source
-                        .rsplit_once('.')
-                        .map_or(source.as_str(), |(_, column)| column)
-                };
-                if !is_score_provenance_column(source)
+            .enumerate()
+            .filter_map(|(position, identity)| {
+                let column = identity.column();
+                if !is_score_provenance_column(column)
                     && prune
                         .and_then(|prune| prune.get(&qualifier))
                         .is_some_and(|wanted| !wanted.contains(column))
                 {
                     return None;
                 }
-                Some((qualified_key(&qualifier, column), source.clone()))
+                let output_identity = uqa_execution::ColumnIdentity::qualified(&qualifier, column);
+                Some((column.to_string(), output_identity, position))
             })
             .collect();
         let scan: Box<dyn uqa_execution::PhysicalOperator + 'a> =
             Box::new(uqa_execution::SharedSpillScan::new(materialized));
         return Ok(Some((
-            Box::new(uqa_execution::ColumnSelection::with_mapping(scan, mapping)),
+            Box::new(uqa_execution::ColumnSelection::with_identities(
+                scan, mapping,
+            )),
             false,
         )));
     }
@@ -285,20 +355,37 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
             .collect(),
         None => table_columns,
     };
-    let schema = columns
+    let schema = columns.clone();
+    let column_definitions = table.columns.read().clone();
+    let column_types = columns
         .iter()
-        .map(|column| qualified_key(&qualifier, column))
+        .map(|column| {
+            column_definitions
+                .iter()
+                .find(|definition| definition.name == *column)
+                .map(|definition| definition.ty.clone())
+        })
         .collect();
+    let physical_schema =
+        uqa_execution::RowSchema::with_qualified_types(&qualifier, schema.clone(), column_types);
     let predicate = qualifier_filter(filters, &qualifier)
-        .map(|predicate| uqa_execution::ProjectedPredicate::compile(&predicate, &columns, params))
+        .map(|predicate| {
+            uqa_execution::ProjectedPredicate::compile_with_schema(
+                &predicate,
+                &physical_schema,
+                params,
+            )
+        })
         .transpose()?
         .flatten();
     let filter_pushed = predicate.is_some();
     let source = EngineTableRowSource {
         table_name: name.clone(),
         table,
+        column_definitions,
         columns,
         schema,
+        physical_schema,
         predicate,
         estimated_cardinality: engine.table_doc_count(name)?,
         after: None,
@@ -324,8 +411,12 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
     use uqa_execution::{HashJoin, LateralJoin, NestedLoopJoin, PhysicalOperator};
 
     match from {
-        SourcePlan::Table { name, alias } => {
-            let qualifier = qualifier_for(name, alias.as_deref());
+        SourcePlan::Table {
+            name,
+            qualifier,
+            alias,
+        } => {
+            let qualifier = qualifier_for(qualifier, alias.as_deref());
             if let Some(materialized) = ctes.rows.get(name).cloned() {
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(uqa_execution::SharedSpillScan::new(materialized));
@@ -381,12 +472,18 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             }
 
             if let Some(rows) = build_info_schema_rows(engine, name)? {
-                let columns: Vec<String> = rows
-                    .first()
-                    .map(|row| row.keys().cloned().collect())
-                    .unwrap_or_default();
-                let scan: Box<dyn PhysicalOperator + 'a> =
-                    Box::new(uqa_execution::TableScan::from_rows(columns.clone(), rows));
+                let schema = virtual_relation_schema(name).ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "virtual relation `{name}` has rows but no PostgreSQL 18 row type"
+                    ))
+                })?;
+                let (columns, types): (Vec<_>, Vec<_>) = schema
+                    .into_iter()
+                    .map(|(column, ty)| (column, Some(ty)))
+                    .unzip();
+                let scan: Box<dyn PhysicalOperator + 'a> = Box::new(
+                    uqa_execution::TableScan::from_typed_rows(columns.clone(), types, rows),
+                );
                 let operator =
                     qualify_source_operator_with_columns(scan, &columns, &qualifier, prune, &[]);
                 return Ok(attach_qualifier_filter(
@@ -402,12 +499,18 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                 let rows = engine
                     .scan_foreign_table_stream(name, None, &[], None)
                     .map_err(SQLError::Unsupported)?;
-                let columns = engine
-                    .foreign_table_columns(name)
+                let typed_columns = engine
+                    .foreign_table_typed_columns(name)
                     .map_err(SQLError::Unsupported)?;
+                let columns = typed_columns
+                    .iter()
+                    .map(|(column, _)| column.clone())
+                    .collect::<Vec<_>>();
+                let types = typed_columns.into_iter().map(|(_, ty)| Some(ty)).collect();
                 let scan: Box<dyn PhysicalOperator + 'a> =
-                    Box::new(uqa_execution::RowIteratorScan::new(
+                    Box::new(uqa_execution::RowIteratorScan::with_types(
                         columns.clone(),
+                        types,
                         Box::new(rows.map(|row| {
                             row.map_err(SQLError::Unsupported)
                                 .map_err(uqa_execution::ExecError::from)
@@ -471,6 +574,8 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             right,
             kind,
             on,
+            using,
+            natural,
             lateral,
             strategy,
         } => {
@@ -493,23 +598,39 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                         "optimizer selected a hash strategy for a lateral join".into(),
                     ));
                 }
-                let left_nulls = null_row_for_schema(left_operator.schema());
-                let mut right_nulls = ResultRow::new();
-                pad_nulls_for_from(&mut right_nulls, right, engine)?;
+                let left_schema = left_operator.row_schema().clone();
+                let left_nulls = null_row_for_schema(left_schema.columns());
+                let right_schema =
+                    bind_source_plan_schema(engine, right, params, ctes, Some(&left_schema))?;
+                let right_nulls = null_row_for_schema(right_schema.columns());
+                let resolved_using =
+                    resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
+                let effective_on = resolved_using
+                    .as_ref()
+                    .and_then(|using| join_using_predicate(using, &left_schema, &right_schema))
+                    .or_else(|| on.clone());
                 let source = EngineLateralSource {
                     engine,
                     right: (**right).clone(),
-                    on: on.clone(),
+                    on: effective_on,
                     params,
                     ctes: ctes.clone(),
+                    right_schema: right_schema.clone(),
                 };
-                return Ok(Box::new(LateralJoin::new(
-                    left_operator,
-                    Box::new(source),
-                    *kind,
-                    left_nulls,
-                    right_nulls,
-                )));
+                let joined: Box<dyn PhysicalOperator + 'a> =
+                    Box::new(LateralJoin::new_with_right_schema(
+                        left_operator,
+                        Box::new(source),
+                        *kind,
+                        left_nulls,
+                        right_nulls,
+                        right_schema.clone(),
+                    ));
+                return if let Some(using) = resolved_using.as_ref() {
+                    shape_join_using_output(joined, *kind, &left_schema, &right_schema, using)
+                } else {
+                    Ok(joined)
+                };
             }
 
             let right_filters = filters
@@ -524,17 +645,21 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                 right_filter_ref,
             )?;
 
+            let left_schema = left_operator.row_schema().clone();
+            let right_schema = right_operator.row_schema().clone();
+            let resolved_using =
+                resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
+            let effective_on = resolved_using
+                .as_ref()
+                .and_then(|using| join_using_predicate(using, &left_schema, &right_schema))
+                .or_else(|| on.clone());
+
             let evaluator = EngineExpressionEvaluator::shared(engine, params, ctes);
             let hash_plan = if matches!(kind, JoinKind::Cross) {
                 None
             } else {
-                on.as_ref().and_then(|predicate| {
+                effective_on.as_ref().and_then(|predicate| {
                     let conjuncts = join_conjuncts(predicate);
-                    let scoped_hook = ScopedEngineHook::new(engine, ctes);
-                    let subquery_arena =
-                        PlanSubqueryArena::new(&ctes.scalar_subqueries, Some(&scoped_hook));
-                    let left_sample = join_schema_sample(left_operator.schema());
-                    let right_sample = join_schema_sample(right_operator.schema());
                     let mut left_keys = Vec::with_capacity(conjuncts.len());
                     let mut right_keys = Vec::with_capacity(conjuncts.len());
                     let mut residual = Vec::new();
@@ -548,19 +673,11 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                             residual.push(conjunct.clone());
                             continue;
                         };
-                        if let Some((left_key, right_key)) = decide_join_sides(
-                            &scoped_hook,
-                            &subquery_arena,
-                            std::slice::from_ref(&left_sample),
-                            std::slice::from_ref(&right_sample),
-                            lhs,
-                            rhs,
-                            params,
-                        ) {
-                            left_keys
-                                .push(bind_join_key_to_schema(left_key, left_operator.schema()));
-                            right_keys
-                                .push(bind_join_key_to_schema(right_key, right_operator.schema()));
+                        if let Some((left_key, right_key)) =
+                            decide_join_sides(&left_schema, &right_schema, lhs, rhs)
+                        {
+                            left_keys.push(left_key.clone());
+                            right_keys.push(right_key.clone());
                         } else {
                             residual.push(conjunct.clone());
                         }
@@ -579,11 +696,11 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             let left_nulls = null_row_for_schema(left_operator.schema());
             let right_nulls = null_row_for_schema(right_operator.schema());
             let work_mem = physical_work_mem_bytes(engine)?;
-            match (strategy, hash_plan) {
+            let joined: Box<dyn PhysicalOperator + 'a> = match (strategy, hash_plan) {
                 (
                     JoinExecutionStrategy::Auto | JoinExecutionStrategy::Hash,
                     Some((left_keys, right_keys, residual)),
-                ) => Ok(Box::new(
+                ) => Box::new(
                     HashJoin::try_new_with_work_mem_and_predicate(
                         left_operator,
                         right_operator,
@@ -598,22 +715,27 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                         params,
                     )
                     .map_err(crate::sql::select::physical_exec_error)?,
+                ),
+                (JoinExecutionStrategy::Auto, None) => Box::new(NestedLoopJoin::new_with_work_mem(
+                    left_operator,
+                    right_operator,
+                    *kind,
+                    effective_on,
+                    evaluator,
+                    left_nulls,
+                    right_nulls,
+                    work_mem,
                 )),
-                (JoinExecutionStrategy::Auto, None) => {
-                    Ok(Box::new(NestedLoopJoin::new_with_work_mem(
-                        left_operator,
-                        right_operator,
-                        *kind,
-                        on.clone(),
-                        evaluator,
-                        left_nulls,
-                        right_nulls,
-                        work_mem,
-                    )))
+                (JoinExecutionStrategy::Hash, None) => {
+                    return Err(SQLError::Internal(
+                        "DPccp hash-join strategy has no splittable equality predicate".into(),
+                    ));
                 }
-                (JoinExecutionStrategy::Hash, None) => Err(SQLError::Internal(
-                    "DPccp hash-join strategy has no splittable equality predicate".into(),
-                )),
+            };
+            if let Some(using) = resolved_using.as_ref() {
+                shape_join_using_output(joined, *kind, &left_schema, &right_schema, using)
+            } else {
+                Ok(joined)
             }
         }
         SourcePlan::Values {
@@ -621,33 +743,42 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             alias,
             column_aliases,
         } => {
-            let hook = ScopedEngineHook::new(engine, ctes);
-            let rows = build_values_rows(
+            let column_types = crate::sql::select::values_types_in_scope(
+                engine,
                 rows,
-                alias.as_deref(),
-                column_aliases,
-                params,
-                &hook,
-                &hook,
                 &ctes.scalar_subqueries,
+                None,
+                params,
+                ctes,
             )?;
-            let columns = rows.first().map_or_else(
-                || {
-                    column_aliases
-                        .iter()
-                        .map(|column| {
-                            alias
-                                .as_deref()
-                                .map_or_else(|| column.clone(), |qual| qualified_key(qual, column))
-                        })
-                        .collect()
-                },
-                |row| row.keys().cloned().collect(),
-            );
-            Ok(Box::new(uqa_execution::TableScan::from_rows(columns, rows)))
+            let source_columns = if column_aliases.is_empty() {
+                (0..rows.first().map_or(0, Vec::len))
+                    .map(|index| format!("column{}", index + 1))
+                    .collect::<Vec<_>>()
+            } else {
+                column_aliases.clone()
+            };
+            let hook = ScopedEngineHook::new(engine, ctes);
+            let context =
+                SourceEvalContext::new(engine, params, &hook, &hook, &ctes.scalar_subqueries);
+            let rows = build_values_rows(&context, rows, column_aliases, &column_types)?;
+            let operator: Box<dyn uqa_execution::PhysicalOperator + 'a> =
+                Box::new(uqa_execution::TableScan::from_typed_rows(
+                    source_columns.clone(),
+                    column_types,
+                    rows,
+                ));
+            Ok(qualify_source_operator_with_columns(
+                operator,
+                &source_columns,
+                alias.as_deref().unwrap_or_default(),
+                prune,
+                &[],
+            ))
         }
         SourcePlan::Function {
             name,
+            output_name,
             relation,
             args,
             alias,
@@ -655,35 +786,115 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             column_types,
         } => {
             let hook = ScopedEngineHook::new(engine, ctes);
-            let context = TableFunctionEvalContext::new(
-                engine,
-                params,
-                &hook,
-                &hook,
-                &ctes.scalar_subqueries,
-            );
+            let context =
+                SourceEvalContext::new(engine, params, &hook, &hook, &ctes.scalar_subqueries);
             let call = TableFunctionCall::new(
                 name,
+                output_name,
                 relation.as_deref(),
                 args,
                 alias.as_deref(),
                 column_aliases,
                 column_types,
             );
-            let mut rows = build_table_function_row_stream(&context, call)?;
-            let first = rows
-                .next()
-                .transpose()
-                .map_err(crate::sql::select::physical_exec_error)?;
-            let columns = first.as_ref().map_or_else(
-                || table_function_empty_schema(name, alias.as_deref(), column_aliases),
-                |row| row.keys().cloned().collect(),
+            let rows = build_table_function_row_stream(&context, call)?;
+            let multi_unnest =
+                crate::sql::builtin_function_dispatch_name(name) == "unnest" && args.len() > 1;
+            let (operator, source_columns): (
+                Box<dyn uqa_execution::PhysicalOperator + 'a>,
+                Vec<String>,
+            ) = if multi_unnest {
+                let public_columns = table_function_empty_schema(
+                    name,
+                    output_name,
+                    alias.as_deref(),
+                    column_aliases,
+                    args.len(),
+                );
+                let internal_columns = multi_unnest_internal_columns(args.len());
+                let types = table_function_column_types(
+                    engine,
+                    name,
+                    args,
+                    column_types,
+                    &public_columns,
+                    &uqa_execution::RowSchema::default(),
+                    params,
+                );
+                let identities = public_columns
+                    .into_iter()
+                    .map(uqa_execution::ColumnIdentity::unqualified)
+                    .collect();
+                let schema = uqa_execution::RowSchema::with_identities(
+                    internal_columns.clone(),
+                    identities,
+                    types,
+                );
+                (
+                    Box::new(uqa_execution::RowIteratorScan::with_row_schema(
+                        schema,
+                        Box::new(rows),
+                    )),
+                    internal_columns,
+                )
+            } else {
+                let mut rows = rows;
+                let first = rows
+                    .next()
+                    .transpose()
+                    .map_err(crate::sql::select::physical_exec_error)?;
+                let columns = if column_aliases.is_empty() {
+                    first.as_ref().map_or_else(
+                        || {
+                            table_function_empty_schema(
+                                name,
+                                output_name,
+                                alias.as_deref(),
+                                column_aliases,
+                                args.len(),
+                            )
+                        },
+                        |row| row.keys().cloned().collect(),
+                    )
+                } else {
+                    table_function_empty_schema(
+                        name,
+                        output_name,
+                        alias.as_deref(),
+                        column_aliases,
+                        args.len(),
+                    )
+                };
+                let rows = first.into_iter().map(Ok).chain(rows);
+                let types = table_function_column_types(
+                    engine,
+                    name,
+                    args,
+                    column_types,
+                    &columns,
+                    &uqa_execution::RowSchema::default(),
+                    params,
+                );
+                (
+                    Box::new(uqa_execution::RowIteratorScan::with_types(
+                        columns.clone(),
+                        types,
+                        Box::new(rows),
+                    )),
+                    columns,
+                )
+            };
+            let qualifier = alias.as_deref().unwrap_or(output_name);
+            let operator = qualify_source_operator_with_columns(
+                operator,
+                &source_columns,
+                qualifier,
+                prune,
+                &[],
             );
-            let rows = first.into_iter().map(Ok).chain(rows);
-            Ok(Box::new(uqa_execution::RowIteratorScan::new(
-                columns,
-                Box::new(rows),
-            )))
+            Ok(attach_qualifier_filter(
+                operator, qualifier, filters, engine, params, ctes,
+            ))
         }
         SourcePlan::Subquery {
             body,

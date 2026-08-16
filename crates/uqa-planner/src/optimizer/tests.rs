@@ -54,7 +54,7 @@ fn query_block(plan: &UnifiedPlan) -> &QueryBlockPlan {
 
 fn source_aliases(source: &SourcePlan) -> BTreeSet<String> {
     match source {
-        SourcePlan::Table { name, alias } => {
+        SourcePlan::Table { name, alias, .. } => {
             BTreeSet::from([alias.clone().unwrap_or_else(|| name.clone())])
         }
         SourcePlan::Join { left, right, .. } => {

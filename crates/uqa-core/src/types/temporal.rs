@@ -45,10 +45,16 @@ pub enum TemporalValue {
 
 impl TemporalValue {
     pub fn parse_date(input: &str) -> Option<Self> {
-        let date = NaiveDate::parse_from_str(input.trim(), "%Y-%m-%d").ok()?;
+        Self::try_parse_date(input).ok()
+    }
+
+    /// Parse a date while retaining whether the input format or a field value is invalid.
+    pub fn try_parse_date(input: &str) -> Result<Self, chrono::ParseError> {
+        let date = NaiveDate::parse_from_str(input.trim(), "%Y-%m-%d")?;
         let days = date.signed_duration_since(epoch_date()).num_days();
-        Some(Self::Date {
-            days: i32::try_from(days).ok()?,
+        Ok(Self::Date {
+            days: i32::try_from(days)
+                .expect("chrono's date range fits PostgreSQL's i32 day carrier"),
         })
     }
 

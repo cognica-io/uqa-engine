@@ -168,6 +168,8 @@ pub(super) fn column_to_rust(col: &PythonColumnDef) -> Result<ColumnDef, PythonM
         ty,
         primary_key: col.primary_key,
         not_null: col.not_null,
+        not_null_explicit: col.not_null,
+        not_null_name: None,
         auto_increment: col.auto_increment,
         unique: col.unique,
         default: col
@@ -177,7 +179,10 @@ pub(super) fn column_to_rust(col: &PythonColumnDef) -> Result<ColumnDef, PythonM
             .map(json_to_value)
             .transpose()?
             .map(Expr::Literal),
+        generated: None,
         check: None,
+        check_name: None,
+        check_enforced: true,
         references: None,
     })
 }
@@ -227,14 +232,21 @@ pub(super) fn rust_scalar_column_type(
     if let Some(ty) = python_temporal_type(raw) {
         return Ok(ty);
     }
-    if is_python_text_type(raw) {
-        return Ok(ColumnType::Text);
-    }
     match raw {
-        "integer" | "int" | "int2" | "int4" | "int8" | "bigint" | "smallint" | "serial"
-        | "bigserial" | "serial4" | "serial8" => Ok(ColumnType::Integer),
+        "smallint" | "int2" | "smallserial" | "serial2" => Ok(ColumnType::SmallInteger),
+        "integer" | "int" | "int4" | "serial" | "serial4" => Ok(ColumnType::Integer),
+        "bigint" | "int8" | "bigserial" | "serial8" => Ok(ColumnType::BigInteger),
+        "oid" => Ok(ColumnType::Oid),
+        "xid" => Ok(ColumnType::Xid),
         "bool" | "boolean" => Ok(ColumnType::Boolean),
-        "real" | "float" | "float4" | "float8" | "double precision" => Ok(ColumnType::Real),
+        "text" => Ok(ColumnType::Text),
+        "name" => Ok(ColumnType::Name),
+        "uuid" => Ok(ColumnType::Uuid),
+        "varchar" | "character varying" => Ok(ColumnType::Varchar(None)),
+        "bpchar" => Ok(ColumnType::Bpchar),
+        "char" | "character" => Ok(ColumnType::Character(1)),
+        "real" | "float4" => Ok(ColumnType::Real),
+        "float" | "float8" | "double" | "double precision" => Ok(ColumnType::DoublePrecision),
         "numeric" | "decimal" => {
             let scale = col
                 .numeric_scale
@@ -256,15 +268,12 @@ pub(super) fn rust_scalar_column_type(
         "json" => Ok(ColumnType::Json),
         "jsonb" => Ok(ColumnType::JsonB),
         "bytea" => Ok(ColumnType::Bytea),
-        _ => Ok(ColumnType::Text),
+        "interval" => Ok(ColumnType::Interval),
+        _ => Err(PythonMigrationError::Invalid(format!(
+            "unsupported source column type `{raw}` for column {}",
+            col.name
+        ))),
     }
-}
-
-pub(super) fn is_python_text_type(raw: &str) -> bool {
-    matches!(
-        raw,
-        "text" | "varchar" | "character varying" | "char" | "character" | "name" | "uuid"
-    )
 }
 
 pub(super) fn python_temporal_type(raw: &str) -> Option<ColumnType> {

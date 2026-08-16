@@ -134,12 +134,10 @@ fn min_max_avg_aggregates() {
     assert_eq!(r.rows.len(), 1);
     assert_eq!(r.rows[0].get("mn"), Some(&Value::Int(1965)));
     assert_eq!(r.rows[0].get("mx"), Some(&Value::Int(2024)));
-    match r.rows[0].get("av") {
-        Some(Value::Float(f)) => {
-            // (2021 + 2024 + 2022 + 1992 + 2005 + 1965 + 1988) / 7
-            let expected = (2021.0 + 2024.0 + 2022.0 + 1992.0 + 2005.0 + 1965.0 + 1988.0) / 7.0;
-            assert!((f - expected).abs() < 1e-9, "got {f}, expected {expected}");
-        }
-        other => panic!("expected Float avg, got {other:?}"),
-    }
+    assert_eq!(
+        r.rows[0].get("av"),
+        Some(&Value::Decimal(
+            uqa_core::DecimalValue::parse("2002.4285714285714286").unwrap()
+        ))
+    );
 }

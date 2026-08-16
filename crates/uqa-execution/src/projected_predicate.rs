@@ -8,9 +8,10 @@
 
 use uqa_core::Value;
 use uqa_sql::ast::BinaryOp;
+use uqa_sql::expr::IntegerWidth;
 use uqa_sql::{SQLError, SQLParam};
 
-use crate::ScalarExpr;
+use crate::{RowSchema, ScalarExpr};
 
 mod compile;
 mod evaluate;
@@ -22,6 +23,20 @@ pub struct ProjectedPredicate {
     expression: ProjectedExpr,
 }
 
+pub(super) enum ProjectedIntPredicate {
+    Comparison {
+        field: usize,
+        op: BinaryOp,
+        literal: i64,
+        field_on_left: bool,
+    },
+    Between {
+        field: usize,
+        low: i64,
+        high: i64,
+    },
+}
+
 pub(super) enum ProjectedExpr {
     Field(usize),
     Literal(Value),
@@ -29,7 +44,9 @@ pub(super) enum ProjectedExpr {
         op: BinaryOp,
         lhs: Box<Self>,
         rhs: Box<Self>,
+        integer_width: Option<IntegerWidth>,
     },
+    UnaryMinus(Box<Self>),
     IntFieldComparison {
         field: usize,
         op: BinaryOp,
@@ -38,6 +55,7 @@ pub(super) enum ProjectedExpr {
     },
     Not(Box<Self>),
     And(Vec<Self>),
+    IntFieldConjunction(Vec<ProjectedIntPredicate>),
     Or(Vec<Self>),
     IsNull {
         expression: Box<Self>,
@@ -74,7 +92,16 @@ impl ProjectedPredicate {
         fields: &[String],
         params: &[SQLParam],
     ) -> Result<Option<Self>, SQLError> {
-        match compile::compile(expression, fields, params) {
+        Self::compile_with_schema(expression, &RowSchema::new(fields.to_vec()), params)
+    }
+
+    /// Compile against structured SQL identities instead of interpreting punctuation in public labels as qualification metadata.
+    pub fn compile_with_schema(
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        params: &[SQLParam],
+    ) -> Result<Option<Self>, SQLError> {
+        match compile::compile(expression, schema, params) {
             Ok(expression) => Ok(expression.map(|expression| Self { expression })),
             Err(SQLError::Unsupported(_)) => Ok(None),
             Err(error) => Err(error),
@@ -144,6 +171,10 @@ mod tests {
         let predicate = ProjectedPredicate::compile(&q6, &fields, &params)
             .unwrap()
             .unwrap();
+        assert!(matches!(
+            &predicate.expression,
+            ProjectedExpr::IntFieldConjunction(items) if items.len() == 3
+        ));
 
         let discounts = [Value::Null, Value::Int(1), Value::Int(2), Value::Int(8)];
         let quantities = [
@@ -203,6 +234,7 @@ mod tests {
         ] {
             let expression = ScalarExpr::Func {
                 name: name.into(),
+                binding: None,
                 args: vec![
                     ScalarExpr::Column("text".into()),
                     ScalarExpr::Literal(Value::Str(pattern.into())),
@@ -231,6 +263,7 @@ mod tests {
     fn qualified_like_runs_directly_on_a_composite_physical_row() {
         let expression = ScalarExpr::Not(Box::new(ScalarExpr::Func {
             name: "like".into(),
+            binding: None,
             args: vec![
                 ScalarExpr::qualified_column("o", "comment"),
                 ScalarExpr::Literal(Value::Str("%special%requests%".into())),
@@ -239,10 +272,12 @@ mod tests {
             order_by: Vec::new(),
             filter: None,
         }));
-        let left_schema = crate::RowSchema::new(vec!["c.id".into()]);
-        let right_schema = crate::RowSchema::new(vec!["o.comment".into()]);
+        let left_schema =
+            crate::RowSchema::with_qualified_types("c", vec!["id".into()], vec![None]);
+        let right_schema =
+            crate::RowSchema::with_qualified_types("o", vec!["comment".into()], vec![None]);
         let schema = crate::RowSchema::join(&left_schema, &right_schema, std::iter::empty());
-        let predicate = ProjectedPredicate::compile(&expression, schema.columns(), &[])
+        let predicate = ProjectedPredicate::compile_with_schema(&expression, &schema, &[])
             .unwrap()
             .unwrap();
 
@@ -279,6 +314,27 @@ mod tests {
             rhs.as_ref(),
             ProjectedExpr::Literal(Value::Temporal(_))
         ));
+    }
+
+    #[test]
+    fn projected_predicate_preserves_unary_minus_integer_width() {
+        let expression = ScalarExpr::Binary {
+            op: BinaryOp::Equal,
+            lhs: Box::new(ScalarExpr::UnaryMinus(Box::new(ScalarExpr::Cast {
+                expr: Box::new(ScalarExpr::Column("x".into())),
+                ty: "smallint".into(),
+            }))),
+            rhs: Box::new(ScalarExpr::Literal(Value::Int(-1))),
+        };
+        let predicate = ProjectedPredicate::compile(&expression, &["x".into()], &[])
+            .unwrap()
+            .unwrap();
+
+        assert!(predicate.keep(&[&Value::Int(1)]).unwrap());
+        let error = predicate
+            .keep(&[&Value::Int(i64::from(i16::MIN))])
+            .expect_err("negating smallint minimum must overflow");
+        assert_eq!(error.sqlstate(), Some("22003"));
     }
 
     fn assert_projected_parity(

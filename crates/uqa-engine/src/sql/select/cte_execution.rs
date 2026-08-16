@@ -70,11 +70,11 @@ pub(in crate::sql) fn materialize_plan_ctes_with_filters(
                             .cloned()
                             .unwrap_or_else(|| source.clone())
                     };
-                    (output, source.clone())
+                    (output, index)
                 })
                 .collect();
             columns = renamed_columns;
-            operator = Box::new(uqa_execution::ColumnSelection::with_mapping(
+            operator = Box::new(uqa_execution::ColumnSelection::with_positions(
                 operator, mapping,
             ));
         }
@@ -136,7 +136,9 @@ pub(in crate::sql) fn run_explain(
         row.insert("plan".to_string(), Value::Str(payload.to_string()));
         return Ok(SQLResult {
             columns: vec!["plan".to_string()],
+            column_types: vec![Some(uqa_sql::ColumnType::Text)],
             rows: vec![row],
+            positional_rows: None,
             affected_rows: 0,
         });
     }
@@ -153,7 +155,9 @@ pub(in crate::sql) fn run_explain(
     }
     Ok(SQLResult {
         columns: vec!["plan".to_string()],
+        column_types: vec![Some(uqa_sql::ColumnType::Text)],
         rows,
+        positional_rows: None,
         affected_rows: 0,
     })
 }
@@ -247,23 +251,6 @@ pub(in crate::sql) fn run_select_without_from_output(
 ) -> Result<QueryOutput, SQLError> {
     let row = ResultRow::new();
     let columns = projection_columns(&stmt.projections);
-    let hook = ScopedEngineHook::new(engine, ctes);
-    // Set-returning functions in the projection list expand to rows
-    // (`SELECT generate_series(1, 3)`).
-    // They are a one-to-many projection boundary, but their WHERE phase still
-    // runs through the common physical Filter.
-    if let Some(result) = expand_projection_srf_output(
-        engine,
-        &hook,
-        original,
-        stmt,
-        &row,
-        params,
-        ctes,
-        output_mode,
-    )? {
-        return Ok(result);
-    }
     let operator: Box<dyn uqa_execution::PhysicalOperator + '_> =
         Box::new(uqa_execution::TableScan::from_rows(Vec::new(), vec![row]));
     execute_query_block_operator_output(
@@ -277,118 +264,4 @@ pub(in crate::sql) fn run_select_without_from_output(
         columns,
         output_mode,
     )
-}
-
-/// Expand a projection list that consists of exactly one set-returning
-/// function call (`generate_series`, `unnest`, `jsonb_object_keys`,
-/// ...) into one result row per element, mirroring `PostgreSQL`'s
-/// SRF-in-select-list behavior for the single-SRF case.
-#[allow(clippy::too_many_arguments)]
-pub(in crate::sql) fn expand_projection_srf_output<'a>(
-    engine: &'a Engine,
-    hook: &'a ScopedEngineHook<'a>,
-    original: &'a QueryBlockPlan,
-    stmt: &'a QueryBlockPlan,
-    row: &ResultRow,
-    params: &'a [SQLParam],
-    ctes: &'a CteScope,
-    output_mode: QueryOutputMode,
-) -> Result<Option<QueryOutput>, SQLError> {
-    if stmt.projections.len() != 1 {
-        return Ok(None);
-    }
-    let projection = &stmt.projections[0];
-    let ScalarExpr::Func { name, args, .. } = &projection.expr else {
-        return Ok(None);
-    };
-    let lower = name.to_ascii_lowercase();
-    let is_json_keys = matches!(lower.as_str(), "json_object_keys" | "jsonb_object_keys");
-    let is_table_srf = matches!(
-        lower.as_str(),
-        "generate_series"
-            | "unnest"
-            | "json_array_elements"
-            | "jsonb_array_elements"
-            | "json_array_elements_text"
-            | "jsonb_array_elements_text"
-            | "regexp_split_to_table"
-            | "string_to_table"
-    );
-    if !is_json_keys && !is_table_srf {
-        return Ok(None);
-    }
-
-    use uqa_execution::{Filter, PhysicalOperator, ProjectRows, ProjectSet};
-
-    let columns = projection_columns(&stmt.projections);
-    let label = columns[0].clone();
-    let projector = move |input: &ResultRow| -> ExecResult<ProjectRows> {
-        if is_json_keys {
-            let context = PhysicalEvalContext::new(Some(input), params)
-                .with_function_hook(hook)
-                .with_subquery_runner(hook);
-            let value = eval_physical_scalar(&projection.expr, &stmt.subqueries, &context)?;
-            let Value::List(items) = value else {
-                return Ok(Box::new(std::iter::empty()));
-            };
-            return Ok(Box::new(items.into_iter().map({
-                let label = label.clone();
-                move |item| Ok([(label.clone(), item)].into_iter().collect())
-            })));
-        }
-        let context = crate::sql::from_rows::TableFunctionEvalContext::new(
-            engine,
-            params,
-            hook,
-            hook,
-            &stmt.subqueries,
-        );
-        let call =
-            crate::sql::from_rows::TableFunctionCall::new(&lower, None, args, None, &[], &[]);
-        let produced = crate::sql::from_rows::build_table_function_row_stream(&context, call)?;
-        Ok(Box::new(produced.map({
-            let label = label.clone();
-            move |produced_row| {
-                let produced_row = produced_row?;
-                let value = produced_row
-                    .iter()
-                    .next()
-                    .map_or(Value::Null, |(_, value)| value.clone());
-                Ok([(label.clone(), value)].into_iter().collect())
-            }
-        })))
-    };
-    let input_schema = row.keys().cloned().collect();
-    let mut child: Box<dyn PhysicalOperator + '_> = Box::new(uqa_execution::TableScan::from_rows(
-        input_schema,
-        vec![row.clone()],
-    ));
-    if let Some(predicate) = stmt.r#where.clone() {
-        child = Box::new(Filter::with_evaluator(
-            child,
-            predicate,
-            EngineExpressionEvaluator::shared(engine, params, ctes),
-        ));
-    }
-    let mut operator: Box<dyn PhysicalOperator + '_> =
-        Box::new(ProjectSet::new(child, columns.clone(), Box::new(projector)));
-    let output_columns = identity_order_columns(&columns);
-    operator = attach_order_limit(
-        operator,
-        stmt,
-        &output_columns,
-        engine,
-        params,
-        ctes,
-        EngineExpressionEvaluator::shared(engine, params, ctes),
-    )?;
-    Ok(Some(finish_query_block_operator_output(
-        engine,
-        operator,
-        original,
-        params,
-        ctes,
-        columns,
-        output_mode,
-    )?))
 }

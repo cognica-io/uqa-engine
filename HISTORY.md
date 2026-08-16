@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Added the PostgreSQL 18 baseline with a revision-pinned PostgreSQL 18 parser chain, `pg18` fixtures and differential probes, `18.0-uqa` session metadata, protocol 3.2 primitives, and exact 22-query PostgreSQL 18.4 TPC-H-derived results.
+- Added PostgreSQL 18 behavior for qualified joins, DML old/new `RETURNING` row images, constraint metadata, identified functions and casts, database locale catalogs, generated columns, and the implemented PL/pgSQL datum-slot and bound-cursor surface.
+
+### Changed
+
+- Replaced flattened relational column names with structured `(qualifier, column)` identities across planning and execution, kept lateral and correlated rows physical until their final consumer, and made spill format version 1 persist structured identities and declared schemas without a legacy reader.
+- Preserved declared row types across scans, projections, joins, aggregates, CTEs, DML, cursors, foreign tables, generated columns, and schema rewrites instead of reconstructing types from materialized values.
+
+### Performance
+
+- Replaced dynamic per-slot lookup in direct scored aggregation with a concrete projected-row representation, retaining structured metadata while removing the PostgreSQL 18 migration's analytical-query regression and accelerating cursor result scans.
+
 ## [0.1.2] - 2026-08-13
 
 ### Added

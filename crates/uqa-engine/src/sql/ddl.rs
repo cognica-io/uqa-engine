@@ -37,7 +37,7 @@ use drop::ddl_storage_error;
 use value_conversion::rewrite_column_values_to_type;
 
 #[cfg(test)]
-use value_conversion::{coerce_json_value, float_to_integer};
+use value_conversion::coerce_json_value;
 
 #[cfg(test)]
 mod tests;

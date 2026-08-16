@@ -106,10 +106,17 @@ fn qualified_user_table_routine_keeps_its_schema_identity() {
         .unwrap();
 
     let result = engine
-        .sql("SELECT x FROM application.rows_for(7)", &[])
+        .sql("SELECT rows_for.x FROM application.rows_for(7)", &[])
         .unwrap();
     assert_eq!(result.rows.len(), 1);
     assert_eq!(result.rows[0]["x"], Value::Int(7));
+    let scalar_subquery = engine
+        .sql(
+            "SELECT (SELECT rows_for.x FROM application.rows_for(7)) AS x",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(scalar_subquery.rows[0]["x"], Value::Int(7));
     let wrong_schema = engine
         .sql("SELECT * FROM ag_catalog.rows_for(7)", &[])
         .unwrap_err();

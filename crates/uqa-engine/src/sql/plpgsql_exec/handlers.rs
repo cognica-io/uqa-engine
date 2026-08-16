@@ -7,9 +7,10 @@
 //! SQL statement handlers and scalar/table routine entry points.
 
 use super::{
-    call_signature, execute_routine, output_column_names, resolve_routine, routine_local_name,
-    routine_resolution_error, BTreeMap, CreateFunction, DepthGuard, DropFunctionStmt, Engine,
-    FunctionReturns, Interpreter, ResultRow, SQLError, SQLResult, SQLTableFunctionResult, Value,
+    call_signature, execute_routine, output_column_names, resolve_bound_routine, resolve_routine,
+    routine_local_name, routine_resolution_error, CreateFunction, DepthGuard, DropFunctionStmt,
+    Engine, FunctionBinding, FunctionReturns, Interpreter, ResultRow, SQLError, SQLResult,
+    SQLTableFunctionResult, Value,
 };
 
 pub(in crate::sql) fn run_create_function(
@@ -48,6 +49,7 @@ pub(in crate::sql) fn run_do_block(
         returns: FunctionReturns::Scalar {
             type_name: "void".into(),
         },
+        return_type_reference: None,
         language: "plpgsql".into(),
         body: uqa_sql::ast::FunctionBody::Source(body.to_string()),
         volatility: uqa_sql::ast::FunctionVolatility::Volatile,
@@ -88,13 +90,19 @@ pub(in crate::sql) fn run_call(
         return Ok(SQLResult::empty());
     }
     let columns = output_column_names(&function.def);
+    let column_types = out_params
+        .iter()
+        .map(|parameter| uqa_sql::ast::ColumnType::from_sql_name(&parameter.type_name).map(Some))
+        .collect::<Result<Vec<_>, _>>()?;
     let mut row = ResultRow::new();
     for (column, value) in columns.iter().zip(outcome.out_values.iter()) {
         row.insert(column.clone(), value.clone());
     }
     Ok(SQLResult {
+        column_types,
         columns,
         rows: vec![row],
+        positional_rows: None,
         affected_rows: 0,
     })
 }
@@ -111,58 +119,106 @@ pub(crate) fn call_user_scalar_function(
         Ok(None) => return None,
         Err(e) => return Some(Err(e)),
     };
+    Some(execute_resolved_scalar_function(
+        engine, name, args, resolved,
+    ))
+}
+
+pub(crate) fn call_bound_user_scalar_function(
+    engine: &Engine,
+    binding: &FunctionBinding,
+    args: &[(Option<String>, Value)],
+) -> Option<Result<Value, SQLError>> {
+    let resolved = match resolve_bound_routine(engine, binding, args) {
+        Ok(Some(resolved)) => resolved,
+        Ok(None) => return None,
+        Err(error) => return Some(Err(error)),
+    };
+    Some(execute_resolved_scalar_function(
+        engine,
+        &binding.name,
+        args,
+        resolved,
+    ))
+}
+
+fn execute_resolved_scalar_function(
+    engine: &Engine,
+    name: &str,
+    args: &[(Option<String>, Value)],
+    resolved: (
+        std::sync::Arc<crate::engine_user_functions::SQLUserFunction>,
+        Vec<Value>,
+    ),
+) -> Result<Value, SQLError> {
     let (function, bound) = resolved;
     if function.def.is_procedure {
-        return Some(Err(SQLError::Routine {
+        return Err(SQLError::Routine {
             sqlstate: "42809".into(),
             message: format!("{} is a procedure", call_signature(name, args)),
-        }));
+        });
     }
     if function.def.returns_set() {
-        return Some(Err(SQLError::Routine {
+        return Err(SQLError::Routine {
             sqlstate: "0A000".into(),
             message: "set-valued function called in context that cannot accept a set".into(),
-        }));
+        });
     }
     if function.def.strict && bound.iter().any(|v| matches!(v, Value::Null)) {
-        return Some(Ok(Value::Null));
+        return Ok(Value::Null);
     }
-    let outcome = match execute_routine(engine, &function, bound) {
-        Ok(outcome) => outcome,
-        Err(e) => return Some(Err(e)),
-    };
+    let outcome = execute_routine(engine, &function, bound)?;
     let out_params = function.def.output_params();
     if outcome.out_values.len() != out_params.len() {
-        return Some(Err(SQLError::Internal(format!(
+        return Err(SQLError::Internal(format!(
             "routine `{}` produced {} OUT values for {} OUT parameters",
             function.def.name,
             outcome.out_values.len(),
             out_params.len()
-        ))));
+        )));
     }
     let value = match out_params.len() {
         0 => outcome.value,
         1 => match outcome.out_values.into_iter().next() {
             Some(value) => value,
             None => {
-                return Some(Err(SQLError::Internal(format!(
+                return Err(SQLError::Internal(format!(
                     "routine `{}` lost its validated OUT value",
                     function.def.name
-                ))));
+                )));
             }
         },
-        _ => {
-            let mut record = BTreeMap::new();
-            for (column, value) in output_column_names(&function.def)
+        _ => Value::Record(
+            output_column_names(&function.def)
                 .into_iter()
                 .zip(outcome.out_values)
-            {
-                record.insert(column, value);
-            }
-            Value::Map(record)
-        }
+                .collect(),
+        ),
     };
-    Some(Ok(value))
+    Ok(value)
+}
+
+/// Resolve a user function call far enough for the projection planner to
+/// choose scalar or set execution. `None` means no routine with this name
+/// exists; argument-resolution errors remain observable at execution time.
+pub(crate) fn resolved_user_function_returns_set(
+    engine: &Engine,
+    name: &str,
+    args: &[(Option<String>, Value)],
+) -> Option<Result<bool, SQLError>> {
+    let resolved = match resolve_routine(engine, name, args, "function") {
+        Ok(Some(resolved)) => resolved,
+        Ok(None) => return None,
+        Err(error) => return Some(Err(error)),
+    };
+    let (function, _) = resolved;
+    if function.def.is_procedure {
+        return Some(Err(SQLError::Routine {
+            sqlstate: "42809".into(),
+            message: format!("{} is a procedure", call_signature(name, args)),
+        }));
+    }
+    Some(Ok(function.def.returns_set()))
 }
 
 /// FROM-clause invocation: any user routine is callable as a table

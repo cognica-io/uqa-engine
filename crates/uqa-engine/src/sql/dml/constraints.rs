@@ -29,11 +29,49 @@ pub(in crate::sql) fn validate_document_non_key_constraints(
     document: &Document,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
-    for col_def in engine
+    let definitions = engine
         .try_describe_table(table)
         .map_err(|err| dml_storage_error("constraint validation", err))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?
-    {
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let check_constraints = engine
+        .try_check_constraint_definitions(table)
+        .map_err(|err| dml_storage_error("constraint validation", err))?;
+    let virtual_columns = definitions
+        .iter()
+        .filter(|column| {
+            column.generated.as_ref().is_some_and(|generated| {
+                generated.kind == uqa_sql::ast::GeneratedColumnKind::Virtual
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut required_virtual_columns = std::collections::BTreeSet::new();
+    for column in &virtual_columns {
+        if column.not_null
+            || check_constraints.iter().any(|constraint| {
+                constraint.enforced
+                    && crate::engine_table_storage::schema_expr_references_column(
+                        &constraint.expr,
+                        &column.name,
+                    )
+            })
+        {
+            required_virtual_columns.insert(column.name.clone());
+        }
+    }
+    let logical_document = if required_virtual_columns.is_empty() {
+        None
+    } else {
+        let mut logical_document = document.clone();
+        crate::engine_generated::materialize_selected_virtual_generated_columns(
+            &definitions,
+            &mut logical_document,
+            &required_virtual_columns,
+        )?;
+        Some(logical_document)
+    };
+    let document = logical_document.as_ref().unwrap_or(document);
+
+    for col_def in &definitions {
         if !col_def.not_null || col_def.auto_increment {
             continue;
         }
@@ -48,13 +86,13 @@ pub(in crate::sql) fn validate_document_non_key_constraints(
         }
     }
 
-    for (cname, expr) in engine
-        .try_check_constraints(table)
-        .map_err(|err| dml_storage_error("constraint validation", err))?
-    {
-        let result = eval_lowered_expression(engine, &expr, Some(document), params)?;
+    for constraint in check_constraints {
+        if !constraint.enforced {
+            continue;
+        }
+        let result = eval_lowered_expression(engine, &constraint.expr, Some(document), params)?;
         if !uqa_sql::expr::truthy(&result) {
-            let label = cname.unwrap_or_else(|| "<unnamed>".into());
+            let label = constraint.name.unwrap_or_else(|| "<unnamed>".into());
             return Err(SQLError::TypeMismatch(format!(
                 "CHECK constraint `{label}` violated in table `{table}`"
             )));
@@ -65,6 +103,9 @@ pub(in crate::sql) fn validate_document_non_key_constraints(
         .try_foreign_keys(table)
         .map_err(|err| dml_storage_error("constraint validation", err))?
     {
+        if !fk.enforced {
+            continue;
+        }
         let Some(local_values) = foreign_key_lookup_values(&fk, document)? else {
             continue;
         };
@@ -170,22 +211,24 @@ pub(in crate::sql) fn rewrite_document_with_referential_actions(
     table: &str,
     doc_id: DocId,
     old_doc: &Document,
-    new_doc: Document,
+    new_doc: &mut Document,
     params: &[SQLParam],
 ) -> Result<DocId, SQLError> {
-    validate_document_constraints(engine, table, &new_doc, params, Some(doc_id))?;
-    let rewritten_doc_id = match integer_primary_key_doc_id(engine, table, &new_doc)? {
+    crate::sql::generated::refresh_stored_generated_columns(engine, table, new_doc)?;
+    validate_document_constraints(engine, table, new_doc, params, Some(doc_id))?;
+    let rewritten_doc_id = match integer_primary_key_doc_id(engine, table, new_doc)? {
         // An integer primary key names the row's doc_id slot; keep that
         // invariant when the key itself changes, or value -> doc_id
         // lookups (the unique fast path and FOREIGN KEY validation) read
         // the stale slot and miss the row.
         Some(new_id) if new_id != doc_id => {
             engine.delete_document(table, doc_id)?;
-            engine.add_document_with_vector_values(
+            engine.add_prepared_document_with_vector_values(
                 table,
                 new_id,
                 new_doc.clone(),
-                document_vectors(engine, table, &new_doc)?,
+                document_vectors(engine, table, new_doc)?,
+                true,
             )?;
             engine
                 .advance_next_id(table, new_id)
@@ -193,11 +236,11 @@ pub(in crate::sql) fn rewrite_document_with_referential_actions(
             new_id
         }
         _ => {
-            engine.rewrite_document(table, doc_id, new_doc.clone())?;
+            engine.rewrite_prepared_document(table, doc_id, new_doc.clone())?;
             doc_id
         }
     };
-    apply_referenced_key_update_actions(engine, table, old_doc, &new_doc, params)?;
+    apply_referenced_key_update_actions(engine, table, old_doc, new_doc, params)?;
     Ok(rewritten_doc_id)
 }
 
@@ -212,10 +255,7 @@ pub(in crate::sql) fn integer_primary_key_doc_id(
     else {
         return Ok(None);
     };
-    let Some(pk) = cols
-        .iter()
-        .find(|c| c.primary_key && matches!(c.ty, uqa_sql::ast::ColumnType::Integer))
-    else {
+    let Some(pk) = cols.iter().find(|c| c.primary_key && c.ty.is_integer()) else {
         return Ok(None);
     };
     Ok(match doc.get(&pk.name) {
@@ -261,7 +301,12 @@ pub(in crate::sql) fn apply_referenced_key_update_actions(
                         updated.insert(col.clone(), value.clone());
                     }
                     rewrite_document_with_referential_actions(
-                        engine, &ref_table, child_id, &child_doc, updated, params,
+                        engine,
+                        &ref_table,
+                        child_id,
+                        &child_doc,
+                        &mut updated,
+                        params,
                     )?;
                 }
                 ForeignKeyAction::SetNull | ForeignKeyAction::SetDefault => {
@@ -276,7 +321,12 @@ pub(in crate::sql) fn apply_referenced_key_update_actions(
                         params,
                     )?;
                     rewrite_document_with_referential_actions(
-                        engine, &ref_table, child_id, &child_doc, updated, params,
+                        engine,
+                        &ref_table,
+                        child_id,
+                        &child_doc,
+                        &mut updated,
+                        params,
                     )?;
                 }
             }

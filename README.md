@@ -218,16 +218,16 @@ The combined report includes exact, IVF, and HNSW SQL query latency and throughp
 Integration tests are consolidated into a small set of domain harnesses so a workspace test does not pay one linker and process-startup cost per source file. Individual modules remain directly selectable during development:
 
 ```sh
-cargo test -p uqa-engine --test engine_queries sql_joins::
+cargo test -p uqa-engine --test integration engine_queries::sql_joins::
 cargo test -p uqa-sql --test integration parser_fuzz::
 ```
 
-## PostgreSQL 17 compatibility
+## PostgreSQL 18 compatibility
 
-The repository includes a deterministic TPC-H-derived scale-factor `0.001` fixture with all 22 default queries. The self-contained correctness gate compares exact columns, row order, NULLs, text bytes, and type-aware canonical numeric values with checked-in PostgreSQL 17.10 results:
+The repository includes a deterministic TPC-H-derived scale-factor `0.001` fixture with all 22 default queries. The self-contained correctness gate compares exact columns, row order, NULLs, text bytes, and type-aware canonical numeric values with checked-in PostgreSQL 18.4 results:
 
 ```sh
-cargo test -p uqa-engine --test sql_tpch
+cargo test -p uqa-engine --test integration sql_tpch::
 ```
 
 Release-mode timing uses a machine-readable runner rather than test-profile execution:

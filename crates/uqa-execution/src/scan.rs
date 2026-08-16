@@ -15,6 +15,7 @@
 
 use crate::batch::{Batch, PhysicalRow, RowSchema, DEFAULT_BATCH_SIZE};
 use crate::physical::{ExecResult, PhysicalOperator, PhysicalOrder};
+use uqa_sql::ast::ColumnType;
 use uqa_sql::ResultRow;
 
 /// Source of rows feeding a [`TableScan`]. Implementors typically own
@@ -86,7 +87,14 @@ pub trait RowSource: Send {
 /// tests and for materialising CTE bodies.
 pub struct VecSource {
     schema: Vec<String>,
+    physical_schema: RowSchema,
     rows: std::vec::IntoIter<ResultRow>,
+}
+
+/// In-memory positional source that preserves a structured [`RowSchema`] and shared physical row fragments without round-tripping through named maps.
+pub struct PhysicalVecSource {
+    schema: RowSchema,
+    rows: std::vec::IntoIter<PhysicalRow>,
 }
 
 /// Physical scan over a fallible row iterator. Unlike [`VecSource`], this
@@ -105,6 +113,29 @@ impl<'a> RowIteratorScan<'a> {
     ) -> Self {
         Self {
             schema: RowSchema::new(schema),
+            rows,
+            exhausted: false,
+        }
+    }
+
+    pub fn with_types(
+        schema: Vec<String>,
+        types: Vec<Option<ColumnType>>,
+        rows: Box<dyn Iterator<Item = ExecResult<ResultRow>> + Send + 'a>,
+    ) -> Self {
+        Self {
+            schema: RowSchema::with_types(schema, types),
+            rows,
+            exhausted: false,
+        }
+    }
+
+    pub fn with_row_schema(
+        schema: RowSchema,
+        rows: Box<dyn Iterator<Item = ExecResult<ResultRow>> + Send + 'a>,
+    ) -> Self {
+        Self {
+            schema,
             rows,
             exhausted: false,
         }
@@ -151,8 +182,31 @@ impl PhysicalOperator for RowIteratorScan<'_> {
 
 impl VecSource {
     pub fn new(schema: Vec<String>, rows: Vec<ResultRow>) -> Self {
+        let physical_schema = RowSchema::from_named_columns(schema.clone());
         Self {
             schema,
+            physical_schema,
+            rows: rows.into_iter(),
+        }
+    }
+
+    pub fn with_row_schema(physical_schema: RowSchema, rows: Vec<ResultRow>) -> Self {
+        Self {
+            schema: physical_schema.columns().to_vec(),
+            physical_schema,
+            rows: rows.into_iter(),
+        }
+    }
+
+    pub fn with_types(
+        schema: Vec<String>,
+        types: Vec<Option<ColumnType>>,
+        rows: Vec<ResultRow>,
+    ) -> Self {
+        let physical_schema = RowSchema::with_types(schema.clone(), types);
+        Self {
+            schema,
+            physical_schema,
             rows: rows.into_iter(),
         }
     }
@@ -163,12 +217,50 @@ impl RowSource for VecSource {
         &self.schema
     }
 
+    fn physical_schema(&self) -> Option<&RowSchema> {
+        Some(&self.physical_schema)
+    }
+
     fn estimated_cardinality(&self) -> Option<u64> {
         u64::try_from(self.rows.len()).ok()
     }
 
     fn next_row(&mut self) -> ExecResult<Option<ResultRow>> {
         Ok(self.rows.next())
+    }
+}
+
+impl PhysicalVecSource {
+    pub fn new(schema: RowSchema, rows: Vec<PhysicalRow>) -> Self {
+        Self {
+            schema,
+            rows: rows.into_iter(),
+        }
+    }
+}
+
+impl RowSource for PhysicalVecSource {
+    fn schema(&self) -> &[String] {
+        self.schema.columns()
+    }
+
+    fn physical_schema(&self) -> Option<&RowSchema> {
+        Some(&self.schema)
+    }
+
+    fn estimated_cardinality(&self) -> Option<u64> {
+        u64::try_from(self.rows.len()).ok()
+    }
+
+    fn next_row(&mut self) -> ExecResult<Option<ResultRow>> {
+        Ok(self
+            .rows
+            .next()
+            .map(|row| self.schema.view(&row).to_result_row()))
+    }
+
+    fn next_physical_batch(&mut self, max_rows: usize) -> ExecResult<Vec<PhysicalRow>> {
+        Ok(self.rows.by_ref().take(max_rows).collect())
     }
 }
 
@@ -203,6 +295,22 @@ impl TableScan {
 
     pub fn from_rows(schema: Vec<String>, rows: Vec<ResultRow>) -> Self {
         Self::new(Box::new(VecSource::new(schema, rows)))
+    }
+
+    pub fn from_typed_rows(
+        schema: Vec<String>,
+        types: Vec<Option<ColumnType>>,
+        rows: Vec<ResultRow>,
+    ) -> Self {
+        Self::new(Box::new(VecSource::with_types(schema, types, rows)))
+    }
+
+    pub fn from_rows_with_schema(schema: RowSchema, rows: Vec<ResultRow>) -> Self {
+        Self::new(Box::new(VecSource::with_row_schema(schema, rows)))
+    }
+
+    pub fn from_physical_rows(schema: RowSchema, rows: Vec<PhysicalRow>) -> Self {
+        Self::new(Box::new(PhysicalVecSource::new(schema, rows)))
     }
 }
 

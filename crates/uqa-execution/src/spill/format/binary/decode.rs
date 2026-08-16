@@ -8,10 +8,10 @@
 
 use std::collections::BTreeMap;
 
-use uqa_core::{DecimalValue, TemporalValue, Value};
-use uqa_sql::ResultRow;
+use uqa_core::{ArrayValue, DecimalValue, TemporalValue, Value};
+use uqa_sql::ast::ColumnType;
 
-use crate::batch::{Batch, RowSchema};
+use crate::batch::{Batch, ColumnIdentity, PhysicalRow, RowSchema};
 use crate::physical::ExecResult;
 use crate::spill::format::spill_error;
 
@@ -19,23 +19,66 @@ use super::MAX_VALUE_DEPTH;
 
 pub(crate) fn decode_batch(record: &[u8]) -> ExecResult<Batch> {
     let mut reader = BinaryReader::new(record);
-    let column_count = reader.read_count("schema column count", 8)?;
+    let physical_width = reader.read_count("schema physical width", 1)?;
+    let column_count = reader.read_count("schema column count", 16)?;
     let mut columns = Vec::new();
+    let mut identities = Vec::new();
+    let mut types = Vec::new();
+    let mut slots = Vec::new();
     columns
         .try_reserve_exact(column_count)
         .map_err(|error| spill_error(format!("cannot allocate spill schema: {error}")))?;
+    identities
+        .try_reserve_exact(column_count)
+        .map_err(|error| {
+            spill_error(format!("cannot allocate spill schema identities: {error}"))
+        })?;
+    slots
+        .try_reserve_exact(column_count)
+        .map_err(|error| spill_error(format!("cannot allocate spill schema slots: {error}")))?;
+    types
+        .try_reserve_exact(column_count)
+        .map_err(|error| spill_error(format!("cannot allocate spill schema types: {error}")))?;
     for _ in 0..column_count {
         columns.push(reader.read_string("schema column")?);
+        identities.push(reader.read_identity("schema identity")?);
+        slots.push(reader.read_slot("schema logical slot", physical_width)?);
+        types.push(reader.read_column_type("schema column type")?);
     }
+    let alias_count = reader.read_count("schema alias count", 16)?;
+    let mut aliases = Vec::new();
+    aliases
+        .try_reserve_exact(alias_count)
+        .map_err(|error| spill_error(format!("cannot allocate spill schema aliases: {error}")))?;
+    for _ in 0..alias_count {
+        aliases.push((
+            reader.read_identity("schema alias")?,
+            reader.read_slot("schema alias slot", physical_width)?,
+            reader.read_column_type("schema alias type")?,
+        ));
+    }
+    let schema =
+        RowSchema::from_physical_layout(columns, identities, types, slots, physical_width, aliases)
+            .map_err(|error| spill_error(format!("invalid spill schema: {error}")))?;
     let row_count = reader.read_count("batch row count", 8)?;
     let mut rows = Vec::new();
     rows.try_reserve_exact(row_count)
         .map_err(|error| spill_error(format!("cannot allocate spill rows: {error}")))?;
     for _ in 0..row_count {
-        rows.push(reader.read_row()?);
+        rows.push(reader.read_row(physical_width)?);
     }
     reader.finish("spill batch")?;
-    Ok(Batch::new(RowSchema::new(columns), rows))
+    Ok(Batch::from_physical_rows(schema, rows))
+}
+
+pub(crate) fn decode_physical_row_record(
+    record: &[u8],
+    physical_width: usize,
+) -> ExecResult<PhysicalRow> {
+    let mut reader = BinaryReader::new(record);
+    let row = reader.read_row(physical_width)?;
+    reader.finish("indexed spill row")?;
+    Ok(row)
 }
 
 struct BinaryReader<'a> {
@@ -113,19 +156,61 @@ impl<'a> BinaryReader<'a> {
             .map_err(|error| spill_error(format!("invalid UTF-8 in {description}: {error}")))
     }
 
-    fn read_row(&mut self) -> ExecResult<ResultRow> {
-        let field_count = self.read_count("row field count", 9)?;
-        let mut row = ResultRow::new();
-        for _ in 0..field_count {
-            let name = self.read_string("row field name")?;
-            let value = self.read_value(0)?;
-            if row.insert(name.clone(), value).is_some() {
-                return Err(spill_error(format!(
-                    "duplicate field `{name}` in spill row"
-                )));
-            }
+    fn read_identity(&mut self, description: &str) -> ExecResult<ColumnIdentity> {
+        let qualifier = self.read_string(description)?;
+        let column = self.read_string(description)?;
+        if column.is_empty() {
+            return Err(spill_error(format!(
+                "{description} has an empty column name"
+            )));
         }
-        Ok(row)
+        Ok(if qualifier.is_empty() {
+            ColumnIdentity::unqualified(column)
+        } else {
+            ColumnIdentity::qualified(qualifier, column)
+        })
+    }
+
+    fn read_column_type(&mut self, description: &str) -> ExecResult<Option<ColumnType>> {
+        let encoded = self.read_string(description)?;
+        if encoded.is_empty() {
+            return Ok(None);
+        }
+        serde_json::from_str(&encoded)
+            .map(Some)
+            .map_err(|error| spill_error(format!("invalid {description}: {error}")))
+    }
+
+    fn read_slot(&mut self, description: &str, physical_width: usize) -> ExecResult<Option<usize>> {
+        let encoded = self.read_u64(description)?;
+        if encoded == u64::MAX {
+            return Ok(None);
+        }
+        let slot = usize::try_from(encoded)
+            .map_err(|_| spill_error(format!("{description} exceeds address space")))?;
+        if slot >= physical_width {
+            return Err(spill_error(format!(
+                "{description} {slot} is outside physical width {physical_width}"
+            )));
+        }
+        Ok(Some(slot))
+    }
+
+    fn read_row(&mut self, expected_values: usize) -> ExecResult<PhysicalRow> {
+        let value_count = self.read_count("row value count", 1)?;
+        if value_count != expected_values {
+            return Err(spill_error(format!(
+                "spill row has {value_count} values for {expected_values} columns"
+            )));
+        }
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(value_count)
+            .map_err(|error| spill_error(format!("cannot allocate spill row: {error}")))?;
+        for _ in 0..value_count {
+            values.push(self.read_value(0)?);
+        }
+        Ok(PhysicalRow::from_values(values))
     }
 
     fn read_value(&mut self, depth: usize) -> ExecResult<Value> {
@@ -180,6 +265,55 @@ impl<'a> BinaryReader<'a> {
             10 => self
                 .read_string("fixed character value")
                 .map(Value::FixedChar),
+            11 => self.read_string("JSON value").map(Value::Json),
+            12 => self.read_string("JSONB value").map(Value::JsonB),
+            13 => {
+                let count = self.read_count("row length", 1)?;
+                let mut values = Vec::new();
+                values
+                    .try_reserve_exact(count)
+                    .map_err(|error| spill_error(format!("cannot allocate spill row: {error}")))?;
+                for _ in 0..count {
+                    values.push(self.read_value(depth + 1)?);
+                }
+                Ok(Value::Row(values))
+            }
+            14 => {
+                let count = self.read_count("record length", 9)?;
+                let mut fields = Vec::new();
+                fields.try_reserve_exact(count).map_err(|error| {
+                    spill_error(format!("cannot allocate spill record: {error}"))
+                })?;
+                for _ in 0..count {
+                    let name = self.read_string("record field name")?;
+                    let value = self.read_value(depth + 1)?;
+                    fields.push((name, value));
+                }
+                Ok(Value::Record(fields))
+            }
+            15 => {
+                let bound_count = self.read_count("array lower-bound count", 4)?;
+                let mut lower_bounds = Vec::new();
+                lower_bounds
+                    .try_reserve_exact(bound_count)
+                    .map_err(|error| {
+                        spill_error(format!("cannot allocate spill array bounds: {error}"))
+                    })?;
+                for _ in 0..bound_count {
+                    lower_bounds.push(self.read_i32("array lower bound")?);
+                }
+                let element_count = self.read_count("array element count", 1)?;
+                let mut elements = Vec::new();
+                elements.try_reserve_exact(element_count).map_err(|error| {
+                    spill_error(format!("cannot allocate spill array: {error}"))
+                })?;
+                for _ in 0..element_count {
+                    elements.push(self.read_value(depth + 1)?);
+                }
+                ArrayValue::with_lower_bounds(elements, lower_bounds)
+                    .map(Value::Array)
+                    .ok_or_else(|| spill_error("invalid array dimensions in spill file"))
+            }
             tag => Err(spill_error(format!("invalid spill value tag {tag}"))),
         }
     }
