@@ -29,9 +29,11 @@ pub(super) use arguments::expect_column_name;
 pub(super) use dispatch::{execute_function, execute_function_with_top_k};
 pub(super) use graph::{
     execute_tree_entries, expect_optional_graph_value, graph_betweenness_entries,
-    graph_hits_entries, graph_pagerank_entries, run_age_create_graph_with_evaluator,
-    run_age_drop_graph_with_evaluator, run_graph_create_with_evaluator,
-    run_graph_drop_with_evaluator,
+    graph_hits_entries, graph_pagerank_entries, run_age_alter_graph_with_evaluator,
+    run_age_create_elabel_with_evaluator, run_age_create_graph_with_evaluator,
+    run_age_create_vlabel_with_evaluator, run_age_drop_graph_with_evaluator,
+    run_age_drop_label_with_evaluator, run_age_graph_exists_with_evaluator,
+    run_graph_create_with_evaluator, run_graph_drop_with_evaluator,
 };
 pub(crate) use retrieval::{
     run_bayesian_match_with_prior_in_execution, run_bayesian_match_with_prior_public,

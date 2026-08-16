@@ -9,7 +9,10 @@
 use super::{CatalogIndexRow, ColumnType, DropKind, DropStmt, Engine, SQLError, SQLResult};
 
 pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError> {
-    if stmt.cascade && matches!(stmt.kind, DropKind::View | DropKind::Schema) {
+    if stmt.cascade
+        && matches!(stmt.kind, DropKind::View | DropKind::Schema)
+        && !(stmt.kind == DropKind::Schema && only_graph_namespaces(engine, &stmt.names)?)
+    {
         return Err(SQLError::Unsupported(format!(
             "DROP {} CASCADE is not supported; no objects were changed",
             match stmt.kind {
@@ -20,6 +23,24 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
         )));
     }
     engine.with_implicit_transaction(move |engine| run_drop_inner(engine, stmt))
+}
+
+/// `DROP SCHEMA ... CASCADE` is implemented for graph namespaces, whose only
+/// dependents are the graph's own label relations, so cascading drops the
+/// graph exactly like AGE.
+fn only_graph_namespaces(engine: &Engine, names: &[String]) -> Result<bool, SQLError> {
+    for name in names {
+        let is_graph = engine
+            .has_graph(name)
+            .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?;
+        let is_schema = engine
+            .has_schema(name)
+            .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?;
+        if !is_graph || is_schema {
+            return Ok(false);
+        }
+    }
+    Ok(!names.is_empty())
 }
 
 fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError> {
@@ -115,12 +136,31 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
         }
         DropKind::Schema => {
             let mut schemas = Vec::new();
+            let mut graphs = Vec::new();
             for name in &stmt.names {
                 let exists = engine
                     .preflight_drop_schema(name)
                     .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?;
                 if exists {
                     schemas.push(name.clone());
+                    continue;
+                }
+                // A named graph owns a namespace of the same name whose
+                // label relations always depend on it, exactly like AGE's
+                // graph schema: RESTRICT fails and CASCADE drops the graph.
+                if engine
+                    .has_graph(name)
+                    .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?
+                {
+                    if !stmt.cascade {
+                        return Err(SQLError::Routine {
+                            sqlstate: "2BP01".into(),
+                            message: format!(
+                                "cannot drop schema {name} because other objects depend on it"
+                            ),
+                        });
+                    }
+                    graphs.push(name.clone());
                 } else if !stmt.if_exists {
                     return Err(SQLError::Unsupported(format!(
                         "DROP SCHEMA: schema `{name}` does not exist"
@@ -130,6 +170,11 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
             for schema in schemas {
                 engine
                     .drop_schema(&schema)
+                    .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?;
+            }
+            for graph in graphs {
+                engine
+                    .drop_graph(&graph)
                     .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?;
             }
         }

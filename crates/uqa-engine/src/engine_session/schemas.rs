@@ -34,7 +34,9 @@ impl Engine {
         self.synchronize_catalog_registries()?;
         Self::validate_schema_name(name)?;
         let mut schemas = self.durable.schemas.write();
-        if schemas.contains(name) {
+        // Every named graph owns a namespace of the same name (AGE keeps
+        // one schema per graph), so the two name spaces cannot overlap.
+        if schemas.contains(name) || self.durable.graphs.read().contains_key(name) {
             if if_not_exists {
                 return Ok(false);
             }
@@ -102,7 +104,7 @@ impl Engine {
                 "invalid schema name `{name}`"
             )));
         }
-        if matches!(name, "pg_catalog" | "information_schema") {
+        if matches!(name, "pg_catalog" | "information_schema" | "ag_catalog") {
             return Err(StorageBackendError::Other(format!(
                 "schema name `{name}` is reserved"
             )));

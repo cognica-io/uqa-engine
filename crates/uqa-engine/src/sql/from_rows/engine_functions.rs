@@ -7,10 +7,12 @@
 //! Engine-backed scalar interception, scoring projections, and highlighting.
 
 use super::{
-    checked_integer_value, expect_column_name, run_age_create_graph_with_evaluator,
-    run_age_drop_graph_with_evaluator, run_graph_create_with_evaluator,
-    run_graph_drop_with_evaluator, BTreeMap, Engine, SQLError, ScalarExpr, Value,
-    MERGE_ACTION_COLUMN, SCORE_PROVENANCE_COLUMN,
+    checked_integer_value, expect_column_name, run_age_alter_graph_with_evaluator,
+    run_age_create_elabel_with_evaluator, run_age_create_graph_with_evaluator,
+    run_age_create_vlabel_with_evaluator, run_age_drop_graph_with_evaluator,
+    run_age_drop_label_with_evaluator, run_age_graph_exists_with_evaluator,
+    run_graph_create_with_evaluator, run_graph_drop_with_evaluator, BTreeMap, Engine, SQLError,
+    ScalarExpr, Value, MERGE_ACTION_COLUMN, SCORE_PROVENANCE_COLUMN,
 };
 use uqa_sql::expr::RowLookup;
 
@@ -69,6 +71,31 @@ pub(in crate::sql) fn engine_func_intercept(
         )?)),
         "drop_graph" => Ok(Some(run_age_drop_graph_with_evaluator(
             require_projection_engine(engine, "drop_graph")?,
+            args,
+            evaluate,
+        )?)),
+        "graph_exists" => Ok(Some(run_age_graph_exists_with_evaluator(
+            require_projection_engine(engine, "graph_exists")?,
+            args,
+            evaluate,
+        )?)),
+        "create_vlabel" => Ok(Some(run_age_create_vlabel_with_evaluator(
+            require_projection_engine(engine, "create_vlabel")?,
+            args,
+            evaluate,
+        )?)),
+        "create_elabel" => Ok(Some(run_age_create_elabel_with_evaluator(
+            require_projection_engine(engine, "create_elabel")?,
+            args,
+            evaluate,
+        )?)),
+        "drop_label" => Ok(Some(run_age_drop_label_with_evaluator(
+            require_projection_engine(engine, "drop_label")?,
+            args,
+            evaluate,
+        )?)),
+        "alter_graph" => Ok(Some(run_age_alter_graph_with_evaluator(
+            require_projection_engine(engine, "alter_graph")?,
             args,
             evaluate,
         )?)),

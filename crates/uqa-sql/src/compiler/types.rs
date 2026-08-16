@@ -197,6 +197,7 @@ pub(super) fn compile_pg_type_name(
         "bytea" => Ok(ColumnType::Bytea),
         "regproc" => Ok(ColumnType::Regproc),
         "regclass" => Ok(ColumnType::Regclass),
+        "regnamespace" => Ok(ColumnType::Regnamespace),
         "regtype" => Ok(ColumnType::Regtype),
         "pg_node_tree" => Ok(ColumnType::PgNodeTree),
         "aclitem" => Ok(ColumnType::AclItem),

@@ -73,6 +73,7 @@ pub enum ColumnType {
     InternalChar,
     Regproc,
     Regclass,
+    Regnamespace,
     Regtype,
     PgNodeTree,
     AclItem,

@@ -707,7 +707,7 @@ pub(super) fn is_quoted_keyword(word: &str) -> bool {
 
 /// `quote_ident`: double-quote unless the identifier is a safe
 /// lower-case name that is not a keyword.
-pub(super) fn quote_ident(ident: &str) -> String {
+pub fn quote_ident(ident: &str) -> String {
     let safe = !ident.is_empty()
         && ident.chars().enumerate().all(|(i, c)| {
             c.is_ascii_lowercase() || c == '_' || (i > 0 && (c.is_ascii_digit() || c == '$'))

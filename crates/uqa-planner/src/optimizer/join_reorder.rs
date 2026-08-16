@@ -128,6 +128,7 @@ fn reorder_command_joins(
         | CommandPlan::SetVariable { .. }
         | CommandPlan::ShowVariable { .. }
         | CommandPlan::Discard { .. }
+        | CommandPlan::Load { .. }
         | CommandPlan::Analyze { .. }
         | CommandPlan::Truncate { .. }
         | CommandPlan::Transaction(_)

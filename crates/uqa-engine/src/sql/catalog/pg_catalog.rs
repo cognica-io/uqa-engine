@@ -135,6 +135,7 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
         let (schema, index_name) = split_index_name(&idx.name, &table_schema)?;
         out.push(pg_class_row(&schema, &index_name, "i", 0, 0.0, false));
     }
+    out.extend(super::ag_catalog::age_pg_class_rows(engine)?);
     Ok(out)
 }
 
@@ -287,6 +288,7 @@ pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
             ));
         }
     }
+    out.extend(super::ag_catalog::age_pg_attribute_rows(engine)?);
     Ok(out)
 }
 
@@ -615,6 +617,7 @@ pub(super) fn build_pg_type() -> Vec<ResultRow> {
             "b",
         ),
         (ColumnType::Regtype, "N", false, "b"),
+        (ColumnType::Regnamespace, "N", false, "b"),
         (ColumnType::AnyArray, "P", false, "p"),
         (ColumnType::Uuid, "U", false, "b"),
         (ColumnType::JsonB, "U", false, "b"),
@@ -673,6 +676,35 @@ pub(super) fn build_pg_type() -> Vec<ResultRow> {
             -1,
         ));
     }
+    for domain in super::schema::ag_catalog_domains() {
+        let ColumnType::Domain { base, .. } = &domain else {
+            unreachable!("ag_catalog type constructor returned a non-domain")
+        };
+        let category = if matches!(**base, ColumnType::Integer) {
+            "N"
+        } else {
+            "Z"
+        };
+        types.push(pg_type_catalog_row(
+            &domain,
+            schema_oid(super::schema::AG_CATALOG_SCHEMA),
+            "d",
+            category,
+            false,
+            pg_type_oid(base),
+            -1,
+        ));
+        types.push(pg_type_catalog_row(
+            &ColumnType::Array(Box::new(domain)),
+            schema_oid(super::schema::AG_CATALOG_SCHEMA),
+            "b",
+            "A",
+            false,
+            0,
+            -1,
+        ));
+    }
+    types.extend(super::ag_catalog::age_pg_type_rows());
     types.extend([
         special_pg_type_catalog_row(PgTypeCatalogMetadata {
             oid: 2249,
@@ -1260,7 +1292,7 @@ pub(super) fn build_pg_settings(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
 }
 
 pub(super) fn build_pg_sequences(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    engine
+    let mut rows = engine
         .list_sequences()
         .map_err(|err| SQLError::Internal(format!("read sequence catalog: {err}")))?
         .into_iter()
@@ -1280,5 +1312,7 @@ pub(super) fn build_pg_sequences(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
                 ("last_value", Value::Null),
             ]))
         })
-        .collect::<Result<Vec<_>, SQLError>>()
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    rows.extend(super::ag_catalog::age_pg_sequences_rows(engine)?);
+    Ok(rows)
 }

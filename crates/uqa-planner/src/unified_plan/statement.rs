@@ -197,6 +197,7 @@ impl UnifiedPlan {
             Statement::Discard { target } => {
                 Self::Command(Box::new(CommandPlan::Discard { target }))
             }
+            Statement::Load { library } => Self::Command(Box::new(CommandPlan::Load { library })),
             Statement::Explain {
                 analyze,
                 verbose,
@@ -335,6 +336,7 @@ impl CommandPlan {
             Self::SetVariable { .. } => "SetVariable",
             Self::ShowVariable { .. } => "ShowVariable",
             Self::Discard { .. } => "Discard",
+            Self::Load { .. } => "Load",
             Self::Explain { .. } => "Explain",
             Self::Analyze { .. } => "Analyze",
             Self::Truncate { .. } => "Truncate",

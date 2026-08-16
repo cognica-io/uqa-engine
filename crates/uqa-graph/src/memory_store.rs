@@ -24,8 +24,9 @@ mod store;
 mod trait_impl;
 
 pub use graphid::{
-    graphid_label_id, graphid_sequence, make_graphid, GraphLabelRegistry, EDGE_DEFAULT_LABEL_ID,
-    FIRST_USER_LABEL_ID, GRAPHID_LABEL_SHIFT, VERTEX_DEFAULT_LABEL_ID,
+    graphid_label_id, graphid_sequence, make_graphid, GraphLabelInfo, GraphLabelRegistry,
+    LabelKind, EDGE_DEFAULT_LABEL_ID, FIRST_USER_LABEL_ID, GRAPHID_LABEL_SHIFT,
+    VERTEX_DEFAULT_LABEL_ID,
 };
 
 use graphid::usize_to_f64_exact;

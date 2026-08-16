@@ -71,6 +71,11 @@ pub(super) fn function_volatility(
             | "graph_drop"
             | "create_graph"
             | "drop_graph"
+            | "graph_exists"
+            | "create_vlabel"
+            | "create_elabel"
+            | "drop_label"
+            | "alter_graph"
             | "cypher"
             | "deep_learn"
             // Retrieval calibration learns and persists parameters on a

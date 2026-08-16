@@ -93,6 +93,9 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::DiscardStmt(stmt) => Ok(Statement::Discard {
             target: discard_target(stmt.target)?,
         }),
+        NodeEnum::LoadStmt(stmt) => Ok(Statement::Load {
+            library: stmt.filename.clone(),
+        }),
         other => Err(SQLError::Unsupported(format!(
             "{}",
             other_node_label(other)

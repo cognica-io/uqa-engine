@@ -299,3 +299,212 @@ fn graph_id_allocation_rejects_missing_graph_and_exhaustion() {
     assert!(make_graphid(MAX_GRAPHID_LABEL_ID + 1, 1).is_err());
     assert!(make_graphid(1, MAX_GRAPHID_SEQUENCE + 1).is_err());
 }
+
+#[test]
+fn label_kinds_are_recorded_and_enforced_like_age() {
+    let mut store = MemoryGraphStore::new();
+    store.create_graph("g");
+    store.allocate_vertex_id("Person", "g").unwrap();
+    store.allocate_edge_id("KNOWS", "g").unwrap();
+    assert_eq!(
+        store.graph_label_kind("g", "Person").unwrap(),
+        Some(LabelKind::Vertex)
+    );
+    assert_eq!(
+        store.graph_label_kind("g", "KNOWS").unwrap(),
+        Some(LabelKind::Edge)
+    );
+    assert_eq!(
+        store.graph_label_kind("g", "_ag_label_edge").unwrap(),
+        Some(LabelKind::Edge)
+    );
+    assert_eq!(store.graph_label_kind("g", "Nope").unwrap(), None);
+    let err = store.allocate_edge_id("Person", "g").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "invalid graph mutation: label Person is for vertices, not edges"
+    );
+    let err = store.allocate_vertex_id("KNOWS", "g").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "invalid graph mutation: label KNOWS is for edges, not vertices"
+    );
+}
+
+#[test]
+fn label_registry_lists_default_labels_first_then_user_labels_by_id() {
+    let mut store = MemoryGraphStore::new();
+    store.create_graph("g");
+    store.allocate_vertex_id("Zeta", "g").unwrap();
+    store.allocate_edge_id("Alpha", "g").unwrap();
+    assert_eq!(
+        store.create_label("g", "Empty", LabelKind::Vertex).unwrap(),
+        Some(5)
+    );
+    assert_eq!(
+        store.create_label("g", "Empty", LabelKind::Edge).unwrap(),
+        None
+    );
+    assert_eq!(
+        store
+            .create_label("g", "_ag_label_vertex", LabelKind::Vertex)
+            .unwrap(),
+        None
+    );
+    assert!(matches!(
+        store.create_label("missing", "X", LabelKind::Vertex),
+        Err(GraphStoreError::UnknownGraph(_))
+    ));
+    let labels = store.graph_labels("g").unwrap();
+    let shaped: Vec<(&str, u32, LabelKind, u64)> = labels
+        .iter()
+        .map(|label| {
+            (
+                label.name.as_str(),
+                label.id,
+                label.kind,
+                label.last_sequence,
+            )
+        })
+        .collect();
+    assert_eq!(
+        shaped,
+        vec![
+            ("_ag_label_vertex", 1, LabelKind::Vertex, 0),
+            ("_ag_label_edge", 2, LabelKind::Edge, 0),
+            ("Zeta", 3, LabelKind::Vertex, 1),
+            ("Alpha", 4, LabelKind::Edge, 1),
+            ("Empty", 5, LabelKind::Vertex, 0),
+        ]
+    );
+    // A pre-registered label keeps its id when entities arrive.
+    assert_eq!(
+        store.allocate_vertex_id("Empty", "g").unwrap(),
+        make_graphid(5, 1).unwrap()
+    );
+}
+
+#[test]
+fn drop_label_removes_entities_and_releases_the_label() {
+    let mut store = MemoryGraphStore::new();
+    store.create_graph("g");
+    let a = store.allocate_vertex_id("Person", "g").unwrap();
+    let b = store.allocate_vertex_id("Person", "g").unwrap();
+    let c = store.allocate_vertex_id("City", "g").unwrap();
+    store.add_vertex(Vertex::new(a, "Person"), "g").unwrap();
+    store.add_vertex(Vertex::new(b, "Person"), "g").unwrap();
+    store.add_vertex(Vertex::new(c, "City"), "g").unwrap();
+    let knows = store.allocate_edge_id("KNOWS", "g").unwrap();
+    let lives = store.allocate_edge_id("LIVES_IN", "g").unwrap();
+    store
+        .add_edge(Edge::new(knows, a, b, "KNOWS"), "g")
+        .unwrap();
+    store
+        .add_edge(Edge::new(lives, a, c, "LIVES_IN"), "g")
+        .unwrap();
+
+    // Labels were allocated Person(3), City(4), KNOWS(5), LIVES_IN(6).
+    assert_eq!(
+        store.drop_label("g", "KNOWS").unwrap(),
+        Some((5, LabelKind::Edge))
+    );
+    assert_eq!(store.edges_in_graph("g").unwrap().len(), 1);
+    assert_eq!(store.vertex_ids_in_graph("g").unwrap().len(), 3);
+
+    assert_eq!(
+        store.drop_label("g", "Person").unwrap(),
+        Some((3, LabelKind::Vertex))
+    );
+    assert_eq!(store.vertex_ids_in_graph("g").unwrap().len(), 1);
+    // The incident LIVES_IN edge left with its Person endpoint.
+    assert!(store.edges_in_graph("g").unwrap().is_empty());
+    assert_eq!(store.drop_label("g", "Person").unwrap(), None);
+    assert_eq!(store.drop_label("g", "_ag_label_vertex").unwrap(), None);
+    assert!(matches!(
+        store.drop_label("missing", "Person"),
+        Err(GraphStoreError::UnknownGraph(_))
+    ));
+    let names: Vec<String> = store
+        .graph_labels("g")
+        .unwrap()
+        .into_iter()
+        .map(|label| label.name)
+        .collect();
+    assert_eq!(
+        names,
+        vec!["_ag_label_vertex", "_ag_label_edge", "City", "LIVES_IN"]
+    );
+    // Released label ids are not reused; the shared counter keeps moving.
+    assert_eq!(
+        store.allocate_vertex_id("Person", "g").unwrap(),
+        make_graphid(7, 1).unwrap()
+    );
+}
+
+#[test]
+fn rename_graph_moves_partition_membership_and_registry() {
+    let mut store = MemoryGraphStore::new();
+    store.create_graph("old");
+    store.create_graph("other");
+    let a = store.allocate_vertex_id("Person", "old").unwrap();
+    store.add_vertex(Vertex::new(a, "Person"), "old").unwrap();
+    assert!(matches!(
+        store.rename_graph("old", "other"),
+        Err(GraphStoreError::InvalidMutation(_))
+    ));
+    assert!(matches!(
+        store.rename_graph("missing", "new"),
+        Err(GraphStoreError::UnknownGraph(_))
+    ));
+    store.rename_graph("old", "new").unwrap();
+    assert!(!store.has_graph("old"));
+    assert!(store.has_graph("new"));
+    assert_eq!(store.vertex_graphs(a), BTreeSet::from(["new".to_string()]));
+    assert_eq!(
+        store.vertex_ids_in_graph("new").unwrap(),
+        BTreeSet::from([a])
+    );
+    assert_eq!(
+        store.graph_label_kind("new", "Person").unwrap(),
+        Some(LabelKind::Vertex)
+    );
+    assert_eq!(
+        store.allocate_vertex_id("Person", "new").unwrap(),
+        make_graphid(3, 2).unwrap()
+    );
+}
+
+#[test]
+fn legacy_registries_without_kinds_learn_them_from_entities() {
+    let mut store = MemoryGraphStore::new();
+    store.create_graph("g");
+    store
+        .add_vertex(Vertex::new(make_graphid(3, 1).unwrap(), "Person"), "g")
+        .unwrap();
+    store
+        .add_edge(
+            Edge::new(
+                make_graphid(4, 1).unwrap(),
+                make_graphid(3, 1).unwrap(),
+                make_graphid(3, 1).unwrap(),
+                "KNOWS",
+            ),
+            "g",
+        )
+        .unwrap();
+    let legacy: GraphLabelRegistry = serde_json::from_str(
+        r#"{"labels":{"Person":3,"KNOWS":4},"sequences":{"3":1,"4":1},"next_label_id":5}"#,
+    )
+    .unwrap();
+    assert!(legacy.kinds.is_empty());
+    store.import_label_registry("g", &legacy);
+    store.rebuild_label_registry_from_ids("g");
+    assert_eq!(
+        store.graph_label_kind("g", "Person").unwrap(),
+        Some(LabelKind::Vertex)
+    );
+    assert_eq!(
+        store.graph_label_kind("g", "KNOWS").unwrap(),
+        Some(LabelKind::Edge)
+    );
+}

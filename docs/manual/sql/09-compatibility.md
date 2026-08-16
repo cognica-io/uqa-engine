@@ -9,7 +9,7 @@ UQA-RS deliberately uses PostgreSQL-oriented syntax and behavior while remaining
 - The repository checks all 22 deterministic TPC-H-derived scale-factor `0.001` query results against PostgreSQL 18.4 fixtures.
 - The optional wire crate implements PostgreSQL protocol 3.0 through 3.2 codec primitives, minor-version negotiation, reserved startup-option reporting, protocol-specific cancellation-key validation, FunctionCall, GSS/SSPI message shapes, notifications, and COPY format validation. PostgreSQL 18.4 `psql`/libpq tests verify 3.0, 3.2, and `latest` startup, 3.2-to-3.0 downgrade, authentication ordering, SSL rejection and retry, legacy and 256-byte cancellation keys, and extended Parse/Bind/Describe/Execute/Sync flow.
 - PostgreSQL-shaped `information_schema` and `pg_catalog` virtual relations carry declared PostgreSQL 18 row types even when empty; implemented `pg_type` rows expose exact scalar, array, information-schema domain, pseudo-type, and `information_schema_catalog_name` metadata.
-- Apache AGE-shaped `cypher(...) AS (...)` integrates graph results into SQL.
+- Apache AGE-shaped `cypher(...) AS (...)` integrates graph results into SQL, and the AGE catalog surface (`LOAD 'age'`, `ag_catalog.ag_graph`, `ag_catalog.ag_label`, the `agtype` / `graphid` types, and the graph and label management functions) lets AGE drivers bootstrap against the embedded engine.
 
 The fixture coverage is evidence for those queries and types, not a claim of complete PostgreSQL 18 compatibility.
 
@@ -82,11 +82,13 @@ Supported declarations retain distinct `SMALLINT`, `INTEGER`, `BIGINT`, `OID`, `
 
 ## Open PostgreSQL 18 catalog and administration bugs
 
-The virtual catalogs expose engine metadata needed by supported clients and tests. Implemented PostgreSQL 18 identities include catalog row schemas, information-schema domain OIDs, core/system type layout and I/O routine OIDs, `record`, `_record`, `void`, and the `information_schema_catalog_name` view/composite/array with its `pg_class` and `pg_attribute` rows. The complete OID graph, every `pg_proc` row, ownership, ACLs, server processes, WAL, statistics views, and extension catalogs remain open.
+The virtual catalogs expose engine metadata needed by supported clients and tests. Implemented PostgreSQL 18 identities include catalog row schemas, information-schema domain OIDs, core/system type layout and I/O routine OIDs, `regnamespace`, `record`, `_record`, `void`, and the `information_schema_catalog_name` view/composite/array with its `pg_class` and `pg_attribute` rows. The Apache AGE extension catalog is implemented: `ag_catalog.ag_graph`, `ag_catalog.ag_label`, the `agtype`, `graphid`, `label_id`, and `label_kind` types, one namespace per graph, and the label relations and sequences of every graph appear in `pg_namespace`, `pg_class`, `pg_attribute`, `pg_sequences`, `pg_type`, and the information schema. The complete OID graph, every `pg_proc` row, ownership, ACLs, server processes, WAL, statistics views, and other extension catalogs remain open.
 
 Known mutable settings are `search_path`, `client_encoding`, `datestyle`, `timezone`, and `work_mem`. Unknown or unsupported settings return an error rather than becoming ignored server configuration.
 
 `DISCARD TEMP` is rejected because temporary relations are unavailable.
+
+`LOAD` accepts the Apache AGE library names (`age`, `age.so`, `$libdir/age`, `$libdir/age.so`) as no-ops because the AGE surface is embedded; every other library fails as a missing `$libdir` file because the engine loads no shared objects.
 
 ## Open PostgreSQL 18 routine bugs
 
@@ -97,6 +99,8 @@ Volatility affects planning, but UQA-RS does not reproduce every PostgreSQL cata
 ## Graph compatibility
 
 The `cypher` table function follows an Apache AGE-shaped SQL interface and uses `agtype` output. UQA-RS adds concrete SQL output types for direct joins. The Cypher parser is an implemented subset rather than complete AGE or Neo4j Cypher.
+
+Graph and label management follows AGE's `graph_commands.c` and `label_commands.c`: `create_graph`, `drop_graph`, `graph_exists`, `create_vlabel`, `create_elabel`, `drop_label`, and `alter_graph` validate names with AGE's Unicode identifier rules and raise AGE's messages and SQLSTATEs, and `ag_catalog.ag_graph` / `ag_catalog.ag_label` report the same rows an AGE database holds. Label relations such as `graph._ag_label_vertex` are catalog metadata only; entities are read through `cypher(...)`, and `LOAD 'age'` is a no-op rather than a shared-library load.
 
 Regular path query syntax and functions such as `graph_traverse` and `graph_pagerank` are UQA-RS extensions.
 

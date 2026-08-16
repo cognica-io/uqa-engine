@@ -33,7 +33,11 @@ pub(in crate::sql) fn execute_function_with_top_k(
     match kind {
         FunctionKind::GraphCreate => run_graph_create(engine, args, params),
         FunctionKind::GraphDrop => run_graph_drop(engine, args, params),
-        FunctionKind::UQAHighlight
+        FunctionKind::GraphExists
+        | FunctionKind::GraphLabelCreate
+        | FunctionKind::GraphLabelDrop
+        | FunctionKind::GraphAlter
+        | FunctionKind::UQAHighlight
         | FunctionKind::UQAFacets
         | FunctionKind::ScoreBM25
         | FunctionKind::ScoreBayesianBM25

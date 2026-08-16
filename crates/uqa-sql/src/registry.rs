@@ -80,6 +80,17 @@ pub enum FunctionKind {
     GraphCreate,
     /// `graph_drop(graph_name)` - drop a registered graph.
     GraphDrop,
+    /// `graph_exists(graph_name)` - AGE agtype boolean graph probe.
+    GraphExists,
+    /// `create_vlabel(graph_name, label_name)` /
+    /// `create_elabel(graph_name, label_name)` - register an AGE label.
+    GraphLabelCreate,
+    /// `drop_label(graph_name, label_name [, force])` - drop an AGE label
+    /// together with its entities.
+    GraphLabelDrop,
+    /// `alter_graph(graph_name, operation, new_value)` - AGE graph
+    /// alteration (`RENAME`).
+    GraphAlter,
     /// `graph_edges(graph_name [, label])` - emit every edge in the
     /// graph as `(source, target, label, weight)` rows.
     GraphEdges,
@@ -153,6 +164,11 @@ fn registry() -> &'static BTreeMap<&'static str, FunctionKind> {
         m.insert("create_graph", FunctionKind::GraphCreate);
         m.insert("graph_drop", FunctionKind::GraphDrop);
         m.insert("drop_graph", FunctionKind::GraphDrop);
+        m.insert("graph_exists", FunctionKind::GraphExists);
+        m.insert("create_vlabel", FunctionKind::GraphLabelCreate);
+        m.insert("create_elabel", FunctionKind::GraphLabelCreate);
+        m.insert("drop_label", FunctionKind::GraphLabelDrop);
+        m.insert("alter_graph", FunctionKind::GraphAlter);
         m.insert("graph_edges", FunctionKind::GraphEdges);
         m.insert("attention", FunctionKind::AttentionFusion);
         m.insert("fuse_attention", FunctionKind::AttentionFusion);

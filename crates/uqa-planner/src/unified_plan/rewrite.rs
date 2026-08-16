@@ -213,6 +213,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::SetVariable { .. }
         | CommandPlan::ShowVariable { .. }
         | CommandPlan::Discard { .. }
+        | CommandPlan::Load { .. }
         | CommandPlan::Analyze { .. }
         | CommandPlan::Truncate { .. }
         | CommandPlan::Transaction(_)

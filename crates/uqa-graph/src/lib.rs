@@ -13,6 +13,7 @@
 //! separately from ordinary posting payload merges.
 
 pub mod adapters;
+pub mod age_names;
 pub mod agtype;
 mod centrality;
 mod cross_paradigm;
@@ -46,8 +47,9 @@ pub use embedding::{GraphEmbedding, MAX_GRAPH_EMBEDDING_DIMENSIONS, MAX_GRAPH_EM
 pub use incremental_match::{implicated_vertices, IncrementalPatternMatcher};
 pub use index::{LabelIndex, PathIndex, VertexPropertyIndex};
 pub use memory_store::{
-    graphid_label_id, graphid_sequence, make_graphid, GraphLabelRegistry, MemoryGraphStore,
-    EDGE_DEFAULT_LABEL_ID, FIRST_USER_LABEL_ID, GRAPHID_LABEL_SHIFT, VERTEX_DEFAULT_LABEL_ID,
+    graphid_label_id, graphid_sequence, make_graphid, GraphLabelInfo, GraphLabelRegistry,
+    LabelKind, MemoryGraphStore, EDGE_DEFAULT_LABEL_ID, FIRST_USER_LABEL_ID, GRAPHID_LABEL_SHIFT,
+    VERTEX_DEFAULT_LABEL_ID,
 };
 pub use message_passing::{AggregationKind, MessagePassing, MAX_MESSAGE_PASSING_LAYERS};
 pub use operator_impls::{CypherQueryOperator, WeightedPathQueryOperator};

@@ -184,6 +184,7 @@ pub(super) fn column_generation_type(ty: &ColumnType) -> GenerationType {
         | ColumnType::InternalChar
         | ColumnType::Regproc
         | ColumnType::Regclass
+        | ColumnType::Regnamespace
         | ColumnType::Regtype
         | ColumnType::PgNodeTree
         | ColumnType::AclItem => GenerationType::Text,

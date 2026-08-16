@@ -16,6 +16,8 @@ mod graph_delta_and_path_index;
 mod graph_path_index_persistence;
 #[path = "postgres_age_compat.rs"]
 mod postgres_age_compat;
+#[path = "sql_age_catalog.rs"]
+mod sql_age_catalog;
 #[path = "sql_graph_functions.rs"]
 mod sql_graph_functions;
 #[path = "sql_graph_lifecycle.rs"]

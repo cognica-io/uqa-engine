@@ -27,7 +27,7 @@ UQA-RS parses PostgreSQL-oriented SQL with `libpg_query`, compiles it into UQA-R
 | Index DDL | `CREATE INDEX`, `DROP INDEX` for B-tree, GIN, IVF, and HNSW |
 | Sequence DDL | `CREATE SEQUENCE`, `ALTER SEQUENCE` |
 | Foreign data | `CREATE SERVER`, `CREATE FOREIGN TABLE` |
-| Session and diagnostics | `SET`, `SHOW`, `DISCARD`, `ANALYZE`, `EXPLAIN` |
+| Session and diagnostics | `SET`, `SHOW`, `DISCARD`, `LOAD`, `ANALYZE`, `EXPLAIN` |
 | Transactions | `BEGIN`, `START TRANSACTION`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`, `ROLLBACK TO SAVEPOINT` |
 | Prepared SQL | `PREPARE`, `EXECUTE`, `DEALLOCATE` |
 | Routines | `CREATE FUNCTION`, `CREATE PROCEDURE`, `CREATE OR REPLACE`, `DROP FUNCTION`, `DROP PROCEDURE`, `DO`, `CALL` |

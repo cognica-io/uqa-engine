@@ -104,6 +104,7 @@ pub(super) fn build_info_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
                     .cmp(&value_to_text(b.get("table_name").unwrap_or(&Value::Null)))
             })
     });
+    out.extend(super::ag_catalog::age_info_table_rows(engine)?);
     Ok(out)
 }
 
@@ -208,6 +209,7 @@ pub(super) fn build_info_columns(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
             ]));
         }
     }
+    out.extend(super::ag_catalog::age_info_column_rows(engine)?);
     Ok(out)
 }
 
