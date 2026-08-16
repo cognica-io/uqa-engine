@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-16
+
 ### Added
 
 - Added the PostgreSQL 18 baseline with a revision-pinned PostgreSQL 18 parser chain, `pg18` fixtures and differential probes, `18.0-uqa` session metadata, protocol 3.2 primitives, and exact 22-query PostgreSQL 18.4 TPC-H-derived results.
@@ -15,6 +17,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Replaced flattened relational column names with structured `(qualifier, column)` identities across planning and execution, kept lateral and correlated rows physical until their final consumer, and made spill format version 1 persist structured identities and declared schemas without a legacy reader.
 - Preserved declared row types across scans, projections, joins, aggregates, CTEs, DML, cursors, foreign tables, generated columns, and schema rewrites instead of reconstructing types from materialized values.
+- Matched PostgreSQL 18 `to_hex` overload selection and SQLSTATE behavior across queries, defaults, constraints, `ALTER TABLE ... USING`, and DML, rejected row-dependent default expressions, and reported failed check constraints as `check_violation`.
+- Preserved PostgreSQL 18 `regclass` identity through parsing, type resolution, casts, foreign-table boundaries, schema expressions, and `pg_catalog.pg_type`, including the canonical OID, array OID, and I/O routines.
 
 ### Performance
 

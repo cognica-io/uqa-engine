@@ -7,6 +7,18 @@
 use super::*;
 
 #[test]
+fn regclass_cast_preserves_postgresql_type_identity() {
+    let expression = ScalarExpr::Cast {
+        expr: Box::new(ScalarExpr::Literal(Value::Str("items".into()))),
+        ty: "pg_catalog.regclass".into(),
+    };
+    assert_eq!(
+        scalar_type(&expression, &RowSchema::default(), &[]).unwrap(),
+        Some(ColumnType::Regclass)
+    );
+}
+
+#[test]
 fn common_type_matches_postgresql_numeric_and_left_character_precedence() {
     assert_eq!(
         common_type(&ColumnType::SmallInteger, &ColumnType::BigInteger).unwrap(),

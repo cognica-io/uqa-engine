@@ -54,6 +54,8 @@ pub enum ColumnType {
     /// `PostgreSQL`'s internal single-byte `"char"` catalog type.
     InternalChar,
     Regproc,
+    /// `PostgreSQL` relation object identifier (`pg_catalog.regclass`).
+    Regclass,
     Regtype,
     PgNodeTree,
     AclItem,
@@ -105,6 +107,7 @@ pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str
         "_int2vector" => "int2vector",
         "_int4" => "int4",
         "_regproc" => "regproc",
+        "_regclass" => "regclass",
         "_text" => "text",
         "_oid" => "oid",
         "_oidvector" => "oidvector",
@@ -243,6 +246,7 @@ impl ColumnType {
             "bytea" => Ok(Self::Bytea),
             "\"char\"" => Ok(Self::InternalChar),
             "regproc" => Ok(Self::Regproc),
+            "regclass" => Ok(Self::Regclass),
             "regtype" => Ok(Self::Regtype),
             "pg_node_tree" => Ok(Self::PgNodeTree),
             "aclitem" => Ok(Self::AclItem),
@@ -300,6 +304,7 @@ impl ColumnType {
             Self::Bytea => "bytea".into(),
             Self::InternalChar => "\"char\"".into(),
             Self::Regproc => "regproc".into(),
+            Self::Regclass => "regclass".into(),
             Self::Regtype => "regtype".into(),
             Self::PgNodeTree => "pg_node_tree".into(),
             Self::AclItem => "aclitem".into(),
@@ -1402,6 +1407,19 @@ pub enum TransactionStmt {
 #[cfg(test)]
 mod tests {
     use super::{AlterSequence, ColumnType, SequenceRestart};
+
+    #[test]
+    fn regclass_scalar_and_array_names_preserve_type_identity() {
+        assert_eq!(
+            ColumnType::from_sql_name("pg_catalog.regclass").unwrap(),
+            ColumnType::Regclass
+        );
+        assert_eq!(
+            ColumnType::from_sql_name("_regclass").unwrap(),
+            ColumnType::Array(Box::new(ColumnType::Regclass))
+        );
+        assert_eq!(ColumnType::Regclass.sql_name(), "regclass");
+    }
 
     #[test]
     fn regtype_output_omits_type_modifiers() {

@@ -53,6 +53,6 @@ New users should read the [quick start](reference/01-quick-start.md), then work 
 
 ## Version and compatibility scope
 
-This manual targets UQA-RS 0.1.2 and Rust 1.90 or newer. UQA-RS implements a large PostgreSQL-oriented surface, but it is an embedded engine rather than a PostgreSQL server clone. The [compatibility guide](sql/09-compatibility.md) states important differences and unsupported behavior.
+This manual targets UQA-RS 0.1.3 and Rust 1.90 or newer. UQA-RS implements a large PostgreSQL-oriented surface, but it is an embedded engine rather than a PostgreSQL server clone. The [compatibility guide](sql/09-compatibility.md) states important differences and unsupported behavior.
 
 The implementation and tests are authoritative when behavior changes. Source paths are included throughout the internal documentation to make each claim traceable.

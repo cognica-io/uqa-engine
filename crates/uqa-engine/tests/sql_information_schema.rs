@@ -822,7 +822,7 @@ fn pg_catalog_system_type_storage_metadata_matches_postgresql_18() {
                     typalign, typstorage, typelem, typarray, typsubscript, typcollation
              FROM pg_catalog.pg_type
              WHERE typname IN ('char', 'int2vector', 'regproc', 'oid', 'xid',
-                               'oidvector', 'pg_node_tree', 'aclitem', 'regtype', 'anyarray')
+                               'oidvector', 'pg_node_tree', 'aclitem', 'regclass', 'regtype', 'anyarray')
              ORDER BY oid",
             &[],
         )
@@ -882,6 +882,7 @@ fn pg_catalog_system_type_storage_metadata_matches_postgresql_18() {
                 100,
             ),
             type_layout("aclitem", 16, false, "b", "U", false, "d", "p", 0, 1034, "-", 0,),
+            type_layout("regclass", 4, true, "b", "N", false, "i", "p", 0, 2210, "-", 0,),
             type_layout("regtype", 4, true, "b", "N", false, "i", "p", 0, 2211, "-", 0,),
             type_layout("anyarray", -1, false, "p", "P", false, "d", "x", 0, 0, "-", 0,),
         ]
@@ -897,12 +898,12 @@ fn pg_catalog_system_type_arrays_match_postgresql_18() {
              FROM pg_catalog.pg_type AS base
              JOIN pg_catalog.pg_type AS array_type ON array_type.oid = base.typarray
              WHERE base.typname IN ('char', 'int2vector', 'regproc', 'oid', 'xid',
-                                    'oidvector', 'aclitem', 'regtype')
+                                    'oidvector', 'aclitem', 'regclass', 'regtype')
              ORDER BY base.oid",
             &[],
         )
         .unwrap();
-    assert_eq!(system_arrays.rows.len(), 8);
+    assert_eq!(system_arrays.rows.len(), 9);
     assert_eq!(
         system_arrays.rows[0]["array_name"],
         Value::Str("_char".into())
@@ -910,9 +911,14 @@ fn pg_catalog_system_type_arrays_match_postgresql_18() {
     assert_eq!(system_arrays.rows[0]["typelem"], Value::Int(18));
     assert_eq!(
         system_arrays.rows[7]["array_name"],
+        Value::Str("_regclass".into())
+    );
+    assert_eq!(system_arrays.rows[7]["typelem"], Value::Int(2205));
+    assert_eq!(
+        system_arrays.rows[8]["array_name"],
         Value::Str("_regtype".into())
     );
-    assert_eq!(system_arrays.rows[7]["typelem"], Value::Int(2206));
+    assert_eq!(system_arrays.rows[8]["typelem"], Value::Int(2206));
 }
 
 #[test]
@@ -1145,7 +1151,7 @@ fn postgresql_18_type_catalog_preserves_io_routines_and_pseudo_types() {
                     typmodin, typmodout, typanalyze
              FROM pg_catalog.pg_type
              WHERE typname IN (
-                 'bool', 'int4', 'oid', 'bpchar', 'timestamptz', 'numeric', 'jsonb',
+                 'bool', 'int4', 'oid', 'regclass', 'bpchar', 'timestamptz', 'numeric', 'jsonb',
                  'aclitem', '_int4', '_bpchar', '_numeric', '_aclitem',
                  'cardinal_number', 'sql_identifier',
                  '_cardinal_number', '_sql_identifier'
@@ -1157,6 +1163,7 @@ fn postgresql_18_type_catalog_preserves_io_routines_and_pseudo_types() {
         ("bool", [1242, 1243, 2436, 2437, 0, 0, 0]),
         ("int4", [42, 43, 2406, 2407, 0, 0, 0]),
         ("oid", [1798, 1799, 2418, 2419, 0, 0, 0]),
+        ("regclass", [2218, 2219, 2452, 2453, 0, 0, 0]),
         ("bpchar", [1044, 1045, 2430, 2431, 2913, 2914, 0]),
         ("timestamptz", [1150, 1151, 2476, 2477, 2907, 2908, 0]),
         ("numeric", [1701, 1702, 2460, 2461, 2917, 2918, 0]),

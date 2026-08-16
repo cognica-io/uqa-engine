@@ -136,6 +136,7 @@ fn convert_declared_value_to_column_type(
                     | ColumnType::BigInteger
                     | ColumnType::Oid
                     | ColumnType::Regproc
+                    | ColumnType::Regclass
                     | ColumnType::Regtype
             ) =>
         {
@@ -286,6 +287,7 @@ pub(crate) fn convert_value_to_column_type(
             }
         }
         ColumnType::Regproc
+        | ColumnType::Regclass
         | ColumnType::Regtype
         | ColumnType::PgNodeTree
         | ColumnType::AclItem => Ok(match value {
@@ -471,6 +473,7 @@ pub(in crate::sql) fn column_type_name(ty: &ColumnType) -> &str {
         ColumnType::Bytea => "bytea",
         ColumnType::InternalChar => "\"char\"",
         ColumnType::Regproc => "regproc",
+        ColumnType::Regclass => "regclass",
         ColumnType::Regtype => "regtype",
         ColumnType::PgNodeTree => "pg_node_tree",
         ColumnType::AclItem => "aclitem",

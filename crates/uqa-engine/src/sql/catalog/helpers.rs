@@ -502,6 +502,7 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::Bytea => 17,
         ColumnType::InternalChar => 18,
         ColumnType::Regproc => 24,
+        ColumnType::Regclass => 2205,
         ColumnType::Regtype => 2206,
         ColumnType::PgNodeTree => 194,
         ColumnType::AclItem => 1033,
@@ -529,6 +530,7 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
             ColumnType::Bytea => 1001,
             ColumnType::InternalChar => 1002,
             ColumnType::Regproc => 1008,
+            ColumnType::Regclass => 2210,
             ColumnType::Regtype => 2211,
             ColumnType::PgNodeTree => 0,
             ColumnType::AclItem => 1034,
@@ -577,6 +579,7 @@ pub(super) fn pg_type_len(ty: &ColumnType) -> i64 {
         | ColumnType::Oid
         | ColumnType::Xid
         | ColumnType::Regproc
+        | ColumnType::Regclass
         | ColumnType::Regtype => 4,
         ColumnType::BigInteger => 8,
         ColumnType::Boolean | ColumnType::InternalChar => 1,
@@ -603,6 +606,7 @@ pub(super) fn pg_type_by_value(ty: &ColumnType) -> bool {
             | ColumnType::Boolean
             | ColumnType::InternalChar
             | ColumnType::Regproc
+            | ColumnType::Regclass
             | ColumnType::Regtype
             | ColumnType::Real
             | ColumnType::DoublePrecision
@@ -775,6 +779,7 @@ pub(super) fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRoutineOids {
         ColumnType::Int2Vector => PgTypeRoutineOids::new(40, 41, 2410, 2411),
         ColumnType::Integer => PgTypeRoutineOids::new(42, 43, 2406, 2407),
         ColumnType::Regproc => PgTypeRoutineOids::new(44, 45, 2444, 2445),
+        ColumnType::Regclass => PgTypeRoutineOids::new(2218, 2219, 2452, 2453),
         ColumnType::Text => PgTypeRoutineOids::new(46, 47, 2414, 2415),
         ColumnType::Oid => PgTypeRoutineOids::new(1798, 1799, 2418, 2419),
         ColumnType::Xid => PgTypeRoutineOids::new(50, 51, 2440, 2441),
@@ -895,6 +900,7 @@ pub(super) fn info_udt_name(ty: &ColumnType) -> String {
         ColumnType::Bytea => "bytea".into(),
         ColumnType::InternalChar => "char".into(),
         ColumnType::Regproc => "regproc".into(),
+        ColumnType::Regclass => "regclass".into(),
         ColumnType::Regtype => "regtype".into(),
         ColumnType::PgNodeTree => "pg_node_tree".into(),
         ColumnType::AclItem => "aclitem".into(),
@@ -922,6 +928,7 @@ pub(super) fn info_udt_name(ty: &ColumnType) -> String {
             ColumnType::Bytea => "_bytea".into(),
             ColumnType::InternalChar => "_char".into(),
             ColumnType::Regproc => "_regproc".into(),
+            ColumnType::Regclass => "_regclass".into(),
             ColumnType::Regtype => "_regtype".into(),
             ColumnType::PgNodeTree => "_pg_node_tree".into(),
             ColumnType::AclItem => "_aclitem".into(),

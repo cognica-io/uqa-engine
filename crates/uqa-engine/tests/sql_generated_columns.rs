@@ -1035,9 +1035,12 @@ fn virtual_generation_is_deferred_until_required_by_read_or_constraint() {
             "INSERT INTO generated_virtual_checked (source) VALUES (-2)",
             &[],
         )
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("CHECK constraint"), "{error}");
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("23514"));
+    assert_eq!(
+        error.to_string(),
+        "new row for relation \"generated_virtual_checked\" violates check constraint \"generated_virtual_checked_derived_check\""
+    );
 }
 
 fn generated_operator_fixture() -> Engine {

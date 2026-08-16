@@ -238,6 +238,7 @@ pub(super) fn rust_scalar_column_type(
         "bigint" | "int8" | "bigserial" | "serial8" => Ok(ColumnType::BigInteger),
         "oid" => Ok(ColumnType::Oid),
         "xid" => Ok(ColumnType::Xid),
+        "regclass" => Ok(ColumnType::Regclass),
         "bool" | "boolean" => Ok(ColumnType::Boolean),
         "text" => Ok(ColumnType::Text),
         "name" => Ok(ColumnType::Name),

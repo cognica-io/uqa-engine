@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "uqa"
-version = "0.1.2"
+version = "0.1.3"
 description = "Python bindings for the UQA Rust engine"
 readme = "README.md"
 requires-python = ">=3.8"

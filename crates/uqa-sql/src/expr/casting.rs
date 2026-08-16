@@ -82,6 +82,7 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
             Ok(Value::Str(value_to_string(v)))
         }
         "oid" | "pg_catalog.oid" => cast_oid(v, source_ty),
+        "regclass" | "pg_catalog.regclass" => cast_regclass(v, source_ty),
         "xid" | "pg_catalog.xid" => cast_xid(v, source_ty),
         "\"char\"" => {
             let text = value_to_string(v);
@@ -305,6 +306,18 @@ fn cast_oid(value: &Value, source_ty: Option<&str>) -> Result<Value> {
             .map(|value| Value::Int(i64::from(value)))
             .map_err(|_| out_of_range("oid")),
         _ => Err(undefined_cast(&source, "oid")),
+    }
+}
+
+fn cast_regclass(value: &Value, source_ty: Option<&str>) -> Result<Value> {
+    let source = canonical_cast_source(source_ty, value);
+    match (source.as_str(), value) {
+        (
+            "unknown" | "text" | "varchar" | "bpchar" | "name" | "regclass",
+            Value::Str(text) | Value::FixedChar(text),
+        ) => Ok(Value::Str(text.clone())),
+        (_, Value::Int(_)) => cast_oid(value, source_ty),
+        _ => Err(undefined_cast(&source, "regclass")),
     }
 }
 
@@ -1165,6 +1178,23 @@ mod tests {
             let error = cast_value_from(&value, "oid", Some(source)).unwrap_err();
             assert_eq!(error.sqlstate(), Some("42846"));
         }
+    }
+
+    #[test]
+    fn regclass_cast_preserves_bound_relation_names_and_oid_carriers() {
+        assert_eq!(
+            cast_value_from(
+                &Value::Str("app.items".into()),
+                "pg_catalog.regclass",
+                Some("unknown")
+            )
+            .unwrap(),
+            Value::Str("app.items".into())
+        );
+        assert_eq!(
+            cast_value_from(&Value::Int(2205), "regclass", Some("oid")).unwrap(),
+            Value::Int(2205)
+        );
     }
 
     #[test]

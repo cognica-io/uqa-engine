@@ -587,6 +587,7 @@ pub(super) fn build_pg_type() -> Vec<ResultRow> {
         (ColumnType::SmallInteger, "N", false, "b"),
         (ColumnType::Integer, "N", false, "b"),
         (ColumnType::Regproc, "N", false, "b"),
+        (ColumnType::Regclass, "N", false, "b"),
         (ColumnType::Text, "S", true, "b"),
         (ColumnType::Oid, "N", true, "b"),
         (ColumnType::Xid, "U", false, "b"),

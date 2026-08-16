@@ -415,7 +415,11 @@ fn update_fast_path_never_bypasses_enforced_check_constraints() {
     let error = eng
         .sql("UPDATE checked_update SET value = -1 WHERE id = 1", &[])
         .unwrap_err();
-    assert!(error.to_string().contains("CHECK constraint"), "{error}");
+    assert_eq!(error.sqlstate(), Some("23514"));
+    assert_eq!(
+        error.to_string(),
+        "new row for relation \"checked_update\" violates check constraint \"checked_update_value_check\""
+    );
     let result = eng
         .sql("SELECT value FROM checked_update WHERE id = 1", &[])
         .unwrap();

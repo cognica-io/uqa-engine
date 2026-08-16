@@ -192,6 +192,7 @@ fn python_schema_migration_preserves_postgresql_scalar_type_identity() {
         ("bigint", ColumnType::BigInteger),
         ("oid", ColumnType::Oid),
         ("xid", ColumnType::Xid),
+        ("regclass", ColumnType::Regclass),
         ("real", ColumnType::Real),
         ("double precision", ColumnType::DoublePrecision),
         ("text", ColumnType::Text),

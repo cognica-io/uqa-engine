@@ -26,6 +26,16 @@ fn assert_err_contains(engine: &Engine, sql: &str, needle: &str) {
     );
 }
 
+fn assert_err_with_sqlstate(engine: &Engine, sql: &str, sqlstate: &str, message: &str) {
+    let error = engine.sql(sql, &[]).unwrap_err();
+    assert_eq!(
+        error.sqlstate(),
+        Some(sqlstate),
+        "unexpected error: {error}"
+    );
+    assert_eq!(error.to_string(), message);
+}
+
 fn engine_with_users() -> Engine {
     let engine = Engine::new();
     exec(
@@ -550,10 +560,11 @@ fn check_constraint_basic() {
         "CREATE TABLE t (id INTEGER, age INTEGER CHECK (age > 0))",
     );
     exec(&engine, "INSERT INTO t (id, age) VALUES (1, 25)");
-    assert_err_contains(
+    assert_err_with_sqlstate(
         &engine,
         "INSERT INTO t (id, age) VALUES (2, -1)",
-        "CHECK constraint",
+        "23514",
+        "new row for relation \"t\" violates check constraint \"t_age_check\"",
     );
 }
 
@@ -578,10 +589,11 @@ fn check_constraint_with_comparison() {
         "CREATE TABLE t (id INTEGER, price REAL CHECK (price >= 0.0))",
     );
     exec(&engine, "INSERT INTO t (id, price) VALUES (1, 9.99)");
-    assert_err_contains(
+    assert_err_with_sqlstate(
         &engine,
         "INSERT INTO t (id, price) VALUES (2, -0.01)",
-        "CHECK constraint",
+        "23514",
+        "new row for relation \"t\" violates check constraint \"t_price_check\"",
     );
 }
 
