@@ -195,3 +195,49 @@ fn numeric_to_char_places_sign_tokens_at_their_postgresql_positions() {
     assert_sqlstate(&eng, "SELECT to_char(12::numeric, 'PR999')", "42601");
     assert_sqlstate(&eng, "SELECT to_char(12::numeric, '9S99MI')", "42601");
 }
+
+#[test]
+fn to_hex_uses_the_declared_integer_overload_at_every_expression_boundary() {
+    let eng = engine();
+    assert_eq!(
+        text(&eng, "SELECT to_hex((-1)::bigint)"),
+        "ffffffffffffffff"
+    );
+    eng.sql(
+        "CREATE TABLE to_hex_widths (
+            i4 INTEGER,
+            i8 BIGINT,
+            default_hex TEXT DEFAULT to_hex((-1)::bigint),
+            CHECK (to_hex(i8) = 'ffffffffffffffff')
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql("INSERT INTO to_hex_widths (i4, i8) VALUES (-1, -1)", &[])
+        .unwrap();
+    assert_eq!(
+        text(&eng, "SELECT to_hex(i4) FROM to_hex_widths"),
+        "ffffffff"
+    );
+    assert_eq!(
+        text(&eng, "SELECT to_hex(i8) FROM to_hex_widths"),
+        "ffffffffffffffff"
+    );
+    assert_eq!(
+        text(&eng, "SELECT default_hex FROM to_hex_widths"),
+        "ffffffffffffffff"
+    );
+    eng.sql("CREATE TABLE to_hex_alter (i8 BIGINT)", &[])
+        .unwrap();
+    eng.sql("INSERT INTO to_hex_alter VALUES (-1)", &[])
+        .unwrap();
+    eng.sql(
+        "ALTER TABLE to_hex_alter ALTER COLUMN i8 TYPE TEXT USING to_hex(i8)",
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        text(&eng, "SELECT i8 FROM to_hex_alter"),
+        "ffffffffffffffff"
+    );
+}
