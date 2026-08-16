@@ -8,8 +8,7 @@
 
 use super::{
     make_graphid, usize_to_f64_exact, BTreeMap, BTreeSet, Direction, Edge, EdgeId, GraphStore,
-    GraphStoreError, GraphStoreResult, MemoryGraphStore, Vertex, VertexId, EDGE_DEFAULT_LABEL_ID,
-    VERTEX_DEFAULT_LABEL_ID,
+    GraphStoreError, GraphStoreResult, LabelKind, MemoryGraphStore, Vertex, VertexId,
 };
 
 impl GraphStore for MemoryGraphStore {
@@ -517,7 +516,7 @@ impl GraphStore for MemoryGraphStore {
             .get(graph)
             .cloned()
             .unwrap_or_default();
-        let label_id = candidate.label_id(label, VERTEX_DEFAULT_LABEL_ID)?;
+        let label_id = candidate.label_id(label, LabelKind::Vertex)?;
         let id = make_graphid(label_id, candidate.next_sequence(label_id)?)?;
         self.label_registries.insert(graph.to_string(), candidate);
         Ok(id)
@@ -532,7 +531,7 @@ impl GraphStore for MemoryGraphStore {
             .get(graph)
             .cloned()
             .unwrap_or_default();
-        let label_id = candidate.label_id(label, EDGE_DEFAULT_LABEL_ID)?;
+        let label_id = candidate.label_id(label, LabelKind::Edge)?;
         let id = make_graphid(label_id, candidate.next_sequence(label_id)?)?;
         self.label_registries.insert(graph.to_string(), candidate);
         Ok(id)

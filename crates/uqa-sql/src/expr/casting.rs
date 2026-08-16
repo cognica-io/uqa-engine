@@ -83,6 +83,7 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
         }
         "oid" | "pg_catalog.oid" => cast_oid(v, source_ty),
         "regclass" | "pg_catalog.regclass" => cast_regclass(v, source_ty),
+        "regnamespace" | "pg_catalog.regnamespace" => cast_regnamespace(v, source_ty),
         "xid" | "pg_catalog.xid" => cast_xid(v, source_ty),
         "\"char\"" => {
             let text = value_to_string(v);
@@ -318,6 +319,18 @@ fn cast_regclass(value: &Value, source_ty: Option<&str>) -> Result<Value> {
         ) => Ok(Value::Str(text.clone())),
         (_, Value::Int(_)) => cast_oid(value, source_ty),
         _ => Err(undefined_cast(&source, "regclass")),
+    }
+}
+
+fn cast_regnamespace(value: &Value, source_ty: Option<&str>) -> Result<Value> {
+    let source = canonical_cast_source(source_ty, value);
+    match (source.as_str(), value) {
+        (
+            "unknown" | "text" | "varchar" | "bpchar" | "name" | "regnamespace",
+            Value::Str(text) | Value::FixedChar(text),
+        ) => Ok(Value::Str(text.clone())),
+        (_, Value::Int(_)) => cast_oid(value, source_ty),
+        _ => Err(undefined_cast(&source, "regnamespace")),
     }
 }
 

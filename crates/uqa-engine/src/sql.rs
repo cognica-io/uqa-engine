@@ -91,7 +91,10 @@ use plan_executor::UnifiedPlanExecutor;
 use row_functions::{
     execute_function, execute_function_with_top_k, execute_tree_entries, expect_column_name,
     expect_optional_graph_value, graph_betweenness_entries, graph_hits_entries,
-    graph_pagerank_entries, run_age_create_graph_with_evaluator, run_age_drop_graph_with_evaluator,
+    graph_pagerank_entries, run_age_alter_graph_with_evaluator,
+    run_age_create_elabel_with_evaluator, run_age_create_graph_with_evaluator,
+    run_age_create_vlabel_with_evaluator, run_age_drop_graph_with_evaluator,
+    run_age_drop_label_with_evaluator, run_age_graph_exists_with_evaluator,
     run_graph_create_with_evaluator, run_graph_drop_with_evaluator,
     validate_expr_text_match_fields, validate_joined_expr_text_match_fields,
 };
@@ -134,7 +137,17 @@ pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
         return lower;
     };
     let is_builtin = match schema {
-        "ag_catalog" => matches!(local, "cypher" | "create_graph" | "drop_graph"),
+        "ag_catalog" => matches!(
+            local,
+            "cypher"
+                | "create_graph"
+                | "drop_graph"
+                | "graph_exists"
+                | "create_vlabel"
+                | "create_elabel"
+                | "drop_label"
+                | "alter_graph"
+        ),
         "pg_catalog" => {
             uqa_sql::registry::is_registered(local)
                 || matches!(

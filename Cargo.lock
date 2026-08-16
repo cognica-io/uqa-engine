@@ -2977,6 +2977,7 @@ name = "uqa-graph"
 version = "0.1.3"
 dependencies = [
  "criterion",
+ "icu_properties",
  "parking_lot",
  "proptest",
  "regex",

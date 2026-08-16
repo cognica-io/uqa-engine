@@ -141,6 +141,7 @@ pub(super) fn optimize_command(
         | CommandPlan::SetVariable { .. }
         | CommandPlan::ShowVariable { .. }
         | CommandPlan::Discard { .. }
+        | CommandPlan::Load { .. }
         | CommandPlan::Analyze { .. }
         | CommandPlan::Truncate { .. }
         | CommandPlan::Transaction(_)

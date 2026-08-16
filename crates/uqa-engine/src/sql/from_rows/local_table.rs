@@ -472,7 +472,7 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             }
 
             if let Some(rows) = build_info_schema_rows(engine, name)? {
-                let schema = virtual_relation_schema(name).ok_or_else(|| {
+                let schema = virtual_relation_schema(engine, name).ok_or_else(|| {
                     SQLError::Internal(format!(
                         "virtual relation `{name}` has rows but no PostgreSQL 18 row type"
                     ))

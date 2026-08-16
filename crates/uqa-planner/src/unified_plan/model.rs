@@ -313,6 +313,9 @@ pub enum CommandPlan {
     Discard {
         target: uqa_sql::ast::DiscardTarget,
     },
+    Load {
+        library: String,
+    },
     Explain {
         analyze: bool,
         verbose: bool,

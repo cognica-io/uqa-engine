@@ -8,6 +8,11 @@
 
 use uqa_sql::ast::ColumnType;
 
+use crate::Engine;
+
+/// Namespace of the Apache AGE catalog relations, types, and functions.
+pub(in crate::sql) const AG_CATALOG_SCHEMA: &str = "ag_catalog";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum VirtualRelation {
     InformationSchemaCatalogName,
@@ -37,10 +42,25 @@ pub(super) enum VirtualRelation {
     PgDescription,
     PgMatviews,
     PgSequences,
+    AgGraph,
+    AgLabel,
 }
 
-pub(super) fn resolve_virtual_relation(name: &str) -> Option<VirtualRelation> {
+/// Resolve a relation reference to one of the engine's virtual catalog
+/// relations. `information_schema` and `pg_catalog` names resolve
+/// qualified or bare because `PostgreSQL` always searches `pg_catalog`;
+/// the AGE relations resolve bare only while `ag_catalog` is on the
+/// session `search_path`, exactly like the extension's schema.
+pub(super) fn resolve_virtual_relation(engine: &Engine, name: &str) -> Option<VirtualRelation> {
     let lower = name.to_ascii_lowercase();
+    if let Some(local) = lower.strip_prefix("ag_catalog.") {
+        return resolve_ag_catalog_relation(local);
+    }
+    if !lower.contains('.') && engine.search_path_contains(AG_CATALOG_SCHEMA) {
+        if let Some(relation) = resolve_ag_catalog_relation(&lower) {
+            return Some(relation);
+        }
+    }
     let is_information_schema = lower.starts_with("information_schema.");
     let is_pg_catalog = lower.starts_with("pg_catalog.");
     let stripped = lower
@@ -97,8 +117,19 @@ pub(super) fn resolve_virtual_relation(name: &str) -> Option<VirtualRelation> {
     }
 }
 
-pub(in crate::sql) fn virtual_relation_schema(name: &str) -> Option<Vec<(String, ColumnType)>> {
-    resolve_virtual_relation(name).map(VirtualRelation::schema)
+fn resolve_ag_catalog_relation(local: &str) -> Option<VirtualRelation> {
+    match local {
+        "ag_graph" => Some(VirtualRelation::AgGraph),
+        "ag_label" => Some(VirtualRelation::AgLabel),
+        _ => None,
+    }
+}
+
+pub(in crate::sql) fn virtual_relation_schema(
+    engine: &Engine,
+    name: &str,
+) -> Option<Vec<(String, ColumnType)>> {
+    resolve_virtual_relation(engine, name).map(VirtualRelation::schema)
 }
 
 impl VirtualRelation {
@@ -543,8 +574,51 @@ impl VirtualRelation {
                 "cache_size" => ColumnType::BigInteger,
                 "last_value" => ColumnType::BigInteger,
             ],
+            Self::AgGraph => columns![
+                "graphid" => ColumnType::Oid,
+                "name" => ColumnType::Name,
+                "namespace" => ColumnType::Regnamespace,
+            ],
+            Self::AgLabel => columns![
+                "name" => ColumnType::Name,
+                "graph" => ColumnType::Oid,
+                "id" => ag_label_id(),
+                "kind" => ag_label_kind(),
+                "relation" => ColumnType::Regclass,
+                "seq_name" => ColumnType::Name,
+            ],
         }
     }
+}
+
+fn ag_catalog_domain(name: &str, base: ColumnType) -> ColumnType {
+    ColumnType::Domain {
+        schema: AG_CATALOG_SCHEMA.into(),
+        name: name.into(),
+        oid: ag_catalog_type_oid(name),
+        base: Box::new(base),
+    }
+}
+
+/// Stable OID of an `ag_catalog` type; the extension assigns these from
+/// the OID counter, so any collision-free assignment is faithful.
+pub(super) fn ag_catalog_type_oid(name: &str) -> u32 {
+    let oid = super::helpers::stable_oid("type", &format!("{AG_CATALOG_SCHEMA}.{name}"));
+    u32::try_from(oid).unwrap_or(0)
+}
+
+/// AGE `label_id`: `int NOT NULL CHECK (VALUE > 0 AND VALUE <= 65535)`.
+pub(super) fn ag_label_id() -> ColumnType {
+    ag_catalog_domain("label_id", ColumnType::Integer)
+}
+
+/// AGE `label_kind`: `"char" NOT NULL CHECK (VALUE = 'v' OR VALUE = 'e')`.
+pub(super) fn ag_label_kind() -> ColumnType {
+    ag_catalog_domain("label_kind", ColumnType::InternalChar)
+}
+
+pub(super) fn ag_catalog_domains() -> Vec<ColumnType> {
+    vec![ag_label_id(), ag_label_kind()]
 }
 
 fn array(element: ColumnType) -> ColumnType {
@@ -689,11 +763,12 @@ mod tests {
 
     #[test]
     fn pg18_catalog_shapes_include_empty_relations_and_removed_columns() {
-        let description = virtual_relation_schema("pg_catalog.pg_description").unwrap();
+        let engine = Engine::new();
+        let description = virtual_relation_schema(&engine, "pg_catalog.pg_description").unwrap();
         assert_eq!(description.len(), 4);
         assert_eq!(description[0], ("objoid".into(), ColumnType::Oid));
 
-        let attrdef = virtual_relation_schema("pg_attrdef").unwrap();
+        let attrdef = virtual_relation_schema(&engine, "pg_attrdef").unwrap();
         assert_eq!(
             attrdef
                 .iter()
@@ -705,7 +780,8 @@ mod tests {
 
     #[test]
     fn pg18_information_schema_domains_retain_their_oid_identity() {
-        let routines = virtual_relation_schema("information_schema.routines").unwrap();
+        let engine = Engine::new();
+        let routines = virtual_relation_schema(&engine, "information_schema.routines").unwrap();
         assert_eq!(routines.len(), 82);
         assert!(matches!(
             routines[0].1,
@@ -715,5 +791,51 @@ mod tests {
             routines[54].1,
             ColumnType::Domain { oid: 13_318, .. }
         ));
+    }
+
+    #[test]
+    fn ag_catalog_relations_resolve_qualified_or_through_the_search_path() {
+        let engine = Engine::new();
+        assert_eq!(
+            resolve_virtual_relation(&engine, "ag_catalog.ag_graph"),
+            Some(VirtualRelation::AgGraph)
+        );
+        assert_eq!(
+            resolve_virtual_relation(&engine, "AG_CATALOG.AG_LABEL"),
+            Some(VirtualRelation::AgLabel)
+        );
+        assert_eq!(resolve_virtual_relation(&engine, "ag_graph"), None);
+        engine
+            .set_variable("search_path", "ag_catalog, \"$user\", public")
+            .unwrap();
+        assert_eq!(
+            resolve_virtual_relation(&engine, "ag_graph"),
+            Some(VirtualRelation::AgGraph)
+        );
+        assert_eq!(
+            resolve_virtual_relation(&engine, "ag_label"),
+            Some(VirtualRelation::AgLabel)
+        );
+        assert_eq!(resolve_virtual_relation(&engine, "public.ag_graph"), None);
+
+        let graph = virtual_relation_schema(&engine, "ag_catalog.ag_graph").unwrap();
+        assert_eq!(
+            graph
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["graphid", "name", "namespace"]
+        );
+        assert_eq!(graph[2].1, ColumnType::Regnamespace);
+        let label = virtual_relation_schema(&engine, "ag_catalog.ag_label").unwrap();
+        assert_eq!(
+            label
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["name", "graph", "id", "kind", "relation", "seq_name"]
+        );
+        assert!(matches!(&label[2].1, ColumnType::Domain { name, .. } if name == "label_id"));
+        assert!(matches!(&label[3].1, ColumnType::Domain { name, .. } if name == "label_kind"));
     }
 }

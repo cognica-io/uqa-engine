@@ -20,7 +20,7 @@ pub(super) fn build_info_schema_rows(
     engine: &Engine,
     name: &str,
 ) -> Result<Option<Vec<ResultRow>>, SQLError> {
-    let Some(relation) = resolve_virtual_relation(name) else {
+    let Some(relation) = resolve_virtual_relation(engine, name) else {
         return Ok(None);
     };
     Ok(Some(match relation {
@@ -50,15 +50,19 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::PgSettings => build_pg_settings(engine)?,
         VirtualRelation::PgDescription | VirtualRelation::PgMatviews => Vec::new(),
         VirtualRelation::PgSequences => build_pg_sequences(engine)?,
+        VirtualRelation::AgGraph => build_ag_graph(engine)?,
+        VirtualRelation::AgLabel => build_ag_label(engine)?,
     }))
 }
 
+mod ag_catalog;
 mod expression_text;
 mod helpers;
 mod information_schema;
 mod pg_catalog;
 mod schema;
 
+use ag_catalog::{build_ag_graph, build_ag_label};
 use information_schema::{
     build_info_catalog_name, build_info_columns, build_info_key_column_usage, build_info_routines,
     build_info_schemata, build_info_sequences, build_info_table_constraints, build_info_tables,

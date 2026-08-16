@@ -65,11 +65,11 @@ use conversion::{
 pub use conversion::{array_value_to_string, value_to_string};
 pub use conversion::{value_to_tensor, value_to_vector};
 use scalar_dispatch::{eval_scalar_function, eval_sequence_function};
-pub use scalar_helpers::CompiledLikePattern;
 use scalar_helpers::{
-    compile_pg_regex, like_match, point_xy, quote_ident, quote_literal, similar_to_regex,
-    trim_chars, typeof_value,
+    compile_pg_regex, like_match, point_xy, quote_literal, similar_to_regex, trim_chars,
+    typeof_value,
 };
+pub use scalar_helpers::{quote_ident, CompiledLikePattern};
 
 /// Engine-side hook that scalar function evaluation calls for stateful
 /// sequence and user-defined functions. Query-valued expressions are not

@@ -30,9 +30,11 @@ use super::{
     age_cypher, build_info_schema_rows, doc_id_value, execute_tree_entries, expect_column_name,
     expect_optional_graph_value, graph_betweenness_entries, graph_hits_entries,
     graph_pagerank_entries, is_score_provenance_column, json_table_arg, json_table_value_to_text,
-    projection_columns, run_age_create_graph_with_evaluator, run_age_drop_graph_with_evaluator,
-    run_graph_create_with_evaluator, run_graph_drop_with_evaluator, MERGE_ACTION_COLUMN,
-    SCORE_PROVENANCE_COLUMN,
+    projection_columns, run_age_alter_graph_with_evaluator, run_age_create_elabel_with_evaluator,
+    run_age_create_graph_with_evaluator, run_age_create_vlabel_with_evaluator,
+    run_age_drop_graph_with_evaluator, run_age_drop_label_with_evaluator,
+    run_age_graph_exists_with_evaluator, run_graph_create_with_evaluator,
+    run_graph_drop_with_evaluator, MERGE_ACTION_COLUMN, SCORE_PROVENANCE_COLUMN,
 };
 
 pub(super) type ColumnPrune = BTreeMap<String, BTreeSet<String>>;

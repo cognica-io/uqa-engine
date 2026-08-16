@@ -94,6 +94,7 @@ pub(super) fn build_info_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
             ("commit_action", Value::Null),
         ]));
     }
+    out.extend(super::ag_catalog::age_info_table_rows(engine)?);
     out.sort_by(|a, b| {
         value_to_text(a.get("table_schema").unwrap_or(&Value::Null))
             .cmp(&value_to_text(
@@ -208,6 +209,7 @@ pub(super) fn build_info_columns(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
             ]));
         }
     }
+    out.extend(super::ag_catalog::age_info_column_rows(engine)?);
     Ok(out)
 }
 

@@ -359,6 +359,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 self.engine.discard(*target)?;
                 Ok(SQLResult::empty())
             }
+            CommandPlan::Load { library } => {
+                self.engine.load_library(library)?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::Explain {
                 analyze,
                 verbose,

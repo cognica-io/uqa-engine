@@ -56,6 +56,8 @@ pub enum ColumnType {
     Regproc,
     /// `PostgreSQL` relation object identifier (`pg_catalog.regclass`).
     Regclass,
+    /// `PostgreSQL` namespace object identifier (`pg_catalog.regnamespace`).
+    Regnamespace,
     Regtype,
     PgNodeTree,
     AclItem,
@@ -247,6 +249,7 @@ impl ColumnType {
             "\"char\"" => Ok(Self::InternalChar),
             "regproc" => Ok(Self::Regproc),
             "regclass" => Ok(Self::Regclass),
+            "regnamespace" => Ok(Self::Regnamespace),
             "regtype" => Ok(Self::Regtype),
             "pg_node_tree" => Ok(Self::PgNodeTree),
             "aclitem" => Ok(Self::AclItem),
@@ -305,6 +308,7 @@ impl ColumnType {
             Self::InternalChar => "\"char\"".into(),
             Self::Regproc => "regproc".into(),
             Self::Regclass => "regclass".into(),
+            Self::Regnamespace => "regnamespace".into(),
             Self::Regtype => "regtype".into(),
             Self::PgNodeTree => "pg_node_tree".into(),
             Self::AclItem => "aclitem".into(),
@@ -1203,6 +1207,13 @@ pub enum Statement {
     /// until temporary tables are supported instead of being silently ignored.
     Discard {
         target: DiscardTarget,
+    },
+    /// `LOAD 'library'` - load a shared library into the session. The
+    /// engine embeds its extension surface, so libraries it provides
+    /// natively (Apache AGE) load as no-ops and unknown libraries fail
+    /// like a missing `$libdir` file.
+    Load {
+        library: String,
     },
     /// `EXPLAIN ...`. Carries the inner statement so the engine can
     /// emit the planner output.

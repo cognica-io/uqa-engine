@@ -466,6 +466,7 @@ pub(super) fn all_schema_names(engine: &Engine) -> Result<Vec<String>, SQLError>
             .list_schemas()
             .map_err(|err| SQLError::Internal(format!("read schema catalog: {err}")))?,
     );
+    schemas.extend(super::ag_catalog::age_namespace_names(engine)?);
     schemas.sort();
     schemas.dedup();
     Ok(schemas)
@@ -503,6 +504,7 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::InternalChar => 18,
         ColumnType::Regproc => 24,
         ColumnType::Regclass => 2205,
+        ColumnType::Regnamespace => 4089,
         ColumnType::Regtype => 2206,
         ColumnType::PgNodeTree => 194,
         ColumnType::AclItem => 1033,
@@ -531,6 +533,7 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
             ColumnType::InternalChar => 1002,
             ColumnType::Regproc => 1008,
             ColumnType::Regclass => 2210,
+            ColumnType::Regnamespace => 4090,
             ColumnType::Regtype => 2211,
             ColumnType::PgNodeTree => 0,
             ColumnType::AclItem => 1034,
@@ -580,6 +583,7 @@ pub(super) fn pg_type_len(ty: &ColumnType) -> i64 {
         | ColumnType::Xid
         | ColumnType::Regproc
         | ColumnType::Regclass
+        | ColumnType::Regnamespace
         | ColumnType::Regtype => 4,
         ColumnType::BigInteger => 8,
         ColumnType::Boolean | ColumnType::InternalChar => 1,
@@ -607,6 +611,7 @@ pub(super) fn pg_type_by_value(ty: &ColumnType) -> bool {
             | ColumnType::InternalChar
             | ColumnType::Regproc
             | ColumnType::Regclass
+            | ColumnType::Regnamespace
             | ColumnType::Regtype
             | ColumnType::Real
             | ColumnType::DoublePrecision
@@ -780,6 +785,7 @@ pub(super) fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRoutineOids {
         ColumnType::Integer => PgTypeRoutineOids::new(42, 43, 2406, 2407),
         ColumnType::Regproc => PgTypeRoutineOids::new(44, 45, 2444, 2445),
         ColumnType::Regclass => PgTypeRoutineOids::new(2218, 2219, 2452, 2453),
+        ColumnType::Regnamespace => PgTypeRoutineOids::new(4084, 4085, 4087, 4088),
         ColumnType::Text => PgTypeRoutineOids::new(46, 47, 2414, 2415),
         ColumnType::Oid => PgTypeRoutineOids::new(1798, 1799, 2418, 2419),
         ColumnType::Xid => PgTypeRoutineOids::new(50, 51, 2440, 2441),
@@ -901,6 +907,7 @@ pub(super) fn info_udt_name(ty: &ColumnType) -> String {
         ColumnType::InternalChar => "char".into(),
         ColumnType::Regproc => "regproc".into(),
         ColumnType::Regclass => "regclass".into(),
+        ColumnType::Regnamespace => "regnamespace".into(),
         ColumnType::Regtype => "regtype".into(),
         ColumnType::PgNodeTree => "pg_node_tree".into(),
         ColumnType::AclItem => "aclitem".into(),
@@ -929,6 +936,7 @@ pub(super) fn info_udt_name(ty: &ColumnType) -> String {
             ColumnType::InternalChar => "_char".into(),
             ColumnType::Regproc => "_regproc".into(),
             ColumnType::Regclass => "_regclass".into(),
+            ColumnType::Regnamespace => "_regnamespace".into(),
             ColumnType::Regtype => "_regtype".into(),
             ColumnType::PgNodeTree => "_pg_node_tree".into(),
             ColumnType::AclItem => "_aclitem".into(),

@@ -137,6 +137,7 @@ fn convert_declared_value_to_column_type(
                     | ColumnType::Oid
                     | ColumnType::Regproc
                     | ColumnType::Regclass
+                    | ColumnType::Regnamespace
                     | ColumnType::Regtype
             ) =>
         {
@@ -288,6 +289,7 @@ pub(crate) fn convert_value_to_column_type(
         }
         ColumnType::Regproc
         | ColumnType::Regclass
+        | ColumnType::Regnamespace
         | ColumnType::Regtype
         | ColumnType::PgNodeTree
         | ColumnType::AclItem => Ok(match value {
@@ -474,6 +476,7 @@ pub(in crate::sql) fn column_type_name(ty: &ColumnType) -> &str {
         ColumnType::InternalChar => "\"char\"",
         ColumnType::Regproc => "regproc",
         ColumnType::Regclass => "regclass",
+        ColumnType::Regnamespace => "regnamespace",
         ColumnType::Regtype => "regtype",
         ColumnType::PgNodeTree => "pg_node_tree",
         ColumnType::AclItem => "aclitem",

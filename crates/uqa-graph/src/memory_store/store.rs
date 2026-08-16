@@ -7,8 +7,8 @@
 //! In-memory state management and persistence hydration helpers.
 
 use super::{
-    BTreeSet, Edge, EdgeId, GraphLabelRegistry, GraphStoreError, GraphStoreResult,
-    MemoryGraphStore, Partition, Vertex, VertexId,
+    BTreeSet, Edge, EdgeId, GraphLabelInfo, GraphLabelRegistry, GraphStore as _, GraphStoreError,
+    GraphStoreResult, LabelKind, MemoryGraphStore, Partition, Vertex, VertexId,
 };
 
 impl MemoryGraphStore {
@@ -272,22 +272,133 @@ impl MemoryGraphStore {
     /// entities currently attached to it. Self-heals restored graphs
     /// whose registry metadata is missing: `label_id = id >> 48`.
     pub fn rebuild_label_registry_from_ids(&mut self, graph: &str) {
-        let mut observations: Vec<(String, u64)> = Vec::new();
+        let mut observations: Vec<(String, u64, LabelKind)> = Vec::new();
         if let Some(part) = self.graphs.get(graph) {
             for vid in &part.vertex_ids {
                 if let Some(vertex) = self.vertices.get(vid) {
-                    observations.push((vertex.label.clone(), vertex.vertex_id));
+                    observations.push((vertex.label.clone(), vertex.vertex_id, LabelKind::Vertex));
                 }
             }
             for eid in &part.edge_ids {
                 if let Some(edge) = self.edges.get(eid) {
-                    observations.push((edge.label.clone(), edge.edge_id));
+                    observations.push((edge.label.clone(), edge.edge_id, LabelKind::Edge));
                 }
             }
         }
         let registry = self.label_registries.entry(graph.to_string()).or_default();
-        for (label, id) in observations {
-            registry.observe(&label, id);
+        for (label, id, kind) in observations {
+            registry.observe(&label, id, kind);
         }
+    }
+
+    /// Every `ag_label` entry of `graph`: the two default labels followed
+    /// by the user labels in label-id order.
+    pub fn graph_labels(&self, graph: &str) -> GraphStoreResult<Vec<GraphLabelInfo>> {
+        self.require_partition(graph)?;
+        Ok(self.label_registry(graph).labels())
+    }
+
+    /// The kind of `label` in `graph`, or `None` when the label is not
+    /// registered there.
+    pub fn graph_label_kind(
+        &self,
+        graph: &str,
+        label: &str,
+    ) -> GraphStoreResult<Option<LabelKind>> {
+        self.require_partition(graph)?;
+        Ok(self.label_registry(graph).label_kind(label))
+    }
+
+    /// Register an empty user label in `graph` (`create_vlabel` /
+    /// `create_elabel`). Returns the label id, or `None` when a label of
+    /// that name already exists in the graph.
+    pub fn create_label(
+        &mut self,
+        graph: &str,
+        label: &str,
+        kind: LabelKind,
+    ) -> GraphStoreResult<Option<u32>> {
+        self.require_partition(graph)?;
+        let mut candidate = self.label_registry(graph);
+        let id = candidate.register_label(label, kind)?;
+        if id.is_some() {
+            self.label_registries.insert(graph.to_string(), candidate);
+        }
+        Ok(id)
+    }
+
+    /// Drop a user label from `graph` together with every entity that
+    /// carries it (`drop_label`, which AGE implements as `DROP TABLE` on
+    /// the label relation). Vertices are removed with their incident
+    /// edges. Returns the released label id and kind, or `None` when the
+    /// label is not registered.
+    pub fn drop_label(
+        &mut self,
+        graph: &str,
+        label: &str,
+    ) -> GraphStoreResult<Option<(u32, LabelKind)>> {
+        self.require_partition(graph)?;
+        let registry = self.label_registry(graph);
+        let Some(id) = registry.labels.get(label).copied() else {
+            return Ok(None);
+        };
+        let kind = registry.label_kind(label).ok_or_else(|| {
+            GraphStoreError::CorruptGraph(format!(
+                "graph {graph:?} label {label:?} has no registry entry"
+            ))
+        })?;
+        match kind {
+            LabelKind::Vertex => {
+                for vertex_id in self.vertex_ids_by_label(label, graph)? {
+                    self.remove_vertex(vertex_id, graph)?;
+                }
+            }
+            LabelKind::Edge => {
+                for edge_id in self.edge_ids_by_label(label, graph)? {
+                    self.remove_edge(edge_id, graph)?;
+                }
+            }
+        }
+        if let Some(entry) = self.label_registries.get_mut(graph) {
+            entry.remove_label(label);
+        }
+        Ok(Some((id, kind)))
+    }
+
+    /// Rename graph `from` to `to`, carrying its partition, memberships,
+    /// and label registry over. Fails when `from` is missing or `to`
+    /// already exists.
+    pub fn rename_graph(&mut self, from: &str, to: &str) -> GraphStoreResult<()> {
+        if from == to {
+            return Ok(());
+        }
+        if self.graphs.contains_key(to) {
+            return Err(GraphStoreError::InvalidMutation(format!(
+                "graph {to:?} already exists"
+            )));
+        }
+        let partition = self
+            .graphs
+            .remove(from)
+            .ok_or_else(|| GraphStoreError::UnknownGraph(from.to_string()))?;
+        for vertex_id in &partition.vertex_ids {
+            if let Some(set) = self.vertex_membership.get_mut(vertex_id) {
+                if set.remove(from) {
+                    set.insert(to.to_string());
+                }
+            }
+        }
+        for edge_id in &partition.edge_ids {
+            if let Some(set) = self.edge_membership.get_mut(edge_id) {
+                if set.remove(from) {
+                    set.insert(to.to_string());
+                }
+            }
+        }
+        self.graphs.insert(to.to_string(), partition);
+        if let Some(registry) = self.label_registries.remove(from) {
+            self.label_registries.insert(to.to_string(), registry);
+        }
+        Ok(())
     }
 }

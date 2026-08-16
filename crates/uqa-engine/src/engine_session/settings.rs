@@ -14,15 +14,53 @@ impl Engine {
         self.session.state.read().search_path.clone()
     }
 
-    /// First existing schema on this logical session's explicit search path.
+    /// `LOAD 'library'`. The engine embeds the extension surfaces it
+    /// supports, so loading Apache AGE succeeds as a no-op through every
+    /// spelling `PostgreSQL` resolves against `$libdir`; any other library
+    /// fails exactly like a missing shared object.
+    pub fn load_library(&self, library: &str) -> Result<(), SQLError> {
+        let requested = library.strip_prefix("$libdir/").unwrap_or(library);
+        let base = requested.strip_suffix(".so").unwrap_or(requested);
+        if base == "age" && !requested.contains('/') {
+            return Ok(());
+        }
+        let path = if library.contains('/') {
+            library.to_string()
+        } else {
+            format!("$libdir/{library}")
+        };
+        Err(SQLError::Routine {
+            sqlstate: "58P01".into(),
+            message: format!("could not access file \"{path}\": No such file or directory"),
+        })
+    }
+
+    /// Whether `schema` is an explicit entry of the current `search_path`.
+    pub(crate) fn search_path_contains(&self, schema: &str) -> bool {
+        self.session
+            .state
+            .read()
+            .search_path
+            .iter()
+            .any(|entry| entry == schema)
+    }
+
+    /// First existing namespace on this logical session's explicit search
+    /// path: a durable schema, a virtual system schema such as `ag_catalog`,
+    /// or a graph namespace.
     pub fn current_schema_name(&self) -> StorageBackendResult<Option<String>> {
         self.synchronize_catalog_registries()?;
         let session = self.session.state.read();
         let schemas = self.durable.schemas.read();
+        let graphs = self.durable.graphs.read();
         Ok(session
             .search_path
             .iter()
-            .find(|name| schemas.contains(name.as_str()))
+            .find(|name| {
+                schemas.contains(name.as_str())
+                    || super::schemas::is_virtual_system_schema(name)
+                    || graphs.contains_key(name.as_str())
+            })
             .cloned())
     }
 
@@ -36,6 +74,7 @@ impl Engine {
         self.synchronize_catalog_registries()?;
         let session = self.session.state.read();
         let schemas = self.durable.schemas.read();
+        let graphs = self.durable.graphs.read();
         let path = &session.search_path;
         let mut out = Vec::new();
         if include_implicit && !path.iter().any(|name| name == "pg_catalog") {
@@ -43,7 +82,8 @@ impl Engine {
         }
         for name in path {
             if (schemas.contains(name.as_str())
-                || matches!(name.as_str(), "pg_catalog" | "information_schema"))
+                || super::schemas::is_virtual_system_schema(name)
+                || graphs.contains_key(name.as_str()))
                 && !out.contains(name)
             {
                 out.push(name.clone());

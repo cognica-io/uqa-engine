@@ -239,6 +239,7 @@ pub(super) fn rust_scalar_column_type(
         "oid" => Ok(ColumnType::Oid),
         "xid" => Ok(ColumnType::Xid),
         "regclass" => Ok(ColumnType::Regclass),
+        "regnamespace" => Ok(ColumnType::Regnamespace),
         "bool" | "boolean" => Ok(ColumnType::Boolean),
         "text" => Ok(ColumnType::Text),
         "name" => Ok(ColumnType::Name),

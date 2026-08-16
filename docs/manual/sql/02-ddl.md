@@ -13,7 +13,9 @@ CREATE SCHEMA scratch;
 DROP SCHEMA scratch;
 ```
 
-Schema-qualified objects are supported. `CREATE SCHEMA AUTHORIZATION` and schema elements embedded inside `CREATE SCHEMA` are not implemented. Cross-database names are rejected.
+Schema-qualified objects are supported. `CREATE SCHEMA AUTHORIZATION` and schema elements embedded inside `CREATE SCHEMA` are not implemented. Cross-database names are rejected. `DROP SCHEMA` requires an empty schema; `DROP SCHEMA ... CASCADE` is implemented only for graph namespaces, where it drops the named graph.
+
+Every named graph reserves a namespace of its own name and `ag_catalog` is reserved for the Apache AGE catalog, so `CREATE SCHEMA` rejects those names as existing or reserved schemas and `DROP SCHEMA graph_name` fails until the graph is dropped; see [Graph SQL and Cypher](07-graph.md).
 
 ## Tables
 

@@ -69,6 +69,156 @@ impl Engine {
         Ok(self.durable.graphs.read().contains_key(name))
     }
 
+    /// Every named graph with its `ag_label` entries, read under one catalog
+    /// lock so catalog relations that mirror graphs do not re-read the
+    /// registry once per graph.
+    pub fn graph_label_catalog(
+        &self,
+    ) -> StorageBackendResult<Vec<(String, Vec<uqa_graph::GraphLabelInfo>)>> {
+        self.synchronize_catalog_registries()?;
+        let graphs = self.durable.graphs.read();
+        graphs
+            .iter()
+            .map(|(name, store)| {
+                store
+                    .graph_labels(name)
+                    .map(|labels| (name.clone(), labels))
+                    .map_err(graph_store_error)
+            })
+            .collect()
+    }
+
+    /// The `ag_label` entries of a named graph: the two AGE default labels
+    /// followed by the user labels in label-id order. `None` when the graph
+    /// does not exist.
+    pub fn list_graph_labels(
+        &self,
+        graph: &str,
+    ) -> StorageBackendResult<Option<Vec<uqa_graph::GraphLabelInfo>>> {
+        self.synchronize_catalog_registries()?;
+        let graphs = self.durable.graphs.read();
+        let Some(store) = graphs.get(graph) else {
+            return Ok(None);
+        };
+        store
+            .graph_labels(graph)
+            .map(Some)
+            .map_err(graph_store_error)
+    }
+
+    /// Register an empty vertex or edge label in a named graph
+    /// (`create_vlabel` / `create_elabel`). Returns `false` when a label of
+    /// that name already exists in the graph and fails when the graph does
+    /// not exist.
+    pub fn create_graph_label(
+        &self,
+        graph: &str,
+        label: &str,
+        kind: uqa_graph::LabelKind,
+    ) -> StorageBackendResult<bool> {
+        self.with_implicit_storage_transaction(move |engine| {
+            engine.create_graph_label_inner(graph, label, kind)
+        })
+    }
+
+    fn create_graph_label_inner(
+        &self,
+        graph: &str,
+        label: &str,
+        kind: uqa_graph::LabelKind,
+    ) -> StorageBackendResult<bool> {
+        self.synchronize_catalog_registries()?;
+        let mut graphs = self.durable.graphs.write();
+        let Some(store) = graphs.get(graph) else {
+            return Err(super::StorageBackendError::Other(format!(
+                "graph `{graph}` does not exist"
+            )));
+        };
+        let mut candidate = store.clone();
+        let created = candidate
+            .create_label(graph, label, kind)
+            .map_err(graph_store_error)?
+            .is_some();
+        if !created {
+            return Ok(false);
+        }
+        self.persist_graph_candidate(graph, &candidate)?;
+        graphs.insert(graph.to_string(), candidate);
+        drop(graphs);
+        self.note_catalog_registry_changed();
+        Ok(true)
+    }
+
+    /// Drop a user label and every entity carrying it from a named graph
+    /// (`drop_label`). Returns `false` when the label is not registered and
+    /// fails when the graph does not exist.
+    pub fn drop_graph_label(&self, graph: &str, label: &str) -> StorageBackendResult<bool> {
+        self.with_implicit_storage_transaction(move |engine| {
+            engine.drop_graph_label_inner(graph, label)
+        })
+    }
+
+    fn drop_graph_label_inner(&self, graph: &str, label: &str) -> StorageBackendResult<bool> {
+        self.synchronize_catalog_registries()?;
+        let mut graphs = self.durable.graphs.write();
+        let Some(store) = graphs.get(graph) else {
+            return Err(super::StorageBackendError::Other(format!(
+                "graph `{graph}` does not exist"
+            )));
+        };
+        let mut candidate = store.clone();
+        let dropped = candidate
+            .drop_label(graph, label)
+            .map_err(graph_store_error)?
+            .is_some();
+        if !dropped {
+            return Ok(false);
+        }
+        self.persist_graph_candidate(graph, &candidate)?;
+        graphs.insert(graph.to_string(), candidate);
+        self.invalidate_graph_path_indexes(graph);
+        drop(graphs);
+        self.note_catalog_registry_changed();
+        Ok(true)
+    }
+
+    /// Rename a named graph (`alter_graph(..., 'RENAME', ...)`). Returns
+    /// `false` when `from` does not exist and fails when `to` is already a
+    /// graph.
+    pub fn rename_graph(&self, from: &str, to: &str) -> StorageBackendResult<bool> {
+        self.with_implicit_storage_transaction(move |engine| engine.rename_graph_inner(from, to))
+    }
+
+    fn rename_graph_inner(&self, from: &str, to: &str) -> StorageBackendResult<bool> {
+        self.synchronize_catalog_registries()?;
+        let mut graphs = self.durable.graphs.write();
+        let Some(store) = graphs.get(from) else {
+            return Ok(false);
+        };
+        if from == to {
+            return Ok(true);
+        }
+        if graphs.contains_key(to) {
+            return Err(super::StorageBackendError::Other(format!(
+                "graph `{to}` already exists"
+            )));
+        }
+        let mut candidate = store.clone();
+        candidate
+            .rename_graph(from, to)
+            .map_err(graph_store_error)?;
+        self.persist_graph_candidate(to, &candidate)?;
+        if let Some(catalog) = self.storage.catalog.as_ref() {
+            catalog.drop_named_graph_data(from)?;
+        }
+        graphs.remove(from);
+        graphs.insert(to.to_string(), candidate);
+        self.invalidate_graph_path_indexes(from);
+        drop(graphs);
+        self.note_catalog_registry_changed();
+        Ok(true)
+    }
+
     /// Insert a vertex into a named graph, creating the graph if needed.
     pub fn add_graph_vertex(
         &self,

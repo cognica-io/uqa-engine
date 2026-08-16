@@ -6,11 +6,11 @@ Named property graphs are durable engine objects. SQL reaches them through an AG
 
 | Contract part | Definition |
 | --- | --- |
-| Syntax | `create_graph(name TEXT)` or `drop_graph(name TEXT [, cascade BOOLEAN])` as scalar lifecycle calls |
-| Arguments | `name` is a string value naming a graph, not an SQL relation identifier; dropping an existing AGE-compatible graph requires `cascade = true` |
+| Syntax | `create_graph(name TEXT)` or `drop_graph(name TEXT [, cascade BOOLEAN])` as scalar lifecycle calls, optionally qualified as `ag_catalog.create_graph` and `ag_catalog.drop_graph` |
+| Arguments | `name` is a string value naming a graph, not an SQL relation identifier; a valid AGE graph name is 3 to 63 bytes, starts with a Unicode letter or underscore, continues with letters, digits, marks, underscores, dots, or dashes, and ends with a letter, digit, mark, or underscore; dropping an existing graph requires `cascade = true` |
 | Result | SQL `NULL` (the AGE-compatible `void` result) on success |
-| Effects | Creates or removes the durable named graph in the current transaction |
-| Errors | Wrong arity or type, invalid names, duplicate creation, missing drop targets, a false or omitted drop cascade, and graph persistence failures are rejected |
+| Effects | Creates or removes the durable named graph in the current transaction; a created graph reserves a namespace of the same name and owns the AGE default labels `_ag_label_vertex` (label id 1) and `_ag_label_edge` (label id 2) |
+| Errors | Apache AGE messages and SQLSTATEs: a SQL `NULL` name is `graph name can not be NULL` (`22023`), an invalid name is `graph name is invalid` (`22023`), a duplicate graph is `graph "name" already exists` (`3F000`), a name that is already a schema is `schema "name" already exists` (`42P06`), a missing drop target is `graph "name" does not exist` (`3F000`), and a false or omitted drop cascade is `cannot drop schema name because other objects depend on it` (`2BP01`); wrong arity or argument types and persistence failures are also rejected |
 
 ```sql execute
 SELECT create_graph('network') AS created;
@@ -18,6 +18,74 @@ SELECT drop_graph('network', true) AS dropped;
 ```
 
 Aliases `graph_create` and `graph_drop` expose the native Boolean lifecycle result and are less strict than the AGE-compatible names. The Rust engine API also provides `create_graph`, `drop_graph`, and `list_graphs`.
+
+## AGE session bootstrap
+
+| Contract part | Definition |
+| --- | --- |
+| Syntax | `LOAD 'age'` followed by `SET search_path = ag_catalog, "$user", public` |
+| Arguments | `LOAD` takes the shared-library string PostgreSQL clients send; `age`, `age.so`, `$libdir/age`, and `$libdir/age.so` name the embedded Apache AGE surface |
+| Result | No rows |
+| Effects | Loading AGE is a no-op because the engine embeds the AGE surface; the `search_path` assignment makes the bare `ag_graph` and `ag_label` names and the unqualified AGE functions resolve as they do in PostgreSQL |
+| Errors | Any other library fails as `could not access file "$libdir/name": No such file or directory` (`58P01`, using the given path when it contains a directory separator) |
+
+```sql execute
+LOAD 'age';
+SET search_path = ag_catalog, "$user", public;
+SELECT typelem FROM pg_type WHERE typname = '_agtype';
+```
+
+Drivers such as apache-age-python run exactly this sequence and then register the `agtype` type by its `pg_type` OID; both queries succeed against the embedded catalog.
+
+## Graph existence and label management
+
+| Contract part | Definition |
+| --- | --- |
+| Syntax | `graph_exists(graph_name TEXT)`, `create_vlabel(graph_name TEXT, label_name TEXT)`, `create_elabel(graph_name TEXT, label_name TEXT)`, `drop_label(graph_name TEXT, label_name TEXT [, force BOOLEAN])`, and `alter_graph(graph_name TEXT, operation TEXT, new_value TEXT)`, optionally qualified with `ag_catalog.` |
+| Arguments | Graph and label names are string values; a valid AGE label name is 1 to 63 bytes, starts with a Unicode letter or underscore, and continues with letters, digits, marks, or underscores; `operation` is the case-insensitive `RENAME`; `force` defaults to `false` |
+| Result | `graph_exists` returns the agtype boolean text `true` or `false`; the other functions return SQL `NULL` (`void`) on success |
+| Effects | `create_vlabel` / `create_elabel` register an empty vertex or edge label with the next label id, so its graphids are allocated ahead of any entity; `drop_label` removes a user label and every vertex (with its incident edges) or edge that carries it, like AGE's `DROP TABLE` on the label relation; `alter_graph ... RENAME` renames the graph, its namespace, and its catalog rows while keeping every entity id |
+| Errors | Apache AGE messages and SQLSTATEs: `graph name must not be NULL` / `label name must not be NULL` (`22023`), `graph name is invalid` / `label name is invalid` (`22023`), `graph "name" does not exist.` (`3F000`, with the trailing period AGE prints from `create_vlabel` and `create_elabel`), `label "name" already exists` (`3F000`), `graph "name" does not exist` and `label "name" does not exist` for `drop_label` (`3F000` and `42P01`), `force option is not supported yet` (`0A000`), `cannot drop table graph.label because other objects depend on it` (`2BP01`) for the default labels (always, even when the graph is empty, unlike AGE's `DROP TABLE ... RESTRICT`), `graph_name must not be NULL` / `operation must not be NULL` / `new_value must not be NULL` (`22023`), `invalid operation "name"` (`22023`), `new graph name is invalid` (`22023`), and `schema "name" already exists` (`42P06`) when the new name is taken; `graph_exists(NULL)` is `graph name can not be NULL` (`22023`) |
+
+```sql execute
+SELECT create_graph('catalog_demo') AS created;
+SELECT graph_exists('catalog_demo') AS present, graph_exists('missing') AS absent;
+SELECT create_vlabel('catalog_demo', 'Person') AS vlabel;
+SELECT create_elabel('catalog_demo', 'KNOWS') AS elabel;
+SELECT * FROM cypher('catalog_demo', $$
+    CREATE (:Person {name: 'ada'})-[:KNOWS]->(:Person {name: 'bob'}), (:City {name: 'Seoul'})
+$$) AS (ignored agtype);
+SELECT drop_label('catalog_demo', 'City') AS dropped_label;
+SELECT alter_graph('catalog_demo', 'RENAME', 'catalog_demo_renamed') AS renamed;
+```
+
+Cypher `CREATE` and `MERGE` register labels implicitly with the same allocator, and a label keeps one kind: creating a vertex with an edge label fails as `label name is for edges, not vertices` and the reverse as `label name is for vertices, not edges` (`0A000`). The reserved names `_ag_label_vertex` and `_ag_label_edge` always denote the default labels, so Cypher entities created under them take the reserved label ids 1 and 2 instead of a new user label.
+
+## AGE catalog relations
+
+| Contract part | Definition |
+| --- | --- |
+| Syntax | `ag_catalog.ag_graph` and `ag_catalog.ag_label` in `FROM`; the bare names `ag_graph` and `ag_label` resolve while `ag_catalog` is on the session `search_path` |
+| Arguments | Ordinary relations; filter, join, and project them like any table |
+| Result | `ag_graph (graphid oid, name name, namespace regnamespace)` has one row per graph and `ag_label (name name, graph oid, id label_id, kind label_kind, relation regclass, seq_name name)` has one row per label, the two default labels first and then user labels by ascending label id; `kind` is `v` or `e`, `relation` is the quoted `graph.label` relation name, and `seq_name` is the label's own `<label>_id_seq` sequence (the graph-level `_label_id_seq` allocator appears only in `pg_sequences`) |
+| Effects | Read-only synthesized rows that reflect the current transaction's graph catalog |
+| Errors | The bare names fail as unknown relations when `ag_catalog` is not on the `search_path`, exactly like the extension schema in PostgreSQL |
+
+```sql execute
+SELECT name FROM ag_catalog.ag_graph ORDER BY name;
+SELECT l.name, l.id, l.kind, l.relation, l.seq_name
+FROM ag_catalog.ag_label AS l
+JOIN ag_catalog.ag_graph AS g ON g.graphid = l.graph
+WHERE g.name = 'catalog_demo_renamed'
+ORDER BY l.id;
+SELECT count(*) AS graphs FROM ag_graph WHERE name = 'catalog_demo_renamed';
+```
+
+The PostgreSQL catalogs mirror each graph the way the extension does: `pg_namespace` and `information_schema.schemata` list `ag_catalog` and one namespace per graph, `pg_class` / `pg_attribute` / `information_schema.tables` / `information_schema.columns` describe the label relations (`id graphid, properties agtype` for vertex labels and `id graphid, start_id graphid, end_id graphid, properties agtype` for edge labels), `pg_class` and `pg_sequences` list `_label_id_seq` and every `label_id_seq` with the last allocated value, and `pg_type` carries `agtype`, `_agtype`, `graphid`, `_graphid`, and the `label_id` / `label_kind` domains in the `ag_catalog` namespace. Because a graph owns its namespace, `CREATE SCHEMA` rejects a graph name as `schema already exists`, `DROP SCHEMA name` on a graph namespace fails as `cannot drop schema name because other objects depend on it` (`2BP01`), `DROP SCHEMA name CASCADE` drops the graph, `current_schema()` returns the first existing namespace on the `search_path` (so `ag_catalog` when it leads the AGE session path), `current_schemas(false)` lists the existing namespaces in path order including `ag_catalog` and graph namespaces, and `current_schemas(true)` also prepends the implicit `pg_catalog`. Label relations are catalog-visible metadata; the entities themselves are read through `cypher(...)` rather than through those relation names.
+
+```sql execute
+SELECT drop_graph('catalog_demo_renamed', true) AS dropped;
+```
 
 ## Cypher table function
 
