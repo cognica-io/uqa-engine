@@ -104,6 +104,12 @@ fn ascii_folding_filter_roundtrip() {
     assert!(matches!(back, TokenFilter::ASCIIFolding));
 }
 
+#[test]
+fn ascii_folding_filter_accepts_legacy_tag() {
+    let legacy: TokenFilter = serde_json::from_str(r#"{"type":"a_s_c_i_i_folding"}"#).unwrap();
+    assert!(matches!(legacy, TokenFilter::ASCIIFolding));
+}
+
 fn syn_map(pairs: &[(&str, &[&str])]) -> BTreeMap<String, Vec<String>> {
     pairs
         .iter()

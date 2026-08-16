@@ -28,7 +28,9 @@ pub enum TokenFilter {
         custom_words: Vec<String>,
     },
     PorterStem,
-    #[serde(rename = "ascii_folding")]
+    // The alias keeps catalogs persisted before the stable tag existed
+    // deserializable: releases up to 0.1.2 wrote the derived spelling.
+    #[serde(rename = "ascii_folding", alias = "a_s_c_i_i_folding")]
     ASCIIFolding,
     Synonym {
         /// Inline `term -> [expansion, ...]` mapping. Empty when the

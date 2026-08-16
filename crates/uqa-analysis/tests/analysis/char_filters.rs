@@ -41,6 +41,12 @@ fn html_strip_roundtrip() {
 }
 
 #[test]
+fn html_strip_accepts_legacy_tag() {
+    let legacy: CharFilter = serde_json::from_str(r#"{"type":"h_t_m_l_strip"}"#).unwrap();
+    assert!(matches!(legacy, CharFilter::HTMLStrip));
+}
+
+#[test]
 fn mapping_char_filter_mapping() {
     let mut m = BTreeMap::new();
     m.insert("&".to_string(), "and".to_string());

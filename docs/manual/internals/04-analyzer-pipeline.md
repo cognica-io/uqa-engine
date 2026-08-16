@@ -30,7 +30,7 @@ flowchart LR
 
 `Analyzer::analyze` owns a mutable string through the character-filter loop, tokenizes once, and moves the token vector through each token filter. Every stage is fallible. An empty vector is a valid result; an invalid regular expression, invalid gram range, or failed synonym-file read is an error and must not be converted into an empty result.
 
-Configuration uses Serde tagged enums. Most serialized tags derive from Rust variant spelling, including `n_gram` for `Tokenizer::NGram` and `ngram` for `TokenFilter::Ngram`. Acronym-bearing variants have explicit stable names: `html_strip` for `CharFilter::HTMLStrip` and `ascii_folding` for `TokenFilter::ASCIIFolding`. Engine parsing normalizes string shorthand only for the tokenizer and token-filter arrays; canonical object tags remain the compatibility contract.
+Configuration uses Serde tagged enums. Most serialized tags derive from Rust variant spelling, including `n_gram` for `Tokenizer::NGram` and `ngram` for `TokenFilter::Ngram`. Acronym-bearing variants have explicit stable names: `html_strip` for `CharFilter::HTMLStrip` and `ascii_folding` for `TokenFilter::ASCIIFolding`. Deserialization also accepts the derived spellings `h_t_m_l_strip` and `a_s_c_i_i_folding` that releases up to 0.1.2 persisted, so catalogs written before the stable names still open; serialization always emits the stable names. Engine parsing normalizes string shorthand only for the tokenizer and token-filter arrays; canonical object tags remain the compatibility contract.
 
 ## Definition validation
 
