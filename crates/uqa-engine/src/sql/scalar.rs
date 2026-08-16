@@ -144,7 +144,19 @@ pub(super) fn eval_lowered_expression(
     row: Option<&ResultRow>,
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
-    let expression = ExpressionPlan::lower(expression.clone());
+    let mut expression = ExpressionPlan::lower(expression.clone());
+    uqa_execution::scalar_type_with_resolver(
+        &expression.scalar,
+        &RowSchema::default(),
+        params,
+        engine,
+    )?;
+    expression.scalar = uqa_execution::bind_type_introspection_with_resolver(
+        expression.scalar,
+        &RowSchema::default(),
+        params,
+        engine,
+    );
     let scope = CteScope::new();
     let hook = ScopedEngineHook::new(engine, &scope);
     let context = PhysicalEvalContext::new(row, params)
@@ -165,6 +177,7 @@ pub(crate) fn eval_lowered_expression_with_schema(
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
     let mut expression = ExpressionPlan::lower(expression.clone());
+    uqa_execution::scalar_type_with_resolver(&expression.scalar, schema, params, engine)?;
     expression.scalar = uqa_execution::bind_type_introspection_with_resolver(
         expression.scalar,
         schema,

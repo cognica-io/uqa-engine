@@ -6,7 +6,7 @@
 
 use super::{ScalarExpr, ScalarOrder, WindowSlot};
 
-pub(super) fn expr_has_window(expr: &ScalarExpr) -> bool {
+pub(in crate::sql) fn expr_has_window(expr: &ScalarExpr) -> bool {
     match expr {
         ScalarExpr::WindowCall { .. } => true,
         ScalarExpr::Func {

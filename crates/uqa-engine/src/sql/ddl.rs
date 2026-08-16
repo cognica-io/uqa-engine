@@ -18,6 +18,7 @@ use crate::CatalogIndexRow;
 mod alter_table;
 mod create_index;
 mod create_table;
+mod defaults;
 mod drop;
 mod sequence_ctas;
 mod value_conversion;

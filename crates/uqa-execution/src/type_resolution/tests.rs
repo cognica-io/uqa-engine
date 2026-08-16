@@ -95,6 +95,29 @@ fn type_introspection_binds_before_integer_width_is_erased() {
 }
 
 #[test]
+fn to_hex_binds_the_declared_integer_overload_before_width_is_erased() {
+    let schema = RowSchema::with_types(
+        vec!["i4".into(), "i8".into()],
+        vec![Some(ColumnType::Integer), Some(ColumnType::BigInteger)],
+    );
+    for (column, expected_name) in [("i4", TO_HEX_INT4_FUNCTION), ("i8", TO_HEX_INT8_FUNCTION)] {
+        let expression = ScalarExpr::Func {
+            name: "to_hex".into(),
+            binding: None,
+            args: vec![ScalarExpr::Column(column.into())],
+            distinct: false,
+            order_by: Vec::new(),
+            filter: None,
+        };
+        let ScalarExpr::Func { name, .. } = bind_type_introspection(expression, &schema, &[])
+        else {
+            panic!("to_hex must remain a scalar function");
+        };
+        assert_eq!(name, expected_name);
+    }
+}
+
+#[test]
 fn qualified_type_introspection_binds_inside_an_expression() {
     let schema = RowSchema::with_types(vec!["v".into()], vec![Some(ColumnType::Real)]);
     let expression = ScalarExpr::IsNull {

@@ -20,7 +20,8 @@ use uqa_planner::ProjectionPlan;
 
 mod planning;
 
-use planning::{expr_has_window, rewrite_window_expr};
+pub(in crate::sql) use planning::expr_has_window;
+use planning::rewrite_window_expr;
 
 #[derive(Clone)]
 struct WindowSlot {

@@ -10,7 +10,7 @@ use super::{
     allocation_error, compile_pg_regex, eval_between, eval_comparison_op, expect_str,
     json_contained_by, json_contains, nonnegative_usize, out_of_range, quote_ident, quote_literal,
     similar_to_regex, to_i64, value_to_string, values_equal, ArrayValue, BinaryOp, DecimalValue,
-    Result, SQLError, Value,
+    Result, SQLError, Value, TO_HEX_INT4_FUNCTION, TO_HEX_INT8_FUNCTION,
 };
 
 pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
@@ -18,6 +18,8 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
         "factorial",
         "bit_length",
         "to_hex",
+        TO_HEX_INT4_FUNCTION,
+        TO_HEX_INT8_FUNCTION,
         "string_to_array",
         "string_to_table",
         "quote_ident",
@@ -96,17 +98,23 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
                     None => Err(SQLError::TypeMismatch("bit_length takes 1 arg".into())),
                 }
             }
-            "to_hex" => {
-                if matches!(args.first(), Some(Value::Null)) {
+            "to_hex" | TO_HEX_INT4_FUNCTION | TO_HEX_INT8_FUNCTION => {
+                let [argument] = args else {
+                    return Err(SQLError::TypeMismatch("to_hex takes 1 arg".into()));
+                };
+                if matches!(argument, Value::Null) {
                     return Ok(Value::Null);
                 }
-                let n = to_i64(&args[0])?;
-                // int4 arguments format as 32-bit two's complement
-                // (`to_hex(-1)` = 'ffffffff'), wider values as 64-bit.
-                if let Ok(small) = i32::try_from(n) {
-                    Ok(Value::Str(format!("{:x}", small as u32)))
-                } else {
-                    Ok(Value::Str(format!("{:x}", n as u64)))
+                let value = to_i64(argument)?;
+                match name {
+                    TO_HEX_INT4_FUNCTION => {
+                        let value = i32::try_from(value).map_err(|_| out_of_range("integer"))?;
+                        Ok(Value::Str(format!("{:x}", value as u32)))
+                    }
+                    TO_HEX_INT8_FUNCTION => Ok(Value::Str(format!("{:x}", value as u64))),
+                    _ => Err(SQLError::Internal(
+                        "to_hex reached runtime before its integer overload was bound".into(),
+                    )),
                 }
             }
             "string_to_array" | "string_to_table" => {

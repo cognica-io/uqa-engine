@@ -502,6 +502,10 @@ fn normalized_function_name(name: &str) -> Cow<'_, str> {
 /// in (`NamedArgExpr` has no dedicated AST node).
 pub const NAMED_ARG_FUNCTION: &str = "__named_arg";
 
+/// Physical scalar built-ins selected after `PostgreSQL` overload resolution has preserved the declared integer width.
+pub const TO_HEX_INT4_FUNCTION: &str = "__to_hex_int4";
+pub const TO_HEX_INT8_FUNCTION: &str = "__to_hex_int8";
+
 /// Evaluate a call's argument list, unwrapping `name => value`
 /// markers into `(Some(name), value)` pairs.
 pub fn evaluate_call_args(

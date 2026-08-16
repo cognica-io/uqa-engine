@@ -8,11 +8,13 @@
 
 use uqa_core::Value;
 use uqa_sql::ast::{BinaryOp, ColumnType, FunctionBinding};
+use uqa_sql::expr::{TO_HEX_INT4_FUNCTION, TO_HEX_INT8_FUNCTION};
 use uqa_sql::{SQLError, SQLParam};
 
 use crate::{RowSchema, ScalarExpr};
 
 mod containment;
+mod to_hex;
 
 pub trait FunctionTypeResolver: Send + Sync {
     fn resolve_function_type(
@@ -270,7 +272,8 @@ fn builtin_function_type_inner(
         | "md5"
         | "encode"
         | "split_part"
-        | "to_hex"
+        | TO_HEX_INT4_FUNCTION
+        | TO_HEX_INT8_FUNCTION
         | "quote_ident"
         | "quote_literal"
         | "quote_nullable"
@@ -292,6 +295,7 @@ fn builtin_function_type_inner(
         | "jsonb_array_elements_text"
         | "json_extract_path_text"
         | "jsonb_extract_path_text" => Ok(Some(ColumnType::Text)),
+        "to_hex" => to_hex::resolve_type(original_name, args, schema, params, resolver),
         "count" | "row_number" | "rank" | "dense_rank" | "crc32" | "crc32c" | "nextval"
         | "currval" | "setval" => Ok(Some(ColumnType::BigInteger)),
         "sum" => Ok(first()?.and_then(|ty| aggregate_sum_type(&ty))),
@@ -816,6 +820,8 @@ fn bind_type_introspection_inner(
             if is_common_type_function(&name) {
                 bind_common_type_expressions(&mut args, schema, params, resolver);
             }
+            let name =
+                to_hex::bind_overload(name, binding.as_ref(), &args, schema, params, resolver);
             if is_pg_typeof(&name) && args.len() == 1 {
                 let name = scalar_type_inner(&args[0], schema, params, resolver)
                     .ok()
@@ -1037,6 +1043,7 @@ fn requires_type_introspection_binding(expression: &ScalarExpr) -> bool {
         } => {
             is_pg_typeof(name)
                 || is_common_type_function(name)
+                || to_hex::is_function(name)
                 || containment::is_operator(name)
                 || args.iter().any(requires_type_introspection_binding)
                 || order_by
