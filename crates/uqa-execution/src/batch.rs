@@ -99,10 +99,6 @@ struct SchemaColdMetadata {
     columns: Box<[Option<ColumnType>]>,
     aliases: HashMap<ColumnIdentity, Option<ColumnType>>,
     identity_layout: bool,
-    /// Unique public labels in `BTreeMap` key order, represented by the last logical occurrence of each label so named-result compatibility keeps its established last-write-wins semantics.
-    result_logical_order: Box<[usize]>,
-    /// Whether the aligned result value is the final named-result read of its physical slot and can therefore be moved instead of cloned.
-    result_take: Box<[bool]>,
 }
 
 #[derive(Default)]
@@ -318,30 +314,6 @@ impl RowSchema {
                 .iter()
                 .enumerate()
                 .all(|(position, slot)| position == *slot);
-        let mut last_logical_by_label = HashMap::<&str, usize>::with_capacity(columns.len());
-        for (logical, column) in columns.iter().enumerate() {
-            last_logical_by_label.insert(column, logical);
-        }
-        let mut result_logical_order = last_logical_by_label.into_values().collect::<Vec<_>>();
-        result_logical_order.sort_unstable_by(|left, right| columns[*left].cmp(&columns[*right]));
-        let mut remaining_result_reads = vec![0usize; physical_width];
-        for logical in &result_logical_order {
-            let slot = slots[*logical];
-            if slot != NULL_SLOT {
-                remaining_result_reads[slot] += 1;
-            }
-        }
-        let result_take = result_logical_order
-            .iter()
-            .map(|logical| {
-                let slot = slots[*logical];
-                if slot == NULL_SLOT {
-                    return false;
-                }
-                remaining_result_reads[slot] -= 1;
-                remaining_result_reads[slot] == 0
-            })
-            .collect::<Vec<_>>();
         let mut exact = HashMap::with_capacity(columns.len());
         let mut unqualified = HashMap::with_capacity(columns.len());
         let mut qualified = HashMap::with_capacity(columns.len());
@@ -397,8 +369,6 @@ impl RowSchema {
                     columns: types.into_boxed_slice(),
                     aliases: alias_types,
                     identity_layout,
-                    result_logical_order: result_logical_order.into_boxed_slice(),
-                    result_take: result_take.into_boxed_slice(),
                 }),
             }),
         }

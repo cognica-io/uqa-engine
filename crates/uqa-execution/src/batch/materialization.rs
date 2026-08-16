@@ -6,10 +6,18 @@
 
 //! Final conversion from positional physical rows to named result rows.
 
+use std::collections::HashMap;
+
 use super::{
     Arc, PhysicalRow, ResultRow, RowFragment, RowSchema, SmallVec, Value, INLINE_ROW_FRAGMENTS,
     NULL_SLOT,
 };
+
+struct ResultMaterializationPlan {
+    template: ResultRow,
+    logical_order: Box<[usize]>,
+    take: Box<[bool]>,
+}
 
 impl RowSchema {
     pub(super) fn materialize_result_row(&self, row: PhysicalRow) -> ResultRow {
@@ -20,46 +28,72 @@ impl RowSchema {
     }
 
     pub(super) fn materialize_remapped_result_row(&self, row: PhysicalRow) -> ResultRow {
-        let template = self.result_row_template();
-        self.materialize_remapped_result_row_with_template(row, &template)
+        let plan = self.result_materialization_plan();
+        self.materialize_remapped_result_row_with_plan(row, &plan)
     }
 
     pub(super) fn materialize_remapped_result_rows(
         &self,
         rows: Vec<PhysicalRow>,
     ) -> Vec<ResultRow> {
-        let template = self.result_row_template();
+        let plan = self.result_materialization_plan();
         rows.into_iter()
-            .map(|row| self.materialize_remapped_result_row_with_template(row, &template))
+            .map(|row| self.materialize_remapped_result_row_with_plan(row, &plan))
             .collect()
     }
 
-    fn result_row_template(&self) -> ResultRow {
-        self.index
-            .cold
-            .result_logical_order
+    fn result_materialization_plan(&self) -> ResultMaterializationPlan {
+        let columns = self.columns();
+        let mut last_logical_by_label = HashMap::<&str, usize>::with_capacity(columns.len());
+        for (logical, column) in columns.iter().enumerate() {
+            last_logical_by_label.insert(column, logical);
+        }
+        let mut logical_order = last_logical_by_label.into_values().collect::<Vec<_>>();
+        logical_order.sort_unstable_by(|left, right| columns[*left].cmp(&columns[*right]));
+        let mut remaining_reads = vec![0usize; self.physical_width()];
+        for logical in &logical_order {
+            let slot = self.index.slots[*logical];
+            if slot != NULL_SLOT {
+                remaining_reads[slot] += 1;
+            }
+        }
+        let take = logical_order
             .iter()
-            .map(|logical| (self.columns()[*logical].clone(), Value::Null))
-            .collect()
+            .map(|logical| {
+                let slot = self.index.slots[*logical];
+                if slot == NULL_SLOT {
+                    return false;
+                }
+                remaining_reads[slot] -= 1;
+                remaining_reads[slot] == 0
+            })
+            .collect::<Vec<_>>();
+        let template = logical_order
+            .iter()
+            .map(|logical| (columns[*logical].clone(), Value::Null))
+            .collect();
+        ResultMaterializationPlan {
+            template,
+            logical_order: logical_order.into_boxed_slice(),
+            take: take.into_boxed_slice(),
+        }
     }
 
-    fn materialize_remapped_result_row_with_template(
+    fn materialize_remapped_result_row_with_plan(
         &self,
         row: PhysicalRow,
-        template: &ResultRow,
+        plan: &ResultMaterializationPlan,
     ) -> ResultRow {
         let mut fragments = row.into_value_fragments();
         debug_assert_eq!(
             self.physical_width(),
             fragments.iter().map(Vec::len).sum::<usize>()
         );
-        let mut result = template.clone();
-        for ((logical, take), output) in self
-            .index
-            .cold
-            .result_logical_order
+        let mut result = plan.template.clone();
+        for ((logical, take), output) in plan
+            .logical_order
             .iter()
-            .zip(self.index.cold.result_take.iter())
+            .zip(plan.take.iter())
             .zip(result.values_mut())
         {
             let slot = self.index.slots[*logical];
