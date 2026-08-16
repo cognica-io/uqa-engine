@@ -76,6 +76,7 @@ pub mod migration;
 pub mod operator_tree_bridge;
 pub mod sql;
 
+mod async_sql_engine;
 mod engine_analyzers;
 mod engine_cancellation;
 mod engine_catalog_indexes;
@@ -129,7 +130,7 @@ use uqa_storage::{
 
 pub use sql::{SQLCursor, SQLCursorSummary};
 pub use uqa_execution::{ColumnVector, ColumnarBatch};
-pub use uqa_sql::{ast::SequenceRestart, SQLParam, SQLResult};
+pub use uqa_sql::{ast::SequenceRestart, AsyncSQLEngine, SQLParam, SQLResult};
 pub use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions, SQLiteError};
 
 use engine_state::{

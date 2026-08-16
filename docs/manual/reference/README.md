@@ -12,5 +12,6 @@ The reference manual describes public ways to operate and embed UQA-RS.
 | [Text analyzer pipelines](06-text-analyzers.md) | Built-ins, JSON stages, field binding, phases, synonyms, diagnostics, and lifecycle APIs |
 | [Graphs](07-graphs.md) | Named graphs, Cypher, regular path queries, and SQL integration |
 | [Bindings and extensions](08-bindings-and-extensions.md) | QueryBuilder, Python, Node.js, browser WASM, UDFs, and FDWs |
+| [HTTP Engine](09-http-engine.md) | Direct authenticated local and Cloud SQL, atomic batches, streaming, and security |
 
 For syntax organized by SQL feature, use the [Supported SQL manual](../sql/README.md). For implementation ownership and invariants, use the [Internals manual](../internals/README.md).

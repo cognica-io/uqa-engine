@@ -16,6 +16,9 @@ This document is the technical overview of UQA-RS. It describes the boundaries t
 ```mermaid
 flowchart LR
     Apps["Rust / Python / Node.js / WASM / usql"] --> API["Engine and QueryBuilder APIs"]
+    RemoteApps["Rust / Python / Node.js / Browser HTTP apps"] --> Client["HttpEngine bindings"]
+    Client --> DataPlane["Authenticated local / Cloud UQA data plane"]
+    DataPlane --> Compile
     API --> Compile["uqa-sql compilation"]
     Compile --> Plan["UnifiedPlan and plan-native optimizer"]
     Plan --> Execute["UnifiedPlanExecutor"]
@@ -59,6 +62,7 @@ graph TD
     ml["uqa-ml"]
     engine["uqa-engine"]
     api["uqa-api"]
+    client["uqa-client"]
     cli["uqa-cli"]
     pgwire["uqa-pg-wire"]
     bindings["uqa-python / uqa-node / uqa-wasm"]
@@ -101,8 +105,11 @@ graph TD
     engine --> ml
     engine --> fdw
     api --> engine
+    client --> core
+    client --> sql
     cli --> engine
     bindings --> engine
+    bindings --> client
 ```
 
 ## Crate responsibilities
@@ -123,12 +130,13 @@ graph TD
 | `uqa-execution` | Volcano-style physical operators, columnar result batches, spill formats, sorting, aggregation, joins, and bounded materialization |
 | `uqa-planner` | Cardinality and cost models, DPccp join enumeration, unified-plan optimization, and physical text top-K selection |
 | `uqa-engine` | Composition root, SQL lifecycle, transactions, catalog restore, persistent state, graph/model integration, and public embedded API |
+| `uqa-client` | Authenticated direct HTTP SQL, atomic batch, and bounded NDJSON stream client shared by local and Cloud UQA nodes |
 | `uqa-fdw` | Foreign server/table contracts and pushdown handlers for DuckDB, Arrow IPC, and in-memory data |
 | `uqa-api` | Fluent `QueryBuilder` for common SQL, retrieval, graph, fusion, highlight, facet, and ML flows |
 | `uqa-cli` | `usql` interactive shell, scripts, history, completion, highlighting, introspection, and database migration commands |
 | `uqa-ml` | Serializable model specifications, CPU inference, analytical training, and optional Apple MLX backend integration |
 | `uqa-pg-wire` | Network-independent PostgreSQL v3 frontend decoding and backend message encoding |
-| `uqa-python`, `uqa-node`, `uqa-wasm` | Language and browser bindings over the engine boundary |
+| `uqa-python`, `uqa-node`, `uqa-wasm` | Language and browser bindings over the embedded engine and authenticated HTTP data-plane boundaries |
 
 ## Carrier boundaries
 
@@ -316,7 +324,7 @@ Compressed encrypted containers use authenticated format v2, reject unauthentica
 
 `uqa-pg-wire` only parses and encodes PostgreSQL v3 protocol messages. Socket ownership, scheduling, TLS, authentication storage, planning, and SQL execution remain responsibilities of an embedding server.
 
-`uqa-api` provides a fluent `QueryBuilder`, while `uqa-python`, `uqa-node`, and `uqa-wasm` expose the engine to Python, Node.js, and Emscripten browser environments. Bindings reuse the engine boundary instead of maintaining independent query semantics.
+`uqa-api` provides a fluent `QueryBuilder`, `uqa-client` maps the stable local and Cloud data-plane protocol back to UQA SQL parameters and results, and `uqa-python`, `uqa-node`, and `uqa-wasm` expose both the embedded engine and an HTTP engine to Python, Node.js, and Emscripten browser environments. Native bindings reuse `uqa-client`; the browser uses the same typed wire contract over `fetch` because native Rust networking is unavailable there.
 
 ## CLI boundary
 

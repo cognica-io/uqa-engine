@@ -46,6 +46,21 @@ function guardEngineMethods(engineClass) {
   }
 }
 
+function installHTTPStreamIterator(streamClass) {
+  Object.defineProperty(streamClass.prototype, Symbol.asyncIterator, {
+    configurable: true,
+    async *value() {
+      for (;;) {
+        const frame = await this.nextFrame();
+        if (frame === null) {
+          return;
+        }
+        yield frame;
+      }
+    },
+  });
+}
+
 function wrapAggregateFactory(factory) {
   return function wrappedAggregateFactory() {
     return runSQLCallback(
@@ -127,10 +142,14 @@ function installRegistrationWrappers(engineClass) {
 }
 
 guardEngineMethods(binding.Engine);
+guardEngineMethods(binding.HttpEngine);
+installHTTPStreamIterator(binding.HttpSQLStream);
 installRegistrationWrappers(binding.Engine);
 
 module.exports = binding;
 module.exports.Engine = binding.Engine;
+module.exports.HttpEngine = binding.HttpEngine;
+module.exports.HttpSQLStream = binding.HttpSQLStream;
 module.exports.SQLParam = binding.SQLParam;
 module.exports.detectDatabaseFile = binding.detectDatabaseFile;
 module.exports.JSFunctionVolatility = binding.JSFunctionVolatility;

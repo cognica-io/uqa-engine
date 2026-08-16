@@ -6,8 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-08-16
+
 ### Added
 
+- Added the `uqa-client` crate, a common asynchronous SQL Engine contract, and direct authenticated `HttpEngine` bindings for Rust, Python, Node.js, and browsers, including materialized SQL, atomic batches, request metadata, and bounded NDJSON streaming against the shared local and Cloud UQA data-plane API.
 - Added the Apache AGE catalog surface: `ag_catalog.ag_graph` and `ag_catalog.ag_label` (bare names resolve through `search_path`), the `agtype`, `graphid`, `label_id`, and `label_kind` types in `pg_type`, one `pg_namespace` / `information_schema.schemata` entry per graph plus `ag_catalog`, and label relations and label sequences mirrored into `pg_class`, `pg_attribute`, `pg_sequences`, `information_schema.tables`, and `information_schema.columns`.
 - Added `LOAD` as a session statement that loads Apache AGE as a no-op through every `$libdir` spelling and fails for other libraries with PostgreSQL's missing-file error.
 - Added AGE graph and label management: `graph_exists`, `create_vlabel`, `create_elabel`, `drop_label`, and `alter_graph`, with AGE's Unicode identifier validation, messages, and SQLSTATEs, and recorded the vertex or edge kind of every graph label so `ag_label.kind` and AGE's label-kind conflicts are exact.
@@ -15,7 +18,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Made the Browser WASM build select a Python 3.10-or-newer interpreter explicitly when an older system Python appears first on `PATH`.
+- Made Node.js HTTP requests run on the asynchronous Tokio runtime instead of occupying the four-thread libuv worker pool, so independent local and Cloud queries can make network progress concurrently.
 - Made `create_graph` and `drop_graph` raise Apache AGE's messages and SQLSTATEs (`22023`, `3F000`, `42P06`, `2BP01`) instead of generic unsupported-feature errors, validate graph names with AGE's rules (3 to 63 bytes with Unicode identifier characters, dots, and dashes), and reserve the graph namespace so `create_graph`, `CREATE SCHEMA`, and `alter_graph ... RENAME` reject name collisions and `DROP SCHEMA ... CASCADE` drops a graph namespace.
+
+### Fixed
+
+- Made HTTP bindings reject nested non-finite parameters, preserve bytes and adversarial JSON keys, format extended dates and mixed-sign intervals exactly, accept IPv6 loopback nodes, validate the complete NDJSON body after a terminal frame, and consume large browser frames without quadratic copying.
+- Kept native Node.js builds from overwriting the committed version-checking loader and declared the Python HTTP surface in the shipped type stub.
 
 ## [0.1.3] - 2026-08-16
 

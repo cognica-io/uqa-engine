@@ -11,3 +11,5 @@ These modules mirror the Rust, Python, and Node.js scenarios with the browser WA
 | [`extensibility.mjs`](extensibility.mjs) | Scalar, table, and aggregate JavaScript callbacks |
 
 Each module also runs under Node.js against the generated Emscripten bundle, which is how CI verifies the same SQL and assertions without a browser UI. The Node.js and browser WASM examples share the SQL scenario modules in [`../javascript`](../javascript), while their entry points retain platform-specific engine construction, persistence, and close behavior.
+
+For local or Cloud SQL without loading the embedded database, import the fetch-based `HttpEngine` from the same package; see the [HTTP Engine reference](../../docs/manual/reference/09-http-engine.md). The browser binding test executes SQL, atomic batch, and streaming requests through this class and verifies the typed wire representation.

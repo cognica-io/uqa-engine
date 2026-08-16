@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from ._uqa import (
     Engine,
+    HttpEngine,
+    HttpSQLStream,
     SQLParam,
     SQLResult,
     __version__,
@@ -27,6 +29,8 @@ from ._uqa import (
 
 __all__ = [
     "Engine",
+    "HttpEngine",
+    "HttpSQLStream",
     "SQLParam",
     "SQLResult",
     "__version__",

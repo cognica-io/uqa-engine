@@ -43,6 +43,10 @@
       "uqa-graph",
       "uqa-sql"
     ],
+    "uqa-client": [
+      "uqa-core",
+      "uqa-sql"
+    ],
     "uqa-core": [],
     "uqa-engine": [
       "uqa-analysis",
@@ -89,6 +93,7 @@
       "uqa-storage"
     ],
     "uqa-node": [
+      "uqa-client",
       "uqa-core",
       "uqa-engine",
       "uqa-scoring",
@@ -112,6 +117,7 @@
       "uqa-storage"
     ],
     "uqa-python": [
+      "uqa-client",
       "uqa-core",
       "uqa-engine",
       "uqa-scoring",

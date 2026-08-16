@@ -99,7 +99,7 @@ jobs:
       # workspace already defines a stripped profile for exactly this.
       - name: Build native addon
         working-directory: crates/uqa-node
-        run: npx napi build --platform --profile release-stripped --target ${{ matrix.target }}
+        run: npx napi build --platform --no-js --profile release-stripped --target ${{ matrix.target }}
 
       - name: Test the addon
         if: matrix.target != 'aarch64-pc-windows-msvc'

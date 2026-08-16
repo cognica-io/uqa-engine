@@ -1,7 +1,7 @@
 {
   "name": "uqa-wasm",
-  "version": "0.1.3",
-  "description": "Browser WASM bindings for the UQA engine",
+  "version": "0.1.4",
+  "description": "Browser bindings for embedded UQA WASM and local or Cloud HTTP SQL",
   "license": "AGPL-3.0-only",
   "author": "Jaepil Jeong <jaepil@cognica.io>",
   "repository": {

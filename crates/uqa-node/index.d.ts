@@ -3,6 +3,7 @@ export type ParamInput = SQLParam | JSValue
 export type SQLTableFunctionRows = JSValue[][] | Array<Record<string, JSValue>>
 export type SQLTableFunctionResult = { columns: string[]; rows: SQLTableFunctionRows } | [string[], SQLTableFunctionRows]
 export type SQLAggregateState = ({ observe(...args: JSValue[]): unknown } | { step(...args: JSValue[]): unknown }) & ({ finish(): JSValue } | { finalize(): JSValue })
+export interface HttpSQLStream extends AsyncIterable<HttpSQLStreamFrame> { [Symbol.asyncIterator](): AsyncIterator<HttpSQLStreamFrame> }
 export declare class Engine {
   /** Create an in-memory engine. */
   constructor()
@@ -65,6 +66,23 @@ export declare class Engine {
   close(): void
 }
 
+export declare class HttpEngine {
+  /** Connect to one local or Cloud UQA data-plane origin. */
+  constructor(url: string, token: string)
+  /** Read `UQA_URL` and `UQA_TOKEN` from the process environment. */
+  static fromEnv(): HttpEngine
+  sql(query: string, params?: Array<ParamInput> | undefined | null): Promise<SQLResult>
+  sqlWithMetadata(query: string, params?: Array<ParamInput> | undefined | null): Promise<HttpSQLExecution>
+  sqlBatch(statements: Array<[string, Array<ParamInput>]>): Promise<Array<SQLResult>>
+  sqlBatchWithMetadata(statements: Array<[string, Array<ParamInput>]>): Promise<HttpSQLBatchExecution>
+  sqlStream(query: string, params?: Array<ParamInput> | undefined | null): Promise<HttpSQLStream>
+}
+
+export declare class HttpSQLStream {
+  get requestId(): string
+  nextFrame(): Promise<HttpSQLStreamFrame | null>
+}
+
 export declare class SQLParam {
   static scalar(value: unknown): SQLParam
   static vector(values: Float32Array | Array<number>): SQLParam
@@ -86,6 +104,27 @@ export interface CompressionOptions {
 }
 
 export declare function detectDatabaseFile(path: string): string
+
+export interface HttpSQLBatchExecution {
+  results: Array<SQLResult>
+  requestId: string
+}
+
+export interface HttpSQLExecution {
+  result: SQLResult
+  requestId: string
+}
+
+export interface HttpSQLStreamFrame {
+  type: string
+  columns?: Array<string>
+  row?: Record<string, JSValue>
+  rowCount?: number
+  spilledToDisk?: boolean
+  requestId?: string
+  code?: string
+  message?: string
+}
 
 export declare const enum JSFunctionVolatility {
   Volatile = 'volatile',

@@ -1,6 +1,6 @@
 # UQA-RS
 
-> UQA-RS 0.1.3 is an embedded Rust database that combines PostgreSQL-oriented relational SQL, full-text and vector retrieval, graph queries, ranked fusion, and host-language SQL callbacks in one runtime.
+> UQA-RS 0.1.4 is an embedded Rust database that combines PostgreSQL-oriented relational SQL, full-text and vector retrieval, graph queries, ranked fusion, and host-language SQL callbacks in one runtime, with a direct authenticated HTTP client for local and Cloud UQA nodes.
 
 The manual is the canonical product contract. Parser acceptance alone does not prove execution support; follow the documented argument shape, result schema, state effects, and errors, then verify executable claims against tests or the engine.
 
@@ -40,6 +40,7 @@ When generating SQL:
 
 - [Tutorials](docs/manual/tutorials/README.md): Ordered, working database exercises.
 - [Rust engine API](docs/manual/reference/02-rust-engine-api.md): Engine lifecycle, parameters, results, cursors, and direct APIs.
+- [HTTP Engine API](docs/manual/reference/09-http-engine.md): Direct authenticated local and Cloud SQL from Rust, Python, Node.js, and browsers, including atomic batches, NDJSON streaming, CORS, and connection security.
 - [CLI](docs/manual/reference/03-cli.md): `usql` commands and persistent database usage.
 - [Search and ranking](docs/manual/reference/05-search-and-ranking.md): Retrieval behavior and evaluation guidance.
 - [Text analyzer pipelines](docs/manual/reference/06-text-analyzers.md): Pipeline stages, exact component vocabulary, phases, and bindings.

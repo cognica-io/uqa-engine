@@ -30,6 +30,7 @@
 )]
 
 pub mod ast;
+mod async_sql_engine;
 pub mod compiler;
 pub mod error;
 pub mod expr;
@@ -40,6 +41,7 @@ pub mod registry;
 pub mod result;
 
 pub use ast::{ColumnType, Statement};
+pub use async_sql_engine::AsyncSQLEngine;
 pub use compiler::{compile, plan_only_for_test};
 pub use error::SQLError;
 pub use fts_query::{parse_query_string as parse_fts_query_string, tokenize as fts_tokenize};

@@ -22,6 +22,31 @@ if ! command -v emcc > /dev/null; then
     exit 1
 fi
 
+# Emscripten 6 requires Python 3.10 or newer. Some developer environments put
+# an older Xcode Python first even when the package manager installed a current
+# interpreter for Emscripten, so select a compatible interpreter explicitly.
+if [[ -n "${EMSDK_PYTHON:-}" ]]; then
+    if ! "${EMSDK_PYTHON}" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))'; then
+        echo "error: EMSDK_PYTHON must point to Python 3.10 or newer" >&2
+        exit 1
+    fi
+else
+    for python_candidate in python3 python3.14 python3.13 python3.12 python3.11 python3.10; do
+        if ! command -v "${python_candidate}" > /dev/null; then
+            continue
+        fi
+        python_path="$(command -v "${python_candidate}")"
+        if "${python_path}" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))'; then
+            export EMSDK_PYTHON="${python_path}"
+            break
+        fi
+    done
+    if [[ -z "${EMSDK_PYTHON:-}" ]]; then
+        echo "error: emscripten requires Python 3.10 or newer" >&2
+        exit 1
+    fi
+fi
+
 PROFILE="release"
 PROFILE_FLAG="--release"
 if [[ "${1:-}" == "--debug" ]]; then

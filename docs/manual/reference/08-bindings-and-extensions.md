@@ -1,6 +1,6 @@
 # Bindings and Extensions
 
-UQA-RS exposes the same durable engine through Rust, Python, Node.js, and browser WASM. Rust has the widest low-level extension surface; other bindings focus on SQL, retrieval, graphs, and common runtime integrations.
+UQA-RS exposes the same durable embedded engine through Rust, Python, Node.js, and browser WASM, and exposes direct local and Cloud HTTP SQL in those same environments. Rust has the widest low-level extension surface; other bindings focus on SQL, retrieval, graphs, and common runtime integrations.
 
 ## Capability overview
 
@@ -15,8 +15,11 @@ UQA-RS exposes the same durable engine through Rust, Python, Node.js, and browse
 | Runtime scalar/table/aggregate callbacks | Yes | Yes | Yes | Yes |
 | Native DuckDB and Arrow FDWs | Yes | Build dependent | Build dependent | No |
 | Independent persistent sessions | Yes | Engine dependent | Yes | Yes |
+| Local and Cloud HTTP SQL/batch/stream | Yes | Yes | Yes | Yes, subject to CORS |
 
 Check the type declaration files in the target package for the exact release surface.
+
+The HTTP class is named `HttpEngine` in every package. Native Rust, Python, and Node.js reuse `uqa-client`; browsers use the same typed protocol through `fetch`. See the [HTTP Engine reference](09-http-engine.md) for construction, lifecycle, CORS, request metadata, and streaming contracts.
 
 Across every binding, `hybrid_search` or `hybridSearch` uses exact signed single-prior log-odds fusion and has no `alpha` argument. The separately named `robust_hybrid_search` or `robustHybridSearch` accepts `alpha` and selects gated, confidence-scaled positive-evidence pooling. SQL follows the same split: mixed same-relation text and vector conjunctions are exact by default, `fuse_bayesian_evidence` and `fuse_log_odds` are exact explicit functions, and `pool_positive_evidence` is the explicit heuristic.
 

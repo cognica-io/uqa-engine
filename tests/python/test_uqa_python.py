@@ -6,9 +6,120 @@
 
 from __future__ import annotations
 
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
 import pytest
 
 import uqa
+
+
+class _HTTPHandler(BaseHTTPRequestHandler):
+    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        assert self.headers["Authorization"] == "Bearer uqa_db_test"
+        length = int(self.headers["Content-Length"])
+        request = json.loads(self.rfile.read(length))
+        if self.path == "/v1/sql":
+            assert request["params"][0] == {"type": "int64", "value": 7}
+            self._json(
+                {
+                    "columns": ["answer", "payload"],
+                    "rows": [{"answer": 7, "payload": {"$uqa_type": "bytes", "hex": "00ff"}}],
+                    "affected_rows": 0,
+                    "request_id": "qry_python",
+                },
+                "qry_python",
+            )
+        elif self.path == "/v1/sql/batch":
+            assert len(request["statements"]) == 2
+            self._json(
+                {
+                    "results": [
+                        {"columns": [], "rows": [], "affected_rows": 1},
+                        {"columns": ["n"], "rows": [{"n": 1}], "affected_rows": 0},
+                    ],
+                    "request_id": "qry_python_batch",
+                },
+                "qry_python_batch",
+            )
+        elif self.path == "/v1/sql/stream":
+            body = "".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "metadata",
+                            "columns": ["n"],
+                            "row_count": 1,
+                            "spilled_to_disk": False,
+                            "request_id": "qry_python_stream",
+                        }
+                    )
+                    + "\n",
+                    json.dumps({"type": "row", "row": {"n": 1}}) + "\n",
+                    json.dumps(
+                        {
+                            "type": "complete",
+                            "row_count": 1,
+                            "request_id": "qry_python_stream",
+                        }
+                    )
+                    + "\n",
+                ]
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson")
+            self.send_header("X-Request-Id", "qry_python_stream")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            self.send_error(404)
+
+    def _json(self, payload: object, request_id: str) -> None:
+        body = json.dumps(payload).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("X-Request-Id", request_id)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+@pytest.fixture
+def http_origin():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _HTTPHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/"
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+def test_http_engine_sql_batch_and_stream(http_origin: str) -> None:
+    engine = uqa.HttpEngine(http_origin, "uqa_db_test")
+    result, request_id = engine.sql_with_metadata("SELECT $1", [7])
+    assert request_id == "qry_python"
+    assert result.rows == [{"answer": 7, "payload": b"\x00\xff"}]
+
+    results, request_id = engine.sql_batch_with_metadata(
+        [("INSERT INTO t VALUES (1)", []), ("SELECT 1 AS n", [])]
+    )
+    assert request_id == "qry_python_batch"
+    assert results[-1].rows == [{"n": 1}]
+
+    stream = engine.sql_stream("SELECT 1 AS n")
+    assert stream.request_id == "qry_python_stream"
+    frames = list(stream)
+    assert [frame["type"] for frame in frames] == ["metadata", "row", "complete"]
+    assert frames[1]["row"] == {"n": 1}
+    assert "uqa_db_test" not in repr(engine)
 
 
 def test_sql_text_vector_tensor_and_cypher_surfaces() -> None:

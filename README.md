@@ -20,10 +20,11 @@ It is designed for applications that need more than a relational table but do no
 - Search text with BM25 or Bayesian BM25, retrieve vectors with KNN, and combine both signals in hybrid queries.
 - Store named graphs, execute Cypher and regular path queries, and call graph traversal or centrality functions from SQL.
 - Start in memory for experiments, then choose the default SQLite backend or the pure-Rust redb backend without changing the query API.
+- Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
 > [!NOTE]
-> UQA-RS is under active development at version 0.1.3. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
+> UQA-RS is under active development at version 0.1.4. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
 
 ## Mathematical foundation
 
@@ -131,11 +132,35 @@ cargo run -p uqa-engine --example sqlcipher_encrypted_catalog
 cargo run -p uqa-engine --example compressed_encrypted_catalog
 ```
 
+## Connect to a local or Cloud UQA node
+
+`uqa-client::HttpEngine` sends SQL directly to the authenticated HTTP data plane shared by local and Cloud nodes. A trusted launcher can obtain `UQA_URL` and `UQA_TOKEN` from `uqa local connection PROJECT --format env` or `uqa cloud connection PROJECT --format env`; do not log, commit, or pass the token as a command-line argument.
+
+```rust
+use uqa_client::{HttpEngine, SQLParam};
+use uqa_core::Value;
+
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+let engine = HttpEngine::from_env()?;
+let result = engine
+    .sql(
+        "SELECT id, title FROM notes WHERE id = $1",
+        &[SQLParam::scalar(Value::Int(42))],
+    )
+    .await?;
+assert_eq!(result.rows.len(), 1);
+# Ok(())
+# }
+```
+
+Python, Node.js, and browser packages expose the same `HttpEngine` name. The client calls `/v1/sql`, `/v1/sql/batch`, and `/v1/sql/stream` directly; it does not start a CLI subprocess for queries. See the [HTTP Engine reference](docs/manual/reference/09-http-engine.md) for connection, binding examples, result, streaming, CORS, and security contracts.
+
 ## Choose a query path
 
 | Goal | Starting point |
 | --- | --- |
 | Relational SQL | `Engine::sql` or the `usql` shell |
+| Local or Cloud SQL over HTTP | `uqa_client::HttpEngine` |
 | Streaming larger results | `Engine::sql_cursor` or `Engine::sql_columnar` |
 | Full-text retrieval | `text_match`, `fts_match`, or `bayesian_match` |
 | Vector retrieval | `VECTOR(N)`, `TENSOR(N)`, `knn_match`, and explicit IVF or HNSW indexes |
@@ -174,9 +199,10 @@ Read the [compressed VFS security contract](docs/design/compressed-vfs-security.
 | Environment | Workspace package | Notes |
 | --- | --- | --- |
 | Rust | [`uqa-engine`](crates/uqa-engine) | Direct embedded API and runnable examples |
-| Python | [`uqa-python`](crates/uqa-python) | pyo3/maturin bindings for SQL, retrieval, graph, calibration, and runtime callbacks |
-| Node.js | [`uqa-node`](crates/uqa-node) | Node-API bindings with asynchronous query and search methods plus JavaScript callbacks |
-| Browser | [`uqa-wasm`](crates/uqa-wasm) | Emscripten build with IndexedDB persistence and JavaScript callbacks |
+| Rust HTTP | [`uqa-client`](crates/uqa-client) | Authenticated local and Cloud data-plane SQL, atomic batches, and NDJSON streaming |
+| Python | [`uqa-python`](crates/uqa-python) | pyo3/maturin bindings for the embedded engine plus synchronous local and Cloud HTTP SQL |
+| Node.js | [`uqa-node`](crates/uqa-node) | Node-API bindings with asynchronous embedded and local or Cloud HTTP SQL methods |
+| Browser | [`uqa-wasm`](crates/uqa-wasm) | Emscripten embedded engine with IndexedDB persistence plus fetch-based local and Cloud HTTP SQL |
 
 Prebuilt Linux Python wheels target glibc 2.28 or newer because the bundled DuckDB runtime requires the modern C++11 ABI.
 

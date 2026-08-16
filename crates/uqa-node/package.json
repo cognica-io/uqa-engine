@@ -1,7 +1,7 @@
 {
   "name": "uqa",
-  "version": "0.1.3",
-  "description": "Node.js bindings for the UQA engine",
+  "version": "0.1.4",
+  "description": "Node.js bindings for embedded UQA and local or Cloud HTTP SQL",
   "license": "AGPL-3.0-only",
   "author": "Jaepil Jeong <jaepil@cognica.io>",
   "repository": {
@@ -35,7 +35,7 @@
   },
   "napi": {
     "binaryName": "uqa",
-    "dtsHeader": "export type JSValue = null | boolean | number | bigint | string | Buffer | Uint8Array | Float32Array | Float64Array | Array<JSValue> | { [key: string]: JSValue }\nexport type ParamInput = SQLParam | JSValue\nexport type SQLTableFunctionRows = JSValue[][] | Array<Record<string, JSValue>>\nexport type SQLTableFunctionResult = { columns: string[]; rows: SQLTableFunctionRows } | [string[], SQLTableFunctionRows]\nexport type SQLAggregateState = ({ observe(...args: JSValue[]): unknown } | { step(...args: JSValue[]): unknown }) & ({ finish(): JSValue } | { finalize(): JSValue })\n",
+    "dtsHeader": "export type JSValue = null | boolean | number | bigint | string | Buffer | Uint8Array | Float32Array | Float64Array | Array<JSValue> | { [key: string]: JSValue }\nexport type ParamInput = SQLParam | JSValue\nexport type SQLTableFunctionRows = JSValue[][] | Array<Record<string, JSValue>>\nexport type SQLTableFunctionResult = { columns: string[]; rows: SQLTableFunctionRows } | [string[], SQLTableFunctionRows]\nexport type SQLAggregateState = ({ observe(...args: JSValue[]): unknown } | { step(...args: JSValue[]): unknown }) & ({ finish(): JSValue } | { finalize(): JSValue })\nexport interface HttpSQLStream extends AsyncIterable<HttpSQLStreamFrame> { [Symbol.asyncIterator](): AsyncIterator<HttpSQLStreamFrame> }\n",
     "targets": [
       "x86_64-unknown-linux-gnu",
       "aarch64-unknown-linux-gnu",
@@ -46,8 +46,8 @@
     ]
   },
   "scripts": {
-    "build": "napi build --platform --release",
-    "build:debug": "napi build --platform"
+    "build": "napi build --platform --no-js --release",
+    "build:debug": "napi build --platform --no-js"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.0.0"

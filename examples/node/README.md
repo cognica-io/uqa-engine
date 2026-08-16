@@ -11,3 +11,5 @@ These programs mirror the Rust, Python, and browser WASM scenarios with the Node
 | [`extensibility.mjs`](extensibility.mjs) | Scalar, table, and aggregate JavaScript callbacks |
 
 The Node.js and browser WASM examples share the SQL scenario modules in [`../javascript`](../javascript), while their entry points retain platform-specific engine construction, persistence, and close behavior.
+
+For local or Cloud SQL without embedding storage, construct `HttpEngine` or call `HttpEngine.fromEnv()` from the same `uqa` package; see the [HTTP Engine reference](../../docs/manual/reference/09-http-engine.md). The Node.js binding test executes SQL, atomic batch, and streaming requests through this class.

@@ -12,7 +12,241 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { Engine, SQLParam, UQA, vector, tensor } from "../../crates/uqa-wasm/js/index.mjs";
+import {
+  Engine,
+  HttpEngine,
+  HttpEngineError,
+  SQLParam,
+  UQA,
+  vector,
+  tensor,
+} from "../../crates/uqa-wasm/js/index.mjs";
+
+test("HTTP engine executes SQL, atomic batches, and streams", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (url, options) => {
+    assert.equal(options.headers.authorization, "Bearer uqa_db_test");
+    assert.equal(options.credentials, "omit");
+    assert.equal(options.redirect, "error");
+    assert.equal(options.referrerPolicy, "no-referrer");
+    const request = JSON.parse(options.body);
+    if (url.pathname === "/v1/sql") {
+      if (request.sql === "SELECT transport_error") {
+        const body = new ReadableStream({
+          start(controller) {
+            controller.error(new Error("secret upstream transport diagnostic"));
+          },
+        });
+        return new Response(body, {
+          headers: {
+            "content-type": "application/json",
+            "x-request-id": "qry_browser_transport",
+          },
+        });
+      }
+      if (request.sql === "SELECT unsafe") {
+        return new Response(JSON.stringify({
+          columns: ["unsafe"],
+          rows: [{ unsafe: 9_007_199_254_740_992 }],
+          affected_rows: 0,
+          request_id: "qry_browser_unsafe",
+        }), {
+          headers: {
+            "content-type": "application/json",
+            "x-request-id": "qry_browser_unsafe",
+          },
+        });
+      }
+      if (request.sql === "SELECT special") {
+        assert.deepEqual(request.params[0], { type: "bytes", hex: "00ff" });
+        assert.equal(request.params[1].type, "json");
+        assert.equal(Object.hasOwn(request.params[1].value, "__proto__"), true);
+        assert.equal(request.params[1].value.__proto__, "preserved");
+        assert.deepEqual(request.params[2], {
+          type: "json",
+          value: { $bytes: "ordinary-json", $vector: [1, 2] },
+        });
+        return new Response(JSON.stringify({
+          columns: [
+            "$uqa_type",
+            "hex",
+            "document",
+            "created_on",
+            "duration",
+            "tag_with_extra",
+            "invalid_array",
+            "matrix",
+            "outside_chrono",
+          ],
+          rows: [{
+            $uqa_type: "bytes",
+            hex: "column",
+            document: {
+              $uqa_type: "json",
+              value: "{\"$uqa_type\":\"bytes\",\"hex\":\"00ff\",\"__proto__\":\"preserved\"}",
+            },
+            created_on: { $uqa_type: "date", days: 2_932_897 },
+            duration: {
+              $uqa_type: "interval",
+              months: -1,
+              days: 1,
+              micros: 3_600_000_000,
+            },
+            tag_with_extra: {
+              $uqa_type: "bytes",
+              hex: "00ff",
+              extra: true,
+            },
+            invalid_array: {
+              $uqa_type: "array",
+              lower_bounds: [1],
+              values: [[1, 2], [3, 4]],
+            },
+            matrix: {
+              $uqa_type: "array",
+              lower_bounds: [0, -2],
+              values: [[1, 2], [3, 4]],
+            },
+            outside_chrono: { $uqa_type: "date", days: 100_000_000 },
+          }],
+          affected_rows: 0,
+          request_id: "qry_browser_special",
+        }), {
+          headers: {
+            "content-type": "application/json",
+            "x-request-id": "qry_browser_special",
+          },
+        });
+      }
+      assert.deepEqual(request.params, [
+        { type: "int64", value: 7 },
+        { type: "vector", value: [0.25, 0.75] },
+      ]);
+      return new Response(JSON.stringify({
+        columns: ["answer", "payload"],
+        rows: [{ answer: 7, payload: { $uqa_type: "bytes", hex: "00ff" } }],
+        affected_rows: 0,
+        request_id: "qry_browser",
+      }), {
+        headers: {
+          "content-type": "application/json",
+          "x-request-id": "qry_browser",
+        },
+      });
+    }
+    if (url.pathname === "/v1/sql/batch") {
+      assert.equal(request.statements.length, 2);
+      return new Response(JSON.stringify({
+        results: [
+          { columns: [], rows: [], affected_rows: 1 },
+          { columns: ["n"], rows: [{ n: 1 }], affected_rows: 0 },
+        ],
+        request_id: "qry_browser_batch",
+      }), {
+        headers: {
+          "content-type": "application/json",
+          "x-request-id": "qry_browser_batch",
+        },
+      });
+    }
+    if (url.pathname === "/v1/sql/stream") {
+      const frames = [
+        {
+          type: "metadata",
+          columns: ["n"],
+          row_count: 1,
+          spilled_to_disk: false,
+          request_id: "qry_browser_stream",
+        },
+        { type: "row", row: { n: 1 } },
+        { type: "complete", row_count: 1, request_id: "qry_browser_stream" },
+      ];
+      if (request.sql === "SELECT trailing") {
+        frames.push({ type: "row", row: { n: 2 } });
+      }
+      const body = frames.map((frame) => `${JSON.stringify(frame)}\n`).join("");
+      return new Response(body, {
+        headers: {
+          "content-type": "application/x-ndjson",
+          "x-request-id": "qry_browser_stream",
+        },
+      });
+    }
+    throw new Error(`unexpected test URL ${url.pathname}`);
+  };
+
+  const engine = new HttpEngine("http://127.0.0.1:8432/", "uqa_db_test");
+  assert.equal(JSON.stringify(engine), "{}");
+  assert.throws(
+    () => new HttpEngine("http://example.com/", "uqa_db_secret"),
+    /plain HTTP UQA URLs must resolve to loopback/,
+  );
+  const execution = await engine.sqlWithMetadata("SELECT $1", [
+    7,
+    SQLParam.vector([0.25, 0.75]),
+  ]);
+  assert.equal(execution.requestId, "qry_browser");
+  assert.deepEqual([...execution.result.rows[0].payload], [0, 255]);
+  await assert.rejects(engine.sql("SELECT unsafe"), /browser safe range/);
+
+  const special = await engine.sql("SELECT special", [
+    SQLParam.scalar(new Uint8Array([0, 255])),
+    JSON.parse('{"__proto__":"preserved"}'),
+    SQLParam.scalar({ $bytes: "ordinary-json", $vector: [1, 2] }),
+  ]);
+  assert.equal(special.rows[0].created_on, "+10000-01-01");
+  assert.equal(special.rows[0].duration, "-1 mons +1 day +01:00:00");
+  assert.equal(special.rows[0].$uqa_type, "bytes");
+  assert.equal(special.rows[0].hex, "column");
+  assert.equal(special.rows[0].document.$uqa_type, "bytes");
+  assert.equal(special.rows[0].document.hex, "00ff");
+  assert.equal(Object.hasOwn(special.rows[0].document, "__proto__"), true);
+  assert.equal(special.rows[0].document.__proto__, "preserved");
+  assert.deepEqual(special.rows[0].tag_with_extra, {
+    $uqa_type: "bytes",
+    hex: "00ff",
+    extra: true,
+  });
+  assert.deepEqual(special.rows[0].invalid_array, {
+    $uqa_type: "array",
+    lower_bounds: [1],
+    values: [[1, 2], [3, 4]],
+  });
+  assert.deepEqual(special.rows[0].matrix, [[1, 2], [3, 4]]);
+  assert.equal(special.rows[0].outside_chrono, "100000000");
+
+  await assert.rejects(engine.sql("SELECT transport_error"), (error) => {
+    assert.ok(error instanceof HttpEngineError);
+    assert.equal(error.message, "UQA HTTP transport failed");
+    assert.doesNotMatch(error.message, /secret/);
+    return true;
+  });
+
+  const batch = await engine.sqlBatchWithMetadata([
+    ["INSERT INTO t VALUES (1)", []],
+    ["SELECT 1 AS n", []],
+  ]);
+  assert.equal(batch.requestId, "qry_browser_batch");
+  assert.deepEqual(batch.results.at(-1).rows, [{ n: 1 }]);
+
+  const stream = await engine.sqlStream("SELECT 1 AS n");
+  assert.equal(stream.requestId, "qry_browser_stream");
+  const frames = [];
+  for await (const frame of stream) {
+    frames.push(frame);
+  }
+  assert.deepEqual(frames.map((frame) => frame.type), ["metadata", "row", "complete"]);
+  assert.deepEqual(frames[1].row, { n: 1 });
+
+  const trailing = await engine.sqlStream("SELECT trailing");
+  assert.equal((await trailing.nextFrame()).type, "metadata");
+  assert.equal((await trailing.nextFrame()).type, "row");
+  assert.equal((await trailing.nextFrame()).type, "complete");
+  await assert.rejects(trailing.nextFrame(), /frame order is invalid/);
+});
 
 test("sql, params, vector, tensor, and cypher surfaces", async () => {
   const engine = await Engine.inMemory();

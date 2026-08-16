@@ -8,15 +8,165 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const require = createRequire(import.meta.url);
 const uqa = require("../../crates/uqa-node");
 
+async function readRequestJSON(request) {
+  const chunks = [];
+  for await (const chunk of request) {
+    chunks.push(chunk);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+function sendJSON(response, requestId, payload) {
+  const body = JSON.stringify(payload);
+  response.writeHead(200, {
+    "content-length": Buffer.byteLength(body),
+    "content-type": "application/json",
+    "x-request-id": requestId,
+  });
+  response.end(body);
+}
+
+async function withHTTPServer(run) {
+  const server = createServer(async (request, response) => {
+    assert.equal(request.headers.authorization, "Bearer uqa_db_test");
+    const payload = await readRequestJSON(request);
+    if (request.url === "/v1/sql") {
+      assert.deepEqual(payload.params[0], { type: "int64", value: 7 });
+      sendJSON(response, "qry_node", {
+        columns: ["answer", "payload"],
+        rows: [{ answer: 7, payload: { $uqa_type: "bytes", hex: "00ff" } }],
+        affected_rows: 0,
+        request_id: "qry_node",
+      });
+      return;
+    }
+    if (request.url === "/v1/sql/batch") {
+      assert.equal(payload.statements.length, 2);
+      sendJSON(response, "qry_node_batch", {
+        results: [
+          { columns: [], rows: [], affected_rows: 1 },
+          { columns: ["n"], rows: [{ n: 1 }], affected_rows: 0 },
+        ],
+        request_id: "qry_node_batch",
+      });
+      return;
+    }
+    if (request.url === "/v1/sql/stream") {
+      const body = [
+        {
+          type: "metadata",
+          columns: ["n"],
+          row_count: 1,
+          spilled_to_disk: false,
+          request_id: "qry_node_stream",
+        },
+        { type: "row", row: { n: 1 } },
+        { type: "complete", row_count: 1, request_id: "qry_node_stream" },
+      ].map((frame) => `${JSON.stringify(frame)}\n`).join("");
+      response.writeHead(200, {
+        "content-length": Buffer.byteLength(body),
+        "content-type": "application/x-ndjson",
+        "x-request-id": "qry_node_stream",
+      });
+      response.end(body);
+      return;
+    }
+    response.writeHead(404);
+    response.end();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.notEqual(address, null);
+  try {
+    await run(`http://127.0.0.1:${address.port}/`);
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => error === undefined ? resolve() : reject(error));
+    });
+  }
+}
+
+async function withConcurrentHTTPServer(run) {
+  let activeRequests = 0;
+  let peakRequests = 0;
+  const server = createServer(async (request, response) => {
+    assert.equal(request.headers.authorization, "Bearer uqa_db_test");
+    const payload = await readRequestJSON(request);
+    assert.equal(request.url, "/v1/sql");
+    assert.equal(payload.sql, "SELECT 1");
+    assert.deepEqual(payload.params, []);
+    activeRequests += 1;
+    peakRequests = Math.max(peakRequests, activeRequests);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    activeRequests -= 1;
+    sendJSON(response, "qry_node_concurrent", {
+      columns: ["n"],
+      rows: [{ n: 1 }],
+      affected_rows: 0,
+      request_id: "qry_node_concurrent",
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.notEqual(address, null);
+  try {
+    await run(`http://127.0.0.1:${address.port}/`, () => peakRequests);
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => error === undefined ? resolve() : reject(error));
+    });
+  }
+}
+
+test("HTTP engine executes SQL, atomic batches, and streams", async () => {
+  await withHTTPServer(async (origin) => {
+    const engine = new uqa.HttpEngine(origin, "uqa_db_test");
+    const execution = await engine.sqlWithMetadata("SELECT $1", [7]);
+    assert.equal(execution.requestId, "qry_node");
+    assert.equal(execution.result.rows[0].answer, 7);
+    assert.deepEqual(execution.result.rows[0].payload, Buffer.from([0, 255]));
+
+    const batch = await engine.sqlBatchWithMetadata([
+      ["INSERT INTO t VALUES (1)", []],
+      ["SELECT 1 AS n", []],
+    ]);
+    assert.equal(batch.requestId, "qry_node_batch");
+    assert.deepEqual(batch.results.at(-1).rows, [{ n: 1 }]);
+
+    const stream = await engine.sqlStream("SELECT 1 AS n");
+    assert.equal(stream.requestId, "qry_node_stream");
+    const frames = [];
+    for await (const frame of stream) {
+      frames.push(frame);
+    }
+    assert.deepEqual(frames.map((frame) => frame.type), ["metadata", "row", "complete"]);
+    assert.deepEqual(frames[1].row, { n: 1 });
+  });
+});
+
+test("HTTP engine does not serialize concurrent requests onto the libuv worker pool", async () => {
+  await withConcurrentHTTPServer(async (origin, peakRequests) => {
+    const engine = new uqa.HttpEngine(origin, "uqa_db_test");
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () => engine.sql("SELECT 1", [])),
+    );
+    assert.equal(peakRequests(), 8);
+    assert.ok(results.every((result) => result.rows[0].n === 1));
+  });
+});
+
 test("CommonJS and ESM package exports agree", async () => {
   const esm = await import("../../crates/uqa-node/api.js");
   assert.equal(esm.Engine, uqa.Engine);
+  assert.equal(esm.HttpEngine, uqa.HttpEngine);
+  assert.equal(esm.HttpSQLStream, uqa.HttpSQLStream);
   assert.equal(esm.vector, uqa.vector);
   assert.equal(esm.JSFunctionVolatility, uqa.JSFunctionVolatility);
 });

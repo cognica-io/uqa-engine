@@ -31,6 +31,7 @@ mod callbacks;
 mod conversions;
 mod engine;
 mod errors;
+mod http_engine;
 mod inputs;
 mod migration;
 mod options;
@@ -49,6 +50,7 @@ use engine::{
     open_encrypted,
 };
 use errors::{py_error_to_sql, runtime_error};
+use http_engine::{PyHttpEngine, PyHttpSQLStream};
 use inputs::{
     document_from_py, validate_binary_label, validate_binary_labels, validate_tensor,
     validate_vector, vector_values_from_py,
@@ -81,6 +83,8 @@ impl PyEngine {
 #[pyo3(name = "_uqa")]
 fn uqa_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyEngine>()?;
+    m.add_class::<PyHttpEngine>()?;
+    m.add_class::<PyHttpSQLStream>()?;
     m.add_class::<PySQLParam>()?;
     m.add_class::<PySQLResult>()?;
     m.add_function(wrap_pyfunction!(open, m)?)?;

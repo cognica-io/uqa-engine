@@ -43,9 +43,10 @@ allow = [
 ]
 # Keep non-project-wide licenses scoped to the crates that require them.
 exceptions = [
-    # `webpki-roots` carries the Mozilla CA root dataset under CDLA-Permissive-2.0.
-    # DuckDB's bundled build path pulls it through libduckdb-sys -> reqwest.
+    # These crates carry the Mozilla CA root dataset under CDLA-Permissive-2.0.
+    # DuckDB pulls webpki-roots; the HTTPS client pulls webpki-root-certs.
     { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-root-certs" },
 ]
 
 [bans]

@@ -279,7 +279,7 @@ function decodeValue(value) {
     }
     const out = {};
     for (const key of keys) {
-      out[key] = decodeValue(value[key]);
+      defineOwnValue(out, key, decodeValue(value[key]));
     }
     return out;
   }
@@ -320,7 +320,7 @@ function encodeValue(value) {
   if (value !== null && typeof value === "object") {
     const out = {};
     for (const key of Object.keys(value)) {
-      out[key] = encodeValue(value[key]);
+      defineOwnValue(out, key, encodeValue(value[key]));
     }
     return out;
   }
@@ -356,22 +356,891 @@ function encodeParams(params) {
   });
 }
 
+const MAX_HTTP_JSON_BYTES = 65 * 1024 * 1024;
+const MAX_HTTP_ERROR_BYTES = 64 * 1024;
+const MAX_HTTP_STREAM_FRAME_BYTES = 64 * 1024 * 1024;
+
+/** Redacted local/Cloud HTTP client error. */
+export class HttpEngineError extends Error {
+  constructor(message, { code, status, requestId } = {}) {
+    super(message);
+    this.name = "HttpEngineError";
+    this.code = code;
+    this.status = status;
+    this.requestId = requestId;
+  }
+}
+
+function httpBaseURL(source) {
+  let url;
+  try {
+    url = new URL(source);
+  } catch {
+    throw new HttpEngineError("UQA data-plane URL is invalid");
+  }
+  const exactOrigin = url.username === "" && url.password === "" && url.pathname === "/"
+    && url.search === "" && url.hash === "";
+  if (!exactOrigin || (url.protocol !== "http:" && url.protocol !== "https:")) {
+    throw new HttpEngineError("UQA data-plane URL is invalid");
+  }
+  if (url.protocol === "http:" && !isLoopbackHostname(url.hostname)) {
+    throw new HttpEngineError("plain HTTP UQA URLs must resolve to loopback");
+  }
+  return url;
+}
+
+function isLoopbackHostname(hostname) {
+  const normalized = hostname.toLowerCase();
+  if (normalized === "localhost" || normalized === "[::1]" || normalized === "::1") {
+    return true;
+  }
+  const octets = normalized.split(".");
+  return octets.length === 4
+    && octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255)
+    && Number(octets[0]) === 127;
+}
+
+function encodeHTTPStatement(query, params) {
+  if (typeof query !== "string" || query.trim() === "") {
+    throw new HttpEngineError("SQL text must not be empty");
+  }
+  return {
+    sql: query,
+    params: (params ?? []).map(encodeHTTPParameter),
+  };
+}
+
+function encodeHTTPParameter(parameter) {
+  if (parameter instanceof SQLParam) {
+    if (parameter.httpKind === "bytes") {
+      return { type: "bytes", hex: bytesToHex(base64ToBytes(parameter.payload.$bytes)) };
+    }
+    if (parameter.httpKind === "vector") {
+      return { type: "vector", value: finiteHTTPVector(parameter.payload.$vector) };
+    }
+    if (parameter.httpKind === "tensor") {
+      return {
+        type: "tensor",
+        value: parameter.payload.$tensor.map(finiteHTTPVector),
+      };
+    }
+    return encodeHTTPScalar(parameter.payload);
+  }
+  return encodeHTTPScalar(parameter);
+}
+
+function encodeHTTPScalar(value) {
+  if (value === undefined || value === null) {
+    return { type: "null" };
+  }
+  if (typeof value === "boolean") {
+    return { type: "boolean", value };
+  }
+  if (typeof value === "bigint") {
+    if (value > BigInt(Number.MAX_SAFE_INTEGER) || value < -BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new HttpEngineError("SQL integer exceeds the browser safe range");
+    }
+    return { type: "int64", value: Number(value) };
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new HttpEngineError("SQL parameter cannot be represented by the HTTP protocol");
+    }
+    if (Number.isInteger(value)) {
+      if (!Number.isSafeInteger(value)) {
+        throw new HttpEngineError("SQL integer exceeds the browser safe range");
+      }
+      return { type: "int64", value };
+    }
+    return { type: "float64", value };
+  }
+  if (typeof value === "string") {
+    return { type: "text", value };
+  }
+  if (value instanceof Uint8Array) {
+    return { type: "bytes", hex: bytesToHex(value) };
+  }
+  if (value instanceof ArrayBuffer) {
+    return { type: "bytes", hex: bytesToHex(new Uint8Array(value)) };
+  }
+  return { type: "json", value: encodeHTTPJSONValue(value) };
+}
+
+function encodeHTTPJSONValue(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value === "boolean" || typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "bigint") {
+    if (value > BigInt(Number.MAX_SAFE_INTEGER) || value < -BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new HttpEngineError("JSON integer exceeds the browser safe range");
+    }
+    return Number(value);
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) {
+      throw new HttpEngineError("JSON number cannot be represented by the HTTP protocol");
+    }
+    return value;
+  }
+  if (value instanceof Uint8Array) {
+    return { $uqa_type: "bytes", hex: bytesToHex(value) };
+  }
+  if (value instanceof ArrayBuffer) {
+    return { $uqa_type: "bytes", hex: bytesToHex(new Uint8Array(value)) };
+  }
+  if (value instanceof Float32Array || value instanceof Float64Array) {
+    return Array.from(value, encodeHTTPJSONValue);
+  }
+  if (Array.isArray(value)) {
+    return value.map(encodeHTTPJSONValue);
+  }
+  if (typeof value === "object") {
+    const encoded = {};
+    for (const key of Object.keys(value)) {
+      defineOwnValue(encoded, key, encodeHTTPJSONValue(value[key]));
+    }
+    return encoded;
+  }
+  throw new HttpEngineError("SQL parameter cannot be represented by the HTTP protocol");
+}
+
+function defineOwnValue(object, key, value) {
+  Object.defineProperty(object, key, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true,
+  });
+}
+
+function finiteHTTPVector(values) {
+  return Array.from(values, (value) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      throw new HttpEngineError("SQL parameter cannot be represented by the HTTP protocol");
+    }
+    return number;
+  });
+}
+
+function bytesToHex(bytes) {
+  let encoded = "";
+  for (const byte of bytes) {
+    encoded += byte.toString(16).padStart(2, "0");
+  }
+  return encoded;
+}
+
+function hexToBytes(encoded) {
+  if (typeof encoded !== "string" || encoded.length % 2 !== 0 || !/^[0-9a-f]*$/i.test(encoded)) {
+    throw new HttpEngineError("UQA response body is not valid JSON");
+  }
+  const bytes = new Uint8Array(encoded.length / 2);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(encoded.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+function decodeHTTPValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(decodeHTTPValue);
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) {
+      throw new HttpEngineError("UQA response integer exceeds the browser safe range");
+    }
+    return value;
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  const kind = value.$uqa_type;
+  if (kind === "bytes" && exactHTTPObject(value, ["$uqa_type", "hex"])
+      && validHTTPHex(value.hex)) {
+    return hexToBytes(value.hex);
+  }
+  if (kind === "decimal" && canonicalHTTPDecimal(value.value)) {
+    return value.value;
+  }
+  if (kind === "fixed_char" && exactHTTPObject(value, ["$uqa_type", "value"])
+      && typeof value.value === "string") {
+    return value.value;
+  }
+  if ((kind === "json" || kind === "jsonb")
+      && exactHTTPObject(value, ["$uqa_type", "value"])
+      && typeof value.value === "string") {
+    try {
+      return validateHTTPJSONDocument(JSON.parse(value.value));
+    } catch {
+      throw new HttpEngineError("UQA response body is not valid JSON");
+    }
+  }
+  if (kind === "array" && validHTTPTaggedArrayShape(value) !== undefined) {
+    return value.values.map(decodeHTTPValue);
+  }
+  if (kind === "row" && exactHTTPObject(value, ["$uqa_type", "values"])
+      && Array.isArray(value.values)) {
+    return value.values.map(decodeHTTPValue);
+  }
+  if (kind === "record" && exactHTTPObject(value, ["$uqa_type", "fields"])
+      && Array.isArray(value.fields)
+      && value.fields.every((field) => Array.isArray(field)
+        && field.length === 2 && typeof field[0] === "string")) {
+    return Object.fromEntries(value.fields.map(([key, item]) => [key, decodeHTTPValue(item)]));
+  }
+  if (kind === "date" && exactHTTPObject(value, ["$uqa_type", "days"])
+      && isHTTPInt32(value.days)) {
+    return formatHTTPDate(value.days);
+  }
+  if (kind === "time" && exactHTTPObject(value, ["$uqa_type", "micros"])
+      && Number.isSafeInteger(value.micros)) {
+    return formatHTTPTime(value.micros);
+  }
+  if (kind === "time_tz"
+      && exactHTTPObject(value, ["$uqa_type", "micros", "offset_minutes"])
+      && Number.isSafeInteger(value.micros) && isHTTPInt32(value.offset_minutes)) {
+    return `${formatHTTPTime(value.micros)}${formatHTTPOffset(value.offset_minutes)}`;
+  }
+  if ((kind === "timestamp" || kind === "timestamp_tz")
+      && exactHTTPObject(value, ["$uqa_type", "micros"])
+      && Number.isSafeInteger(value.micros)) {
+    return formatHTTPTimestamp(value.micros, kind === "timestamp_tz");
+  }
+  if (kind === "interval"
+      && exactHTTPObject(value, ["$uqa_type", "months", "days", "micros"])
+      && isHTTPInt32(value.months) && isHTTPInt32(value.days)
+      && Number.isSafeInteger(value.micros)) {
+    return formatHTTPInterval(value.months, value.days, value.micros);
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, decodeHTTPValue(item)]));
+}
+
+function exactHTTPObject(value, keys) {
+  const actual = Object.keys(value);
+  return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function validHTTPHex(value) {
+  return typeof value === "string" && value.length % 2 === 0 && /^[0-9a-f]*$/i.test(value);
+}
+
+function canonicalHTTPDecimal(value) {
+  return typeof value === "string"
+    && /^(?:NaN|Infinity|-Infinity|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?)$/.test(value)
+    && !/^-0(?:\.0+)?$/.test(value);
+}
+
+function isHTTPInt32(value) {
+  return Number.isInteger(value) && value >= -2_147_483_648 && value <= 2_147_483_647;
+}
+
+function validHTTPTaggedArrayShape(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)
+      || value.$uqa_type !== "array"
+      || !exactHTTPObject(value, ["$uqa_type", "lower_bounds", "values"])
+      || !Array.isArray(value.lower_bounds)
+      || !value.lower_bounds.every(isHTTPInt32)
+      || !Array.isArray(value.values)) {
+    return undefined;
+  }
+  const shape = httpArrayShape(value.values);
+  if (shape === undefined) {
+    return undefined;
+  }
+  const normalizedShape = shape[0] === 0 ? [] : shape;
+  return normalizedShape.length === value.lower_bounds.length ? shape : undefined;
+}
+
+function httpArrayShape(values) {
+  const dimensions = [values.length];
+  let nestedShape;
+  let hasScalar = false;
+  for (const value of values) {
+    const shape = Array.isArray(value)
+      ? httpArrayShape(value)
+      : validHTTPTaggedArrayShape(value);
+    if (shape === undefined) {
+      if (nestedShape !== undefined) {
+        return undefined;
+      }
+      hasScalar = true;
+      continue;
+    }
+    if (hasScalar || (nestedShape !== undefined && !sameHTTPShape(nestedShape, shape))) {
+      return undefined;
+    }
+    nestedShape = shape;
+  }
+  if (nestedShape !== undefined) {
+    dimensions.push(...nestedShape);
+  }
+  return dimensions;
+}
+
+function sameHTTPShape(left, right) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function validateHTTPJSONDocument(value) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      validateHTTPJSONDocument(item);
+    }
+    return value;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) {
+      throw new HttpEngineError("UQA response integer exceeds the browser safe range");
+    }
+    return value;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const item of Object.values(value)) {
+      validateHTTPJSONDocument(item);
+    }
+  }
+  return value;
+}
+
+function requireSafeHTTPInteger(value) {
+  if (!Number.isSafeInteger(value)) {
+    throw new HttpEngineError("UQA response integer exceeds the browser safe range");
+  }
+  return value;
+}
+
+function formatHTTPDate(days) {
+  requireSafeHTTPInteger(days);
+  const date = new Date(days * 86_400_000);
+  if (Number.isNaN(date.valueOf())) {
+    return String(days);
+  }
+  const year = date.getUTCFullYear();
+  if (year < -262_143 || year > 262_142) {
+    return String(days);
+  }
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${formatHTTPYear(year)}-${month}-${day}`;
+}
+
+function formatHTTPYear(year) {
+  const magnitude = String(Math.abs(year)).padStart(4, "0");
+  return year < 0 ? `-${magnitude}` : year > 9_999 ? `+${magnitude}` : magnitude;
+}
+
+function formatHTTPTime(source) {
+  const day = 86_400_000_000;
+  const micros = ((requireSafeHTTPInteger(source) % day) + day) % day;
+  const hours = Math.floor(micros / 3_600_000_000);
+  const minutes = Math.floor((micros % 3_600_000_000) / 60_000_000);
+  const seconds = Math.floor((micros % 60_000_000) / 1_000_000);
+  const fraction = micros % 1_000_000;
+  let output = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  if (fraction !== 0) {
+    output += `.${String(fraction).padStart(6, "0").replace(/0+$/, "")}`;
+  }
+  return output;
+}
+
+function formatHTTPOffset(source) {
+  const minutes = requireSafeHTTPInteger(source);
+  const sign = minutes < 0 ? "-" : "+";
+  const absolute = Math.abs(minutes);
+  return `${sign}${String(Math.floor(absolute / 60)).padStart(2, "0")}:${String(absolute % 60).padStart(2, "0")}`;
+}
+
+function formatHTTPTimestamp(source, utc) {
+  const micros = requireSafeHTTPInteger(source);
+  const date = new Date(Math.floor(micros / 1000));
+  if (Number.isNaN(date.valueOf())) {
+    return String(micros);
+  }
+  const year = date.getUTCFullYear();
+  if (year < -262_143 || year > 262_142) {
+    return String(micros);
+  }
+  const datePart = `${formatHTTPYear(year)}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+  const timePart = [date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds()]
+    .map((value) => String(value).padStart(2, "0"))
+    .join(":");
+  let output = `${datePart} ${timePart}`;
+  const fraction = ((micros % 1_000_000) + 1_000_000) % 1_000_000;
+  if (fraction !== 0) {
+    output += `.${String(fraction).padStart(6, "0").replace(/0+$/, "")}`;
+  }
+  return utc ? `${output}+00` : output;
+}
+
+function formatHTTPInterval(monthsSource, daysSource, microsSource) {
+  const monthsTotal = requireSafeHTTPInteger(monthsSource);
+  const days = requireSafeHTTPInteger(daysSource);
+  const micros = requireSafeHTTPInteger(microsSource);
+  const fields = [];
+  let negativeFieldSeen = false;
+  const years = Math.trunc(monthsTotal / 12);
+  const months = monthsTotal % 12;
+  for (const [value, singular] of [[years, "year"], [months, "mon"], [days, "day"]]) {
+    if (value !== 0) {
+      const sign = negativeFieldSeen && value > 0 ? "+" : "";
+      fields.push(`${sign}${value} ${singular}${value === 1 ? "" : "s"}`);
+      negativeFieldSeen ||= value < 0;
+    }
+  }
+  if (micros !== 0 || fields.length === 0) {
+    const sign = micros < 0 ? "-" : negativeFieldSeen ? "+" : "";
+    const absolute = Math.abs(micros);
+    const hours = Math.floor(absolute / 3_600_000_000);
+    const minutes = Math.floor((absolute % 3_600_000_000) / 60_000_000);
+    const seconds = Math.floor((absolute % 60_000_000) / 1_000_000);
+    const fraction = absolute % 1_000_000;
+    let time = `${sign}${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    if (fraction !== 0) {
+      time += `.${String(fraction).padStart(6, "0").replace(/0+$/, "")}`;
+    }
+    fields.push(time);
+  }
+  return fields.join(" ");
+}
+
+function validateHTTPContentType(response, expected) {
+  const actual = response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+  if (actual !== expected) {
+    throw new HttpEngineError("UQA response content type is invalid");
+  }
+}
+
+function httpRequestId(response) {
+  const requestId = response.headers.get("x-request-id");
+  if (requestId === null || requestId === "") {
+    throw new HttpEngineError("UQA response is missing its request ID");
+  }
+  return requestId;
+}
+
+async function readBoundedHTTPBody(response, maximumBytes) {
+  const declared = response.headers.get("content-length");
+  if (declared !== null && Number(declared) > maximumBytes) {
+    throw new HttpEngineError("UQA response exceeded the client safety limit");
+  }
+  if (response.body === null) {
+    return new Uint8Array();
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let length = 0;
+  for (;;) {
+    const { value, done } = await readHTTPChunk(reader);
+    if (done) {
+      break;
+    }
+    length += value.byteLength;
+    if (length > maximumBytes) {
+      try {
+        await reader.cancel();
+      } catch {
+        // The bounded error remains the stable public diagnostic.
+      }
+      throw new HttpEngineError("UQA response exceeded the client safety limit");
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
+async function readHTTPChunk(reader) {
+  try {
+    return await reader.read();
+  } catch {
+    throw new HttpEngineError("UQA HTTP transport failed");
+  }
+}
+
+async function decodeHTTPJSONResponse(response) {
+  const requestId = httpRequestId(response);
+  validateHTTPContentType(response, "application/json");
+  const maximumBytes = response.ok ? MAX_HTTP_JSON_BYTES : MAX_HTTP_ERROR_BYTES;
+  const bytes = await readBoundedHTTPBody(response, maximumBytes);
+  let body;
+  try {
+    body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    throw new HttpEngineError("UQA response body is not valid JSON");
+  }
+  if (!response.ok) {
+    const code = typeof body?.error?.code === "string" ? body.error.code : "HTTP_ERROR";
+    if (body?.request_id !== undefined && body.request_id !== requestId) {
+      throw new HttpEngineError("UQA response request IDs do not match");
+    }
+    throw new HttpEngineError(`UQA returned ${response.status} with code ${code}`, {
+      code,
+      status: response.status,
+      requestId,
+    });
+  }
+  if (body?.request_id !== requestId) {
+    throw new HttpEngineError("UQA response request IDs do not match");
+  }
+  return { body, requestId };
+}
+
+function decodeHTTPSQLResult(body) {
+  if (!Array.isArray(body?.columns) || !Array.isArray(body?.rows)
+      || !body.columns.every((column) => typeof column === "string")
+      || !Number.isSafeInteger(body?.affected_rows) || body.affected_rows < 0) {
+    throw new HttpEngineError("UQA response body is not valid JSON");
+  }
+  return {
+    columns: body.columns,
+    rows: body.rows.map(decodeHTTPRow),
+    affectedRows: body.affected_rows,
+  };
+}
+
+function decodeHTTPRow(row) {
+  if (row === null || Array.isArray(row) || typeof row !== "object") {
+    throw new HttpEngineError("UQA response body is not valid JSON");
+  }
+  const decoded = {};
+  for (const [key, value] of Object.entries(row)) {
+    defineOwnValue(decoded, key, decodeHTTPValue(value));
+  }
+  return decoded;
+}
+
+/** Direct authenticated SQL over the local or Cloud UQA HTTP data plane. */
+export class HttpEngine {
+  #baseURL;
+
+  #token;
+
+  constructor(url, token) {
+    this.#baseURL = httpBaseURL(url);
+    if (typeof token !== "string" || token.length === 0) {
+      throw new HttpEngineError("UQA project token must not be empty");
+    }
+    this.#token = token;
+  }
+
+  static fromEnv(environment = globalThis.process?.env) {
+    if (environment?.UQA_URL === undefined) {
+      throw new HttpEngineError("required UQA connection environment variable UQA_URL is missing");
+    }
+    if (environment?.UQA_TOKEN === undefined) {
+      throw new HttpEngineError("required UQA connection environment variable UQA_TOKEN is missing");
+    }
+    return new HttpEngine(environment.UQA_URL, environment.UQA_TOKEN);
+  }
+
+  async #request(path, body, accept = "application/json") {
+    if (typeof globalThis.fetch !== "function") {
+      throw new HttpEngineError("Fetch API is unavailable in this JavaScript runtime");
+    }
+    let response;
+    try {
+      response = await globalThis.fetch(new URL(path, this.#baseURL), {
+        method: "POST",
+        headers: {
+          accept,
+          authorization: `Bearer ${this.#token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+        cache: "no-store",
+        credentials: "omit",
+        redirect: "error",
+        referrerPolicy: "no-referrer",
+      });
+    } catch {
+      throw new HttpEngineError("UQA HTTP transport failed");
+    }
+    return response;
+  }
+
+  async sql(query, params) {
+    return (await this.sqlWithMetadata(query, params)).result;
+  }
+
+  async sqlWithMetadata(query, params) {
+    const response = await this.#request("v1/sql", encodeHTTPStatement(query, params));
+    const { body, requestId } = await decodeHTTPJSONResponse(response);
+    return { result: decodeHTTPSQLResult(body), requestId };
+  }
+
+  async sqlBatch(statements) {
+    return (await this.sqlBatchWithMetadata(statements)).results;
+  }
+
+  async sqlBatchWithMetadata(statements) {
+    const encoded = statements.map(([query, params]) => encodeHTTPStatement(query, params));
+    const response = await this.#request("v1/sql/batch", { statements: encoded });
+    const { body, requestId } = await decodeHTTPJSONResponse(response);
+    if (!Array.isArray(body.results)) {
+      throw new HttpEngineError("UQA response body is not valid JSON");
+    }
+    return { results: body.results.map(decodeHTTPSQLResult), requestId };
+  }
+
+  async sqlStream(query, params) {
+    const response = await this.#request(
+      "v1/sql/stream",
+      encodeHTTPStatement(query, params),
+      "application/x-ndjson",
+    );
+    if (!response.ok) {
+      await decodeHTTPJSONResponse(response);
+    }
+    validateHTTPContentType(response, "application/x-ndjson");
+    const requestId = httpRequestId(response);
+    return new HttpSQLStream(response, requestId);
+  }
+}
+
+/** Incremental reader for one authenticated UQA NDJSON SQL response. */
+export class HttpSQLStream {
+  constructor(response, requestId) {
+    if (response.body === null) {
+      throw new HttpEngineError("UQA NDJSON stream ended before a terminal frame");
+    }
+    this.reader = response.body.getReader();
+    this.requestId = requestId;
+    this.chunks = [];
+    this.bufferedBytes = 0;
+    this.newlineOffset = null;
+    this.phase = "metadata";
+    this.bodyFinished = false;
+  }
+
+  async nextFrame() {
+    for (;;) {
+      if (this.phase === "finished") {
+        return null;
+      }
+      if (this.phase === "terminal") {
+        return this.#finish();
+      }
+      const bufferedLine = this.#takeLine();
+      if (bufferedLine !== null) {
+        const line = stripHTTPStreamCR(bufferedLine);
+        if (line.byteLength === 0) {
+          continue;
+        }
+        return this.decodeFrame(line);
+      }
+      if (this.bodyFinished) {
+        if (this.bufferedBytes === 0) {
+          throw new HttpEngineError("UQA NDJSON stream ended before a terminal frame");
+        }
+        const line = stripHTTPStreamCR(this.#takeRemainder());
+        if (line.byteLength === 0) {
+          continue;
+        }
+        return this.decodeFrame(line);
+      }
+      await this.#readChunk();
+    }
+  }
+
+  async #finish() {
+    for (;;) {
+      const bufferedLine = this.#takeLine();
+      if (bufferedLine !== null) {
+        if (stripHTTPStreamCR(bufferedLine).byteLength !== 0) {
+          throw new HttpEngineError("UQA NDJSON stream frame order is invalid");
+        }
+        continue;
+      }
+      if (this.bodyFinished) {
+        if (stripHTTPStreamCR(this.#takeRemainder()).byteLength !== 0) {
+          throw new HttpEngineError("UQA NDJSON stream frame order is invalid");
+        }
+        this.phase = "finished";
+        return null;
+      }
+      await this.#readChunk();
+    }
+  }
+
+  async #readChunk() {
+    const { value, done } = await readHTTPChunk(this.reader);
+    if (done) {
+      this.bodyFinished = true;
+      return;
+    }
+    if (value.byteLength === 0) {
+      return;
+    }
+    if (this.newlineOffset === null) {
+      const newline = value.indexOf(10);
+      if (newline !== -1) {
+        this.newlineOffset = this.bufferedBytes + newline;
+      }
+    }
+    this.chunks.push(value);
+    this.bufferedBytes += value.byteLength;
+    this.#validateBufferedFrameSize();
+  }
+
+  #takeLine() {
+    if (this.newlineOffset === null) {
+      return null;
+    }
+    const lineLength = this.newlineOffset;
+    if (lineLength > MAX_HTTP_STREAM_FRAME_BYTES) {
+      throw new HttpEngineError("UQA NDJSON stream frame exceeded the client safety limit");
+    }
+    const line = new Uint8Array(lineLength);
+    let lineOffset = 0;
+    let remaining = lineLength + 1;
+    while (remaining !== 0) {
+      const chunk = this.chunks.shift();
+      const consumed = Math.min(remaining, chunk.byteLength);
+      const copied = Math.min(consumed, lineLength - lineOffset);
+      if (copied !== 0) {
+        line.set(chunk.subarray(0, copied), lineOffset);
+        lineOffset += copied;
+      }
+      if (consumed !== chunk.byteLength) {
+        this.chunks.unshift(chunk.subarray(consumed));
+      }
+      this.bufferedBytes -= consumed;
+      remaining -= consumed;
+    }
+    this.#indexNewline();
+    this.#validateBufferedFrameSize();
+    return line;
+  }
+
+  #takeRemainder() {
+    const output = new Uint8Array(this.bufferedBytes);
+    let offset = 0;
+    for (const chunk of this.chunks) {
+      output.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    this.chunks = [];
+    this.bufferedBytes = 0;
+    this.newlineOffset = null;
+    return output;
+  }
+
+  #indexNewline() {
+    this.newlineOffset = null;
+    let offset = 0;
+    for (const chunk of this.chunks) {
+      const newline = chunk.indexOf(10);
+      if (newline !== -1) {
+        this.newlineOffset = offset + newline;
+        return;
+      }
+      offset += chunk.byteLength;
+    }
+  }
+
+  #validateBufferedFrameSize() {
+    const frameBytes = this.newlineOffset ?? this.bufferedBytes;
+    if (frameBytes > MAX_HTTP_STREAM_FRAME_BYTES) {
+      throw new HttpEngineError("UQA NDJSON stream frame exceeded the client safety limit");
+    }
+  }
+
+  decodeFrame(line) {
+    let frame;
+    try {
+      frame = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(line));
+    } catch {
+      throw new HttpEngineError("UQA response body is not valid JSON");
+    }
+    if (frame.request_id !== undefined && frame.request_id !== this.requestId) {
+      throw new HttpEngineError("UQA NDJSON stream request ID does not match its HTTP response");
+    }
+    if (this.phase === "metadata" && frame.type === "metadata") {
+      if (!Array.isArray(frame.columns)
+          || !frame.columns.every((column) => typeof column === "string")
+          || !Number.isSafeInteger(frame.row_count) || frame.row_count < 0
+          || typeof frame.spilled_to_disk !== "boolean"
+          || typeof frame.request_id !== "string" || frame.request_id === "") {
+        throw new HttpEngineError("UQA response body is not valid JSON");
+      }
+      this.phase = "rows";
+      return {
+        type: "metadata",
+        columns: frame.columns,
+        rowCount: frame.row_count,
+        spilledToDisk: frame.spilled_to_disk,
+        requestId: frame.request_id,
+      };
+    }
+    if (this.phase === "rows" && frame.type === "row") {
+      return { type: "row", row: decodeHTTPRow(frame.row) };
+    }
+    if ((this.phase === "metadata" || this.phase === "rows") && frame.type === "error") {
+      if (typeof frame.code !== "string" || typeof frame.message !== "string"
+          || typeof frame.request_id !== "string" || frame.request_id === "") {
+        throw new HttpEngineError("UQA response body is not valid JSON");
+      }
+      this.phase = "terminal";
+      return {
+        type: "error",
+        code: frame.code,
+        message: frame.message,
+        requestId: frame.request_id,
+      };
+    }
+    if (this.phase === "rows" && frame.type === "complete") {
+      if (!Number.isSafeInteger(frame.row_count) || frame.row_count < 0
+          || typeof frame.request_id !== "string" || frame.request_id === "") {
+        throw new HttpEngineError("UQA response body is not valid JSON");
+      }
+      this.phase = "terminal";
+      return { type: "complete", rowCount: frame.row_count, requestId: frame.request_id };
+    }
+    throw new HttpEngineError("UQA NDJSON stream frame order is invalid");
+  }
+
+  async *[Symbol.asyncIterator]() {
+    for (;;) {
+      const frame = await this.nextFrame();
+      if (frame === null) {
+        return;
+      }
+      yield frame;
+    }
+  }
+}
+
+function stripHTTPStreamCR(line) {
+  return line.at(-1) === 13 ? line.subarray(0, line.byteLength - 1) : line;
+}
+
 /** Tagged SQL parameter (vector / tensor); scalars pass directly. */
 export class SQLParam {
-  constructor(payload) {
+  constructor(payload, httpKind = "scalar") {
     this.payload = payload;
+    Object.defineProperty(this, "httpKind", { value: httpKind });
   }
 
   static scalar(value) {
-    return new SQLParam(encodeValue(value));
+    const bytes = value instanceof Uint8Array || value instanceof ArrayBuffer;
+    return new SQLParam(encodeValue(value), bytes ? "bytes" : "scalar");
   }
 
   static vector(values) {
-    return new SQLParam({ $vector: Array.from(values) });
+    return new SQLParam({ $vector: Array.from(values) }, "vector");
   }
 
   static tensor(values) {
-    return new SQLParam({ $tensor: values.map((row) => Array.from(row)) });
+    return new SQLParam({ $tensor: values.map((row) => Array.from(row)) }, "tensor");
   }
 }
 

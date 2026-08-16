@@ -1,6 +1,6 @@
 # UQA-RS Manual
 
-This manual documents the behavior implemented by the current UQA-RS workspace. UQA-RS is an embedded database that combines PostgreSQL-oriented SQL, full-text retrieval, vector retrieval, graph queries, and ranked fusion in one Rust runtime.
+This manual documents the behavior implemented by the current UQA-RS workspace. UQA-RS is an embedded database that combines PostgreSQL-oriented SQL, full-text retrieval, vector retrieval, graph queries, and ranked fusion in one Rust runtime, and its Rust HTTP client connects applications directly to local and Cloud UQA nodes.
 
 The manual is divided by reader intent:
 
@@ -25,16 +25,20 @@ Each section keeps `README.md` as its landing page and names every chapter `NN-t
 
 ```mermaid
 flowchart LR
-    A[Application] --> B[Engine API or usql]
-    B --> C[SQL parser and compiler]
-    C --> D[Logical and physical planning]
-    D --> E[Unified execution]
-    E --> F[Relational operators]
-    E --> G[Text and vector retrieval]
-    E --> H[Graph runtime]
-    F --> I[Memory, SQLite, or redb storage]
-    G --> I
-    H --> I
+    A[Application] --> B{Execution mode}
+    B -->|Embedded| C[Engine API or usql]
+    B -->|Local or Cloud| J[HttpEngine]
+    J --> K[Authenticated UQA HTTP data plane]
+    K --> D
+    C --> D[SQL parser and compiler]
+    D --> E[Logical and physical planning]
+    E --> F[Unified execution]
+    F --> G[Relational operators]
+    F --> H[Text and vector retrieval]
+    F --> I[Graph runtime]
+    G --> L[Memory, SQLite, or redb storage]
+    H --> L
+    I --> L
 ```
 
 ## Reading paths
@@ -53,6 +57,6 @@ New users should read the [quick start](reference/01-quick-start.md), then work 
 
 ## Version and compatibility scope
 
-This manual targets UQA-RS 0.1.3 and Rust 1.90 or newer. UQA-RS implements a large PostgreSQL-oriented surface, but it is an embedded engine rather than a PostgreSQL server clone. The [compatibility guide](sql/09-compatibility.md) states important differences and unsupported behavior.
+This manual targets UQA-RS 0.1.4 and Rust 1.90 or newer. UQA-RS implements a large PostgreSQL-oriented surface, but it is an embedded engine rather than a PostgreSQL server clone. The [compatibility guide](sql/09-compatibility.md) states important differences and unsupported behavior.
 
 The implementation and tests are authoritative when behavior changes. Source paths are included throughout the internal documentation to make each claim traceable.

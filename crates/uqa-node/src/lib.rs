@@ -41,6 +41,7 @@ const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 mod api;
 mod callbacks;
 mod engine;
+mod http_engine;
 mod input;
 mod results;
 mod tasks;
@@ -49,6 +50,9 @@ mod value;
 pub use api::*;
 pub use callbacks::{JSFunctionOptions, JSFunctionVolatility};
 pub use engine::Engine;
+pub use http_engine::{
+    HttpEngine, HttpSQLBatchExecution, HttpSQLExecution, HttpSQLStream, HttpSQLStreamFrame,
+};
 pub use results::{
     CalibrationReport, CompressionOptions, MigrationReport, ReliabilityBin, SQLNotice, SQLParam,
     SQLResult, SearchHit,

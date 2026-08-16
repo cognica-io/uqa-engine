@@ -21,4 +21,6 @@ Start with unified search for the complete relational, full-text, vector, graph,
 
 The Node.js and Browser WASM entry points share the binding-neutral JavaScript scenarios in [`javascript/`](javascript). Platform-specific files still own engine construction, persistence, callback registration, and resource cleanup.
 
+All four environments also expose the local and Cloud HTTP SQL path: Rust uses `uqa_client::HttpEngine`, while Python, Node.js, and Browser WASM export `HttpEngine` from their existing packages. The binding test suites execute materialized SQL, atomic batch, and streaming requests against controlled HTTP servers; the [HTTP Engine reference](../docs/manual/reference/09-http-engine.md) contains user-facing examples.
+
 The engine also ships smaller single-file Rust examples under [`crates/uqa-engine/examples/`](../crates/uqa-engine/examples), including encrypted-storage variants and the `doomql` demo.

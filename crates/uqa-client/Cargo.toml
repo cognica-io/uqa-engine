@@ -1,0 +1,33 @@
+[package]
+name = "uqa-client"
+description = "Authenticated HTTP Engine client for local and Cloud UQA data planes"
+autotests = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+license-file.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+reqwest.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uqa-core.workspace = true
+uqa-sql.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+tokio.workspace = true
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[lints]
+workspace = true

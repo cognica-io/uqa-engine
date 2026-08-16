@@ -38,6 +38,44 @@ export interface SQLResult {
   affectedRows: number;
 }
 
+export interface HttpSQLExecution {
+  result: SQLResult;
+  requestId: string;
+}
+
+export interface HttpSQLBatchExecution {
+  results: SQLResult[];
+  requestId: string;
+}
+
+export type HttpSQLStreamFrame =
+  | { type: "metadata"; columns: string[]; rowCount: number; spilledToDisk: boolean; requestId: string }
+  | { type: "row"; row: Record<string, JSValue> }
+  | { type: "complete"; rowCount: number; requestId: string }
+  | { type: "error"; code: string; message: string; requestId: string };
+
+export declare class HttpEngineError extends Error {
+  readonly code?: string;
+  readonly status?: number;
+  readonly requestId?: string;
+}
+
+export declare class HttpSQLStream implements AsyncIterable<HttpSQLStreamFrame> {
+  readonly requestId: string;
+  nextFrame(): Promise<HttpSQLStreamFrame | null>;
+  [Symbol.asyncIterator](): AsyncIterator<HttpSQLStreamFrame>;
+}
+
+export declare class HttpEngine {
+  constructor(url: string, token: string);
+  static fromEnv(environment?: { UQA_URL?: string; UQA_TOKEN?: string }): HttpEngine;
+  sql(query: string, params?: ParamInput[]): Promise<SQLResult>;
+  sqlWithMetadata(query: string, params?: ParamInput[]): Promise<HttpSQLExecution>;
+  sqlBatch(statements: Array<[string, ParamInput[]]>): Promise<SQLResult[]>;
+  sqlBatchWithMetadata(statements: Array<[string, ParamInput[]]>): Promise<HttpSQLBatchExecution>;
+  sqlStream(query: string, params?: ParamInput[]): Promise<HttpSQLStream>;
+}
+
 export interface SearchHit {
   docId: number;
   score: number;
