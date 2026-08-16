@@ -446,6 +446,7 @@ fn label_functions_follow_age_semantics_and_errors() {
     create_label_errors_follow_age(&engine);
     created_labels_keep_ids_and_kinds(&engine);
     drop_label_follows_age(&engine);
+    drop_label_removes_entities_and_keeps_default_labels(&engine);
     alter_graph_follows_age(&engine);
 }
 
@@ -653,6 +654,9 @@ fn drop_label_follows_age(engine: &Engine) {
         ),
         Value::Int(3)
     );
+}
+
+fn drop_label_removes_entities_and_keeps_default_labels(engine: &Engine) {
     // Dropping a vertex label removes the vertices with their incident
     // edges, and dropping an edge label removes just the edges; the
     // default-label edge between ada and bob is untouched by either.
