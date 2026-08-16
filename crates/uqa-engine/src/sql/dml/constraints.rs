@@ -36,6 +36,16 @@ pub(in crate::sql) fn validate_document_non_key_constraints(
     let check_constraints = engine
         .try_check_constraint_definitions(table)
         .map_err(|err| dml_storage_error("constraint validation", err))?;
+    let schema = uqa_execution::RowSchema::with_types(
+        definitions
+            .iter()
+            .map(|column| column.name.clone())
+            .collect(),
+        definitions
+            .iter()
+            .map(|column| Some(column.ty.clone()))
+            .collect(),
+    );
     let virtual_columns = definitions
         .iter()
         .filter(|column| {
@@ -90,7 +100,13 @@ pub(in crate::sql) fn validate_document_non_key_constraints(
         if !constraint.enforced {
             continue;
         }
-        let result = eval_lowered_expression(engine, &constraint.expr, Some(document), params)?;
+        let result = crate::sql::scalar::eval_lowered_expression_with_schema(
+            engine,
+            &constraint.expr,
+            document,
+            &schema,
+            params,
+        )?;
         if !uqa_sql::expr::truthy(&result) {
             let label = constraint.name.unwrap_or_else(|| "<unnamed>".into());
             return Err(SQLError::TypeMismatch(format!(

@@ -144,7 +144,13 @@ pub(super) fn eval_lowered_expression(
     row: Option<&ResultRow>,
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
-    let expression = ExpressionPlan::lower(expression.clone());
+    let mut expression = ExpressionPlan::lower(expression.clone());
+    expression.scalar = uqa_execution::bind_type_introspection_with_resolver(
+        expression.scalar,
+        &RowSchema::default(),
+        params,
+        engine,
+    );
     let scope = CteScope::new();
     let hook = ScopedEngineHook::new(engine, &scope);
     let context = PhysicalEvalContext::new(row, params)

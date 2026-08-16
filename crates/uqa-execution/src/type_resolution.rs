@@ -8,6 +8,7 @@
 
 use uqa_core::Value;
 use uqa_sql::ast::{BinaryOp, ColumnType, FunctionBinding};
+use uqa_sql::expr::{TO_HEX_INT4_FUNCTION, TO_HEX_INT8_FUNCTION};
 use uqa_sql::{SQLError, SQLParam};
 
 use crate::{RowSchema, ScalarExpr};
@@ -271,6 +272,8 @@ fn builtin_function_type_inner(
         | "encode"
         | "split_part"
         | "to_hex"
+        | TO_HEX_INT4_FUNCTION
+        | TO_HEX_INT8_FUNCTION
         | "quote_ident"
         | "quote_literal"
         | "quote_nullable"
@@ -816,6 +819,8 @@ fn bind_type_introspection_inner(
             if is_common_type_function(&name) {
                 bind_common_type_expressions(&mut args, schema, params, resolver);
             }
+            let name =
+                bind_to_hex_overload(name, binding.as_ref(), &args, schema, params, resolver);
             if is_pg_typeof(&name) && args.len() == 1 {
                 let name = scalar_type_inner(&args[0], schema, params, resolver)
                     .ok()
@@ -1037,6 +1042,7 @@ fn requires_type_introspection_binding(expression: &ScalarExpr) -> bool {
         } => {
             is_pg_typeof(name)
                 || is_common_type_function(name)
+                || is_to_hex(name)
                 || containment::is_operator(name)
                 || args.iter().any(requires_type_introspection_binding)
                 || order_by
@@ -1112,6 +1118,35 @@ fn frame_bound_requires_type_introspection_binding(bound: &crate::ScalarFrameBou
 
 fn is_pg_typeof(name: &str) -> bool {
     name.eq_ignore_ascii_case("pg_typeof") || name.eq_ignore_ascii_case("pg_catalog.pg_typeof")
+}
+
+fn is_to_hex(name: &str) -> bool {
+    name.eq_ignore_ascii_case("to_hex") || name.eq_ignore_ascii_case("pg_catalog.to_hex")
+}
+
+fn bind_to_hex_overload(
+    name: String,
+    binding: Option<&FunctionBinding>,
+    args: &[ScalarExpr],
+    schema: &RowSchema,
+    params: &[SQLParam],
+    resolver: Option<&dyn FunctionTypeResolver>,
+) -> String {
+    if binding.is_some() || !is_to_hex(&name) || args.len() != 1 {
+        return name;
+    }
+    let Some(argument_type) =
+        scalar_type_inner(named_argument_value(&args[0]), schema, params, resolver)
+            .ok()
+            .flatten()
+    else {
+        return name;
+    };
+    match base_type(&argument_type) {
+        ColumnType::Integer => TO_HEX_INT4_FUNCTION.into(),
+        ColumnType::BigInteger => TO_HEX_INT8_FUNCTION.into(),
+        _ => name,
+    }
 }
 
 fn is_common_type_function(name: &str) -> bool {

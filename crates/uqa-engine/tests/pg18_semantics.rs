@@ -575,6 +575,47 @@ fn new_scalar_functions() {
     assert_eq!(scalar(&eng, "SELECT bit_length('abc')"), Value::Int(24));
     assert_eq!(text(&eng, "SELECT to_hex(255)"), "ff");
     assert_eq!(text(&eng, "SELECT to_hex(-1)"), "ffffffff");
+    assert_eq!(
+        text(&eng, "SELECT to_hex((-1)::bigint)"),
+        "ffffffffffffffff"
+    );
+    eng.sql(
+        "CREATE TABLE to_hex_widths (
+            i4 INTEGER,
+            i8 BIGINT,
+            default_hex TEXT DEFAULT to_hex((-1)::bigint),
+            CHECK (to_hex(i8) = 'ffffffffffffffff')
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql("INSERT INTO to_hex_widths (i4, i8) VALUES (-1, -1)", &[])
+        .unwrap();
+    assert_eq!(
+        text(&eng, "SELECT to_hex(i4) FROM to_hex_widths"),
+        "ffffffff"
+    );
+    assert_eq!(
+        text(&eng, "SELECT to_hex(i8) FROM to_hex_widths"),
+        "ffffffffffffffff"
+    );
+    assert_eq!(
+        text(&eng, "SELECT default_hex FROM to_hex_widths"),
+        "ffffffffffffffff"
+    );
+    eng.sql("CREATE TABLE to_hex_alter (i8 BIGINT)", &[])
+        .unwrap();
+    eng.sql("INSERT INTO to_hex_alter VALUES (-1)", &[])
+        .unwrap();
+    eng.sql(
+        "ALTER TABLE to_hex_alter ALTER COLUMN i8 TYPE TEXT USING to_hex(i8)",
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        text(&eng, "SELECT i8 FROM to_hex_alter"),
+        "ffffffffffffffff"
+    );
     assert_eq!(text(&eng, "SELECT quote_ident('select')"), "\"select\"");
     assert_eq!(text(&eng, "SELECT quote_ident('hello')"), "hello");
     assert_eq!(text(&eng, "SELECT quote_ident('Hello')"), "\"Hello\"");
