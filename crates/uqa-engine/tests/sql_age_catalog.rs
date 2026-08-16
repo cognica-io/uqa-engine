@@ -694,6 +694,14 @@ fn drop_label_follows_age(engine: &Engine) {
         ),
         Value::Int(0)
     );
+    // The default labels stay even when empty: AGE's RESTRICT drop would
+    // remove the empty relation, the engine keeps the graph usable.
+    assert_age_error(
+        engine,
+        "SELECT drop_label('labels', '_ag_label_edge')",
+        "2BP01",
+        "cannot drop table labels._ag_label_edge because other objects depend on it",
+    );
     assert_eq!(
         strings(
             engine,
