@@ -13,6 +13,8 @@ use super::{
 };
 use uqa_sql::ast::{GeneratedColumn, GeneratedColumnKind};
 
+use super::defaults::validate_default_expression;
+
 pub(in crate::sql) fn run_alter_table(
     engine: &Engine,
     stmt: AlterTableStmt,
@@ -64,6 +66,9 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
                 return Err(SQLError::Unsupported(format!(
                     "ALTER TABLE ADD COLUMN: column `{col_name}` already exists"
                 )));
+            }
+            if let Some(default) = &column.default {
+                validate_default_expression(engine, default)?;
             }
             let mut candidate_columns = engine
                 .try_describe_table(&stmt.table)
@@ -218,6 +223,7 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
         }
         AlterTableAction::SetDefault { name, default } => {
             reject_default_change_on_generated_column(engine, &stmt.table, &name)?;
+            validate_default_expression(engine, &default)?;
             if !engine
                 .set_column_default(&stmt.table, &name, Some(default))
                 .map_err(|err| ddl_storage_error("ALTER COLUMN SET DEFAULT", err))?

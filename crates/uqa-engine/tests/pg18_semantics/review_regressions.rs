@@ -199,6 +199,16 @@ fn numeric_to_char_places_sign_tokens_at_their_postgresql_positions() {
 #[test]
 fn to_hex_uses_the_declared_integer_overload_at_every_expression_boundary() {
     let eng = engine();
+    for (sql, sqlstate) in [
+        ("SELECT to_hex('42')", "42725"),
+        ("SELECT to_hex(NULL)", "42725"),
+        ("SELECT to_hex(1::smallint)", "42725"),
+        ("SELECT to_hex('42'::text)", "42883"),
+    ] {
+        assert_sqlstate(&eng, sql, sqlstate);
+    }
+    assert_eq!(scalar(&eng, "SELECT to_hex(NULL::integer)"), Value::Null);
+    assert_eq!(scalar(&eng, "SELECT to_hex(NULL::bigint)"), Value::Null);
     assert_eq!(
         text(&eng, "SELECT to_hex((-1)::bigint)"),
         "ffffffffffffffff"
@@ -215,6 +225,11 @@ fn to_hex_uses_the_declared_integer_overload_at_every_expression_boundary() {
     .unwrap();
     eng.sql("INSERT INTO to_hex_widths (i4, i8) VALUES (-1, -1)", &[])
         .unwrap();
+    assert_sqlstate(
+        &eng,
+        "INSERT INTO to_hex_widths (i4, i8) VALUES (-1, 0)",
+        "23514",
+    );
     assert_eq!(
         text(&eng, "SELECT to_hex(i4) FROM to_hex_widths"),
         "ffffffff"
@@ -239,5 +254,29 @@ fn to_hex_uses_the_declared_integer_overload_at_every_expression_boundary() {
     assert_eq!(
         text(&eng, "SELECT i8 FROM to_hex_alter"),
         "ffffffffffffffff"
+    );
+    assert_sqlstate(
+        &eng,
+        "CREATE TABLE invalid_default_reference (i8 BIGINT, encoded TEXT DEFAULT to_hex(i8))",
+        "0A000",
+    );
+    assert_sqlstate(
+        &eng,
+        "CREATE TABLE ambiguous_default (encoded TEXT DEFAULT to_hex('42'))",
+        "42725",
+    );
+    eng.sql("CREATE TABLE invalid_alter_default (i8 BIGINT)", &[])
+        .unwrap();
+    assert_sqlstate(
+        &eng,
+        "ALTER TABLE invalid_alter_default ALTER COLUMN i8 SET DEFAULT to_hex(i8)",
+        "0A000",
+    );
+    eng.sql("CREATE TABLE invalid_to_hex_dml (encoded TEXT)", &[])
+        .unwrap();
+    assert_sqlstate(
+        &eng,
+        "INSERT INTO invalid_to_hex_dml VALUES (to_hex('42'))",
+        "42725",
     );
 }

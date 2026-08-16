@@ -6,6 +6,7 @@
 
 //! CREATE TABLE execution.
 
+use super::defaults::validate_default_expression;
 use super::{ddl_storage_error, ColumnType, CreateTable, Engine, SQLError, SQLResult};
 use crate::sql::generated::prepare_generated_columns;
 
@@ -30,6 +31,11 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
             "CREATE TABLE: relation `{}` already exists",
             c.name
         )));
+    }
+    for column in &c.columns {
+        if let Some(default) = &column.default {
+            validate_default_expression(engine, default)?;
+        }
     }
     prepare_generated_columns(
         engine,

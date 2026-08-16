@@ -248,13 +248,16 @@ fn eval_mutation_expr(
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
     let hook = ScopedEngineHook::new(engine, ctes);
+    let empty_schema = RowSchema::default();
+    let schema = row.map_or(&empty_schema, |row| &row.schema);
+    uqa_execution::scalar_type_with_resolver(expression, schema, params, engine)?;
+    let expression = uqa_execution::bind_type_introspection_with_resolver(
+        expression.clone(),
+        schema,
+        params,
+        engine,
+    );
     if let Some(row) = row {
-        let expression = uqa_execution::bind_type_introspection_with_resolver(
-            expression.clone(),
-            &row.schema,
-            params,
-            engine,
-        );
         let view = row.view();
         let context = PhysicalEvalContext::from_row_lookup(&view, params)
             .with_function_hook(&hook)
@@ -265,7 +268,7 @@ fn eval_mutation_expr(
         let context = PhysicalEvalContext::new(None, params)
             .with_function_hook(&hook)
             .with_subquery_runner(&hook);
-        eval_physical_scalar(expression, &ctes.scalar_subqueries, &context)
+        eval_physical_scalar(&expression, &ctes.scalar_subqueries, &context)
     }
 }
 

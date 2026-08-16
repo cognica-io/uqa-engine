@@ -145,6 +145,12 @@ pub(super) fn eval_lowered_expression(
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
     let mut expression = ExpressionPlan::lower(expression.clone());
+    uqa_execution::scalar_type_with_resolver(
+        &expression.scalar,
+        &RowSchema::default(),
+        params,
+        engine,
+    )?;
     expression.scalar = uqa_execution::bind_type_introspection_with_resolver(
         expression.scalar,
         &RowSchema::default(),
@@ -171,6 +177,7 @@ pub(crate) fn eval_lowered_expression_with_schema(
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
     let mut expression = ExpressionPlan::lower(expression.clone());
+    uqa_execution::scalar_type_with_resolver(&expression.scalar, schema, params, engine)?;
     expression.scalar = uqa_execution::bind_type_introspection_with_resolver(
         expression.scalar,
         schema,
