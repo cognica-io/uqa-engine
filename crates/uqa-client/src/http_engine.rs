@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use std::ffi::OsStr;
 use std::fmt;
 use std::net::IpAddr;
 use std::time::Duration;
@@ -15,6 +16,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use uqa_sql::{AsyncSQLEngine, SQLParam, SQLResult};
 
+use crate::cli_connection;
 use crate::server_error_envelope::ServerErrorEnvelope;
 use crate::sql_batch_execution::SQLBatchWireResponse;
 use crate::sql_execution::SQLWireResponse;
@@ -69,6 +71,41 @@ impl HttpEngine {
         let credential = std::env::var("UQA_TOKEN")
             .map_err(|_| HttpEngineError::MissingEnvironmentVariable("UQA_TOKEN"))?;
         Self::new(&base_url, SecretString::from(credential))
+    }
+
+    /// Resolve a local project through the installed `uqa` CLI, then connect to its data plane.
+    ///
+    /// The CLI is invoked only during construction. Subsequent SQL calls use HTTP directly.
+    pub async fn local(project: &str) -> Result<Self, HttpEngineError> {
+        Self::local_with_cli(project, "uqa").await
+    }
+
+    /// Resolve a local project through a specific `uqa` CLI executable.
+    pub async fn local_with_cli(
+        project: &str,
+        cli_path: impl AsRef<OsStr>,
+    ) -> Result<Self, HttpEngineError> {
+        let connection = cli_connection::resolve_local(cli_path.as_ref(), project).await?;
+        Self::new(&connection.url, connection.token)
+    }
+
+    /// Resolve a Cloud project and optional organization through the installed `uqa` CLI.
+    ///
+    /// Passing `None` uses the CLI's current default organization. The CLI is invoked only during
+    /// construction; subsequent SQL calls use HTTP directly.
+    pub async fn cloud(project: &str, organization: Option<&str>) -> Result<Self, HttpEngineError> {
+        Self::cloud_with_cli(project, organization, "uqa").await
+    }
+
+    /// Resolve a Cloud project through a specific `uqa` CLI executable.
+    pub async fn cloud_with_cli(
+        project: &str,
+        organization: Option<&str>,
+        cli_path: impl AsRef<OsStr>,
+    ) -> Result<Self, HttpEngineError> {
+        let connection =
+            cli_connection::resolve_cloud(cli_path.as_ref(), project, organization).await?;
+        Self::new(&connection.url, connection.token)
     }
 
     /// Execute one materialized SQL statement through `POST /v1/sql`.

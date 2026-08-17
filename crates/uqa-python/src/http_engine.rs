@@ -7,6 +7,7 @@
 //! Python binding for authenticated local and Cloud HTTP SQL.
 
 use std::future::Future;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use pyo3::exceptions::PyRuntimeError;
@@ -48,6 +49,43 @@ impl PyHttpEngine {
     fn from_env() -> PyResult<Self> {
         Ok(Self {
             inner: Arc::new(HttpEngine::from_env().map_err(http_runtime_error)?),
+        })
+    }
+
+    /// Resolve a local project through the installed `uqa` CLI.
+    #[staticmethod]
+    #[pyo3(signature = (project, *, cli_path=None))]
+    fn local(py: Python<'_>, project: String, cli_path: Option<PathBuf>) -> PyResult<Self> {
+        let inner = run_http(py, async move {
+            match cli_path {
+                Some(path) => HttpEngine::local_with_cli(&project, path).await,
+                None => HttpEngine::local(&project).await,
+            }
+        })?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// Resolve a Cloud project and optional organization through the installed `uqa` CLI.
+    #[staticmethod]
+    #[pyo3(signature = (project, organization=None, *, cli_path=None))]
+    fn cloud(
+        py: Python<'_>,
+        project: String,
+        organization: Option<String>,
+        cli_path: Option<PathBuf>,
+    ) -> PyResult<Self> {
+        let inner = run_http(py, async move {
+            match cli_path {
+                Some(path) => {
+                    HttpEngine::cloud_with_cli(&project, organization.as_deref(), path).await
+                }
+                None => HttpEngine::cloud(&project, organization.as_deref()).await,
+            }
+        })?;
+        Ok(Self {
+            inner: Arc::new(inner),
         })
     }
 

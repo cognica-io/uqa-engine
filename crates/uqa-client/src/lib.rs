@@ -6,10 +6,11 @@
 
 //! Direct, authenticated HTTP access to local and Cloud UQA data planes.
 //!
-//! [`HttpEngine`] mirrors the embedded engine's asynchronous SQL-shaped surface while keeping
-//! endpoint discovery and credential storage outside the library. Both `uqa local connection`
-//! and `uqa cloud connection` produce the URL and project token accepted by this client.
+//! [`HttpEngine`] mirrors the embedded engine's asynchronous SQL-shaped surface. It can use an
+//! explicit URL and token, environment variables, or the installed `uqa` CLI to resolve a local
+//! or Cloud project once during construction.
 
+mod cli_connection;
 mod http_engine;
 mod http_engine_error;
 mod server_error_envelope;

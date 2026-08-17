@@ -8,8 +8,8 @@ authors:
   - family-names: Jeong
     given-names: Jaepil
     orcid: "https://orcid.org/0009-0006-5881-8907"
-version: 0.1.4
-date-released: 2026-08-16
+version: 0.1.5
+date-released: 2026-08-17
 repository-code: "https://github.com/cognica-io/uqa-rs"
 url: "https://github.com/cognica-io/uqa-rs"
 license: AGPL-3.0-only

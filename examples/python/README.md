@@ -10,4 +10,4 @@ These programs mirror the Rust, Node.js, and browser WASM scenarios with the Pyt
 | [`storage_transactions.py`](storage_transactions.py) | Persistent reopen, rollback, savepoints, and independent sessions |
 | [`extensibility.py`](extensibility.py) | Scalar, table, and aggregate Python callbacks |
 
-For local or Cloud SQL without embedding storage, construct `uqa.HttpEngine` or call `uqa.HttpEngine.from_env()`; see the [HTTP Engine reference](../../docs/manual/reference/09-http-engine.md). The Python binding test executes SQL, atomic batch, and streaming requests through this class.
+For local or Cloud SQL without embedding storage, call `uqa.HttpEngine.local(project)`, `uqa.HttpEngine.cloud(project, organization=...)`, `uqa.HttpEngine.from_env()`, or the explicit constructor; see the [HTTP Engine reference](../../docs/manual/reference/09-http-engine.md). The Python binding test covers CLI project lookup, SQL, atomic batch, and streaming requests through this class.

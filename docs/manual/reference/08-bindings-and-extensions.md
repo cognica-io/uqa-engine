@@ -16,10 +16,11 @@ UQA-RS exposes the same durable embedded engine through Rust, Python, Node.js, a
 | Native DuckDB and Arrow FDWs | Yes | Build dependent | Build dependent | No |
 | Independent persistent sessions | Yes | Engine dependent | Yes | Yes |
 | Local and Cloud HTTP SQL/batch/stream | Yes | Yes | Yes | Yes, subject to CORS |
+| Project lookup through installed `uqa` CLI | Yes | Yes | Yes | No |
 
 Check the type declaration files in the target package for the exact release surface.
 
-The HTTP class is named `HttpEngine` in every package. Native Rust, Python, and Node.js reuse `uqa-client`; browsers use the same typed protocol through `fetch`. See the [HTTP Engine reference](09-http-engine.md) for construction, lifecycle, CORS, request metadata, and streaming contracts.
+The HTTP class is named `HttpEngine` in every package. Native Rust, Python, and Node.js reuse `uqa-client` and can resolve local or Cloud projects through the installed CLI once during construction; browsers use the same typed protocol through `fetch` but require explicit connection material. See the [HTTP Engine reference](09-http-engine.md) for construction, lifecycle, CORS, request metadata, and streaming contracts.
 
 Across every binding, `hybrid_search` or `hybridSearch` uses exact signed single-prior log-odds fusion and has no `alpha` argument. The separately named `robust_hybrid_search` or `robustHybridSearch` accepts `alpha` and selects gated, confidence-scaled positive-evidence pooling. SQL follows the same split: mixed same-relation text and vector conjunctions are exact by default, `fuse_bayesian_evidence` and `fuse_log_odds` are exact explicit functions, and `pool_positive_evidence` is the explicit heuristic.
 

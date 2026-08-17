@@ -14,15 +14,18 @@ rust-version.workspace = true
 
 [dependencies]
 reqwest.workspace = true
-secrecy.workspace = true
+secrecy = { workspace = true, features = ["serde"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "process", "time"] }
 uqa-core.workspace = true
 uqa-sql.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
+tempfile = "3.13"
 tokio.workspace = true
 
 [[test]]

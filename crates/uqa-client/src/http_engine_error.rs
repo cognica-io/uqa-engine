@@ -5,6 +5,7 @@
 //
 
 use std::fmt;
+use std::io;
 
 use reqwest::StatusCode;
 use thiserror::Error;
@@ -20,6 +21,22 @@ pub enum HttpEngineError {
     InvalidCredential,
     #[error("required UQA connection environment variable {0} is missing")]
     MissingEnvironmentVariable(&'static str),
+    #[error("UQA project name must not be empty")]
+    EmptyProjectName,
+    #[error("UQA organization name must not be empty")]
+    EmptyOrganizationName,
+    #[error("uqa CLI could not be started; install it or provide its executable path")]
+    CLIUnavailable(#[source] io::Error),
+    #[error("uqa CLI connection lookup failed")]
+    CLIExecution(#[source] io::Error),
+    #[error("uqa CLI connection lookup timed out")]
+    CLITimedOut,
+    #[error("uqa CLI connection output exceeded the client safety limit")]
+    CLIOutputTooLarge,
+    #[error("uqa CLI could not resolve the requested project; run the matching connection command for details")]
+    CLIConnectionFailed,
+    #[error("uqa CLI returned an invalid connection response")]
+    InvalidCLIResponse(#[source] serde_json::Error),
     #[error("SQL text must not be empty")]
     EmptySQL,
     #[error("SQL parameter cannot be represented by the HTTP protocol")]
@@ -86,6 +103,24 @@ impl fmt::Debug for HttpEngineError {
                 .debug_tuple("HttpEngineError::MissingEnvironmentVariable")
                 .field(name)
                 .finish(),
+            Self::EmptyProjectName => formatter.write_str("HttpEngineError::EmptyProjectName"),
+            Self::EmptyOrganizationName => {
+                formatter.write_str("HttpEngineError::EmptyOrganizationName")
+            }
+            Self::CLIUnavailable(_) => {
+                formatter.write_str("HttpEngineError::CLIUnavailable([REDACTED])")
+            }
+            Self::CLIExecution(_) => {
+                formatter.write_str("HttpEngineError::CLIExecution([REDACTED])")
+            }
+            Self::CLITimedOut => formatter.write_str("HttpEngineError::CLITimedOut"),
+            Self::CLIOutputTooLarge => formatter.write_str("HttpEngineError::CLIOutputTooLarge"),
+            Self::CLIConnectionFailed => {
+                formatter.write_str("HttpEngineError::CLIConnectionFailed")
+            }
+            Self::InvalidCLIResponse(_) => {
+                formatter.write_str("HttpEngineError::InvalidCLIResponse([REDACTED])")
+            }
             Self::EmptySQL => formatter.write_str("HttpEngineError::EmptySQL"),
             Self::InvalidParameter => formatter.write_str("HttpEngineError::InvalidParameter"),
             Self::BuildClient(_) => formatter.write_str("HttpEngineError::BuildClient([REDACTED])"),

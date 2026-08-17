@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -148,6 +148,34 @@ test("HTTP engine executes SQL, atomic batches, and streams", async () => {
     }
     assert.deepEqual(frames.map((frame) => frame.type), ["metadata", "row", "complete"]);
     assert.deepEqual(frames[1].row, { n: 1 });
+  });
+});
+
+test("HTTP engine resolves local and Cloud projects through the CLI", {
+  skip: process.platform === "win32" ? "POSIX fake CLI fixture" : false,
+}, async () => {
+  await withHTTPServer(async (origin) => {
+    const directory = mkdtempSync(join(tmpdir(), "uqa-http-cli-"));
+    const cli = join(directory, "uqa");
+    writeFileSync(cli, [
+      "#!/bin/sh",
+      "test \"$2\" = connection || exit 19",
+      "if test \"$1\" = cloud; then test \"$6\" = --org && test \"$7\" = acme || exit 20; fi",
+      `printf '%s\\n' '{"url":"${origin}","token":"uqa_db_test"}'`,
+      "",
+    ].join("\n"), "ascii");
+    chmodSync(cli, 0o700);
+    try {
+      const local = await uqa.HttpEngine.local("notes", { cliPath: cli });
+      assert.equal((await local.sql("SELECT $1", [7])).rows[0].answer, 7);
+      const cloud = await uqa.HttpEngine.cloud("analytics", {
+        organization: "acme",
+        cliPath: cli,
+      });
+      assert.equal((await cloud.sql("SELECT $1", [7])).rows[0].answer, 7);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
 

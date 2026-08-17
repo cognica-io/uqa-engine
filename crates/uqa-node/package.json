@@ -1,6 +1,6 @@
 {
   "name": "uqa",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Node.js bindings for embedded UQA and local or Cloud HTTP SQL",
   "license": "AGPL-3.0-only",
   "author": "Jaepil Jeong <jaepil@cognica.io>",

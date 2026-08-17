@@ -51,7 +51,8 @@ pub use api::*;
 pub use callbacks::{JSFunctionOptions, JSFunctionVolatility};
 pub use engine::Engine;
 pub use http_engine::{
-    HttpEngine, HttpSQLBatchExecution, HttpSQLExecution, HttpSQLStream, HttpSQLStreamFrame,
+    HttpEngine, HttpEngineCloudOptions, HttpEngineLocalOptions, HttpSQLBatchExecution,
+    HttpSQLExecution, HttpSQLStream, HttpSQLStreamFrame,
 };
 pub use results::{
     CalibrationReport, CompressionOptions, MigrationReport, ReliabilityBin, SQLNotice, SQLParam,

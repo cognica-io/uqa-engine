@@ -24,7 +24,7 @@ It is designed for applications that need more than a relational table but do no
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
 > [!NOTE]
-> UQA-RS is under active development at version 0.1.4. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
+> UQA-RS is under active development at version 0.1.5. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
 
 ## Mathematical foundation
 
@@ -134,14 +134,14 @@ cargo run -p uqa-engine --example compressed_encrypted_catalog
 
 ## Connect to a local or Cloud UQA node
 
-`uqa-client::HttpEngine` sends SQL directly to the authenticated HTTP data plane shared by local and Cloud nodes. A trusted launcher can obtain `UQA_URL` and `UQA_TOKEN` from `uqa local connection PROJECT --format env` or `uqa cloud connection PROJECT --format env`; do not log, commit, or pass the token as a command-line argument.
+`uqa-client::HttpEngine` sends SQL directly to the authenticated HTTP data plane shared by local and Cloud nodes. Native applications can resolve a project through the installed CLI once during construction, while services can continue to supply an explicit URL and token or trusted `UQA_URL` and `UQA_TOKEN` environment variables.
 
 ```rust
 use uqa_client::{HttpEngine, SQLParam};
 use uqa_core::Value;
 
 # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-let engine = HttpEngine::from_env()?;
+let engine = HttpEngine::cloud("notes", Some("example")).await?;
 let result = engine
     .sql(
         "SELECT id, title FROM notes WHERE id = $1",
@@ -153,7 +153,7 @@ assert_eq!(result.rows.len(), 1);
 # }
 ```
 
-Python, Node.js, and browser packages expose the same `HttpEngine` name. The client calls `/v1/sql`, `/v1/sql/batch`, and `/v1/sql/stream` directly; it does not start a CLI subprocess for queries. See the [HTTP Engine reference](docs/manual/reference/09-http-engine.md) for connection, binding examples, result, streaming, CORS, and security contracts.
+Python and Node.js provide matching `local` and `cloud` project constructors; browsers retain explicit URL/token and environment construction because they cannot execute the CLI or access its credential store. Every client calls `/v1/sql`, `/v1/sql/batch`, and `/v1/sql/stream` directly after construction. See the [HTTP Engine reference](docs/manual/reference/09-http-engine.md) for connection, binding examples, result, streaming, CORS, and security contracts.
 
 ## Choose a query path
 

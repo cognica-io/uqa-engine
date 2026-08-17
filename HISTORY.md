@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-08-17
+
+### Added
+
+- Added one-shot local and Cloud project-name initialization to the Rust, Python, and Node.js `HttpEngine` bindings through the installed `uqa` CLI, including optional Cloud organization selection and explicit nonstandard CLI paths while preserving URL/token and environment constructors.
+
+### Security
+
+- Launched CLI discovery without a shell or token-bearing arguments, removed any ambient `UQA_TOKEN` from the child environment, bounded stdout and stderr at 64 KiB and execution at 30 seconds, cleared captured credential buffers, and kept CLI diagnostics out of public errors.
+
 ## [0.1.4] - 2026-08-16
 
 ### Added

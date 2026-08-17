@@ -57,6 +57,17 @@ pub struct HttpSQLStreamFrame {
     pub message: Option<String>,
 }
 
+#[napi(object, js_name = "HttpEngineLocalOptions")]
+pub struct HttpEngineLocalOptions {
+    pub cli_path: Option<String>,
+}
+
+#[napi(object, js_name = "HttpEngineCloudOptions")]
+pub struct HttpEngineCloudOptions {
+    pub organization: Option<String>,
+    pub cli_path: Option<String>,
+}
+
 #[napi]
 impl HttpEngine {
     /// Connect to one local or Cloud UQA data-plane origin.
@@ -74,6 +85,39 @@ impl HttpEngine {
     pub fn from_env() -> Result<Self> {
         Ok(Self {
             inner: Arc::new(CoreHttpEngine::from_env().map_err(http_error)?),
+        })
+    }
+
+    /// Resolve a local project through the installed `uqa` CLI.
+    #[napi(factory, ts_return_type = "Promise<HttpEngine>")]
+    pub async fn local(project: String, options: Option<HttpEngineLocalOptions>) -> Result<Self> {
+        let cli_path = options.and_then(|value| value.cli_path);
+        let inner = match cli_path {
+            Some(path) => CoreHttpEngine::local_with_cli(&project, path).await,
+            None => CoreHttpEngine::local(&project).await,
+        }
+        .map_err(http_error)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// Resolve a Cloud project and optional organization through the installed `uqa` CLI.
+    #[napi(factory, ts_return_type = "Promise<HttpEngine>")]
+    pub async fn cloud(project: String, options: Option<HttpEngineCloudOptions>) -> Result<Self> {
+        let organization = options
+            .as_ref()
+            .and_then(|value| value.organization.clone());
+        let cli_path = options.and_then(|value| value.cli_path);
+        let inner = match cli_path {
+            Some(path) => {
+                CoreHttpEngine::cloud_with_cli(&project, organization.as_deref(), path).await
+            }
+            None => CoreHttpEngine::cloud(&project, organization.as_deref()).await,
+        }
+        .map_err(http_error)?;
+        Ok(Self {
+            inner: Arc::new(inner),
         })
     }
 

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -120,6 +121,27 @@ def test_http_engine_sql_batch_and_stream(http_origin: str) -> None:
     assert [frame["type"] for frame in frames] == ["metadata", "row", "complete"]
     assert frames[1]["row"] == {"n": 1}
     assert "uqa_db_test" not in repr(engine)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX fake CLI fixture")
+def test_http_engine_resolves_local_and_cloud_projects(
+    http_origin: str, tmp_path
+) -> None:
+    cli = tmp_path / "uqa"
+    cli.write_text(
+        "#!/bin/sh\n"
+        "test \"$2\" = connection || exit 19\n"
+        "if test \"$1\" = cloud; then "
+        "test \"$6\" = --org && test \"$7\" = acme || exit 20; fi\n"
+        f"printf '%s\\n' '{{\"url\":\"{http_origin}\",\"token\":\"uqa_db_test\"}}'\n",
+        encoding="ascii",
+    )
+    cli.chmod(0o700)
+
+    local = uqa.HttpEngine.local("notes", cli_path=cli)
+    assert local.sql("SELECT $1", [7]).rows[0]["answer"] == 7
+    cloud = uqa.HttpEngine.cloud("analytics", organization="acme", cli_path=cli)
+    assert cloud.sql("SELECT $1", [7]).rows[0]["answer"] == 7
 
 
 def test_sql_text_vector_tensor_and_cypher_surfaces() -> None:

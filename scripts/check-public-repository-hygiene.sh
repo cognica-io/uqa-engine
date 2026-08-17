@@ -6,7 +6,8 @@ failed=0
 reported=0
 
 machine_path_pattern='(/Users/[[:alnum:]_.-]+/|/home/[[:alnum:]_.-]+/|[A-Za-z]:\\Users\\|file:///(Users|home)/)'
-internal_host_pattern='((^|[^[:alnum:]_.-])([[:alnum:]][[:alnum:]_-]*\.)+(internal|local)([^[:alnum:]_.-]|$)|https?://(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.))'
+# An opening parenthesis after `.local` or `.internal` is a method call, not a hostname.
+internal_host_pattern='((^|[^[:alnum:]_.-])([[:alnum:]][[:alnum:]_-]*\.)+(internal|local)([^[:alnum:]_.(-]|$)|https?://(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.))'
 credential_pattern='(github_pat_[[:alnum:]_]{20,}|gh[pousr]_[[:alnum:]]{20,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----)'
 combined_pattern="($machine_path_pattern)|($internal_host_pattern)|($credential_pattern)"
 

@@ -71,6 +71,10 @@ export declare class HttpEngine {
   constructor(url: string, token: string)
   /** Read `UQA_URL` and `UQA_TOKEN` from the process environment. */
   static fromEnv(): HttpEngine
+  /** Resolve a local project through the installed `uqa` CLI. */
+  static local(project: string, options?: HttpEngineLocalOptions | undefined | null): Promise<HttpEngine>
+  /** Resolve a Cloud project and optional organization through the installed `uqa` CLI. */
+  static cloud(project: string, options?: HttpEngineCloudOptions | undefined | null): Promise<HttpEngine>
   sql(query: string, params?: Array<ParamInput> | undefined | null): Promise<SQLResult>
   sqlWithMetadata(query: string, params?: Array<ParamInput> | undefined | null): Promise<HttpSQLExecution>
   sqlBatch(statements: Array<[string, Array<ParamInput>]>): Promise<Array<SQLResult>>
@@ -104,6 +108,15 @@ export interface CompressionOptions {
 }
 
 export declare function detectDatabaseFile(path: string): string
+
+export interface HttpEngineCloudOptions {
+  organization?: string
+  cliPath?: string
+}
+
+export interface HttpEngineLocalOptions {
+  cliPath?: string
+}
 
 export interface HttpSQLBatchExecution {
   results: Array<SQLResult>

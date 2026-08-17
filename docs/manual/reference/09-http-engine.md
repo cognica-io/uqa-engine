@@ -1,34 +1,55 @@
 # HTTP Engine
 
-The `uqa-client` crate provides `HttpEngine`, an asynchronous Rust SQL interface for the HTTP data plane shared by local and Cloud UQA nodes. It executes queries directly over HTTP after construction; it does not invoke the `uqa` CLI for each query.
+The `uqa-client` crate provides `HttpEngine`, an asynchronous Rust SQL interface for the HTTP data plane shared by local and Cloud UQA nodes. Native Rust, Python, and Node.js applications can resolve a project name through the installed `uqa` CLI once during construction; every SQL operation after construction goes directly to the data plane over HTTP.
 
 ## Install a released binding
 
-UQA-RS release artifacts are attached to the [GitHub release](https://github.com/cognica-io/uqa-rs/releases/tag/v0.1.4); they are not currently published to crates.io, PyPI, or npm. Pin the application and its deployment artifact to the same release:
+UQA-RS release artifacts are attached to the [GitHub release](https://github.com/cognica-io/uqa-rs/releases/tag/v0.1.5); they are not currently published to crates.io, PyPI, or npm. Pin the application and its deployment artifact to the same release:
 
 ```toml
 [dependencies]
-uqa-client = { git = "https://github.com/cognica-io/uqa-rs", tag = "v0.1.4" }
+uqa-client = { git = "https://github.com/cognica-io/uqa-rs", tag = "v0.1.5" }
 ```
 
 ```sh
-python -m pip install ./uqa-0.1.4-cp38-abi3-PLATFORM.whl
-npm install ./uqa-0.1.4-PLATFORM.tgz
-npm install ./uqa-wasm-0.1.4.tgz
+python -m pip install ./uqa-0.1.5-cp38-abi3-PLATFORM.whl
+npm install ./uqa-0.1.5-PLATFORM.tgz
+npm install ./uqa-wasm-0.1.5.tgz
 ```
 
-The platform-specific Node.js archive includes the native addon; the unqualified `uqa-0.1.4.tgz` archive contains only the JavaScript package and expects a compatible addon package to be installed separately. An application runtime does not need to spawn or bundle the `uqa` CLI once trusted deployment configuration supplies `UQA_URL` and `UQA_TOKEN`.
+The platform-specific Node.js archive includes the native addon; the unqualified `uqa-0.1.5.tgz` archive contains only the JavaScript package and expects a compatible addon package to be installed separately. An application runtime does not need to spawn or bundle the `uqa` CLI when trusted deployment configuration supplies `UQA_URL` and `UQA_TOKEN`.
 
-## Obtain connection material
+## Connect by project name
 
-Local and Cloud projects differ only in how their URL and project-scoped token are discovered. Both connection commands can emit the `UQA_URL` and `UQA_TOKEN` names consumed by `HttpEngine::from_env`:
+The native Rust client can ask the installed `uqa` CLI to resolve a local project name or a Cloud project name and organization:
+
+```rust
+use uqa_client::HttpEngine;
+
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+let local = HttpEngine::local("notes").await?;
+let cloud = HttpEngine::cloud("analytics", Some("example")).await?;
+# let _ = (local, cloud);
+# Ok(())
+# }
+```
+
+`HttpEngine::local` runs `uqa local connection PROJECT --format json`. It uses the local registry and credential store and does not require a Cloud login, but the project node must be ready. `HttpEngine::cloud` runs `uqa cloud connection PROJECT --format json`; it requires a current Cloud login and uses the supplied organization ID or slug, or the CLI's default organization when the argument is `None`.
+
+Both methods resolve `uqa` through `PATH`. Use `HttpEngine::local_with_cli(project, path)` or `HttpEngine::cloud_with_cli(project, organization, path)` when the executable has a fixed nonstandard location. The application process must have access to the same UQA home and native credential store as the interactive CLI user.
+
+The resolver launches the executable directly without a shell, passes no token in arguments, explicitly removes an ambient `UQA_TOKEN` project credential from the child environment, closes stdin, limits stdout and stderr to 64 KiB each, and terminates a lookup after 30 seconds. CLI-specific Cloud and local authentication environment remains available to the child. The resolver accepts only a successful JSON connection response, clears captured credential buffers, discards stderr, and returns redacted errors. Run the matching `uqa ... connection` command directly when a generic lookup failure requires operator diagnostics.
+
+## Connect with deployment configuration
+
+Services that should not invoke a CLI can obtain connection material in a trusted launcher or secret manager. Both connection commands can emit the `UQA_URL` and `UQA_TOKEN` names consumed by `HttpEngine::from_env`:
 
 ```sh
 uqa local connection notes --format env
 uqa cloud connection notes --org example --format env
 ```
 
-Connection output contains a credential. Use it only in a trusted launcher or secret manager, never log it, commit it, place it in a command-line argument, or persist it in application configuration. The CLI remains responsible for local project lifecycle, Cloud login and organization selection, project lookup, and native credential-store access.
+Connection output contains a credential. Never log it, commit it, place it in a command-line argument, or persist it in application configuration. The CLI remains responsible for local project lifecycle, Cloud login and organization selection, project lookup, and native credential-store access.
 
 Applications that already hold connection material can construct the engine explicitly:
 
@@ -49,12 +70,14 @@ The embedded `Engine` and remote `HttpEngine` implement the common Rust `AsyncSQ
 
 ## Language bindings
 
-The Python package exposes a synchronous `HttpEngine` that follows the existing synchronous Python `Engine` shape and releases the GIL during HTTP work:
+The Python package exposes synchronous project constructors and follows the existing synchronous Python `Engine` shape while releasing the GIL during CLI lookup and HTTP work:
 
 ```python
 import uqa
 
-engine = uqa.HttpEngine.from_env()
+local = uqa.HttpEngine.local("notes")
+engine = uqa.HttpEngine.cloud("analytics", organization="example")
+# A nonstandard installation can pass cli_path="/opt/uqa/bin/uqa".
 result, request_id = engine.sql_with_metadata(
     "SELECT id, title FROM notes WHERE id = $1",
     [42],
@@ -64,12 +87,14 @@ for frame in engine.sql_stream("SELECT id FROM notes ORDER BY id"):
         print(frame["row"])
 ```
 
-The Node.js binding is asynchronous and reuses the native Rust HTTP client:
+The Node.js binding exposes asynchronous project constructors and reuses the native Rust HTTP client:
 
 ```javascript
 const { HttpEngine } = require("uqa");
 
-const engine = HttpEngine.fromEnv();
+const local = await HttpEngine.local("notes");
+const engine = await HttpEngine.cloud("analytics", { organization: "example" });
+// Add cliPath: "/opt/uqa/bin/uqa" when the CLI is outside PATH.
 const { result, requestId } = await engine.sqlWithMetadata(
   "SELECT id, title FROM notes WHERE id = $1",
   [42],
@@ -95,7 +120,7 @@ for await (const frame of await engine.sqlStream("SELECT id FROM notes ORDER BY 
 }
 ```
 
-Browser requests use no cookies and require the data plane to allow `POST` and `OPTIONS`, allow the `authorization` and `content-type` request headers, and expose `x-request-id`. A browser application must keep the project token out of source bundles and durable browser storage; obtain it through a trusted application backend or another short-lived bootstrap path. JavaScript numbers cannot exactly carry integers beyond `Number.MAX_SAFE_INTEGER`, so the browser binding rejects unsafe input and output integers instead of silently rounding them.
+Browsers cannot execute a local CLI or read its native credential store, so the browser class intentionally supports only an explicit URL and token or `HttpEngine.fromEnv(environment)`. Browser requests use no cookies and require the data plane to allow `POST` and `OPTIONS`, allow the `authorization` and `content-type` request headers, and expose `x-request-id`. A browser application must keep the project token out of source bundles and durable browser storage; obtain it through a trusted application backend or another short-lived bootstrap path. JavaScript numbers cannot exactly carry integers beyond `Number.MAX_SAFE_INTEGER`, so the browser binding rejects unsafe input and output integers instead of silently rounding them.
 
 ## Execute SQL
 
@@ -170,6 +195,6 @@ The client bounds each NDJSON frame at 64 MiB, rejects invalid frame order, requ
 
 ## Errors and diagnostics
 
-`HttpEngineError` separates URL, credential, parameter, transport, content-type, size, JSON, request-identity, stream, and server failures. A Rust server failure retains its HTTP status, stable error code, message, and optional request ID for explicit handling, while `Debug` output redacts server messages, transport URLs, endpoints, credentials, statements, parameters, rows, and streamed values. Python and Node.js surface the redacted display message; browser errors expose only the status, stable code, and request ID. Materialized JSON bodies are bounded at 65 MiB, error bodies at 64 KiB, and individual stream frames at 64 MiB in every binding.
+`HttpEngineError` separates CLI availability, timeout, size, exit, and JSON failures from URL, credential, parameter, transport, content-type, response-size, request-identity, stream, and server failures. A Rust server failure retains its HTTP status, stable error code, message, and optional request ID for explicit handling, while `Debug` output redacts CLI diagnostics, server messages, transport URLs, endpoints, credentials, statements, parameters, rows, and streamed values. Python and Node.js surface the redacted display message; browser errors expose only the status, stable code, and request ID. CLI stdout and stderr are bounded at 64 KiB each, materialized JSON bodies at 65 MiB, HTTP error bodies at 64 KiB, and individual stream frames at 64 MiB.
 
 Do not blindly retry SQL mutations. Retry only a bounded transient failure when the operation is known to be safe, and use the preserved request ID when investigating an ambiguous response.
