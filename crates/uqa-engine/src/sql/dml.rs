@@ -26,6 +26,48 @@ fn dml_storage_error(action: &str, err: impl std::fmt::Display) -> SQLError {
     SQLError::Internal(format!("{action} failed in storage backend: {err}"))
 }
 
+fn lock_mutation_row(
+    engine: &Engine,
+    table: &str,
+    display_name: &str,
+    doc_id: DocId,
+    strength: uqa_sql::ast::LockStrength,
+) -> Result<(), SQLError> {
+    match engine.lock_row(
+        table,
+        doc_id,
+        strength,
+        uqa_sql::ast::LockWait::Block,
+        display_name,
+    )? {
+        crate::row_locks::LockAcquire::Granted => Ok(()),
+        crate::row_locks::LockAcquire::Skipped => Err(SQLError::Internal(
+            "DML row locking used SKIP LOCKED".into(),
+        )),
+    }
+}
+
+fn update_lock_strength(
+    engine: &Engine,
+    table: &str,
+    columns: &[String],
+) -> uqa_sql::ast::LockStrength {
+    let Ok(keys) = engine.try_key_constraints(table) else {
+        return uqa_sql::ast::LockStrength::ForUpdate;
+    };
+    let touches_key = keys.iter().any(|constraint| {
+        constraint
+            .columns
+            .iter()
+            .any(|column| columns.iter().any(|assigned| assigned == column))
+    });
+    if touches_key {
+        uqa_sql::ast::LockStrength::ForUpdate
+    } else {
+        uqa_sql::ast::LockStrength::ForNoKeyUpdate
+    }
+}
+
 fn missing_document_error(action: &str, table: &str, doc_id: DocId) -> SQLError {
     SQLError::Internal(format!(
         "{action}: document {doc_id} listed by table `{table}` disappeared during the statement"

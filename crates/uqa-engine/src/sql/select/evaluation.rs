@@ -20,6 +20,7 @@ use uqa_sql::expr::RowLookup;
 pub(crate) struct CteScope {
     pub(in crate::sql) rows: BTreeMap<String, uqa_execution::SharedSpill>,
     pub(in crate::sql) scalar_subqueries: Vec<QueryPlan>,
+    pub(in crate::sql) emit_lock_identities: bool,
     scalar_subquery_arena: u64,
     next_scalar_subquery_arena: Arc<AtomicU64>,
     scalar_subquery_cache:
@@ -31,6 +32,7 @@ impl Default for CteScope {
         Self {
             rows: BTreeMap::new(),
             scalar_subqueries: Vec::new(),
+            emit_lock_identities: false,
             scalar_subquery_arena: 0,
             next_scalar_subquery_arena: Arc::new(AtomicU64::new(1)),
             scalar_subquery_cache: Arc::new(parking_lot::Mutex::new(BTreeMap::new())),
@@ -709,6 +711,7 @@ impl ScopedEngineHook<'_> {
             return Ok(None);
         };
         let mut scoped_ctes = self.ctes.clone();
+        scoped_ctes.emit_lock_identities = false;
         let result = execute_query_plan_output(
             self.engine,
             &decorrelated.inner,
@@ -777,6 +780,7 @@ impl ScopedEngineHook<'_> {
         params: &[SQLParam],
     ) -> Result<CachedScalarSubquery, SQLError> {
         let mut scoped_ctes = self.ctes.clone();
+        scoped_ctes.emit_lock_identities = false;
         let output = execute_query_plan_output(
             self.engine,
             plan,

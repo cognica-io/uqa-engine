@@ -38,6 +38,7 @@ pub(crate) fn encode_physical_row_record(
         })?;
         encode_value(&mut record, value, 0)?;
     }
+    encode_lock_origins(&mut record, row)?;
     debug_assert_eq!(record.len(), bytes);
     Ok(record)
 }
@@ -55,6 +56,7 @@ pub(crate) fn encoded_physical_row_record_size(
         })?;
         add_value_size(&mut bytes, value, 0)?;
     }
+    add_lock_origins_size(&mut bytes, row)?;
     if row.value(physical_width).is_some() {
         return Err(spill_error(format!(
             "physical row has more than {physical_width} slots"
@@ -296,6 +298,27 @@ fn encode_batch(writer: &mut impl Write, batch: &Batch) -> ExecResult<()> {
             })?;
             encode_value(writer, value, 0)?;
         }
+        encode_lock_origins(writer, row)?;
+    }
+    Ok(())
+}
+
+fn encode_lock_origins(writer: &mut impl Write, row: &PhysicalRow) -> ExecResult<()> {
+    write_u64(writer, row.lock_origins().len())?;
+    for origin in row.lock_origins() {
+        write_bytes(writer, origin.qualifier.as_bytes())?;
+        write_bytes(writer, origin.storage_name.as_bytes())?;
+        write_raw(writer, &origin.doc_id.to_le_bytes(), "lock origin doc id")?;
+    }
+    Ok(())
+}
+
+fn add_lock_origins_size(bytes: &mut usize, row: &PhysicalRow) -> ExecResult<()> {
+    add_size(bytes, 8, "lock origin count")?;
+    for origin in row.lock_origins() {
+        add_string_size(bytes, origin.qualifier.as_ref(), "lock origin qualifier")?;
+        add_string_size(bytes, origin.storage_name.as_ref(), "lock origin storage")?;
+        add_size(bytes, 8, "lock origin doc id")?;
     }
     Ok(())
 }

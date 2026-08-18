@@ -6,6 +6,8 @@
 
 //! Schema-only projection used after an expression-producing stage.
 
+use std::sync::Arc;
+
 use crate::{Batch, ColumnIdentity, ExecResult, PhysicalOperator, PhysicalOrder, RowSchema};
 
 fn remap_ordering(
@@ -41,6 +43,7 @@ pub struct ColumnSelection<'a> {
     /// under collision-free internal names while this final, non-evaluating
     /// operator restores the public SQL column names.
     ordering: Vec<PhysicalOrder>,
+    rebind_lock_qualifier: Option<Arc<str>>,
 }
 
 impl<'a> ColumnSelection<'a> {
@@ -66,6 +69,7 @@ impl<'a> ColumnSelection<'a> {
             child,
             schema,
             ordering,
+            rebind_lock_qualifier: None,
         }
     }
 
@@ -86,6 +90,7 @@ impl<'a> ColumnSelection<'a> {
             child,
             schema,
             ordering,
+            rebind_lock_qualifier: None,
         }
     }
 
@@ -111,7 +116,19 @@ impl<'a> ColumnSelection<'a> {
             child,
             schema,
             ordering,
+            rebind_lock_qualifier: None,
         }
+    }
+
+    /// Attribute inner lock origins to this source qualifier so `FOR UPDATE OF`
+    /// a view, CTE, or subquery does not lock sibling join inputs.
+    #[must_use]
+    pub fn rebinding_lock_origins(mut self, qualifier: impl Into<String>) -> Self {
+        let qualifier = qualifier.into();
+        if !qualifier.is_empty() {
+            self.rebind_lock_qualifier = Some(Arc::from(qualifier));
+        }
+        self
     }
 }
 
@@ -136,10 +153,15 @@ impl PhysicalOperator for ColumnSelection<'_> {
         let Some(batch) = self.child.next()? else {
             return Ok(None);
         };
-        Ok(Some(Batch::from_physical_rows(
-            self.schema.clone(),
-            batch.rows,
-        )))
+        let rows = match self.rebind_lock_qualifier.as_ref() {
+            Some(qualifier) => batch
+                .rows
+                .into_iter()
+                .map(|row| row.rebind_lock_origin_qualifiers(Arc::clone(qualifier)))
+                .collect(),
+            None => batch.rows,
+        };
+        Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)))
     }
 
     fn close(&mut self) -> ExecResult<()> {

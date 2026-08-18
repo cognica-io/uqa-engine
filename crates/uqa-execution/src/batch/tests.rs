@@ -6,6 +6,7 @@
 
 use super::*;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 #[test]
 fn qualified_schema_lookup_reads_positional_values() {
@@ -84,6 +85,41 @@ fn join_composes_fragments_without_cloning_values() {
     let view = output_schema.view(&joined);
     assert_eq!(view.get("l.value"), left_fragment.first());
     assert_eq!(view.get("r.value"), right_fragment.first());
+}
+
+#[test]
+fn lock_rows_clone_keeps_shared_fragments_and_concatenated_origins() {
+    let left = PhysicalRow::from_values(vec![Value::Str("left".repeat(128))])
+        .with_lock_origin(RowLockOrigin::new("accounts", "public.accounts", 1));
+    let right = PhysicalRow::from_values(vec![Value::Str("right".repeat(128))])
+        .with_lock_origin(RowLockOrigin::new("owners", "public.owners", 2));
+    let left_fragment = Arc::clone(&left.fragments[0].values);
+    let right_fragment = Arc::clone(&right.fragments[0].values);
+    let joined = PhysicalRow::concat(&left, &right);
+    let locked = joined.clone();
+
+    assert_eq!(locked.fragment_count(), 2);
+    assert!(Arc::ptr_eq(&locked.fragments[0].values, &left_fragment));
+    assert!(Arc::ptr_eq(&locked.fragments[1].values, &right_fragment));
+    assert_eq!(locked.lock_origins().len(), 2);
+    assert_eq!(locked.lock_origins()[0].doc_id, 1);
+    assert_eq!(locked.lock_origins()[1].doc_id, 2);
+}
+
+#[test]
+fn rebind_lock_origin_qualifiers_keeps_storage_names() {
+    let row = PhysicalRow::from_values(vec![Value::Int(1)]).with_lock_origin(RowLockOrigin::new(
+        "accounts",
+        "public.accounts",
+        7,
+    ));
+    let rebound = row.rebind_lock_origin_qualifiers(Arc::<str>::from("balances"));
+    assert_eq!(rebound.lock_origins()[0].qualifier.as_ref(), "balances");
+    assert_eq!(
+        rebound.lock_origins()[0].storage_name.as_ref(),
+        "public.accounts"
+    );
+    assert_eq!(rebound.lock_origins()[0].doc_id, 7);
 }
 
 #[test]

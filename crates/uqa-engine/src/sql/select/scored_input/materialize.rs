@@ -54,7 +54,10 @@ impl ScoredDocumentSource {
                 values,
                 &extras,
             );
-            rows.push(uqa_execution::PhysicalRow::from_values(row.into_values()));
+            rows.push(self.attach_lock_origin(
+                uqa_execution::PhysicalRow::from_values(row.into_values()),
+                doc_id,
+            ));
             Ok(())
         })?;
         Ok(rows)

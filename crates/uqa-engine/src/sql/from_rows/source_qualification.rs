@@ -82,9 +82,10 @@ pub(in crate::sql) fn qualify_source_operator_with_columns<'a>(
             Some((column.to_string(), identity, index))
         })
         .collect();
-    Box::new(uqa_execution::ColumnSelection::with_identities(
-        operator, mapping,
-    ))
+    Box::new(
+        uqa_execution::ColumnSelection::with_identities(operator, mapping)
+            .rebinding_lock_origins(qualifier),
+    )
 }
 
 pub(in crate::sql) fn attach_qualifier_filter<'a>(

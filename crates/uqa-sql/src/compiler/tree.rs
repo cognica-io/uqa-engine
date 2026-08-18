@@ -74,6 +74,7 @@ mod expression_core;
 mod expression_operators;
 mod from;
 mod insert;
+mod locking;
 mod select;
 mod window;
 

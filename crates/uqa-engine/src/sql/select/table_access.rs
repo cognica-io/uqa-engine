@@ -178,7 +178,8 @@ pub(in crate::sql) fn run_single_table_select_output(
         ordered_primary_key,
         pushed_predicate,
     )
-    .with_qualifier(qualifier);
+    .with_qualifier(qualifier)
+    .with_lock_origin(Some((qualifier.to_string(), table.to_string())));
     let source: Box<dyn uqa_execution::PhysicalOperator + '_> =
         Box::new(uqa_execution::TableScan::new(Box::new(source)));
     let columns = expand_from_star_columns(

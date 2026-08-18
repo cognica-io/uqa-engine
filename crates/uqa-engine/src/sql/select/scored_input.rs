@@ -187,6 +187,7 @@ pub(in crate::sql) struct ScoredDocumentSource {
     hidden_columns: HiddenColumns,
     ordering: Vec<uqa_execution::PhysicalOrder>,
     input_guarantees_presence: bool,
+    lock_origin: Option<(String, String)>,
 }
 
 pub(in crate::sql) enum ScoredInputCursor {
@@ -302,7 +303,13 @@ impl ScoredDocumentSource {
             hidden_columns,
             ordering,
             input_guarantees_presence,
+            lock_origin: None,
         }
+    }
+
+    pub(in crate::sql) fn with_lock_origin(mut self, origin: Option<(String, String)>) -> Self {
+        self.lock_origin = origin;
+        self
     }
 
     /// Bind every visible column to its relation without changing public labels or copying values.
@@ -322,6 +329,21 @@ impl ScoredDocumentSource {
             score_origin: self.score_origin,
             columns: self.hidden_columns,
         }
+    }
+
+    pub(super) fn attach_lock_origin(
+        &self,
+        row: uqa_execution::PhysicalRow,
+        doc_id: DocId,
+    ) -> uqa_execution::PhysicalRow {
+        let Some((qualifier, storage_name)) = self.lock_origin.as_ref() else {
+            return row;
+        };
+        row.with_lock_origin(uqa_execution::RowLockOrigin::new(
+            qualifier.clone(),
+            storage_name.clone(),
+            doc_id,
+        ))
     }
 
     fn next_entries(&mut self, max_rows: usize) -> Result<Vec<ScoredEntry>, SQLError> {

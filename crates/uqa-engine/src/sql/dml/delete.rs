@@ -8,12 +8,12 @@
 
 use super::{
     apply_set_action_to_child, build_join_spill_with_ctes, build_returning_row, dml_join_rows,
-    dml_returning_result, dml_target_row, eval_mutation_expr, missing_document_error,
-    referencing_rows, referrers_to_for_actions, rewrite_document_with_referential_actions,
-    validate_dml_expression_qualifiers, validate_returning_alias_relations, BTreeSet, CteScope,
-    DeletePlan, DmlReturningShape, DocId, Document, Engine, ForeignKey, ForeignKeyAction,
-    ReturningProjectionRow, ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult,
-    Value,
+    dml_returning_result, dml_target_row, eval_mutation_expr, lock_mutation_row,
+    missing_document_error, referencing_rows, referrers_to_for_actions,
+    rewrite_document_with_referential_actions, validate_dml_expression_qualifiers,
+    validate_returning_alias_relations, BTreeSet, CteScope, DeletePlan, DmlReturningShape, DocId,
+    Document, Engine, ForeignKey, ForeignKeyAction, ReturningProjectionRow, ReturningRowImage,
+    ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
 };
 
 pub(in crate::sql) fn run_delete(
@@ -84,6 +84,13 @@ pub(in crate::sql) fn run_delete_inner(
     };
     for doc_id in doc_ids {
         cancel.check()?;
+        lock_mutation_row(
+            engine,
+            &stmt.table,
+            &stmt.target_qualifier,
+            doc_id,
+            uqa_sql::ast::LockStrength::ForUpdate,
+        )?;
         if preselected && stmt.returning.is_empty() {
             // No RETURNING and the filter already matched: the
             // document body is not needed at all.

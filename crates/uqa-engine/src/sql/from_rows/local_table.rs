@@ -38,6 +38,7 @@ pub(in crate::sql) struct EngineTableRowSource {
     predicate: Option<uqa_execution::ProjectedPredicate>,
     estimated_cardinality: u64,
     after: Option<uqa_core::DocId>,
+    lock_origin: Option<(String, String)>,
 }
 
 impl EngineTableRowSource {
@@ -79,7 +80,7 @@ impl EngineTableRowSource {
                     break;
                 };
                 self.after = Some(last);
-                for (_, shared) in shared_rows {
+                for (doc_id, shared) in shared_rows {
                     let keep = shared.with_projected(|projected| {
                         self.predicate
                             .as_ref()
@@ -87,9 +88,10 @@ impl EngineTableRowSource {
                     })?;
                     if keep {
                         let (values, projection) = shared.into_parts();
-                        rows.push(uqa_execution::PhysicalRow::from_shared_values(
-                            values, projection,
-                        ));
+                        rows.push(self.with_lock_identity(
+                            uqa_execution::PhysicalRow::from_shared_values(values, projection),
+                            doc_id,
+                        )?);
                     }
                 }
                 continue;
@@ -124,7 +126,7 @@ impl EngineTableRowSource {
                     .into());
                 }
                 let null = Value::Null;
-                for shared in shared_rows {
+                for (doc_id, shared) in doc_ids.iter().copied().zip(shared_rows) {
                     let keep = if let Some(shared) = shared.as_ref() {
                         shared.with_projected(|projected| {
                             self.predicate
@@ -140,19 +142,22 @@ impl EngineTableRowSource {
                     if !keep {
                         continue;
                     }
-                    rows.push(match shared {
-                        Some(shared) => {
-                            let (values, projection) = shared.into_parts();
-                            uqa_execution::PhysicalRow::from_shared_values(values, projection)
-                        }
-                        None => uqa_execution::PhysicalRow::nulls(fields.len()),
-                    });
+                    rows.push(self.with_lock_identity(
+                        match shared {
+                            Some(shared) => {
+                                let (values, projection) = shared.into_parts();
+                                uqa_execution::PhysicalRow::from_shared_values(values, projection)
+                            }
+                            None => uqa_execution::PhysicalRow::nulls(fields.len()),
+                        },
+                        doc_id,
+                    )?);
                 }
             } else {
                 let mut visited = 0usize;
                 let mut predicate_error = None;
                 store
-                    .for_each_fields_multi_ref(&doc_ids, &fields, &mut |_, values| {
+                    .for_each_fields_multi_ref(&doc_ids, &fields, &mut |doc_id, values| {
                         visited += 1;
                         if let Some(predicate) = self.predicate.as_ref() {
                             match predicate.keep(values) {
@@ -164,9 +169,18 @@ impl EngineTableRowSource {
                                 }
                             }
                         }
-                        rows.push(uqa_execution::PhysicalRow::from_values(
-                            values.iter().map(|value| (*value).clone()).collect(),
-                        ));
+                        match self.with_lock_identity(
+                            uqa_execution::PhysicalRow::from_values(
+                                values.iter().map(|value| (*value).clone()).collect(),
+                            ),
+                            doc_id,
+                        ) {
+                            Ok(row) => rows.push(row),
+                            Err(error) => {
+                                predicate_error = Some(error);
+                                return false;
+                            }
+                        }
                         true
                     })
                     .map_err(|error| {
@@ -238,10 +252,30 @@ impl EngineTableRowSource {
                         continue;
                     }
                 }
-                rows.push(uqa_execution::PhysicalRow::from_values(values));
+                rows.push(
+                    self.with_lock_identity(
+                        uqa_execution::PhysicalRow::from_values(values),
+                        doc_id,
+                    )?,
+                );
             }
         }
         Ok(rows)
+    }
+
+    fn with_lock_identity(
+        &self,
+        row: uqa_execution::PhysicalRow,
+        doc_id: uqa_core::DocId,
+    ) -> Result<uqa_execution::PhysicalRow, SQLError> {
+        let Some((qualifier, storage_name)) = self.lock_origin.as_ref() else {
+            return Ok(row);
+        };
+        Ok(row.with_lock_origin(uqa_execution::RowLockOrigin::new(
+            qualifier.clone(),
+            storage_name.clone(),
+            doc_id,
+        )))
     }
 }
 
@@ -320,9 +354,10 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         let scan: Box<dyn uqa_execution::PhysicalOperator + 'a> =
             Box::new(uqa_execution::SharedSpillScan::new(materialized));
         return Ok(Some((
-            Box::new(uqa_execution::ColumnSelection::with_identities(
-                scan, mapping,
-            )),
+            Box::new(
+                uqa_execution::ColumnSelection::with_identities(scan, mapping)
+                    .rebinding_lock_origins(qualifier),
+            ),
             false,
         )));
     }
@@ -365,7 +400,8 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
                 .find(|definition| definition.name == *column)
                 .map(|definition| definition.ty.clone())
         })
-        .collect();
+        .collect::<Vec<_>>();
+    let lock_origin = Some((qualifier.clone(), name.clone()));
     let physical_schema =
         uqa_execution::RowSchema::with_qualified_types(&qualifier, schema.clone(), column_types);
     let predicate = qualifier_filter(filters, &qualifier)
@@ -389,6 +425,7 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         predicate,
         estimated_cardinality: engine.table_doc_count(name)?,
         after: None,
+        lock_origin,
     };
     Ok(Some((
         Box::new(uqa_execution::TableScan::new(Box::new(source))),

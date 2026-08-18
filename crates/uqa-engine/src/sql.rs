@@ -70,6 +70,7 @@ use planning::compile_logical_plans;
 use planning::lower_statement;
 pub(super) use planning::{execute_compiled_statement, optimize_engine_plan};
 pub(crate) use plpgsql_exec::{call_bound_user_scalar_function, call_user_scalar_function};
+use select::query_has_row_locks;
 
 use aggregates::{
     aggregate_value, contains_aggregate, has_aggregate, projection_label_at, AggregateAccumulator,
@@ -117,7 +118,7 @@ type RowUpdateVectors = BTreeMap<String, Vec<Vec<f32>>>;
 type RowIndependentUpdateValues = (RowUpdateValues, RowUpdateVectors);
 
 const SCORE_COLUMN: &str = "_score";
-const DOC_ID_COLUMN: &str = "_doc_id";
+pub(in crate::sql) const DOC_ID_COLUMN: &str = "_doc_id";
 const MERGE_ACTION_COLUMN: &str = "_merge_action";
 // NUL cannot occur in a SQL identifier, so this row-carried field cannot
 // collide with a user column. Its value is the score emitted by an executed

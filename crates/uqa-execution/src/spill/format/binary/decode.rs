@@ -210,7 +210,15 @@ impl<'a> BinaryReader<'a> {
         for _ in 0..value_count {
             values.push(self.read_value(0)?);
         }
-        Ok(PhysicalRow::from_values(values))
+        let origin_count = self.read_count("lock origin count", 0)?;
+        let mut origins = Vec::with_capacity(origin_count);
+        for _ in 0..origin_count {
+            let qualifier = self.read_string("lock origin qualifier")?;
+            let storage_name = self.read_string("lock origin storage")?;
+            let doc_id = self.read_u64("lock origin doc id")?;
+            origins.push(crate::RowLockOrigin::new(qualifier, storage_name, doc_id));
+        }
+        Ok(PhysicalRow::from_values(values).with_lock_origins(origins))
     }
 
     fn read_value(&mut self, depth: usize) -> ExecResult<Value> {

@@ -159,6 +159,7 @@ pub(in crate::sql) fn materialize_recursive_cte(
         distinct_on: Vec::new(),
         subqueries: subqueries.clone(),
         access: AccessPathPlan::Row,
+        locking: Vec::new(),
     };
     let ordering_scope = ctes.enter_scalar_subqueries(subqueries);
     let operation: Box<dyn uqa_execution::PhysicalOperator + '_> =

@@ -33,7 +33,35 @@ pub const DEFAULT_BATCH_SIZE: usize = 1024;
 
 const NULL_SLOT: usize = usize::MAX;
 const INLINE_ROW_FRAGMENTS: usize = 8;
+const INLINE_ROW_LOCK_ORIGINS: usize = 2;
 static NULL_VALUE: Value = Value::Null;
+
+/// Base-table identity carried on a composite physical row for `FOR UPDATE`.
+///
+/// Origins ride beside value fragments. Joins concatenate them; projections and
+/// schema remaps keep them. They are not SQL-visible columns and must not be
+/// rebuilt from named maps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowLockOrigin {
+    pub qualifier: Arc<str>,
+    pub storage_name: Arc<str>,
+    pub doc_id: uqa_core::DocId,
+}
+
+impl RowLockOrigin {
+    #[must_use]
+    pub fn new(
+        qualifier: impl Into<String>,
+        storage_name: impl Into<String>,
+        doc_id: uqa_core::DocId,
+    ) -> Self {
+        Self {
+            qualifier: Arc::<str>::from(qualifier.into()),
+            storage_name: Arc::<str>::from(storage_name.into()),
+            doc_id,
+        }
+    }
+}
 
 /// Structured SQL column identity. A qualifier is metadata, never a prefix encoded into the column name, so quoted names containing `.` remain intact.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -1088,6 +1116,7 @@ type RowFragments = SmallVec<[RowFragment; INLINE_ROW_FRAGMENTS]>;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PhysicalRow {
     fragments: RowFragments,
+    lock_origins: SmallVec<[RowLockOrigin; INLINE_ROW_LOCK_ORIGINS]>,
 }
 
 impl PhysicalRow {
@@ -1096,7 +1125,10 @@ impl PhysicalRow {
         if !values.is_empty() {
             fragments.push(RowFragment::contiguous(Arc::new(values)));
         }
-        Self { fragments }
+        Self {
+            fragments,
+            lock_origins: SmallVec::new(),
+        }
     }
 
     /// Build a row by sharing a stored positional value vector and applying a
@@ -1107,7 +1139,10 @@ impl PhysicalRow {
         if !projection.is_empty() {
             fragments.push(RowFragment::projected(values, projection));
         }
-        Self { fragments }
+        Self {
+            fragments,
+            lock_origins: SmallVec::new(),
+        }
     }
 
     pub fn from_result_row(schema: &RowSchema, mut row: ResultRow) -> Self {
@@ -1136,11 +1171,19 @@ impl PhysicalRow {
             RowFragments::with_capacity(left.fragments.len() + right.fragments.len());
         fragments.extend(left.fragments.iter().cloned());
         fragments.extend(right.fragments.iter().cloned());
-        Self { fragments }
+        let mut lock_origins =
+            SmallVec::with_capacity(left.lock_origins.len() + right.lock_origins.len());
+        lock_origins.extend(left.lock_origins.iter().cloned());
+        lock_origins.extend(right.lock_origins.iter().cloned());
+        Self {
+            fragments,
+            lock_origins,
+        }
     }
 
     pub fn concat_left_owned(mut left: Self, right: &Self) -> Self {
         left.fragments.extend(right.fragments.iter().cloned());
+        left.lock_origins.extend(right.lock_origins.iter().cloned());
         left
     }
 
@@ -1149,7 +1192,14 @@ impl PhysicalRow {
             RowFragments::with_capacity(left.fragments.len() + right.fragments.len());
         fragments.extend(left.fragments.iter().cloned());
         fragments.append(&mut right.fragments);
-        Self { fragments }
+        let mut lock_origins =
+            SmallVec::with_capacity(left.lock_origins.len() + right.lock_origins.len());
+        lock_origins.extend(left.lock_origins.iter().cloned());
+        lock_origins.append(&mut right.lock_origins);
+        Self {
+            fragments,
+            lock_origins,
+        }
     }
 
     pub(crate) fn value(&self, mut slot: usize) -> Option<&Value> {
@@ -1215,7 +1265,10 @@ impl PhysicalRow {
             current_projection.push(stored);
         }
         flush(&mut output, &mut current_values, &mut current_projection);
-        Self { fragments: output }
+        Self {
+            fragments: output,
+            lock_origins: self.lock_origins.clone(),
+        }
     }
 
     pub fn fragment_count(&self) -> usize {
@@ -1239,7 +1292,39 @@ impl PhysicalRow {
             }
         }
         debug_assert_eq!(remaining, 0, "physical row prefix exceeds row width");
-        Self { fragments }
+        Self {
+            fragments,
+            lock_origins: self.lock_origins,
+        }
+    }
+
+    #[must_use]
+    pub fn with_lock_origin(mut self, origin: RowLockOrigin) -> Self {
+        self.lock_origins.push(origin);
+        self
+    }
+
+    #[must_use]
+    pub fn with_lock_origins(mut self, origins: impl IntoIterator<Item = RowLockOrigin>) -> Self {
+        self.lock_origins.extend(origins);
+        self
+    }
+
+    #[must_use]
+    pub fn lock_origins(&self) -> &[RowLockOrigin] {
+        &self.lock_origins
+    }
+
+    /// Point every lock origin at the visible source qualifier. Views, CTEs,
+    /// and subqueries keep inner storage names so `FOR UPDATE OF` that alias
+    /// locks only those origins after a join.
+    #[must_use]
+    pub fn rebind_lock_origin_qualifiers(mut self, qualifier: impl Into<Arc<str>>) -> Self {
+        let qualifier = qualifier.into();
+        for origin in &mut self.lock_origins {
+            origin.qualifier = Arc::clone(&qualifier);
+        }
+        self
     }
 }
 

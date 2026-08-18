@@ -33,9 +33,11 @@ pub(in crate::compiler) fn compile_select(
             "FETCH ... WITH TIES is not supported".into(),
         ));
     }
-    if !stmt.locking_clause.is_empty() {
+    if stmt.op != pg_query::protobuf::SetOperation::SetopNone as i32
+        && !stmt.locking_clause.is_empty()
+    {
         return Err(SQLError::Unsupported(
-            "SELECT row-locking clauses are not supported".into(),
+            "FOR UPDATE is not allowed with UNION/INTERSECT/EXCEPT".into(),
         ));
     }
     let from = compile_from_list(&stmt.from_clause)?;
@@ -122,8 +124,8 @@ pub(in crate::compiler) fn compile_select(
         };
 
     let (distinct, distinct_on) = compile_distinct_clause(&stmt.distinct_clause)?;
-
-    Ok(SelectStmt {
+    let locking = super::locking::compile_locking_clauses(&stmt.locking_clause)?;
+    let compiled = SelectStmt {
         projections,
         values,
         from,
@@ -138,7 +140,10 @@ pub(in crate::compiler) fn compile_select(
         set_op,
         distinct,
         distinct_on,
-    })
+        locking,
+    };
+    super::locking::validate_select_locking(&compiled)?;
+    Ok(compiled)
 }
 
 pub(in crate::compiler) fn compile_values_lists(nodes: &[Node]) -> Result<Vec<Vec<Expr>>> {

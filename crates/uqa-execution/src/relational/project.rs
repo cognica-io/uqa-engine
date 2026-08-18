@@ -237,7 +237,10 @@ impl PhysicalOperator for Project<'_> {
                         );
                     }
                 }
-                out.push(PhysicalRow::from_values(values));
+                out.push(
+                    PhysicalRow::from_values(values)
+                        .with_lock_origins(row.lock_origins().iter().cloned()),
+                );
                 continue;
             }
             let values = self
@@ -248,7 +251,10 @@ impl PhysicalOperator for Project<'_> {
                         .evaluate_physical(expression, &batch.schema, &row)
                 })
                 .collect::<ExecResult<Vec<_>>>()?;
-            out.push(PhysicalRow::from_values(values));
+            out.push(
+                PhysicalRow::from_values(values)
+                    .with_lock_origins(row.lock_origins().iter().cloned()),
+            );
         }
         Ok(Some(Batch::from_physical_rows(self.schema.clone(), out)))
     }

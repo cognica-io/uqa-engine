@@ -8,10 +8,11 @@
 
 use super::{
     build_join_spill_with_ctes, build_returning_row, dml_join_rows, dml_returning_result,
-    dml_target_row, eval_mutation_assignment, eval_mutation_expr, missing_document_error,
-    rewrite_document_with_referential_actions, validate_returning_alias_relations, CteScope,
-    DmlReturningShape, Engine, MutationAssignmentTarget, ReturningProjectionRow, ReturningRowImage,
-    ReturningRowImages, SQLError, SQLParam, SQLResult, SourcePlan, UpdatePlan,
+    dml_target_row, eval_mutation_assignment, eval_mutation_expr, lock_mutation_row,
+    missing_document_error, rewrite_document_with_referential_actions, update_lock_strength,
+    validate_returning_alias_relations, CteScope, DmlReturningShape, Engine,
+    MutationAssignmentTarget, ReturningProjectionRow, ReturningRowImage, ReturningRowImages,
+    SQLError, SQLParam, SQLResult, SourcePlan, UpdatePlan,
 };
 
 pub(in crate::sql) fn run_update_from(
@@ -31,6 +32,15 @@ pub(in crate::sql) fn run_update_from(
     let mut affected = 0u64;
     let mut returning_rows = Vec::new();
     let target = stmt.table.clone();
+    let strength = update_lock_strength(
+        engine,
+        &target,
+        &stmt
+            .assignments
+            .iter()
+            .map(|assignment| assignment.column.clone())
+            .collect::<Vec<_>>(),
+    );
     let target_doc_ids = engine.table_doc_ids(&target)?;
     for doc_id in target_doc_ids {
         cancel.check()?;
@@ -64,6 +74,7 @@ pub(in crate::sql) fn run_update_from(
                     continue;
                 }
             }
+            lock_mutation_row(engine, &target, &stmt.target_qualifier, doc_id, strength)?;
             // Apply assignments evaluated against the joined row so
             // RHS expressions can read FROM-side columns.
             for assignment in &stmt.assignments {

@@ -221,6 +221,9 @@ pub(in crate::sql) fn format_select_plan(stmt: &QueryBlockPlan) -> String {
     if stmt.distinct {
         let _ = writeln!(s, "  distinct=true");
     }
+    if !stmt.locking.is_empty() {
+        let _ = writeln!(s, "  locking={}", stmt.locking.len());
+    }
     s.trim_end().to_string()
 }
 

@@ -1159,6 +1159,7 @@ mod tests {
             distinct_on: Vec::new(),
             subqueries: Vec::new(),
             access: AccessPathPlan::Row,
+            locking: Vec::new(),
         }
     }
 

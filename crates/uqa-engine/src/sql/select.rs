@@ -46,6 +46,7 @@ mod foreign_access;
 mod physical_plan;
 mod query_block;
 mod recursive_cte;
+mod row_locking;
 mod schema_binding;
 mod scored_input;
 mod set_projection;
@@ -64,6 +65,7 @@ pub(in crate::sql) use foreign_access::*;
 pub(in crate::sql) use physical_plan::*;
 pub(in crate::sql) use query_block::*;
 pub(in crate::sql) use recursive_cte::*;
+pub(in crate::sql) use row_locking::*;
 pub(in crate::sql) use schema_binding::*;
 pub(in crate::sql) use scored_input::*;
 pub(in crate::sql) use set_projection::*;
@@ -250,6 +252,9 @@ pub(super) fn execute_query_plan_output(
     ctes: &mut CteScope,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
+    if query_has_row_locks(plan) {
+        ctes.emit_lock_identities = true;
+    }
     if !plan.ctes.is_empty() {
         let filters = cte_output_filters(engine, plan);
         materialize_plan_ctes_with_filters(engine, &plan.ctes, params, ctes, &filters)?;
@@ -318,6 +323,7 @@ pub(super) fn execute_query_plan_output(
                     distinct_on: Vec::new(),
                     subqueries: subqueries.clone(),
                     access: AccessPathPlan::Row,
+                    locking: Vec::new(),
                 };
                 let ordering_scope = ctes.enter_scalar_subqueries(subqueries);
                 let evaluator = EngineExpressionEvaluator::shared(engine, params, &ordering_scope);
@@ -634,6 +640,9 @@ fn execute_query_block_output(
     ctes: &mut CteScope,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
+    if !block.locking.is_empty() {
+        ctes.emit_lock_identities = true;
+    }
     let mut scoped_ctes = ctes.enter_scalar_subqueries(&block.subqueries);
     let defer_distinct_limit = should_defer_distinct_limit(block);
     let execution = select_execution_stmt(block, defer_distinct_limit);

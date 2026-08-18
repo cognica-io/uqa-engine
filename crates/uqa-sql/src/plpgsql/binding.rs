@@ -249,6 +249,7 @@ pub fn bind_select(stmt: &SelectStmt, r: &mut dyn VariableResolver) -> Result<Se
         },
         distinct: stmt.distinct,
         distinct_on: bind_exprs(&stmt.distinct_on, r)?,
+        locking: stmt.locking.clone(),
     })
 }
 

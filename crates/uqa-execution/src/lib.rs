@@ -80,8 +80,8 @@ pub mod spill_scan;
 pub mod type_resolution;
 
 pub use batch::{
-    Batch, ColumnIdentity, OwnedPhysicalRow, PhysicalRow, PhysicalRowView, RowSchema,
-    DEFAULT_BATCH_SIZE,
+    Batch, ColumnIdentity, OwnedPhysicalRow, PhysicalRow, PhysicalRowView, RowLockOrigin,
+    RowSchema, DEFAULT_BATCH_SIZE,
 };
 pub use column_selection::ColumnSelection;
 pub use columnar_batch::{ColumnVector, ColumnarBatch};

@@ -97,6 +97,7 @@ mod engine_tables;
 mod engine_transactions;
 mod engine_truncate;
 mod engine_user_functions;
+mod row_locks;
 mod value_index;
 
 use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
@@ -238,6 +239,8 @@ pub struct Engine {
     extensions: RuntimeExtensions,
     epochs: EpochCoordinator,
     runtime: QueryRuntime,
+    row_locks: Arc<row_locks::RowLockManager>,
+    session_id: u64,
 }
 
 #[derive(Clone, Default)]
@@ -337,6 +340,8 @@ struct TransactionFrame {
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
     dirty_at_begin: TransactionDirtyState,
+    lock_mark: u32,
+    next_lock_mark: u32,
 }
 
 struct TransactionSavepoint {
@@ -344,6 +349,7 @@ struct TransactionSavepoint {
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
     dirty: TransactionDirtyState,
+    lock_mark: u32,
 }
 
 /// Lightweight SQL-session state that follows transaction/savepoint rollback
@@ -487,9 +493,17 @@ impl Default for Engine {
     }
 }
 
+impl Drop for Engine {
+    fn drop(&mut self) {
+        self.row_locks.release_session(self.session_id);
+    }
+}
+
 impl Engine {
     /// In-memory engine. State lives only as long as this `Engine`.
     pub fn new() -> Self {
+        let row_locks = Arc::new(row_locks::RowLockManager::new());
+        let session_id = row_locks.allocate_session();
         Self {
             storage: StorageContext::memory(),
             durable: DurableCatalogState::new(),
@@ -497,6 +511,8 @@ impl Engine {
             extensions: RuntimeExtensions::new(),
             epochs: EpochCoordinator::new(),
             runtime: QueryRuntime::new(SQL_FUNCTION_DEPTH_LIMIT),
+            row_locks,
+            session_id,
         }
     }
 

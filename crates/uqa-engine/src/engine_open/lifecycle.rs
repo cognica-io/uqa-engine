@@ -164,6 +164,8 @@ impl Engine {
         let storage_session = provider.open_session()?;
         let mut session =
             Self::from_persistent_session(storage_session, Some(Arc::clone(provider)))?;
+        session.row_locks = Arc::clone(&self.row_locks);
+        session.session_id = self.row_locks.allocate_session();
         session.epochs.share_published_from(&self.epochs);
         // Force one catalog rebind after attaching the shared generation.
         // Otherwise a DDL commit racing the initial restore could leave this
@@ -207,6 +209,8 @@ impl Engine {
         let PersistentStorageSession { catalog, backend } = storage_session;
         let restore_catalog = Arc::clone(&catalog);
         let restore_backend = Arc::clone(&backend);
+        let row_locks = Arc::new(crate::row_locks::RowLockManager::new());
+        let session_id = row_locks.allocate_session();
         let mut engine = Self {
             storage: super::StorageContext::persistent(catalog, backend, provider),
             durable: super::DurableCatalogState::new(),
@@ -214,6 +218,8 @@ impl Engine {
             extensions: super::RuntimeExtensions::new(),
             epochs: super::EpochCoordinator::new(),
             runtime: super::QueryRuntime::new(super::SQL_FUNCTION_DEPTH_LIMIT),
+            row_locks,
+            session_id,
         };
         Self::prepare_catalog_for_initial_restore(restore_catalog.as_ref())?;
         restore_backend.migrate_inverted_index_storage()?;

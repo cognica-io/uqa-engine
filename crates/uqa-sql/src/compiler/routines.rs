@@ -385,6 +385,7 @@ fn select_of_expr(expr: Expr) -> Statement {
         set_op: None,
         distinct: false,
         distinct_on: Vec::new(),
+        locking: Vec::new(),
     }))
 }
 

@@ -81,6 +81,9 @@ pub struct QueryBlockPlan {
     pub distinct_on: Vec<ScalarExpr>,
     pub subqueries: Vec<QueryPlan>,
     pub access: AccessPathPlan,
+    /// `FOR UPDATE` / `FOR SHARE` clauses belonging to this query block.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locking: Vec<uqa_sql::ast::LockingClause>,
 }
 
 /// Cross-paradigm access decision made after the relational and scalar

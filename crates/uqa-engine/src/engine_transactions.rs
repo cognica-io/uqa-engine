@@ -379,6 +379,9 @@ impl Engine {
                 (Some(savepoint), self.snapshot_transaction_data()?)
             }
         };
+        let (lock_mark, next_lock_mark) = stack.last().map_or((0, 1), |frame| {
+            (frame.next_lock_mark, frame.next_lock_mark.saturating_add(1))
+        });
         stack.push(TransactionFrame {
             storage_savepoint,
             read_only,
@@ -386,6 +389,8 @@ impl Engine {
             session_snapshot,
             data_snapshot,
             dirty_at_begin: self.transaction_dirty_state(),
+            lock_mark,
+            next_lock_mark,
         });
         Ok(())
     }
@@ -467,6 +472,7 @@ impl Engine {
             }
         }
         if storage_savepoint.is_none() {
+            self.row_locks.release_session(self.session_id);
             if self
                 .epochs
                 .table_catalog
@@ -521,6 +527,7 @@ impl Engine {
             }
         }
         stack.clear();
+        self.row_locks.release_session(self.session_id);
         self.restore_transaction_dirty_state(dirty_at_begin);
         if let Some(snapshot) = snapshot.as_ref() {
             if let Err(error) = self.restore_transaction_data(snapshot) {
@@ -609,7 +616,14 @@ impl Engine {
             }
         }
         self.restore_session_state(&session_snapshot);
+        let lock_mark = frame.lock_mark;
         stack.pop();
+        if stack.is_empty() {
+            self.row_locks.release_session(self.session_id);
+        } else {
+            self.row_locks
+                .release_mark_above(self.session_id, lock_mark.saturating_sub(1));
+        }
         if cleanup_errors.is_empty() {
             Ok(())
         } else {
@@ -638,11 +652,15 @@ impl Engine {
                 .savepoint(&name)
                 .map_err(|err| Self::storage_tx_error("SAVEPOINT", &err))?;
         }
+        let keep_mark = frame.lock_mark;
+        frame.lock_mark = frame.next_lock_mark;
+        frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
         frame.savepoints.push(TransactionSavepoint {
             name,
             session_snapshot,
             data_snapshot,
             dirty: self.transaction_dirty_state(),
+            lock_mark: keep_mark,
         });
         Ok(())
     }
@@ -707,7 +725,12 @@ impl Engine {
             }
         }
         self.restore_session_state(&savepoint.session_snapshot);
+        let keep_mark = savepoint.lock_mark;
         frame.savepoints.truncate(position + 1);
+        self.row_locks
+            .release_mark_above(self.session_id, keep_mark);
+        frame.lock_mark = frame.next_lock_mark;
+        frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
         if cleanup_errors.is_empty() {
             Ok(())
         } else {
@@ -720,6 +743,56 @@ impl Engine {
 
     fn storage_tx_error(action: &str, err: &StorageBackendError) -> SQLError {
         SQLError::Internal(format!("{action} failed in storage backend: {err}"))
+    }
+
+    pub(crate) fn current_lock_mark(&self) -> u32 {
+        self.session
+            .transactions
+            .lock()
+            .last()
+            .map_or(0, |frame| frame.lock_mark)
+    }
+
+    pub(crate) fn lock_row(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+        strength: uqa_sql::ast::LockStrength,
+        wait: uqa_sql::ast::LockWait,
+        display_name: &str,
+    ) -> Result<crate::row_locks::LockAcquire, SQLError> {
+        let canonical = self
+            .try_resolve_table_name(table)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| table.to_string());
+        let key = crate::row_locks::RowLockKey {
+            table: self.row_locks.table_key(&canonical),
+            doc_id,
+        };
+        self.row_locks.acquire(&crate::row_locks::LockRequest {
+            session_id: self.session_id,
+            key,
+            strength,
+            mark: self.current_lock_mark(),
+            wait,
+            cancel: &self.runtime.cancellation,
+            relation: display_name,
+        })
+    }
+
+    pub(crate) fn unlock_row_acquired_now(&self, table: &str, doc_id: uqa_core::DocId) {
+        let canonical = self
+            .try_resolve_table_name(table)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| table.to_string());
+        let key = crate::row_locks::RowLockKey {
+            table: self.row_locks.table_key(&canonical),
+            doc_id,
+        };
+        self.row_locks
+            .release_row_if_acquired(self.session_id, key, self.current_lock_mark());
     }
 
     fn snapshot_session_state(&self) -> SessionStateSnapshot {

@@ -183,6 +183,58 @@ impl Expr {
             column: column.into(),
         }
     }
+
+    /// True when this expression tree contains a window function call.
+    #[must_use]
+    pub fn contains_window(&self) -> bool {
+        match self {
+            Self::WindowCall { .. } => true,
+            Self::Func {
+                args,
+                order_by,
+                filter,
+                ..
+            } => {
+                args.iter().any(Self::contains_window)
+                    || order_by.iter().any(|order| order.expr.contains_window())
+                    || filter.as_deref().is_some_and(Self::contains_window)
+            }
+            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => {
+                items.iter().any(Self::contains_window)
+            }
+            Self::UnaryMinus(expr) | Self::Not(expr) | Self::Cast { expr, .. } => {
+                expr.contains_window()
+            }
+            Self::Binary { lhs, rhs, .. } => lhs.contains_window() || rhs.contains_window(),
+            Self::IsNull { expr, .. } | Self::InSubquery { expr, .. } => expr.contains_window(),
+            Self::Between { expr, low, high } => {
+                expr.contains_window() || low.contains_window() || high.contains_window()
+            }
+            Self::InList { expr, list, .. } => {
+                expr.contains_window() || list.iter().any(Self::contains_window)
+            }
+            Self::Case {
+                base,
+                when,
+                else_branch,
+            } => {
+                base.as_deref().is_some_and(Self::contains_window)
+                    || when.iter().any(|(condition, result)| {
+                        condition.contains_window() || result.contains_window()
+                    })
+                    || else_branch.as_deref().is_some_and(Self::contains_window)
+            }
+            Self::Star
+            | Self::QualifiedStar(_)
+            | Self::Default
+            | Self::Column(_)
+            | Self::QualifiedColumn { .. }
+            | Self::Literal(_)
+            | Self::Param(_)
+            | Self::ScalarSubquery(_)
+            | Self::Exists { .. } => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

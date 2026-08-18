@@ -9,8 +9,9 @@
 use super::{
     build_returning_row, coerce_to_column_type, dml_returning_result, dml_storage_error,
     dml_target_row, eval_mutation_assignment, eval_mutation_expr, index_vectors_for_type,
-    missing_document_error, referrers_to_for_actions, rewrite_document_with_referential_actions,
-    run_update_from, validate_dml_expression_qualifiers, validate_mutation_columns,
+    lock_mutation_row, missing_document_error, referrers_to_for_actions,
+    rewrite_document_with_referential_actions, run_update_from, update_lock_strength,
+    validate_dml_expression_qualifiers, validate_mutation_columns,
     validate_returning_alias_relations, BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope,
     DmlReturningShape, Engine, MutationAssignmentTarget, ReturningProjectionRow, ReturningRowImage,
     ReturningRowImages, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, ScalarExpr,
@@ -89,6 +90,21 @@ pub(in crate::sql) fn run_update_inner(
     };
     for doc_id in doc_ids {
         cancel.check()?;
+        lock_mutation_row(
+            engine,
+            &stmt.table,
+            &stmt.target_qualifier,
+            doc_id,
+            update_lock_strength(
+                engine,
+                &stmt.table,
+                &stmt
+                    .assignments
+                    .iter()
+                    .map(|assignment| assignment.column.clone())
+                    .collect::<Vec<_>>(),
+            ),
+        )?;
         let Some(mut doc) = engine.get_document(&stmt.table, doc_id)? else {
             return Err(missing_document_error("UPDATE scan", &stmt.table, doc_id));
         };
@@ -221,6 +237,21 @@ pub(in crate::sql) fn try_run_point_update(
     else {
         return Ok(Some(SQLResult::from_affected(0)));
     };
+    lock_mutation_row(
+        engine,
+        &stmt.table,
+        &stmt.target_qualifier,
+        doc_id,
+        update_lock_strength(
+            engine,
+            &stmt.table,
+            &stmt
+                .assignments
+                .iter()
+                .map(|assignment| assignment.column.clone())
+                .collect::<Vec<_>>(),
+        ),
+    )?;
     let affected =
         engine.patch_document_fields_with_vector_values(&stmt.table, doc_id, &updates, &vectors)?;
     Ok(Some(SQLResult::from_affected(u64::from(affected))))

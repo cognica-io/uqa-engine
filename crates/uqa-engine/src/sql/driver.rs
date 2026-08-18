@@ -5,7 +5,7 @@
 //
 
 use super::{
-    compile, is_transaction_control, lower_statement, optimize_engine_plan,
+    compile, is_transaction_control, lower_statement, optimize_engine_plan, query_has_row_locks,
     query_may_mutate_engine, Arc, Engine, SQLError, SQLParam, SQLResult, UnifiedPlanExecutor,
 };
 
@@ -76,7 +76,12 @@ pub(crate) fn execute(
             uqa_planner::UnifiedPlan::Query(query) => !query_may_mutate_engine(engine, query)?,
             uqa_planner::UnifiedPlan::Command(_) => false,
         };
-        let needs_implicit_transaction = engine.storage.backend.is_some() || !is_read_query;
+        let has_row_locks = match initial_plan.as_ref() {
+            uqa_planner::UnifiedPlan::Query(query) => query_has_row_locks(query),
+            uqa_planner::UnifiedPlan::Command(_) => false,
+        };
+        let needs_implicit_transaction =
+            engine.storage.backend.is_some() || !is_read_query || has_row_locks;
         if needs_implicit_transaction {
             engine.begin_implicit_statement_transaction(is_read_query)?;
             // Catalog/table refresh intentionally invalidates cached logical

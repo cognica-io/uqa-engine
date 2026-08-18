@@ -219,6 +219,7 @@ fn execute_lateral_relational_root_output(
                         distinct_on: Vec::new(),
                         subqueries: subqueries.clone(),
                         access: AccessPathPlan::Row,
+                        locking: Vec::new(),
                     }
                 });
             let execution = crate::sql::select::SetSpillExecution::new(

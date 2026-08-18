@@ -518,7 +518,7 @@ pub(in crate::sql) fn attach_order_limit<'a>(
     mut operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
     statement: &QueryBlockPlan,
     output_columns: &[OutputColumnMapping],
-    engine: &Engine,
+    engine: &'a Engine,
     params: &[SQLParam],
     ctes: &CteScope,
     evaluator: SharedExpressionEvaluator<'a>,
@@ -578,13 +578,20 @@ pub(in crate::sql) fn attach_order_limit<'a>(
                 operator,
                 keys,
                 evaluator,
-                keep,
+                keep.filter(|_| !crate::sql::select::locking_uses_skip(&statement.locking)),
                 work_mem_bytes,
             ));
         }
     }
+    let skip_locked = crate::sql::select::locking_uses_skip(&statement.locking);
+    if skip_locked {
+        operator = crate::sql::select::attach_lock_rows(engine, operator, statement, ctes)?;
+    }
     if offset.is_some() || limit.is_some() {
         operator = Box::new(Limit::new(operator, offset.unwrap_or(0), limit));
+    }
+    if !statement.locking.is_empty() && !skip_locked {
+        operator = crate::sql::select::attach_lock_rows(engine, operator, statement, ctes)?;
     }
     Ok(operator)
 }
