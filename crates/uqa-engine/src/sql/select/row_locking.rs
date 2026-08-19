@@ -736,6 +736,17 @@ struct LockCandidate {
     foreign_waited: bool,
 }
 
+enum CandidateRecheckTarget {
+    Unchanged,
+    Missing,
+    Changed(uqa_core::DocId),
+}
+
+enum CandidateRecheckAdvance {
+    Retained,
+    Missing,
+}
+
 impl LockRows<'_> {
     // Keep candidate acquisition separate from successor traversal so release optimization never merges their control-flow graphs.
     #[inline(never)]
@@ -879,74 +890,38 @@ impl LockRows<'_> {
             .has_cross_process_coordination();
         loop {
             let mut progressed = false;
-            for index in 0..candidates.len() {
-                if handled[index] {
+            for (((candidate, row_override), handled), visited_doc_ids) in candidates
+                .iter_mut()
+                .zip(&mut overrides)
+                .zip(&mut handled)
+                .zip(&mut visited_doc_ids)
+            {
+                if *handled {
                     continue;
                 }
-                let candidate = &candidates[index];
-                let change_target = cache.conflicting_change_target_since_snapshot(
-                    candidate.storage_name.as_ref(),
-                    candidate.doc_id,
-                    candidate.strength,
-                )?;
-                let target_doc_id = match change_target {
-                    crate::row_locks::RowChangeTarget::Deleted => return Ok(None),
-                    crate::row_locks::RowChangeTarget::Present(target_doc_id) => target_doc_id,
-                    crate::row_locks::RowChangeTarget::Unchanged => {
-                        if !(candidate.foreign_waited || durable_coordination) {
-                            handled[index] = true;
+                let target_doc_id =
+                    match self.candidate_recheck_target(candidate, cache, durable_coordination)? {
+                        CandidateRecheckTarget::Unchanged => {
+                            *handled = true;
                             continue;
                         }
-                        if self.cross_process_candidate_changed(candidate, cache)? {
-                            candidate.doc_id
-                        } else {
-                            handled[index] = true;
-                            continue;
-                        }
-                    }
-                };
+                        CandidateRecheckTarget::Missing => return Ok(None),
+                        CandidateRecheckTarget::Changed(target_doc_id) => target_doc_id,
+                    };
                 any_changed = true;
                 progressed = true;
-                let row_override = cache.committed_override(
-                    self.engine,
-                    candidate.storage_name.as_ref(),
-                    candidate.doc_id,
-                    target_doc_id,
-                    candidate.strength,
-                )?;
-                match row_override {
-                    super::RetryRowOverride::Deleted => {
-                        // Lock targets are never on the nullable side of an active outer join, so a deleted tuple always eliminates this candidate row. Locks already acquired stay until transaction end, matching PostgreSQL's treatment of dead EPQ tuples.
-                        return Ok(None);
-                    }
-                    super::RetryRowOverride::Present { doc_id, .. } => {
-                        if doc_id == candidate.doc_id {
-                            overrides[index] = Some(row_override);
-                            handled[index] = true;
-                            continue;
-                        }
-                        if !visited_doc_ids[index].insert(doc_id) {
-                            return Err(SQLError::Internal(format!(
-                                "row-lock successor chain for relation `{}` contains a cycle at document {doc_id}",
-                                candidate.display_name
-                            )));
-                        }
-                        // PostgreSQL follows the update chain to the row the blocker moved the tuple to, locks it, and rechecks that successor. The refetch on the next pass reads the successor after its lock is held, so a change committed while waiting here is still observed.
-                        match self.engine.lock_row(
-                            candidate.storage_name.as_ref(),
-                            doc_id,
-                            candidate.strength,
-                            candidate.wait,
-                            &candidate.display_name,
-                        )? {
-                            LockAcquire::Granted { .. } => {}
-                            LockAcquire::Skipped => {
-                                return Ok(None);
-                            }
-                        }
-                        overrides[index] = Some(row_override);
-                        candidates[index].doc_id = doc_id;
-                    }
+                if matches!(
+                    self.apply_candidate_recheck(
+                        candidate,
+                        row_override,
+                        handled,
+                        visited_doc_ids,
+                        cache,
+                        target_doc_id,
+                    )?,
+                    CandidateRecheckAdvance::Missing
+                ) {
+                    return Ok(None);
                 }
             }
             if !progressed {
@@ -957,6 +932,89 @@ impl LockRows<'_> {
             return Ok(Some(row));
         }
         self.run_candidate_recheck(&row, &candidates, &overrides)
+    }
+
+    // Resolve one candidate's post-snapshot state without combining cache observation with successor locking.
+    #[inline(never)]
+    fn candidate_recheck_target(
+        &self,
+        candidate: &LockCandidate,
+        cache: &super::RowLockRetryCache,
+        durable_coordination: bool,
+    ) -> Result<CandidateRecheckTarget, SQLError> {
+        match cache.conflicting_change_target_since_snapshot(
+            candidate.storage_name.as_ref(),
+            candidate.doc_id,
+            candidate.strength,
+        )? {
+            crate::row_locks::RowChangeTarget::Deleted => Ok(CandidateRecheckTarget::Missing),
+            crate::row_locks::RowChangeTarget::Present(target_doc_id) => {
+                Ok(CandidateRecheckTarget::Changed(target_doc_id))
+            }
+            crate::row_locks::RowChangeTarget::Unchanged => {
+                if !(candidate.foreign_waited || durable_coordination) {
+                    return Ok(CandidateRecheckTarget::Unchanged);
+                }
+                if self.cross_process_candidate_changed(candidate, cache)? {
+                    Ok(CandidateRecheckTarget::Changed(candidate.doc_id))
+                } else {
+                    Ok(CandidateRecheckTarget::Unchanged)
+                }
+            }
+        }
+    }
+
+    // Apply one committed image and, for a primary-key rewrite, lock the successor before the outer traversal retries it.
+    #[inline(never)]
+    fn apply_candidate_recheck(
+        &self,
+        candidate: &mut LockCandidate,
+        row_override: &mut Option<super::RetryRowOverride>,
+        handled: &mut bool,
+        visited_doc_ids: &mut std::collections::BTreeSet<uqa_core::DocId>,
+        cache: &super::RowLockRetryCache,
+        target_doc_id: uqa_core::DocId,
+    ) -> Result<CandidateRecheckAdvance, SQLError> {
+        let committed = cache.committed_override(
+            self.engine,
+            candidate.storage_name.as_ref(),
+            candidate.doc_id,
+            target_doc_id,
+            candidate.strength,
+        )?;
+        match committed {
+            super::RetryRowOverride::Deleted => {
+                // Lock targets are never on the nullable side of an active outer join, so a deleted tuple always eliminates this candidate row. Locks already acquired stay until transaction end, matching PostgreSQL's treatment of dead EPQ tuples.
+                Ok(CandidateRecheckAdvance::Missing)
+            }
+            super::RetryRowOverride::Present { doc_id, .. } => {
+                if doc_id == candidate.doc_id {
+                    *row_override = Some(committed);
+                    *handled = true;
+                    return Ok(CandidateRecheckAdvance::Retained);
+                }
+                if !visited_doc_ids.insert(doc_id) {
+                    return Err(SQLError::Internal(format!(
+                        "row-lock successor chain for relation `{}` contains a cycle at document {doc_id}",
+                        candidate.display_name
+                    )));
+                }
+                // PostgreSQL follows the update chain to the row the blocker moved the tuple to, locks it, and rechecks that successor. The refetch on the next pass reads the successor after its lock is held, so a change committed while waiting here is still observed.
+                match self.engine.lock_row(
+                    candidate.storage_name.as_ref(),
+                    doc_id,
+                    candidate.strength,
+                    candidate.wait,
+                    &candidate.display_name,
+                )? {
+                    LockAcquire::Granted { .. } => {}
+                    LockAcquire::Skipped => return Ok(CandidateRecheckAdvance::Missing),
+                }
+                *row_override = Some(committed);
+                candidate.doc_id = doc_id;
+                Ok(CandidateRecheckAdvance::Retained)
+            }
+        }
     }
 
     /// Whether another OS process committed a change to this candidate that conflicts with the requested lock strength. Foreign commits are invisible to the in-process change epochs, so the latest committed image is compared with the statement snapshot and the mutation strength is derived from the changed columns, exactly like the epochs derive it from the writer's own column set. A row this transaction already rewrote itself is authoritative as-is.
