@@ -635,6 +635,8 @@ pub(in crate::sql) fn attach_order_limit<'a>(
 }
 
 /// Rebuild the plan below one `LockRows` boundary for a tuple-local recheck. The construction replays the same source, filter, and scalar target projection below the original `LockRows` boundary, with the recheck pins active in `ctes` so every lock-target base scan emits only the candidate's tuples while unmarked relations rescan under the statement snapshot. Sorting, locking, and `LIMIT` never run here: the candidate keeps its original position in the outer stream.
+#[cold]
+#[inline(never)]
 pub(in crate::sql) fn build_row_lock_recheck_operator<'a>(
     engine: &'a Engine,
     statement: &QueryBlockPlan,

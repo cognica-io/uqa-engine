@@ -353,6 +353,8 @@ fn collect_source_leaf_plans<'a>(
     }
 }
 
+#[cold]
+#[inline(never)]
 fn copy_recheck_source_row(
     engine: &Engine,
     source: &SourcePlan,
@@ -680,6 +682,8 @@ impl PhysicalOperator for LockRows<'_> {
         self.input.open()
     }
 
+    // Keep the virtual pull boundary intact under `ThinLTO`; the acquisition and recheck state machines below are deliberately separate optimized functions.
+    #[inline(never)]
     fn next(&mut self) -> ExecResult<Option<Batch>> {
         if self
             .max_rows
@@ -733,6 +737,8 @@ struct LockCandidate {
 }
 
 impl LockRows<'_> {
+    // Keep candidate acquisition separate from successor traversal so release optimization never merges their control-flow graphs.
+    #[inline(never)]
     fn lock_physical_row(&mut self, row: PhysicalRow) -> Result<Option<PhysicalRow>, SQLError> {
         let mut candidates: Vec<LockCandidate> = Vec::new();
         for target in &self.targets {
@@ -849,6 +855,8 @@ impl LockRows<'_> {
     }
 
     /// `PostgreSQL` 18 `EvalPlanQual`: when a selected tuple was concurrently updated by a committed transaction whose mutation strength conflicts with the requested row lock, re-evaluate this candidate in place. The candidate keeps its original scan and sort position, its original join partners stay pinned, `LIMIT` membership is decided by the recheck outcome, and a primary-key rewrite is followed to the successor row.
+    // Keep successor traversal separate from candidate acquisition and committed-image comparison.
+    #[inline(never)]
     fn recheck_changed_candidates(
         &self,
         row: PhysicalRow,
@@ -952,6 +960,8 @@ impl LockRows<'_> {
     }
 
     /// Whether another OS process committed a change to this candidate that conflicts with the requested lock strength. Foreign commits are invisible to the in-process change epochs, so the latest committed image is compared with the statement snapshot and the mutation strength is derived from the changed columns, exactly like the epochs derive it from the writer's own column set. A row this transaction already rewrote itself is authoritative as-is.
+    // Keep committed-image comparison separate from the successor traversal state machine.
+    #[inline(never)]
     fn cross_process_candidate_changed(
         &self,
         candidate: &LockCandidate,
@@ -1002,6 +1012,9 @@ impl LockRows<'_> {
     }
 
     /// Re-execute the plan below this `LockRows` boundary with every base scan pinned to the tuple that formed the original candidate. Changed lock targets substitute their committed image; unmarked join partners keep their statement-snapshot image, matching `PostgreSQL`'s `EvalPlanQual` row marks.
+    // This contention-only rebuild stays out of the per-row locking path.
+    #[cold]
+    #[inline(never)]
     fn run_candidate_recheck(
         &self,
         row: &PhysicalRow,
@@ -1132,6 +1145,8 @@ fn rollback_row_acquisitions(
 }
 
 /// Align a rebuilt recheck pipeline with the original lock boundary schema. The single-relation access path derives its scan order from the pruned projection while the join builder uses catalog column order, so the same columns can arrive in a different physical order. Positions are resolved by column identity; any column the rebuild cannot supply is an error, not a silent divergence.
+#[cold]
+#[inline(never)]
 fn align_recheck_schema<'a>(
     operator: Box<dyn PhysicalOperator + 'a>,
     expected: &RowSchema,

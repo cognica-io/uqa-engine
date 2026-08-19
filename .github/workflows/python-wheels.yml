@@ -71,12 +71,6 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # Rust 1.90's LLVM 20 crashes deterministically in BranchProbabilityInfo while applying cross-crate ThinLTO to this target; 16 through 64 MiB stacks fail at the same instruction, so use the regular optimized per-crate pipeline.
-      - name: Configure Linux ARM64 release profile
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        shell: bash
-        run: echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
-
       - name: Free Linux runner disk
         if: runner.os == 'Linux'
         run: bash .github/scripts/free-linux-runner-disk.sh
