@@ -27,8 +27,6 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  # LLVM optimization of the single-codegen-unit release artifact needs the 64 MiB worker stack rustc recommends on Linux aarch64.
-  RUST_MIN_STACK: "67108864"
   RUSTFLAGS: "-D warnings"
 
 jobs:
@@ -72,6 +70,12 @@ jobs:
           python-version: "3.12"
 
       - uses: dtolnay/rust-toolchain@stable
+
+      # Rust 1.90's LLVM 20 crashes deterministically in BranchProbabilityInfo while applying cross-crate ThinLTO to this target; 16 through 64 MiB stacks fail at the same instruction, so use the regular optimized per-crate pipeline.
+      - name: Configure Linux ARM64 release profile
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        shell: bash
+        run: echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
 
       - name: Free Linux runner disk
         if: runner.os == 'Linux'
