@@ -27,8 +27,8 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  # LLVM optimization of the single-codegen-unit release artifact needs the 32 MiB worker stack rustc recommends on Linux aarch64.
-  RUST_MIN_STACK: "33554432"
+  # LLVM optimization of the single-codegen-unit release artifact needs the 64 MiB worker stack rustc recommends on Linux aarch64.
+  RUST_MIN_STACK: "67108864"
   RUSTFLAGS: "-D warnings"
 
 jobs:
