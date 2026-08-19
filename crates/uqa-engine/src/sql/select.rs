@@ -201,11 +201,7 @@ impl QueryRowConsumer for SetOperationRowConsumer {
                         .as_ref()
                         .is_some_and(|target_type| source_type != Some(target_type))
                     {
-                        let value = view.value_at(position).cloned().ok_or_else(|| {
-                            SQLError::Internal(format!(
-                                "set-operation input lost output position {position}"
-                            ))
-                        })?;
+                        let value = view.value_at(position).cloned().unwrap_or(Value::Null);
                         return coerce_common_context_value(
                             value,
                             source_type,

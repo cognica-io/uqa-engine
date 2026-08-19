@@ -688,10 +688,12 @@ fn order_by_rejects_an_out_of_range_ordinal() {
     let error = eng
         .sql("SELECT name FROM products ORDER BY 0", &[])
         .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42P10"));
     assert!(error.to_string().contains("ORDER BY position 0"), "{error}");
     let error = eng
         .sql("SELECT name FROM products ORDER BY 2", &[])
         .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42P10"));
     assert!(error.to_string().contains("ORDER BY position 2"), "{error}");
 }
 
@@ -917,6 +919,37 @@ fn distinct_ordering_validation_matches_postgresql() {
     assert!(distinct_on_order
         .to_string()
         .contains("DISTINCT ON expressions must match initial ORDER BY expressions"));
+
+    let ordinal = eng
+        .sql(
+            "SELECT DISTINCT ON (1) x, y FROM (VALUES (1, 20), (1, 10), (2, 30)) AS input(x, y) ORDER BY 1, y",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(ordinal.rows.len(), 2);
+    assert_eq!(ordinal.value_at(0, 1), Some(&Value::Int(10)));
+    assert_eq!(ordinal.value_at(1, 1), Some(&Value::Int(30)));
+
+    let output_alias = eng
+        .sql(
+            "SELECT DISTINCT ON (output_key) x AS output_key, y FROM (VALUES (1, 20), (1, 10), (2, 30)) AS input(x, y) ORDER BY output_key, y",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(output_alias.rows.len(), 2);
+    assert_eq!(output_alias.value_at(0, 1), Some(&Value::Int(10)));
+    assert_eq!(output_alias.value_at(1, 1), Some(&Value::Int(30)));
+
+    let out_of_range = eng
+        .sql(
+            "SELECT DISTINCT ON (3) x, y FROM (VALUES (1, 10)) AS input(x, y) ORDER BY x, y",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(out_of_range.sqlstate(), Some("42P10"));
+    assert!(out_of_range
+        .to_string()
+        .contains("DISTINCT ON position 3 is not in the select list"));
 
     let reordered = eng
         .sql(

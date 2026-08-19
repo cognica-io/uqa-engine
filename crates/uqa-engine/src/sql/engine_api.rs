@@ -56,31 +56,71 @@ impl Engine {
     /// All doc ids on a table, used by the SELECT path when there is no
     /// WHERE clause.
     pub fn table_doc_ids(&self, table: &str) -> Result<Vec<uqa_core::DocId>, SQLError> {
-        if let Some(documents) = self.command_visible_documents(table)? {
-            return Ok(documents.into_keys().collect());
-        }
         let Some(t) = self
             .try_table(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
-        let result = t.document_store.read().doc_ids();
-        result.map_err(|error| SQLError::Internal(format!("read document ids: {error}")))
+        let doc_ids = t
+            .document_store
+            .read()
+            .doc_ids()
+            .map_err(|error| SQLError::Internal(format!("read document ids: {error}")))?;
+        let Some(changes) = self.command_overlay_changes(table)? else {
+            return Ok(doc_ids);
+        };
+        let mut visible = doc_ids
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        for (doc_id, document) in changes {
+            if document.is_some() {
+                visible.insert(doc_id);
+            } else {
+                visible.remove(&doc_id);
+            }
+        }
+        Ok(visible.into_iter().collect())
     }
 
     pub(crate) fn table_doc_count(&self, table: &str) -> Result<u64, SQLError> {
         use std::sync::atomic::Ordering;
-        if let Some(documents) = self.command_visible_documents(table)? {
-            return u64::try_from(documents.len())
-                .map_err(|_| SQLError::Internal("document count exceeds u64".into()));
-        }
         let Some(t) = self
             .try_table(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
+        if let Some(changes) = self
+            .command_overlay_changes(table)?
+            .filter(|changes| !changes.is_empty())
+        {
+            let store = t.document_store.read();
+            let mut count =
+                u64::try_from(store.len().map_err(|error| {
+                    SQLError::Internal(format!("read document count: {error}"))
+                })?)
+                .map_err(|_| SQLError::Internal("document count exceeds u64".into()))?;
+            for (doc_id, document) in changes {
+                let persisted = store.contains_doc_id(doc_id).map_err(|error| {
+                    SQLError::Internal(format!("read command-visible document count: {error}"))
+                })?;
+                match (persisted, document.is_some()) {
+                    (false, true) => {
+                        count = count.checked_add(1).ok_or_else(|| {
+                            SQLError::Internal("document count exceeds u64".into())
+                        })?;
+                    }
+                    (true, false) => {
+                        count = count
+                            .checked_sub(1)
+                            .ok_or_else(|| SQLError::Internal("document count underflow".into()))?;
+                    }
+                    _ => {}
+                }
+            }
+            return Ok(count);
+        }
         if !t.doc_count_dirty.load(Ordering::Acquire) {
             return Ok(t.doc_count_cache.load(Ordering::Acquire));
         }

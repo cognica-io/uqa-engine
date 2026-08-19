@@ -29,6 +29,9 @@ use crate::sql::virtual_relation_schema;
 use std::sync::Arc;
 use uqa_planner::{AccessPathPlan, ComputePlan, RelationalPlan};
 
+#[path = "local_table_command_scan.rs"]
+mod command_scan;
+
 type StreamingLocalTableScan<'a> = (Box<dyn uqa_execution::PhysicalOperator + 'a>, bool);
 type SharedLockOrigin = (Arc<str>, Arc<str>);
 
@@ -45,10 +48,18 @@ pub(in crate::sql) struct EngineTableRowSource {
     lock_origin: Option<SharedLockOrigin>,
     recheck_pins: Option<Arc<Vec<crate::sql::select::RecheckDoc>>>,
     recheck_cursor: usize,
-    command_documents: Option<
-        Arc<std::collections::BTreeMap<uqa_core::DocId, uqa_storage::document_store::Document>>,
+    command_changes: Option<
+        Arc<
+            std::collections::BTreeMap<
+                uqa_core::DocId,
+                Option<uqa_storage::document_store::Document>,
+            >,
+        >,
     >,
-    command_cursor: usize,
+    command_change_after: Option<uqa_core::DocId>,
+    command_base_after: Option<uqa_core::DocId>,
+    command_base_ids: std::collections::VecDeque<uqa_core::DocId>,
+    command_base_exhausted: bool,
 }
 
 fn table_lock_origin(
@@ -81,7 +92,7 @@ impl EngineTableRowSource {
         if self.recheck_pins.is_some() {
             return self.next_pinned_physical_rows_batch(max_rows);
         }
-        if self.command_documents.is_some() {
+        if self.command_changes.is_some() {
             return self.next_command_physical_rows_batch(max_rows);
         }
         if crate::engine_generated::projection_contains_virtual_generated_column(
@@ -235,43 +246,6 @@ impl EngineTableRowSource {
                     ))
                     .into());
                 }
-            }
-        }
-        Ok(rows)
-    }
-
-    fn next_command_physical_rows_batch(
-        &mut self,
-        max_rows: usize,
-    ) -> uqa_execution::ExecResult<Vec<uqa_execution::PhysicalRow>> {
-        let Some(documents) = self.command_documents.as_ref().map(Arc::clone) else {
-            return Err(SQLError::Internal("command scan has no document overlay".into()).into());
-        };
-        let mut rows = Vec::with_capacity(max_rows);
-        for (doc_id, document) in documents.iter().skip(self.command_cursor) {
-            self.command_cursor += 1;
-            let mut document = document.clone();
-            crate::engine_generated::materialize_projected_virtual_generated_columns(
-                &self.column_definitions,
-                &mut document,
-                &self.columns,
-            )?;
-            let values = self
-                .columns
-                .iter()
-                .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
-                .collect::<Vec<_>>();
-            let value_refs = values.iter().collect::<Vec<_>>();
-            if let Some(predicate) = self.predicate.as_ref() {
-                if !predicate.keep(&value_refs)? {
-                    continue;
-                }
-            }
-            rows.push(
-                self.with_lock_identity(uqa_execution::PhysicalRow::from_values(values), *doc_id)?,
-            );
-            if rows.len() == max_rows {
-                break;
             }
         }
         Ok(rows)
@@ -550,18 +524,12 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         .and_then(|(origin_qualifier, storage_name)| {
             ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
         });
-    let command_documents = if ctes.reads_command_overlay() {
-        engine.command_visible_documents(name)?.map(Arc::new)
+    let command_changes = if ctes.reads_command_overlay() {
+        engine.command_overlay_changes(name)?.map(Arc::new)
     } else {
         None
     };
-    let estimated_cardinality = command_documents.as_ref().map_or_else(
-        || engine.table_doc_count(name),
-        |documents| {
-            u64::try_from(documents.len())
-                .map_err(|_| SQLError::Internal("document count exceeds u64".into()))
-        },
-    )?;
+    let estimated_cardinality = engine.table_doc_count(name)?;
     let source = EngineTableRowSource {
         table_name: name.clone(),
         table,
@@ -575,8 +543,11 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         lock_origin,
         recheck_pins,
         recheck_cursor: 0,
-        command_documents,
-        command_cursor: 0,
+        command_changes,
+        command_change_after: None,
+        command_base_after: None,
+        command_base_ids: std::collections::VecDeque::new(),
+        command_base_exhausted: false,
     };
     Ok(Some((
         Box::new(uqa_execution::TableScan::new(Box::new(source))),

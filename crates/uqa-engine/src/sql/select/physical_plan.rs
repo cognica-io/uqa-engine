@@ -41,9 +41,9 @@ mod row_at_a_time;
 use row_at_a_time::RowAtATime;
 mod ordering;
 use ordering::{
-    append_row_at_time_projection, attach_final_projection_order, one_based_output_position,
-    output_target_position, prior_distinct_key_index, split_locking_order_projections,
-    validate_distinct_ordering,
+    append_row_at_time_projection, attach_final_projection_order, distinct_output_target_position,
+    one_based_output_position, output_position_error, output_target_position,
+    prior_distinct_key_index, split_locking_order_projections, validate_distinct_ordering,
 };
 
 pub(in crate::sql) fn expand_from_star_columns(
@@ -376,11 +376,7 @@ pub(in crate::sql) fn resolve_order_expression(
                 .ok()
                 .and_then(|position| position.checked_sub(1))
                 .filter(|index| *index < output_columns.len())
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(format!(
-                        "ORDER BY position {position} is not in the select list"
-                    ))
-                })?;
+                .ok_or_else(|| output_position_error("ORDER BY", *position))?;
             Ok(output_columns[index].1.clone())
         }
         // SQL output aliases are visible only as a bare ORDER BY name. A
@@ -444,7 +440,7 @@ fn append_distinct_set_projections(
         if prior_distinct_key_index(statement, index, expression, output_columns)?.is_some() {
             continue;
         }
-        if output_target_position(statement, expression, output_columns)?.is_some() {
+        if distinct_output_target_position(statement, expression, output_columns)?.is_some() {
             continue;
         }
         let expression = resolve_order_expression(expression, output_columns)?;
@@ -464,7 +460,7 @@ fn prepare_aggregate_key_statement(
         if prior_distinct_key_index(statement, index, expression, &output)?.is_some() {
             continue;
         }
-        if output_target_position(statement, expression, &output)?.is_some() {
+        if distinct_output_target_position(statement, expression, &output)?.is_some() {
             continue;
         }
         let expression = resolve_order_expression(expression, &output)?;
@@ -840,7 +836,8 @@ pub(in crate::sql) fn finish_query_block_operator_output<'a>(
                     prior_distinct_key_index(original, index, expression, &output)?
                 {
                     distinct_on[prior].clone()
-                } else if let Some(target) = output_target_position(original, expression, &output)?
+                } else if let Some(target) =
+                    distinct_output_target_position(original, expression, &output)?
                 {
                     ScalarExpr::Position(target.position)
                 } else {
@@ -1140,18 +1137,49 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                             Arc::clone(&evaluator),
                         ));
                     }
-                    operator = attach_order_limit(
-                        operator,
-                        &sort_statement,
-                        &order_output,
+                    if projections_may_return_set(
                         engine,
+                        &after_sort,
+                        operator.row_schema(),
                         params,
-                        ctes,
-                        Arc::clone(&evaluator),
-                        None,
-                    )?;
-                    operator =
-                        append_row_at_time_projection(operator, after_sort, Arc::clone(&evaluator));
+                    )? {
+                        operator = build_set_projection(
+                            operator,
+                            engine,
+                            params,
+                            ctes,
+                            Arc::clone(&evaluator),
+                            after_sort,
+                            true,
+                            projection_set_batch_size(statement, ctes),
+                        )?;
+                        operator = attach_order_limit(
+                            operator,
+                            &sort_statement,
+                            &order_output,
+                            engine,
+                            params,
+                            ctes,
+                            Arc::clone(&evaluator),
+                            None,
+                        )?;
+                    } else {
+                        operator = attach_order_limit(
+                            operator,
+                            &sort_statement,
+                            &order_output,
+                            engine,
+                            params,
+                            ctes,
+                            Arc::clone(&evaluator),
+                            None,
+                        )?;
+                        operator = append_row_at_time_projection(
+                            operator,
+                            after_sort,
+                            Arc::clone(&evaluator),
+                        );
+                    }
                 } else {
                     let effective_order_statement = order_statement.as_ref().unwrap_or(statement);
                     let (mut sort_statement, before_sort, after_sort) =

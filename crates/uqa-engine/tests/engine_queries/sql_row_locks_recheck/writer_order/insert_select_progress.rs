@@ -82,7 +82,7 @@ fn insert_select_streams_command_progress_at_postgresql_execution_boundaries() {
     let directory = tempfile::tempdir().unwrap();
     let root = Arc::new(Engine::open(&directory.path().join("insert-select-progress.db")).unwrap());
     register_visible_count(&root);
-    root.sql("CREATE TABLE progress_source (id INTEGER PRIMARY KEY); INSERT INTO progress_source VALUES (1), (2), (3); CREATE TABLE progress_ordered (id INTEGER PRIMARY KEY, seen INTEGER, snapshot_count INTEGER); CREATE TABLE progress_filter (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_sort_key (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_derived (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_srf (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_aggregate (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_window (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_union_all (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_union_distinct (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_union_limit (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_union_offset (id INTEGER PRIMARY KEY, seen INTEGER)", &[]).unwrap();
+    root.sql("CREATE TABLE progress_source (id INTEGER PRIMARY KEY); INSERT INTO progress_source VALUES (1), (2), (3); CREATE TABLE progress_ordered (id INTEGER PRIMARY KEY, seen INTEGER, snapshot_count INTEGER); CREATE TABLE progress_filter (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_sort_key (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_derived (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_srf (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_srf_limit (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_aggregate (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_window (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_union_all (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_union_distinct (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_union_limit (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_union_offset (id INTEGER PRIMARY KEY, seen INTEGER)", &[]).unwrap();
 
     root.sql("INSERT INTO progress_ordered SELECT id, insert_select_visible_count('progress_ordered'), (SELECT count(*) FROM progress_ordered) FROM progress_source ORDER BY id", &[]).unwrap();
     assert_eq!(
@@ -125,6 +125,17 @@ fn insert_select_streams_command_progress_at_postgresql_execution_boundaries() {
             Value::Int(4),
             Value::Int(5),
         ]
+    );
+
+    root.sql("INSERT INTO progress_srf_limit SELECT id * 10 + generate_series(1, 2), insert_select_visible_count('progress_srf_limit') FROM progress_source ORDER BY id LIMIT 3", &[]).unwrap();
+    assert_eq!(
+        root.sql("SELECT id FROM progress_srf_limit ORDER BY id", &[])
+            .unwrap()
+            .rows
+            .into_iter()
+            .map(|row| row["id"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Int(11), Value::Int(12), Value::Int(21)]
     );
 
     root.sql("INSERT INTO progress_aggregate SELECT id, insert_select_visible_count('progress_aggregate') FROM progress_source GROUP BY id", &[]).unwrap();

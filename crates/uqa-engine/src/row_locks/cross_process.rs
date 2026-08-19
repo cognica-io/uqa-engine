@@ -208,6 +208,7 @@ mod file {
     pub(in crate::row_locks) struct FileLockCoordinator {
         file: std::fs::File,
         change_file: std::fs::File,
+        change_journal: Mutex<()>,
         state: Mutex<CoordinatorState>,
     }
 
@@ -244,6 +245,7 @@ mod file {
             let coordinator = Self {
                 file,
                 change_file,
+                change_journal: Mutex::new(()),
                 state: Mutex::new(CoordinatorState {
                     claims: HashMap::new(),
                     holders: HashMap::new(),
@@ -493,7 +495,7 @@ mod file {
             if changes.is_empty() {
                 return Ok(());
             }
-            let _guard = self.state.lock();
+            let _guard = self.change_journal.lock();
             let deadline = std::time::Instant::now() + CHANGE_JOURNAL_WAIT_LIMIT;
             loop {
                 match self.apply_byte_mode(CHANGE_JOURNAL_LOCK_BYTE, None, Some(true)) {

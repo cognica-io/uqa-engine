@@ -634,10 +634,13 @@ fn deadlock_detected() -> SQLError {
 }
 
 fn change_gate_timeout() -> SQLError {
-    SQLError::Internal(format!(
-        "timed out after {} seconds waiting for cross-process row-change coordination",
-        CHANGE_GATE_WAIT_LIMIT.as_secs()
-    ))
+    SQLError::Routine {
+        sqlstate: "55P03".into(),
+        message: format!(
+            "timed out after {} seconds waiting for cross-process row-change coordination",
+            CHANGE_GATE_WAIT_LIMIT.as_secs()
+        ),
+    }
 }
 
 /// Advertises one session's cross-process wait for the duration of an acquisition and clears it on every exit path.

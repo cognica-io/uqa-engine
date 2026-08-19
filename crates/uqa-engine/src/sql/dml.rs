@@ -64,7 +64,7 @@ fn lock_mutation_row(
     }
 }
 
-/// Lock a DML target row and follow any primary-key rewrite another transaction committed while this statement waited, exactly like `PostgreSQL` 18 follows the update chain to the row version it lands on. Returns the doc id the statement must act on together with whether any wait or successor hop makes a re-qualification necessary. Callers acquire every row dependency first and promote the backend writer only after that lock phase has completed.
+/// Outcome of following a DML target through its committed update chain.
 pub(in crate::sql) enum MutationLockTarget {
     Present { doc_id: DocId, recheck: bool },
     Deleted,
@@ -287,6 +287,7 @@ pub(in crate::sql) fn decode_prepared_document_delete(
     })
 }
 
+/// Lock a DML target row and follow any primary-key rewrite another transaction committed while this statement waited, exactly like `PostgreSQL` 18 follows the update chain to the row version it lands on. Returns the doc id the statement must act on together with whether any wait or successor hop makes a re-qualification necessary. Callers acquire every row dependency first and promote the backend writer only after that lock phase has completed.
 pub(in crate::sql) fn lock_mutation_target(
     engine: &Engine,
     table: &str,

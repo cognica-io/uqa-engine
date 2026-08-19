@@ -29,17 +29,30 @@ pub(super) fn output_target_position(
     expression: &ScalarExpr,
     output: &[OutputColumnMapping],
 ) -> Result<Option<OutputTarget>, SQLError> {
+    output_target_position_for(statement, expression, output, "ORDER BY")
+}
+
+pub(super) fn distinct_output_target_position(
+    statement: &QueryBlockPlan,
+    expression: &ScalarExpr,
+    output: &[OutputColumnMapping],
+) -> Result<Option<OutputTarget>, SQLError> {
+    output_target_position_for(statement, expression, output, "DISTINCT ON")
+}
+
+fn output_target_position_for(
+    statement: &QueryBlockPlan,
+    expression: &ScalarExpr,
+    output: &[OutputColumnMapping],
+    clause: &str,
+) -> Result<Option<OutputTarget>, SQLError> {
     match expression {
         ScalarExpr::Literal(Value::Int(position)) => {
             let position = usize::try_from(*position)
                 .ok()
                 .and_then(|position| position.checked_sub(1))
                 .filter(|position| *position < output.len())
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(format!(
-                        "ORDER BY position {position} is not in the select list"
-                    ))
-                })?;
+                .ok_or_else(|| output_position_error(clause, *position))?;
             return Ok(Some(OutputTarget {
                 position,
                 direct: true,
@@ -75,6 +88,13 @@ pub(super) fn output_target_position(
         }))
 }
 
+pub(super) fn output_position_error(clause: &str, position: i64) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42P10".into(),
+        message: format!("{clause} position {position} is not in the select list"),
+    }
+}
+
 pub(super) fn one_based_output_position(position: usize) -> Result<ScalarExpr, SQLError> {
     let position = position
         .checked_add(1)
@@ -88,9 +108,14 @@ fn distinct_key_expressions_match(
     left: &ScalarExpr,
     right: &ScalarExpr,
     output: &[OutputColumnMapping],
+    right_is_order_by: bool,
 ) -> Result<bool, SQLError> {
-    let left_target = output_target_position(statement, left, output)?;
-    let right_target = output_target_position(statement, right, output)?;
+    let left_target = distinct_output_target_position(statement, left, output)?;
+    let right_target = if right_is_order_by {
+        output_target_position(statement, right, output)?
+    } else {
+        distinct_output_target_position(statement, right, output)?
+    };
     match (left_target, right_target) {
         (Some(left), Some(right)) => Ok(left.position == right.position),
         (None, None) => Ok(crate::sql::aggregates::exprs_match(
@@ -108,7 +133,7 @@ pub(super) fn prior_distinct_key_index(
     output: &[OutputColumnMapping],
 ) -> Result<Option<usize>, SQLError> {
     for (prior, candidate) in statement.distinct_on[..index].iter().enumerate() {
-        if distinct_key_expressions_match(statement, candidate, expression, output)? {
+        if distinct_key_expressions_match(statement, candidate, expression, output, false)? {
             return Ok(Some(prior));
         }
     }
@@ -143,7 +168,7 @@ pub(super) fn validate_distinct_ordering(statement: &QueryBlockPlan) -> Result<(
     for order in &statement.order_by {
         let mut order_is_distinct = false;
         for (index, expression) in statement.distinct_on.iter().enumerate() {
-            if distinct_key_expressions_match(statement, expression, &order.expr, &output)? {
+            if distinct_key_expressions_match(statement, expression, &order.expr, &output, true)? {
                 order_is_distinct = true;
                 matched[index] = true;
             }

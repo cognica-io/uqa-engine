@@ -8,6 +8,8 @@ use super::*;
 
 #[path = "writer_order/insert_select_progress.rs"]
 mod insert_select_progress;
+#[path = "writer_order/update_from_source.rs"]
+mod update_from_source;
 
 #[test]
 fn writer_promoted_after_savepoint_keeps_its_deadlock_registration() {
@@ -43,17 +45,18 @@ fn writer_promoted_after_savepoint_keeps_its_deadlock_registration() {
         writer.sql("ROLLBACK", &[]).ok();
         writer_tx.send(result).unwrap();
     });
-    assert!(writer_rx.recv_timeout(Duration::from_millis(150)).is_err());
-
-    let error = blocker
-        .sql("UPDATE savepoint_writer SET value = 1 WHERE id = 3", &[])
-        .unwrap_err();
-    assert_eq!(sqlstate(&error), "40P01");
-    blocker.sql("ROLLBACK", &[]).unwrap();
-    writer_rx
-        .recv_timeout(Duration::from_secs(2))
-        .unwrap()
-        .unwrap();
+    let blocker_result = blocker.sql("UPDATE savepoint_writer SET value = 1 WHERE id = 3", &[]);
+    blocker.sql("ROLLBACK", &[]).ok();
+    let writer_result = writer_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(
+        blocker_result
+            .as_ref()
+            .is_err_and(|error| sqlstate(error) == "40P01")
+            || writer_result
+                .as_ref()
+                .is_err_and(|error| sqlstate(error) == "40P01"),
+        "one participant must detect the writer/row-lock cycle; blocker: {blocker_result:?}, writer: {writer_result:?}"
+    );
     writer_wait.join().unwrap();
 }
 

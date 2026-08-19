@@ -645,3 +645,8 @@ fn change_gate_wait_observes_statement_cancellation() {
 
     assert_eq!(error.sqlstate(), Some("57014"));
 }
+
+#[test]
+fn change_gate_timeout_is_reported_as_lock_not_available() {
+    assert_eq!(change_gate_timeout().sqlstate(), Some("55P03"));
+}
