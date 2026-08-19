@@ -72,9 +72,12 @@ uqa-api = { version = "0.1.5", path = "crates/uqa-api" }
 # Shared external dependencies (versions added when first consumer pulls them in)
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["arbitrary_precision"] }
+ciborium = "0.2"
 thiserror = "1.0"
 tracing = "0.1"
 parking_lot = "0.12"
+libc = "0.2"
+windows-sys = "0.61"
 smallvec = "1.15"
 ahash = "0.8"
 rayon = "1.10"

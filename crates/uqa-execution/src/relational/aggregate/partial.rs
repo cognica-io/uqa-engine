@@ -6,7 +6,8 @@
 
 //! Compact spill representation for mergeable built-in aggregate states.
 
-use super::{fold, AggregateSpec, ExecError, ExecResult, ResultRow, RowSchema, Value};
+use super::{fold, AggregateSpec, ExecError, ExecResult, RowSchema, Value};
+use crate::PhysicalRow;
 use fold::{AggFold, GroupState};
 
 const PARTIAL_GROUP_PREFIX: &str = "__uqa_builtin_group_";
@@ -22,16 +23,12 @@ pub(super) fn schema(group_count: usize) -> RowSchema {
     RowSchema::new(columns)
 }
 
-pub(super) fn encode_group(state: GroupState) -> ResultRow {
-    let mut row = ResultRow::new();
-    for (index, value) in state.key_values.into_iter().enumerate() {
-        row.insert(group_column(index), value);
-    }
-    row.insert(
-        PARTIAL_STATE_COLUMN.into(),
-        Value::List(state.folds.into_iter().map(encode_fold).collect()),
-    );
-    row
+pub(super) fn encode_group(state: GroupState) -> PhysicalRow {
+    let mut values = state.key_values;
+    values.push(Value::List(
+        state.folds.into_iter().map(encode_fold).collect(),
+    ));
+    PhysicalRow::from_values(values)
 }
 
 fn encode_fold(fold: AggFold) -> Value {
@@ -46,18 +43,20 @@ fn encode_fold(fold: AggFold) -> Value {
 }
 
 pub(super) fn decode_group(
-    mut row: ResultRow,
+    row: PhysicalRow,
     group_count: usize,
     aggregates: &[AggregateSpec],
 ) -> ExecResult<GroupState> {
-    let key_values = (0..group_count)
-        .map(|index| {
-            row.remove(&group_column(index)).ok_or_else(|| {
-                ExecError::Other(format!("partial aggregate group key {index} is missing"))
-            })
-        })
-        .collect::<ExecResult<Vec<_>>>()?;
-    let states = match row.remove(PARTIAL_STATE_COLUMN) {
+    let mut values = row.into_physical_values();
+    if values.len() != group_count + 1 {
+        return Err(ExecError::Other(format!(
+            "partial aggregate row has {} values, expected {}",
+            values.len(),
+            group_count + 1
+        )));
+    }
+    let state = values.pop();
+    let states = match state {
         Some(Value::List(states)) => states,
         _ => {
             return Err(ExecError::Other(
@@ -77,7 +76,10 @@ pub(super) fn decode_group(
         .zip(aggregates)
         .map(|(state, aggregate)| decode_fold(state, aggregate))
         .collect::<ExecResult<Vec<_>>>()?;
-    Ok(GroupState { folds, key_values })
+    Ok(GroupState {
+        folds,
+        key_values: values,
+    })
 }
 
 fn decode_fold(state: Value, aggregate: &AggregateSpec) -> ExecResult<AggFold> {

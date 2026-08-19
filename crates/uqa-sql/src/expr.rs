@@ -506,6 +506,93 @@ pub const NAMED_ARG_FUNCTION: &str = "__named_arg";
 pub const TO_HEX_INT4_FUNCTION: &str = "__to_hex_int4";
 pub const TO_HEX_INT8_FUNCTION: &str = "__to_hex_int8";
 
+/// Return the `PostgreSQL` 18 strictness contract for a built-in scalar call when its implemented overload is known.
+#[must_use]
+pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> Option<bool> {
+    let normalized = normalized_function_name(name);
+    match normalized.as_ref() {
+        "coalesce" | "greatest" | "least" if argument_count >= 1 => Some(false),
+        "nullif" | "concat_op" if argument_count == 2 => Some(false),
+        "concat" | "format" | "json_build_array" | "jsonb_build_array" | "json_build_object"
+        | "jsonb_build_object" | "num_nulls" | "num_nonnulls" => Some(false),
+        "concat_ws" if argument_count >= 1 => Some(false),
+        "quote_nullable" | "pg_typeof" | "typeof" if argument_count == 1 => Some(false),
+        "array_cat" | "array_append" | "array_prepend" | "array_remove" | "array_positions"
+            if argument_count == 2 =>
+        {
+            Some(false)
+        }
+        "array_position" if matches!(argument_count, 2 | 3) => Some(false),
+        "array_replace" if argument_count == 3 => Some(false),
+        "array_fill" if matches!(argument_count, 2 | 3) => Some(false),
+        "array_to_string" if argument_count == 3 => Some(false),
+        "string_to_array" | "string_to_table" if matches!(argument_count, 2 | 3) => Some(false),
+        "overlaps" if argument_count == 4 => Some(false),
+        "abs" | "acos" | "array_dims" | "array_ndims" | "array_reverse" | "ascii" | "asin"
+        | "atan" | "bit_length" | "cardinality" | "casefold" | "cbrt" | "ceil" | "ceiling"
+        | "char_length" | "character_length" | "chr" | "cos" | "cosh" | "current_schemas"
+        | "degrees" | "exp" | "factorial" | "floor" | "gamma" | "initcap" | "isfinite"
+        | "json_array_length" | "jsonb_array_length" | "json_typeof" | "jsonb_typeof"
+        | "jsonb_pretty" | "justify_hours" | "length" | "lgamma" | "ln" | "log10" | "log2"
+        | "lower" | "md5" | "octet_length" | "quote_ident" | "quote_literal" | "radians"
+        | "reverse" | "row_to_json" | "sign" | "sin" | "sinh" | "sqrt" | "tan" | "tanh"
+        | "to_hex" | TO_HEX_INT4_FUNCTION | TO_HEX_INT8_FUNCTION | "to_json" | "to_jsonb"
+        | "to_timestamp" | "upper"
+            if argument_count == 1 =>
+        {
+            Some(true)
+        }
+        "age" | "btrim" | "ltrim" | "rtrim" | "trim" | "log" | "round" | "trunc"
+        | "json_strip_nulls" | "jsonb_strip_nulls"
+            if matches!(argument_count, 1 | 2) =>
+        {
+            Some(true)
+        }
+        "array_sort" if matches!(argument_count, 1..=3) => Some(true),
+        "array_length" | "array_lower" | "array_upper" | "atan2" | "date_part" | "date_trunc"
+        | "decode" | "encode" | "extract" | "gcd" | "lcm" | "left" | "mod" | "power" | "pow"
+        | "repeat" | "right" | "starts_with" | "position" | "strpos" | "to_char" | "to_date"
+        | "to_number" | "trim_array" | "like" | "ilike" | "similar_to" | "point"
+        | "st_distance" | "st_within"
+            if argument_count == 2 =>
+        {
+            Some(true)
+        }
+        "array_to_string" if argument_count == 2 => Some(true),
+        "substring" | "substr" | "lpad" | "rpad" if matches!(argument_count, 2 | 3) => Some(true),
+        "regexp_count" if matches!(argument_count, 2..=4) => Some(true),
+        "regexp_instr" if matches!(argument_count, 2..=7) => Some(true),
+        "regexp_like" | "regexp_match" | "regexp_matches" if matches!(argument_count, 2 | 3) => {
+            Some(true)
+        }
+        "regexp_replace" if matches!(argument_count, 3..=6) => Some(true),
+        "regexp_substr" if matches!(argument_count, 2..=6) => Some(true),
+        "replace" | "split_part" | "translate" | "make_date" if argument_count == 3 => Some(true),
+        "__between_symmetric" if argument_count == 3 => Some(true),
+        "overlay" | "jsonb_set" | "jsonb_insert" if matches!(argument_count, 3 | 4) => Some(true),
+        "json_extract_path"
+        | "jsonb_extract_path"
+        | "json_extract_path_text"
+        | "jsonb_extract_path_text"
+            if argument_count >= 2 =>
+        {
+            Some(true)
+        }
+        "json_contains" | "json_contained_by" | "json_delete_path" | "json_has_key"
+        | "json_has_any_key" | "json_has_all_keys" | "jsonb_path_exists" | "jsonpath_exists"
+        | "jsonb_path_match" | "jsonpath_match"
+            if argument_count == 2 =>
+        {
+            Some(true)
+        }
+        "make_timestamp" if matches!(argument_count, 6 | 7) => Some(true),
+        "make_interval" if argument_count <= 7 => Some(true),
+        "width_bucket" if argument_count == 4 => Some(true),
+        "st_dwithin" if matches!(argument_count, 2 | 3) => Some(true),
+        _ => None,
+    }
+}
+
 /// Evaluate a call's argument list, unwrapping `name => value`
 /// markers into `(Some(name), value)` pairs.
 pub fn evaluate_call_args(

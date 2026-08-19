@@ -533,7 +533,7 @@ fn encoded_byte_budget_never_retains_an_oversized_batch() {
 }
 
 #[test]
-fn encoded_batch_size_is_one_schema_header_plus_row_records() {
+fn origin_free_batch_size_has_no_per_row_metadata_word() {
     let batch = dummy_batch(0, 3);
     let expected = SpillBuffer::encoded_batch_overhead_size(&batch.schema)
         .unwrap()
@@ -547,6 +547,40 @@ fn encoded_batch_size_is_one_schema_header_plus_row_records() {
         .unwrap();
 
     assert_eq!(SpillBuffer::encoded_size(&batch).unwrap(), expected);
+}
+
+#[test]
+fn spill_round_trips_optional_lock_origins() {
+    let schema = RowSchema::new(vec!["id".into()]);
+    let rebound = crate::RowLockOrigin::new("accounts", "public.accounts", 1);
+    let rows = vec![
+        PhysicalRow::from_values(vec![Value::Int(1)])
+            .with_lock_origin(rebound)
+            .rebind_lock_origin_qualifiers(std::sync::Arc::<str>::from("account_view")),
+        PhysicalRow::from_values(vec![Value::Int(2)]),
+    ];
+    let mut buffer = SpillBuffer::new(0);
+    buffer
+        .push(Batch::from_physical_rows(schema, rows))
+        .unwrap();
+
+    let restored = buffer.drain_all().unwrap();
+    assert_eq!(restored[0].rows[0].lock_origins().len(), 1);
+    assert_eq!(
+        restored[0].rows[0].lock_origins()[0].storage_name.as_ref(),
+        "public.accounts"
+    );
+    assert_eq!(
+        restored[0].rows[0].lock_origins()[0].qualifier.as_ref(),
+        "account_view"
+    );
+    assert_eq!(
+        restored[0].rows[0].lock_origins()[0]
+            .scan_qualifier
+            .as_ref(),
+        "accounts"
+    );
+    assert!(restored[0].rows[1].lock_origins().is_empty());
 }
 
 #[test]

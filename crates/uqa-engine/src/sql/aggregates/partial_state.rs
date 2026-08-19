@@ -7,8 +7,8 @@
 //! Encoding and merging of compact, mergeable aggregate partial states.
 
 use super::{
-    value_gt, value_lt, AggregateAccumulator, DecimalValue, NumericInputKind, ResultRow, SQLError,
-    ScalarExpr, Value,
+    value_gt, value_lt, AggregateAccumulator, DecimalValue, NumericInputKind, SQLError, ScalarExpr,
+    Value,
 };
 
 pub(super) const PARTIAL_STATE_COLUMN: &str = "__uqa_partial_aggregate_state";
@@ -29,32 +29,30 @@ pub(super) fn partial_schema(group_count: usize) -> uqa_execution::RowSchema {
 pub(super) fn encode_partial_group(
     group_values: Vec<Value>,
     accumulators: Vec<AggregateAccumulator>,
-) -> ResultRow {
-    let mut row = ResultRow::new();
-    for (index, value) in group_values.into_iter().enumerate() {
-        row.insert(partial_group_column(index), value);
-    }
-    row.insert(
-        PARTIAL_STATE_COLUMN.to_string(),
-        Value::List(accumulators.into_iter().map(encode_accumulator).collect()),
-    );
-    row
+) -> uqa_execution::PhysicalRow {
+    let mut values = group_values;
+    values.push(Value::List(
+        accumulators.into_iter().map(encode_accumulator).collect(),
+    ));
+    uqa_execution::PhysicalRow::from_values(values)
 }
 
 pub(super) fn decode_partial_group(
-    mut row: ResultRow,
+    row: uqa_execution::PhysicalRow,
     aggregate_targets: &[ScalarExpr],
     accumulator_budget: usize,
     group_count: usize,
 ) -> Result<(Vec<Value>, Vec<AggregateAccumulator>), SQLError> {
-    let group_values = (0..group_count)
-        .map(|index| {
-            row.remove(&partial_group_column(index)).ok_or_else(|| {
-                SQLError::Internal(format!("partial aggregate group key {index} is missing"))
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let states = match row.remove(PARTIAL_STATE_COLUMN) {
+    let mut values = row.into_physical_values();
+    if values.len() != group_count + 1 {
+        return Err(SQLError::Internal(format!(
+            "partial aggregate row has {} values, expected {}",
+            values.len(),
+            group_count + 1
+        )));
+    }
+    let state = values.pop();
+    let states = match state {
         Some(Value::List(states)) => states,
         _ => {
             return Err(SQLError::Internal(
@@ -74,7 +72,7 @@ pub(super) fn decode_partial_group(
         .zip(aggregate_targets)
         .map(|(state, target)| decode_accumulator(state, target, accumulator_budget))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok((group_values, accumulators))
+    Ok((values, accumulators))
 }
 
 fn encode_accumulator(accumulator: AggregateAccumulator) -> Value {

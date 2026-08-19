@@ -44,9 +44,17 @@ pub(in crate::sql) fn qualify_source_operator<'a>(
     operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
     qualifier: &str,
     prune: Option<&ColumnPrune>,
+    rebind_lock_origins: bool,
 ) -> Box<dyn uqa_execution::PhysicalOperator + 'a> {
     let columns = operator.schema().to_vec();
-    qualify_source_operator_with_columns(operator, &columns, qualifier, prune, &[])
+    qualify_source_operator_with_columns(
+        operator,
+        &columns,
+        qualifier,
+        prune,
+        &[],
+        rebind_lock_origins,
+    )
 }
 
 pub(in crate::sql) fn qualify_source_operator_with_columns<'a>(
@@ -55,6 +63,7 @@ pub(in crate::sql) fn qualify_source_operator_with_columns<'a>(
     qualifier: &str,
     prune: Option<&ColumnPrune>,
     aliases: &[String],
+    rebind_lock_origins: bool,
 ) -> Box<dyn uqa_execution::PhysicalOperator + 'a> {
     let mapping = source_columns
         .iter()
@@ -82,10 +91,12 @@ pub(in crate::sql) fn qualify_source_operator_with_columns<'a>(
             Some((column.to_string(), identity, index))
         })
         .collect();
-    Box::new(
-        uqa_execution::ColumnSelection::with_identities(operator, mapping)
-            .rebinding_lock_origins(qualifier),
-    )
+    let selection = uqa_execution::ColumnSelection::with_identities(operator, mapping);
+    if rebind_lock_origins {
+        Box::new(selection.rebinding_lock_origins(qualifier))
+    } else {
+        Box::new(selection.discarding_lock_origins())
+    }
 }
 
 pub(in crate::sql) fn attach_qualifier_filter<'a>(

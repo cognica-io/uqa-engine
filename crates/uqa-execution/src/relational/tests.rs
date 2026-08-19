@@ -83,6 +83,65 @@ fn appending_projection_only_propagates_unmodified_ordering_prefix() {
 }
 
 #[test]
+fn direct_projection_is_a_schema_only_row_remap() {
+    let scan = TableScan::from_physical_rows(
+        RowSchema::new(vec!["first".into(), "second".into()]),
+        vec![crate::PhysicalRow::from_values(vec![
+            Value::Str("payload".repeat(32)),
+            Value::Int(7),
+        ])],
+    );
+    let mut projection = Project::new(
+        Box::new(scan),
+        vec![("value".into(), col("second"))],
+        vec![],
+    );
+
+    projection.open().unwrap();
+    let batch = projection.next().unwrap().unwrap();
+    projection.close().unwrap();
+
+    assert_eq!(batch.schema.physical_width(), 2);
+    assert_eq!(batch.rows[0].fragment_count(), 1);
+    assert_eq!(
+        batch.schema.view(&batch.rows[0]).get("value"),
+        Some(&Value::Int(7))
+    );
+}
+
+#[test]
+fn mixed_projection_appends_only_computed_values() {
+    let scan = TableScan::from_physical_rows(
+        RowSchema::new(vec!["first".into(), "second".into()]),
+        vec![crate::PhysicalRow::from_values(vec![
+            Value::Int(3),
+            Value::Int(7),
+        ])],
+    );
+    let mut projection = Project::new(
+        Box::new(scan),
+        vec![
+            ("second".into(), col("second")),
+            (
+                "sum".into(),
+                bin(BinaryOp::Add, col("first"), col("second")),
+            ),
+        ],
+        vec![],
+    );
+
+    projection.open().unwrap();
+    let batch = projection.next().unwrap().unwrap();
+    projection.close().unwrap();
+
+    assert_eq!(batch.schema.physical_width(), 3);
+    assert_eq!(batch.rows[0].fragment_count(), 2);
+    let view = batch.schema.view(&batch.rows[0]);
+    assert_eq!(view.get("second"), Some(&Value::Int(7)));
+    assert_eq!(view.get("sum"), Some(&Value::Int(10)));
+}
+
+#[test]
 fn filter_keeps_truthy_rows() {
     let scan = boxed_scan(
         vec!["x".into()],

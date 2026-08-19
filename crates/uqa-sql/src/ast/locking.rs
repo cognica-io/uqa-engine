@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// One `FOR UPDATE` / `FOR SHARE` clause, including optional `OF` targets
+/// One `PostgreSQL` row-locking clause, including optional `OF` targets
 /// and the `NOWAIT` / `SKIP LOCKED` wait policy.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LockingClause {

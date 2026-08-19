@@ -355,7 +355,10 @@ impl AdaptiveAggregateSet {
             ));
             if pending.len() == uqa_execution::batch::DEFAULT_BATCH_SIZE {
                 partials
-                    .push(Batch::new(schema.clone(), std::mem::take(&mut pending)))
+                    .push(Batch::from_physical_rows(
+                        schema.clone(),
+                        std::mem::take(&mut pending),
+                    ))
                     .map_err(super::sort_fallback::exec_to_sql_error)?;
                 pending = Vec::with_capacity(uqa_execution::batch::DEFAULT_BATCH_SIZE);
             }
@@ -363,7 +366,7 @@ impl AdaptiveAggregateSet {
         self.groups = groups;
         if !pending.is_empty() {
             partials
-                .push(Batch::new(schema, pending))
+                .push(Batch::from_physical_rows(schema, pending))
                 .map_err(super::sort_fallback::exec_to_sql_error)?;
         }
         self.retained_bytes = 0;

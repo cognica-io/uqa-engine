@@ -8,9 +8,10 @@
 
 use super::{
     build_join_operator_with_ctes, eval_scalar, query_output_shared, BTreeSet, CteScope, Engine,
-    PlanSubqueryArena, QueryOutputMode, QueryPlan, RelationalPlan, ResultRow, SQLError, SQLParam,
+    PlanSubqueryArena, QueryOutputMode, QueryPlan, RelationalPlan, SQLError, SQLParam,
     ScalarEvalContext, ScalarExpr, SourceEvalContext, SourcePlan,
 };
+use uqa_planner::CtePlan;
 
 /// Materialize a repeatable FROM input under the session work-memory budget.
 /// DML statements may need to rescan their source for each target row; the
@@ -36,27 +37,33 @@ pub(in crate::sql) fn build_join_spill_with_ctes(
 pub(in crate::sql) fn save_and_remove_cte_names(
     ctes: &mut CteScope,
     names: &BTreeSet<String>,
-) -> Vec<(String, Option<uqa_execution::SharedSpill>)> {
+) -> Vec<SavedCteBinding> {
     names
         .iter()
-        .map(|name| (name.clone(), ctes.remove_materialized(name)))
+        .map(|name| SavedCteBinding {
+            name: name.clone(),
+            rows: ctes.remove_materialized(name),
+            deferred: ctes.remove_deferred(name),
+        })
         .collect()
 }
 
-pub(in crate::sql) fn restore_cte_names(
-    ctes: &mut CteScope,
-    saved: Vec<(String, Option<uqa_execution::SharedSpill>)>,
-) {
-    for (name, rows) in saved {
-        match rows {
-            Some(rows) => {
-                ctes.rows.insert(name.clone(), rows);
-            }
-            None => {
-                ctes.remove_materialized(&name);
-            }
+pub(in crate::sql) fn restore_cte_names(ctes: &mut CteScope, saved: Vec<SavedCteBinding>) {
+    for binding in saved {
+        ctes.remove_materialized(&binding.name);
+        ctes.remove_deferred(&binding.name);
+        if let Some(rows) = binding.rows {
+            ctes.insert_shared(binding.name, rows);
+        } else if let Some(plan) = binding.deferred {
+            ctes.insert_deferred(plan);
         }
     }
+}
+
+pub(in crate::sql) struct SavedCteBinding {
+    name: String,
+    rows: Option<uqa_execution::SharedSpill>,
+    deferred: Option<CtePlan>,
 }
 
 pub(in crate::sql) fn query_cte_names(plan: &QueryPlan) -> BTreeSet<String> {
@@ -98,32 +105,22 @@ pub(in crate::sql) fn collect_source_query_cte_names(
     }
 }
 
-pub(in crate::sql) fn build_values_rows(
+pub(in crate::sql) fn build_values_physical_rows(
     context: &SourceEvalContext<'_>,
     rows: &[Vec<ScalarExpr>],
-    column_aliases: &[String],
     column_types: &[Option<uqa_sql::ast::ColumnType>],
-) -> Result<Vec<ResultRow>, SQLError> {
+) -> Result<Vec<uqa_execution::PhysicalRow>, SQLError> {
     if rows.is_empty() {
         return Ok(Vec::new());
     }
-    let n_cols = rows[0].len();
-    let columns: Vec<String> = (0..n_cols)
-        .map(|i| {
-            column_aliases
-                .get(i)
-                .cloned()
-                .unwrap_or_else(|| format!("column{}", i + 1))
-        })
-        .collect();
     let subquery_arena = PlanSubqueryArena::new(context.subqueries, Some(context.subquery_runner));
     let ctx = ScalarEvalContext::new(None, context.params)
         .with_function_hook(context.eval_hook)
         .with_subquery_runner(&subquery_arena);
     let empty_schema = uqa_execution::RowSchema::default();
-    let mut out: Vec<ResultRow> = Vec::with_capacity(rows.len());
+    let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        let mut r = ResultRow::new();
+        let mut values = Vec::with_capacity(row.len());
         for (i, expr) in row.iter().enumerate() {
             let source_type = uqa_execution::common_context_expression_type(
                 expr,
@@ -136,9 +133,9 @@ pub(in crate::sql) fn build_values_rows(
                 source_type.as_ref(),
                 column_types.get(i).and_then(Option::as_ref),
             )?;
-            r.insert(columns[i].clone(), v);
+            values.push(v);
         }
-        out.push(r);
+        out.push(uqa_execution::PhysicalRow::from_values(values));
     }
     Ok(out)
 }

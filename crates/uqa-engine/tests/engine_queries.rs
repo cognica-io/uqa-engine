@@ -60,6 +60,8 @@ mod sql_offset_like;
 mod sql_prepared;
 #[path = "sql_row_locks.rs"]
 mod sql_row_locks;
+#[path = "engine_queries/sql_row_locks_recheck.rs"]
+mod sql_row_locks_recheck;
 #[path = "sql_subqueries.rs"]
 mod sql_subqueries;
 #[path = "sql_subquery.rs"]

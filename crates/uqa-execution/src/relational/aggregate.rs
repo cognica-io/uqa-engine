@@ -8,8 +8,7 @@
 
 use super::{
     compare_values, eval_scalar, Batch, DefaultExpressionEvaluator, ExecError, ExecResult,
-    PhysicalOperator, ResultRow, RowSchema, SQLParam, ScalarEvalContext, ScalarExpr, SortKey,
-    Value,
+    PhysicalOperator, RowSchema, SQLParam, ScalarEvalContext, ScalarExpr, SortKey, Value,
 };
 use crate::ProjectedRow;
 

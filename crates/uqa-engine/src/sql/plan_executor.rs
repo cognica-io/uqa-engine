@@ -43,7 +43,8 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     }
 
     fn execute_query(&self, query: &QueryPlan) -> Result<SQLResult, SQLError> {
-        select::execute_query_plan(self.engine, query, self.params)
+        let mut ctes = select::CteScope::new();
+        select::execute_query_plan_with_ctes(self.engine, query, self.params, &mut ctes)
     }
 
     pub(super) fn execute_query_to_spill(
@@ -182,7 +183,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 }
             }
         }
-        self.engine.transaction(|engine| {
+        let truncate = |engine: &Engine| {
             // Referencing relations first makes the mutation order explicit
             // even though the low-level clear does not evaluate row FKs.
             fn visit(
@@ -223,11 +224,13 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                     &mut ordered,
                 )?;
             }
-            for table in ordered {
-                engine.truncate_table(&table)?;
-            }
-            Ok(())
-        })?;
+            engine.truncate_tables(&ordered)
+        };
+        if self.engine.transaction_depth() == 0 {
+            self.engine.transaction(truncate)?;
+        } else {
+            truncate(self.engine)?;
+        }
         Ok(SQLResult::empty())
     }
 

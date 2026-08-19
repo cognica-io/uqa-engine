@@ -264,6 +264,31 @@ fn cte_with_distinct() {
 }
 
 #[test]
+fn single_reference_volatile_cte_is_materialized_once() {
+    let engine = Engine::new();
+    let calls = Arc::new(AtomicUsize::new(0));
+    engine
+        .register_scalar_function(
+            "count_calls",
+            CountCalls {
+                calls: Arc::clone(&calls),
+            },
+        )
+        .unwrap();
+
+    let result = exec(
+        &engine,
+        "WITH c AS (SELECT count_calls() AS marker)
+         SELECT o.id, (SELECT marker FROM c WHERE o.id > 0) AS marker
+         FROM (VALUES (1), (2)) AS o(id)
+         ORDER BY o.id",
+    );
+
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(ints(&result, "marker"), vec![1, 1]);
+}
+
+#[test]
 fn cte_insert_select_materializes_cte() {
     let engine = Engine::new();
     exec(

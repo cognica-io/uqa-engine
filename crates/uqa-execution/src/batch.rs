@@ -33,35 +33,7 @@ pub const DEFAULT_BATCH_SIZE: usize = 1024;
 
 const NULL_SLOT: usize = usize::MAX;
 const INLINE_ROW_FRAGMENTS: usize = 8;
-const INLINE_ROW_LOCK_ORIGINS: usize = 2;
 static NULL_VALUE: Value = Value::Null;
-
-/// Base-table identity carried on a composite physical row for `FOR UPDATE`.
-///
-/// Origins ride beside value fragments. Joins concatenate them; projections and
-/// schema remaps keep them. They are not SQL-visible columns and must not be
-/// rebuilt from named maps.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RowLockOrigin {
-    pub qualifier: Arc<str>,
-    pub storage_name: Arc<str>,
-    pub doc_id: uqa_core::DocId,
-}
-
-impl RowLockOrigin {
-    #[must_use]
-    pub fn new(
-        qualifier: impl Into<String>,
-        storage_name: impl Into<String>,
-        doc_id: uqa_core::DocId,
-    ) -> Self {
-        Self {
-            qualifier: Arc::<str>::from(qualifier.into()),
-            storage_name: Arc::<str>::from(storage_name.into()),
-            doc_id,
-        }
-    }
-}
 
 /// Structured SQL column identity. A qualifier is metadata, never a prefix encoded into the column name, so quoted names containing `.` remain intact.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -146,6 +118,13 @@ struct SchemaBuildMetadata {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowSchema {
     index: Arc<SchemaIndex>,
+}
+
+/// Physical source of one scalar-projection output. Direct input slots stay in the child row; only computed values extend its physical layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectedSlot {
+    Input(Option<usize>),
+    Computed,
 }
 
 impl Default for RowSchema {
@@ -480,6 +459,21 @@ impl RowSchema {
         self.index.physical_width
     }
 
+    /// Resolve one logical output position to its flattened physical slot.
+    pub fn physical_slot(&self, logical: usize) -> Option<usize> {
+        self.slot(logical)
+    }
+
+    /// Resolve a structured SQL identity, including a hidden JOIN USING
+    /// alias, to its flattened physical slot. Ambiguous identities deliberately
+    /// return `None` rather than selecting an arbitrary source value.
+    pub fn physical_slot_for_identity(&self, identity: &ColumnIdentity) -> Option<usize> {
+        match identity.qualifier() {
+            Some(qualifier) => self.qualified_slot(qualifier, identity.column()),
+            None => self.column_slot(identity.column()),
+        }
+    }
+
     pub(crate) fn slot(&self, logical: usize) -> Option<usize> {
         self.index
             .slots
@@ -655,6 +649,72 @@ impl RowSchema {
             types,
             slots,
             input.physical_width(),
+            HashMap::new(),
+            HashMap::new(),
+        )
+    }
+
+    /// Build a scalar-projection schema without rebuilding direct input values. A non-pass-through projection hides child identities logically while retaining their physical fragments; an appending projection preserves the child schema and replaces duplicate labels with `PostgreSQL` map-insertion semantics.
+    pub(crate) fn project_with_sources(
+        input: &Self,
+        projected: Vec<(String, Option<ColumnType>, ProjectedSlot)>,
+        pass_through: bool,
+    ) -> Self {
+        let mut next_computed_slot = input.physical_width();
+        let mut resolve_slot = |source: ProjectedSlot| match source {
+            ProjectedSlot::Input(slot) => slot.unwrap_or(NULL_SLOT),
+            ProjectedSlot::Computed => {
+                let slot = next_computed_slot;
+                next_computed_slot += 1;
+                slot
+            }
+        };
+
+        if pass_through {
+            let mut columns = input.columns().to_vec();
+            let mut identities = input.identities().to_vec();
+            let mut types = input.column_types().to_vec();
+            let mut slots = input.index.slots.to_vec();
+            for (name, ty, source) in projected {
+                let slot = resolve_slot(source);
+                if let Some(position) = columns.iter().position(|column| column == &name) {
+                    slots[position] = slot;
+                    identities[position] = ColumnIdentity::unqualified(name);
+                    types[position] = ty;
+                } else {
+                    identities.push(ColumnIdentity::unqualified(name.clone()));
+                    columns.push(name);
+                    types.push(ty);
+                    slots.push(slot);
+                }
+            }
+            return Self::from_typed_parts_with_aliases(
+                columns,
+                identities,
+                types,
+                slots,
+                next_computed_slot,
+                input.index.aliases.clone(),
+                input.index.cold.aliases.clone(),
+            );
+        }
+
+        let mut columns = Vec::with_capacity(projected.len());
+        let mut identities = Vec::with_capacity(projected.len());
+        let mut types = Vec::with_capacity(projected.len());
+        let mut slots = Vec::with_capacity(projected.len());
+        for (name, ty, source) in projected {
+            slots.push(resolve_slot(source));
+            identities.push(ColumnIdentity::unqualified(name.clone()));
+            columns.push(name);
+            types.push(ty);
+        }
+        Self::from_typed_parts_with_aliases(
+            columns,
+            identities,
+            types,
+            slots,
+            next_computed_slot,
             HashMap::new(),
             HashMap::new(),
         )
@@ -1030,6 +1090,80 @@ impl RowSchema {
     pub fn view<'a>(&'a self, row: &'a PhysicalRow) -> PhysicalRowView<'a> {
         PhysicalRowView { schema: self, row }
     }
+
+    /// Re-express a row emitted under this schema in `target`'s complete physical layout without cloning any values. Visible columns are matched by logical position; hidden lookup aliases are matched by their structured identity. This is used when two equivalent operator pipelines expose the same logical row through different physical slot arrangements.
+    pub fn relayout_physical_row(
+        &self,
+        row: PhysicalRow,
+        target: &Self,
+    ) -> ExecResult<PhysicalRow> {
+        if self.len() != target.len() {
+            return Err(ExecError::Other(format!(
+                "cannot relayout {} logical columns as {} logical columns",
+                self.len(),
+                target.len()
+            )));
+        }
+
+        let mut source_slots = vec![None; target.physical_width()];
+        let mut assign = |target_slot: usize, source_slot: usize| -> ExecResult<()> {
+            if target_slot == NULL_SLOT {
+                return Ok(());
+            }
+            match source_slots[target_slot] {
+                Some(existing) if existing != source_slot => Err(ExecError::Other(format!(
+                    "physical relayout maps target slot {target_slot} to both source slots {existing} and {source_slot}"
+                ))),
+                Some(_) => Ok(()),
+                None => {
+                    source_slots[target_slot] = Some(source_slot);
+                    Ok(())
+                }
+            }
+        };
+
+        for logical in 0..target.len() {
+            assign(target.index.slots[logical], self.index.slots[logical])?;
+        }
+
+        for (identity, target_slot) in &target.index.aliases {
+            if *target_slot == NULL_SLOT {
+                continue;
+            }
+            let mut matching_slots = self
+                .index
+                .identities
+                .iter()
+                .enumerate()
+                .filter_map(|(logical, candidate)| {
+                    (candidate == identity).then_some(self.index.slots[logical])
+                })
+                .chain(self.index.aliases.get(identity).copied())
+                .collect::<Vec<_>>();
+            matching_slots.sort_unstable();
+            matching_slots.dedup();
+            let source_slot = match matching_slots.as_slice() {
+                [source_slot] => *source_slot,
+                [] => {
+                    return Err(ExecError::Other(format!(
+                        "physical relayout source is missing lookup identity `{identity:?}`"
+                    )))
+                }
+                _ => {
+                    return Err(ExecError::Other(format!(
+                        "physical relayout source has ambiguous lookup identity `{identity:?}`"
+                    )))
+                }
+            };
+            assign(*target_slot, source_slot)?;
+        }
+
+        let source_slots = source_slots
+            .into_iter()
+            .map(|slot| slot.unwrap_or(NULL_SLOT))
+            .collect::<Vec<_>>();
+        Ok(row.project_slots(&source_slots))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1116,7 +1250,16 @@ type RowFragments = SmallVec<[RowFragment; INLINE_ROW_FRAGMENTS]>;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PhysicalRow {
     fragments: RowFragments,
-    lock_origins: SmallVec<[RowLockOrigin; INLINE_ROW_LOCK_ORIGINS]>,
+    lock_origins: Option<Arc<[RowLockOrigin]>>,
+}
+
+/// One output position in a mixed physical projection.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RowProjectionValue {
+    /// Reuse one flattened slot from the input row.
+    InputSlot(usize),
+    /// Append a newly computed value.
+    Owned(Value),
 }
 
 impl PhysicalRow {
@@ -1127,7 +1270,7 @@ impl PhysicalRow {
         }
         Self {
             fragments,
-            lock_origins: SmallVec::new(),
+            lock_origins: None,
         }
     }
 
@@ -1141,7 +1284,7 @@ impl PhysicalRow {
         }
         Self {
             fragments,
-            lock_origins: SmallVec::new(),
+            lock_origins: None,
         }
     }
 
@@ -1171,10 +1314,8 @@ impl PhysicalRow {
             RowFragments::with_capacity(left.fragments.len() + right.fragments.len());
         fragments.extend(left.fragments.iter().cloned());
         fragments.extend(right.fragments.iter().cloned());
-        let mut lock_origins =
-            SmallVec::with_capacity(left.lock_origins.len() + right.lock_origins.len());
-        lock_origins.extend(left.lock_origins.iter().cloned());
-        lock_origins.extend(right.lock_origins.iter().cloned());
+        let lock_origins =
+            concat_lock_origins(left.lock_origins.as_ref(), right.lock_origins.as_ref());
         Self {
             fragments,
             lock_origins,
@@ -1183,7 +1324,8 @@ impl PhysicalRow {
 
     pub fn concat_left_owned(mut left: Self, right: &Self) -> Self {
         left.fragments.extend(right.fragments.iter().cloned());
-        left.lock_origins.extend(right.lock_origins.iter().cloned());
+        left.lock_origins =
+            concat_lock_origins(left.lock_origins.as_ref(), right.lock_origins.as_ref());
         left
     }
 
@@ -1192,10 +1334,8 @@ impl PhysicalRow {
             RowFragments::with_capacity(left.fragments.len() + right.fragments.len());
         fragments.extend(left.fragments.iter().cloned());
         fragments.append(&mut right.fragments);
-        let mut lock_origins =
-            SmallVec::with_capacity(left.lock_origins.len() + right.lock_origins.len());
-        lock_origins.extend(left.lock_origins.iter().cloned());
-        lock_origins.append(&mut right.lock_origins);
+        let lock_origins =
+            concat_lock_origins(left.lock_origins.as_ref(), right.lock_origins.as_ref());
         Self {
             fragments,
             lock_origins,
@@ -1271,6 +1411,50 @@ impl PhysicalRow {
         }
     }
 
+    /// Build an output row from shared input slots and newly computed values while preserving their requested order and sharing row metadata.
+    pub fn project_with_values(
+        &self,
+        values: impl IntoIterator<Item = RowProjectionValue>,
+    ) -> Self {
+        fn flush_slots(source: &PhysicalRow, output: &mut RowFragments, slots: &mut Vec<usize>) {
+            if slots.is_empty() {
+                return;
+            }
+            let mut projected = source.project_slots(slots);
+            output.append(&mut projected.fragments);
+            slots.clear();
+        }
+
+        fn flush_owned(output: &mut RowFragments, owned: &mut Vec<Value>) {
+            if owned.is_empty() {
+                return;
+            }
+            output.push(RowFragment::contiguous(Arc::new(std::mem::take(owned))));
+        }
+
+        let mut fragments = RowFragments::new();
+        let mut slots = Vec::new();
+        let mut owned = Vec::new();
+        for value in values {
+            match value {
+                RowProjectionValue::InputSlot(slot) => {
+                    flush_owned(&mut fragments, &mut owned);
+                    slots.push(slot);
+                }
+                RowProjectionValue::Owned(value) => {
+                    flush_slots(self, &mut fragments, &mut slots);
+                    owned.push(value);
+                }
+            }
+        }
+        flush_slots(self, &mut fragments, &mut slots);
+        flush_owned(&mut fragments, &mut owned);
+        Self {
+            fragments,
+            lock_origins: self.lock_origins.clone(),
+        }
+    }
+
     pub fn fragment_count(&self) -> usize {
         self.fragments.len()
     }
@@ -1297,191 +1481,17 @@ impl PhysicalRow {
             lock_origins: self.lock_origins,
         }
     }
-
-    #[must_use]
-    pub fn with_lock_origin(mut self, origin: RowLockOrigin) -> Self {
-        self.lock_origins.push(origin);
-        self
-    }
-
-    #[must_use]
-    pub fn with_lock_origins(mut self, origins: impl IntoIterator<Item = RowLockOrigin>) -> Self {
-        self.lock_origins.extend(origins);
-        self
-    }
-
-    #[must_use]
-    pub fn lock_origins(&self) -> &[RowLockOrigin] {
-        &self.lock_origins
-    }
-
-    /// Point every lock origin at the visible source qualifier. Views, CTEs,
-    /// and subqueries keep inner storage names so `FOR UPDATE OF` that alias
-    /// locks only those origins after a join.
-    #[must_use]
-    pub fn rebind_lock_origin_qualifiers(mut self, qualifier: impl Into<Arc<str>>) -> Self {
-        let qualifier = qualifier.into();
-        for origin in &mut self.lock_origins {
-            origin.qualifier = Arc::clone(&qualifier);
-        }
-        self
-    }
 }
 
-/// Stack-only schema/row pair implementing the scalar evaluator's read seam.
-#[derive(Debug, Clone, Copy)]
-pub struct PhysicalRowView<'a> {
-    schema: &'a RowSchema,
-    row: &'a PhysicalRow,
-}
+mod physical_row_view;
+pub use physical_row_view::PhysicalRowView;
 
-impl<'a> PhysicalRowView<'a> {
-    pub fn get(&self, name: &str) -> Option<&'a Value> {
-        self.schema
-            .exact_slot(name)
-            .and_then(|slot| self.row.value(slot))
-    }
+mod batches;
+pub use batches::Batch;
 
-    pub fn value_at(&self, logical: usize) -> Option<&'a Value> {
-        self.schema
-            .slot(logical)
-            .and_then(|slot| self.row.value(slot))
-    }
-
-    pub fn iter(&'a self) -> impl Iterator<Item = (&'a str, &'a Value)> + 'a {
-        self.schema
-            .columns()
-            .iter()
-            .enumerate()
-            .map(|(logical, column)| {
-                (
-                    column.as_str(),
-                    self.value_at(logical).unwrap_or(&NULL_VALUE),
-                )
-            })
-    }
-
-    pub fn to_result_row(&self) -> ResultRow {
-        self.iter()
-            .map(|(column, value)| (column.to_string(), value.clone()))
-            .collect()
-    }
-}
-
-impl RowLookup for PhysicalRowView<'_> {
-    fn column(&self, name: &str) -> Option<&Value> {
-        self.schema
-            .column_slot(name)
-            .and_then(|slot| self.row.value(slot))
-    }
-
-    fn column_is_ambiguous(&self, name: &str) -> bool {
-        self.schema.column_is_ambiguous(name)
-    }
-
-    fn qualified_column(&self, qualifier: &str, column: &str) -> Option<&Value> {
-        self.schema
-            .qualified_slot(qualifier, column)
-            .and_then(|slot| self.row.value(slot))
-    }
-
-    fn qualified_column_is_ambiguous(&self, qualifier: &str, column: &str) -> bool {
-        self.schema.qualified_column_is_ambiguous(qualifier, column)
-    }
-
-    fn positional_column(&self, index: usize) -> Option<&Value> {
-        self.value_at(index)
-    }
-
-    fn visit_columns(&self, visitor: &mut dyn FnMut(&str, &Value)) {
-        for (column, value) in self.iter() {
-            visitor(column, value);
-        }
-    }
-}
-
-/// A schema and bounded vector of physical rows flowing between operators.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Batch {
-    pub schema: RowSchema,
-    pub rows: Vec<PhysicalRow>,
-}
-
-impl Batch {
-    /// Compatibility constructor for named rows entering the physical engine.
-    /// The resulting batch is positional immediately; maps do not flow to the
-    /// next operator.
-    pub fn new(schema: RowSchema, rows: Vec<ResultRow>) -> Self {
-        let rows = rows
-            .into_iter()
-            .map(|row| PhysicalRow::from_result_row(&schema, row))
-            .collect();
-        Self { schema, rows }
-    }
-
-    pub fn from_physical_rows(schema: RowSchema, rows: Vec<PhysicalRow>) -> Self {
-        debug_assert!(rows.iter().all(|row| {
-            row.fragments.iter().map(RowFragment::len).sum::<usize>() == schema.physical_width()
-        }));
-        Self { schema, rows }
-    }
-
-    pub fn empty(schema: RowSchema) -> Self {
-        Self {
-            schema,
-            rows: Vec::new(),
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.rows.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.rows.is_empty()
-    }
-
-    pub fn into_result_rows(self) -> Vec<ResultRow> {
-        let schema = self.schema;
-        if schema.index.cold.identity_layout {
-            return self
-                .rows
-                .into_iter()
-                .map(|row| schema.materialize_identity_result_row(row))
-                .collect();
-        }
-        schema.materialize_remapped_result_rows(self.rows)
-    }
-
-    /// Consume a batch without materializing named maps.
-    pub fn into_owned_rows(self) -> Vec<OwnedPhysicalRow> {
-        let schema = self.schema;
-        self.rows
-            .into_iter()
-            .map(|row| OwnedPhysicalRow::new(schema.clone(), row))
-            .collect()
-    }
-
-    /// Split named rows into batches of at most [`DEFAULT_BATCH_SIZE`].
-    pub fn chunked(schema: RowSchema, rows: Vec<ResultRow>) -> Vec<Batch> {
-        if rows.is_empty() {
-            return vec![Batch::empty(schema)];
-        }
-        let mut out = Vec::with_capacity(rows.len().div_ceil(DEFAULT_BATCH_SIZE));
-        let mut buf = Vec::with_capacity(DEFAULT_BATCH_SIZE);
-        for row in rows {
-            buf.push(row);
-            if buf.len() == DEFAULT_BATCH_SIZE {
-                out.push(Batch::new(schema.clone(), std::mem::take(&mut buf)));
-                buf.reserve(DEFAULT_BATCH_SIZE);
-            }
-        }
-        if !buf.is_empty() {
-            out.push(Batch::new(schema, buf));
-        }
-        out
-    }
-}
+mod row_lock_origins;
+use row_lock_origins::concat_lock_origins;
+pub use row_lock_origins::RowLockOrigin;
 
 #[cfg(test)]
 mod tests;

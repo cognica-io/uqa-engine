@@ -332,16 +332,42 @@ struct TransactionDirtyState {
     catalog_registry: bool,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TransactionIntent {
+    ReadOnly,
+    ReadWrite,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BackendTransactionMode {
+    Deferred,
+    Writer,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TransactionStatus {
+    Active,
+    Failed,
+    FailedBackendAborted,
+}
+
 struct TransactionFrame {
     storage_savepoint: Option<String>,
-    read_only: bool,
+    intent: TransactionIntent,
+    backend_mode: BackendTransactionMode,
+    status: TransactionStatus,
     savepoints: Vec<TransactionSavepoint>,
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
     dirty_at_begin: TransactionDirtyState,
+    /// Lock mark this frame started with. Rolling the whole frame back
+    /// releases every acquisition at or above it, independent of the
+    /// savepoint marks the frame allocated later.
+    begin_lock_mark: u32,
     lock_mark: u32,
     next_lock_mark: u32,
+    snapshot_change_baseline: row_locks::RowChangeBaseline,
+    row_changes: Vec<row_locks::PendingRowChange>,
 }
 
 struct TransactionSavepoint {
@@ -350,6 +376,7 @@ struct TransactionSavepoint {
     data_snapshot: Option<EngineDataSnapshot>,
     dirty: TransactionDirtyState,
     lock_mark: u32,
+    row_changes: Vec<row_locks::PendingRowChange>,
 }
 
 /// Lightweight SQL-session state that follows transaction/savepoint rollback

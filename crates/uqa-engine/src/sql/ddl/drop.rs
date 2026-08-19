@@ -23,6 +23,45 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
             }
         )));
     }
+    let mut lock_targets = std::collections::BTreeSet::new();
+    match stmt.kind {
+        DropKind::Table | DropKind::View => {
+            for name in &stmt.names {
+                if let Some((canonical, _)) = engine
+                    .try_resolve_relation_kind(name)
+                    .map_err(|err| ddl_storage_error("DROP relation lock", err))?
+                {
+                    lock_targets.insert(canonical);
+                }
+            }
+        }
+        DropKind::Index => {
+            for name in &stmt.names {
+                if let Some(index) = engine
+                    .catalog_index(name)
+                    .map_err(|err| ddl_storage_error("DROP INDEX relation lock", err))?
+                {
+                    lock_targets.insert(index.table_name);
+                }
+            }
+        }
+        DropKind::Schema => {
+            // Dropping a schema removes every relation it owns, including
+            // the label relations of a graph namespace, so each of them takes
+            // the same AccessExclusive lock a direct DROP would.
+            for name in &stmt.names {
+                for table in engine
+                    .tables_in_schema(name)
+                    .map_err(|err| ddl_storage_error("DROP SCHEMA relation lock", err))?
+                {
+                    lock_targets.insert(format!("{name}.{table}"));
+                }
+            }
+        }
+    }
+    for table in lock_targets {
+        engine.lock_relation(&table, crate::row_locks::RelationLockMode::AccessExclusive)?;
+    }
     engine.with_implicit_transaction(move |engine| run_drop_inner(engine, stmt))
 }
 

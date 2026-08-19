@@ -8,7 +8,12 @@
 
 use std::sync::Arc;
 
-use crate::{Batch, ColumnIdentity, ExecResult, PhysicalOperator, PhysicalOrder, RowSchema};
+use uqa_core::Value;
+
+use crate::{
+    Batch, ColumnIdentity, ExecResult, PhysicalOperator, PhysicalOrder, RowProjectionValue,
+    RowSchema,
+};
 
 fn remap_ordering(
     ordering: &[PhysicalOrder],
@@ -44,6 +49,8 @@ pub struct ColumnSelection<'a> {
     /// operator restores the public SQL column names.
     ordering: Vec<PhysicalOrder>,
     rebind_lock_qualifier: Option<Arc<str>>,
+    discard_lock_origins: bool,
+    compact_slots: Option<Vec<Option<usize>>>,
 }
 
 impl<'a> ColumnSelection<'a> {
@@ -70,6 +77,8 @@ impl<'a> ColumnSelection<'a> {
             schema,
             ordering,
             rebind_lock_qualifier: None,
+            discard_lock_origins: false,
+            compact_slots: None,
         }
     }
 
@@ -91,6 +100,8 @@ impl<'a> ColumnSelection<'a> {
             schema,
             ordering,
             rebind_lock_qualifier: None,
+            discard_lock_origins: false,
+            compact_slots: None,
         }
     }
 
@@ -117,6 +128,45 @@ impl<'a> ColumnSelection<'a> {
             schema,
             ordering,
             rebind_lock_qualifier: None,
+            discard_lock_origins: false,
+            compact_slots: None,
+        }
+    }
+
+    /// Select logical input positions and compact them to one canonical positional layout. Use this only at an explicit state boundary, such as recursive working-table materialization, where independently planned inputs must share an identical physical schema.
+    pub fn compacting_with_positions(
+        child: Box<dyn PhysicalOperator + 'a>,
+        columns: Vec<(String, usize)>,
+    ) -> Self {
+        let input_positions = columns
+            .iter()
+            .map(|(_, position)| Some(*position))
+            .collect::<Vec<_>>();
+        let ordering = remap_ordering(child.output_ordering(), &input_positions);
+        let names = columns
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        let types = columns
+            .iter()
+            .map(|(_, position)| child.row_schema().column_type(*position).cloned())
+            .collect::<Vec<_>>();
+        let slots = columns
+            .iter()
+            .map(|(_, position)| child.row_schema().physical_slot(*position))
+            .collect::<Vec<_>>();
+        let identity_layout = child.row_schema().physical_width() == slots.len()
+            && slots
+                .iter()
+                .enumerate()
+                .all(|(position, slot)| *slot == Some(position));
+        Self {
+            child,
+            schema: RowSchema::with_types(names, types),
+            ordering,
+            rebind_lock_qualifier: None,
+            discard_lock_origins: true,
+            compact_slots: (!identity_layout).then_some(slots),
         }
     }
 
@@ -128,6 +178,14 @@ impl<'a> ColumnSelection<'a> {
         if !qualifier.is_empty() {
             self.rebind_lock_qualifier = Some(Arc::from(qualifier));
         }
+        self
+    }
+
+    /// Remove row-lock identities at a relational row-identity barrier.
+    #[must_use]
+    pub fn discarding_lock_origins(mut self) -> Self {
+        self.rebind_lock_qualifier = None;
+        self.discard_lock_origins = true;
         self
     }
 }
@@ -153,14 +211,30 @@ impl PhysicalOperator for ColumnSelection<'_> {
         let Some(batch) = self.child.next()? else {
             return Ok(None);
         };
-        let rows = match self.rebind_lock_qualifier.as_ref() {
-            Some(qualifier) => batch
+        let mut rows = match self.compact_slots.as_ref() {
+            Some(slots) => batch
                 .rows
                 .into_iter()
-                .map(|row| row.rebind_lock_origin_qualifiers(Arc::clone(qualifier)))
+                .map(|row| {
+                    row.project_with_values(slots.iter().map(|slot| {
+                        slot.map_or(
+                            RowProjectionValue::Owned(Value::Null),
+                            RowProjectionValue::InputSlot,
+                        )
+                    }))
+                })
                 .collect(),
             None => batch.rows,
         };
+        if self.discard_lock_origins {
+            for row in &mut rows {
+                row.discard_lock_origins_mut();
+            }
+        } else if let Some(qualifier) = self.rebind_lock_qualifier.as_ref() {
+            for row in &mut rows {
+                row.rebind_lock_origin_qualifiers_mut(Arc::clone(qualifier));
+            }
+        }
         Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)))
     }
 
@@ -239,5 +313,38 @@ mod tests {
         let remapped = remap_ordering(&ordering, &[Some(2), Some(0)]);
         assert_eq!(remapped[0].position, 0);
         assert!(remap_ordering(&ordering, &[Some(0), Some(1)]).is_empty());
+    }
+
+    #[test]
+    fn row_identity_barrier_discards_lock_origins_in_place() {
+        let schema = RowSchema::new(vec!["id".into()]);
+        let row = crate::PhysicalRow::from_values(vec![Value::Int(1)])
+            .with_lock_origin(crate::RowLockOrigin::new("accounts", "public.accounts", 1));
+        let scan = TableScan::from_physical_rows(schema, vec![row]);
+        let mut barrier = ColumnSelection::with_positions(Box::new(scan), vec![("id".into(), 0)])
+            .discarding_lock_origins();
+
+        let batches = crate::physical::run_to_batches(&mut barrier).unwrap();
+        assert!(batches[0].rows[0].lock_origins().is_empty());
+    }
+
+    #[test]
+    fn explicit_compaction_canonicalizes_a_wider_physical_layout() {
+        let source = RowSchema::new(vec!["unused".into(), "value".into()]);
+        let selected = RowSchema::select(&source, &[("value".into(), "value".into())]);
+        let row = crate::PhysicalRow::from_values(vec![Value::Int(1), Value::Int(7)]);
+        let scan = TableScan::from_physical_rows(selected, vec![row]);
+        let mut compact =
+            ColumnSelection::compacting_with_positions(Box::new(scan), vec![("value".into(), 0)]);
+
+        compact.open().unwrap();
+        let batch = compact.next().unwrap().unwrap();
+        compact.close().unwrap();
+
+        assert_eq!(batch.schema.physical_width(), 1);
+        assert_eq!(
+            batch.schema.view(&batch.rows[0]).get("value"),
+            Some(&Value::Int(7))
+        );
     }
 }

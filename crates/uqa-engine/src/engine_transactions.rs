@@ -5,9 +5,10 @@
 //
 
 use super::{
-    BTreeMap, Engine, EngineDataSnapshot, SQLError, SQLParam, SQLResult, SessionStateSnapshot,
-    StorageBackendError, StorageBackendResult, TableDataSnapshot, TransactionDirtyState,
-    TransactionFrame, TransactionSavepoint,
+    BTreeMap, BackendTransactionMode, Engine, EngineDataSnapshot, SQLError, SQLParam, SQLResult,
+    SessionStateSnapshot, StorageBackendError, StorageBackendResult, TableDataSnapshot,
+    TransactionDirtyState, TransactionFrame, TransactionIntent, TransactionSavepoint,
+    TransactionStatus,
 };
 use uqa_sql::ast::TransactionStmt;
 
@@ -56,7 +57,15 @@ impl Engine {
     }
 
     pub fn begin(&self) -> Result<(), SQLError> {
-        self.run_transaction_statement(uqa_sql::ast::TransactionStmt::Begin)
+        let _statement = self.runtime.statement_gate.lock();
+        let mut stack = self.session.transactions.lock();
+        if stack
+            .last()
+            .is_some_and(|frame| frame.status != TransactionStatus::Active)
+        {
+            return Err(failed_transaction_error());
+        }
+        self.begin_transaction_frame(&mut stack, false, true)
     }
 
     /// Commit the topmost transaction frame.
@@ -131,10 +140,18 @@ impl Engine {
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
         let _statement = self.runtime.statement_gate.lock();
-        if self.transaction_depth() != 0 || self.storage.backend.is_none() {
+        if self.transaction_depth() != 0 {
+            self.ensure_transaction_usable()?;
+            self.prepare_explicit_transaction_writer()?;
             return f(self);
         }
-        self.transaction(f)
+        if self.storage.backend.is_none() {
+            return f(self);
+        }
+        self.transaction(|engine| {
+            engine.prepare_explicit_transaction_writer()?;
+            f(engine)
+        })
     }
 
     /// Error-type-preserving counterpart for direct APIs whose public error
@@ -150,12 +167,34 @@ impl Engine {
         E: std::fmt::Display,
     {
         let _statement = self.runtime.statement_gate.lock();
-        if self.transaction_depth() != 0 || self.storage.backend.is_none() {
+        if self.transaction_depth() != 0 {
+            self.ensure_transaction_usable()
+                .map_err(|error| map_transaction_error(error.to_string()))?;
+            self.prepare_explicit_transaction_writer()
+                .map_err(|error| {
+                    map_transaction_error(format!(
+                        "promote explicit engine transaction failed: {error}"
+                    ))
+                })?;
+            return f(self);
+        }
+        if self.storage.backend.is_none() {
             return f(self);
         }
         self.begin().map_err(|error| {
             map_transaction_error(format!("begin implicit engine transaction failed: {error}"))
         })?;
+        if let Err(error) = self.prepare_explicit_transaction_writer() {
+            let error = map_transaction_error(format!(
+                "promote implicit engine transaction failed: {error}"
+            ));
+            return match self.rollback() {
+                Ok(()) => Err(error),
+                Err(rollback_error) => Err(map_transaction_error(format!(
+                    "rollback implicit engine transaction after promotion failure failed: {rollback_error}; original error: {error}"
+                ))),
+            };
+        }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
         match result {
             Ok(Ok(value)) => {
@@ -191,11 +230,30 @@ impl Engine {
     ) -> StorageBackendResult<R> {
         let _statement = self.runtime.statement_gate.lock();
         if self.transaction_depth() != 0 {
+            self.ensure_transaction_usable()
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            self.prepare_explicit_transaction_writer()
+                .map_err(|error| {
+                    StorageBackendError::Other(format!(
+                        "promote explicit engine transaction failed: {error}"
+                    ))
+                })?;
             return f(self);
         }
         self.begin().map_err(|error| {
             StorageBackendError::Other(format!("begin implicit engine transaction failed: {error}"))
         })?;
+        if let Err(error) = self.prepare_explicit_transaction_writer() {
+            let error = StorageBackendError::Other(format!(
+                "promote implicit engine transaction failed: {error}"
+            ));
+            return match self.rollback() {
+                Ok(()) => Err(error),
+                Err(rollback_error) => Err(StorageBackendError::Other(format!(
+                    "rollback implicit engine transaction after promotion failure failed: {rollback_error}; original error: {error}"
+                ))),
+            };
+        }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
         match result {
             Ok(Ok(value)) => {
@@ -228,10 +286,23 @@ impl Engine {
     ) -> Result<R, String> {
         let _statement = self.runtime.statement_gate.lock();
         if self.transaction_depth() != 0 {
+            self.ensure_transaction_usable()
+                .map_err(|error| error.to_string())?;
+            self.prepare_explicit_transaction_writer()
+                .map_err(|error| format!("promote explicit engine transaction failed: {error}"))?;
             return f(self);
         }
         self.begin()
             .map_err(|error| format!("begin implicit engine transaction failed: {error}"))?;
+        if let Err(error) = self.prepare_explicit_transaction_writer() {
+            let error = format!("promote implicit engine transaction failed: {error}");
+            return match self.rollback() {
+                Ok(()) => Err(error),
+                Err(rollback_error) => Err(format!(
+                    "rollback implicit engine transaction after promotion failure failed: {rollback_error}; original error: {error}"
+                )),
+            };
+        }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
         match result {
             Ok(Ok(value)) => {
@@ -301,19 +372,54 @@ impl Engine {
     pub fn run_transaction_statement(&self, tx: TransactionStmt) -> Result<(), SQLError> {
         let _statement = self.runtime.statement_gate.lock();
         let mut guard = self.session.transactions.lock();
-        match tx {
-            TransactionStmt::Begin => self.begin_transaction_frame(&mut guard, false)?,
-            TransactionStmt::Commit => self.commit_transaction_frame(&mut guard)?,
-            TransactionStmt::Rollback => self.rollback_transaction_frame(&mut guard)?,
-            TransactionStmt::Savepoint(name) => {
-                self.save_transaction_savepoint(&mut guard, name)?;
-            }
-            TransactionStmt::ReleaseSavepoint(name) => {
-                self.release_transaction_savepoint(&mut guard, &name)?;
-            }
+        let failed = guard
+            .last()
+            .is_some_and(|frame| frame.status != TransactionStatus::Active);
+        let outcome = match tx {
+            TransactionStmt::Rollback => self.rollback_transaction_frame(&mut guard),
+            TransactionStmt::Commit if failed => self.rollback_transaction_frame(&mut guard),
             TransactionStmt::RollbackToSavepoint(name) => {
-                self.rollback_to_transaction_savepoint(&mut guard, &name)?;
+                self.rollback_to_transaction_savepoint(&mut guard, &name)
             }
+            _ if failed => return Err(failed_transaction_error()),
+            TransactionStmt::Begin if guard.is_empty() => {
+                self.begin_transaction_frame(&mut guard, false, true)
+            }
+            TransactionStmt::Begin => self.begin_transaction_frame(&mut guard, false, false),
+            TransactionStmt::Commit => self.commit_transaction_frame(&mut guard),
+            TransactionStmt::Savepoint(name) => self.save_transaction_savepoint(&mut guard, name),
+            TransactionStmt::ReleaseSavepoint(name) => {
+                self.release_transaction_savepoint(&mut guard, &name)
+            }
+        };
+        match outcome {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                // PostgreSQL aborts the enclosing transaction when a
+                // savepoint command or nested BEGIN fails; later statements
+                // see 25P02 until ROLLBACK. Frames that this failing command
+                // could not open or that no longer exist need no abort.
+                let still_open = guard
+                    .last()
+                    .is_some_and(|frame| frame.status == TransactionStatus::Active);
+                drop(guard);
+                if still_open {
+                    return Err(self.abort_sql_transaction_after_error(error));
+                }
+                Err(error)
+            }
+        }
+    }
+
+    pub(crate) fn ensure_transaction_usable(&self) -> Result<(), SQLError> {
+        if self
+            .session
+            .transactions
+            .lock()
+            .last()
+            .is_some_and(|frame| frame.status != TransactionStatus::Active)
+        {
+            return Err(failed_transaction_error());
         }
         Ok(())
     }
@@ -329,70 +435,152 @@ impl Engine {
                 "implicit statement transaction started inside an explicit transaction".into(),
             ));
         }
-        self.begin_transaction_frame(&mut stack, read_only)
+        self.begin_transaction_frame(&mut stack, read_only, true)
     }
 
     fn begin_transaction_frame(
         &self,
         stack: &mut Vec<TransactionFrame>,
         read_only: bool,
+        defer_write_lock: bool,
     ) -> Result<(), SQLError> {
         let session_snapshot = self.snapshot_session_state();
-        let (storage_savepoint, data_snapshot) = if stack.is_empty() {
-            if let Some(backend) = self.storage.backend.as_ref() {
-                if read_only {
-                    backend
-                        .begin_read_transaction()
-                        .map_err(|err| Self::storage_tx_error("BEGIN DEFERRED", &err))?;
-                } else {
-                    backend
-                        .begin_transaction()
-                        .map_err(|err| Self::storage_tx_error("BEGIN", &err))?;
-                }
-                if let Err(error) = self.refresh_pinned_transaction_snapshot() {
-                    let refresh_error =
-                        Self::storage_tx_error("BEGIN pinned snapshot refresh", &error);
-                    return Err(self.recover_failed_begin_refresh(
-                        backend.as_ref(),
-                        &session_snapshot,
-                        refresh_error,
-                    ));
-                }
-                (None, None)
-            } else {
-                self.synchronize_table_catalog()
-                    .map_err(|err| Self::storage_tx_error("BEGIN table catalog refresh", &err))?;
-                self.synchronize_table_data()
-                    .map_err(|err| Self::storage_tx_error("BEGIN table data refresh", &err))?;
-                self.synchronize_catalog_registries()
-                    .map_err(|err| Self::storage_tx_error("BEGIN registry refresh", &err))?;
-                (None, self.snapshot_transaction_data()?)
-            }
+        let (storage_savepoint, data_snapshot, snapshot_change_baseline) = if stack.is_empty() {
+            let (data_snapshot, baseline) = self.begin_outer_transaction_snapshot(
+                read_only,
+                defer_write_lock,
+                &session_snapshot,
+            )?;
+            (None, data_snapshot, baseline)
         } else {
+            let baseline = stack[0].snapshot_change_baseline;
             let savepoint = format!("__uqa_nested_tx_{}", stack.len());
             if let Some(backend) = self.storage.backend.as_ref() {
-                backend
-                    .savepoint(&savepoint)
-                    .map_err(|err| Self::storage_tx_error("nested BEGIN savepoint", &err))?;
-                (Some(savepoint), None)
+                if !Self::backend_savepoints_deferred(stack) {
+                    backend
+                        .savepoint(&savepoint)
+                        .map_err(|err| Self::storage_tx_error("nested BEGIN savepoint", &err))?;
+                }
+                (Some(savepoint), None, baseline)
             } else {
-                (Some(savepoint), self.snapshot_transaction_data()?)
+                (Some(savepoint), self.snapshot_transaction_data()?, baseline)
             }
         };
-        let (lock_mark, next_lock_mark) = stack.last().map_or((0, 1), |frame| {
-            (frame.next_lock_mark, frame.next_lock_mark.saturating_add(1))
+        let (lock_mark, next_lock_mark) = stack.last_mut().map_or((0, 1), |frame| {
+            let lock_mark = frame.next_lock_mark;
+            frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
+            (lock_mark, frame.next_lock_mark)
         });
+        let backend_mode = if stack.is_empty() && defer_write_lock && self.storage.backend.is_some()
+        {
+            BackendTransactionMode::Deferred
+        } else {
+            BackendTransactionMode::Writer
+        };
         stack.push(TransactionFrame {
             storage_savepoint,
-            read_only,
+            intent: if read_only {
+                TransactionIntent::ReadOnly
+            } else {
+                TransactionIntent::ReadWrite
+            },
+            backend_mode,
+            status: TransactionStatus::Active,
             savepoints: Vec::new(),
             session_snapshot,
             data_snapshot,
             dirty_at_begin: self.transaction_dirty_state(),
+            begin_lock_mark: lock_mark,
             lock_mark,
             next_lock_mark,
+            snapshot_change_baseline,
+            row_changes: Vec::new(),
         });
+        self.update_statement_row_lock_baseline(snapshot_change_baseline);
         Ok(())
+    }
+
+    fn begin_outer_transaction_snapshot(
+        &self,
+        read_only: bool,
+        defer_write_lock: bool,
+        session_snapshot: &SessionStateSnapshot,
+    ) -> Result<
+        (
+            Option<EngineDataSnapshot>,
+            crate::row_locks::RowChangeBaseline,
+        ),
+        SQLError,
+    > {
+        let Some(backend) = self.storage.backend.as_ref() else {
+            let snapshot_gate = self.row_locks.begin_change_snapshot()?;
+            self.synchronize_table_catalog()
+                .map_err(|err| Self::storage_tx_error("BEGIN table catalog refresh", &err))?;
+            self.synchronize_table_data()
+                .map_err(|err| Self::storage_tx_error("BEGIN table data refresh", &err))?;
+            self.synchronize_catalog_registries()
+                .map_err(|err| Self::storage_tx_error("BEGIN registry refresh", &err))?;
+            return Ok((self.snapshot_transaction_data()?, snapshot_gate.baseline()?));
+        };
+        let snapshot_gate = if read_only || defer_write_lock {
+            let gate = self.row_locks.begin_change_snapshot()?;
+            backend
+                .begin_read_transaction()
+                .map_err(|err| Self::storage_tx_error("BEGIN DEFERRED", &err))?;
+            gate
+        } else {
+            // Take the writer registration before the snapshot gate so a
+            // writer already committing cannot deadlock with this snapshot.
+            self.acquire_backend_writer_lock(0)?;
+            let gate = match self.row_locks.begin_change_snapshot() {
+                Ok(gate) => gate,
+                Err(error) => {
+                    self.row_locks.release_session(self.session_id);
+                    return Err(error);
+                }
+            };
+            if let Err(err) = backend.begin_transaction() {
+                self.row_locks.release_session(self.session_id);
+                return Err(Self::storage_tx_error("BEGIN", &err));
+            }
+            gate
+        };
+        if let Err(error) = self.refresh_pinned_transaction_snapshot() {
+            let refresh_error = Self::storage_tx_error("BEGIN pinned snapshot refresh", &error);
+            let recovered = self.recover_failed_begin_refresh(
+                backend.as_ref(),
+                session_snapshot,
+                refresh_error,
+            );
+            self.row_locks.release_session(self.session_id);
+            return Err(recovered);
+        }
+        let baseline = match snapshot_gate.baseline() {
+            Ok(baseline) => baseline,
+            Err(error) => {
+                let recovered =
+                    self.recover_failed_begin_refresh(backend.as_ref(), session_snapshot, error);
+                self.row_locks.release_session(self.session_id);
+                return Err(recovered);
+            }
+        };
+        Ok((None, baseline))
+    }
+
+    /// Register the physical backend writer this session holds in the
+    /// logical lock manager. Eager writer frames (typed `begin`, direct
+    /// transactions) and promoted deferred frames must both hold the
+    /// `\0uqa-backend-writer` relation lock, otherwise a writer blocked on a
+    /// row lock is invisible to the deadlock detector and a promoting SQL
+    /// session waits at the storage layer instead of reporting `40P01`.
+    fn acquire_backend_writer_lock(&self, mark: u32) -> Result<(), SQLError> {
+        self.row_locks.acquire_relation(
+            self.session_id,
+            self.row_locks.table_key("\0uqa-backend-writer"),
+            crate::row_locks::RelationLockMode::AccessExclusive,
+            mark,
+            &self.runtime.cancellation,
+        )
     }
 
     fn recover_failed_begin_refresh(
@@ -431,7 +619,7 @@ impl Engine {
             .last()
             .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?;
         let storage_savepoint = frame.storage_savepoint.clone();
-        let read_only = frame.read_only;
+        let read_only = frame.intent == TransactionIntent::ReadOnly;
         if read_only && storage_savepoint.is_none() {
             if let Some(backend) = self.storage.backend.as_ref() {
                 let violation = match backend.transaction_has_written() {
@@ -453,11 +641,21 @@ impl Engine {
                 }
             }
         }
+        let change_publication = if storage_savepoint.is_none() && !frame.row_changes.is_empty() {
+            Some(self.row_locks.begin_change_publication()?)
+        } else {
+            None
+        };
+        let savepoints_deferred = Self::backend_savepoints_deferred(stack);
         if let Some(backend) = self.storage.backend.as_ref() {
             let commit_result = if let Some(savepoint) = storage_savepoint.as_ref() {
-                backend
-                    .release_savepoint(savepoint)
-                    .map_err(|err| Self::storage_tx_error("nested COMMIT savepoint", &err))
+                if savepoints_deferred {
+                    Ok(())
+                } else {
+                    backend
+                        .release_savepoint(savepoint)
+                        .map_err(|err| Self::storage_tx_error("nested COMMIT savepoint", &err))
+                }
             } else {
                 backend
                     .commit_transaction()
@@ -471,7 +669,13 @@ impl Engine {
                 ));
             }
         }
+        let committed = stack
+            .pop()
+            .ok_or_else(|| SQLError::Internal("COMMIT lost its transaction frame".into()))?;
         if storage_savepoint.is_none() {
+            self.row_locks
+                .publish_row_changes(self.session_id, committed.row_changes.iter().copied());
+            drop(change_publication);
             self.row_locks.release_session(self.session_id);
             if self
                 .epochs
@@ -498,7 +702,10 @@ impl Engine {
                 self.publish_table_data_changes();
             }
         }
-        stack.pop();
+        if let Some(parent) = stack.last_mut() {
+            parent.next_lock_mark = parent.next_lock_mark.max(committed.next_lock_mark);
+            parent.row_changes.extend(committed.row_changes);
+        }
         Ok(())
     }
 
@@ -567,16 +774,24 @@ impl Engine {
             .ok_or_else(|| SQLError::Internal("ROLLBACK without an open transaction".into()))?
             .storage_savepoint
             .clone();
-        if let Some(backend) = self.storage.backend.as_ref() {
+        let backend_aborted = stack
+            .last()
+            .is_some_and(|frame| frame.status == TransactionStatus::FailedBackendAborted);
+        let savepoints_deferred = Self::backend_savepoints_deferred(stack);
+        if let Some(backend) = self.storage.backend.as_ref().filter(|_| !backend_aborted) {
             let rollback_result = if let Some(savepoint) = storage_savepoint.as_ref() {
-                backend
-                    .rollback_to_savepoint(savepoint)
-                    .map_err(|err| Self::storage_tx_error("nested ROLLBACK savepoint", &err))
-                    .and_then(|()| {
-                        backend
-                            .release_savepoint(savepoint)
-                            .map_err(|err| Self::storage_tx_error("nested ROLLBACK release", &err))
-                    })
+                if savepoints_deferred {
+                    Ok(())
+                } else {
+                    backend
+                        .rollback_to_savepoint(savepoint)
+                        .map_err(|err| Self::storage_tx_error("nested ROLLBACK savepoint", &err))
+                        .and_then(|()| {
+                            backend.release_savepoint(savepoint).map_err(|err| {
+                                Self::storage_tx_error("nested ROLLBACK release", &err)
+                            })
+                        })
+                }
             } else {
                 backend
                     .rollback_transaction()
@@ -616,13 +831,13 @@ impl Engine {
             }
         }
         self.restore_session_state(&session_snapshot);
-        let lock_mark = frame.lock_mark;
+        let begin_lock_mark = frame.begin_lock_mark;
         stack.pop();
         if stack.is_empty() {
             self.row_locks.release_session(self.session_id);
         } else {
             self.row_locks
-                .release_mark_above(self.session_id, lock_mark.saturating_sub(1));
+                .release_mark_above(self.session_id, begin_lock_mark.saturating_sub(1));
         }
         if cleanup_errors.is_empty() {
             Ok(())
@@ -632,6 +847,125 @@ impl Engine {
                 cleanup_errors.join("; ")
             )))
         }
+    }
+
+    pub(crate) fn abort_sql_transaction_after_error(&self, error: SQLError) -> SQLError {
+        let _statement = self.runtime.statement_gate.lock();
+        let mut stack = self.session.transactions.lock();
+        let Some(frame) = stack.last() else {
+            return error;
+        };
+        if frame.status != TransactionStatus::Active {
+            return error;
+        }
+
+        let savepoint = frame.savepoints.last().map(|savepoint| {
+            (
+                savepoint.name.clone(),
+                savepoint.session_snapshot.clone(),
+                savepoint.data_snapshot.clone(),
+                savepoint.dirty,
+                savepoint.lock_mark,
+                savepoint.row_changes.clone(),
+            )
+        });
+        let transaction_snapshot = (
+            frame.session_snapshot.clone(),
+            frame.data_snapshot.clone(),
+            frame.dirty_at_begin,
+        );
+        // A nested frame owns a backend savepoint of its own; aborting the
+        // statement rolls the storage back to that savepoint so the outer
+        // frames' writes and locks survive, exactly like a PostgreSQL
+        // subtransaction abort. Only the outermost frame aborts the whole
+        // backend transaction.
+        let frame_storage_savepoint = frame.storage_savepoint.clone();
+        let frame_begin_lock_mark = frame.begin_lock_mark;
+        let savepoints_deferred = Self::backend_savepoints_deferred(&stack);
+        let mut cleanup_errors = Vec::new();
+        let mut backend_aborted = false;
+
+        if let Some(backend) = self.storage.backend.as_ref() {
+            // A deferred outer transaction has written nothing to storage, so
+            // its backend savepoints exist only logically and there is
+            // nothing to roll back at the backend for a savepoint or nested
+            // frame; the outermost abort still ends the read transaction.
+            let rollback = if savepoint.is_some() || frame_storage_savepoint.is_some() {
+                if savepoints_deferred {
+                    Ok(())
+                } else if let Some((name, ..)) = savepoint.as_ref() {
+                    backend.rollback_to_savepoint(name)
+                } else if let Some(frame_savepoint) = frame_storage_savepoint.as_ref() {
+                    backend.rollback_to_savepoint(frame_savepoint)
+                } else {
+                    Ok(())
+                }
+            } else {
+                backend_aborted = true;
+                backend.rollback_transaction()
+            };
+            if let Err(rollback_error) = rollback {
+                cleanup_errors.push(format!("storage rollback: {rollback_error}"));
+            }
+        }
+
+        let (session_snapshot, data_snapshot, dirty, keep_mark, row_changes) =
+            if let Some((_, session, data, dirty, mark, row_changes)) = savepoint {
+                (session, data, dirty, Some(mark), row_changes)
+            } else {
+                (
+                    transaction_snapshot.0,
+                    transaction_snapshot.1,
+                    transaction_snapshot.2,
+                    frame_storage_savepoint
+                        .as_ref()
+                        .map(|_| frame_begin_lock_mark.saturating_sub(1)),
+                    Vec::new(),
+                )
+            };
+        if let Some(snapshot) = data_snapshot.as_ref() {
+            if let Err(restore_error) = self.restore_transaction_data(snapshot) {
+                cleanup_errors.push(format!("memory restore: {restore_error}"));
+            }
+        }
+        self.restore_transaction_dirty_state(dirty);
+        if let Err(restore_error) = self.reload_persistent_value_indexes() {
+            cleanup_errors.push(format!("btree restore: {restore_error}"));
+        }
+        if self.storage.backend.is_some() {
+            if let Err(restore_error) = self.reload_table_catalog_after_rollback() {
+                cleanup_errors.push(format!("table catalog restore: {restore_error}"));
+            }
+            if let Err(restore_error) = self.reload_catalog_registries_after_rollback() {
+                cleanup_errors.push(format!("registry restore: {restore_error}"));
+            }
+        }
+        self.restore_session_state(&session_snapshot);
+        if let Some(mark) = keep_mark {
+            self.row_locks.release_mark_above(self.session_id, mark);
+        } else {
+            self.row_locks.release_session(self.session_id);
+        }
+        if let Some(frame) = stack.last_mut() {
+            frame.status = if backend_aborted {
+                TransactionStatus::FailedBackendAborted
+            } else {
+                TransactionStatus::Failed
+            };
+            frame.row_changes = row_changes;
+        }
+        transaction_abort_result(error, &cleanup_errors)
+    }
+
+    /// A deferred outer frame still runs a backend read transaction, which
+    /// cannot carry backend savepoints. Savepoints are then recorded on the
+    /// frame only; promotion to a writer recreates every recorded savepoint
+    /// on the write transaction, so `PostgreSQL`'s fresh READ COMMITTED
+    /// snapshot per statement survives `SAVEPOINT` and nested `BEGIN`.
+    fn backend_savepoints_deferred(stack: &[TransactionFrame]) -> bool {
+        stack
+            .first()
+            .is_some_and(|frame| frame.backend_mode == BackendTransactionMode::Deferred)
     }
 
     fn save_transaction_savepoint(
@@ -644,10 +978,11 @@ impl Engine {
         }
         let session_snapshot = self.snapshot_session_state();
         let data_snapshot = self.snapshot_transaction_data()?;
+        let deferred = Self::backend_savepoints_deferred(stack);
         let frame = stack.last_mut().ok_or_else(|| {
             SQLError::Internal("SAVEPOINT lost its checked transaction frame".into())
         })?;
-        if let Some(backend) = self.storage.backend.as_ref() {
+        if let Some(backend) = self.storage.backend.as_ref().filter(|_| !deferred) {
             backend
                 .savepoint(&name)
                 .map_err(|err| Self::storage_tx_error("SAVEPOINT", &err))?;
@@ -655,12 +990,14 @@ impl Engine {
         let keep_mark = frame.lock_mark;
         frame.lock_mark = frame.next_lock_mark;
         frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
+        let row_changes = frame.row_changes.clone();
         frame.savepoints.push(TransactionSavepoint {
             name,
             session_snapshot,
             data_snapshot,
             dirty: self.transaction_dirty_state(),
             lock_mark: keep_mark,
+            row_changes,
         });
         Ok(())
     }
@@ -670,6 +1007,7 @@ impl Engine {
         stack: &mut [TransactionFrame],
         name: &str,
     ) -> Result<(), SQLError> {
+        let deferred = Self::backend_savepoints_deferred(stack);
         let frame = stack
             .last_mut()
             .ok_or_else(|| SQLError::Internal("RELEASE SAVEPOINT outside a transaction".into()))?;
@@ -678,7 +1016,7 @@ impl Engine {
             .iter()
             .rposition(|savepoint| savepoint.name == name)
             .ok_or_else(|| SQLError::Internal(format!("savepoint `{name}` not found")))?;
-        if let Some(backend) = self.storage.backend.as_ref() {
+        if let Some(backend) = self.storage.backend.as_ref().filter(|_| !deferred) {
             backend
                 .release_savepoint(name)
                 .map_err(|err| Self::storage_tx_error("RELEASE SAVEPOINT", &err))?;
@@ -692,6 +1030,7 @@ impl Engine {
         stack: &mut [TransactionFrame],
         name: &str,
     ) -> Result<(), SQLError> {
+        let deferred = Self::backend_savepoints_deferred(stack);
         let frame = stack.last_mut().ok_or_else(|| {
             SQLError::Internal("ROLLBACK TO SAVEPOINT outside a transaction".into())
         })?;
@@ -700,7 +1039,7 @@ impl Engine {
             .iter()
             .rposition(|savepoint| savepoint.name == name)
             .ok_or_else(|| SQLError::Internal(format!("savepoint `{name}` not found")))?;
-        if let Some(backend) = self.storage.backend.as_ref() {
+        if let Some(backend) = self.storage.backend.as_ref().filter(|_| !deferred) {
             backend
                 .rollback_to_savepoint(name)
                 .map_err(|err| Self::storage_tx_error("ROLLBACK TO SAVEPOINT", &err))?;
@@ -726,11 +1065,13 @@ impl Engine {
         }
         self.restore_session_state(&savepoint.session_snapshot);
         let keep_mark = savepoint.lock_mark;
+        frame.row_changes.clone_from(&savepoint.row_changes);
         frame.savepoints.truncate(position + 1);
         self.row_locks
             .release_mark_above(self.session_id, keep_mark);
         frame.lock_mark = frame.next_lock_mark;
         frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
+        frame.status = TransactionStatus::Active;
         if cleanup_errors.is_empty() {
             Ok(())
         } else {
@@ -753,46 +1094,202 @@ impl Engine {
             .map_or(0, |frame| frame.lock_mark)
     }
 
-    pub(crate) fn lock_row(
-        &self,
-        table: &str,
-        doc_id: uqa_core::DocId,
-        strength: uqa_sql::ast::LockStrength,
-        wait: uqa_sql::ast::LockWait,
-        display_name: &str,
-    ) -> Result<crate::row_locks::LockAcquire, SQLError> {
-        let canonical = self
-            .try_resolve_table_name(table)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| table.to_string());
-        let key = crate::row_locks::RowLockKey {
-            table: self.row_locks.table_key(&canonical),
-            doc_id,
+    pub(crate) fn refresh_explicit_statement_snapshot(&self) -> Result<(), SQLError> {
+        let Some(backend) = self.storage.backend.as_ref() else {
+            return Ok(());
         };
-        self.row_locks.acquire(&crate::row_locks::LockRequest {
-            session_id: self.session_id,
-            key,
-            strength,
-            mark: self.current_lock_mark(),
-            wait,
-            cancel: &self.runtime.cancellation,
-            relation: display_name,
-        })
+        // A statement issued by a host callback while an outer statement is
+        // still executing must keep the outer statement's snapshot: replacing
+        // the backend read transaction underneath a running scan would mix
+        // snapshots or abort the outer cursor. Only the outermost statement
+        // of the session takes a fresh READ COMMITTED snapshot.
+        if self.session.row_lock_statements.lock().len() > 1 {
+            return Ok(());
+        }
+        let _statement = self.runtime.statement_gate.lock();
+        let mut stack = self.session.transactions.lock();
+        if !stack
+            .first()
+            .is_some_and(|frame| frame.backend_mode == BackendTransactionMode::Deferred)
+        {
+            return Ok(());
+        }
+        if backend
+            .transaction_has_written()
+            .map_err(|error| Self::storage_tx_error("inspect statement snapshot", &error))?
+        {
+            return Ok(());
+        }
+        let snapshot_gate = self.row_locks.begin_change_snapshot()?;
+        self.replace_unwritten_backend_transaction(
+            &mut stack,
+            true,
+            "refresh READ COMMITTED statement snapshot",
+        )?;
+        let baseline = match snapshot_gate.baseline() {
+            Ok(baseline) => baseline,
+            Err(error) => {
+                return Err(self.abort_failed_backend_transaction_replacement(
+                    &mut stack,
+                    backend.as_ref(),
+                    error,
+                ));
+            }
+        };
+        stack[0].snapshot_change_baseline = baseline;
+        self.update_statement_row_lock_baseline(baseline);
+        Ok(())
     }
 
-    pub(crate) fn unlock_row_acquired_now(&self, table: &str, doc_id: uqa_core::DocId) {
-        let canonical = self
-            .try_resolve_table_name(table)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| table.to_string());
-        let key = crate::row_locks::RowLockKey {
-            table: self.row_locks.table_key(&canonical),
-            doc_id,
+    pub(crate) fn prepare_explicit_transaction_writer(&self) -> Result<bool, SQLError> {
+        let _statement = self.runtime.statement_gate.lock();
+        let mut stack = self.session.transactions.lock();
+        if !stack
+            .first()
+            .is_some_and(|frame| frame.backend_mode == BackendTransactionMode::Deferred)
+        {
+            return Ok(false);
+        }
+        self.promote_deferred_transaction_frame(&mut stack)?;
+        Ok(true)
+    }
+
+    pub(crate) fn backend_transaction_is_deferred(&self) -> bool {
+        self.session
+            .transactions
+            .lock()
+            .first()
+            .is_some_and(|frame| frame.backend_mode == BackendTransactionMode::Deferred)
+    }
+
+    fn promote_deferred_transaction_frame(
+        &self,
+        stack: &mut Vec<TransactionFrame>,
+    ) -> Result<(), SQLError> {
+        if !stack
+            .first()
+            .is_some_and(|frame| frame.backend_mode == BackendTransactionMode::Deferred)
+        {
+            return Ok(());
+        }
+        let mark = stack.first().map_or(0, |frame| frame.lock_mark);
+        self.acquire_backend_writer_lock(mark)?;
+        if self.storage.backend.is_none() {
+            if let Some(frame) = stack.first_mut() {
+                frame.backend_mode = BackendTransactionMode::Writer;
+            }
+            return Ok(());
+        }
+        self.replace_unwritten_backend_transaction(
+            stack,
+            false,
+            "promote explicit transaction to writer",
+        )
+    }
+
+    fn replace_unwritten_backend_transaction(
+        &self,
+        stack: &mut Vec<TransactionFrame>,
+        deferred: bool,
+        action: &str,
+    ) -> Result<(), SQLError> {
+        let Some(backend) = self.storage.backend.as_ref() else {
+            return Err(SQLError::Internal(format!(
+                "{action} requires persistent storage"
+            )));
         };
-        self.row_locks
-            .release_row_if_acquired(self.session_id, key, self.current_lock_mark());
+        let written = backend
+            .transaction_has_written()
+            .map_err(|error| Self::storage_tx_error(&format!("inspect {action}"), &error))?;
+        if stack.is_empty() || written {
+            return Err(SQLError::Internal(format!(
+                "{action} requires an open transaction without storage writes"
+            )));
+        }
+        if let Err(error) = backend.rollback_transaction() {
+            let failure = Self::storage_tx_error(action, &error);
+            return Err(self.abort_failed_backend_transaction_replacement(
+                stack,
+                backend.as_ref(),
+                failure,
+            ));
+        }
+        let begin = if deferred {
+            backend.begin_read_transaction()
+        } else {
+            backend.begin_transaction()
+        };
+        if let Err(error) = begin {
+            let failure = Self::storage_tx_error(action, &error);
+            return Err(self.abort_failed_backend_transaction_replacement(
+                stack,
+                backend.as_ref(),
+                failure,
+            ));
+        }
+        // Writer promotion materializes every logical savepoint in creation
+        // order: each frame's own nested-BEGIN savepoint precedes the user
+        // savepoints declared inside that frame, and inner frames follow
+        // their parents. A refreshed read transaction keeps them logical.
+        let mut savepoint_names = Vec::new();
+        if !deferred {
+            for frame in stack.iter() {
+                if let Some(name) = frame.storage_savepoint.as_ref() {
+                    savepoint_names.push(name.clone());
+                }
+                savepoint_names.extend(
+                    frame
+                        .savepoints
+                        .iter()
+                        .map(|savepoint| savepoint.name.clone()),
+                );
+            }
+        }
+        for savepoint_name in savepoint_names {
+            if let Err(error) = backend.savepoint(&savepoint_name) {
+                let failure = SQLError::Internal(format!(
+                    "recreate savepoint `{savepoint_name}` after {action} failed: {error}"
+                ));
+                return Err(self.abort_failed_backend_transaction_replacement(
+                    stack,
+                    backend.as_ref(),
+                    failure,
+                ));
+            }
+        }
+        if let Err(error) = self.refresh_pinned_transaction_snapshot() {
+            let failure = SQLError::Internal(format!("refresh after {action} failed: {error}"));
+            return Err(self.abort_failed_backend_transaction_replacement(
+                stack,
+                backend.as_ref(),
+                failure,
+            ));
+        }
+        stack[0].backend_mode = if deferred {
+            BackendTransactionMode::Deferred
+        } else {
+            BackendTransactionMode::Writer
+        };
+        Ok(())
+    }
+
+    fn abort_failed_backend_transaction_replacement(
+        &self,
+        stack: &mut Vec<TransactionFrame>,
+        backend: &dyn uqa_storage::PersistentStorageBackend,
+        failure: SQLError,
+    ) -> SQLError {
+        let failure = if backend.in_transaction() {
+            match backend.rollback_transaction() {
+                Ok(()) => failure,
+                Err(rollback_error) => SQLError::Internal(format!(
+                    "{failure}; replacement rollback also failed: {rollback_error}"
+                )),
+            }
+        } else {
+            failure
+        };
+        self.recover_failed_transaction_finish(stack, false, failure)
     }
 
     fn snapshot_session_state(&self) -> SessionStateSnapshot {
@@ -946,6 +1443,27 @@ impl Engine {
         Ok(())
     }
 }
+
+fn failed_transaction_error() -> SQLError {
+    SQLError::Routine {
+        sqlstate: "25P02".into(),
+        message: "current transaction is aborted, commands ignored until end of transaction block"
+            .into(),
+    }
+}
+
+fn transaction_abort_result(error: SQLError, cleanup_errors: &[String]) -> SQLError {
+    if cleanup_errors.is_empty() {
+        error
+    } else {
+        SQLError::Internal(format!(
+            "{error}; transaction abort cleanup failed: {}",
+            cleanup_errors.join("; ")
+        ))
+    }
+}
+
+mod row_locks_session;
 
 #[cfg(test)]
 mod tests;

@@ -46,7 +46,7 @@ mod catalog;
 mod correlation;
 mod cursor;
 mod ddl;
-mod dml;
+pub(crate) mod dml;
 mod driver;
 mod engine_api;
 mod from_rows;
@@ -71,6 +71,7 @@ use planning::lower_statement;
 pub(super) use planning::{execute_compiled_statement, optimize_engine_plan};
 pub(crate) use plpgsql_exec::{call_bound_user_scalar_function, call_user_scalar_function};
 use select::query_has_row_locks;
+pub(crate) use select::RowLockRetryCache;
 
 use aggregates::{
     aggregate_value, contains_aggregate, has_aggregate, projection_label_at, AggregateAccumulator,

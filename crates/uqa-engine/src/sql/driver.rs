@@ -18,7 +18,9 @@ pub(crate) fn execute(
     // not leak into a fresh batch. Callers that want the
     // cancellation flag preserved across statements should use
     // [`crate::Engine::reset_cancellation`] explicitly between calls.
-    engine.cancellation_token().check()?;
+    if let Err(error) = engine.cancellation_token().check() {
+        return Err(abort_explicit_statement_error(engine, error.into()));
+    }
     // Parse an uncached batch completely before executing its first statement.
     // This preserves syntax atomicity. Exact single-statement cache hits reuse
     // the parsed AST and logical plan; batches still lower each statement only
@@ -27,16 +29,22 @@ pub(crate) fn execute(
     let cached_statement = engine.cached_sql_statement(sql);
     let (statements, mut cached_entry) = match cached_statement {
         Some(cached) => (vec![cached.statement.as_ref().clone()], Some(cached)),
-        None => (compile(sql)?, None),
+        None => match compile(sql) {
+            Ok(statements) => (statements, None),
+            Err(error) => return Err(abort_explicit_statement_error(engine, error)),
+        },
     };
     if statements.is_empty() {
         return Ok(SQLResult::empty());
     }
     let is_single_statement = statements.len() == 1;
-    let mut executor = UnifiedPlanExecutor::new(engine, params);
     let mut last = SQLResult::empty();
     for statement in statements {
-        engine.cancellation_token().check()?;
+        if let Err(error) = engine.cancellation_token().check() {
+            return Err(abort_explicit_statement_error(engine, error.into()));
+        }
+        let _row_lock_statement = engine.begin_row_lock_statement();
+        let mut executor = UnifiedPlanExecutor::new(engine, params);
         let (initial_plan, cached_optimized_plan) = if is_single_statement {
             if let Some(cached) = cached_entry.take() {
                 (cached.logical_plan, cached.optimized_plan)
@@ -56,12 +64,61 @@ pub(crate) fn execute(
             last = executor.execute(initial_plan.as_ref())?;
             continue;
         }
+        let has_row_locks = match initial_plan.as_ref() {
+            uqa_planner::UnifiedPlan::Query(query) => query_has_row_locks(query),
+            uqa_planner::UnifiedPlan::Command(_) => false,
+        };
 
         if engine.transaction_depth() != 0 {
+            engine.ensure_transaction_usable()?;
+            if has_row_locks {
+                engine
+                    .statement_row_lock_cache()
+                    .map_err(|error| engine.abort_sql_transaction_after_error(error))?;
+            }
+            engine
+                .refresh_explicit_statement_snapshot()
+                .map_err(|error| engine.abort_sql_transaction_after_error(error))?;
             // The statement was lowered immediately above, after any earlier
             // BEGIN or catalog-changing statement in this batch completed.
-            let optimized = optimize_engine_plan(engine, initial_plan.as_ref().clone())?;
-            last = executor.execute(&optimized)?;
+            let mut plan = lower_statement(engine, statement.clone());
+            if is_single_statement {
+                engine.cache_sql_statement(
+                    sql.to_string(),
+                    Arc::new(statement.clone()),
+                    Arc::new(plan.clone()),
+                );
+            }
+            let mutating_query = match &plan {
+                uqa_planner::UnifiedPlan::Query(query) => query_may_mutate_engine(engine, query),
+                uqa_planner::UnifiedPlan::Command(_) => Ok(false),
+            }
+            .map_err(|error| engine.abort_sql_transaction_after_error(error))?;
+            if mutating_query
+                && !has_row_locks
+                && engine
+                    .prepare_explicit_transaction_writer()
+                    .map_err(|error| engine.abort_sql_transaction_after_error(error))?
+            {
+                plan = lower_statement(engine, statement.clone());
+                if is_single_statement {
+                    engine.cache_sql_statement(
+                        sql.to_string(),
+                        Arc::new(statement.clone()),
+                        Arc::new(plan.clone()),
+                    );
+                }
+            }
+            let optimized = match optimize_engine_plan(engine, plan) {
+                Ok(plan) => plan,
+                Err(error) => {
+                    return Err(engine.abort_sql_transaction_after_error(error));
+                }
+            };
+            match executor.execute(&optimized) {
+                Ok(result) => last = result,
+                Err(error) => return Err(engine.abort_sql_transaction_after_error(error)),
+            }
             continue;
         }
 
@@ -76,13 +133,12 @@ pub(crate) fn execute(
             uqa_planner::UnifiedPlan::Query(query) => !query_may_mutate_engine(engine, query)?,
             uqa_planner::UnifiedPlan::Command(_) => false,
         };
-        let has_row_locks = match initial_plan.as_ref() {
-            uqa_planner::UnifiedPlan::Query(query) => query_has_row_locks(query),
-            uqa_planner::UnifiedPlan::Command(_) => false,
-        };
         let needs_implicit_transaction =
             engine.storage.backend.is_some() || !is_read_query || has_row_locks;
         if needs_implicit_transaction {
+            if has_row_locks {
+                engine.statement_row_lock_cache()?;
+            }
             engine.begin_implicit_statement_transaction(is_read_query)?;
             // Catalog/table refresh intentionally invalidates cached logical
             // plans even when the in-process generation did not move: a
@@ -97,19 +153,20 @@ pub(crate) fn execute(
                     Arc::new(plan.clone()),
                 );
             }
-            let must_restart_as_writer = if is_read_query && engine.storage.backend.is_some() {
-                match &plan {
-                    uqa_planner::UnifiedPlan::Query(query) => {
-                        match query_may_mutate_engine(engine, query) {
-                            Ok(mutates) => mutates,
-                            Err(error) => return rollback_after_statement_error(engine, error),
+            let must_restart_as_writer =
+                if is_read_query && engine.storage.backend.is_some() && !has_row_locks {
+                    match &plan {
+                        uqa_planner::UnifiedPlan::Query(query) => {
+                            match query_may_mutate_engine(engine, query) {
+                                Ok(mutates) => mutates,
+                                Err(error) => return rollback_after_statement_error(engine, error),
+                            }
                         }
+                        uqa_planner::UnifiedPlan::Command(_) => false,
                     }
-                    uqa_planner::UnifiedPlan::Command(_) => false,
-                }
-            } else {
-                false
-            };
+                } else {
+                    false
+                };
             if must_restart_as_writer {
                 rollback_implicit_statement(engine, "restart read transaction as writer")?;
                 engine.begin_implicit_statement_transaction(false)?;
@@ -120,6 +177,30 @@ pub(crate) fn execute(
                         Arc::new(statement.clone()),
                         Arc::new(plan.clone()),
                     );
+                }
+            }
+            let mutating_query = match &plan {
+                uqa_planner::UnifiedPlan::Query(query) => query_may_mutate_engine(engine, query),
+                uqa_planner::UnifiedPlan::Command(_) => Ok(false),
+            };
+            let mutating_query = match mutating_query {
+                Ok(mutates) => mutates,
+                Err(error) => return rollback_after_statement_error(engine, error),
+            };
+            if mutating_query && engine.storage.backend.is_some() && !has_row_locks {
+                match engine.prepare_explicit_transaction_writer() {
+                    Ok(true) => {
+                        plan = lower_statement(engine, statement.clone());
+                        if is_single_statement {
+                            engine.cache_sql_statement(
+                                sql.to_string(),
+                                Arc::new(statement.clone()),
+                                Arc::new(plan.clone()),
+                            );
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(error) => return rollback_after_statement_error(engine, error),
                 }
             }
             let optimized = match optimize_engine_plan(engine, plan) {
@@ -155,6 +236,14 @@ pub(crate) fn execute(
         }
     }
     Ok(last)
+}
+
+pub(super) fn abort_explicit_statement_error(engine: &Engine, error: SQLError) -> SQLError {
+    if engine.transaction_depth() == 0 {
+        error
+    } else {
+        engine.abort_sql_transaction_after_error(error)
+    }
 }
 
 pub(super) fn rollback_implicit_statement(engine: &Engine, action: &str) -> Result<(), SQLError> {

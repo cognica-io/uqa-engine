@@ -13,6 +13,8 @@ COMMIT;
 
 `START TRANSACTION` is accepted as the explicit begin form. `ROLLBACK` discards the active transaction.
 
+A statement that fails inside an explicit transaction aborts the transaction as in PostgreSQL 18: every later statement, including typed engine mutations and failing savepoint commands, reports `25P02` until `ROLLBACK` or `ROLLBACK TO SAVEPOINT` ends the aborted state, and `COMMIT` of an aborted transaction rolls back. A failure inside a nested `BEGIN` aborts only that nested frame; the enclosing frames keep their writes and row locks.
+
 ## Savepoints
 
 ```sql

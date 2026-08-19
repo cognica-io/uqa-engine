@@ -68,6 +68,9 @@ impl ScoredDocumentSource {
         entries: &[ScoredEntry],
         visitor: &mut KeptEntryVisitor<'_>,
     ) -> ExecResult<()> {
+        if self.recheck_pinned {
+            return self.for_each_pinned_entry(entries, visitor);
+        }
         let fields = self
             .projected_fields
             .iter()
@@ -195,6 +198,60 @@ impl ScoredDocumentSource {
                 entries.len()
             ))
             .into());
+        }
+        Ok(())
+    }
+
+    /// Materialize tuples for a pinned tuple-local recheck scan: a changed
+    /// tuple projects its latest committed image, an unchanged join partner
+    /// reads the statement snapshot, and a tuple missing from the snapshot is
+    /// skipped so the recheck drops the candidate naturally.
+    fn for_each_pinned_entry(
+        &self,
+        entries: &[ScoredEntry],
+        visitor: &mut KeptEntryVisitor<'_>,
+    ) -> ExecResult<()> {
+        let fields = self
+            .projected_fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let store = self.table.document_store.read();
+        for entry in entries {
+            let mut document = if let Some(document) = self.recheck_documents.get(&entry.doc_id) {
+                (**document).clone()
+            } else {
+                let Some(document) =
+                    store
+                        .get(entry.doc_id)
+                        .map_err(|error| -> uqa_execution::ExecError {
+                            SQLError::Internal(format!(
+                                "read `{}` rows from the pinned command snapshot: {error}",
+                                self.table_name
+                            ))
+                            .into()
+                        })?
+                else {
+                    continue;
+                };
+                document
+            };
+            crate::engine_generated::materialize_projected_virtual_generated_columns(
+                &self.column_definitions,
+                &mut document,
+                &self.projected_fields,
+            )?;
+            let values = fields
+                .iter()
+                .map(|field| document.get(*field).cloned().unwrap_or(Value::Null))
+                .collect::<Vec<_>>();
+            let value_refs = values.iter().collect::<Vec<_>>();
+            if let Some(predicate) = self.predicate.as_ref() {
+                if !predicate.keep(&value_refs)? {
+                    continue;
+                }
+            }
+            visitor(entry.doc_id, entry, &fields, &value_refs)?;
         }
         Ok(())
     }

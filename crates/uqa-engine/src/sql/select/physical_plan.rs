@@ -8,15 +8,16 @@
 
 use super::{
     build_set_projection, collect_exists_key_operator, collect_query_operator,
-    expression_may_return_set, is_score_provenance_column, prepare_aggregate_set_projection,
+    column_prune_for_stmt, expression_may_return_set, final_filter_after_qualifier_pushdown,
+    is_score_provenance_column, prepare_aggregate_set_projection,
     prepare_correlated_exists_predicate, prepare_group_set_projection, prepare_window_plan,
-    projection_columns, projections_may_return_set, resolve_limit_offset_with_ctes,
-    should_defer_distinct_limit, validate_query_block_expression_types,
-    validate_query_set_contexts, Arc, ComputePlan, CteScope, Engine, EngineExpressionEvaluator,
-    HashSet, OutputColumnMapping, PhysicalAggregateExecutor, PhysicalProjection,
-    PhysicalWindowExecutor, ProjectionPlan, QueryBlockPlan, QueryOutput, QueryOutputMode,
-    ResultRow, SQLError, SQLParam, ScalarExpr, SharedExpressionEvaluator, Value, DOC_ID_COLUMN,
-    MERGE_ACTION_COLUMN, SCORE_COLUMN,
+    projection_columns, projections_may_return_set, qualifier_filters_for_stmt,
+    resolve_limit_offset_with_ctes, should_defer_distinct_limit,
+    validate_query_block_expression_types, validate_query_set_contexts, Arc, ComputePlan, CteScope,
+    Engine, EngineExpressionEvaluator, HashSet, OutputColumnMapping, PhysicalAggregateExecutor,
+    PhysicalProjection, PhysicalWindowExecutor, ProjectionPlan, QueryBlockPlan, QueryOutput,
+    QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr, SharedExpressionEvaluator, Value,
+    DOC_ID_COLUMN, MERGE_ACTION_COLUMN, SCORE_COLUMN,
 };
 
 const ORDER_SET_COLUMN_PREFIX: &str = "\0uqa.order_set_value.";
@@ -33,6 +34,9 @@ fn projection_set_batch_size(statement: &QueryBlockPlan) -> usize {
         uqa_execution::DEFAULT_BATCH_SIZE
     }
 }
+
+mod row_at_a_time;
+use row_at_a_time::RowAtATime;
 
 pub(in crate::sql) fn expand_from_star_columns(
     columns: Vec<String>,
@@ -325,6 +329,57 @@ pub(in crate::sql) fn order_projection(
     Ok((physical, output))
 }
 
+fn split_locking_order_projections(
+    statement: &QueryBlockPlan,
+    output: &[OutputColumnMapping],
+    physical: Vec<PhysicalProjection>,
+) -> Result<
+    (
+        QueryBlockPlan,
+        Vec<PhysicalProjection>,
+        Vec<PhysicalProjection>,
+    ),
+    SQLError,
+> {
+    let mut sort_statement = statement.clone();
+    let mut required = HashSet::new();
+    for (index, order) in statement.order_by.iter().enumerate() {
+        let expression = resolve_order_expression(&order.expr, output)?;
+        if let ScalarExpr::Column(column) = &expression {
+            if physical.iter().any(|(name, _)| name == column) {
+                required.insert(column.clone());
+                continue;
+            }
+        }
+        if let Some((column, _)) = physical
+            .iter()
+            .find(|(_, projected)| crate::sql::aggregates::exprs_match(projected, &expression))
+        {
+            required.insert(column.clone());
+            sort_statement.order_by[index].expr = ScalarExpr::Column(column.clone());
+        }
+    }
+    let (before_sort, after_sort) = physical
+        .into_iter()
+        .partition(|(column, _)| required.contains(column));
+    Ok((sort_statement, before_sort, after_sort))
+}
+
+fn append_row_at_time_projection<'a>(
+    operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
+    projections: Vec<PhysicalProjection>,
+    evaluator: SharedExpressionEvaluator<'a>,
+) -> Box<dyn uqa_execution::PhysicalOperator + 'a> {
+    if projections.is_empty() {
+        return operator;
+    }
+    Box::new(uqa_execution::Project::appending_with_evaluator(
+        Box::new(RowAtATime::new(operator)),
+        projections,
+        evaluator,
+    ))
+}
+
 pub(in crate::sql) fn identity_order_columns(columns: &[String]) -> Vec<OutputColumnMapping> {
     columns
         .iter()
@@ -332,7 +387,7 @@ pub(in crate::sql) fn identity_order_columns(columns: &[String]) -> Vec<OutputCo
         .collect()
 }
 
-fn output_selection_positions(
+pub(in crate::sql) fn output_selection_positions(
     schema: &uqa_execution::RowSchema,
     output: Vec<OutputColumnMapping>,
 ) -> Result<Vec<(String, usize)>, SQLError> {
@@ -514,14 +569,16 @@ pub(in crate::sql) fn execute_filter_rows(
     Ok(rows)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(in crate::sql) fn attach_order_limit<'a>(
     mut operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
     statement: &QueryBlockPlan,
     output_columns: &[OutputColumnMapping],
     engine: &'a Engine,
-    params: &[SQLParam],
+    params: &'a [SQLParam],
     ctes: &CteScope,
     evaluator: SharedExpressionEvaluator<'a>,
+    recheck_source: Option<crate::sql::select::LockRowsRecheckSource>,
 ) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
     use uqa_execution::{ExternalSort, Limit, SortKey};
 
@@ -574,25 +631,133 @@ pub(in crate::sql) fn attach_order_limit<'a>(
             uqa_execution::ordering_satisfies(operator.output_ordering(), required)
         });
         if !already_ordered {
+            // A locking query must keep the complete sorted candidate
+            // stream: SKIP LOCKED skips rows, and a tuple-local recheck can
+            // drop a changed candidate, in which case PostgreSQL 18 surfaces
+            // the next candidate in sort order instead of returning fewer
+            // rows.
             operator = Box::new(ExternalSort::new(
                 operator,
                 keys,
                 evaluator,
-                keep.filter(|_| !crate::sql::select::locking_uses_skip(&statement.locking)),
+                keep.filter(|_| statement.locking.is_empty()),
                 work_mem_bytes,
             ));
         }
     }
-    let skip_locked = crate::sql::select::locking_uses_skip(&statement.locking);
-    if skip_locked {
-        operator = crate::sql::select::attach_lock_rows(engine, operator, statement, ctes)?;
+    if !statement.locking.is_empty() {
+        let max_rows = limit
+            .map(|limit| {
+                offset
+                    .unwrap_or(0)
+                    .checked_add(limit)
+                    .ok_or_else(|| SQLError::TypeMismatch("OFFSET + LIMIT overflow".into()))
+            })
+            .transpose()?;
+        operator = crate::sql::select::attach_lock_rows(
+            engine,
+            operator,
+            statement,
+            params,
+            ctes,
+            max_rows,
+            recheck_source,
+        )?;
     }
     if offset.is_some() || limit.is_some() {
         operator = Box::new(Limit::new(operator, offset.unwrap_or(0), limit));
     }
-    if !statement.locking.is_empty() && !skip_locked {
-        operator = crate::sql::select::attach_lock_rows(engine, operator, statement, ctes)?;
+    Ok(operator)
+}
+
+/// Rebuild the plan below one `LockRows` boundary for a tuple-local recheck.
+/// The construction replays the same source, filter, and scalar target
+/// projection below the original `LockRows` boundary, with the recheck pins
+/// active in `ctes` so every lock-target base scan emits only the candidate's
+/// tuples while unmarked relations rescan under the statement snapshot.
+/// Sorting, locking, and `LIMIT` never run here: the candidate keeps its
+/// original position in the outer stream.
+pub(in crate::sql) fn build_row_lock_recheck_operator<'a>(
+    engine: &'a Engine,
+    statement: &QueryBlockPlan,
+    params: &'a [SQLParam],
+    ctes: &mut CteScope,
+    _ordered: bool,
+) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
+    use uqa_execution::Project;
+
+    let Some(from) = statement.from.as_ref() else {
+        return Err(SQLError::Internal(
+            "row-lock recheck requires a FROM clause".into(),
+        ));
+    };
+    let column_prune = column_prune_for_stmt(engine, statement, from);
+    let qualifier_filters = qualifier_filters_for_stmt(engine, statement, from);
+    let source_row_locks = crate::sql::select::resolve_row_locks(
+        engine,
+        from,
+        &statement.locking,
+        statement.r#where.as_ref(),
+        params,
+        ctes,
+    )?;
+    let mut operator = {
+        let mut scoped_ctes = ctes.enter_source_row_locks(source_row_locks);
+        crate::sql::from_rows::build_join_operator_with_recheck_pins(
+            engine,
+            from,
+            params,
+            &mut scoped_ctes,
+            column_prune.as_ref(),
+            qualifier_filters.as_ref(),
+        )?
+    };
+    if let Some(outer_row) = ctes.row_lock_outer_row() {
+        operator = Box::new(uqa_execution::ScopeOverlay::new(
+            operator,
+            outer_row.clone(),
+        ));
     }
+    let predicate =
+        final_filter_after_qualifier_pushdown(engine, statement, from, qualifier_filters.as_ref());
+    let expanded_statement = statement
+        .projections
+        .iter()
+        .any(|projection| {
+            matches!(
+                projection.expr,
+                ScalarExpr::Star | ScalarExpr::QualifiedStar(_)
+            )
+        })
+        .then(|| {
+            let mut expanded = statement.clone();
+            expanded.projections =
+                expand_bound_projection_stars(&statement.projections, operator.row_schema())?;
+            Ok::<_, SQLError>(expanded)
+        })
+        .transpose()?;
+    let statement = expanded_statement.as_ref().unwrap_or(statement);
+    let evaluator = EngineExpressionEvaluator::shared(engine, params, ctes);
+    if let Some(predicate) = predicate {
+        operator = match prepare_correlated_exists_predicate(engine, &predicate, params, ctes)? {
+            Some(prepared) => Box::new(uqa_execution::Filter::with_row_predicate(
+                operator, prepared,
+            )),
+            None => Box::new(uqa_execution::Filter::with_evaluator(
+                operator,
+                predicate,
+                Arc::clone(&evaluator),
+            )),
+        };
+    }
+    let (physical, _) = order_projection(&statement.projections, operator.row_schema())?;
+    operator = if physical.is_empty() {
+        operator
+    } else {
+        Box::new(Project::appending_with_evaluator(
+            operator, physical, evaluator,
+        )) as Box<dyn uqa_execution::PhysicalOperator + 'a>
+    };
     Ok(operator)
 }
 
@@ -652,7 +817,7 @@ fn attach_relational_filter<'a>(
     mut operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
     predicate: Option<ScalarExpr>,
     params: &'a [SQLParam],
-    ctes: &'a CteScope,
+    ctes: &CteScope,
     evaluator: &SharedExpressionEvaluator<'a>,
 ) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
     use uqa_execution::Filter;
@@ -779,9 +944,9 @@ pub(in crate::sql) fn build_relational_operator<'a>(
     engine: &'a Engine,
     mut operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
     predicate: Option<ScalarExpr>,
-    statement: &'a QueryBlockPlan,
+    statement: &QueryBlockPlan,
     params: &'a [SQLParam],
-    ctes: &'a CteScope,
+    ctes: &CteScope,
 ) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
     use uqa_execution::{ColumnSelection, HashAggregate, Project, Window};
 
@@ -802,6 +967,25 @@ pub(in crate::sql) fn build_relational_operator<'a>(
         })
         .transpose()?;
     let statement = expanded_statement.as_ref().unwrap_or(statement);
+    if let Some(clause) = statement.locking.first() {
+        let projections = physical_projections(&statement.projections);
+        let (_, output) = order_projection(&statement.projections, operator.row_schema())?;
+        let order_returns_set = statement.order_by.iter().try_fold(false, |found, order| {
+            if found {
+                return Ok(true);
+            }
+            let expression = resolve_order_expression(&order.expr, &output)?;
+            expression_may_return_set(engine, &expression, operator.row_schema(), params)
+        })?;
+        if projections_may_return_set(engine, &projections, operator.row_schema(), params)?
+            || order_returns_set
+        {
+            return Err(SQLError::Unsupported(format!(
+                "{} is not allowed with set-returning functions in the target list",
+                clause.strength.sql_name()
+            )));
+        }
+    }
     let evaluator = EngineExpressionEvaluator::shared(engine, params, ctes);
     operator = attach_relational_filter(engine, operator, predicate, params, ctes, &evaluator)?;
     let mut group_statement = None;
@@ -839,8 +1023,48 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                     params,
                 )?;
                 append_score_provenance_projections(&mut projections, operator.schema());
-                if projections_may_return_set(engine, &projections, operator.row_schema(), params)?
-                {
+                if !statement.locking.is_empty() {
+                    let (physical, mut output) =
+                        order_projection(&statement.projections, operator.row_schema())?;
+                    append_score_provenance_mappings(&mut output, operator.schema());
+                    operator =
+                        append_row_at_time_projection(operator, physical, Arc::clone(&evaluator));
+                    operator = attach_order_limit(
+                        operator,
+                        statement,
+                        &[],
+                        engine,
+                        params,
+                        ctes,
+                        Arc::clone(&evaluator),
+                        Some(crate::sql::select::LockRowsRecheckSource::new(
+                            statement, ctes, false,
+                        )),
+                    )?;
+                    let output = output_selection_positions(operator.row_schema(), output)?;
+                    operator = Box::new(ColumnSelection::with_positions(operator, output));
+                } else if projections_may_return_set(
+                    engine,
+                    &projections,
+                    operator.row_schema(),
+                    params,
+                )? {
+                    // PostgreSQL evaluates set-returning target expressions
+                    // above LockRows, so a rechecked tuple re-expands its
+                    // rows from the substituted base tuple. Locks therefore
+                    // attach below the set projection, and LIMIT is applied
+                    // to the expanded output above.
+                    operator = crate::sql::select::attach_lock_rows(
+                        engine,
+                        operator,
+                        statement,
+                        params,
+                        ctes,
+                        None,
+                        Some(crate::sql::select::LockRowsRecheckSource::new(
+                            statement, ctes, false,
+                        )),
+                    )?;
                     operator = build_set_projection(
                         operator,
                         engine,
@@ -851,14 +1075,20 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                         false,
                         projection_set_batch_size(statement),
                     )?;
+                    let unlocked_statement = (!statement.locking.is_empty()).then(|| {
+                        let mut unlocked = statement.clone();
+                        unlocked.locking.clear();
+                        unlocked
+                    });
                     operator = attach_order_limit(
                         operator,
-                        statement,
+                        unlocked_statement.as_ref().unwrap_or(statement),
                         &[],
                         engine,
                         params,
                         ctes,
                         evaluator,
+                        None,
                     )?;
                 } else {
                     // Without ordering or row expansion, Limit may stop the
@@ -871,6 +1101,9 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                         params,
                         ctes,
                         Arc::clone(&evaluator),
+                        Some(crate::sql::select::LockRowsRecheckSource::new(
+                            statement, ctes, false,
+                        )),
                     )?;
                     operator = Box::new(Project::with_evaluator(operator, projections, evaluator));
                 }
@@ -904,38 +1137,85 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                         .into_iter()
                         .map(|column| (column.clone(), ScalarExpr::Column(column))),
                 );
-                operator = if projections_may_return_set(
-                    engine,
-                    &physical,
-                    operator.row_schema(),
-                    params,
-                )? {
-                    build_set_projection(
+                if statement.locking.is_empty() {
+                    operator = if projections_may_return_set(
+                        engine,
+                        &physical,
+                        operator.row_schema(),
+                        params,
+                    )? {
+                        build_set_projection(
+                            operator,
+                            engine,
+                            params,
+                            ctes,
+                            Arc::clone(&evaluator),
+                            physical,
+                            true,
+                            uqa_execution::DEFAULT_BATCH_SIZE,
+                        )?
+                    } else {
+                        Box::new(Project::appending_with_evaluator(
+                            operator,
+                            physical,
+                            Arc::clone(&evaluator),
+                        ))
+                    };
+                    operator = attach_order_limit(
                         operator,
+                        order_statement.as_ref().unwrap_or(statement),
+                        &order_output,
+                        engine,
+                        params,
+                        ctes,
+                        evaluator,
+                        None,
+                    )?;
+                } else {
+                    let effective_order_statement = order_statement.as_ref().unwrap_or(statement);
+                    let (mut sort_statement, before_sort, after_sort) =
+                        split_locking_order_projections(
+                            effective_order_statement,
+                            &order_output,
+                            physical,
+                        )?;
+                    if !before_sort.is_empty() {
+                        operator = Box::new(Project::appending_with_evaluator(
+                            operator,
+                            before_sort,
+                            Arc::clone(&evaluator),
+                        ));
+                    }
+                    sort_statement.locking.clear();
+                    sort_statement.limit = None;
+                    sort_statement.offset = None;
+                    operator = attach_order_limit(
+                        operator,
+                        &sort_statement,
+                        &order_output,
                         engine,
                         params,
                         ctes,
                         Arc::clone(&evaluator),
-                        physical,
-                        true,
-                        uqa_execution::DEFAULT_BATCH_SIZE,
-                    )?
-                } else {
-                    Box::new(Project::appending_with_evaluator(
+                        None,
+                    )?;
+                    operator =
+                        append_row_at_time_projection(operator, after_sort, Arc::clone(&evaluator));
+                    let mut lock_statement = statement.clone();
+                    lock_statement.order_by.clear();
+                    operator = attach_order_limit(
                         operator,
-                        physical,
+                        &lock_statement,
+                        &[],
+                        engine,
+                        params,
+                        ctes,
                         Arc::clone(&evaluator),
-                    ))
-                };
-                operator = attach_order_limit(
-                    operator,
-                    order_statement.as_ref().unwrap_or(statement),
-                    &order_output,
-                    engine,
-                    params,
-                    ctes,
-                    evaluator,
-                )?;
+                        Some(crate::sql::select::LockRowsRecheckSource::new(
+                            statement, ctes, true,
+                        )),
+                    )?;
+                }
                 let output = output_selection_positions(operator.row_schema(), output)?;
                 operator = Box::new(ColumnSelection::with_positions(operator, output));
             }
@@ -1025,7 +1305,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
             }
             let output = identity_order_columns(&schema);
             operator = attach_order_limit(
-                operator, statement, &output, engine, params, ctes, evaluator,
+                operator, statement, &output, engine, params, ctes, evaluator, None,
             )?;
             if set_key_statement.is_some() {
                 let visible = operator
@@ -1107,6 +1387,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                 params,
                 ctes,
                 evaluator,
+                None,
             )?;
             if order_statement.is_some() {
                 let visible = operator
@@ -1202,42 +1483,4 @@ pub(in crate::sql) fn expr_is_jsonpath_fts_match(expr: &ScalarExpr) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn position_bound_order_by_reuses_qualified_primary_key_ordering() {
-        let schema = uqa_execution::RowSchema::with_qualified_types(
-            "lineitem",
-            vec!["id".into(), "extended_price".into()],
-            vec![None, None],
-        );
-        let projections = vec![
-            ProjectionPlan {
-                expr: ScalarExpr::Column("id".into()),
-                alias: None,
-            },
-            ProjectionPlan {
-                expr: ScalarExpr::Column("extended_price".into()),
-                alias: None,
-            },
-        ];
-        let (_, output) = order_projection(&projections, &schema).unwrap();
-        let expression =
-            resolve_order_expression(&ScalarExpr::Column("id".into()), &output).unwrap();
-        assert_eq!(expression, ScalarExpr::Position(0));
-        let required = [uqa_execution::PhysicalOrder {
-            position: uqa_execution::order_expression_position(&schema, &expression).unwrap(),
-            descending: false,
-            nulls_first: Some(false),
-            nullable: true,
-        }];
-        let actual = [uqa_execution::PhysicalOrder {
-            position: 0,
-            descending: false,
-            nulls_first: None,
-            nullable: false,
-        }];
-        assert!(uqa_execution::ordering_satisfies(&actual, &required));
-    }
-}
+mod tests;

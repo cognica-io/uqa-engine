@@ -110,7 +110,9 @@ fn waiting_writer_refreshes_when_sqlite_commit_precedes_epoch_publication() {
 
     // End the physical transaction without publishing the shared epoch.
     // This deterministically models the interval after SQLite COMMIT has
-    // released its writer lock but before Engine::commit publishes it.
+    // released its writer lock but before Engine::commit publishes it. The
+    // logical writer registration goes with it, exactly as the real commit
+    // path releases the session's locks before publication.
     writer
         .storage
         .backend
@@ -118,6 +120,7 @@ fn waiting_writer_refreshes_when_sqlite_commit_precedes_epoch_publication() {
         .unwrap()
         .commit_transaction()
         .unwrap();
+    writer.row_locks.release_session(writer.session_id);
 
     done_rx
         .recv_timeout(Duration::from_secs(2))
@@ -181,7 +184,9 @@ fn pinned_reader_defers_sibling_catalog_epochs_until_transaction_end() {
 
     {
         let mut stack = reader.session.transactions.lock();
-        reader.begin_transaction_frame(&mut stack, true).unwrap();
+        reader
+            .begin_transaction_frame(&mut stack, true, true)
+            .unwrap();
     }
     assert!(!reader.has_schema("later").unwrap());
     writer.sql("CREATE SCHEMA later", &[]).unwrap();

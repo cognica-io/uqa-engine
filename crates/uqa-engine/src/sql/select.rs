@@ -46,6 +46,8 @@ mod foreign_access;
 mod physical_plan;
 mod query_block;
 mod recursive_cte;
+mod row_lock_recheck;
+mod row_lock_retry_cache;
 mod row_locking;
 mod schema_binding;
 mod scored_input;
@@ -65,6 +67,8 @@ pub(in crate::sql) use foreign_access::*;
 pub(in crate::sql) use physical_plan::*;
 pub(in crate::sql) use query_block::*;
 pub(in crate::sql) use recursive_cte::*;
+pub(in crate::sql) use row_lock_recheck::*;
+pub(crate) use row_lock_retry_cache::{RetryRowOverride, RowLockRetryCache};
 pub(in crate::sql) use row_locking::*;
 pub(in crate::sql) use schema_binding::*;
 pub(in crate::sql) use scored_input::*;
@@ -252,12 +256,38 @@ pub(super) fn execute_query_plan_output(
     ctes: &mut CteScope,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
-    if query_has_row_locks(plan) {
-        ctes.emit_lock_identities = true;
-    }
+    let mut visible_ctes = ctes.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
+    let ctes = &mut *visible_ctes;
     if !plan.ctes.is_empty() {
+        let reachable = reachable_plan_cte_names(plan);
+        let single_reference = single_reference_plan_cte_names(plan);
+        for cte in plan.ctes.iter().filter(|cte| {
+            !cte.recursive
+                && reachable.contains(&cte.name)
+                && single_reference.contains(&cte.name)
+                && matches!(
+                    query_contains_volatile_function(engine, &cte.query),
+                    Ok(false)
+                )
+        }) {
+            ctes.insert_deferred(cte.clone());
+        }
         let filters = cte_output_filters(engine, plan);
-        materialize_plan_ctes_with_filters(engine, &plan.ctes, params, ctes, &filters)?;
+        materialize_plan_ctes_with_filters(
+            engine,
+            plan.ctes.iter().filter(|cte| {
+                reachable.contains(&cte.name)
+                    && (cte.recursive
+                        || !single_reference.contains(&cte.name)
+                        || !matches!(
+                            query_contains_volatile_function(engine, &cte.query),
+                            Ok(false)
+                        ))
+            }),
+            params,
+            ctes,
+            &filters,
+        )?;
     }
     match &plan.root {
         RelationalPlan::QueryBlock(block) => {
@@ -279,22 +309,26 @@ pub(super) fn execute_query_plan_output(
             // therefore never owns two cardinality-sized `SQLResult.rows`
             // vectors, and its external merge consumes batches under
             // `work_mem`.
-            let lhs = execute_query_plan_output(
-                engine,
-                left,
-                params,
-                ctes,
-                QueryOutputMode::SharedSpill,
-            )?;
+            let (lhs, rhs) = {
+                let mut child_ctes = ctes.enter_lock_identity_emission(false);
+                let lhs = execute_query_plan_output(
+                    engine,
+                    left,
+                    params,
+                    &mut child_ctes,
+                    QueryOutputMode::SharedSpill,
+                )?;
+                let rhs = execute_query_plan_output(
+                    engine,
+                    right,
+                    params,
+                    &mut child_ctes,
+                    QueryOutputMode::SharedSpill,
+                )?;
+                (lhs, rhs)
+            };
             let columns = lhs.columns.clone();
             let left: Box<dyn uqa_execution::PhysicalOperator + '_> = lhs.into_public_operator();
-            let rhs = execute_query_plan_output(
-                engine,
-                right,
-                params,
-                ctes,
-                QueryOutputMode::SharedSpill,
-            )?;
             let right: Box<dyn uqa_execution::PhysicalOperator + '_> = rhs.into_public_operator();
             let operation: Box<dyn uqa_execution::PhysicalOperator + '_> = Box::new(
                 uqa_execution::ExternalSetOperation::new_with_types(
@@ -336,6 +370,7 @@ pub(super) fn execute_query_plan_output(
                     params,
                     &ordering_scope,
                     evaluator,
+                    None,
                 )?;
                 return collect_query_operator(engine, columns, operation, output_mode);
             }
@@ -640,10 +675,15 @@ fn execute_query_block_output(
     ctes: &mut CteScope,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
-    if !block.locking.is_empty() {
-        ctes.emit_lock_identities = true;
-    }
+    let inherited_lock_identities = ctes.emit_lock_identities;
     let mut scoped_ctes = ctes.enter_scalar_subqueries(&block.subqueries);
+    let row_identity_barrier = block.distinct
+        || !block.distinct_on.is_empty()
+        || matches!(block.compute, ComputePlan::Aggregate | ComputePlan::Window);
+    scoped_ctes.emit_lock_identities =
+        !block.locking.is_empty() || (inherited_lock_identities && !row_identity_barrier);
+    scoped_ctes.retain_lock_identities_after_lock =
+        inherited_lock_identities && !row_identity_barrier;
     let defer_distinct_limit = should_defer_distinct_limit(block);
     let execution = select_execution_stmt(block, defer_distinct_limit);
     run_query_block_with_prepared_exists_output(
@@ -734,6 +774,7 @@ pub(super) fn combine_set_spills_with_order_output(
             params,
             ctes,
             EngineExpressionEvaluator::shared(engine, params, ctes),
+            None,
         )?;
     }
     collect_query_operator(engine, execution.columns, operation, execution.output_mode)
@@ -749,7 +790,10 @@ fn execute_plan_values_output(
 ) -> Result<QueryOutput, SQLError> {
     if rows.is_empty() {
         let scan: Box<dyn uqa_execution::PhysicalOperator + '_> =
-            Box::new(uqa_execution::TableScan::from_rows(Vec::new(), Vec::new()));
+            Box::new(uqa_execution::TableScan::from_physical_rows(
+                uqa_execution::RowSchema::default(),
+                Vec::new(),
+            ));
         return collect_query_operator(engine, Vec::new(), scan, output_mode);
     }
     let columns: Vec<String> = (0..rows[0].len())
@@ -770,7 +814,7 @@ fn execute_plan_values_output(
                 columns.len()
             )));
         }
-        let mut row = ResultRow::new();
+        let mut values = Vec::with_capacity(source.len());
         for (index, expression) in source.iter().enumerate() {
             let source_type = uqa_execution::common_context_expression_type(
                 expression,
@@ -779,20 +823,17 @@ fn execute_plan_values_output(
                 Some(engine),
             )?;
             let value = eval_physical_scalar(expression, subqueries, &context)?;
-            row.insert(
-                columns[index].clone(),
-                coerce_common_context_value(
-                    value,
-                    source_type.as_ref(),
-                    column_types[index].as_ref(),
-                )?,
-            );
+            values.push(coerce_common_context_value(
+                value,
+                source_type.as_ref(),
+                column_types[index].as_ref(),
+            )?);
         }
-        output.push(row);
+        output.push(uqa_execution::PhysicalRow::from_values(values));
     }
-    let scan: Box<dyn uqa_execution::PhysicalOperator + '_> = Box::new(
-        uqa_execution::TableScan::from_typed_rows(columns.clone(), column_types, output),
-    );
+    let schema = uqa_execution::RowSchema::with_types(columns.clone(), column_types);
+    let scan: Box<dyn uqa_execution::PhysicalOperator + '_> =
+        Box::new(uqa_execution::TableScan::from_physical_rows(schema, output));
     collect_query_operator(engine, columns, scan, output_mode)
 }
 

@@ -72,8 +72,14 @@ fn savepoint_order_invalidates_descendants_and_preserves_shadowed_names() {
     eng.savepoint("inner").unwrap();
     eng.rollback_to_savepoint("outer").unwrap();
     assert!(eng.release_savepoint("inner").is_err());
+    // PostgreSQL 18: a failed savepoint command aborts the transaction, so
+    // every later command except ROLLBACK reports 25P02 and COMMIT rolls back.
+    let error = eng.release_savepoint("outer").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("25P02"));
+    eng.rollback_to_savepoint("outer").unwrap();
     eng.release_savepoint("outer").unwrap();
     eng.commit().unwrap();
+    assert!(!eng.has_schema("first_level").unwrap());
 }
 
 #[test]
@@ -392,7 +398,12 @@ fn persistent_rollback_and_savepoint_restore_lightweight_session_state() {
         engine.sql("SHOW work_mem", &[]).unwrap().rows[0]["work_mem"],
         uqa_core::Value::Str("12MB".into())
     );
-    assert!(engine.sql("EXECUTE after_savepoint", &[]).is_err());
+    let execute_error = engine.sql("EXECUTE after_savepoint", &[]).unwrap_err();
+    let aborted = engine.sql("SELECT 1", &[]).unwrap_err();
+    assert_eq!(aborted.sqlstate(), Some("25P02"), "{execute_error}");
+    engine
+        .sql("ROLLBACK TO SAVEPOINT session_point", &[])
+        .unwrap();
     assert_eq!(
         engine.sql("SELECT random() AS value", &[]).unwrap().rows[0]["value"],
         expected_savepoint.rows[0]["value"]

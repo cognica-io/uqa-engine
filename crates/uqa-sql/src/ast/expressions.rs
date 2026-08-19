@@ -187,44 +187,82 @@ impl Expr {
     /// True when this expression tree contains a window function call.
     #[must_use]
     pub fn contains_window(&self) -> bool {
+        self.any_node(&|node| matches!(node, Self::WindowCall { .. }))
+    }
+
+    /// True when this expression tree contains a built-in aggregate call.
+    #[must_use]
+    pub fn contains_aggregate(&self) -> bool {
+        self.any_node(
+            &|node| matches!(node, Self::Func { name, .. } if is_builtin_aggregate_function(name)),
+        )
+    }
+
+    /// True when this expression contains a column whose owning relation can
+    /// only be determined after catalog schemas have been bound.
+    #[must_use]
+    pub fn contains_unqualified_column(&self) -> bool {
+        self.any_node(&|node| matches!(node, Self::Column(_)))
+    }
+
+    /// True when this expression contains a function whose strictness cannot be decided without an engine catalog.
+    #[must_use]
+    pub fn contains_function_with_unknown_strictness(&self) -> bool {
+        self.any_node(&|node| {
+            matches!(
+                node,
+                Self::Func { name, args, .. }
+                    if crate::expr::builtin_scalar_function_strictness(name, args.len()).is_none()
+            )
+        })
+    }
+
+    /// Whether `hit` matches this node or any node below it. Subquery bodies
+    /// are opaque: `ScalarSubquery` and `Exists` own their expression trees.
+    fn any_node(&self, hit: &dyn Fn(&Self) -> bool) -> bool {
+        if hit(self) {
+            return true;
+        }
         match self {
-            Self::WindowCall { .. } => true,
             Self::Func {
                 args,
                 order_by,
                 filter,
                 ..
             } => {
-                args.iter().any(Self::contains_window)
-                    || order_by.iter().any(|order| order.expr.contains_window())
-                    || filter.as_deref().is_some_and(Self::contains_window)
+                args.iter().any(|arg| arg.any_node(hit))
+                    || order_by.iter().any(|order| order.expr.any_node(hit))
+                    || filter.as_deref().is_some_and(|filter| filter.any_node(hit))
             }
             Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => {
-                items.iter().any(Self::contains_window)
+                items.iter().any(|item| item.any_node(hit))
             }
             Self::UnaryMinus(expr) | Self::Not(expr) | Self::Cast { expr, .. } => {
-                expr.contains_window()
+                expr.any_node(hit)
             }
-            Self::Binary { lhs, rhs, .. } => lhs.contains_window() || rhs.contains_window(),
-            Self::IsNull { expr, .. } | Self::InSubquery { expr, .. } => expr.contains_window(),
+            Self::Binary { lhs, rhs, .. } => lhs.any_node(hit) || rhs.any_node(hit),
+            Self::IsNull { expr, .. } | Self::InSubquery { expr, .. } => expr.any_node(hit),
             Self::Between { expr, low, high } => {
-                expr.contains_window() || low.contains_window() || high.contains_window()
+                expr.any_node(hit) || low.any_node(hit) || high.any_node(hit)
             }
             Self::InList { expr, list, .. } => {
-                expr.contains_window() || list.iter().any(Self::contains_window)
+                expr.any_node(hit) || list.iter().any(|item| item.any_node(hit))
             }
             Self::Case {
                 base,
                 when,
                 else_branch,
             } => {
-                base.as_deref().is_some_and(Self::contains_window)
-                    || when.iter().any(|(condition, result)| {
-                        condition.contains_window() || result.contains_window()
-                    })
-                    || else_branch.as_deref().is_some_and(Self::contains_window)
+                base.as_deref().is_some_and(|base| base.any_node(hit))
+                    || when
+                        .iter()
+                        .any(|(condition, result)| condition.any_node(hit) || result.any_node(hit))
+                    || else_branch
+                        .as_deref()
+                        .is_some_and(|branch| branch.any_node(hit))
             }
-            Self::Star
+            Self::WindowCall { .. }
+            | Self::Star
             | Self::QualifiedStar(_)
             | Self::Default
             | Self::Column(_)
@@ -235,6 +273,36 @@ impl Expr {
             | Self::Exists { .. } => false,
         }
     }
+}
+
+/// Return whether `name` is a built-in aggregate understood by the planner.
+#[must_use]
+pub fn is_builtin_aggregate_function(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "count"
+            | "sum"
+            | "avg"
+            | "min"
+            | "max"
+            | "string_agg"
+            | "array_agg"
+            | "bool_and"
+            | "bool_or"
+            | "stddev"
+            | "stddev_samp"
+            | "stddev_pop"
+            | "variance"
+            | "var_samp"
+            | "var_pop"
+            | "percentile_cont"
+            | "percentile_disc"
+            | "mode"
+            | "json_agg"
+            | "jsonb_agg"
+            | "json_object_agg"
+            | "jsonb_object_agg"
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

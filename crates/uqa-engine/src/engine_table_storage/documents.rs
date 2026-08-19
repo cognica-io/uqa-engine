@@ -28,6 +28,67 @@ impl Engine {
         Ok(document)
     }
 
+    /// Read the latest committed tuple through an independent persistent session while this session keeps its statement snapshot pinned.
+    pub(crate) fn get_committed_document(
+        &self,
+        table: &str,
+        doc_id: DocId,
+    ) -> Result<Option<Document>, SQLError> {
+        let Some(provider) = self.storage.provider.as_ref() else {
+            return self.get_document(table, doc_id);
+        };
+        let canonical = self
+            .try_resolve_table_name(table)
+            .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
+            .unwrap_or_else(|| table.to_string());
+        let session = provider.open_session().map_err(|error| {
+            SQLError::Internal(format!(
+                "open independent session to recheck `{canonical}` row {doc_id}: {error}"
+            ))
+        })?;
+        let mut document = session
+            .backend
+            .document_store(&canonical)
+            .get(doc_id)
+            .map_err(|error| document_store_read_error("read latest committed document", &error))?;
+        if let Some(document) = document.as_mut() {
+            let table = self.require_table(&canonical)?;
+            crate::engine_generated::materialize_virtual_generated_columns(
+                &table.columns.read(),
+                document,
+            )?;
+        }
+        Ok(document)
+    }
+
+    /// Execute a retrieval predicate against the latest committed index
+    /// state through an independent session while this session keeps its
+    /// statement snapshot pinned. A tuple-local recheck uses it so a
+    /// substituted committed image is judged by the retrieval predicate the
+    /// way `PostgreSQL` re-evaluates the WHERE clause on the new tuple.
+    /// Without a provider the engine has a single shared state already.
+    pub(crate) fn committed_retrieval_entries(
+        &self,
+        table: &str,
+        predicate: &uqa_execution::ScalarExpr,
+        params: &[uqa_sql::SQLParam],
+    ) -> Result<Option<Vec<crate::ScoredEntry>>, SQLError> {
+        if self.storage.provider.is_none() {
+            return crate::operator_tree_bridge::run_optimised(
+                self,
+                table,
+                Some(predicate),
+                params,
+            );
+        }
+        let session = self.new_session().map_err(|error| {
+            SQLError::Internal(format!(
+                "open independent session to recheck retrieval on `{table}`: {error}"
+            ))
+        })?;
+        crate::operator_tree_bridge::run_optimised(&session, table, Some(predicate), params)
+    }
+
     /// Fetch complete physical documents while materialising only the virtual
     /// generated columns named by `projection`. Callers that need full rows
     /// should use [`Engine::get_document`]; projected execution paths use this
@@ -270,7 +331,9 @@ impl Engine {
         updates: BTreeMap<String, Value>,
         vectors: BTreeMap<String, Vec<Vec<f32>>>,
     ) -> Result<bool, SQLError> {
-        self.with_implicit_transaction(|engine| {
+        let columns = updates.keys().cloned().collect::<Vec<_>>();
+        let strength = crate::sql::dml::update_lock_strength(self, table, &columns);
+        self.with_implicit_row_write_transaction(table, doc_id, strength, |engine| {
             engine.update_document_fields_with_vector_values_inner(table, doc_id, updates, vectors)
         })
     }
@@ -335,7 +398,9 @@ impl Engine {
         updates: &BTreeMap<String, Value>,
         vectors: &BTreeMap<String, Vec<Vec<f32>>>,
     ) -> Result<bool, SQLError> {
-        self.with_implicit_transaction(|engine| {
+        let columns = updates.keys().cloned().collect::<Vec<_>>();
+        let strength = crate::sql::dml::update_lock_strength(self, table, &columns);
+        self.with_implicit_row_write_transaction(table, doc_id, strength, |engine| {
             engine.patch_document_fields_with_vector_values_inner(table, doc_id, updates, vectors)
         })
     }
@@ -398,6 +463,12 @@ impl Engine {
         Ok(true)
     }
 
+    /// Rewrite one row for SQL `UPDATE`. The caller has already acquired the
+    /// tuple lock at the strength `update_lock_strength` derived from the
+    /// changed columns and holds the relation lock, so this path must not
+    /// re-lock: taking `FOR UPDATE` here would make a non-key update conflict
+    /// with concurrent `FOR KEY SHARE` holders and publish an inflated
+    /// mutation strength, both contrary to `PostgreSQL` 18.
     pub(crate) fn rewrite_prepared_document(
         &self,
         table: &str,
@@ -413,7 +484,15 @@ impl Engine {
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
         let vectors = Self::document_vector_values(&table_state, &document)?;
-        self.add_prepared_document_with_vector_values(&table_name, doc_id, document, vectors, false)
+        self.with_implicit_transaction(|engine| {
+            engine.add_prepared_document_with_vector_values_inner(
+                &table_name,
+                doc_id,
+                document,
+                vectors,
+                false,
+            )
+        })
     }
 
     /// Rewrite a row while a column is being dropped or renamed. The
@@ -468,11 +547,17 @@ impl Engine {
         }
         self.mark_column_stats_dirty(&table_name, &t)
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
+        self.note_row_changed(&table_name, doc_id);
         Ok(())
     }
 
     pub fn delete_document(&self, table: &str, doc_id: DocId) -> Result<(), SQLError> {
-        self.with_implicit_transaction(|engine| engine.delete_document_inner(table, doc_id))
+        self.with_implicit_row_write_transaction(
+            table,
+            doc_id,
+            uqa_sql::ast::LockStrength::ForUpdate,
+            |engine| engine.delete_document_inner(table, doc_id),
+        )
     }
 
     pub(super) fn delete_document_inner(&self, table: &str, doc_id: DocId) -> Result<(), SQLError> {
@@ -484,6 +569,12 @@ impl Engine {
             .try_table(&table_name)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
+        let existed = t
+            .document_store
+            .read()
+            .get(doc_id)
+            .map_err(|err| document_store_write_error(&err))?
+            .is_some();
         let old_indexed = Self::value_indexes_old_values(&t, doc_id)?;
         let mut store = t.document_store.write();
         store
@@ -505,6 +596,9 @@ impl Engine {
         }
         self.mark_column_stats_dirty(&table_name, &t)
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
+        if existed {
+            self.note_row_deleted(&table_name, doc_id);
+        }
         Ok(())
     }
 

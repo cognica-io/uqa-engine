@@ -4,11 +4,15 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
-use uqa_storage::{KeyValueBatch, KeyValueStore, StorageBackendError, StorageBackendResult};
+use uqa_storage::{
+    KeyValueBatch, KeyValueStore, PersistentStorageIdentity, StorageBackendError,
+    StorageBackendResult,
+};
 
 use crate::batch::{BatchOperation, RedbBatch};
 use crate::error::redb_error;
@@ -25,13 +29,15 @@ pub(crate) const GENERATION_KEY: &str = "change_version";
 /// One transaction-isolated session over a shared redb database.
 pub struct RedbKeyValueStore {
     database: Arc<Database>,
+    identity: PathBuf,
     state: Mutex<SessionState>,
 }
 
 impl RedbKeyValueStore {
-    pub(crate) fn new(database: Arc<Database>) -> Self {
+    pub(crate) fn new(database: Arc<Database>, identity: PathBuf) -> Self {
         Self {
             database,
+            identity,
             state: Mutex::new(SessionState::default()),
         }
     }
@@ -79,6 +85,17 @@ impl RedbKeyValueStore {
 }
 
 impl KeyValueStore for RedbKeyValueStore {
+    fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
+        Ok(Some(PersistentStorageIdentity::File(self.identity.clone())))
+    }
+
+    fn open_session(&self) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
+        Ok(Arc::new(Self::new(
+            Arc::clone(&self.database),
+            self.identity.clone(),
+        )))
+    }
+
     fn get(&self, key: &[u8]) -> StorageBackendResult<Option<Vec<u8>>> {
         let state = self.state.lock();
         match state.active.as_ref() {

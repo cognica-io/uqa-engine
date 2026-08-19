@@ -112,6 +112,73 @@ fn initial_restore_eagerly_loads_column_statistics() {
 }
 
 #[test]
+fn independently_opened_backend_pairs_share_row_locks_for_the_same_database() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("shared-backend-row-locks.db");
+    let seed = Engine::open(&path).unwrap();
+    seed.sql("CREATE TABLE t (id INTEGER PRIMARY KEY)", &[])
+        .unwrap();
+    seed.sql("INSERT INTO t VALUES (1)", &[]).unwrap();
+    drop(seed);
+
+    let open_engine = || {
+        let connection = ManagedConnection::open(&path).unwrap();
+        let catalog = Arc::new(Catalog::open(connection.clone()).unwrap());
+        let backend = Arc::new(SQLiteStorageBackend::new(connection));
+        Engine::from_persistent_backends(catalog, backend).unwrap()
+    };
+    let holder = open_engine();
+    let contender = open_engine();
+    holder.sql("BEGIN", &[]).unwrap();
+    holder
+        .sql("SELECT id FROM t WHERE id = 1 FOR UPDATE", &[])
+        .unwrap();
+    let error = contender
+        .sql("SELECT id FROM t WHERE id = 1 FOR UPDATE NOWAIT", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("55P03"));
+    holder.sql("ROLLBACK", &[]).unwrap();
+}
+
+#[test]
+fn backend_pair_wait_rechecks_through_an_independent_committed_session() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("backend-pair-committed-recheck.db");
+    let seed = Engine::open(&path).unwrap();
+    seed.sql("CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)", &[])
+        .unwrap();
+    seed.sql("INSERT INTO t VALUES (1, 0)", &[]).unwrap();
+    drop(seed);
+
+    let open_engine = || {
+        let connection = ManagedConnection::open(&path).unwrap();
+        let catalog = Arc::new(Catalog::open(connection.clone()).unwrap());
+        let backend = Arc::new(SQLiteStorageBackend::new(connection));
+        Engine::from_persistent_backends(catalog, backend).unwrap()
+    };
+    let holder = open_engine();
+    let waiter = open_engine();
+    holder.sql("BEGIN", &[]).unwrap();
+    holder.sql("UPDATE t SET v = 99 WHERE id = 1", &[]).unwrap();
+
+    let (done_tx, done_rx) = mpsc::channel();
+    let waiting_thread = std::thread::spawn(move || {
+        done_tx
+            .send(waiter.sql("SELECT v FROM t WHERE id = 1 FOR UPDATE", &[]))
+            .unwrap();
+    });
+    assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
+    holder.sql("COMMIT", &[]).unwrap();
+    let result = done_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap()
+        .unwrap();
+    waiting_thread.join().unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0].get("v"), Some(&Value::Int(99)));
+}
+
+#[test]
 fn pinned_and_rollback_reload_do_not_consume_late_legacy_sequences() {
     let directory = tempfile::tempdir().unwrap();
     let engine = Engine::open(&directory.path().join("late-legacy-sequence.db")).unwrap();

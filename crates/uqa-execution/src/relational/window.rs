@@ -367,7 +367,8 @@ fn emit_builtin_window_partition(
         previous_order_key = Some(order_key);
         pending.push(
             row.append_values(window_values)
-                .project_slots(&output_slots),
+                .project_slots(&output_slots)
+                .without_lock_origins(),
         );
         if pending.len() == crate::batch::DEFAULT_BATCH_SIZE {
             output.push(Batch::from_physical_rows(

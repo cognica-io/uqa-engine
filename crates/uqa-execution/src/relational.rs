@@ -14,7 +14,9 @@ use std::sync::Arc;
 use uqa_core::Value;
 use uqa_sql::ast::SetOpKind;
 use uqa_sql::expr::truthy;
-use uqa_sql::{ResultRow, SQLParam};
+#[cfg(test)]
+use uqa_sql::ResultRow;
+use uqa_sql::SQLParam;
 
 use crate::batch::{Batch, RowSchema};
 use crate::physical::{ExecError, ExecResult, PhysicalOperator};

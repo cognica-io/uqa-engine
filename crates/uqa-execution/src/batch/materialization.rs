@@ -279,6 +279,20 @@ fn insert_value<'a>(
 }
 
 impl PhysicalRow {
+    /// Consume an owned row at a positional state boundary, moving uniquely owned fragments and cloning only shared or multiply referenced values.
+    pub fn into_physical_values(self) -> Vec<Value> {
+        let mut fragments = self.into_value_fragments();
+        if fragments.len() == 1 {
+            return fragments.pop().unwrap_or_default();
+        }
+        let capacity = fragments.iter().map(Vec::len).sum();
+        let mut values = Vec::with_capacity(capacity);
+        for fragment in fragments {
+            values.extend(fragment);
+        }
+        values
+    }
+
     fn into_value_fragments(self) -> SmallVec<[Vec<Value>; INLINE_ROW_FRAGMENTS]> {
         self.fragments
             .into_iter()

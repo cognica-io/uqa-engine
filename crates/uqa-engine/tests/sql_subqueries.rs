@@ -373,3 +373,41 @@ fn lateral_set_operation_uses_its_own_limit_subquery_arena() {
     );
     assert_eq!(result.rows[0]["picked"], Value::Int(7));
 }
+
+#[test]
+fn streamed_ordered_derived_table_resolves_its_projection_alias() {
+    let engine = setup();
+    let result = query(
+        &engine,
+        "SELECT * FROM (SELECT salary AS pay FROM employees ORDER BY pay) AS ranked",
+    );
+    assert_eq!(result.rows.len(), 5);
+    assert_eq!(
+        result
+            .rows
+            .iter()
+            .map(|row| row["pay"].clone())
+            .collect::<Vec<_>>(),
+        vec![
+            Value::Float(70_000.0),
+            Value::Float(75_000.0),
+            Value::Float(85_000.0),
+            Value::Float(90_000.0),
+            Value::Float(95_000.0),
+        ]
+    );
+}
+
+#[test]
+fn streamed_derived_outer_filter_stays_above_the_inner_limit() {
+    let engine = setup();
+    let result = query(
+        &engine,
+        "SELECT * FROM (SELECT id FROM employees ORDER BY id LIMIT 1) AS first_employee WHERE id = 2",
+    );
+    assert!(
+        result.rows.is_empty(),
+        "outer filter crossed the inner LIMIT: {:?}",
+        result.rows
+    );
+}

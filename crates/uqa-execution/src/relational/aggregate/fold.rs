@@ -7,9 +7,10 @@
 //! Built-in aggregate state transitions and finalization.
 
 use super::{
-    compare_values, eval_scalar, AggregateKind, AggregateSpec, ExecError, ExecResult, ResultRow,
-    SQLParam, ScalarEvalContext, ScalarExpr, Value,
+    compare_values, eval_scalar, AggregateKind, AggregateSpec, ExecError, ExecResult, SQLParam,
+    ScalarEvalContext, ScalarExpr, Value,
 };
+use crate::PhysicalRow;
 use uqa_sql::expr::RowLookup;
 
 pub(super) struct GroupState {
@@ -140,35 +141,64 @@ pub(super) fn finalise_builtin_group(
     state: GroupState,
     group_keys: &[(String, ScalarExpr)],
     aggregates: &[AggregateSpec],
-) -> ExecResult<ResultRow> {
-    let mut output = ResultRow::new();
-    for (index, (alias, _)) in group_keys.iter().enumerate() {
-        output.insert(alias.clone(), state.key_values[index].clone());
+) -> ExecResult<PhysicalRow> {
+    if state.key_values.len() != group_keys.len() {
+        return Err(ExecError::Other(format!(
+            "aggregate group has {} keys, expected {}",
+            state.key_values.len(),
+            group_keys.len()
+        )));
     }
-    for (index, spec) in aggregates.iter().enumerate() {
-        output.insert(
-            spec.alias.clone(),
-            finalise_fold(&state.folds[index], spec)?,
-        );
+    if state.folds.len() != aggregates.len() {
+        return Err(ExecError::Other(format!(
+            "aggregate group has {} folds, expected {}",
+            state.folds.len(),
+            aggregates.len()
+        )));
     }
-    Ok(output)
+    let mut values = state.key_values;
+    for (fold, spec) in state.folds.into_iter().zip(aggregates) {
+        values.push(finalise_owned_fold(fold, spec)?);
+    }
+    Ok(PhysicalRow::from_values(values))
 }
 
+#[cfg(test)]
 pub(in crate::relational) fn finalise_fold(
     state: &AggFold,
     spec: &AggregateSpec,
 ) -> ExecResult<Value> {
+    finalise_fold_values(
+        state.count,
+        state.sum,
+        state.min.clone(),
+        state.max.clone(),
+        spec,
+    )
+}
+
+fn finalise_owned_fold(state: AggFold, spec: &AggregateSpec) -> ExecResult<Value> {
+    finalise_fold_values(state.count, state.sum, state.min, state.max, spec)
+}
+
+fn finalise_fold_values(
+    count: u64,
+    sum: Option<f64>,
+    min: Option<Value>,
+    max: Option<Value>,
+    spec: &AggregateSpec,
+) -> ExecResult<Value> {
     Ok(match spec.kind {
         AggregateKind::Count | AggregateKind::CountStar => Value::Int(
-            i64::try_from(state.count)
+            i64::try_from(count)
                 .map_err(|_| ExecError::Other("aggregate count exceeds BIGINT".into()))?,
         ),
-        AggregateKind::Sum => state.sum.map(Value::Float).unwrap_or(Value::Null),
-        AggregateKind::Avg => match (state.sum, state.count) {
+        AggregateKind::Sum => sum.map(Value::Float).unwrap_or(Value::Null),
+        AggregateKind::Avg => match (sum, count) {
             (Some(sum), count) if count > 0 => Value::Float(sum / count as f64),
             _ => Value::Null,
         },
-        AggregateKind::Min => state.min.clone().unwrap_or(Value::Null),
-        AggregateKind::Max => state.max.clone().unwrap_or(Value::Null),
+        AggregateKind::Min => min.unwrap_or(Value::Null),
+        AggregateKind::Max => max.unwrap_or(Value::Null),
     })
 }

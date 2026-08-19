@@ -7,13 +7,14 @@
 //! DELETE execution and referenced-key delete actions.
 
 use super::{
-    apply_set_action_to_child, build_join_spill_with_ctes, build_returning_row, dml_join_rows,
-    dml_returning_result, dml_target_row, eval_mutation_expr, lock_mutation_row,
-    missing_document_error, referencing_rows, referrers_to_for_actions,
-    rewrite_document_with_referential_actions, validate_dml_expression_qualifiers,
-    validate_returning_alias_relations, BTreeSet, CteScope, DeletePlan, DmlReturningShape, DocId,
-    Document, Engine, ForeignKey, ForeignKeyAction, ReturningProjectionRow, ReturningRowImage,
-    ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
+    apply_prepared_document_rewrite, apply_set_action_to_child, build_join_spill_with_ctes,
+    build_returning_row, dml_join_rows, dml_returning_result, dml_target_row, eval_mutation_expr,
+    lock_mutation_target, prebuild_locking_returning_row, prepare_document_rewrite,
+    referencing_rows, referrers_to_for_actions, returning_has_row_locks,
+    validate_dml_expression_qualifiers, validate_returning_alias_relations, BTreeSet, CteScope,
+    DeletePlan, DmlReturningShape, DocId, Document, Engine, ForeignKey, ForeignKeyAction,
+    MutationLockTarget, PreparedDeleteAction, PreparedDocumentDelete, ReturningProjectionRow,
+    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
 };
 
 pub(in crate::sql) fn run_delete(
@@ -22,7 +23,11 @@ pub(in crate::sql) fn run_delete(
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
     validate_returning_alias_relations(&stmt.target_qualifier, &stmt.returning_aliases, None)?;
-    engine.transaction(move |engine| run_delete_inner(engine, &stmt, params))
+    if engine.transaction_depth() != 0 {
+        run_delete_inner(engine, &stmt, params)
+    } else {
+        engine.transaction(move |engine| run_delete_inner(engine, &stmt, params))
+    }
 }
 
 pub(in crate::sql) fn run_delete_inner(
@@ -30,9 +35,17 @@ pub(in crate::sql) fn run_delete_inner(
     stmt: &DeletePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    engine.lock_relation(
+        &stmt.table,
+        crate::row_locks::RelationLockMode::RowExclusive,
+    )?;
     let mut affected = 0u64;
     let cancel = engine.cancellation_token();
-    let mut to_delete: Vec<uqa_core::DocId> = Vec::new();
+    let mut qualified_targets: Vec<(
+        uqa_core::DocId,
+        Document,
+        Option<uqa_execution::OwnedPhysicalRow>,
+    )> = Vec::new();
     let mut returning_docs: Vec<(
         uqa_core::DocId,
         Document,
@@ -84,104 +97,140 @@ pub(in crate::sql) fn run_delete_inner(
     };
     for doc_id in doc_ids {
         cancel.check()?;
-        lock_mutation_row(
+        let candidate = if preselected {
+            None
+        } else {
+            let Some(candidate) = qualified_delete_candidate(
+                engine,
+                stmt,
+                params,
+                &ctes,
+                using_rows.as_ref(),
+                doc_id,
+            )?
+            else {
+                continue;
+            };
+            Some(candidate)
+        };
+        let target = lock_mutation_target(
             engine,
             &stmt.table,
             &stmt.target_qualifier,
             doc_id,
             uqa_sql::ast::LockStrength::ForUpdate,
         )?;
-        if preselected && stmt.returning.is_empty() {
-            // No RETURNING and the filter already matched: the
-            // document body is not needed at all.
-            to_delete.push(doc_id);
+        let MutationLockTarget::Present { doc_id, recheck } = target else {
             continue;
-        }
-        let Some(doc) = engine.get_document(&stmt.table, doc_id)? else {
-            return Err(missing_document_error("DELETE scan", &stmt.table, doc_id));
         };
-        let target_row = dml_target_row(engine, &stmt.table, &stmt.target_qualifier, doc_id, &doc)?;
-        let mut returning_context = None;
-        let keep = match (stmt.predicate.as_ref(), using_rows.as_ref()) {
-            (None, None) => true,
-            (Some(_), None) if preselected => true,
-            (Some(filter), None) => uqa_sql::expr::truthy(&eval_mutation_expr(
-                engine,
-                &ctes,
-                filter,
-                Some(&target_row),
-                params,
-            )?),
-            (filter, Some(rows)) => {
-                let mut matched = false;
-                let reader = rows
-                    .read_rows()
-                    .map_err(crate::sql::select::physical_exec_error)?;
-                for using_row in reader {
-                    let using_row = using_row.map_err(crate::sql::select::physical_exec_error)?;
-                    let source_context = using_row.clone();
-                    let joined = dml_join_rows(&target_row, &source_context);
-                    let qualifies = filter.map_or(Ok(true), |filter| {
-                        eval_mutation_expr(engine, &ctes, filter, Some(&joined), params)
-                            .map(|value| uqa_sql::expr::truthy(&value))
-                    })?;
-                    if qualifies {
-                        matched = true;
-                        returning_context = Some(source_context);
-                        break;
-                    }
-                }
-                matched
+        let qualified = if recheck {
+            engine.refresh_explicit_statement_snapshot()?;
+            if let Some((_, Some(source_context))) = candidate.as_ref() {
+                recheck_delete_candidate(engine, stmt, params, &ctes, doc_id, Some(source_context))?
+            } else {
+                recheck_delete_candidate(engine, stmt, params, &ctes, doc_id, None)?
             }
+        } else if let Some(candidate) = candidate {
+            Some(candidate)
+        } else {
+            engine
+                .get_document(&stmt.table, doc_id)?
+                .map(|document| (document, None))
         };
-        if keep {
-            if !stmt.returning.is_empty() {
-                returning_docs.push((doc_id, doc.clone(), returning_context));
-            }
-            to_delete.push(doc_id);
-        }
+        let Some((doc, returning_context)) = qualified else {
+            continue;
+        };
+        qualified_targets.push((doc_id, doc, returning_context));
     }
+    let to_delete = qualified_targets;
     let root_deletes: BTreeSet<(String, DocId)> = to_delete
         .iter()
-        .map(|doc_id| (stmt.table.clone(), *doc_id))
+        .map(|(doc_id, _, _)| (stmt.table.clone(), *doc_id))
         .collect();
     let mut delete_stack = Vec::new();
-    for doc_id in to_delete {
-        delete_document_with_referential_actions(
+    let mut rewrite_stack = Vec::new();
+    let mut prepared_deletes = Vec::with_capacity(to_delete.len());
+    for (doc_id, _doc, returning_context) in to_delete {
+        if let Some(prepared) = prepare_document_delete(
             engine,
             &stmt.table,
             doc_id,
             params,
             &root_deletes,
             &mut delete_stack,
-        )?;
-        affected += 1;
+            &mut rewrite_stack,
+        )? {
+            prepared_deletes.push((prepared, returning_context));
+        }
     }
-    if !stmt.returning.is_empty() {
-        let returning_rows = returning_docs
-            .into_iter()
-            .map(|(doc_id, doc, context)| {
-                build_returning_row(
+    let prebuild_locking_returning = returning_has_row_locks(&stmt.returning, &ctes)?;
+    let mut prebuilt_returning_rows = Vec::new();
+    if !prepared_deletes.is_empty() {
+        if prebuild_locking_returning {
+            for (prepared, returning_context) in &prepared_deletes {
+                prebuilt_returning_rows.push(prebuild_locking_returning_row(
                     engine,
                     ReturningProjectionRow {
                         table: &stmt.table,
                         target_qualifier: &stmt.target_qualifier,
                         images: ReturningRowImages {
                             old: Some(ReturningRowImage {
-                                doc_id,
-                                document: &doc,
+                                doc_id: prepared.doc_id,
+                                document: &prepared.document,
                             }),
                             new: None,
                         },
                         aliases: &stmt.returning_aliases,
-                        context: context.as_ref(),
+                        context: returning_context.as_ref(),
                     },
                     &stmt.returning,
                     params,
                     &ctes,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+                )?);
+            }
+        }
+        engine.prepare_explicit_transaction_writer()?;
+    }
+    for (mut prepared, returning_context) in prepared_deletes {
+        if !stmt.returning.is_empty() && !prebuild_locking_returning {
+            returning_docs.push((
+                prepared.doc_id,
+                prepared.document.clone(),
+                returning_context,
+            ));
+        }
+        apply_prepared_document_delete(engine, &mut prepared, params)?;
+        affected += 1;
+    }
+    if !stmt.returning.is_empty() {
+        let returning_rows = if prebuild_locking_returning {
+            prebuilt_returning_rows
+        } else {
+            returning_docs
+                .into_iter()
+                .map(|(doc_id, doc, context)| {
+                    build_returning_row(
+                        engine,
+                        ReturningProjectionRow {
+                            table: &stmt.table,
+                            target_qualifier: &stmt.target_qualifier,
+                            images: ReturningRowImages {
+                                old: Some(ReturningRowImage {
+                                    doc_id,
+                                    document: &doc,
+                                }),
+                                new: None,
+                            },
+                            aliases: &stmt.returning_aliases,
+                            context: context.as_ref(),
+                        },
+                        &stmt.returning,
+                        params,
+                        &ctes,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
         return dml_returning_result(
             engine,
             DmlReturningShape {
@@ -202,43 +251,145 @@ pub(in crate::sql) fn run_delete_inner(
     Ok(SQLResult::from_affected(affected))
 }
 
-pub(in crate::sql) fn delete_document_with_referential_actions(
+fn recheck_delete_candidate(
+    engine: &Engine,
+    stmt: &DeletePlan,
+    params: &[SQLParam],
+    ctes: &CteScope,
+    doc_id: DocId,
+    source_context: Option<&uqa_execution::OwnedPhysicalRow>,
+) -> Result<Option<(Document, Option<uqa_execution::OwnedPhysicalRow>)>, SQLError> {
+    let Some(doc) = engine.get_document(&stmt.table, doc_id)? else {
+        return Ok(None);
+    };
+    let target_row = dml_target_row(engine, &stmt.table, &stmt.target_qualifier, doc_id, &doc)?;
+    let joined = source_context
+        .map(|source_context| dml_join_rows(&target_row, source_context))
+        .unwrap_or(target_row);
+    let qualifies = stmt.predicate.as_ref().map_or(Ok(true), |filter| {
+        eval_mutation_expr(engine, ctes, filter, Some(&joined), params)
+            .map(|value| uqa_sql::expr::truthy(&value))
+    })?;
+    Ok(qualifies.then(|| (doc, source_context.cloned())))
+}
+
+fn qualified_delete_candidate(
+    engine: &Engine,
+    stmt: &DeletePlan,
+    params: &[SQLParam],
+    ctes: &CteScope,
+    using_rows: Option<&uqa_execution::SharedSpill>,
+    doc_id: DocId,
+) -> Result<Option<(Document, Option<uqa_execution::OwnedPhysicalRow>)>, SQLError> {
+    let Some(doc) = engine.get_document(&stmt.table, doc_id)? else {
+        return Ok(None);
+    };
+    let target_row = dml_target_row(engine, &stmt.table, &stmt.target_qualifier, doc_id, &doc)?;
+    match using_rows {
+        None => {
+            let qualifies = stmt.predicate.as_ref().map_or(Ok(true), |filter| {
+                eval_mutation_expr(engine, ctes, filter, Some(&target_row), params)
+                    .map(|value| uqa_sql::expr::truthy(&value))
+            })?;
+            Ok(qualifies.then_some((doc, None)))
+        }
+        Some(rows) => {
+            let reader = rows
+                .read_rows()
+                .map_err(crate::sql::select::physical_exec_error)?;
+            for using_row in reader {
+                let source_context = using_row.map_err(crate::sql::select::physical_exec_error)?;
+                let joined = dml_join_rows(&target_row, &source_context);
+                let qualifies = stmt.predicate.as_ref().map_or(Ok(true), |filter| {
+                    eval_mutation_expr(engine, ctes, filter, Some(&joined), params)
+                        .map(|value| uqa_sql::expr::truthy(&value))
+                })?;
+                if qualifies {
+                    return Ok(Some((doc, Some(source_context))));
+                }
+            }
+            Ok(None)
+        }
+    }
+}
+
+pub(in crate::sql) fn prepare_document_delete(
     engine: &Engine,
     table: &str,
     doc_id: DocId,
     params: &[SQLParam],
     root_deletes: &BTreeSet<(String, DocId)>,
     delete_stack: &mut Vec<(String, DocId)>,
-) -> Result<(), SQLError> {
+    rewrite_stack: &mut Vec<(String, DocId)>,
+) -> Result<Option<PreparedDocumentDelete>, SQLError> {
     let key = (table.to_string(), doc_id);
     if delete_stack.contains(&key) {
-        return Ok(());
+        return Ok(None);
+    }
+    engine.lock_relation(table, crate::row_locks::RelationLockMode::RowExclusive)?;
+    let target = lock_mutation_target(
+        engine,
+        table,
+        table,
+        doc_id,
+        uqa_sql::ast::LockStrength::ForUpdate,
+    )?;
+    let MutationLockTarget::Present { doc_id, recheck } = target else {
+        return Ok(None);
+    };
+    if recheck {
+        engine.refresh_explicit_statement_snapshot()?;
     }
     let Some(target) = engine.get_document(table, doc_id)? else {
-        return Ok(());
+        return Ok(None);
     };
-    delete_stack.push(key);
-    apply_referenced_key_delete_actions(
+    delete_stack.push((table.to_string(), doc_id));
+    let actions = prepare_referenced_key_delete_actions(
         engine,
         table,
         &target,
         params,
         root_deletes,
         delete_stack,
-    )?;
+        rewrite_stack,
+    );
     delete_stack.pop();
-    engine.delete_document(table, doc_id)?;
-    Ok(())
+    Ok(Some(PreparedDocumentDelete {
+        table: table.to_string(),
+        doc_id,
+        document: target,
+        actions: actions?,
+    }))
 }
 
-pub(in crate::sql) fn apply_referenced_key_delete_actions(
+pub(in crate::sql) fn apply_prepared_document_delete(
+    engine: &Engine,
+    prepared: &mut PreparedDocumentDelete,
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
+    for action in &mut prepared.actions {
+        match action {
+            PreparedDeleteAction::Delete(delete) => {
+                apply_prepared_document_delete(engine, delete, params)?;
+            }
+            PreparedDeleteAction::Rewrite(rewrite) => {
+                apply_prepared_document_rewrite(engine, rewrite, params)?;
+            }
+        }
+    }
+    engine.delete_document(&prepared.table, prepared.doc_id)
+}
+
+fn prepare_referenced_key_delete_actions(
     engine: &Engine,
     table: &str,
     target: &Document,
     params: &[SQLParam],
     root_deletes: &BTreeSet<(String, DocId)>,
     delete_stack: &mut Vec<(String, DocId)>,
-) -> Result<(), SQLError> {
+    rewrite_stack: &mut Vec<(String, DocId)>,
+) -> Result<Vec<PreparedDeleteAction>, SQLError> {
+    let mut actions = Vec::new();
     for (ref_table, fk) in referrers_to_for_actions(engine, table)? {
         let key_values: Vec<Value> = fk
             .ref_columns
@@ -248,8 +399,9 @@ pub(in crate::sql) fn apply_referenced_key_delete_actions(
         if key_values.iter().any(|v| matches!(v, Value::Null)) {
             continue;
         }
+        engine.lock_relation(&ref_table, crate::row_locks::RelationLockMode::RowExclusive)?;
         let referencing = referencing_rows(engine, &ref_table, &fk.local_columns, &key_values)?;
-        for (child_id, child_doc) in referencing {
+        for (child_id, _child_doc) in referencing {
             if root_deletes.contains(&(ref_table.clone(), child_id)) {
                 continue;
             }
@@ -262,18 +414,32 @@ pub(in crate::sql) fn apply_referenced_key_delete_actions(
                     )));
                 }
                 ForeignKeyAction::Cascade => {
-                    delete_document_with_referential_actions(
+                    if let Some(prepared) = prepare_document_delete(
                         engine,
                         &ref_table,
                         child_id,
                         params,
                         root_deletes,
                         delete_stack,
-                    )?;
+                        rewrite_stack,
+                    )? {
+                        actions.push(PreparedDeleteAction::Delete(Box::new(prepared)));
+                    }
                 }
                 ForeignKeyAction::SetNull | ForeignKeyAction::SetDefault => {
-                    let mut updated = child_doc.clone();
                     let columns = delete_set_columns(&fk);
+                    let Some((child_id, child_doc)) = super::lock_referencing_child(
+                        engine,
+                        &ref_table,
+                        child_id,
+                        &columns,
+                        &fk.local_columns,
+                        &key_values,
+                    )?
+                    else {
+                        continue;
+                    };
+                    let mut updated = child_doc.clone();
                     apply_set_action_to_child(
                         engine,
                         &ref_table,
@@ -283,19 +449,22 @@ pub(in crate::sql) fn apply_referenced_key_delete_actions(
                         fk.on_delete,
                         params,
                     )?;
-                    rewrite_document_with_referential_actions(
+                    if let Some(prepared) = prepare_document_rewrite(
                         engine,
                         &ref_table,
                         child_id,
-                        &child_doc,
-                        &mut updated,
+                        child_doc,
+                        updated,
                         params,
-                    )?;
+                        rewrite_stack,
+                    )? {
+                        actions.push(PreparedDeleteAction::Rewrite(Box::new(prepared)));
+                    }
                 }
             }
         }
     }
-    Ok(())
+    Ok(actions)
 }
 
 pub(in crate::sql) fn delete_set_columns(fk: &ForeignKey) -> Vec<String> {

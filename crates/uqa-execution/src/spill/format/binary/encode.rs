@@ -16,6 +16,8 @@ use uqa_core::{TemporalValue, Value};
 
 use super::MAX_VALUE_DEPTH;
 
+const ROW_METADATA_LOCK_ORIGINS: usize = 1;
+
 pub(crate) fn encoded_batch_size(batch: &Batch) -> ExecResult<usize> {
     encoded_rows_size(&batch.schema, &batch.rows)
 }
@@ -38,7 +40,9 @@ pub(crate) fn encode_physical_row_record(
         })?;
         encode_value(&mut record, value, 0)?;
     }
-    encode_lock_origins(&mut record, row)?;
+    if !row.lock_origins().is_empty() {
+        encode_lock_origins(&mut record, row)?;
+    }
     debug_assert_eq!(record.len(), bytes);
     Ok(record)
 }
@@ -56,7 +60,9 @@ pub(crate) fn encoded_physical_row_record_size(
         })?;
         add_value_size(&mut bytes, value, 0)?;
     }
-    add_lock_origins_size(&mut bytes, row)?;
+    if !row.lock_origins().is_empty() {
+        add_lock_origins_size(&mut bytes, row)?;
+    }
     if row.value(physical_width).is_some() {
         return Err(spill_error(format!(
             "physical row has more than {physical_width} slots"
@@ -105,13 +111,15 @@ fn encoded_rows_size(schema: &RowSchema, rows: &[PhysicalRow]) -> ExecResult<usi
             )));
         }
     }
+    let has_lock_origins = rows.iter().any(|row| !row.lock_origins().is_empty());
+    add_size(&mut bytes, 8, "row metadata flags")?;
     add_size(&mut bytes, 8, "batch row count")?;
     for row in rows {
-        add_size(
-            &mut bytes,
-            encoded_physical_row_record_size(row, schema.physical_width())?,
-            "physical row record",
-        )?;
+        let mut row_bytes = encoded_physical_row_record_size(row, schema.physical_width())?;
+        if has_lock_origins && row.lock_origins().is_empty() {
+            add_size(&mut row_bytes, 8, "lock origin count")?;
+        }
+        add_size(&mut bytes, row_bytes, "physical row record")?;
     }
     Ok(bytes)
 }
@@ -286,6 +294,15 @@ fn encode_batch(writer: &mut impl Write, batch: &Batch) -> ExecResult<()> {
         write_slot(writer, slot)?;
         write_bytes(writer, encoded_column_type(ty)?.as_bytes())?;
     }
+    let has_lock_origins = batch.rows.iter().any(|row| !row.lock_origins().is_empty());
+    write_u64(
+        writer,
+        if has_lock_origins {
+            ROW_METADATA_LOCK_ORIGINS
+        } else {
+            0
+        },
+    )?;
     write_u64(writer, batch.rows.len())?;
     for row in &batch.rows {
         write_u64(writer, batch.schema.physical_width())?;
@@ -298,7 +315,9 @@ fn encode_batch(writer: &mut impl Write, batch: &Batch) -> ExecResult<()> {
             })?;
             encode_value(writer, value, 0)?;
         }
-        encode_lock_origins(writer, row)?;
+        if has_lock_origins {
+            encode_lock_origins(writer, row)?;
+        }
     }
     Ok(())
 }
@@ -307,6 +326,7 @@ fn encode_lock_origins(writer: &mut impl Write, row: &PhysicalRow) -> ExecResult
     write_u64(writer, row.lock_origins().len())?;
     for origin in row.lock_origins() {
         write_bytes(writer, origin.qualifier.as_bytes())?;
+        write_bytes(writer, origin.scan_qualifier.as_bytes())?;
         write_bytes(writer, origin.storage_name.as_bytes())?;
         write_raw(writer, &origin.doc_id.to_le_bytes(), "lock origin doc id")?;
     }
@@ -317,6 +337,11 @@ fn add_lock_origins_size(bytes: &mut usize, row: &PhysicalRow) -> ExecResult<()>
     add_size(bytes, 8, "lock origin count")?;
     for origin in row.lock_origins() {
         add_string_size(bytes, origin.qualifier.as_ref(), "lock origin qualifier")?;
+        add_string_size(
+            bytes,
+            origin.scan_qualifier.as_ref(),
+            "lock origin scan qualifier",
+        )?;
         add_string_size(bytes, origin.storage_name.as_ref(), "lock origin storage")?;
         add_size(bytes, 8, "lock origin doc id")?;
     }

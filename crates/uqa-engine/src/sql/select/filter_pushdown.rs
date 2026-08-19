@@ -461,7 +461,7 @@ fn frame_bound_outer_expression_contains_volatile_function(
     }
 }
 
-fn collect_subquery_ids(expression: &ScalarExpr, output: &mut BTreeSet<usize>) {
+pub(in crate::sql) fn collect_subquery_ids(expression: &ScalarExpr, output: &mut BTreeSet<usize>) {
     match expression {
         ScalarExpr::ScalarSubquery(id) | ScalarExpr::Exists { subquery: id, .. } => {
             output.insert(*id);

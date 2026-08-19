@@ -9,8 +9,8 @@
 mod materialize;
 
 use super::{
-    doc_id_value, Arc, DocId, ExecResult, ResultRow, SQLError, ScoredEntry, Value, DOC_ID_COLUMN,
-    SCORE_COLUMN, SCORE_PROVENANCE_COLUMN,
+    doc_id_value, Arc, DocId, ExecResult, RecheckDoc, ResultRow, SQLError, ScoredEntry, Value,
+    DOC_ID_COLUMN, SCORE_COLUMN, SCORE_PROVENANCE_COLUMN,
 };
 
 pub(in crate::sql) enum ScoredInput {
@@ -187,7 +187,10 @@ pub(in crate::sql) struct ScoredDocumentSource {
     hidden_columns: HiddenColumns,
     ordering: Vec<uqa_execution::PhysicalOrder>,
     input_guarantees_presence: bool,
-    lock_origin: Option<(String, String)>,
+    lock_origin: Option<(Arc<str>, Arc<str>)>,
+    recheck_pinned: bool,
+    recheck_documents:
+        std::collections::BTreeMap<DocId, Arc<uqa_storage::document_store::Document>>,
 }
 
 pub(in crate::sql) enum ScoredInputCursor {
@@ -304,11 +307,59 @@ impl ScoredDocumentSource {
             ordering,
             input_guarantees_presence,
             lock_origin: None,
+            recheck_pinned: false,
+            recheck_documents: std::collections::BTreeMap::new(),
         }
     }
 
-    pub(in crate::sql) fn with_lock_origin(mut self, origin: Option<(String, String)>) -> Self {
+    pub(in crate::sql) fn with_lock_origin(mut self, origin: Option<(Arc<str>, Arc<str>)>) -> Self {
         self.lock_origin = origin;
+        self
+    }
+
+    /// Pin this scan to a tuple-local recheck candidate's tuples. A ranked
+    /// input (retrieval predicate) was re-executed against the latest index
+    /// state when the recheck rebuilt the scan, so a pinned tuple survives
+    /// only if the retrieval still matches it, exactly like `PostgreSQL`
+    /// re-evaluating the WHERE clause on the substituted tuple; its score is
+    /// the re-executed retrieval score. A plain scan input keeps every pinned
+    /// tuple and lets the residual predicates decide.
+    pub(in crate::sql) fn with_recheck_pins(mut self, pins: Option<Arc<Vec<RecheckDoc>>>) -> Self {
+        let Some(pins) = pins else {
+            return self;
+        };
+        let ranked: Option<std::collections::BTreeMap<DocId, f64>> = match &mut self.input {
+            ScoredInputCursor::Entries(entries) => Some(
+                entries
+                    .by_ref()
+                    .map(|entry| (entry.doc_id, entry.score))
+                    .collect(),
+            ),
+            ScoredInputCursor::All { .. } => None,
+        };
+        let entries = pins
+            .iter()
+            .filter_map(|pin| match ranked.as_ref() {
+                Some(scores) => scores.get(&pin.doc_id).map(|score| ScoredEntry {
+                    doc_id: pin.doc_id,
+                    score: *score,
+                }),
+                None => Some(ScoredEntry {
+                    doc_id: pin.doc_id,
+                    score: 0.0,
+                }),
+            })
+            .collect::<Vec<_>>();
+        self.recheck_documents = pins
+            .iter()
+            .filter_map(|pin| {
+                pin.document
+                    .as_ref()
+                    .map(|document| (pin.doc_id, Arc::clone(document)))
+            })
+            .collect();
+        self.recheck_pinned = true;
+        self.input = ScoredInputCursor::Entries(entries.into_iter());
         self
     }
 
@@ -339,9 +390,9 @@ impl ScoredDocumentSource {
         let Some((qualifier, storage_name)) = self.lock_origin.as_ref() else {
             return row;
         };
-        row.with_lock_origin(uqa_execution::RowLockOrigin::new(
-            qualifier.clone(),
-            storage_name.clone(),
+        row.with_lock_origin(uqa_execution::RowLockOrigin::from_shared(
+            Arc::clone(qualifier),
+            Arc::clone(storage_name),
             doc_id,
         ))
     }
@@ -594,6 +645,7 @@ mod tests {
         assert_eq!(schema.columns(), ["id"]);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].fragment_count(), 1);
+        assert!(rows[0].lock_origins().is_empty());
         assert_eq!(
             schema.view(&rows[0]).qualified_column("a", "id"),
             Some(&Value::Int(7))

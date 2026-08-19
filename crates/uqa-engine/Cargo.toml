@@ -29,10 +29,13 @@ uqa-execution = { workspace = true }
 uqa-fdw = { workspace = true }
 ahash = { workspace = true }
 parking_lot = { workspace = true }
+libc = { workspace = true }
 regex = { workspace = true }
 smallvec = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+ciborium = { workspace = true }
+sha2 = { workspace = true }
 tempfile = "3.13"
 thiserror = { workspace = true }
 
@@ -43,6 +46,9 @@ rusqlite = { workspace = true }
 
 [target.'cfg(target_os = "emscripten")'.dependencies]
 rusqlite = { version = "0.39", default-features = false, features = ["bundled", "blob", "cache"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Threading"] }
 
 [dev-dependencies]
 uqa-storage-redb = { workspace = true }
@@ -55,7 +61,6 @@ duckdb = { workspace = true }
 arrow-array = { workspace = true }
 arrow-ipc = { workspace = true }
 arrow-schema = { workspace = true }
-sha2 = { workspace = true }
 
 [[test]]
 name = "integration"

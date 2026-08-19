@@ -546,6 +546,16 @@ pub(in crate::sql) fn validate_query_set_contexts(
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
     validate_projection_set_contexts(engine, &statement.projections, schema, params)?;
+    if let Some(locking) = statement.locking.first() {
+        for projection in &statement.projections {
+            if expression_may_return_set(engine, &projection.expr, schema, params)? {
+                return Err(SQLError::Unsupported(format!(
+                    "{} is not allowed with set-returning functions in the target list",
+                    locking.strength.sql_name()
+                )));
+            }
+        }
+    }
     for expression in statement
         .group_by
         .iter()
@@ -1373,7 +1383,7 @@ pub(in crate::sql) fn build_set_projection<'a>(
     mut operator: Box<dyn PhysicalOperator + 'a>,
     engine: &'a Engine,
     params: &'a [SQLParam],
-    ctes: &'a CteScope,
+    ctes: &CteScope,
     evaluator: SharedExpressionEvaluator<'a>,
     projections: Vec<PhysicalProjection>,
     pass_through: bool,

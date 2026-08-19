@@ -281,7 +281,21 @@ impl ManagedConnection {
     }
 
     pub fn open(path: &Path) -> Result<Self> {
+        if path == Path::new(":memory:") {
+            return Self::open_in_memory();
+        }
         Self::open_with_optional_key(path, None)
+    }
+
+    /// Return the backing database path for a file-backed connection.
+    #[must_use]
+    pub fn database_path(&self) -> Option<&Path> {
+        match &self.pool.spec {
+            ConnectionSpec::File { path, .. } | ConnectionSpec::Compressed { path, .. } => {
+                Some(path)
+            }
+            ConnectionSpec::Memory => None,
+        }
     }
 
     pub fn open_encrypted(path: &Path, key: &str) -> Result<Self> {

@@ -24,7 +24,7 @@ use uqa_core::{DecimalValue, TemporalValue, Value};
 use uqa_sql::ResultRow;
 
 use crate::{
-    Batch, ExecError, ExecResult, PhysicalOperator, RowSchema, ScalarExpr,
+    Batch, ExecError, ExecResult, PhysicalOperator, PhysicalRow, RowSchema, ScalarExpr,
     SharedExpressionEvaluator,
 };
 
@@ -63,6 +63,14 @@ pub fn hash_canonical_row<'a, S: BuildHasher>(
         }
     }
     Ok(hasher.finish())
+}
+
+/// Encode positional SQL values in the exact equality domain used by
+/// DISTINCT and spill-backed row-key state. Callers that need an external
+/// exact index can persist this representation without relying on `Value`'s
+/// serialization format.
+pub fn canonical_row_key(values: &[Value]) -> ExecResult<Vec<u8>> {
+    encode_key(values)
 }
 
 /// Collision-safe in-memory set for positional SQL rows.
@@ -207,6 +215,22 @@ impl ExactRowSet {
         self.seen.contains(&encode_key(values)?)
     }
 
+    /// Insert a physical row directly in logical schema order without constructing a named row or cloning its values.
+    pub fn insert_physical(&mut self, row: &PhysicalRow, schema: &RowSchema) -> ExecResult<bool> {
+        let view = schema.view(row);
+        self.seen.insert(encode_key_borrowed(
+            (0..schema.len()).map(|position| view.value_at(position)),
+        )?)
+    }
+
+    /// Probe a physical row directly in logical schema order without constructing a named row or cloning its values.
+    pub fn contains_physical(&mut self, row: &PhysicalRow, schema: &RowSchema) -> ExecResult<bool> {
+        let view = schema.view(row);
+        self.seen.contains(&encode_key_borrowed(
+            (0..schema.len()).map(|position| view.value_at(position)),
+        )?)
+    }
+
     pub fn has_spilled(&self) -> bool {
         self.seen.has_spilled()
     }
@@ -217,11 +241,7 @@ impl ExactRowSet {
 }
 
 fn row_key(row: &ResultRow, schema: &[String]) -> ExecResult<Vec<u8>> {
-    let values = schema
-        .iter()
-        .map(|column| row.get(column).cloned().unwrap_or(Value::Null))
-        .collect::<Vec<_>>();
-    encode_key(&values)
+    encode_key_borrowed(schema.iter().map(|column| row.get(column)))
 }
 
 /// Stable SQL duplicate elimination.
@@ -317,24 +337,19 @@ impl<'a> Distinct<'a> {
         self.seen = SeenKeySet::new(self.work_mem_bytes, self.spill_directory.clone());
     }
 
-    fn key(&self, schema: &RowSchema, row: &crate::PhysicalRow) -> ExecResult<Vec<Value>> {
+    fn key(&self, schema: &RowSchema, row: &crate::PhysicalRow) -> ExecResult<Vec<u8>> {
         if let Some(keys) = self.keys.as_ref() {
             let evaluator = self.evaluator.as_ref().ok_or_else(|| {
                 ExecError::Other("DISTINCT ON evaluator is not configured".into())
             })?;
-            return keys
+            let values = keys
                 .iter()
                 .map(|expression| evaluator.evaluate_physical(expression, schema, row))
-                .collect();
+                .collect::<ExecResult<Vec<_>>>()?;
+            return encode_key(&values);
         }
         let row = schema.view(row);
-        Ok(self
-            .schema
-            .columns()
-            .iter()
-            .enumerate()
-            .map(|(index, _)| row.value_at(index).cloned().unwrap_or(Value::Null))
-            .collect())
+        encode_key_borrowed((0..self.schema.len()).map(|index| row.value_at(index)))
     }
 }
 
@@ -355,9 +370,9 @@ impl PhysicalOperator for Distinct<'_> {
             };
             let mut rows = Vec::with_capacity(batch.rows.len());
             for row in batch.rows {
-                let key = encode_key(&self.key(&batch.schema, &row)?)?;
+                let key = self.key(&batch.schema, &row)?;
                 if self.seen.insert(key)? {
-                    rows.push(row);
+                    rows.push(row.without_lock_origins());
                 }
             }
             if !rows.is_empty() {
@@ -630,11 +645,20 @@ fn distinct_error(message: impl Into<String>) -> ExecError {
 /// equality behavior as UQA's SQL comparisons. Every structural value carries
 /// lengths/counts, preventing concatenation and nested-container collisions.
 pub(crate) fn encode_key(values: &[Value]) -> ExecResult<Vec<u8>> {
+    encode_key_borrowed(values.iter().map(Some))
+}
+
+fn encode_key_borrowed<'a>(
+    values: impl ExactSizeIterator<Item = Option<&'a Value>>,
+) -> ExecResult<Vec<u8>> {
     let estimated_capacity = encoded_key_capacity(values.len())?;
     let mut output = Vec::with_capacity(estimated_capacity);
     encode_len(values.len(), &mut output)?;
     for value in values {
-        encode_value(value, &mut output)?;
+        match value {
+            Some(value) => encode_value(value, &mut output)?,
+            None => encode_value(&Value::Null, &mut output)?,
+        }
     }
     Ok(output)
 }
@@ -880,7 +904,7 @@ mod tests {
     use super::*;
     use crate::physical::run_to_rows;
     use crate::scan::TableScan;
-    use crate::{ExpressionEvaluator, ScalarEvalContext};
+    use crate::{ExpressionEvaluator, PhysicalRow, ScalarEvalContext};
 
     fn row(a: i64, b: i64) -> ResultRow {
         [("a".into(), Value::Int(a)), ("b".into(), Value::Int(b))]
@@ -924,6 +948,18 @@ mod tests {
         );
         let (_, on_rows) = run_to_rows(&mut on).unwrap();
         assert_eq!(on_rows, vec![row(1, 10), row(2, 20)]);
+    }
+
+    #[test]
+    fn distinct_is_a_row_lock_identity_barrier() {
+        let schema = RowSchema::new(vec!["v".into()]);
+        let row = PhysicalRow::from_values(vec![Value::Int(1)])
+            .with_lock_origin(crate::RowLockOrigin::new("source", "public.source", 1));
+        let scan = TableScan::from_physical_rows(schema, vec![row]);
+        let mut distinct = Distinct::all_with_work_mem(Box::new(scan), 1);
+
+        let batches = crate::physical::run_to_batches(&mut distinct).unwrap();
+        assert!(batches[0].rows[0].lock_origins().is_empty());
     }
 
     #[test]

@@ -12,12 +12,14 @@ use std::sync::Arc;
 use uqa_core::Value;
 use uqa_sql::ast::{ColumnType, SetOpKind};
 use uqa_sql::expr::RowLookup;
+
+#[cfg(test)]
 use uqa_sql::ResultRow;
 
 use crate::batch::DEFAULT_BATCH_SIZE;
 use crate::{
-    Batch, ExecError, ExecResult, ExpressionEvaluator, ExternalSort, PhysicalOperator, RowSchema,
-    ScalarExpr, SortKey,
+    Batch, ExecError, ExecResult, ExpressionEvaluator, ExternalSort, PhysicalOperator, PhysicalRow,
+    RowProjectionValue, RowSchema, ScalarExpr, SortKey,
 };
 
 struct ColumnEvaluator;
@@ -135,10 +137,12 @@ impl PhysicalOperator for AlignSchema<'_> {
             && (0..batch.schema.len())
                 .all(|position| batch.schema.slot(position) == Some(position));
         if self.coercions.iter().all(Option::is_none) && identity_layout {
-            return Ok(Some(Batch::from_physical_rows(
-                self.schema.clone(),
-                batch.rows,
-            )));
+            let rows = batch
+                .rows
+                .into_iter()
+                .map(PhysicalRow::without_lock_origins)
+                .collect();
+            return Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)));
         }
         if self.coercions.iter().all(Option::is_none) {
             let slots = (0..batch.schema.len())
@@ -153,28 +157,31 @@ impl PhysicalOperator for AlignSchema<'_> {
             let rows = batch
                 .rows
                 .into_iter()
-                .map(|row| row.project_slots(&slots))
+                .map(|row| row.project_slots(&slots).without_lock_origins())
                 .collect();
             return Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)));
         }
         let mut rows = Vec::with_capacity(batch.rows.len());
-        for row in &batch.rows {
-            let view = batch.schema.view(row);
+        for row in batch.rows {
+            let view = batch.schema.view(&row);
             let values = self
                 .coercions
                 .iter()
                 .enumerate()
-                .map(|(position, target)| {
-                    let value = view.value_at(position).cloned().unwrap_or(Value::Null);
-                    match target {
-                        Some(target) => {
-                            coerce_set_value(value, batch.schema.column_type(position), target)
-                        }
-                        None => Ok(value),
-                    }
+                .map(|(position, target)| match target {
+                    Some(target) => coerce_set_value(
+                        view.value_at(position).cloned().unwrap_or(Value::Null),
+                        batch.schema.column_type(position),
+                        target,
+                    )
+                    .map(RowProjectionValue::Owned),
+                    None => Ok(batch.schema.slot(position).map_or(
+                        RowProjectionValue::Owned(Value::Null),
+                        RowProjectionValue::InputSlot,
+                    )),
                 })
                 .collect::<ExecResult<Vec<_>>>()?;
-            rows.push(crate::PhysicalRow::from_values(values));
+            rows.push(row.project_with_values(values).without_lock_origins());
         }
         Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)))
     }
@@ -185,15 +192,14 @@ impl PhysicalOperator for AlignSchema<'_> {
 }
 
 struct RowGroup {
-    key: Vec<Value>,
-    row: ResultRow,
+    row: PhysicalRow,
     count: usize,
 }
 
 struct RowCursor<'a> {
     operator: Box<dyn PhysicalOperator + 'a>,
-    batch: std::vec::IntoIter<ResultRow>,
-    lookahead: Option<ResultRow>,
+    batch: std::vec::IntoIter<PhysicalRow>,
+    lookahead: Option<PhysicalRow>,
     exhausted: bool,
 }
 
@@ -214,7 +220,7 @@ impl<'a> RowCursor<'a> {
         self.operator.open()
     }
 
-    fn next_row(&mut self) -> ExecResult<Option<ResultRow>> {
+    fn next_row(&mut self) -> ExecResult<Option<PhysicalRow>> {
         loop {
             if let Some(row) = self.batch.next() {
                 return Ok(Some(row));
@@ -223,11 +229,11 @@ impl<'a> RowCursor<'a> {
                 self.exhausted = true;
                 return Ok(None);
             };
-            self.batch = batch.into_result_rows().into_iter();
+            self.batch = batch.rows.into_iter();
         }
     }
 
-    fn take_group(&mut self, schema: &[String]) -> ExecResult<Option<RowGroup>> {
+    fn take_group(&mut self, schema: &RowSchema) -> ExecResult<Option<RowGroup>> {
         let first = match self.lookahead.take() {
             Some(row) => row,
             None => match self.next_row()? {
@@ -235,10 +241,9 @@ impl<'a> RowCursor<'a> {
                 None => return Ok(None),
             },
         };
-        let key = row_key(&first, schema);
         let mut count = 1_usize;
         while let Some(row) = self.next_row()? {
-            if row_key(&row, schema) == key {
+            if compare_rows(&first, &row, schema) == Ordering::Equal {
                 count = count
                     .checked_add(1)
                     .ok_or_else(|| ExecError::Other("set-operation group count overflow".into()))?;
@@ -247,11 +252,7 @@ impl<'a> RowCursor<'a> {
                 break;
             }
         }
-        Ok(Some(RowGroup {
-            key,
-            row: first,
-            count,
-        }))
+        Ok(Some(RowGroup { row: first, count }))
     }
 
     fn close(&mut self) -> ExecResult<()> {
@@ -262,11 +263,20 @@ impl<'a> RowCursor<'a> {
     }
 }
 
-fn row_key(row: &ResultRow, schema: &[String]) -> Vec<Value> {
-    schema
-        .iter()
-        .map(|column| row.get(column).cloned().unwrap_or(Value::Null))
-        .collect()
+fn compare_rows(left: &PhysicalRow, right: &PhysicalRow, schema: &RowSchema) -> Ordering {
+    let left = schema.view(left);
+    let right = schema.view(right);
+    let null = Value::Null;
+    for position in 0..schema.len() {
+        let ordering = left
+            .value_at(position)
+            .unwrap_or(&null)
+            .cmp(right.value_at(position).unwrap_or(&null));
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+    }
+    Ordering::Equal
 }
 
 /// `UNION` / `INTERSECT` / `EXCEPT` physical operator.
@@ -282,7 +292,7 @@ pub struct ExternalSetOperation<'a> {
     schema: RowSchema,
     left_group: Option<RowGroup>,
     right_group: Option<RowGroup>,
-    pending_row: Option<ResultRow>,
+    pending_row: Option<PhysicalRow>,
     pending_count: usize,
     union_all_left_done: bool,
 }
@@ -367,21 +377,21 @@ impl<'a> ExternalSetOperation<'a> {
             let Some(row) = next else {
                 break;
             };
-            rows.push(row);
+            rows.push(row.without_lock_origins());
         }
         if rows.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(Batch::new(self.schema.clone(), rows)))
+            Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)))
         }
     }
 
     fn load_groups(&mut self) -> ExecResult<()> {
         if self.left_group.is_none() && !self.left.exhausted {
-            self.left_group = self.left.take_group(self.schema.columns())?;
+            self.left_group = self.left.take_group(&self.schema)?;
         }
         if self.right_group.is_none() && !self.right.exhausted {
-            self.right_group = self.right.take_group(self.schema.columns())?;
+            self.right_group = self.right.take_group(&self.schema)?;
         }
         Ok(())
     }
@@ -398,10 +408,10 @@ impl<'a> ExternalSetOperation<'a> {
             .ok_or_else(|| ExecError::Other("set-operation selected a missing right group".into()))
     }
 
-    fn choose_group(&mut self) -> ExecResult<Option<(ResultRow, usize)>> {
+    fn choose_group(&mut self) -> ExecResult<Option<(PhysicalRow, usize)>> {
         self.load_groups()?;
         let ordering = match (&self.left_group, &self.right_group) {
-            (Some(left), Some(right)) => Some(left.key.cmp(&right.key)),
+            (Some(left), Some(right)) => Some(compare_rows(&left.row, &right.row, &self.schema)),
             (Some(_), None) => Some(Ordering::Less),
             (None, Some(_)) => Some(Ordering::Greater),
             (None, None) => None,
@@ -499,7 +509,7 @@ impl PhysicalOperator for ExternalSetOperation<'_> {
             }
             match self.choose_group()? {
                 Some((row, count)) => {
-                    self.pending_row = Some(row);
+                    self.pending_row = Some(row.without_lock_origins());
                     self.pending_count = count;
                 }
                 None if self.left.exhausted && self.right.exhausted => break,
@@ -509,7 +519,7 @@ impl PhysicalOperator for ExternalSetOperation<'_> {
         if rows.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(Batch::new(self.schema.clone(), rows)))
+            Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)))
         }
     }
 

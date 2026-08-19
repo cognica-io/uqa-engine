@@ -26,13 +26,44 @@ fn dml_storage_error(action: &str, err: impl std::fmt::Display) -> SQLError {
     SQLError::Internal(format!("{action} failed in storage backend: {err}"))
 }
 
+pub(in crate::sql) fn returning_has_row_locks(
+    returning: &[ProjectionPlan],
+    ctes: &CteScope,
+) -> Result<bool, SQLError> {
+    let mut subquery_ids = BTreeSet::new();
+    for projection in returning {
+        crate::sql::select::collect_subquery_ids(&projection.expr, &mut subquery_ids);
+    }
+    for subquery_id in subquery_ids {
+        let plan = ctes.scalar_subqueries.get(subquery_id).ok_or_else(|| {
+            SQLError::Internal(format!(
+                "RETURNING scalar subquery slot {subquery_id} is out of bounds"
+            ))
+        })?;
+        if crate::sql::select::query_has_row_locks(plan) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+pub(in crate::sql) fn prebuild_locking_returning_row(
+    engine: &Engine,
+    input: ReturningProjectionRow<'_>,
+    returning: &[ProjectionPlan],
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<OwnedPhysicalRow, SQLError> {
+    build_returning_row(engine, input, returning, params, ctes)
+}
+
 fn lock_mutation_row(
     engine: &Engine,
     table: &str,
     display_name: &str,
     doc_id: DocId,
     strength: uqa_sql::ast::LockStrength,
-) -> Result<(), SQLError> {
+) -> Result<bool, SQLError> {
     match engine.lock_row(
         table,
         doc_id,
@@ -40,14 +71,284 @@ fn lock_mutation_row(
         uqa_sql::ast::LockWait::Block,
         display_name,
     )? {
-        crate::row_locks::LockAcquire::Granted => Ok(()),
+        crate::row_locks::LockAcquire::Granted { waited, .. } => Ok(waited),
         crate::row_locks::LockAcquire::Skipped => Err(SQLError::Internal(
             "DML row locking used SKIP LOCKED".into(),
         )),
     }
 }
 
-fn update_lock_strength(
+/// Lock a DML target row and follow any primary-key rewrite another
+/// transaction committed while this statement waited, exactly like
+/// `PostgreSQL` 18 follows the update chain to the row version it lands on.
+/// Returns the doc id the statement must act on together with whether any
+/// wait or successor hop makes a re-qualification necessary. Callers acquire
+/// every row dependency first and promote the backend writer only after that
+/// lock phase has completed.
+pub(in crate::sql) enum MutationLockTarget {
+    Present { doc_id: DocId, recheck: bool },
+    Deleted,
+}
+
+pub(in crate::sql) struct PreparedDocumentRewrite {
+    pub table: String,
+    pub doc_id: DocId,
+    pub old_document: Document,
+    pub new_document: Document,
+    pub actions: Vec<PreparedDocumentRewrite>,
+}
+
+pub(in crate::sql) enum PreparedDeleteAction {
+    Delete(Box<PreparedDocumentDelete>),
+    Rewrite(Box<PreparedDocumentRewrite>),
+}
+
+pub(in crate::sql) struct PreparedDocumentDelete {
+    pub table: String,
+    pub doc_id: DocId,
+    pub document: Document,
+    pub actions: Vec<PreparedDeleteAction>,
+}
+
+pub(in crate::sql) fn encode_prepared_doc_id(doc_id: DocId) -> Value {
+    Value::Bytes(doc_id.to_be_bytes().to_vec())
+}
+
+pub(in crate::sql) fn decode_prepared_doc_id(
+    value: Value,
+    context: &str,
+) -> Result<DocId, SQLError> {
+    let Value::Bytes(bytes) = value else {
+        return Err(SQLError::Internal(format!(
+            "{context} has a non-binary document id"
+        )));
+    };
+    let bytes: [u8; std::mem::size_of::<DocId>()] = bytes
+        .try_into()
+        .map_err(|_| SQLError::Internal(format!("{context} has an invalid document id width")))?;
+    Ok(DocId::from_be_bytes(bytes))
+}
+
+pub(in crate::sql) fn encode_prepared_document_rewrite(prepared: PreparedDocumentRewrite) -> Value {
+    Value::Map(BTreeMap::from([
+        ("table".into(), Value::Str(prepared.table)),
+        ("doc_id".into(), encode_prepared_doc_id(prepared.doc_id)),
+        ("old".into(), Value::Map(prepared.old_document)),
+        ("new".into(), Value::Map(prepared.new_document)),
+        (
+            "actions".into(),
+            Value::List(
+                prepared
+                    .actions
+                    .into_iter()
+                    .map(encode_prepared_document_rewrite)
+                    .collect(),
+            ),
+        ),
+    ]))
+}
+
+pub(in crate::sql) fn decode_prepared_document_rewrite(
+    value: Value,
+) -> Result<PreparedDocumentRewrite, SQLError> {
+    let Value::Map(mut fields) = value else {
+        return Err(SQLError::Internal(
+            "prepared rewrite spill payload is not a map".into(),
+        ));
+    };
+    let table = match fields.remove("table") {
+        Some(Value::Str(table)) => table,
+        _ => {
+            return Err(SQLError::Internal(
+                "prepared rewrite spill payload has no table".into(),
+            ))
+        }
+    };
+    let doc_id = decode_prepared_doc_id(
+        fields.remove("doc_id").ok_or_else(|| {
+            SQLError::Internal("prepared rewrite spill payload has no document id".into())
+        })?,
+        "prepared rewrite spill payload",
+    )?;
+    let old_document = match fields.remove("old") {
+        Some(Value::Map(document)) => document,
+        _ => {
+            return Err(SQLError::Internal(
+                "prepared rewrite spill payload has no old document".into(),
+            ))
+        }
+    };
+    let new_document = match fields.remove("new") {
+        Some(Value::Map(document)) => document,
+        _ => {
+            return Err(SQLError::Internal(
+                "prepared rewrite spill payload has no new document".into(),
+            ))
+        }
+    };
+    let actions = match fields.remove("actions") {
+        Some(Value::List(actions)) => actions
+            .into_iter()
+            .map(decode_prepared_document_rewrite)
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => {
+            return Err(SQLError::Internal(
+                "prepared rewrite spill payload has no action list".into(),
+            ))
+        }
+    };
+    Ok(PreparedDocumentRewrite {
+        table,
+        doc_id,
+        old_document,
+        new_document,
+        actions,
+    })
+}
+
+pub(in crate::sql) fn encode_prepared_document_delete(prepared: PreparedDocumentDelete) -> Value {
+    let actions = prepared
+        .actions
+        .into_iter()
+        .map(|action| match action {
+            PreparedDeleteAction::Delete(delete) => Value::Map(BTreeMap::from([
+                ("kind".into(), Value::Str("delete".into())),
+                ("plan".into(), encode_prepared_document_delete(*delete)),
+            ])),
+            PreparedDeleteAction::Rewrite(rewrite) => Value::Map(BTreeMap::from([
+                ("kind".into(), Value::Str("rewrite".into())),
+                ("plan".into(), encode_prepared_document_rewrite(*rewrite)),
+            ])),
+        })
+        .collect();
+    Value::Map(BTreeMap::from([
+        ("table".into(), Value::Str(prepared.table)),
+        ("doc_id".into(), encode_prepared_doc_id(prepared.doc_id)),
+        ("document".into(), Value::Map(prepared.document)),
+        ("actions".into(), Value::List(actions)),
+    ]))
+}
+
+pub(in crate::sql) fn decode_prepared_document_delete(
+    value: Value,
+) -> Result<PreparedDocumentDelete, SQLError> {
+    let Value::Map(mut fields) = value else {
+        return Err(SQLError::Internal(
+            "prepared delete spill payload is not a map".into(),
+        ));
+    };
+    let table = match fields.remove("table") {
+        Some(Value::Str(table)) => table,
+        _ => {
+            return Err(SQLError::Internal(
+                "prepared delete spill payload has no table".into(),
+            ))
+        }
+    };
+    let doc_id = decode_prepared_doc_id(
+        fields.remove("doc_id").ok_or_else(|| {
+            SQLError::Internal("prepared delete spill payload has no document id".into())
+        })?,
+        "prepared delete spill payload",
+    )?;
+    let document = match fields.remove("document") {
+        Some(Value::Map(document)) => document,
+        _ => {
+            return Err(SQLError::Internal(
+                "prepared delete spill payload has no document".into(),
+            ))
+        }
+    };
+    let action_values = match fields.remove("actions") {
+        Some(Value::List(actions)) => actions,
+        _ => {
+            return Err(SQLError::Internal(
+                "prepared delete spill payload has no action list".into(),
+            ))
+        }
+    };
+    let mut actions = Vec::with_capacity(action_values.len());
+    for action in action_values {
+        let Value::Map(mut action) = action else {
+            return Err(SQLError::Internal(
+                "prepared delete action spill payload is not a map".into(),
+            ));
+        };
+        let kind = match action.remove("kind") {
+            Some(Value::Str(kind)) => kind,
+            _ => {
+                return Err(SQLError::Internal(
+                    "prepared delete action spill payload has no kind".into(),
+                ))
+            }
+        };
+        let plan = action.remove("plan").ok_or_else(|| {
+            SQLError::Internal("prepared delete action spill payload has no plan".into())
+        })?;
+        actions.push(match kind.as_str() {
+            "delete" => {
+                PreparedDeleteAction::Delete(Box::new(decode_prepared_document_delete(plan)?))
+            }
+            "rewrite" => {
+                PreparedDeleteAction::Rewrite(Box::new(decode_prepared_document_rewrite(plan)?))
+            }
+            _ => {
+                return Err(SQLError::Internal(format!(
+                    "prepared delete action spill payload has unknown kind `{kind}`"
+                )))
+            }
+        });
+    }
+    Ok(PreparedDocumentDelete {
+        table,
+        doc_id,
+        document,
+        actions,
+    })
+}
+
+pub(in crate::sql) fn lock_mutation_target(
+    engine: &Engine,
+    table: &str,
+    display_name: &str,
+    doc_id: DocId,
+    strength: uqa_sql::ast::LockStrength,
+) -> Result<MutationLockTarget, SQLError> {
+    let mut current = doc_id;
+    let mut recheck = false;
+    let mut hops = 0usize;
+    loop {
+        recheck |= lock_mutation_row(engine, table, display_name, current, strength)?;
+        let successor = match engine.committed_row_successor(table, current)? {
+            crate::row_locks::RowChangeTarget::Unchanged => {
+                return Ok(MutationLockTarget::Present {
+                    doc_id: current,
+                    recheck,
+                });
+            }
+            crate::row_locks::RowChangeTarget::Deleted => {
+                return Ok(MutationLockTarget::Deleted);
+            }
+            crate::row_locks::RowChangeTarget::Present(successor) => successor,
+        };
+        if successor == current {
+            return Ok(MutationLockTarget::Present {
+                doc_id: current,
+                recheck: true,
+            });
+        }
+        hops += 1;
+        if hops > 64 {
+            return Err(SQLError::Internal(format!(
+                "primary-key rewrite chain for `{table}` row {doc_id} did not converge"
+            )));
+        }
+        recheck = true;
+        current = successor;
+    }
+}
+
+pub(crate) fn update_lock_strength(
     engine: &Engine,
     table: &str,
     columns: &[String],
@@ -55,11 +356,29 @@ fn update_lock_strength(
     let Ok(keys) = engine.try_key_constraints(table) else {
         return uqa_sql::ast::LockStrength::ForUpdate;
     };
+    let Ok(Some(definitions)) = engine.try_describe_table(table) else {
+        return uqa_sql::ast::LockStrength::ForUpdate;
+    };
+    let assigned = columns.iter().map(String::as_str).collect::<BTreeSet<_>>();
     let touches_key = keys.iter().any(|constraint| {
-        constraint
-            .columns
-            .iter()
-            .any(|column| columns.iter().any(|assigned| assigned == column))
+        constraint.columns.iter().any(|column| {
+            if assigned.contains(column.as_str()) {
+                return true;
+            }
+            let Some(generated) = definitions
+                .iter()
+                .find(|definition| definition.name == *column)
+                .and_then(|definition| definition.generated.as_ref())
+            else {
+                return false;
+            };
+            let mut dependencies = BTreeSet::new();
+            let expression = uqa_planner::ExpressionPlan::lower((*generated.expression).clone());
+            !expression.scalar.collect_columns(&mut dependencies)
+                || dependencies
+                    .iter()
+                    .any(|dependency| assigned.contains(dependency.as_str()))
+        })
     });
     if touches_key {
         uqa_sql::ast::LockStrength::ForUpdate

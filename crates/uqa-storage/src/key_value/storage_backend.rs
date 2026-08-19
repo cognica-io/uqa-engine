@@ -7,11 +7,12 @@
 //! Persistent-storage facade that assembles the key/value adapters.
 
 use super::{
-    btree_index, Analyzer, Arc, BTreeMap, DocId, DocumentStore, InvertedIndex,
+    btree_index, Analyzer, Arc, BTreeMap, DocId, DocumentStore, InvertedIndex, KeyValueCatalog,
     KeyValueDocumentStore, KeyValueHNSWIndex, KeyValueIVFIndex, KeyValueInvertedIndex,
-    KeyValueStore, KeyValueVectorIndex, PersistentStorageBackend, StorageBackendResult, Value,
-    VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
+    KeyValueStore, KeyValueVectorIndex, PersistentStorageBackend, PersistentStorageIdentity,
+    StorageBackendResult, Value, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
 };
+use crate::{CatalogFacade, PersistentStorageSession};
 
 /// Persistent storage factory implemented over [`KeyValueStore`].
 #[derive(Clone)]
@@ -30,6 +31,17 @@ impl KeyValueStorageBackend {
 }
 
 impl PersistentStorageBackend for KeyValueStorageBackend {
+    fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
+        self.store.storage_identity()
+    }
+
+    fn open_session(&self) -> StorageBackendResult<PersistentStorageSession> {
+        let store = self.store.open_session()?;
+        let catalog: Arc<dyn CatalogFacade> = Arc::new(KeyValueCatalog::new(Arc::clone(&store)));
+        let backend: Arc<dyn PersistentStorageBackend> = Arc::new(Self::new(store));
+        Ok(PersistentStorageSession::new(catalog, backend))
+    }
+
     fn document_store(&self, table: &str) -> Box<dyn DocumentStore> {
         Box::new(KeyValueDocumentStore::new(Arc::clone(&self.store), table))
     }

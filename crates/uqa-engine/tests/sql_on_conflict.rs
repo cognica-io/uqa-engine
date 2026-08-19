@@ -570,3 +570,140 @@ fn conflict_update_returning_exposes_postgresql_18_row_images() {
     assert_eq!(result.rows[0].get("old_value"), Some(&Value::Int(10)));
     assert_eq!(result.rows[0].get("new_value"), Some(&Value::Int(20)));
 }
+
+#[test]
+fn conflict_update_rejects_a_second_effect_on_the_same_row_atomically() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE counters (id INTEGER PRIMARY KEY, value INTEGER); INSERT INTO counters VALUES (1, 0)",
+        &[],
+    )
+    .unwrap();
+
+    let error = eng
+        .sql(
+            "INSERT INTO counters VALUES (1, 1), (1, 2) ON CONFLICT (id) DO UPDATE SET value = EXCLUDED.value",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("21000"));
+    let rows = eng.sql("SELECT * FROM counters", &[]).unwrap();
+    assert_eq!(rows.rows.len(), 1);
+    assert_eq!(rows.rows[0]["id"], Value::Int(1));
+    assert_eq!(rows.rows[0]["value"], Value::Int(0));
+}
+
+#[test]
+fn conflict_update_rejects_a_row_inserted_earlier_even_when_its_predicate_is_false() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE counters (id INTEGER PRIMARY KEY, value INTEGER)",
+        &[],
+    )
+    .unwrap();
+
+    let error = eng
+        .sql(
+            "INSERT INTO counters VALUES (1, 1), (1, 2) ON CONFLICT (id) DO UPDATE SET value = EXCLUDED.value WHERE false",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("21000"));
+    assert!(eng
+        .sql("SELECT * FROM counters", &[])
+        .unwrap()
+        .rows
+        .is_empty());
+}
+
+#[test]
+fn conflict_update_allows_a_later_input_after_an_earlier_predicate_skips() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE counters (id INTEGER PRIMARY KEY, value INTEGER); INSERT INTO counters VALUES (1, 0)",
+        &[],
+    )
+    .unwrap();
+
+    eng.sql(
+        "INSERT INTO counters VALUES (1, 1), (1, 2) ON CONFLICT (id) DO UPDATE SET value = EXCLUDED.value WHERE EXCLUDED.value = 2",
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        eng.sql("SELECT value FROM counters", &[]).unwrap().rows[0]["value"],
+        Value::Int(2)
+    );
+}
+
+#[test]
+fn conflict_update_key_rewrite_exposes_the_freed_key_to_later_inputs() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE counters (id INTEGER PRIMARY KEY, value INTEGER); CREATE SEQUENCE conflict_eval START 1; INSERT INTO counters VALUES (1, 0)",
+        &[],
+    )
+    .unwrap();
+
+    eng.sql(
+        "INSERT INTO counters VALUES (1, 10), (1, 20) ON CONFLICT (id) DO UPDATE SET id = EXCLUDED.value, value = nextval('conflict_eval')",
+        &[],
+    )
+    .unwrap();
+    let rows = eng
+        .sql("SELECT id, value FROM counters ORDER BY id", &[])
+        .unwrap();
+    assert_eq!(rows.rows.len(), 2);
+    assert_eq!(rows.rows[0]["id"], Value::Int(1));
+    assert_eq!(rows.rows[0]["value"], Value::Int(20));
+    assert_eq!(rows.rows[1]["id"], Value::Int(10));
+    assert_eq!(rows.rows[1]["value"], Value::Int(1));
+    assert_eq!(eng.nextval("conflict_eval").unwrap(), 2);
+}
+
+#[test]
+fn insert_select_conflict_cardinality_state_is_disk_backed() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE counters (id INTEGER PRIMARY KEY, value INTEGER); CREATE TABLE incoming (seq INTEGER PRIMARY KEY, target_id INTEGER, value INTEGER); INSERT INTO incoming VALUES (1, 1, 1), (2, 1, 2); SET work_mem TO '1B'",
+        &[],
+    )
+    .unwrap();
+
+    let error = eng
+        .sql(
+            "INSERT INTO counters SELECT target_id, value FROM incoming ON CONFLICT (id) DO UPDATE SET value = EXCLUDED.value",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("21000"));
+    assert!(eng
+        .sql("SELECT * FROM counters", &[])
+        .unwrap()
+        .rows
+        .is_empty());
+}
+
+#[test]
+fn serial_identity_is_allocated_before_conflict_resolution() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE serial_conflicts (id SERIAL PRIMARY KEY, slug TEXT UNIQUE); INSERT INTO serial_conflicts (slug) VALUES ('taken')",
+        &[],
+    )
+    .unwrap();
+    let skipped = eng
+        .sql(
+            "INSERT INTO serial_conflicts (slug) VALUES ('taken') ON CONFLICT (slug) DO NOTHING RETURNING id",
+            &[],
+        )
+        .unwrap();
+    assert!(skipped.rows.is_empty());
+    let inserted = eng
+        .sql(
+            "INSERT INTO serial_conflicts (slug) VALUES ('free') RETURNING id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(inserted.rows[0]["id"], Value::Int(3));
+}

@@ -13,6 +13,48 @@ use super::{
     SQLError, StorageBackendError, StorageBackendResult, ViewRow,
 };
 
+fn bind_stored_view_relations(
+    plan: &mut QueryPlan,
+    relations: &std::collections::BTreeSet<RelationIdentity>,
+) -> StorageBackendResult<()> {
+    bind_query_plan_relations(plan, &std::collections::BTreeSet::new(), &mut |reference| {
+        if let Some(canonical) = canonical_virtual_relation_reference(reference) {
+            return Ok(canonical);
+        }
+        let (schema, local_name) =
+            RelationIdentity::parse_reference(reference).map_err(|error| {
+                StorageBackendError::Other(format!(
+                    "invalid stored view source `{reference}`: {error}"
+                ))
+            })?;
+        if let Some(schema) = schema {
+            let candidate = RelationIdentity::new(schema, local_name);
+            if relations.contains(&candidate) {
+                return Ok(candidate.qualified_name());
+            }
+        } else {
+            let candidates = relations
+                .iter()
+                .filter(|candidate| candidate.name == local_name)
+                .map(RelationIdentity::qualified_name)
+                .collect::<Vec<_>>();
+            match candidates.as_slice() {
+                [candidate] => return Ok(candidate.clone()),
+                [] => {}
+                _ => {
+                    return Err(StorageBackendError::Other(format!(
+                        "ambiguous stored view source `{reference}` matches {}",
+                        candidates.join(", ")
+                    )));
+                }
+            }
+        }
+        Err(StorageBackendError::Other(format!(
+            "stored view source relation `{reference}` does not exist"
+        )))
+    })
+}
+
 impl Engine {
     fn bind_view_plan_for_create(&self, plan: &mut QueryPlan) -> Result<(), SQLError> {
         bind_query_plan_relations(plan, &std::collections::BTreeSet::new(), &mut |reference| {
@@ -45,47 +87,13 @@ impl Engine {
         })
     }
 
+    #[cfg(test)]
     pub(super) fn bind_stored_view_plan(
         &self,
         plan: &mut QueryPlan,
         relations: &std::collections::BTreeSet<RelationIdentity>,
     ) -> StorageBackendResult<()> {
-        bind_query_plan_relations(plan, &std::collections::BTreeSet::new(), &mut |reference| {
-            if let Some(canonical) = canonical_virtual_relation_reference(reference) {
-                return Ok(canonical);
-            }
-            let (schema, local_name) =
-                RelationIdentity::parse_reference(reference).map_err(|error| {
-                    StorageBackendError::Other(format!(
-                        "invalid stored view source `{reference}`: {error}"
-                    ))
-                })?;
-            if let Some(schema) = schema {
-                let candidate = RelationIdentity::new(schema, local_name);
-                if relations.contains(&candidate) {
-                    return Ok(candidate.qualified_name());
-                }
-            } else {
-                let candidates = relations
-                    .iter()
-                    .filter(|candidate| candidate.name == local_name)
-                    .map(RelationIdentity::qualified_name)
-                    .collect::<Vec<_>>();
-                match candidates.as_slice() {
-                    [candidate] => return Ok(candidate.clone()),
-                    [] => {}
-                    _ => {
-                        return Err(StorageBackendError::Other(format!(
-                            "ambiguous stored view source `{reference}` matches {}",
-                            candidates.join(", ")
-                        )));
-                    }
-                }
-            }
-            Err(StorageBackendError::Other(format!(
-                "stored view source relation `{reference}` does not exist"
-            )))
-        })?;
+        bind_stored_view_relations(plan, relations)?;
         bind_query_plan_sequence_references(plan, &mut |reference| {
             self.resolve_stored_sequence_reference(reference)
         })
@@ -333,10 +341,15 @@ impl Engine {
         for row in rows {
             let view_name = row.relation.qualified_name();
             let mut plan = serde_json::from_str::<uqa_planner::QueryPlan>(&row.definition_json)?;
-            self.bind_stored_view_plan(&mut plan, &relations)
-                .map_err(|error| {
-                    StorageBackendError::Other(format!("restore view `{view_name}`: {error}"))
-                })?;
+            bind_stored_view_relations(&mut plan, &relations).map_err(|error| {
+                StorageBackendError::Other(format!("restore view `{view_name}`: {error}"))
+            })?;
+            bind_query_plan_sequence_references(&mut plan, &mut |reference| {
+                self.resolve_stored_sequence_reference_from_loaded_registry(reference)
+            })
+            .map_err(|error| {
+                StorageBackendError::Other(format!("restore view `{view_name}`: {error}"))
+            })?;
             views.insert(row.relation, plan);
         }
         *self.durable.views.write() = views;

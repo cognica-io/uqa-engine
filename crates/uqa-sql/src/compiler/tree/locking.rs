@@ -6,7 +6,7 @@
 
 //! `FOR UPDATE` / `FOR SHARE` compilation and `PostgreSQL` 18 validation.
 
-use super::{range_var_name, FromClause, JoinKind, Node, NodeEnum, Result, SQLError, SelectStmt};
+use super::{FromClause, JoinKind, Node, NodeEnum, Result, SQLError, SelectStmt};
 use crate::ast::{LockStrength, LockWait, LockingClause};
 
 pub(in crate::compiler) fn compile_locking_clauses(nodes: &[Node]) -> Result<Vec<LockingClause>> {
@@ -43,12 +43,17 @@ fn compile_locking_clause(node: &Node) -> Result<LockingClause> {
                 "FOR UPDATE/SHARE OF target is not a relation".into(),
             ));
         };
-        if !range.catalogname.is_empty() {
-            return Err(SQLError::Unsupported(
-                "cross-database relation references are not supported".into(),
-            ));
+        if !range.catalogname.is_empty() || !range.schemaname.is_empty() {
+            return Err(SQLError::Routine {
+                sqlstate: "42601".into(),
+                message: "FOR UPDATE must specify unqualified relation names".into(),
+            });
         }
-        relations.push(range_var_name(range));
+        // OF names identify FROM items by their visible name, exactly as
+        // written after identifier processing: an alias, or an unqualified
+        // relation name. PostgreSQL compares the raw identifier, so `OF "A"`
+        // matches the alias `"A"`; the rendered (quoted) form is not used.
+        relations.push(range.relname.clone());
     }
     Ok(LockingClause {
         strength,
@@ -62,6 +67,98 @@ pub(in crate::compiler) fn validate_select_locking(statement: &SelectStmt) -> Re
         return Ok(());
     }
     let label = statement.locking[0].strength.sql_name();
+    validate_locking_shape(statement, label)?;
+    let Some(from) = statement.from.as_ref() else {
+        return Ok(());
+    };
+    let targets = collect_lock_sources(from, false, &statement.with);
+    let defer_nullable_validation = statement.r#where.as_ref().is_some_and(|expression| {
+        expression.contains_unqualified_column()
+            || expression.contains_function_with_unknown_strictness()
+    });
+    apply_locking_targets(&statement.locking, &targets, defer_nullable_validation)
+}
+
+/// Push a query block's row marks into selected derived tables. `PostgreSQL`
+/// merges those pushed-down clauses with row marks written inside the derived
+/// query, so the strongest lock and strictest wait policy are applied before
+/// either clause can block independently.
+pub(in crate::compiler) fn propagate_select_locking(statement: &mut SelectStmt) -> Result<()> {
+    let clauses = statement.locking.clone();
+    if clauses.is_empty() {
+        return Ok(());
+    }
+    let cte_names = statement
+        .with
+        .iter()
+        .map(|cte| cte.name.clone())
+        .collect::<Vec<_>>();
+    let Some(from) = statement.from.as_mut() else {
+        return Ok(());
+    };
+    push_clauses_into_selected_subqueries(from, &clauses, &cte_names)
+}
+
+fn push_clauses_into_selected_subqueries(
+    from: &mut FromClause,
+    clauses: &[LockingClause],
+    cte_names: &[String],
+) -> Result<()> {
+    let sources =
+        collect_lock_sources_matching(from, false, &|name| cte_names.iter().any(|cte| cte == name));
+    let mut pushed = vec![Vec::new(); sources.len()];
+    for clause in clauses {
+        let selected = selected_source_indexes(clause, &sources)?;
+        for source_index in selected {
+            if matches!(sources[source_index].kind, LockSourceKind::Subquery(_)) {
+                pushed[source_index].push(LockingClause {
+                    strength: clause.strength,
+                    wait: clause.wait,
+                    relations: Vec::new(),
+                });
+            }
+        }
+    }
+    drop(sources);
+    let mut source_index = 0;
+    apply_pushed_subquery_clauses(from, &mut source_index, &mut pushed)
+}
+
+fn apply_pushed_subquery_clauses(
+    from: &mut FromClause,
+    source_index: &mut usize,
+    pushed: &mut [Vec<LockingClause>],
+) -> Result<()> {
+    match from {
+        FromClause::Join { left, right, .. } => {
+            apply_pushed_subquery_clauses(left, source_index, pushed)?;
+            apply_pushed_subquery_clauses(right, source_index, pushed)
+        }
+        FromClause::Subquery { body, .. } => {
+            let clauses = std::mem::take(&mut pushed[*source_index]);
+            *source_index += 1;
+            if clauses.is_empty() {
+                return Ok(());
+            }
+            body.locking.extend(clauses.iter().cloned());
+            let child_cte_names = body
+                .with
+                .iter()
+                .map(|cte| cte.name.clone())
+                .collect::<Vec<_>>();
+            if let Some(child_from) = body.from.as_mut() {
+                push_clauses_into_selected_subqueries(child_from, &clauses, &child_cte_names)?;
+            }
+            Ok(())
+        }
+        FromClause::Table { .. } | FromClause::Values { .. } | FromClause::Function { .. } => {
+            *source_index += 1;
+            Ok(())
+        }
+    }
+}
+
+fn validate_locking_shape(statement: &SelectStmt, label: &str) -> Result<()> {
     if statement.set_op.is_some() {
         return Err(SQLError::Unsupported(format!(
             "{label} is not allowed with UNION/INTERSECT/EXCEPT"
@@ -86,50 +183,86 @@ pub(in crate::compiler) fn validate_select_locking(statement: &SelectStmt) -> Re
         .projections
         .iter()
         .any(|projection| projection.expr.contains_window())
+        || statement
+            .order_by
+            .iter()
+            .any(|ordering| ordering.expr.contains_window())
     {
         return Err(SQLError::Unsupported(format!(
             "{label} is not allowed with window functions"
         )));
     }
-    let Some(from) = statement.from.as_ref() else {
-        return Err(SQLError::Unsupported(
-            "FOR UPDATE/SHARE cannot be applied to VALUES".into(),
-        ));
-    };
+    if statement
+        .projections
+        .iter()
+        .any(|projection| projection.expr.contains_aggregate())
+        || statement
+            .order_by
+            .iter()
+            .any(|ordering| ordering.expr.contains_aggregate())
+    {
+        return Err(SQLError::Unsupported(format!(
+            "{label} is not allowed with aggregate functions"
+        )));
+    }
     if !statement.values.is_empty() {
         return Err(SQLError::Unsupported(
             "FOR UPDATE/SHARE cannot be applied to VALUES".into(),
         ));
     }
-    let targets = collect_lock_sources(from, false);
-    apply_locking_targets(&statement.locking, &targets)
+    Ok(())
 }
 
-struct LockSource {
+struct LockSource<'a> {
     names: Vec<String>,
-    kind: LockSourceKind,
+    kind: LockSourceKind<'a>,
     nullable: bool,
 }
 
 #[derive(Clone, Copy)]
-enum LockSourceKind {
+enum LockSourceKind<'a> {
     Relation,
+    Cte,
     Values,
     Function,
-    Subquery,
+    Subquery(&'a SelectStmt),
 }
 
-fn collect_lock_sources(from: &FromClause, nullable: bool) -> Vec<LockSource> {
+fn collect_lock_sources<'a>(
+    from: &'a FromClause,
+    nullable: bool,
+    ctes: &[crate::ast::CTE],
+) -> Vec<LockSource<'a>> {
+    collect_lock_sources_matching(from, nullable, &|name| {
+        ctes.iter().any(|cte| cte.name == name)
+    })
+}
+
+fn collect_lock_sources_matching<'a>(
+    from: &'a FromClause,
+    nullable: bool,
+    is_cte: &impl Fn(&str) -> bool,
+) -> Vec<LockSource<'a>> {
     match from {
         FromClause::Table {
             name,
             qualifier,
             alias,
         } => {
-            let mut names = Vec::new();
             if let Some(alias) = alias {
+                let mut names = Vec::new();
                 push_unique(&mut names, alias);
+                return vec![LockSource {
+                    names,
+                    kind: if is_cte(name) {
+                        LockSourceKind::Cte
+                    } else {
+                        LockSourceKind::Relation
+                    },
+                    nullable,
+                }];
             }
+            let mut names = Vec::new();
             push_unique(&mut names, qualifier);
             push_unique(&mut names, name);
             if let Some((_, local)) = name.rsplit_once('.') {
@@ -137,7 +270,11 @@ fn collect_lock_sources(from: &FromClause, nullable: bool) -> Vec<LockSource> {
             }
             vec![LockSource {
                 names,
-                kind: LockSourceKind::Relation,
+                kind: if is_cte(name) {
+                    LockSourceKind::Cte
+                } else {
+                    LockSourceKind::Relation
+                },
                 nullable,
             }]
         }
@@ -150,8 +287,8 @@ fn collect_lock_sources(from: &FromClause, nullable: bool) -> Vec<LockSource> {
                 JoinKind::Full => (true, true),
                 JoinKind::Inner | JoinKind::Cross => (nullable, nullable),
             };
-            let mut sources = collect_lock_sources(left, left_nullable);
-            sources.extend(collect_lock_sources(right, right_nullable));
+            let mut sources = collect_lock_sources_matching(left, left_nullable, is_cte);
+            sources.extend(collect_lock_sources_matching(right, right_nullable, is_cte));
             sources
         }
         FromClause::Values { alias, .. } => vec![LockSource {
@@ -168,75 +305,72 @@ fn collect_lock_sources(from: &FromClause, nullable: bool) -> Vec<LockSource> {
             let mut names = Vec::new();
             if let Some(alias) = alias {
                 push_unique(&mut names, alias);
+            } else {
+                push_unique(&mut names, output_name);
+                push_unique(&mut names, name);
             }
-            push_unique(&mut names, output_name);
-            push_unique(&mut names, name);
             vec![LockSource {
                 names,
                 kind: LockSourceKind::Function,
                 nullable,
             }]
         }
-        FromClause::Subquery { alias, .. } => vec![LockSource {
+        FromClause::Subquery { body, alias, .. } => vec![LockSource {
             names: alias.iter().cloned().collect(),
-            kind: LockSourceKind::Subquery,
+            kind: LockSourceKind::Subquery(body),
             nullable,
         }],
     }
 }
 
-fn apply_locking_targets(clauses: &[LockingClause], sources: &[LockSource]) -> Result<()> {
-    let mut assigned: Vec<Option<usize>> = vec![None; sources.len()];
-    for (clause_index, clause) in clauses.iter().enumerate() {
-        let selected = if clause.relations.is_empty() {
-            (0..sources.len()).collect::<Vec<_>>()
-        } else {
-            let mut selected = Vec::new();
-            for relation in &clause.relations {
-                let matches = matching_sources(sources, relation);
-                match matches.len() {
-                    0 => {
-                        return Err(SQLError::Routine {
-                            sqlstate: "42P01".into(),
-                            message: format!(
-                                "relation \"{relation}\" in FOR UPDATE/SHARE clause not found in FROM clause"
-                            ),
-                        });
-                    }
-                    1 => selected.push(matches[0]),
-                    _ => {
-                        return Err(SQLError::Routine {
-                            sqlstate: "42702".into(),
-                            message: format!("column reference \"{relation}\" is ambiguous"),
-                        });
-                    }
-                }
-            }
-            selected
-        };
+fn apply_locking_targets(
+    clauses: &[LockingClause],
+    sources: &[LockSource<'_>],
+    defer_nullable_validation: bool,
+) -> Result<()> {
+    for clause in clauses {
+        let selected = selected_source_indexes(clause, sources)?;
         for source_index in selected {
-            if let Some(previous) = assigned[source_index] {
-                if previous != clause_index {
-                    let name = sources[source_index]
-                        .names
-                        .first()
-                        .map_or("?", String::as_str);
-                    return Err(SQLError::Routine {
-                        sqlstate: "42712".into(),
-                        message: format!(
-                            "multiple FOR UPDATE/SHARE cannot be applied to table \"{name}\""
-                        ),
-                    });
-                }
-            }
-            assigned[source_index] = Some(clause_index);
-            reject_unusable_lock_source(&sources[source_index])?;
+            reject_unusable_lock_source(&sources[source_index], clause, defer_nullable_validation)?;
         }
     }
     Ok(())
 }
 
-fn matching_sources(sources: &[LockSource], relation: &str) -> Vec<usize> {
+fn selected_source_indexes(
+    clause: &LockingClause,
+    sources: &[LockSource<'_>],
+) -> Result<Vec<usize>> {
+    if clause.relations.is_empty() {
+        return Ok(sources
+            .iter()
+            .enumerate()
+            .filter_map(|(index, source)| source.kind.implicitly_lockable().then_some(index))
+            .collect());
+    }
+    let mut selected = vec![false; sources.len()];
+    for relation in &clause.relations {
+        let matches = matching_sources(sources, relation);
+        if matches.is_empty() {
+            return Err(SQLError::Routine {
+                sqlstate: "42P01".into(),
+                message: format!(
+                    "relation \"{relation}\" in FOR UPDATE/SHARE clause not found in FROM clause"
+                ),
+            });
+        }
+        for source_index in matches {
+            selected[source_index] = true;
+        }
+    }
+    Ok(selected
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, selected)| selected.then_some(index))
+        .collect())
+}
+
+fn matching_sources(sources: &[LockSource<'_>], relation: &str) -> Vec<usize> {
     sources
         .iter()
         .enumerate()
@@ -250,20 +384,52 @@ fn matching_sources(sources: &[LockSource], relation: &str) -> Vec<usize> {
         .collect()
 }
 
-fn reject_unusable_lock_source(source: &LockSource) -> Result<()> {
-    if source.nullable {
-        return Err(SQLError::Unsupported(
-            "FOR UPDATE cannot be applied to the nullable side of an outer join".into(),
-        ));
-    }
+fn reject_unusable_lock_source(
+    source: &LockSource<'_>,
+    clause: &LockingClause,
+    defer_nullable_validation: bool,
+) -> Result<()> {
     match source.kind {
-        LockSourceKind::Values => Err(SQLError::Unsupported(
-            "FOR UPDATE/SHARE cannot be applied to VALUES".into(),
-        )),
+        LockSourceKind::Cte => Err(SQLError::Unsupported(format!(
+            "{} cannot be applied to a WITH query",
+            clause.strength.sql_name()
+        ))),
+        LockSourceKind::Values => Ok(()),
         LockSourceKind::Function => Err(SQLError::Unsupported(
             "FOR UPDATE/SHARE cannot be applied to a function".into(),
         )),
-        LockSourceKind::Relation | LockSourceKind::Subquery => Ok(()),
+        LockSourceKind::Relation => {
+            if source.nullable && !defer_nullable_validation {
+                return Err(SQLError::Unsupported(format!(
+                    "{} cannot be applied to the nullable side of an outer join",
+                    clause.strength.sql_name()
+                )));
+            }
+            Ok(())
+        }
+        LockSourceKind::Subquery(statement) => {
+            validate_locking_shape(statement, clause.strength.sql_name())?;
+            let Some(from) = statement.from.as_ref() else {
+                return Ok(());
+            };
+            let sources = collect_lock_sources(
+                from,
+                source.nullable && !defer_nullable_validation,
+                &statement.with,
+            );
+            let pushed = LockingClause {
+                strength: clause.strength,
+                wait: clause.wait,
+                relations: Vec::new(),
+            };
+            apply_locking_targets(&[pushed], &sources, false)
+        }
+    }
+}
+
+impl LockSourceKind<'_> {
+    fn implicitly_lockable(self) -> bool {
+        matches!(self, Self::Relation | Self::Subquery(_))
     }
 }
 

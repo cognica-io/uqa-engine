@@ -17,6 +17,8 @@ use crate::spill::format::spill_error;
 
 use super::MAX_VALUE_DEPTH;
 
+const ROW_METADATA_LOCK_ORIGINS: u64 = 1;
+
 pub(crate) fn decode_batch(record: &[u8]) -> ExecResult<Batch> {
     let mut reader = BinaryReader::new(record);
     let physical_width = reader.read_count("schema physical width", 1)?;
@@ -60,12 +62,19 @@ pub(crate) fn decode_batch(record: &[u8]) -> ExecResult<Batch> {
     let schema =
         RowSchema::from_physical_layout(columns, identities, types, slots, physical_width, aliases)
             .map_err(|error| spill_error(format!("invalid spill schema: {error}")))?;
+    let row_metadata = reader.read_u64("row metadata flags")?;
+    if row_metadata & !ROW_METADATA_LOCK_ORIGINS != 0 {
+        return Err(spill_error(format!(
+            "unsupported row metadata flags {row_metadata:#x}"
+        )));
+    }
+    let has_lock_origins = row_metadata & ROW_METADATA_LOCK_ORIGINS != 0;
     let row_count = reader.read_count("batch row count", 8)?;
     let mut rows = Vec::new();
     rows.try_reserve_exact(row_count)
         .map_err(|error| spill_error(format!("cannot allocate spill rows: {error}")))?;
     for _ in 0..row_count {
-        rows.push(reader.read_row(physical_width)?);
+        rows.push(reader.read_row(physical_width, has_lock_origins)?);
     }
     reader.finish("spill batch")?;
     Ok(Batch::from_physical_rows(schema, rows))
@@ -76,7 +85,10 @@ pub(crate) fn decode_physical_row_record(
     physical_width: usize,
 ) -> ExecResult<PhysicalRow> {
     let mut reader = BinaryReader::new(record);
-    let row = reader.read_row(physical_width)?;
+    let mut row = reader.read_row(physical_width, false)?;
+    if reader.remaining() != 0 {
+        row = row.with_lock_origins(reader.read_lock_origins()?);
+    }
     reader.finish("indexed spill row")?;
     Ok(row)
 }
@@ -196,7 +208,11 @@ impl<'a> BinaryReader<'a> {
         Ok(Some(slot))
     }
 
-    fn read_row(&mut self, expected_values: usize) -> ExecResult<PhysicalRow> {
+    fn read_row(
+        &mut self,
+        expected_values: usize,
+        has_lock_origins: bool,
+    ) -> ExecResult<PhysicalRow> {
         let value_count = self.read_count("row value count", 1)?;
         if value_count != expected_values {
             return Err(spill_error(format!(
@@ -210,15 +226,32 @@ impl<'a> BinaryReader<'a> {
         for _ in 0..value_count {
             values.push(self.read_value(0)?);
         }
-        let origin_count = self.read_count("lock origin count", 0)?;
-        let mut origins = Vec::with_capacity(origin_count);
+        let row = PhysicalRow::from_values(values);
+        if !has_lock_origins {
+            return Ok(row);
+        }
+        Ok(row.with_lock_origins(self.read_lock_origins()?))
+    }
+
+    fn read_lock_origins(&mut self) -> ExecResult<Vec<crate::RowLockOrigin>> {
+        let origin_count = self.read_count("lock origin count", 32)?;
+        let mut origins = Vec::new();
+        origins
+            .try_reserve_exact(origin_count)
+            .map_err(|error| spill_error(format!("cannot allocate lock origins: {error}")))?;
         for _ in 0..origin_count {
             let qualifier = self.read_string("lock origin qualifier")?;
+            let scan_qualifier = self.read_string("lock origin scan qualifier")?;
             let storage_name = self.read_string("lock origin storage")?;
             let doc_id = self.read_u64("lock origin doc id")?;
-            origins.push(crate::RowLockOrigin::new(qualifier, storage_name, doc_id));
+            origins.push(crate::RowLockOrigin {
+                qualifier: std::sync::Arc::from(qualifier),
+                scan_qualifier: std::sync::Arc::from(scan_qualifier),
+                storage_name: std::sync::Arc::from(storage_name),
+                doc_id,
+            });
         }
-        Ok(PhysicalRow::from_values(values).with_lock_origins(origins))
+        Ok(origins)
     }
 
     fn read_value(&mut self, depth: usize) -> ExecResult<Value> {

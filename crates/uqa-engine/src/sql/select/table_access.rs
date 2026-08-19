@@ -170,6 +170,23 @@ pub(in crate::sql) fn run_single_table_select_output(
             scored.retain_top_scores_with_ties(top_k);
         }
     }
+    let lock_origin = if ctes.emit_lock_identities {
+        let storage_name = engine
+            .try_resolve_table_name(table)
+            .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
+            .unwrap_or_else(|| table.to_string());
+        Some((
+            std::sync::Arc::<str>::from(qualifier),
+            std::sync::Arc::<str>::from(storage_name),
+        ))
+    } else {
+        None
+    };
+    let recheck_pins = lock_origin
+        .as_ref()
+        .and_then(|(origin_qualifier, storage_name)| {
+            ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
+        });
     let source = ScoredDocumentSource::new(
         table,
         table_state,
@@ -179,7 +196,8 @@ pub(in crate::sql) fn run_single_table_select_output(
         pushed_predicate,
     )
     .with_qualifier(qualifier)
-    .with_lock_origin(Some((qualifier.to_string(), table.to_string())));
+    .with_lock_origin(lock_origin)
+    .with_recheck_pins(recheck_pins);
     let source: Box<dyn uqa_execution::PhysicalOperator + '_> =
         Box::new(uqa_execution::TableScan::new(Box::new(source)));
     let columns = expand_from_star_columns(

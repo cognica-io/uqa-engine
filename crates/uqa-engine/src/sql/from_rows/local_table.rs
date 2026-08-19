@@ -8,7 +8,7 @@
 
 use super::{
     attach_qualifier_filter, build_info_schema_rows, build_table_function_row_stream,
-    build_values_rows, combine_filters, decide_join_sides, execute_query_plan_output,
+    build_values_physical_rows, combine_filters, decide_join_sides, execute_query_plan_output,
     execute_view_plan_output_with_parent_cache, has_filters_for_qualifier,
     is_score_provenance_column, join_conjuncts, join_using_predicate,
     multi_unnest_internal_columns, null_row_for_schema, physical_work_mem_bytes,
@@ -22,11 +22,15 @@ use super::{
     TableFunctionCall, Value,
 };
 
-use crate::sql::select::bind_source_plan_schema;
+use crate::sql::select::{
+    apply_propagated_view_lock, bind_source_plan_schema, materialize_plan_ctes, resolve_row_locks,
+};
 use crate::sql::virtual_relation_schema;
+use std::sync::Arc;
 use uqa_planner::{AccessPathPlan, ComputePlan, RelationalPlan};
 
 type StreamingLocalTableScan<'a> = (Box<dyn uqa_execution::PhysicalOperator + 'a>, bool);
+type SharedLockOrigin = (Arc<str>, Arc<str>);
 
 pub(in crate::sql) struct EngineTableRowSource {
     table_name: String,
@@ -38,7 +42,28 @@ pub(in crate::sql) struct EngineTableRowSource {
     predicate: Option<uqa_execution::ProjectedPredicate>,
     estimated_cardinality: u64,
     after: Option<uqa_core::DocId>,
-    lock_origin: Option<(String, String)>,
+    lock_origin: Option<SharedLockOrigin>,
+    recheck_pins: Option<Arc<Vec<crate::sql::select::RecheckDoc>>>,
+    recheck_cursor: usize,
+}
+
+fn table_lock_origin(
+    engine: &Engine,
+    table: &str,
+    qualifier: &str,
+    enabled: bool,
+) -> Result<Option<SharedLockOrigin>, SQLError> {
+    if !enabled {
+        return Ok(None);
+    }
+    let storage_name = engine
+        .try_resolve_table_name(table)
+        .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
+        .unwrap_or_else(|| table.to_string());
+    Ok(Some((
+        Arc::<str>::from(qualifier),
+        Arc::<str>::from(storage_name),
+    )))
 }
 
 impl EngineTableRowSource {
@@ -48,6 +73,9 @@ impl EngineTableRowSource {
     ) -> uqa_execution::ExecResult<Vec<uqa_execution::PhysicalRow>> {
         if max_rows == 0 {
             return Ok(Vec::new());
+        }
+        if self.recheck_pins.is_some() {
+            return self.next_pinned_physical_rows_batch(max_rows);
         }
         if crate::engine_generated::projection_contains_virtual_generated_column(
             &self.column_definitions,
@@ -205,6 +233,66 @@ impl EngineTableRowSource {
         Ok(rows)
     }
 
+    /// Emit exactly the candidate tuples pinned for a tuple-local row-lock
+    /// recheck: the latest committed image for a changed tuple, or the
+    /// statement-snapshot image for an unchanged join partner. Pushed
+    /// predicates re-apply to the substituted values, matching `PostgreSQL`'s
+    /// `EvalPlanQual` scan behavior for marked relations.
+    fn next_pinned_physical_rows_batch(
+        &mut self,
+        max_rows: usize,
+    ) -> uqa_execution::ExecResult<Vec<uqa_execution::PhysicalRow>> {
+        let Some(pins) = self.recheck_pins.as_ref() else {
+            return Err(
+                SQLError::Internal("row-lock recheck scan has no pinned tuples".into()).into(),
+            );
+        };
+        let pins = Arc::clone(pins);
+        let store = self.table.document_store.read();
+        let mut rows = Vec::with_capacity(max_rows.min(pins.len()));
+        while rows.len() < max_rows && self.recheck_cursor < pins.len() {
+            let pin = &pins[self.recheck_cursor];
+            self.recheck_cursor += 1;
+            let mut document = if let Some(document) = pin.document.as_ref() {
+                (**document).clone()
+            } else {
+                let Some(document) = store.get(pin.doc_id).map_err(|error| {
+                    SQLError::Internal(format!(
+                        "read pinned recheck row from `{}`: {error}",
+                        self.table_name
+                    ))
+                })?
+                else {
+                    continue;
+                };
+                document
+            };
+            crate::engine_generated::materialize_projected_virtual_generated_columns(
+                &self.column_definitions,
+                &mut document,
+                &self.columns,
+            )?;
+            let values = self
+                .columns
+                .iter()
+                .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
+                .collect::<Vec<_>>();
+            let value_refs = values.iter().collect::<Vec<_>>();
+            if let Some(predicate) = self.predicate.as_ref() {
+                if !predicate.keep(&value_refs)? {
+                    continue;
+                }
+            }
+            rows.push(
+                self.with_lock_identity(
+                    uqa_execution::PhysicalRow::from_values(values),
+                    pin.doc_id,
+                )?,
+            );
+        }
+        Ok(rows)
+    }
+
     fn next_virtual_physical_rows_batch(
         &mut self,
         max_rows: usize,
@@ -271,11 +359,13 @@ impl EngineTableRowSource {
         let Some((qualifier, storage_name)) = self.lock_origin.as_ref() else {
             return Ok(row);
         };
-        Ok(row.with_lock_origin(uqa_execution::RowLockOrigin::new(
-            qualifier.clone(),
-            storage_name.clone(),
-            doc_id,
-        )))
+        Ok(
+            row.with_lock_origin(uqa_execution::RowLockOrigin::from_shared(
+                std::sync::Arc::clone(qualifier),
+                std::sync::Arc::clone(storage_name),
+                doc_id,
+            )),
+        )
     }
 }
 
@@ -353,13 +443,13 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
             .collect();
         let scan: Box<dyn uqa_execution::PhysicalOperator + 'a> =
             Box::new(uqa_execution::SharedSpillScan::new(materialized));
-        return Ok(Some((
-            Box::new(
-                uqa_execution::ColumnSelection::with_identities(scan, mapping)
-                    .rebinding_lock_origins(qualifier),
-            ),
-            false,
-        )));
+        let selection = uqa_execution::ColumnSelection::with_identities(scan, mapping);
+        let selection = if ctes.emit_lock_identities {
+            selection.rebinding_lock_origins(qualifier)
+        } else {
+            selection
+        };
+        return Ok(Some((Box::new(selection), false)));
     }
     if engine.view_plan(name)?.is_some()
         || engine
@@ -401,7 +491,7 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
                 .map(|definition| definition.ty.clone())
         })
         .collect::<Vec<_>>();
-    let lock_origin = Some((qualifier.clone(), name.clone()));
+    let lock_origin = table_lock_origin(engine, name, &qualifier, ctes.emit_lock_identities)?;
     let physical_schema =
         uqa_execution::RowSchema::with_qualified_types(&qualifier, schema.clone(), column_types);
     let predicate = qualifier_filter(filters, &qualifier)
@@ -415,6 +505,11 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         .transpose()?
         .flatten();
     let filter_pushed = predicate.is_some();
+    let recheck_pins = lock_origin
+        .as_ref()
+        .and_then(|(origin_qualifier, storage_name)| {
+            ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
+        });
     let source = EngineTableRowSource {
         table_name: name.clone(),
         table,
@@ -426,6 +521,8 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         estimated_cardinality: engine.table_doc_count(name)?,
         after: None,
         lock_origin,
+        recheck_pins,
+        recheck_cursor: 0,
     };
     Ok(Some((
         Box::new(uqa_execution::TableScan::new(Box::new(source))),
@@ -445,7 +542,62 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
     prune: Option<&ColumnPrune>,
     filters: Option<&QualifierFilters>,
 ) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
+    build_join_operator_with_ctes_at_path(engine, from, params, ctes, prune, filters, None)
+}
+
+pub(in crate::sql) fn build_join_operator_with_recheck_pins<'a>(
+    engine: &'a Engine,
+    from: &SourcePlan,
+    params: &'a [SQLParam],
+    ctes: &mut CteScope,
+    prune: Option<&ColumnPrune>,
+    filters: Option<&QualifierFilters>,
+) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
+    build_join_operator_with_ctes_at_path(
+        engine,
+        from,
+        params,
+        ctes,
+        prune,
+        filters,
+        Some(Vec::new()),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_join_operator_with_ctes_at_path<'a>(
+    engine: &'a Engine,
+    from: &SourcePlan,
+    params: &'a [SQLParam],
+    ctes: &mut CteScope,
+    prune: Option<&ColumnPrune>,
+    filters: Option<&QualifierFilters>,
+    recheck_path: Option<Vec<u8>>,
+) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
     use uqa_execution::{HashJoin, LateralJoin, NestedLoopJoin, PhysicalOperator};
+
+    if let Some(source) = recheck_path
+        .as_deref()
+        .and_then(|path| ctes.recheck_source_row(path))
+    {
+        let scan: Box<dyn PhysicalOperator + 'a> = Box::new(
+            uqa_execution::TableScan::from_physical_rows(source.schema, vec![source.row]),
+        );
+        if matches!(from, SourcePlan::Values { .. })
+            || qualifier_filter(filters, &source.qualifier)
+                .is_some_and(|predicate| uqa_planner::optimizer::contains_retrieval(&predicate))
+        {
+            return Ok(scan);
+        }
+        return Ok(attach_qualifier_filter(
+            scan,
+            &source.qualifier,
+            filters,
+            engine,
+            params,
+            ctes,
+        ));
+    }
 
     match from {
         SourcePlan::Table {
@@ -457,13 +609,58 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             if let Some(materialized) = ctes.rows.get(name).cloned() {
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(uqa_execution::SharedSpillScan::new(materialized));
-                let operator = qualify_source_operator(scan, &qualifier, prune);
+                let operator =
+                    qualify_source_operator(scan, &qualifier, prune, ctes.emit_lock_identities);
+                return Ok(attach_qualifier_filter(
+                    operator, &qualifier, filters, engine, params, ctes,
+                ));
+            }
+
+            if let Some(plan) = ctes.remove_deferred(name) {
+                let streamed = {
+                    let mut scoped_ctes = ctes.enter_lock_identity_emission(false);
+                    try_build_streaming_subquery_operator(
+                        engine,
+                        &plan.query,
+                        params,
+                        &mut scoped_ctes,
+                    )?
+                };
+                if let Some(operator) = streamed {
+                    let source_columns = operator.schema().to_vec();
+                    let operator = qualify_source_operator_with_columns(
+                        operator,
+                        &source_columns,
+                        &qualifier,
+                        prune,
+                        &plan.columns,
+                        false,
+                    );
+                    return Ok(attach_qualifier_filter(
+                        operator, &qualifier, filters, engine, params, ctes,
+                    ));
+                }
+                materialize_plan_ctes(engine, std::slice::from_ref(&plan), params, ctes)?;
+                let materialized = ctes.rows.get(name).cloned().ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "deferred CTE `{name}` did not produce a materialized input"
+                    ))
+                })?;
+                let scan: Box<dyn PhysicalOperator + 'a> =
+                    Box::new(uqa_execution::SharedSpillScan::new(materialized));
+                let operator = qualify_source_operator(scan, &qualifier, prune, false);
                 return Ok(attach_qualifier_filter(
                     operator, &qualifier, filters, engine, params, ctes,
                 ));
             }
 
             if let Some(plan) = engine.view_plan(name)? {
+                let inherited_lock = ctes.source_row_lock_for_view(&qualifier, name);
+                // During a tuple-local recheck, a view named as the lock
+                // target pins every base scan of its storage inside this
+                // subtree to the candidate's tuples.
+                let mut recheck_scope = ctes.enter_recheck_storage_pins(&qualifier);
+                let ctes: &mut CteScope = &mut recheck_scope;
                 let specialized_plan = filters
                     .and_then(|filters| filters.get(&qualifier))
                     .filter(|filters| !filters.is_empty())
@@ -473,10 +670,34 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                     })
                     .transpose()?
                     .flatten();
-                let execution_plan = specialized_plan.as_ref().unwrap_or(&plan);
+                let propagated_plan = inherited_lock.as_ref().map(|target| {
+                    let mut plan = specialized_plan.clone().unwrap_or_else(|| plan.clone());
+                    apply_propagated_view_lock(&mut plan, target);
+                    plan
+                });
+                let execution_plan = propagated_plan
+                    .as_ref()
+                    .or(specialized_plan.as_ref())
+                    .unwrap_or(&plan);
+                if let Some(operator) =
+                    try_build_streaming_subquery_operator(engine, execution_plan, params, ctes)?
+                {
+                    let source_columns = operator.schema().to_vec();
+                    let operator = qualify_source_operator_with_columns(
+                        operator,
+                        &source_columns,
+                        &qualifier,
+                        prune,
+                        &[],
+                        ctes.emit_lock_identities,
+                    );
+                    return Ok(attach_qualifier_filter(
+                        operator, &qualifier, filters, engine, params, ctes,
+                    ));
+                }
                 let local_cte_names = query_cte_names(execution_plan);
                 let is_volatile = query_contains_volatile_function(engine, execution_plan)?;
-                let output = if is_volatile {
+                let output = if is_volatile || propagated_plan.is_some() {
                     let mut scoped = ctes.clone();
                     execute_query_plan_output(
                         engine,
@@ -496,13 +717,16 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                 };
                 let columns = output.internal_columns.clone();
                 let shared = query_output_shared(output, "view")?;
-                if !is_volatile && specialized_plan.is_none() {
-                    ctes.insert_shared(name.clone(), shared.clone());
-                }
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(uqa_execution::SharedSpillScan::new(shared));
-                let operator =
-                    qualify_source_operator_with_columns(scan, &columns, &qualifier, prune, &[]);
+                let operator = qualify_source_operator_with_columns(
+                    scan,
+                    &columns,
+                    &qualifier,
+                    prune,
+                    &[],
+                    ctes.emit_lock_identities,
+                );
                 return Ok(attach_qualifier_filter(
                     operator, &qualifier, filters, engine, params, ctes,
                 ));
@@ -521,8 +745,14 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                 let scan: Box<dyn PhysicalOperator + 'a> = Box::new(
                     uqa_execution::TableScan::from_typed_rows(columns.clone(), types, rows),
                 );
-                let operator =
-                    qualify_source_operator_with_columns(scan, &columns, &qualifier, prune, &[]);
+                let operator = qualify_source_operator_with_columns(
+                    scan,
+                    &columns,
+                    &qualifier,
+                    prune,
+                    &[],
+                    ctes.emit_lock_identities,
+                );
                 return Ok(attach_qualifier_filter(
                     operator, &qualifier, filters, engine, params, ctes,
                 ));
@@ -553,8 +783,14 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                                 .map_err(uqa_execution::ExecError::from)
                         })),
                     ));
-                let operator =
-                    qualify_source_operator_with_columns(scan, &columns, &qualifier, prune, &[]);
+                let operator = qualify_source_operator_with_columns(
+                    scan,
+                    &columns,
+                    &qualifier,
+                    prune,
+                    &[],
+                    ctes.emit_lock_identities,
+                );
                 return Ok(attach_qualifier_filter(
                     operator, &qualifier, filters, engine, params, ctes,
                 ));
@@ -563,12 +799,28 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             if let Some(predicate) = qualifier_filter(filters, &qualifier)
                 .filter(uqa_planner::optimizer::contains_retrieval)
             {
-                let entries = crate::operator_tree_bridge::run_optimised(
-                    engine,
-                    name,
-                    Some(&predicate),
-                    params,
-                )?
+                let lock_origin =
+                    table_lock_origin(engine, name, &qualifier, ctes.emit_lock_identities)?;
+                let recheck_pins =
+                    lock_origin
+                        .as_ref()
+                        .and_then(|(origin_qualifier, storage_name)| {
+                            ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
+                        });
+                // A tuple-local recheck judges the substituted committed
+                // images with the retrieval predicate re-executed against the
+                // latest committed index state, not this session's pinned
+                // snapshot.
+                let entries = if recheck_pins.is_some() {
+                    engine.committed_retrieval_entries(name, &predicate, params)?
+                } else {
+                    crate::operator_tree_bridge::run_optimised(
+                        engine,
+                        name,
+                        Some(&predicate),
+                        params,
+                    )?
+                }
                 .ok_or_else(|| {
                     SQLError::Unsupported(format!(
                         "JOIN filter retrieval predicate for `{qualifier}` cannot be represented by the shared operator IR"
@@ -585,10 +837,17 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                     columns,
                     None,
                     None,
-                );
+                )
+                .with_lock_origin(lock_origin)
+                .with_recheck_pins(recheck_pins);
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(uqa_execution::TableScan::new(Box::new(source)));
-                return Ok(qualify_source_operator(scan, &qualifier, prune));
+                return Ok(qualify_source_operator(
+                    scan,
+                    &qualifier,
+                    prune,
+                    ctes.emit_lock_identities,
+                ));
             }
 
             let Some((operator, filter_pushed)) =
@@ -616,11 +875,28 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             lateral,
             strategy,
         } => {
+            let left_recheck_path = recheck_path.as_ref().map(|path| {
+                let mut path = path.clone();
+                path.push(0);
+                path
+            });
+            let right_recheck_path = recheck_path.as_ref().map(|path| {
+                let mut path = path.clone();
+                path.push(1);
+                path
+            });
             let left_filters = filters
                 .and_then(|filters| propagated_join_filters(filters, right, left, on.as_ref()));
             let left_filter_ref = left_filters.as_ref().or(filters);
-            let left_operator =
-                build_join_operator_with_ctes(engine, left, params, ctes, prune, left_filter_ref)?;
+            let left_operator = build_join_operator_with_ctes_at_path(
+                engine,
+                left,
+                params,
+                ctes,
+                prune,
+                left_filter_ref,
+                left_recheck_path,
+            )?;
             let implicit_lateral_function = match right.as_ref() {
                 SourcePlan::Function { name, .. } => {
                     let identity = name.to_ascii_lowercase();
@@ -646,6 +922,19 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                     .as_ref()
                     .and_then(|using| join_using_predicate(using, &left_schema, &right_schema))
                     .or_else(|| on.clone());
+                let pinned_right = right_recheck_path
+                    .as_deref()
+                    .and_then(|path| ctes.recheck_source_row(path))
+                    .map(|source| {
+                        source
+                            .schema
+                            .relayout_physical_row(source.row, &right_schema)
+                            .map(|row| {
+                                uqa_execution::OwnedPhysicalRow::new(right_schema.clone(), row)
+                            })
+                            .map_err(crate::sql::select::physical_exec_error)
+                    })
+                    .transpose()?;
                 let source = EngineLateralSource {
                     engine,
                     right: (**right).clone(),
@@ -653,6 +942,7 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                     params,
                     ctes: ctes.clone(),
                     right_schema: right_schema.clone(),
+                    pinned_right,
                 };
                 let joined: Box<dyn PhysicalOperator + 'a> =
                     Box::new(LateralJoin::new_with_right_schema(
@@ -673,13 +963,14 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             let right_filters = filters
                 .and_then(|filters| propagated_join_filters(filters, left, right, on.as_ref()));
             let right_filter_ref = right_filters.as_ref().or(filters);
-            let right_operator = build_join_operator_with_ctes(
+            let right_operator = build_join_operator_with_ctes_at_path(
                 engine,
                 right,
                 params,
                 ctes,
                 prune,
                 right_filter_ref,
+                right_recheck_path,
             )?;
 
             let left_schema = left_operator.row_schema().clone();
@@ -798,19 +1089,17 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             let hook = ScopedEngineHook::new(engine, ctes);
             let context =
                 SourceEvalContext::new(engine, params, &hook, &hook, &ctes.scalar_subqueries);
-            let rows = build_values_rows(&context, rows, column_aliases, &column_types)?;
+            let rows = build_values_physical_rows(&context, rows, &column_types)?;
+            let schema = uqa_execution::RowSchema::with_types(source_columns.clone(), column_types);
             let operator: Box<dyn uqa_execution::PhysicalOperator + 'a> =
-                Box::new(uqa_execution::TableScan::from_typed_rows(
-                    source_columns.clone(),
-                    column_types,
-                    rows,
-                ));
+                Box::new(uqa_execution::TableScan::from_physical_rows(schema, rows));
             Ok(qualify_source_operator_with_columns(
                 operator,
                 &source_columns,
                 alias.as_deref().unwrap_or_default(),
                 prune,
                 &[],
+                ctes.emit_lock_identities,
             ))
         }
         SourcePlan::Function {
@@ -928,6 +1217,7 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                 qualifier,
                 prune,
                 &[],
+                ctes.emit_lock_identities,
             );
             Ok(attach_qualifier_filter(
                 operator, qualifier, filters, engine, params, ctes,
@@ -938,6 +1228,12 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             alias,
             column_aliases,
         } => {
+            // During a tuple-local recheck, a derived table named as the lock
+            // target pins every base scan of its storage inside this subtree
+            // to the candidate's tuples.
+            let visible_qualifier = alias.clone().unwrap_or_default();
+            let mut recheck_scope = ctes.enter_recheck_storage_pins(&visible_qualifier);
+            let ctes: &mut CteScope = &mut recheck_scope;
             if let Some(operator) =
                 try_build_streaming_subquery_operator(engine, body, params, ctes)?
             {
@@ -949,6 +1245,7 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                     qualifier,
                     prune,
                     column_aliases,
+                    ctes.emit_lock_identities,
                 );
                 return Ok(attach_qualifier_filter(
                     operator, qualifier, filters, engine, params, ctes,
@@ -971,6 +1268,7 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                 qualifier,
                 prune,
                 column_aliases,
+                ctes.emit_lock_identities,
             );
             Ok(attach_qualifier_filter(
                 operator, qualifier, filters, engine, params, ctes,
@@ -979,10 +1277,7 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
     }
 }
 
-/// Build a single-consumer derived-table projection as a pull pipeline. These
-/// query blocks have no relational feature that requires repeatability, so a
-/// `SharedSpill` boundary would only serialize and read the same physical rows
-/// once before the parent operator consumes them.
+/// Build a single-consumer derived-table projection as a pull pipeline. Blocking operators inside the query block retain their own bounded state, but a second `SharedSpill` boundary would eagerly exhaust that pipeline before the parent can apply demand such as `LIMIT`.
 fn try_build_streaming_subquery_operator<'a>(
     engine: &'a Engine,
     body: &uqa_planner::QueryPlan,
@@ -995,19 +1290,21 @@ fn try_build_streaming_subquery_operator<'a>(
     let RelationalPlan::QueryBlock(block) = &body.root else {
         return Ok(None);
     };
+    // A block whose qualification calls a registered retrieval function
+    // (text_match, knn_match, graph_traverse, rpq, ...) executes it through
+    // the operator-tree bridge of the single-table executor; the residual
+    // scalar filter of a streamed block cannot evaluate such calls. Plain
+    // comparisons keep streaming so an outer LIMIT still bounds locking
+    // demand inside the derived table.
     if !matches!(block.compute, ComputePlan::Project)
-        || !matches!(block.access, AccessPathPlan::Row)
+        || matches!(block.access, AccessPathPlan::Hybrid)
+        || block
+            .r#where
+            .as_ref()
+            .is_some_and(uqa_planner::optimizer::contains_retrieval)
         || block.from.is_none()
-        || !block.subqueries.is_empty()
-        || !block.order_by.is_empty()
-        || block.limit.is_some()
-        || block.offset.is_some()
         || block.distinct
         || !block.distinct_on.is_empty()
-        || block
-            .projections
-            .iter()
-            .any(|projection| matches!(projection.expr, ScalarExpr::Star))
     {
         return Ok(None);
     }
@@ -1016,35 +1313,70 @@ fn try_build_streaming_subquery_operator<'a>(
         .from
         .as_ref()
         .expect("derived-table FROM checked above");
-    let column_prune = crate::sql::select::column_prune_for_stmt(engine, block, from);
-    let qualifier_filters = crate::sql::select::qualifier_filters_for_stmt(engine, block, from);
-    let mut operator = build_join_operator_with_ctes(
-        engine,
-        from,
-        params,
-        ctes,
-        column_prune.as_ref(),
-        qualifier_filters.as_ref(),
-    )?;
-    let residual = crate::sql::select::final_filter_after_qualifier_pushdown(
-        engine,
-        block,
-        from,
-        qualifier_filters.as_ref(),
-    );
-    let evaluator = EngineExpressionEvaluator::shared(engine, params, ctes);
-    if let Some(predicate) = residual {
-        operator = Box::new(uqa_execution::Filter::with_evaluator(
-            operator,
-            predicate,
-            std::sync::Arc::clone(&evaluator),
-        ));
+    // The block's scalar subqueries live in their own arena for the whole
+    // pull pipeline: the evaluators built below snapshot this scope, so a
+    // derived table with subqueries still streams and an outer LIMIT keeps
+    // its inner locking demand-driven.
+    let mut ctes = ctes.enter_scalar_subqueries(&block.subqueries);
+    let ctes: &mut CteScope = &mut ctes;
+    let source_schema = bind_source_plan_schema(engine, from, params, ctes, None)?;
+    let projections = crate::sql::select::physical_projections(&block.projections);
+    if crate::sql::select::projections_may_return_set(engine, &projections, &source_schema, params)?
+    {
+        return Ok(None);
     }
-    let mut projections = crate::sql::select::physical_projections(&block.projections);
-    crate::sql::select::append_score_provenance_projections(&mut projections, operator.schema());
-    Ok(Some(Box::new(uqa_execution::Project::with_evaluator(
-        operator,
-        projections,
-        evaluator,
-    ))))
+    let (_, order_output) =
+        crate::sql::select::order_projection(&block.projections, &source_schema)?;
+    for order in &block.order_by {
+        let expression = crate::sql::select::resolve_order_expression(&order.expr, &order_output)?;
+        if crate::sql::select::expression_may_return_set(
+            engine,
+            &expression,
+            &source_schema,
+            params,
+        )? {
+            return Ok(None);
+        }
+    }
+
+    let emit_lock_identities = ctes.emit_lock_identities || !block.locking.is_empty();
+    let previous_emit = std::mem::replace(&mut ctes.emit_lock_identities, emit_lock_identities);
+    let previous_retain =
+        std::mem::replace(&mut ctes.retain_lock_identities_after_lock, previous_emit);
+    let result = (|| {
+        let column_prune = crate::sql::select::column_prune_for_stmt(engine, block, from);
+        let qualifier_filters = crate::sql::select::qualifier_filters_for_stmt(engine, block, from);
+        let source_row_locks = resolve_row_locks(
+            engine,
+            from,
+            &block.locking,
+            block.r#where.as_ref(),
+            params,
+            ctes,
+        )?;
+        let operator = {
+            let mut scoped_ctes = ctes.enter_source_row_locks(source_row_locks);
+            build_join_operator_with_ctes(
+                engine,
+                from,
+                params,
+                &mut scoped_ctes,
+                column_prune.as_ref(),
+                qualifier_filters.as_ref(),
+            )?
+        };
+        let residual = crate::sql::select::final_filter_after_qualifier_pushdown(
+            engine,
+            block,
+            from,
+            qualifier_filters.as_ref(),
+        );
+        let operator = crate::sql::select::build_relational_operator(
+            engine, operator, residual, block, params, ctes,
+        )?;
+        Ok(Some(operator))
+    })();
+    ctes.emit_lock_identities = previous_emit;
+    ctes.retain_lock_identities_after_lock = previous_retain;
+    result
 }

@@ -29,6 +29,7 @@ type ProjectionStarColumn = (String, Option<ColumnType>);
 #[derive(Default)]
 struct SchemaScope {
     ctes: BTreeMap<String, RowSchema>,
+    deferred_ctes: BTreeMap<String, uqa_planner::CtePlan>,
     visiting_views: BTreeSet<String>,
 }
 
@@ -40,6 +41,7 @@ impl SchemaScope {
                 .iter()
                 .map(|(name, rows)| (name.clone(), rows.row_schema().clone()))
                 .collect(),
+            deferred_ctes: ctes.deferred_ctes().clone(),
             visiting_views: BTreeSet::new(),
         }
     }
@@ -291,6 +293,13 @@ impl SchemaScope {
                 let qualifier = alias.as_deref().unwrap_or(qualifier);
                 if let Some(schema) = self.ctes.get(name) {
                     return Ok(rename_schema(schema, &[], Some(qualifier)));
+                }
+                if let Some(plan) = self.deferred_ctes.remove(name) {
+                    let result = self
+                        .bind_query(engine, &plan.query, params, outer)
+                        .map(|schema| rename_schema(&schema, &plan.columns, Some(qualifier)));
+                    self.deferred_ctes.insert(name.clone(), plan);
+                    return result;
                 }
                 if let Some(plan) = engine.view_plan(name)? {
                     let key = name.to_ascii_lowercase();

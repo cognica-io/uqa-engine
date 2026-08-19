@@ -13,6 +13,22 @@ use super::{
     StorageBackendResult,
 };
 
+struct BackendSessionProvider {
+    backend: Arc<dyn PersistentStorageBackend>,
+}
+
+impl PersistentStorageProvider for BackendSessionProvider {
+    fn open_session(&self) -> StorageBackendResult<PersistentStorageSession> {
+        self.backend.open_session()
+    }
+
+    fn storage_identity(
+        &self,
+    ) -> StorageBackendResult<Option<uqa_storage::PersistentStorageIdentity>> {
+        self.backend.storage_identity()
+    }
+}
+
 impl Engine {
     pub fn open(path: &Path) -> Result<Self, SQLiteError> {
         let conn = ManagedConnection::open(path)?;
@@ -184,22 +200,40 @@ impl Engine {
 
     /// Build an engine and retain the provider used to create future
     /// independent sessions.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn from_persistent_provider(
         provider: Arc<dyn PersistentStorageProvider>,
     ) -> StorageBackendResult<Self> {
+        let identity = provider.storage_identity()?;
         let session = provider.open_session()?;
-        Self::from_persistent_session(session, Some(provider))
+        let mut engine = Self::from_persistent_session(session, Some(Arc::clone(&provider)))?;
+        let row_locks = crate::row_locks::shared_provider_manager(identity, &provider);
+        engine.session_id = row_locks.allocate_session();
+        engine.row_locks = row_locks;
+        Ok(engine)
     }
 
     /// Build an engine from already-open persistent metadata and data
-    /// backends. This lower-level entry point does not retain a provider, so
-    /// the resulting engine cannot create independent sessions. Prefer
-    /// [`Self::from_persistent_provider`] when a backend has a session factory.
+    /// backends. The backend's session factory is retained for independent
+    /// SQL sessions and latest-committed row-lock rechecks. Prefer
+    /// [`Self::from_persistent_provider`] when a database-level owner is
+    /// already available.
     pub fn from_persistent_backends(
         catalog: Arc<dyn uqa_storage::CatalogFacade>,
         backend: Arc<dyn PersistentStorageBackend>,
     ) -> StorageBackendResult<Self> {
-        Self::from_persistent_session(PersistentStorageSession::new(catalog, backend), None)
+        let identity = backend.storage_identity()?;
+        let row_locks = crate::row_locks::shared_backend_manager(identity, &backend);
+        let provider: Arc<dyn PersistentStorageProvider> = Arc::new(BackendSessionProvider {
+            backend: Arc::clone(&backend),
+        });
+        let mut engine = Self::from_persistent_session(
+            PersistentStorageSession::new(catalog, backend),
+            Some(provider),
+        )?;
+        engine.session_id = row_locks.allocate_session();
+        engine.row_locks = row_locks;
+        Ok(engine)
     }
 
     fn from_persistent_session(

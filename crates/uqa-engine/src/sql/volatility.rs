@@ -135,6 +135,20 @@ pub(super) fn function_volatility(
 }
 
 pub(super) fn expr_contains_volatile_function(engine: &Engine, expr: &ScalarExpr) -> bool {
+    expr_contains_volatile_function_with(engine, expr, true)
+}
+
+/// Query-level walks inspect a block's subquery plans themselves, so their
+/// expression scan treats a subquery reference as opaque-but-inspected
+/// (`conservative_subqueries == false`) instead of assuming volatility.
+fn expr_contains_volatile_function_with(
+    engine: &Engine,
+    expr: &ScalarExpr,
+    conservative_subqueries: bool,
+) -> bool {
+    let recurse = |inner: &ScalarExpr| {
+        expr_contains_volatile_function_with(engine, inner, conservative_subqueries)
+    };
     match expr {
         ScalarExpr::Func {
             name,
@@ -144,57 +158,36 @@ pub(super) fn expr_contains_volatile_function(engine: &Engine, expr: &ScalarExpr
             ..
         } => {
             function_volatility(engine, name, args.len()) == FunctionVolatility::Volatile
-                || args
-                    .iter()
-                    .any(|expr| expr_contains_volatile_function(engine, expr))
-                || order_by
-                    .iter()
-                    .any(|order| expr_contains_volatile_function(engine, &order.expr))
-                || filter
-                    .as_ref()
-                    .is_some_and(|expr| expr_contains_volatile_function(engine, expr))
+                || args.iter().any(recurse)
+                || order_by.iter().any(|order| recurse(&order.expr))
+                || filter.as_ref().is_some_and(|expr| recurse(expr))
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
         | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => items
-            .iter()
-            .any(|expr| expr_contains_volatile_function(engine, expr)),
-        ScalarExpr::Binary { lhs, rhs, .. } => {
-            expr_contains_volatile_function(engine, lhs)
-                || expr_contains_volatile_function(engine, rhs)
-        }
+        | ScalarExpr::Or(items) => items.iter().any(recurse),
+        ScalarExpr::Binary { lhs, rhs, .. } => recurse(lhs) || recurse(rhs),
         ScalarExpr::Not(inner)
         | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => expr_contains_volatile_function(engine, inner),
-        ScalarExpr::Between { expr, low, high } => {
-            expr_contains_volatile_function(engine, expr)
-                || expr_contains_volatile_function(engine, low)
-                || expr_contains_volatile_function(engine, high)
-        }
-        ScalarExpr::InList { expr, list, .. } => {
-            expr_contains_volatile_function(engine, expr)
-                || list
-                    .iter()
-                    .any(|item| expr_contains_volatile_function(engine, item))
-        }
+        | ScalarExpr::Cast { expr: inner, .. } => recurse(inner),
+        ScalarExpr::Between { expr, low, high } => recurse(expr) || recurse(low) || recurse(high),
+        ScalarExpr::InList { expr, list, .. } => recurse(expr) || list.iter().any(recurse),
         ScalarExpr::WindowCall { name, args, spec } => {
             function_volatility(engine, name, args.len()) == FunctionVolatility::Volatile
-                || args
-                    .iter()
-                    .any(|expr| expr_contains_volatile_function(engine, expr))
-                || spec
-                    .partition_by
-                    .iter()
-                    .any(|expr| expr_contains_volatile_function(engine, expr))
-                || spec
-                    .order_by
-                    .iter()
-                    .any(|order| expr_contains_volatile_function(engine, &order.expr))
+                || args.iter().any(recurse)
+                || spec.partition_by.iter().any(recurse)
+                || spec.order_by.iter().any(|order| recurse(&order.expr))
                 || spec.frame.as_ref().is_some_and(|frame| {
-                    frame_bound_contains_volatile_function(engine, &frame.start)
-                        || frame_bound_contains_volatile_function(engine, &frame.end)
+                    frame_bound_contains_volatile_function_with(
+                        engine,
+                        &frame.start,
+                        conservative_subqueries,
+                    ) || frame_bound_contains_volatile_function_with(
+                        engine,
+                        &frame.end,
+                        conservative_subqueries,
+                    )
                 })
         }
         ScalarExpr::Case {
@@ -202,22 +195,17 @@ pub(super) fn expr_contains_volatile_function(engine: &Engine, expr: &ScalarExpr
             when,
             else_branch,
         } => {
-            base.as_ref()
-                .is_some_and(|expr| expr_contains_volatile_function(engine, expr))
-                || when.iter().any(|(condition, result)| {
-                    expr_contains_volatile_function(engine, condition)
-                        || expr_contains_volatile_function(engine, result)
-                })
-                || else_branch
-                    .as_ref()
-                    .is_some_and(|expr| expr_contains_volatile_function(engine, expr))
+            base.as_ref().is_some_and(|expr| recurse(expr))
+                || when
+                    .iter()
+                    .any(|(condition, result)| recurse(condition) || recurse(result))
+                || else_branch.as_ref().is_some_and(|expr| recurse(expr))
         }
         // Query-valued children are inspected by the enclosing `QueryPlan`.
         // At expression-only rewrite sites, retaining the conservative rule
         // prevents an opaque child query from being duplicated or reordered.
-        ScalarExpr::ScalarSubquery(_)
-        | ScalarExpr::Exists { .. }
-        | ScalarExpr::InSubquery { .. } => true,
+        ScalarExpr::ScalarSubquery(_) | ScalarExpr::Exists { .. } => conservative_subqueries,
+        ScalarExpr::InSubquery { expr, .. } => conservative_subqueries || recurse(expr),
         ScalarExpr::Default
         | ScalarExpr::Star
         | ScalarExpr::QualifiedStar(_)
@@ -229,10 +217,14 @@ pub(super) fn expr_contains_volatile_function(engine: &Engine, expr: &ScalarExpr
     }
 }
 
-fn frame_bound_contains_volatile_function(engine: &Engine, bound: &ScalarFrameBound) -> bool {
+fn frame_bound_contains_volatile_function_with(
+    engine: &Engine,
+    bound: &ScalarFrameBound,
+    conservative_subqueries: bool,
+) -> bool {
     match bound {
         ScalarFrameBound::Preceding(expr) | ScalarFrameBound::Following(expr) => {
-            expr_contains_volatile_function(engine, expr)
+            expr_contains_volatile_function_with(engine, expr, conservative_subqueries)
         }
         ScalarFrameBound::UnboundedPreceding
         | ScalarFrameBound::UnboundedFollowing
@@ -240,43 +232,45 @@ fn frame_bound_contains_volatile_function(engine: &Engine, bound: &ScalarFrameBo
     }
 }
 
+/// The block's own subquery plans are inspected separately by the query-level
+/// walk, so subquery references here are not conservatively volatile.
 pub(super) fn select_contains_volatile_function(engine: &Engine, block: &QueryBlockPlan) -> bool {
     block
         .projections
         .iter()
-        .any(|projection| expr_contains_volatile_function(engine, &projection.expr))
+        .any(|projection| expr_contains_volatile_function_with(engine, &projection.expr, false))
         || block
             .r#where
             .as_ref()
-            .is_some_and(|expr| expr_contains_volatile_function(engine, expr))
+            .is_some_and(|expr| expr_contains_volatile_function_with(engine, expr, false))
         || block
             .group_by
             .iter()
-            .any(|expr| expr_contains_volatile_function(engine, expr))
+            .any(|expr| expr_contains_volatile_function_with(engine, expr, false))
         || block.grouping_sets.iter().any(|set| {
             set.iter()
-                .any(|expr| expr_contains_volatile_function(engine, expr))
+                .any(|expr| expr_contains_volatile_function_with(engine, expr, false))
         })
         || block
             .having
             .as_ref()
-            .is_some_and(|expr| expr_contains_volatile_function(engine, expr))
+            .is_some_and(|expr| expr_contains_volatile_function_with(engine, expr, false))
         || block
             .order_by
             .iter()
-            .any(|order| expr_contains_volatile_function(engine, &order.expr))
+            .any(|order| expr_contains_volatile_function_with(engine, &order.expr, false))
         || block
             .limit
             .as_ref()
-            .is_some_and(|expr| expr_contains_volatile_function(engine, expr))
+            .is_some_and(|expr| expr_contains_volatile_function_with(engine, expr, false))
         || block
             .offset
             .as_ref()
-            .is_some_and(|expr| expr_contains_volatile_function(engine, expr))
+            .is_some_and(|expr| expr_contains_volatile_function_with(engine, expr, false))
         || block
             .distinct_on
             .iter()
-            .any(|expr| expr_contains_volatile_function(engine, expr))
+            .any(|expr| expr_contains_volatile_function_with(engine, expr, false))
 }
 
 /// Inspect a complete query, including transitive view dependencies.

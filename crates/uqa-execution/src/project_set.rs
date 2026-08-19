@@ -9,7 +9,7 @@
 use uqa_sql::ResultRow;
 
 use crate::batch::DEFAULT_BATCH_SIZE;
-use crate::{Batch, ExecResult, PhysicalOperator, RowSchema};
+use crate::{Batch, ExecResult, OwnedPhysicalRow, PhysicalOperator, PhysicalRow, RowSchema};
 
 /// Owned row stream produced for one input row.
 ///
@@ -123,11 +123,119 @@ impl PhysicalOperator for ProjectSet<'_> {
     }
 }
 
+/// Owned physical row stream produced for one input row without materializing named maps.
+pub type PhysicalProjectRows = Box<dyn Iterator<Item = ExecResult<PhysicalRow>> + Send>;
+
+/// Engine seam for set-returning projections that keep rows in their physical layout.
+pub trait PhysicalSetProjector: Send {
+    fn project(&mut self, row: OwnedPhysicalRow) -> ExecResult<PhysicalProjectRows>;
+}
+
+impl<F> PhysicalSetProjector for F
+where
+    F: FnMut(OwnedPhysicalRow) -> ExecResult<PhysicalProjectRows> + Send,
+{
+    fn project(&mut self, row: OwnedPhysicalRow) -> ExecResult<PhysicalProjectRows> {
+        self(row)
+    }
+}
+
+/// Pulls physical input rows and expands each without crossing the named-row materialization boundary.
+pub struct PhysicalProjectSet<'a> {
+    child: Box<dyn PhysicalOperator + 'a>,
+    projector: Box<dyn PhysicalSetProjector + 'a>,
+    schema: RowSchema,
+    input: std::vec::IntoIter<OwnedPhysicalRow>,
+    projected: Option<PhysicalProjectRows>,
+    exhausted: bool,
+}
+
+impl<'a> PhysicalProjectSet<'a> {
+    pub fn new(
+        child: Box<dyn PhysicalOperator + 'a>,
+        schema: RowSchema,
+        projector: Box<dyn PhysicalSetProjector + 'a>,
+    ) -> Self {
+        Self {
+            child,
+            projector,
+            schema,
+            input: Vec::new().into_iter(),
+            projected: None,
+            exhausted: false,
+        }
+    }
+
+    fn next_input(&mut self) -> ExecResult<Option<OwnedPhysicalRow>> {
+        loop {
+            if let Some(row) = self.input.next() {
+                return Ok(Some(row));
+            }
+            let Some(batch) = self.child.next()? else {
+                return Ok(None);
+            };
+            self.input = batch.into_owned_rows().into_iter();
+        }
+    }
+}
+
+impl PhysicalOperator for PhysicalProjectSet<'_> {
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
+    }
+
+    fn open(&mut self) -> ExecResult<()> {
+        self.input = Vec::new().into_iter();
+        self.projected = None;
+        self.exhausted = false;
+        self.child.open()
+    }
+
+    fn next(&mut self) -> ExecResult<Option<Batch>> {
+        if self.exhausted && self.projected.is_none() {
+            return Ok(None);
+        }
+
+        let mut rows = Vec::with_capacity(DEFAULT_BATCH_SIZE);
+        while rows.len() < DEFAULT_BATCH_SIZE {
+            if let Some(projected) = self.projected.as_mut() {
+                match projected.next() {
+                    Some(row) => {
+                        rows.push(row?);
+                        continue;
+                    }
+                    None => self.projected = None,
+                }
+            }
+
+            match self.next_input()? {
+                Some(row) => self.projected = Some(self.projector.project(row)?),
+                None => {
+                    self.exhausted = true;
+                    break;
+                }
+            }
+        }
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)))
+    }
+
+    fn close(&mut self) -> ExecResult<()> {
+        self.input = Vec::new().into_iter();
+        self.projected = None;
+        self.exhausted = true;
+        self.child.close()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::physical::run_to_rows;
     use crate::scan::TableScan;
+    use crate::{RowLockOrigin, RowProjectionValue};
     use uqa_core::Value;
 
     #[test]
@@ -189,5 +297,36 @@ mod tests {
         project.open().unwrap();
         let error = project.next().unwrap_err();
         assert!(error.to_string().contains("injected projector failure"));
+    }
+
+    #[test]
+    fn physical_projection_preserves_row_lineage_without_named_materialization() {
+        let input_schema = RowSchema::new(vec!["unused".into(), "value".into()]);
+        let input_row = PhysicalRow::from_values(vec![
+            Value::Str("unused payload".repeat(64)),
+            Value::Str("shared value".repeat(64)),
+        ])
+        .with_lock_origin(RowLockOrigin::new("source", "public.source", 7));
+        let child = TableScan::from_physical_rows(input_schema, vec![input_row]);
+        let projector = |row: OwnedPhysicalRow| -> ExecResult<PhysicalProjectRows> {
+            let slot = row.schema.physical_slot(1).unwrap();
+            Ok(Box::new(std::iter::once(Ok(row.row.project_with_values(
+                [RowProjectionValue::InputSlot(slot)],
+            )))))
+        };
+        let output_schema = RowSchema::new(vec!["value".into()]);
+        let mut project =
+            PhysicalProjectSet::new(Box::new(child), output_schema.clone(), Box::new(projector));
+
+        project.open().unwrap();
+        let output = project.next().unwrap().unwrap();
+        assert_eq!(output.rows.len(), 1);
+        assert_eq!(
+            output_schema.view(&output.rows[0]).value_at(0),
+            Some(&Value::Str("shared value".repeat(64)))
+        );
+        assert_eq!(output.rows[0].lock_origins()[0].doc_id, 7);
+        assert!(project.next().unwrap().is_none());
+        project.close().unwrap();
     }
 }
