@@ -6,14 +6,12 @@
 
 use serde::{Deserialize, Serialize};
 
-/// One `PostgreSQL` row-locking clause, including optional `OF` targets
-/// and the `NOWAIT` / `SKIP LOCKED` wait policy.
+/// One `PostgreSQL` row-locking clause, including optional `OF` targets and the `NOWAIT` / `SKIP LOCKED` wait policy.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LockingClause {
     pub strength: LockStrength,
     pub wait: LockWait,
-    /// Relation names from `OF t [, ...]`. Empty means every lockable
-    /// relation in the query block.
+    /// Relation names from `OF t [, ...]`. Empty means every lockable relation in the query block.
     pub relations: Vec<String>,
 }
 

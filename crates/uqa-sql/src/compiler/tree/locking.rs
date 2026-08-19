@@ -49,10 +49,7 @@ fn compile_locking_clause(node: &Node) -> Result<LockingClause> {
                 message: "FOR UPDATE must specify unqualified relation names".into(),
             });
         }
-        // OF names identify FROM items by their visible name, exactly as
-        // written after identifier processing: an alias, or an unqualified
-        // relation name. PostgreSQL compares the raw identifier, so `OF "A"`
-        // matches the alias `"A"`; the rendered (quoted) form is not used.
+        // OF names identify FROM items by their visible name, exactly as written after identifier processing: an alias, or an unqualified relation name. PostgreSQL compares the raw identifier, so `OF "A"` matches the alias `"A"`; the rendered (quoted) form is not used.
         relations.push(range.relname.clone());
     }
     Ok(LockingClause {
@@ -79,10 +76,7 @@ pub(in crate::compiler) fn validate_select_locking(statement: &SelectStmt) -> Re
     apply_locking_targets(&statement.locking, &targets, defer_nullable_validation)
 }
 
-/// Push a query block's row marks into selected derived tables. `PostgreSQL`
-/// merges those pushed-down clauses with row marks written inside the derived
-/// query, so the strongest lock and strictest wait policy are applied before
-/// either clause can block independently.
+/// Push a query block's row marks into selected derived tables. `PostgreSQL` merges those pushed-down clauses with row marks written inside the derived query, so the strongest lock and strictest wait policy are applied before either clause can block independently.
 pub(in crate::compiler) fn propagate_select_locking(statement: &mut SelectStmt) -> Result<()> {
     let clauses = statement.locking.clone();
     if clauses.is_empty() {

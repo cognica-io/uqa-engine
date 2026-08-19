@@ -317,13 +317,7 @@ impl ScoredDocumentSource {
         self
     }
 
-    /// Pin this scan to a tuple-local recheck candidate's tuples. A ranked
-    /// input (retrieval predicate) was re-executed against the latest index
-    /// state when the recheck rebuilt the scan, so a pinned tuple survives
-    /// only if the retrieval still matches it, exactly like `PostgreSQL`
-    /// re-evaluating the WHERE clause on the substituted tuple; its score is
-    /// the re-executed retrieval score. A plain scan input keeps every pinned
-    /// tuple and lets the residual predicates decide.
+    /// Pin this scan to a tuple-local recheck candidate's tuples. A ranked input (retrieval predicate) was re-executed against the latest index state when the recheck rebuilt the scan, so a pinned tuple survives only if the retrieval still matches it, exactly like `PostgreSQL` re-evaluating the WHERE clause on the substituted tuple; its score is the re-executed retrieval score. A plain scan input keeps every pinned tuple and lets the residual predicates decide.
     pub(in crate::sql) fn with_recheck_pins(mut self, pins: Option<Arc<Vec<RecheckDoc>>>) -> Self {
         let Some(pins) = pins else {
             return self;
@@ -350,6 +344,12 @@ impl ScoredDocumentSource {
                 }),
             })
             .collect::<Vec<_>>();
+        if !entries
+            .windows(2)
+            .all(|pair| pair[0].doc_id <= pair[1].doc_id)
+        {
+            self.ordering.clear();
+        }
         self.recheck_documents = pins
             .iter()
             .filter_map(|pin| {
@@ -380,21 +380,6 @@ impl ScoredDocumentSource {
             score_origin: self.score_origin,
             columns: self.hidden_columns,
         }
-    }
-
-    pub(super) fn attach_lock_origin(
-        &self,
-        row: uqa_execution::PhysicalRow,
-        doc_id: DocId,
-    ) -> uqa_execution::PhysicalRow {
-        let Some((qualifier, storage_name)) = self.lock_origin.as_ref() else {
-            return row;
-        };
-        row.with_lock_origin(uqa_execution::RowLockOrigin::from_shared(
-            Arc::clone(qualifier),
-            Arc::clone(storage_name),
-            doc_id,
-        ))
     }
 
     fn next_entries(&mut self, max_rows: usize) -> Result<Vec<ScoredEntry>, SQLError> {
@@ -592,6 +577,38 @@ mod tests {
     }
 
     #[test]
+    fn recheck_pins_clear_primary_key_ordering_when_their_order_is_not_ascending() {
+        let engine = crate::Engine::new();
+        engine
+            .sql(
+                "CREATE TABLE pinned_order (id BIGINT PRIMARY KEY, payload TEXT)",
+                &[],
+            )
+            .unwrap();
+        let table = engine.require_table("pinned_order").unwrap();
+        let source = ScoredDocumentSource::new(
+            "pinned_order",
+            table,
+            ScoredInput::All,
+            vec!["id".into()],
+            Some("id".into()),
+            None,
+        )
+        .with_recheck_pins(Some(Arc::new(vec![
+            RecheckDoc {
+                doc_id: 2,
+                document: None,
+            },
+            RecheckDoc {
+                doc_id: 1,
+                document: None,
+            },
+        ])));
+
+        assert!(source.output_ordering().is_empty());
+    }
+
+    #[test]
     fn store_cursor_materializes_empty_projection_without_losing_rows() {
         let engine = crate::Engine::new();
         engine
@@ -650,5 +667,38 @@ mod tests {
             schema.view(&rows[0]).qualified_column("a", "id"),
             Some(&Value::Int(7))
         );
+    }
+
+    #[test]
+    fn locking_physical_cursor_attaches_the_requested_origin() {
+        let engine = crate::Engine::new();
+        engine
+            .sql("CREATE TABLE locking_source (id BIGINT PRIMARY KEY)", &[])
+            .unwrap();
+        engine
+            .sql("INSERT INTO locking_source (id) VALUES (7)", &[])
+            .unwrap();
+        let table = engine.require_table("locking_source").unwrap();
+        let mut source = ScoredDocumentSource::new(
+            "locking_source",
+            table,
+            ScoredInput::All,
+            vec!["id".into()],
+            Some("id".into()),
+            None,
+        )
+        .with_qualifier("l")
+        .with_lock_origin(Some((Arc::from("l"), Arc::from("locking_source"))));
+
+        let rows = source.next_physical_batch(16).unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].lock_origins().len(), 1);
+        assert_eq!(rows[0].lock_origins()[0].qualifier.as_ref(), "l");
+        assert_eq!(
+            rows[0].lock_origins()[0].storage_name.as_ref(),
+            "locking_source"
+        );
+        assert_eq!(rows[0].lock_origins()[0].doc_id, 7);
     }
 }

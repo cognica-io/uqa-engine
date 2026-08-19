@@ -6,16 +6,17 @@
 
 //! INSERT conflict resolution, identity extraction, and RETURNING assembly.
 
+use std::sync::Arc;
+
 use super::{
     bind_projection_output_schema, build_projection_physical_row_with_ctes, decode_prepared_doc_id,
     decode_prepared_document_rewrite, dml_append_hidden_qualified_row, dml_storage_error,
     dml_target_row, doc_id_value, encode_prepared_doc_id, encode_prepared_document_rewrite,
     eval_mutation_assignment, eval_mutation_expr, key_constraint_values,
     lock_document_key_dependencies, lock_mutation_target, missing_document_error,
-    prepare_document_rewrite, rewrite_document_with_referential_actions, update_lock_strength,
-    BTreeMap, BTreeSet, ConflictActionPlan, ConflictPlan, CteScope, DocId, Document, Engine,
-    MutationAssignmentTarget, MutationLockTarget, PreparedDocumentRewrite, ProjectionPlan,
-    SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN,
+    prepare_document_rewrite, update_lock_strength, BTreeMap, BTreeSet, ConflictActionPlan,
+    ConflictPlan, CteScope, DocId, Document, Engine, MutationAssignmentTarget, MutationLockTarget,
+    PreparedDocumentRewrite, ProjectionPlan, SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN,
 };
 use rusqlite::OptionalExtension;
 use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema};
@@ -26,12 +27,17 @@ enum CurrentInsertConflict {
     Base(DocId),
 }
 
-/// Disk-backed view of rows inserted or rewritten earlier by the same INSERT
-/// command. `PostgreSQL` resolves `ON CONFLICT` inputs sequentially: a key moved
-/// away by an earlier update becomes insertable, while a later `DO UPDATE` that
-/// reaches a row already inserted or updated by the command raises 21000.
-/// Keeping the exact key index in a temporary `SQLite` database preserves those
-/// semantics without retaining a cardinality-sized map above `work_mem`.
+pub(in crate::sql) struct InsertConflictPreparation<'a> {
+    pub(in crate::sql) engine: &'a Engine,
+    pub(in crate::sql) table: &'a str,
+    pub(in crate::sql) target_qualifier: &'a str,
+    pub(in crate::sql) on_conflict: &'a ConflictPlan,
+    pub(in crate::sql) document: &'a Document,
+    pub(in crate::sql) params: &'a [SQLParam],
+    pub(in crate::sql) scope: &'a CteScope,
+}
+
+/// Disk-backed view of rows inserted or rewritten earlier by the same INSERT command. `PostgreSQL` resolves `ON CONFLICT` inputs sequentially: a key moved away by an earlier update becomes insertable, while a later `DO UPDATE` that reaches a row already inserted or updated by the command raises 21000. Keeping the exact key index in a temporary `SQLite` database preserves those semantics without retaining a cardinality-sized map above `work_mem`.
 struct InsertConflictOverlay {
     connection: rusqlite::Connection,
     _directory: tempfile::TempDir,
@@ -279,17 +285,6 @@ pub(in crate::sql) fn find_insert_conflict(
     Ok(None)
 }
 
-pub(in crate::sql) enum InsertConflictResolution {
-    Insert,
-    Skip,
-    Updated {
-        old_doc_id: DocId,
-        doc_id: DocId,
-        old_document: Document,
-        document: Document,
-    },
-}
-
 pub(in crate::sql) enum PreparedInsertConflict {
     Unresolved,
     Insert { doc_id: DocId, supplied: bool },
@@ -453,116 +448,27 @@ fn build_conflict_update(
     })
 }
 
-pub(in crate::sql) fn resolve_insert_conflict(
-    engine: &Engine,
-    table: &str,
-    target_qualifier: &str,
-    on_conflict: &ConflictPlan,
-    document: &Document,
-    params: &[SQLParam],
-    scope: &CteScope,
-) -> Result<InsertConflictResolution, SQLError> {
-    let Some(existing_id) = find_insert_conflict(engine, table, on_conflict, document)? else {
-        return Ok(InsertConflictResolution::Insert);
-    };
-    match &on_conflict.action {
-        ConflictActionPlan::Nothing => {
-            // PostgreSQL 18 waits for the transaction that owns the
-            // conflicting tuple before deciding: if that transaction deletes
-            // the tuple and commits, the insert proceeds instead of skipping.
-            // A key-share lock is the weakest strength that conflicts with
-            // the deleter's tuple lock without blocking other readers.
-            let mut transient = TransientConflictLocks::new(engine);
-            transient.lock(table, target_qualifier, existing_id)?;
-            engine.refresh_explicit_statement_snapshot()?;
-            if find_insert_conflict(engine, table, on_conflict, document)?.is_none() {
-                return Ok(InsertConflictResolution::Insert);
-            }
-            Ok(InsertConflictResolution::Skip)
-        }
-        ConflictActionPlan::Update {
-            assignments,
-            predicate,
-        } => {
-            // Follow a primary-key rewrite the conflicting row's owner
-            // committed while this statement waited, exactly like
-            // PostgreSQL follows the update chain to the live tuple.
-            let target = lock_mutation_target(
-                engine,
-                table,
-                target_qualifier,
-                existing_id,
-                update_lock_strength(
-                    engine,
-                    table,
-                    &assignments
-                        .iter()
-                        .map(|assignment| assignment.column.clone())
-                        .collect::<Vec<_>>(),
-                ),
-            )?;
-            let MutationLockTarget::Present {
-                doc_id: existing_id,
-                ..
-            } = target
-            else {
-                return Ok(InsertConflictResolution::Insert);
-            };
-            engine.refresh_explicit_statement_snapshot()?;
-            if find_insert_conflict(engine, table, on_conflict, document)? != Some(existing_id) {
-                return Ok(InsertConflictResolution::Insert);
-            }
-            match build_conflict_update(
-                engine,
-                table,
-                target_qualifier,
-                existing_id,
-                document,
-                assignments,
-                predicate.as_ref(),
-                params,
-                scope,
-            )? {
-                BuiltConflictUpdate::Skip => Ok(InsertConflictResolution::Skip),
-                BuiltConflictUpdate::Update {
-                    old_document,
-                    mut new_document,
-                } => {
-                    let rewritten_doc_id = rewrite_document_with_referential_actions(
-                        engine,
-                        table,
-                        existing_id,
-                        &old_document,
-                        &mut new_document,
-                        params,
-                    )?;
-                    Ok(InsertConflictResolution::Updated {
-                        old_doc_id: existing_id,
-                        doc_id: rewritten_doc_id,
-                        old_document,
-                        document: new_document,
-                    })
-                }
-            }
-        }
-    }
-}
-
-struct TransientConflictLocks<'engine> {
-    engine: &'engine Engine,
+struct TransientConflictLocks {
+    manager: Arc<crate::row_locks::RowLockManager>,
     acquisitions: Vec<crate::row_locks::RowLockAcquisition>,
 }
 
-impl<'engine> TransientConflictLocks<'engine> {
-    fn new(engine: &'engine Engine) -> Self {
+impl TransientConflictLocks {
+    fn new(engine: &Engine) -> Self {
         Self {
-            engine,
+            manager: Arc::clone(&engine.row_locks),
             acquisitions: Vec::new(),
         }
     }
 
-    fn lock(&mut self, table: &str, display_name: &str, doc_id: DocId) -> Result<bool, SQLError> {
-        match self.engine.lock_row(
+    fn lock(
+        &mut self,
+        engine: &Engine,
+        table: &str,
+        display_name: &str,
+        doc_id: DocId,
+    ) -> Result<bool, SQLError> {
+        match engine.lock_row(
             table,
             doc_id,
             uqa_sql::ast::LockStrength::ForKeyShare,
@@ -584,19 +490,14 @@ impl<'engine> TransientConflictLocks<'engine> {
     }
 }
 
-/// Locks every currently visible ON CONFLICT dependency for an INSERT input
-/// set while the storage transaction is still a reader. DO NOTHING locks are
-/// retained only until writer promotion; DO UPDATE target locks keep their
-/// normal transaction lifetime. Once the single backend writer is held no
-/// concurrent transaction can create a new physical conflict and make the
-/// execution phase wait behind a tuple owner.
-pub(in crate::sql) struct InsertConflictLocks<'engine> {
-    transient: TransientConflictLocks<'engine>,
+/// Locks every currently visible ON CONFLICT dependency for an INSERT input set while the storage transaction is still a reader. DO NOTHING locks are retained only until writer promotion; DO UPDATE target locks keep their normal transaction lifetime. Once the single backend writer is held no concurrent transaction can create a new physical conflict and make the execution phase wait behind a tuple owner.
+pub(in crate::sql) struct InsertConflictLocks {
+    transient: TransientConflictLocks,
     overlay: Option<InsertConflictOverlay>,
 }
 
-impl<'engine> InsertConflictLocks<'engine> {
-    pub(in crate::sql) fn new(engine: &'engine Engine) -> Self {
+impl InsertConflictLocks {
+    pub(in crate::sql) fn new(engine: &Engine) -> Self {
         Self {
             transient: TransientConflictLocks::new(engine),
             overlay: None,
@@ -605,30 +506,31 @@ impl<'engine> InsertConflictLocks<'engine> {
 
     pub(in crate::sql) fn lock_document(
         &mut self,
+        engine: &Engine,
         table: &str,
         target_qualifier: &str,
         on_conflict: &ConflictPlan,
         document: &Document,
     ) -> Result<(), SQLError> {
         for _ in 0..=64 {
-            let Some(existing_id) =
-                find_insert_conflict(self.transient.engine, table, on_conflict, document)?
+            let Some(existing_id) = find_insert_conflict(engine, table, on_conflict, document)?
             else {
                 return Ok(());
             };
             let (locked_id, recheck) = match &on_conflict.action {
                 ConflictActionPlan::Nothing => (
                     existing_id,
-                    self.transient.lock(table, target_qualifier, existing_id)?,
+                    self.transient
+                        .lock(engine, table, target_qualifier, existing_id)?,
                 ),
                 ConflictActionPlan::Update { assignments, .. } => {
                     match lock_mutation_target(
-                        self.transient.engine,
+                        engine,
                         table,
                         target_qualifier,
                         existing_id,
                         update_lock_strength(
-                            self.transient.engine,
+                            engine,
                             table,
                             &assignments
                                 .iter()
@@ -638,22 +540,16 @@ impl<'engine> InsertConflictLocks<'engine> {
                     )? {
                         MutationLockTarget::Present { doc_id, recheck } => (doc_id, recheck),
                         MutationLockTarget::Deleted => {
-                            self.transient
-                                .engine
-                                .refresh_explicit_statement_snapshot()?;
+                            engine.refresh_explicit_statement_snapshot()?;
                             continue;
                         }
                     }
                 }
             };
             if recheck {
-                self.transient
-                    .engine
-                    .refresh_explicit_statement_snapshot()?;
+                engine.refresh_explicit_statement_snapshot()?;
             }
-            if find_insert_conflict(self.transient.engine, table, on_conflict, document)?
-                == Some(locked_id)
-            {
+            if find_insert_conflict(engine, table, on_conflict, document)? == Some(locked_id) {
                 return Ok(());
             }
         }
@@ -664,27 +560,26 @@ impl<'engine> InsertConflictLocks<'engine> {
 
     pub(in crate::sql) fn prepare_document(
         &mut self,
-        table: &str,
-        target_qualifier: &str,
-        on_conflict: &ConflictPlan,
-        document: &Document,
-        params: &[SQLParam],
-        scope: &CteScope,
+        preparation: InsertConflictPreparation<'_>,
     ) -> Result<PreparedInsertConflict, SQLError> {
-        let key_acquisitions =
-            lock_document_key_dependencies(self.transient.engine, table, document, None)?;
+        let InsertConflictPreparation {
+            engine,
+            table,
+            target_qualifier,
+            on_conflict,
+            document,
+            params,
+            scope,
+        } = preparation;
+        let key_acquisitions = lock_document_key_dependencies(engine, table, document, None)?;
         if self.overlay.is_none() {
-            self.overlay = Some(InsertConflictOverlay::new(
-                self.transient.engine,
-                table,
-                on_conflict,
-            )?);
+            self.overlay = Some(InsertConflictOverlay::new(engine, table, on_conflict)?);
         }
         let current = self
             .overlay
             .as_ref()
             .ok_or_else(|| SQLError::Internal("INSERT conflict overlay is absent".into()))?
-            .find(self.transient.engine, table, document)?;
+            .find(engine, table, document)?;
         match current {
             None => {
                 self.overlay
@@ -694,7 +589,7 @@ impl<'engine> InsertConflictLocks<'engine> {
                 return Ok(PreparedInsertConflict::Unresolved);
             }
             Some(CurrentInsertConflict::Overlay) => {
-                rollback_lock_acquisitions(self.transient.engine, key_acquisitions);
+                rollback_lock_acquisitions(engine, key_acquisitions);
                 return match &on_conflict.action {
                     ConflictActionPlan::Nothing => Ok(PreparedInsertConflict::Skip),
                     ConflictActionPlan::Update { .. } => Err(on_conflict_cardinality_violation()),
@@ -702,12 +597,12 @@ impl<'engine> InsertConflictLocks<'engine> {
             }
             Some(CurrentInsertConflict::Base(_)) => {}
         }
-        self.lock_document(table, target_qualifier, on_conflict, document)?;
+        self.lock_document(engine, table, target_qualifier, on_conflict, document)?;
         let current = self
             .overlay
             .as_ref()
             .ok_or_else(|| SQLError::Internal("INSERT conflict overlay is absent".into()))?
-            .find(self.transient.engine, table, document)?;
+            .find(engine, table, document)?;
         let existing_id = match current {
             None => {
                 self.overlay
@@ -717,7 +612,7 @@ impl<'engine> InsertConflictLocks<'engine> {
                 return Ok(PreparedInsertConflict::Unresolved);
             }
             Some(CurrentInsertConflict::Overlay) => {
-                rollback_lock_acquisitions(self.transient.engine, key_acquisitions);
+                rollback_lock_acquisitions(engine, key_acquisitions);
                 return match &on_conflict.action {
                     ConflictActionPlan::Nothing => Ok(PreparedInsertConflict::Skip),
                     ConflictActionPlan::Update { .. } => Err(on_conflict_cardinality_violation()),
@@ -734,7 +629,7 @@ impl<'engine> InsertConflictLocks<'engine> {
             return Ok(PreparedInsertConflict::Skip);
         };
         match build_conflict_update(
-            self.transient.engine,
+            engine,
             table,
             target_qualifier,
             existing_id,
@@ -751,7 +646,7 @@ impl<'engine> InsertConflictLocks<'engine> {
             } => {
                 let mut rewrite_stack = Vec::new();
                 let prepared = prepare_document_rewrite(
-                    self.transient.engine,
+                    engine,
                     table,
                     existing_id,
                     old_document,
@@ -774,10 +669,10 @@ impl<'engine> InsertConflictLocks<'engine> {
     }
 }
 
-impl Drop for TransientConflictLocks<'_> {
+impl Drop for TransientConflictLocks {
     fn drop(&mut self) {
         for acquisition in self.acquisitions.drain(..).rev() {
-            self.engine.rollback_row_lock_acquisition(acquisition);
+            self.manager.rollback_acquisition(acquisition);
         }
     }
 }
@@ -932,6 +827,7 @@ fn returning_context_schema(
     RowSchema::with_identity_aliases(&schema, &identity_aliases)
 }
 
+#[derive(Clone, Copy)]
 pub(in crate::sql) struct ReturningProjectionRow<'a> {
     pub table: &'a str,
     pub target_qualifier: &'a str,
@@ -947,6 +843,22 @@ pub(in crate::sql) fn build_returning_row(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<OwnedPhysicalRow, SQLError> {
+    let row = returning_projection_context(engine, input)?;
+    let projections = expanded_returning_projections(
+        engine,
+        input.table,
+        input.target_qualifier,
+        input.aliases,
+        returning,
+    )?;
+    let snapshot_scope = ctes.returning_statement_snapshot_scope();
+    build_projection_physical_row_with_ctes(engine, &row, &projections, params, &snapshot_scope)
+}
+
+pub(in crate::sql) fn returning_projection_context(
+    engine: &Engine,
+    input: ReturningProjectionRow<'_>,
+) -> Result<OwnedPhysicalRow, SQLError> {
     let target = returning_row_context(
         engine,
         input.table,
@@ -960,14 +872,7 @@ pub(in crate::sql) fn build_returning_row(
             PhysicalRow::concat(&target.row, &context.row),
         )
     });
-    let projections = expanded_returning_projections(
-        engine,
-        input.table,
-        input.target_qualifier,
-        input.aliases,
-        returning,
-    )?;
-    build_projection_physical_row_with_ctes(engine, &row, &projections, params, ctes)
+    Ok(row)
 }
 
 pub(in crate::sql) struct DmlReturningShape<'a> {

@@ -9,7 +9,7 @@
 use super::{
     build_set_projection, collect_exists_key_operator, collect_query_operator,
     column_prune_for_stmt, expression_may_return_set, final_filter_after_qualifier_pushdown,
-    is_score_provenance_column, prepare_aggregate_set_projection,
+    is_score_provenance_column, prepare_aggregate_output_projection,
     prepare_correlated_exists_predicate, prepare_group_set_projection, prepare_window_plan,
     projection_columns, projections_may_return_set, qualifier_filters_for_stmt,
     resolve_limit_offset_with_ctes, should_defer_distinct_limit,
@@ -19,15 +19,17 @@ use super::{
     QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr, SharedExpressionEvaluator, Value,
     DOC_ID_COLUMN, MERGE_ACTION_COLUMN, SCORE_COLUMN,
 };
+use uqa_execution::ScalarFrameBound;
 
 const ORDER_SET_COLUMN_PREFIX: &str = "\0uqa.order_set_value.";
 const DISTINCT_SET_COLUMN_PREFIX: &str = "\0uqa.distinct_set_value.";
 
-fn projection_set_batch_size(statement: &QueryBlockPlan) -> usize {
-    if statement.limit.is_some()
-        && statement.order_by.is_empty()
-        && !statement.distinct
-        && statement.distinct_on.is_empty()
+fn projection_set_batch_size(statement: &QueryBlockPlan, ctes: &CteScope) -> usize {
+    if ctes.streams_command_progress()
+        || statement.limit.is_some()
+            && statement.order_by.is_empty()
+            && !statement.distinct
+            && statement.distinct_on.is_empty()
     {
         1
     } else {
@@ -37,6 +39,12 @@ fn projection_set_batch_size(statement: &QueryBlockPlan) -> usize {
 
 mod row_at_a_time;
 use row_at_a_time::RowAtATime;
+mod ordering;
+use ordering::{
+    append_row_at_time_projection, attach_final_projection_order, one_based_output_position,
+    output_target_position, prior_distinct_key_index, split_locking_order_projections,
+    validate_distinct_ordering,
+};
 
 pub(in crate::sql) fn expand_from_star_columns(
     columns: Vec<String>,
@@ -329,57 +337,6 @@ pub(in crate::sql) fn order_projection(
     Ok((physical, output))
 }
 
-fn split_locking_order_projections(
-    statement: &QueryBlockPlan,
-    output: &[OutputColumnMapping],
-    physical: Vec<PhysicalProjection>,
-) -> Result<
-    (
-        QueryBlockPlan,
-        Vec<PhysicalProjection>,
-        Vec<PhysicalProjection>,
-    ),
-    SQLError,
-> {
-    let mut sort_statement = statement.clone();
-    let mut required = HashSet::new();
-    for (index, order) in statement.order_by.iter().enumerate() {
-        let expression = resolve_order_expression(&order.expr, output)?;
-        if let ScalarExpr::Column(column) = &expression {
-            if physical.iter().any(|(name, _)| name == column) {
-                required.insert(column.clone());
-                continue;
-            }
-        }
-        if let Some((column, _)) = physical
-            .iter()
-            .find(|(_, projected)| crate::sql::aggregates::exprs_match(projected, &expression))
-        {
-            required.insert(column.clone());
-            sort_statement.order_by[index].expr = ScalarExpr::Column(column.clone());
-        }
-    }
-    let (before_sort, after_sort) = physical
-        .into_iter()
-        .partition(|(column, _)| required.contains(column));
-    Ok((sort_statement, before_sort, after_sort))
-}
-
-fn append_row_at_time_projection<'a>(
-    operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
-    projections: Vec<PhysicalProjection>,
-    evaluator: SharedExpressionEvaluator<'a>,
-) -> Box<dyn uqa_execution::PhysicalOperator + 'a> {
-    if projections.is_empty() {
-        return operator;
-    }
-    Box::new(uqa_execution::Project::appending_with_evaluator(
-        Box::new(RowAtATime::new(operator)),
-        projections,
-        evaluator,
-    ))
-}
-
 pub(in crate::sql) fn identity_order_columns(columns: &[String]) -> Vec<OutputColumnMapping> {
     columns
         .iter()
@@ -453,59 +410,82 @@ fn prepare_order_set_projections(
 ) -> Result<Option<QueryBlockPlan>, SQLError> {
     let mut prepared: Option<QueryBlockPlan> = None;
     for (index, order) in statement.order_by.iter().enumerate() {
-        let expression = resolve_order_expression(&order.expr, output_columns)?;
-        if !expression_may_return_set(engine, &expression, schema, params)? {
+        if let Some(target) = output_target_position(statement, &order.expr, output_columns)? {
+            if !target.direct {
+                prepared.get_or_insert_with(|| statement.clone()).order_by[index].expr =
+                    one_based_output_position(target.position)?;
+            }
             continue;
         }
-        let column = if let Some((column, _)) = projections
+        let expression = resolve_order_expression(&order.expr, output_columns)?;
+        if let Some((column, _)) = projections
             .iter()
             .find(|(_, projected)| crate::sql::aggregates::exprs_match(projected, &expression))
         {
-            column.clone()
-        } else {
+            prepared.get_or_insert_with(|| statement.clone()).order_by[index].expr =
+                ScalarExpr::Column(column.clone());
+        } else if expression_may_return_set(engine, &expression, schema, params)? {
             let column = format!("{ORDER_SET_COLUMN_PREFIX}{index}");
             projections.push((column.clone(), expression));
-            column
-        };
-        prepared.get_or_insert_with(|| statement.clone()).order_by[index].expr =
-            ScalarExpr::Column(column);
+            prepared.get_or_insert_with(|| statement.clone()).order_by[index].expr =
+                ScalarExpr::Column(column);
+        }
     }
     Ok(prepared)
 }
 
 fn append_distinct_set_projections(
-    engine: &Engine,
     statement: &QueryBlockPlan,
     output_columns: &[OutputColumnMapping],
     projections: &mut Vec<PhysicalProjection>,
-    schema: &uqa_execution::RowSchema,
-    params: &[SQLParam],
 ) -> Result<Vec<String>, SQLError> {
     let mut columns = Vec::new();
     for (index, expression) in statement.distinct_on.iter().enumerate() {
-        let expression = resolve_order_expression(expression, output_columns)?;
-        if expression_may_return_set(engine, &expression, schema, params)? {
-            let column = format!("{DISTINCT_SET_COLUMN_PREFIX}{index}");
-            projections.push((column.clone(), expression));
-            columns.push(column);
+        if prior_distinct_key_index(statement, index, expression, output_columns)?.is_some() {
+            continue;
         }
+        if output_target_position(statement, expression, output_columns)?.is_some() {
+            continue;
+        }
+        let expression = resolve_order_expression(expression, output_columns)?;
+        let column = format!("{DISTINCT_SET_COLUMN_PREFIX}{index}");
+        projections.push((column.clone(), expression));
+        columns.push(column);
     }
     Ok(columns)
 }
 
-fn prepare_aggregate_set_key_statement(
-    engine: &Engine,
+fn prepare_aggregate_key_statement(
     statement: &QueryBlockPlan,
-    schema: &uqa_execution::RowSchema,
-    params: &[SQLParam],
 ) -> Result<Option<QueryBlockPlan>, SQLError> {
     let output = identity_order_columns(&projection_columns(&statement.projections));
     let mut prepared: Option<QueryBlockPlan> = None;
-    for (index, order) in statement.order_by.iter().enumerate() {
-        let expression = resolve_order_expression(&order.expr, &output)?;
-        if !expression_may_return_set(engine, &expression, schema, params)? {
+    for (index, expression) in statement.distinct_on.iter().enumerate() {
+        if prior_distinct_key_index(statement, index, expression, &output)?.is_some() {
             continue;
         }
+        if output_target_position(statement, expression, &output)?.is_some() {
+            continue;
+        }
+        let expression = resolve_order_expression(expression, &output)?;
+        let column = format!("{DISTINCT_SET_COLUMN_PREFIX}{index}");
+        prepared
+            .get_or_insert_with(|| statement.clone())
+            .projections
+            .push(ProjectionPlan {
+                expr: expression,
+                alias: Some(column),
+            });
+    }
+    for (index, order) in statement.order_by.iter().enumerate() {
+        if let Some(target) = output_target_position(statement, &order.expr, &output)? {
+            if !target.direct {
+                prepared.get_or_insert_with(|| statement.clone()).order_by[index].expr =
+                    one_based_output_position(target.position)?;
+            }
+            continue;
+        }
+        let expression = resolve_order_expression(&order.expr, &output)?;
         let current = prepared.as_ref().unwrap_or(statement);
         let labels = projection_columns(&current.projections);
         let column = current
@@ -532,20 +512,6 @@ fn prepare_aggregate_set_key_statement(
             });
         }
         prepared.order_by[index].expr = ScalarExpr::Column(column);
-    }
-    for (index, expression) in statement.distinct_on.iter().enumerate() {
-        let expression = resolve_order_expression(expression, &output)?;
-        if !expression_may_return_set(engine, &expression, schema, params)? {
-            continue;
-        }
-        let column = format!("{DISTINCT_SET_COLUMN_PREFIX}{index}");
-        prepared
-            .get_or_insert_with(|| statement.clone())
-            .projections
-            .push(ProjectionPlan {
-                expr: expression,
-                alias: Some(column),
-            });
     }
     Ok(prepared)
 }
@@ -588,19 +554,25 @@ pub(in crate::sql) fn attach_order_limit<'a>(
         resolve_limit_offset_with_ctes(statement.limit.as_ref(), engine, params, "LIMIT", ctes)?;
     if !statement.order_by.is_empty() {
         let work_mem_bytes = physical_work_mem_bytes(engine)?;
-        let keys = statement
-            .order_by
-            .iter()
-            .map(|order| {
-                Ok(SortKey {
-                    expr: resolve_order_expression(&order.expr, output_columns)?,
-                    descending: order.descending,
-                    nulls_first: order
-                        .nulls
-                        .map(|nulls| matches!(nulls, uqa_sql::ast::NullsOrder::First)),
-                })
-            })
-            .collect::<Result<Vec<_>, SQLError>>()?;
+        let keys =
+            statement
+                .order_by
+                .iter()
+                .try_fold(Vec::<SortKey>::new(), |mut keys, order| {
+                    let key = SortKey {
+                        expr: resolve_order_expression(&order.expr, output_columns)?,
+                        descending: order.descending,
+                        nulls_first: order
+                            .nulls
+                            .map(|nulls| matches!(nulls, uqa_sql::ast::NullsOrder::First)),
+                    };
+                    if !keys.iter().any(|existing| {
+                        crate::sql::aggregates::exprs_match(&existing.expr, &key.expr)
+                    }) {
+                        keys.push(key);
+                    }
+                    Ok::<_, SQLError>(keys)
+                })?;
         let keep = if let Some(limit) = limit {
             let keep = offset
                 .unwrap_or(0)
@@ -631,11 +603,7 @@ pub(in crate::sql) fn attach_order_limit<'a>(
             uqa_execution::ordering_satisfies(operator.output_ordering(), required)
         });
         if !already_ordered {
-            // A locking query must keep the complete sorted candidate
-            // stream: SKIP LOCKED skips rows, and a tuple-local recheck can
-            // drop a changed candidate, in which case PostgreSQL 18 surfaces
-            // the next candidate in sort order instead of returning fewer
-            // rows.
+            // A locking query must keep the complete sorted candidate stream: SKIP LOCKED skips rows, and a tuple-local recheck can drop a changed candidate, in which case PostgreSQL 18 surfaces the next candidate in sort order instead of returning fewer rows.
             operator = Box::new(ExternalSort::new(
                 operator,
                 keys,
@@ -670,13 +638,7 @@ pub(in crate::sql) fn attach_order_limit<'a>(
     Ok(operator)
 }
 
-/// Rebuild the plan below one `LockRows` boundary for a tuple-local recheck.
-/// The construction replays the same source, filter, and scalar target
-/// projection below the original `LockRows` boundary, with the recheck pins
-/// active in `ctes` so every lock-target base scan emits only the candidate's
-/// tuples while unmarked relations rescan under the statement snapshot.
-/// Sorting, locking, and `LIMIT` never run here: the candidate keeps its
-/// original position in the outer stream.
+/// Rebuild the plan below one `LockRows` boundary for a tuple-local recheck. The construction replays the same source, filter, and scalar target projection below the original `LockRows` boundary, with the recheck pins active in `ctes` so every lock-target base scan emits only the candidate's tuples while unmarked relations rescan under the statement snapshot. Sorting, locking, and `LIMIT` never run here: the candidate keeps its original position in the outer stream.
 pub(in crate::sql) fn build_row_lock_recheck_operator<'a>(
     engine: &'a Engine,
     statement: &QueryBlockPlan,
@@ -775,7 +737,7 @@ pub(in crate::sql) fn execute_query_block_operator_output<'a>(
 ) -> Result<QueryOutput, SQLError> {
     validate_query_block_expression_types(engine, statement, operator.row_schema(), params)?;
     validate_query_set_contexts(engine, statement, operator.row_schema(), params)?;
-    if matches!(output_mode, QueryOutputMode::ExistsKeySet)
+    if matches!(&output_mode, QueryOutputMode::ExistsKeySet)
         && matches!(statement.compute, ComputePlan::Project)
         && statement.order_by.is_empty()
         && statement.limit.is_none()
@@ -865,22 +827,27 @@ pub(in crate::sql) fn finish_query_block_operator_output<'a>(
                 Box::new(Distinct::all_with_work_mem(operator, work_mem_bytes))
             }
         } else {
-            let distinct_on = original
-                .distinct_on
-                .iter()
-                .enumerate()
-                .map(|(index, expression)| {
-                    if operator
-                        .schema()
-                        .iter()
-                        .any(|column| column == &format!("{DISTINCT_SET_COLUMN_PREFIX}{index}"))
-                    {
-                        ScalarExpr::Column(format!("{DISTINCT_SET_COLUMN_PREFIX}{index}"))
-                    } else {
-                        expression.clone()
-                    }
-                })
-                .collect();
+            let output = identity_order_columns(&columns);
+            let mut distinct_on: Vec<ScalarExpr> = Vec::with_capacity(original.distinct_on.len());
+            for (index, expression) in original.distinct_on.iter().enumerate() {
+                let key = if operator
+                    .schema()
+                    .iter()
+                    .any(|column| column == &format!("{DISTINCT_SET_COLUMN_PREFIX}{index}"))
+                {
+                    ScalarExpr::Column(format!("{DISTINCT_SET_COLUMN_PREFIX}{index}"))
+                } else if let Some(prior) =
+                    prior_distinct_key_index(original, index, expression, &output)?
+                {
+                    distinct_on[prior].clone()
+                } else if let Some(target) = output_target_position(original, expression, &output)?
+                {
+                    ScalarExpr::Position(target.position)
+                } else {
+                    expression.clone()
+                };
+                distinct_on.push(key);
+            }
             Box::new(Distinct::on_with_work_mem(
                 operator,
                 distinct_on,
@@ -967,6 +934,10 @@ pub(in crate::sql) fn build_relational_operator<'a>(
         })
         .transpose()?;
     let statement = expanded_statement.as_ref().unwrap_or(statement);
+    validate_distinct_ordering(statement)?;
+    if ctes.streams_command_progress() {
+        operator = Box::new(RowAtATime::new(operator));
+    }
     if let Some(clause) = statement.locking.first() {
         let projections = physical_projections(&statement.projections);
         let (_, output) = order_projection(&statement.projections, operator.row_schema())?;
@@ -1014,14 +985,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                 let mut projections = physical_projections(&statement.projections);
                 let distinct_output =
                     identity_order_columns(&projection_columns(&statement.projections));
-                append_distinct_set_projections(
-                    engine,
-                    statement,
-                    &distinct_output,
-                    &mut projections,
-                    operator.row_schema(),
-                    params,
-                )?;
+                append_distinct_set_projections(statement, &distinct_output, &mut projections)?;
                 append_score_provenance_projections(&mut projections, operator.schema());
                 if !statement.locking.is_empty() {
                     let (physical, mut output) =
@@ -1049,11 +1013,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                     operator.row_schema(),
                     params,
                 )? {
-                    // PostgreSQL evaluates set-returning target expressions
-                    // above LockRows, so a rechecked tuple re-expands its
-                    // rows from the substituted base tuple. Locks therefore
-                    // attach below the set projection, and LIMIT is applied
-                    // to the expanded output above.
+                    // PostgreSQL evaluates set-returning target expressions above LockRows, so a rechecked tuple re-expands its rows from the substituted base tuple. Locks therefore attach below the set projection, and LIMIT is applied to the expanded output above.
                     operator = crate::sql::select::attach_lock_rows(
                         engine,
                         operator,
@@ -1073,7 +1033,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                         Arc::clone(&evaluator),
                         projections,
                         false,
-                        projection_set_batch_size(statement),
+                        projection_set_batch_size(statement, ctes),
                     )?;
                     let unlocked_statement = (!statement.locking.is_empty()).then(|| {
                         let mut unlocked = statement.clone();
@@ -1115,15 +1075,9 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                 // the final column selection for parent query blocks, but it
                 // is not itself a selectable output position.
                 let order_output = output.clone();
+                let distinct_columns =
+                    append_distinct_set_projections(statement, &order_output, &mut physical)?;
                 let order_statement = prepare_order_set_projections(
-                    engine,
-                    statement,
-                    &order_output,
-                    &mut physical,
-                    operator.row_schema(),
-                    params,
-                )?;
-                let distinct_columns = append_distinct_set_projections(
                     engine,
                     statement,
                     &order_output,
@@ -1137,7 +1091,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                         .into_iter()
                         .map(|column| (column.clone(), ScalarExpr::Column(column))),
                 );
-                if statement.locking.is_empty() {
+                if statement.locking.is_empty() && !ctes.streams_command_progress() {
                     operator = if projections_may_return_set(
                         engine,
                         &physical,
@@ -1171,6 +1125,33 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                         evaluator,
                         None,
                     )?;
+                } else if statement.locking.is_empty() {
+                    let effective_order_statement = order_statement.as_ref().unwrap_or(statement);
+                    let (sort_statement, before_sort, after_sort) =
+                        split_locking_order_projections(
+                            effective_order_statement,
+                            &order_output,
+                            physical,
+                        )?;
+                    if !before_sort.is_empty() {
+                        operator = Box::new(Project::appending_with_evaluator(
+                            operator,
+                            before_sort,
+                            Arc::clone(&evaluator),
+                        ));
+                    }
+                    operator = attach_order_limit(
+                        operator,
+                        &sort_statement,
+                        &order_output,
+                        engine,
+                        params,
+                        ctes,
+                        Arc::clone(&evaluator),
+                        None,
+                    )?;
+                    operator =
+                        append_row_at_time_projection(operator, after_sort, Arc::clone(&evaluator));
                 } else {
                     let effective_order_statement = order_statement.as_ref().unwrap_or(statement);
                     let (mut sort_statement, before_sort, after_sort) =
@@ -1221,93 +1202,54 @@ pub(in crate::sql) fn build_relational_operator<'a>(
             }
         }
         ComputePlan::Aggregate => {
-            let set_key_statement = prepare_aggregate_set_key_statement(
-                engine,
-                statement,
-                operator.row_schema(),
-                params,
-            )?;
-            let statement = set_key_statement.as_ref().unwrap_or(statement);
+            let key_statement = prepare_aggregate_key_statement(statement)?;
+            let statement = key_statement.as_ref().unwrap_or(statement);
             let schema = projection_columns(&statement.projections);
             let input_schema = operator.row_schema().clone();
             let work_mem_bytes = physical_work_mem_bytes(engine)?;
-            if let Some(set_plan) =
-                prepare_aggregate_set_projection(engine, statement, &input_schema, params)?
-            {
-                let aggregate_schema = projection_columns(&set_plan.statement.projections);
-                let aggregate_types = set_plan
-                    .statement
-                    .projections
-                    .iter()
-                    .map(|projection| {
-                        evaluator
-                            .expression_type(&projection.expr, &input_schema)
-                            .ok()
-                            .flatten()
-                    })
-                    .collect::<Vec<_>>();
-                let aggregate_row_schema = uqa_execution::RowSchema::with_types(
-                    aggregate_schema.clone(),
-                    aggregate_types.clone(),
-                );
-                let aggregate_executor = PhysicalAggregateExecutor::new(
-                    engine,
-                    &set_plan.statement,
-                    params,
-                    ctes,
-                    input_schema.clone(),
-                    aggregate_row_schema,
-                    work_mem_bytes,
-                )?;
-                operator = Box::new(HashAggregate::with_typed_executor(
-                    operator,
-                    aggregate_schema,
-                    aggregate_types,
-                    Box::new(aggregate_executor),
-                ));
-                operator = build_set_projection(
-                    operator,
-                    engine,
-                    params,
-                    ctes,
-                    Arc::clone(&evaluator),
-                    set_plan.projections,
-                    false,
-                    projection_set_batch_size(statement),
-                )?;
-            } else {
-                let aggregate_types = statement
-                    .projections
-                    .iter()
-                    .map(|projection| {
-                        evaluator
-                            .expression_type(&projection.expr, &input_schema)
-                            .ok()
-                            .flatten()
-                    })
-                    .collect::<Vec<_>>();
-                let aggregate_row_schema =
-                    uqa_execution::RowSchema::with_types(schema.clone(), aggregate_types.clone());
-                operator = Box::new(HashAggregate::with_typed_executor(
-                    operator,
-                    schema.clone(),
-                    aggregate_types,
-                    Box::new(PhysicalAggregateExecutor::new(
-                        engine,
-                        statement,
-                        params,
-                        ctes,
-                        input_schema,
-                        aggregate_row_schema,
-                        work_mem_bytes,
-                    )?),
-                ));
-            }
-            let output = identity_order_columns(&schema);
-            operator = attach_order_limit(
-                operator, statement, &output, engine, params, ctes, evaluator, None,
+            let output_plan = prepare_aggregate_output_projection(engine, statement);
+            let aggregate_schema = projection_columns(&output_plan.statement.projections);
+            let aggregate_types = output_plan
+                .statement
+                .projections
+                .iter()
+                .map(|projection| {
+                    evaluator
+                        .expression_type(&projection.expr, &input_schema)
+                        .ok()
+                        .flatten()
+                })
+                .collect::<Vec<_>>();
+            let aggregate_row_schema = uqa_execution::RowSchema::with_types(
+                aggregate_schema.clone(),
+                aggregate_types.clone(),
+            );
+            let aggregate_executor = PhysicalAggregateExecutor::new(
+                engine,
+                &output_plan.statement,
+                params,
+                ctes,
+                input_schema,
+                aggregate_row_schema,
+                work_mem_bytes,
             )?;
-            if set_key_statement.is_some() {
+            operator = Box::new(HashAggregate::with_typed_executor(
+                operator,
+                aggregate_schema,
+                aggregate_types,
+                Box::new(aggregate_executor),
+            ));
+            let output = identity_order_columns(&schema);
+            operator = attach_final_projection_order(
+                operator,
+                (statement, &output),
+                output_plan.projections,
+                engine,
+                params,
+                ctes,
+                evaluator,
+            )?;
+            if key_statement.is_some() {
                 let visible = operator
                     .schema()
                     .iter()
@@ -1329,6 +1271,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                 .enumerate()
                 .map(|(position, (output, _))| (output, ScalarExpr::Position(position)))
                 .collect::<Vec<_>>();
+            append_distinct_set_projections(statement, &output_columns, &mut projections)?;
             let order_statement = prepare_order_set_projections(
                 engine,
                 statement,
@@ -1337,18 +1280,9 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                 &schema,
                 params,
             )?;
-            append_distinct_set_projections(
-                engine,
-                statement,
-                &output_columns,
-                &mut projections,
-                &schema,
-                params,
-            )?;
-            operator = Box::new(Window::with_typed_executor(
+            operator = Box::new(Window::with_row_schema_executor(
                 operator,
-                schema.columns().to_vec(),
-                schema.column_types().to_vec(),
+                schema.clone(),
                 Box::new(PhysicalWindowExecutor::new(
                     engine,
                     window_plan,
@@ -1359,35 +1293,15 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                 )),
             ));
             append_score_provenance_projections(&mut projections, operator.schema());
-            operator =
-                if projections_may_return_set(engine, &projections, operator.row_schema(), params)?
-                {
-                    build_set_projection(
-                        operator,
-                        engine,
-                        params,
-                        ctes,
-                        Arc::clone(&evaluator),
-                        projections,
-                        false,
-                        projection_set_batch_size(statement),
-                    )?
-                } else {
-                    Box::new(Project::with_evaluator(
-                        operator,
-                        projections,
-                        Arc::clone(&evaluator),
-                    ))
-                };
-            operator = attach_order_limit(
+            let effective_order_statement = order_statement.as_ref().unwrap_or(statement);
+            operator = attach_final_projection_order(
                 operator,
-                order_statement.as_ref().unwrap_or(statement),
-                &output_columns,
+                (effective_order_statement, &output_columns),
+                projections,
                 engine,
                 params,
                 ctes,
                 evaluator,
-                None,
             )?;
             if order_statement.is_some() {
                 let visible = operator
@@ -1412,12 +1326,15 @@ pub(in crate::sql) fn walk_expr<F: FnMut(&ScalarExpr)>(expr: &ScalarExpr, f: &mu
                 walk_expr(p, f);
             }
         }
-        ScalarExpr::Not(inner) | ScalarExpr::UnaryMinus(inner) => walk_expr(inner, f),
+        ScalarExpr::Not(inner)
+        | ScalarExpr::UnaryMinus(inner)
+        | ScalarExpr::Cast { expr: inner, .. }
+        | ScalarExpr::IsNull { expr: inner, .. }
+        | ScalarExpr::InSubquery { expr: inner, .. } => walk_expr(inner, f),
         ScalarExpr::Binary { lhs, rhs, .. } => {
             walk_expr(lhs, f);
             walk_expr(rhs, f);
         }
-        ScalarExpr::IsNull { expr, .. } => walk_expr(expr, f),
         ScalarExpr::Between { expr, low, high } => {
             walk_expr(expr, f);
             walk_expr(low, f);
@@ -1429,9 +1346,42 @@ pub(in crate::sql) fn walk_expr<F: FnMut(&ScalarExpr)>(expr: &ScalarExpr, f: &mu
                 walk_expr(p, f);
             }
         }
-        ScalarExpr::Func { args, .. } | ScalarExpr::WindowCall { args, .. } => {
+        ScalarExpr::Func {
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
             for p in args {
                 walk_expr(p, f);
+            }
+            for order in order_by {
+                walk_expr(&order.expr, f);
+            }
+            if let Some(filter) = filter {
+                walk_expr(filter, f);
+            }
+        }
+        ScalarExpr::WindowCall { args, spec, .. } => {
+            for p in args {
+                walk_expr(p, f);
+            }
+            for partition in &spec.partition_by {
+                walk_expr(partition, f);
+            }
+            for order in &spec.order_by {
+                walk_expr(&order.expr, f);
+            }
+            if let Some(frame) = &spec.frame {
+                for bound in [&frame.start, &frame.end] {
+                    match bound {
+                        ScalarFrameBound::Preceding(expression)
+                        | ScalarFrameBound::Following(expression) => walk_expr(expression, f),
+                        ScalarFrameBound::UnboundedPreceding
+                        | ScalarFrameBound::UnboundedFollowing
+                        | ScalarFrameBound::CurrentRow => {}
+                    }
+                }
             }
         }
         ScalarExpr::Case {
@@ -1450,7 +1400,6 @@ pub(in crate::sql) fn walk_expr<F: FnMut(&ScalarExpr)>(expr: &ScalarExpr, f: &mu
                 walk_expr(e, f);
             }
         }
-        ScalarExpr::Cast { expr, .. } => walk_expr(expr, f),
         ScalarExpr::Array(items) | ScalarExpr::Row(items) => {
             for p in items {
                 walk_expr(p, f);

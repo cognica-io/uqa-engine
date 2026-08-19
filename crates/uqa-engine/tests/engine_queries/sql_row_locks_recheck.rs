@@ -4,8 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `PostgreSQL` 18 tuple-recheck, candidate-preservation, and cross-process
-//! row-lock coverage.
+//! `PostgreSQL` 18 tuple-recheck, candidate-preservation, and cross-process row-lock coverage.
 
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -75,6 +74,30 @@ fn wait_for_file(path: &std::path::Path) {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+fn wait_for_file_contents(path: &std::path::Path) -> String {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        match std::fs::read_to_string(path) {
+            Ok(contents) if !contents.is_empty() => return contents,
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("failed to read handshake file {}: {error}", path.display()),
+        }
+        assert!(
+            Instant::now() < deadline,
+            "handshake file {} never received contents",
+            path.display()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn publish_file_contents(path: &std::path::Path, contents: impl AsRef<[u8]>) {
+    let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+    std::fs::write(&temporary, contents).unwrap();
+    std::fs::rename(temporary, path).unwrap();
 }
 
 #[test]
@@ -263,8 +286,7 @@ fn row_lock_rechecks_a_commit_after_the_external_writer_exits() {
     assert_eq!(result.rows[0].get("value"), Some(&Value::Str("new".into())));
 }
 
-/// Child half of the cross-process deadlock test: locks row 2, then blocks
-/// requesting row 1 while the parent holds row 1 and requests row 2.
+/// Child half of the cross-process deadlock test: locks row 2, then blocks requesting row 1 while the parent holds row 1 and requests row 2.
 #[test]
 fn cross_process_deadlock_child() {
     let Ok(database) = std::env::var("UQA_CROSS_DEADLOCK_CHILD_DB") else {
@@ -284,7 +306,7 @@ fn cross_process_deadlock_child() {
         Ok(_) => "granted".to_string(),
         Err(error) => sqlstate(error).to_string(),
     };
-    std::fs::write(handshake.join("child-outcome"), outcome_tag).unwrap();
+    publish_file_contents(&handshake.join("child-outcome"), outcome_tag);
     engine.sql("ROLLBACK", &[]).ok();
 }
 
@@ -320,8 +342,7 @@ fn separate_processes_detect_lock_cycles() {
         Err(error) => sqlstate(error).to_string(),
     };
     engine.sql("ROLLBACK", &[]).ok();
-    wait_for_file(&directory.path().join("child-outcome"));
-    let child_tag = std::fs::read_to_string(directory.path().join("child-outcome")).unwrap();
+    let child_tag = wait_for_file_contents(&directory.path().join("child-outcome"));
     assert!(child.wait().unwrap().success());
     assert!(
         parent_tag == "40P01" || child_tag == "40P01",
@@ -343,14 +364,50 @@ fn mixed_process_deadlock_child() {
         .unwrap();
     std::fs::write(handshake.join("mixed-child-holds-row3"), b"1").unwrap();
     wait_for_file(&handshake.join("mixed-child-request-row1"));
-    std::fs::write(handshake.join("mixed-child-requested-row1"), b"1").unwrap();
     let outcome = engine.sql("SELECT id FROM accounts WHERE id = 1 FOR UPDATE", &[]);
     let outcome_tag = match &outcome {
         Ok(_) => "granted".to_string(),
         Err(error) => sqlstate(error).to_string(),
     };
-    std::fs::write(handshake.join("mixed-child-outcome"), outcome_tag).unwrap();
+    publish_file_contents(&handshake.join("mixed-child-outcome"), outcome_tag);
     engine.sql("ROLLBACK", &[]).ok();
+}
+
+/// Observe the durable wait-slot file from a third process. Opening the sidecar in either lock-owning process would release that process's POSIX record locks when the descriptor closes, so the parent delegates this handshake to a process that owns no database locks.
+#[test]
+fn cross_process_wait_slot_observer_child() {
+    let Ok(database) = std::env::var("UQA_WAIT_SLOT_OBSERVER_DB") else {
+        return;
+    };
+    let waiting_pid = std::env::var("UQA_WAIT_SLOT_OBSERVER_PID")
+        .unwrap()
+        .parse::<u32>()
+        .unwrap();
+    let ready = std::path::PathBuf::from(std::env::var("UQA_WAIT_SLOT_OBSERVER_READY").unwrap());
+    let mut sidecar = std::ffi::OsString::from(database);
+    sidecar.push(".uqa-locks");
+    let mut file = std::fs::File::open(std::path::PathBuf::from(sidecar)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        use std::io::{Read as _, Seek as _, SeekFrom};
+
+        file.seek(SeekFrom::Start(64)).unwrap();
+        for _ in 0..256 {
+            let mut slot = [0_u8; 32];
+            file.read_exact(&mut slot).unwrap();
+            if u32::from_be_bytes(slot[0..4].try_into().unwrap()) == 0x5551_4c4b
+                && u32::from_be_bytes(slot[4..8].try_into().unwrap()) == waiting_pid
+            {
+                std::fs::write(ready, b"1").unwrap();
+                return;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "cross-process row-lock waiter was never registered"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]
@@ -382,6 +439,7 @@ fn separate_processes_detect_cycles_that_include_a_local_wait_edge() {
         .stderr(std::process::Stdio::inherit())
         .spawn()
         .unwrap();
+    let child_pid = child.id();
     wait_for_file(&directory.path().join("mixed-child-holds-row3"));
 
     let (done_tx, done_rx) = mpsc::channel();
@@ -396,8 +454,20 @@ fn separate_processes_detect_cycles_that_include_a_local_wait_edge() {
     });
     assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
     std::fs::write(directory.path().join("mixed-child-request-row1"), b"1").unwrap();
-    wait_for_file(&directory.path().join("mixed-child-requested-row1"));
-    std::thread::sleep(Duration::from_millis(150));
+    let observer_ready = directory.path().join("mixed-child-waits-row1");
+    let mut observer = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("--exact")
+        .arg("engine_queries::sql_row_locks_recheck::cross_process_wait_slot_observer_child")
+        .arg("--nocapture")
+        .env("UQA_WAIT_SLOT_OBSERVER_DB", &database)
+        .env("UQA_WAIT_SLOT_OBSERVER_PID", child_pid.to_string())
+        .env("UQA_WAIT_SLOT_OBSERVER_READY", &observer_ready)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .unwrap();
+    wait_for_file(&observer_ready);
+    assert!(observer.wait().unwrap().success());
 
     let (session_a_tx, session_a_rx) = mpsc::channel();
     let session_a_waiter = std::thread::spawn(move || {
@@ -411,9 +481,7 @@ fn separate_processes_detect_cycles_that_include_a_local_wait_edge() {
     });
     let parent_outcome = session_a_rx.recv_timeout(Duration::from_secs(10)).unwrap();
     let waiter_outcome = done_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-    wait_for_file(&directory.path().join("mixed-child-outcome"));
-    let child_outcome =
-        std::fs::read_to_string(directory.path().join("mixed-child-outcome")).unwrap();
+    let child_outcome = wait_for_file_contents(&directory.path().join("mixed-child-outcome"));
     assert!(child.wait().unwrap().success());
     session_a_waiter.join().unwrap();
     waiter.join().unwrap();
@@ -940,7 +1008,13 @@ fn derived_table_self_join_recheck_pins_each_inner_scan_separately() {
             ))
             .unwrap();
     });
-    assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
+    match done_rx.recv_timeout(Duration::from_millis(150)) {
+        Err(mpsc::RecvTimeoutError::Timeout) => {}
+        Ok(outcome) => panic!(
+            "derived self-join waiter finished before its tuple lock was released: {outcome:?}"
+        ),
+        Err(error) => panic!("derived self-join waiter disconnected: {error}"),
+    }
     holder.sql("UPDATE t SET v = 99 WHERE id = 1", &[]).unwrap();
     holder.sql("COMMIT", &[]).unwrap();
 
@@ -991,7 +1065,11 @@ fn spilled_derived_self_join_recheck_preserves_each_inner_scan_qualifier() {
             ))
             .unwrap();
     });
-    assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
+    match done_rx.recv_timeout(Duration::from_millis(150)) {
+        Err(mpsc::RecvTimeoutError::Timeout) => {}
+        Ok(outcome) => panic!("spilled derived self-join waiter finished before its tuple lock was released: {outcome:?}"),
+        Err(error) => panic!("spilled derived self-join waiter disconnected: {error}"),
+    }
     holder.sql("UPDATE t SET v = 99 WHERE id = 1", &[]).unwrap();
     holder.sql("COMMIT", &[]).unwrap();
 
@@ -1215,8 +1293,7 @@ fn statements_after_a_savepoint_still_see_fresh_commits() {
             &[],
         )
         .unwrap();
-    // READ COMMITTED: a later statement of the same transaction sees the
-    // concurrent commit, even after SAVEPOINT.
+    // READ COMMITTED: a later statement of the same transaction sees the concurrent commit, even after SAVEPOINT.
     assert_eq!(
         reader
             .sql("SELECT count(*) AS n FROM accounts", &[])
@@ -1347,9 +1424,7 @@ fn preselected_update_requalifies_rows_after_the_snapshot_advances() {
     .unwrap();
     let holder = root.new_session().unwrap();
     let updater = root.new_session().unwrap();
-    // The holder pins row 1 so the updater's statement waits after having
-    // preselected both rows under its statement snapshot; row 2 changes
-    // meanwhile and must be requalified before it is rewritten.
+    // The holder pins row 1 so the updater's statement waits after having preselected both rows under its statement snapshot; row 2 changes meanwhile and must be requalified before it is rewritten.
     holder.sql("BEGIN", &[]).unwrap();
     holder
         .sql("SELECT id FROM t WHERE id = 1 FOR UPDATE", &[])

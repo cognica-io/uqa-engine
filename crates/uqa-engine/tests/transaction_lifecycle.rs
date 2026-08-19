@@ -72,8 +72,7 @@ fn savepoint_order_invalidates_descendants_and_preserves_shadowed_names() {
     eng.savepoint("inner").unwrap();
     eng.rollback_to_savepoint("outer").unwrap();
     assert!(eng.release_savepoint("inner").is_err());
-    // PostgreSQL 18: a failed savepoint command aborts the transaction, so
-    // every later command except ROLLBACK reports 25P02 and COMMIT rolls back.
+    // PostgreSQL 18: a failed savepoint command aborts the transaction, so commands report 25P02 until ROLLBACK TO an earlier savepoint clears it.
     let error = eng.release_savepoint("outer").unwrap_err();
     assert_eq!(error.sqlstate(), Some("25P02"));
     eng.rollback_to_savepoint("outer").unwrap();

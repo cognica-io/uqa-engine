@@ -170,7 +170,7 @@ pub(in crate::sql) fn run_single_table_select_output(
             scored.retain_top_scores_with_ties(top_k);
         }
     }
-    let lock_origin = if ctes.emit_lock_identities {
+    let lock_origin = if ctes.lock_identities.emit {
         let storage_name = engine
             .try_resolve_table_name(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?

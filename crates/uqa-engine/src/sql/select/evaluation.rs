@@ -20,19 +20,26 @@ use uqa_sql::expr::RowLookup;
 
 type RecheckStoragePin = (String, String, Arc<Vec<RecheckDoc>>);
 
+#[derive(Clone, Copy, Default)]
+pub(in crate::sql) struct LockIdentityOptions {
+    pub(in crate::sql) emit: bool,
+    pub(in crate::sql) retain_after_lock: bool,
+}
+
 #[derive(Clone)]
 pub(crate) struct CteScope {
     pub(in crate::sql) rows: BTreeMap<String, uqa_execution::SharedSpill>,
     deferred_ctes: BTreeMap<String, CtePlan>,
     pub(in crate::sql) scalar_subqueries: Vec<QueryPlan>,
-    pub(in crate::sql) emit_lock_identities: bool,
-    pub(in crate::sql) retain_lock_identities_after_lock: bool,
+    pub(in crate::sql) lock_identities: LockIdentityOptions,
     source_row_locks: Vec<ResolvedRowLock>,
     row_lock_recheck: Option<Arc<RowLockRecheckPins>>,
     row_lock_outer_row: Option<uqa_execution::OwnedPhysicalRow>,
     recheck_storage_pins: Vec<RecheckStoragePin>,
     visible_cte_names: BTreeSet<String>,
     scalar_subquery_arena: u64,
+    read_command_overlay: bool,
+    stream_command_progress: bool,
     next_scalar_subquery_arena: Arc<AtomicU64>,
     scalar_subquery_cache:
         Arc<parking_lot::Mutex<BTreeMap<(u64, usize), ScalarSubqueryCacheEntry>>>,
@@ -44,14 +51,15 @@ impl Default for CteScope {
             rows: BTreeMap::new(),
             deferred_ctes: BTreeMap::new(),
             scalar_subqueries: Vec::new(),
-            emit_lock_identities: false,
-            retain_lock_identities_after_lock: false,
+            lock_identities: LockIdentityOptions::default(),
             source_row_locks: Vec::new(),
             row_lock_recheck: None,
             row_lock_outer_row: None,
             recheck_storage_pins: Vec::new(),
             visible_cte_names: BTreeSet::new(),
             scalar_subquery_arena: 0,
+            read_command_overlay: true,
+            stream_command_progress: false,
             next_scalar_subquery_arena: Arc::new(AtomicU64::new(1)),
             scalar_subquery_cache: Arc::new(parking_lot::Mutex::new(BTreeMap::new())),
         }
@@ -63,9 +71,7 @@ impl CteScope {
         Self::default()
     }
 
-    /// Enter one tuple-local recheck execution: base scans of pinned lock
-    /// targets emit only the candidate's tuples and every nested `LockRows`
-    /// is suppressed while lock identities keep flowing.
+    /// Enter one tuple-local recheck execution: base scans of pinned lock targets emit only the candidate's tuples and every nested `LockRows` is suppressed while lock identities keep flowing.
     pub(in crate::sql) fn activate_row_lock_recheck(&mut self, pins: Arc<RowLockRecheckPins>) {
         self.row_lock_recheck = Some(pins);
     }
@@ -74,10 +80,7 @@ impl CteScope {
         self.row_lock_recheck.is_some()
     }
 
-    /// Preserve the complete correlated outer row for a tuple-local locking
-    /// recheck. The rebuilt inner query must receive the same scope overlay as
-    /// its original lateral execution or its correlation predicate would see
-    /// NULL after a lock wait and incorrectly discard the refreshed tuple.
+    /// Preserve the complete correlated outer row for a tuple-local locking recheck. The rebuilt inner query must receive the same scope overlay as its original lateral execution or its correlation predicate would see NULL after a lock wait and incorrectly discard the refreshed tuple.
     pub(in crate::sql) fn set_row_lock_outer_row(&mut self, row: uqa_execution::OwnedPhysicalRow) {
         self.row_lock_outer_row = Some(row);
     }
@@ -106,19 +109,14 @@ impl CteScope {
             .map(|(_, _, docs)| Arc::clone(docs))
     }
 
-    /// Exact copy-row mark for one top-level FROM leaf in the active tuple
-    /// recheck. Paths use 0/1 for left/right join descent and are scoped to the
-    /// original `LockRows` source, so nested query aliases cannot collide.
+    /// Exact copy-row mark for one top-level FROM leaf in the active tuple recheck. Paths use 0/1 for left/right join descent and are scoped to the original `LockRows` source, so nested query aliases cannot collide.
     pub(in crate::sql) fn recheck_source_row(&self, path: &[u8]) -> Option<RecheckSourceRow> {
         self.row_lock_recheck
             .as_ref()
             .and_then(|pins| pins.source_row(path))
     }
 
-    /// Enter the build of one identity-source lock target's subtree so every
-    /// base scan of its storage inside the derived table or view is pinned.
-    /// Pins already active from an enclosing target stay active: the target's
-    /// base scans may sit below further derived-table boundaries.
+    /// Enter the build of one identity-source lock target's subtree so every base scan of its storage inside the derived table or view is pinned. Pins already active from an enclosing target stay active: the target's base scans may sit below further derived-table boundaries.
     pub(in crate::sql) fn enter_recheck_storage_pins(
         &mut self,
         qualifier: &str,
@@ -173,14 +171,12 @@ impl CteScope {
             .next_scalar_subquery_arena
             .fetch_add(1, Ordering::Relaxed);
         let previous_arena = std::mem::replace(&mut self.scalar_subquery_arena, next_arena);
-        let previous_emit_lock_identities = self.emit_lock_identities;
-        let previous_retain_lock_identities_after_lock = self.retain_lock_identities_after_lock;
+        let previous_lock_identities = self.lock_identities;
         ScalarSubqueryScope {
             ctes: self,
             previous: Some(previous),
             previous_arena,
-            previous_emit_lock_identities,
-            previous_retain_lock_identities_after_lock,
+            previous_lock_identities,
         }
     }
 
@@ -188,12 +184,16 @@ impl CteScope {
         &mut self,
         enabled: bool,
     ) -> LockIdentityEmissionScope<'_> {
-        let previous = std::mem::replace(&mut self.emit_lock_identities, enabled);
-        let previous_retain = std::mem::replace(&mut self.retain_lock_identities_after_lock, false);
+        let previous = std::mem::replace(
+            &mut self.lock_identities,
+            LockIdentityOptions {
+                emit: enabled,
+                retain_after_lock: false,
+            },
+        );
         LockIdentityEmissionScope {
             ctes: self,
             previous,
-            previous_retain,
         }
     }
 
@@ -237,14 +237,29 @@ impl CteScope {
         }
     }
 
-    /// Whether `name` resolves to a CTE in this scope: a name declared by an
-    /// enclosing query's WITH list, or one whose rows or deferred plan are
-    /// bound in the scope, which is how a DML statement's own WITH list
-    /// reaches the query it drives.
+    /// Whether `name` resolves to a CTE in this scope: a name declared by an enclosing query's WITH list, or one whose rows or deferred plan are bound in the scope, which is how a DML statement's own WITH list reaches the query it drives.
     pub(in crate::sql) fn is_visible_cte(&self, name: &str) -> bool {
         self.visible_cte_names.contains(name)
             || self.rows.contains_key(name)
             || self.deferred_ctes.contains_key(name)
+    }
+
+    pub(in crate::sql) fn returning_statement_snapshot_scope(&self) -> Self {
+        let mut scope = self.clone();
+        scope.read_command_overlay = false;
+        scope
+    }
+
+    pub(in crate::sql) fn reads_command_overlay(&self) -> bool {
+        self.read_command_overlay
+    }
+
+    pub(in crate::sql) fn enable_command_progress_streaming(&mut self) {
+        self.stream_command_progress = true;
+    }
+
+    pub(in crate::sql) fn streams_command_progress(&self) -> bool {
+        self.stream_command_progress
     }
 }
 
@@ -252,8 +267,7 @@ pub(in crate::sql) struct ScalarSubqueryScope<'a> {
     ctes: &'a mut CteScope,
     previous: Option<Vec<QueryPlan>>,
     previous_arena: u64,
-    previous_emit_lock_identities: bool,
-    previous_retain_lock_identities_after_lock: bool,
+    previous_lock_identities: LockIdentityOptions,
 }
 
 impl std::ops::Deref for ScalarSubqueryScope<'_> {
@@ -275,17 +289,14 @@ impl Drop for ScalarSubqueryScope<'_> {
         if let Some(previous) = self.previous.take() {
             self.ctes.scalar_subqueries = previous;
             self.ctes.scalar_subquery_arena = self.previous_arena;
-            self.ctes.emit_lock_identities = self.previous_emit_lock_identities;
-            self.ctes.retain_lock_identities_after_lock =
-                self.previous_retain_lock_identities_after_lock;
+            self.ctes.lock_identities = self.previous_lock_identities;
         }
     }
 }
 
 pub(in crate::sql) struct LockIdentityEmissionScope<'a> {
     ctes: &'a mut CteScope,
-    previous: bool,
-    previous_retain: bool,
+    previous: LockIdentityOptions,
 }
 
 pub(in crate::sql) struct SourceRowLockScope<'a> {
@@ -358,8 +369,7 @@ impl std::ops::DerefMut for LockIdentityEmissionScope<'_> {
 
 impl Drop for LockIdentityEmissionScope<'_> {
     fn drop(&mut self) {
-        self.ctes.emit_lock_identities = self.previous;
-        self.ctes.retain_lock_identities_after_lock = self.previous_retain;
+        self.ctes.lock_identities = self.previous;
     }
 }
 
@@ -1005,7 +1015,7 @@ impl ScopedEngineHook<'_> {
             return Ok(None);
         };
         let mut scoped_ctes = self.ctes.clone();
-        scoped_ctes.emit_lock_identities = false;
+        scoped_ctes.lock_identities.emit = false;
         let result = execute_query_plan_output(
             self.engine,
             &decorrelated.inner,
@@ -1074,7 +1084,7 @@ impl ScopedEngineHook<'_> {
         params: &[SQLParam],
     ) -> Result<CachedScalarSubquery, SQLError> {
         let mut scoped_ctes = self.ctes.clone();
-        scoped_ctes.emit_lock_identities = false;
+        scoped_ctes.lock_identities.emit = false;
         scoped_ctes.row_lock_outer_row = None;
         let output = execute_query_plan_output(
             self.engine,

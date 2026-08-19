@@ -7,16 +7,15 @@
 //! UPDATE execution, point-update fast paths, and patch eligibility.
 
 use super::{
-    apply_prepared_document_rewrite, build_returning_row, coerce_to_column_type,
+    apply_validated_prepared_document_rewrite, build_returning_row, coerce_to_column_type,
     dml_returning_result, dml_storage_error, dml_target_row, eval_mutation_assignment,
-    eval_mutation_expr, index_vectors_for_type, integer_primary_key_doc_id, lock_mutation_target,
-    prebuild_locking_returning_row, prepare_document_rewrite, referrers_to_for_actions,
-    returning_has_row_locks, run_update_from, update_lock_strength,
-    validate_dml_expression_qualifiers, validate_mutation_columns,
+    eval_mutation_expr, index_vectors_for_type, lock_mutation_target, prepare_document_rewrite,
+    referrers_to_for_actions, run_update_from, stage_prepared_document_rewrite,
+    update_lock_strength, validate_dml_expression_qualifiers, validate_mutation_columns,
     validate_returning_alias_relations, BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope,
-    DmlReturningShape, Engine, MutationAssignmentTarget, MutationLockTarget,
-    ReturningProjectionRow, ReturningRowImage, ReturningRowImages, RowIndependentUpdateValues,
-    SQLError, SQLParam, SQLResult, ScalarExpr, UpdatePlan, Value,
+    DmlCommandMutationOverlay, DmlReturningShape, Engine, MutationAssignmentTarget,
+    MutationLockTarget, ReturningProjectionRow, ReturningRowImage, ReturningRowImages,
+    RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, ScalarExpr, UpdatePlan, Value,
 };
 
 pub(in crate::sql) fn run_update(
@@ -78,10 +77,11 @@ pub(in crate::sql) fn run_update_inner(
     let mut affected = 0u64;
     let mut returning_rows = Vec::new();
     let cancel = engine.cancellation_token();
-    // Without CTEs the WHERE clause resolves through the accelerated
-    // single-table machinery (value indexes, posting lists) up front;
-    // the per-row re-check below is then unnecessary.
-    let preselected = !has_runtime_scope && stmt.predicate.is_some();
+    // A non-volatile predicate can still use the accelerated candidate set. A VOLATILE predicate must stay in the row loop because PostgreSQL exposes each preceding logical rewrite before qualifying the next candidate.
+    let predicate_is_volatile = stmt.predicate.as_ref().is_some_and(|predicate| {
+        crate::sql::volatility::expr_contains_volatile_function(engine, predicate)
+    });
+    let preselected = !has_runtime_scope && stmt.predicate.is_some() && !predicate_is_volatile;
     let doc_ids: Vec<uqa_core::DocId> = if preselected {
         let filter = stmt.predicate.as_ref().ok_or_else(|| {
             SQLError::Internal("UPDATE preselection is missing its predicate".into())
@@ -106,11 +106,10 @@ pub(in crate::sql) fn run_update_inner(
             .map(|assignment| assignment.column.clone())
             .collect::<Vec<_>>(),
     );
-    // Acquire every target tuple before taking the backend's physical writer
-    // slot. A session that owns a later target must still be able to update
-    // and commit that tuple while this statement waits for it.
-    let mut snapshot_advanced = false;
-    let mut locked_targets = Vec::new();
+    let snapshot_ctes = ctes.returning_statement_snapshot_scope();
+    let overlay = DmlCommandMutationOverlay::new(engine);
+    let mut prepared_updates = Vec::new();
+    let mut rewrite_stack = Vec::new();
     let mut locked_ids = BTreeSet::new();
     for doc_id in doc_ids {
         cancel.check()?;
@@ -128,7 +127,7 @@ pub(in crate::sql) fn run_update_inner(
             if let Some(filter) = stmt.predicate.as_ref() {
                 if !uqa_sql::expr::truthy(&eval_mutation_expr(
                     engine,
-                    &ctes,
+                    &snapshot_ctes,
                     filter,
                     Some(&candidate_row),
                     params,
@@ -145,21 +144,14 @@ pub(in crate::sql) fn run_update_inner(
             strength,
         )?;
         let MutationLockTarget::Present { doc_id, recheck } = target else {
-            snapshot_advanced = true;
             continue;
         };
-        snapshot_advanced |= recheck;
-        if locked_ids.insert(doc_id) {
-            locked_targets.push((doc_id, recheck));
+        if !locked_ids.insert(doc_id) {
+            continue;
         }
-    }
-    if snapshot_advanced {
-        engine.refresh_explicit_statement_snapshot()?;
-    }
-    let mut prepared_updates = Vec::with_capacity(locked_targets.len());
-    let mut rewrite_stack = Vec::new();
-    for (doc_id, recheck) in locked_targets {
-        cancel.check()?;
+        if recheck {
+            engine.refresh_explicit_statement_snapshot()?;
+        }
         let Some(mut doc) = engine.get_document(&stmt.table, doc_id)? else {
             continue;
         };
@@ -171,11 +163,11 @@ pub(in crate::sql) fn run_update_inner(
             doc_id,
             &original_doc,
         )?;
-        if recheck {
+        if recheck || preselected {
             if let Some(filter) = stmt.predicate.as_ref() {
                 if !uqa_sql::expr::truthy(&eval_mutation_expr(
                     engine,
-                    &ctes,
+                    &snapshot_ctes,
                     filter,
                     Some(&target_row),
                     params,
@@ -187,7 +179,7 @@ pub(in crate::sql) fn run_update_inner(
         for assignment in &stmt.assignments {
             let value = eval_mutation_assignment(
                 engine,
-                &ctes,
+                &snapshot_ctes,
                 MutationAssignmentTarget {
                     table: &stmt.table,
                     column: &assignment.column,
@@ -203,7 +195,7 @@ pub(in crate::sql) fn run_update_inner(
                 doc.remove(&assignment.column);
             }
         }
-        if let Some(prepared) = prepare_document_rewrite(
+        if let Some(mut prepared) = prepare_document_rewrite(
             engine,
             &stmt.table,
             doc_id,
@@ -212,55 +204,9 @@ pub(in crate::sql) fn run_update_inner(
             params,
             &mut rewrite_stack,
         )? {
-            prepared_updates.push(prepared);
-        }
-    }
-    let prebuild_locking_returning = returning_has_row_locks(&stmt.returning, &ctes)?;
-    let mut prebuilt_returning_rows = Vec::new();
-    if !prepared_updates.is_empty() {
-        if prebuild_locking_returning {
-            for prepared in &prepared_updates {
-                prebuilt_returning_rows.push(prebuild_locking_returning_row(
-                    engine,
-                    ReturningProjectionRow {
-                        table: &stmt.table,
-                        target_qualifier: &stmt.target_qualifier,
-                        images: ReturningRowImages {
-                            old: Some(ReturningRowImage {
-                                doc_id: prepared.doc_id,
-                                document: &prepared.old_document,
-                            }),
-                            new: Some(ReturningRowImage {
-                                doc_id: integer_primary_key_doc_id(
-                                    engine,
-                                    &prepared.table,
-                                    &prepared.new_document,
-                                )?
-                                .unwrap_or(prepared.doc_id),
-                                document: &prepared.new_document,
-                            }),
-                        },
-                        aliases: &stmt.returning_aliases,
-                        context: None,
-                    },
-                    &stmt.returning,
-                    params,
-                    &ctes,
-                )?);
-            }
-        }
-        engine.prepare_explicit_transaction_writer()?;
-    }
-    let mut prebuilt_returning_rows = prebuilt_returning_rows.into_iter();
-    for mut prepared in prepared_updates {
-        let rewritten_doc_id = apply_prepared_document_rewrite(engine, &mut prepared, params)?;
-        if !stmt.returning.is_empty() {
-            returning_rows.push(if prebuild_locking_returning {
-                prebuilt_returning_rows.next().ok_or_else(|| {
-                    SQLError::Internal("UPDATE lost a prebuilt RETURNING row".into())
-                })?
-            } else {
-                build_returning_row(
+            let rewritten_doc_id = stage_prepared_document_rewrite(engine, &mut prepared, params)?;
+            if !stmt.returning.is_empty() {
+                returning_rows.push(build_returning_row(
                     engine,
                     ReturningProjectionRow {
                         table: &stmt.table,
@@ -280,11 +226,19 @@ pub(in crate::sql) fn run_update_inner(
                     },
                     &stmt.returning,
                     params,
-                    &ctes,
-                )?
-            });
+                    &snapshot_ctes,
+                )?);
+            }
+            affected += 1;
+            prepared_updates.push(prepared);
         }
-        affected += 1;
+    }
+    drop(overlay);
+    if !prepared_updates.is_empty() {
+        engine.prepare_explicit_transaction_writer()?;
+        for mut prepared in prepared_updates {
+            apply_validated_prepared_document_rewrite(engine, &mut prepared)?;
+        }
     }
     if !stmt.returning.is_empty() {
         return dml_returning_result(

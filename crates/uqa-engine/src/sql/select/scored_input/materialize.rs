@@ -40,6 +40,16 @@ impl ScoredDocumentSource {
         &self,
         entries: &[ScoredEntry],
     ) -> ExecResult<Vec<uqa_execution::PhysicalRow>> {
+        if let Some((qualifier, storage_name)) = self.lock_origin.as_ref() {
+            return self.materialize_locking_physical_entries(entries, qualifier, storage_name);
+        }
+        self.materialize_plain_physical_entries(entries)
+    }
+
+    fn materialize_plain_physical_entries(
+        &self,
+        entries: &[ScoredEntry],
+    ) -> ExecResult<Vec<uqa_execution::PhysicalRow>> {
         let mut rows = Vec::with_capacity(entries.len());
         self.for_each_kept_entry(entries, &mut |doc_id, entry, _fields, values| {
             let metadata = self.row_metadata(doc_id, entry.score);
@@ -54,10 +64,42 @@ impl ScoredDocumentSource {
                 values,
                 &extras,
             );
-            rows.push(self.attach_lock_origin(
-                uqa_execution::PhysicalRow::from_values(row.into_values()),
-                doc_id,
-            ));
+            rows.push(uqa_execution::PhysicalRow::from_values(row.into_values()));
+            Ok(())
+        })?;
+        Ok(rows)
+    }
+
+    #[inline(never)]
+    fn materialize_locking_physical_entries(
+        &self,
+        entries: &[ScoredEntry],
+        qualifier: &std::sync::Arc<str>,
+        storage_name: &std::sync::Arc<str>,
+    ) -> ExecResult<Vec<uqa_execution::PhysicalRow>> {
+        let mut rows = Vec::with_capacity(entries.len());
+        self.for_each_kept_entry(entries, &mut |doc_id, entry, _fields, values| {
+            let metadata = self.row_metadata(doc_id, entry.score);
+            let extras = [
+                metadata.doc_id()?,
+                metadata.score(),
+                metadata.score_provenance(),
+            ];
+            let row = uqa_execution::ProjectedRow::new(
+                &self.schema,
+                &self.projected_slots,
+                values,
+                &extras,
+            );
+            rows.push(
+                uqa_execution::PhysicalRow::from_values(row.into_values()).with_lock_origin(
+                    uqa_execution::RowLockOrigin::from_shared(
+                        std::sync::Arc::clone(qualifier),
+                        std::sync::Arc::clone(storage_name),
+                        doc_id,
+                    ),
+                ),
+            );
             Ok(())
         })?;
         Ok(rows)
@@ -71,6 +113,15 @@ impl ScoredDocumentSource {
         if self.recheck_pinned {
             return self.for_each_pinned_entry(entries, visitor);
         }
+        self.for_each_snapshot_entry(entries, visitor)
+    }
+
+    #[inline]
+    fn for_each_snapshot_entry(
+        &self,
+        entries: &[ScoredEntry],
+        visitor: &mut KeptEntryVisitor<'_>,
+    ) -> ExecResult<()> {
         let fields = self
             .projected_fields
             .iter()
@@ -202,10 +253,9 @@ impl ScoredDocumentSource {
         Ok(())
     }
 
-    /// Materialize tuples for a pinned tuple-local recheck scan: a changed
-    /// tuple projects its latest committed image, an unchanged join partner
-    /// reads the statement snapshot, and a tuple missing from the snapshot is
-    /// skipped so the recheck drops the candidate naturally.
+    /// Materialize tuples for a pinned tuple-local recheck scan: a changed tuple projects its latest committed image, an unchanged join partner reads the statement snapshot, and a tuple missing from the snapshot is skipped so the recheck drops the candidate naturally.
+    #[cold]
+    #[inline(never)]
     fn for_each_pinned_entry(
         &self,
         entries: &[ScoredEntry],

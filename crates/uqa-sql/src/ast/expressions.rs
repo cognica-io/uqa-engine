@@ -198,8 +198,7 @@ impl Expr {
         )
     }
 
-    /// True when this expression contains a column whose owning relation can
-    /// only be determined after catalog schemas have been bound.
+    /// True when this expression contains a column whose owning relation can only be determined after catalog schemas have been bound.
     #[must_use]
     pub fn contains_unqualified_column(&self) -> bool {
         self.any_node(&|node| matches!(node, Self::Column(_)))
@@ -217,8 +216,7 @@ impl Expr {
         })
     }
 
-    /// Whether `hit` matches this node or any node below it. Subquery bodies
-    /// are opaque: `ScalarSubquery` and `Exists` own their expression trees.
+    /// Whether `hit` matches this node or any node below it. Subquery bodies are opaque: `ScalarSubquery` and `Exists` own their expression trees.
     fn any_node(&self, hit: &dyn Fn(&Self) -> bool) -> bool {
         if hit(self) {
             return true;

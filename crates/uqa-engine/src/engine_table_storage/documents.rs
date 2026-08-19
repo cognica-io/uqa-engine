@@ -11,14 +11,283 @@ use super::{
     FieldName, IndexConflictProbe, SQLError, TableState, Value,
 };
 
+enum CommandOverlayDocument {
+    Present(Document),
+    Deleted,
+}
+
+fn command_exact_lookup_parts(
+    fields: &[String],
+    values: &[Value],
+) -> Result<(Vec<String>, Vec<u8>), SQLError> {
+    if fields.len() != values.len() {
+        return Err(SQLError::Internal(
+            "command-overlay exact lookup has mismatched fields and values".into(),
+        ));
+    }
+    let mut pairs = fields
+        .iter()
+        .cloned()
+        .zip(values.iter().cloned())
+        .collect::<Vec<_>>();
+    pairs.sort_by(|left, right| left.0.cmp(&right.0));
+    let (fields, values): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
+    let key = uqa_execution::canonical_row_key(&values).map_err(|error| {
+        SQLError::Internal(format!("encode command-overlay exact lookup key: {error}"))
+    })?;
+    Ok((fields, key))
+}
+
+fn command_exact_document_key(document: &Document, fields: &[String]) -> Result<Vec<u8>, SQLError> {
+    let values = fields
+        .iter()
+        .map(|field| document.get(field).cloned().unwrap_or(Value::Null))
+        .collect::<Vec<_>>();
+    uqa_execution::canonical_row_key(&values).map_err(|error| {
+        SQLError::Internal(format!("encode command-overlay document key: {error}"))
+    })
+}
+
 impl Engine {
-    pub fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {
+    fn command_overlay_table_name(&self, table: &str) -> Result<String, SQLError> {
+        self.try_resolve_table_name(table)
+            .map_err(|error| {
+                SQLError::Internal(format!("resolve command-overlay table `{table}`: {error}"))
+            })
+            .map(|resolved| resolved.unwrap_or_else(|| table.to_string()))
+    }
+
+    pub(crate) fn begin_command_mutation_overlay(&self) {
+        self.session
+            .command_mutation_overlays
+            .lock()
+            .push(super::CommandMutationOverlay::default());
+    }
+
+    pub(crate) fn end_command_mutation_overlay(&self) {
+        let removed = self.session.command_mutation_overlays.lock().pop();
+        debug_assert!(
+            removed.is_some(),
+            "command mutation overlay stack underflow"
+        );
+    }
+
+    pub(crate) fn command_mutation_overlay_active(&self) -> bool {
+        !self.session.command_mutation_overlays.lock().is_empty()
+    }
+
+    pub(crate) fn stage_command_document(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Option<Document>,
+    ) -> Result<(), SQLError> {
+        let table = self.command_overlay_table_name(table)?;
+        let mut overlays = self.session.command_mutation_overlays.lock();
+        let overlay = overlays.last_mut().ok_or_else(|| {
+            SQLError::Internal("stage document without an active command overlay".into())
+        })?;
+        let previous = overlay
+            .documents
+            .get(&table)
+            .and_then(|documents| documents.get(&doc_id))
+            .cloned();
+        let index_updates = overlay
+            .exact_indexes
+            .get(&table)
+            .map(|indexes| {
+                indexes
+                    .keys()
+                    .map(|fields| {
+                        Ok((
+                            fields.clone(),
+                            previous
+                                .as_ref()
+                                .and_then(Option::as_ref)
+                                .map(|document| command_exact_document_key(document, fields))
+                                .transpose()?,
+                            document
+                                .as_ref()
+                                .map(|document| command_exact_document_key(document, fields))
+                                .transpose()?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, SQLError>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+        for (fields, previous_key, new_key) in index_updates {
+            let index = overlay
+                .exact_indexes
+                .get_mut(&table)
+                .and_then(|indexes| indexes.get_mut(&fields))
+                .ok_or_else(|| {
+                    SQLError::Internal("command-overlay exact index disappeared".into())
+                })?;
+            if let Some(previous_key) = previous_key {
+                let empty = index
+                    .doc_ids_by_key
+                    .get_mut(&previous_key)
+                    .is_some_and(|doc_ids| {
+                        doc_ids.remove(&doc_id);
+                        doc_ids.is_empty()
+                    });
+                if empty {
+                    index.doc_ids_by_key.remove(&previous_key);
+                }
+            }
+            if let Some(new_key) = new_key {
+                index
+                    .doc_ids_by_key
+                    .entry(new_key)
+                    .or_default()
+                    .insert(doc_id);
+            }
+        }
+        overlay
+            .documents
+            .entry(table)
+            .or_default()
+            .insert(doc_id, document);
+        Ok(())
+    }
+
+    fn command_overlay_document(
+        &self,
+        table: &str,
+        doc_id: DocId,
+    ) -> Result<Option<CommandOverlayDocument>, SQLError> {
+        let table = self.command_overlay_table_name(table)?;
+        Ok(self
+            .session
+            .command_mutation_overlays
+            .lock()
+            .iter()
+            .rev()
+            .find_map(|overlay| {
+                overlay
+                    .documents
+                    .get(&table)
+                    .and_then(|documents| documents.get(&doc_id))
+                    .map(|document| match document {
+                        Some(document) => CommandOverlayDocument::Present(document.clone()),
+                        None => CommandOverlayDocument::Deleted,
+                    })
+            }))
+    }
+
+    fn command_overlay_exact_match(
+        &self,
+        table: &str,
+        fields: &[String],
+        values: &[Value],
+    ) -> Result<Option<DocId>, SQLError> {
+        let table = self.command_overlay_table_name(table)?;
+        let (fields, key) = command_exact_lookup_parts(fields, values)?;
+        let mut overlays = self.session.command_mutation_overlays.lock();
+        for overlay in overlays.iter_mut() {
+            let indexes = overlay.exact_indexes.entry(table.clone()).or_default();
+            if !indexes.contains_key(&fields) {
+                let mut index = super::CommandExactIndex::default();
+                if let Some(documents) = overlay.documents.get(&table) {
+                    for (doc_id, document) in documents {
+                        let Some(document) = document else {
+                            continue;
+                        };
+                        index
+                            .doc_ids_by_key
+                            .entry(command_exact_document_key(document, &fields)?)
+                            .or_default()
+                            .insert(*doc_id);
+                    }
+                }
+                indexes.insert(fields.clone(), index);
+            }
+        }
+        let candidates = overlays
+            .iter()
+            .filter_map(|overlay| overlay.exact_indexes.get(&table))
+            .filter_map(|indexes| indexes.get(&fields))
+            .filter_map(|index| index.doc_ids_by_key.get(&key))
+            .flatten()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        for doc_id in candidates {
+            let visible = overlays.iter().rev().find_map(|overlay| {
+                overlay
+                    .documents
+                    .get(&table)
+                    .and_then(|documents| documents.get(&doc_id))
+            });
+            if let Some(Some(document)) = visible {
+                if command_exact_document_key(document, &fields)? == key {
+                    return Ok(Some(doc_id));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub(crate) fn command_visible_documents(
+        &self,
+        table: &str,
+    ) -> Result<Option<BTreeMap<DocId, Document>>, SQLError> {
+        let Some(changes) = self.command_overlay_changes(table)? else {
+            return Ok(None);
+        };
         let t = self.require_table(table)?;
-        let mut document = t
+        let mut documents = t
             .document_store
             .read()
-            .get(doc_id)
-            .map_err(|error| document_store_read_error("read document", &error))?;
+            .iter_all()
+            .map_err(|error| document_store_read_error("read command snapshot", &error))?
+            .collect::<BTreeMap<_, _>>();
+        for (doc_id, document) in changes {
+            match document {
+                Some(document) => {
+                    documents.insert(doc_id, document);
+                }
+                None => {
+                    documents.remove(&doc_id);
+                }
+            }
+        }
+        Ok(Some(documents))
+    }
+
+    fn command_overlay_changes(
+        &self,
+        table: &str,
+    ) -> Result<Option<BTreeMap<DocId, Option<Document>>>, SQLError> {
+        let canonical = self.command_overlay_table_name(table)?;
+        let overlays = self.session.command_mutation_overlays.lock();
+        if overlays.is_empty() {
+            return Ok(None);
+        }
+        let mut changes = BTreeMap::new();
+        for overlay in overlays.iter() {
+            if let Some(documents) = overlay.documents.get(&canonical) {
+                changes.extend(
+                    documents
+                        .iter()
+                        .map(|(doc_id, document)| (*doc_id, document.clone())),
+                );
+            }
+        }
+        Ok(Some(changes))
+    }
+
+    pub fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {
+        let t = self.require_table(table)?;
+        let mut document = match self.command_overlay_document(table, doc_id)? {
+            Some(CommandOverlayDocument::Present(document)) => Some(document),
+            Some(CommandOverlayDocument::Deleted) => None,
+            None => t
+                .document_store
+                .read()
+                .get(doc_id)
+                .map_err(|error| document_store_read_error("read document", &error))?,
+        };
         if let Some(document) = document.as_mut() {
             crate::engine_generated::materialize_virtual_generated_columns(
                 &t.columns.read(),
@@ -61,12 +330,7 @@ impl Engine {
         Ok(document)
     }
 
-    /// Execute a retrieval predicate against the latest committed index
-    /// state through an independent session while this session keeps its
-    /// statement snapshot pinned. A tuple-local recheck uses it so a
-    /// substituted committed image is judged by the retrieval predicate the
-    /// way `PostgreSQL` re-evaluates the WHERE clause on the new tuple.
-    /// Without a provider the engine has a single shared state already.
+    /// Execute a retrieval predicate against the latest committed index state through an independent session while this session keeps its statement snapshot pinned. A tuple-local recheck uses it so a substituted committed image is judged by the retrieval predicate the way `PostgreSQL` re-evaluates the WHERE clause on the new tuple. Without a provider the engine has a single shared state already.
     pub(crate) fn committed_retrieval_entries(
         &self,
         table: &str,
@@ -101,9 +365,19 @@ impl Engine {
     ) -> Result<BTreeMap<DocId, Document>, SQLError> {
         let t = self.require_table(table)?;
         let columns = t.columns.read().clone();
-        let mut documents = t.document_store.read().get_many(doc_ids).map_err(|error| {
-            document_store_read_error("read generated document projection", &error)
-        })?;
+        let mut documents = if self.command_mutation_overlay_active() {
+            let mut documents = BTreeMap::new();
+            for doc_id in doc_ids {
+                if let Some(document) = self.get_document(table, *doc_id)? {
+                    documents.insert(*doc_id, document);
+                }
+            }
+            documents
+        } else {
+            t.document_store.read().get_many(doc_ids).map_err(|error| {
+                document_store_read_error("read generated document projection", &error)
+            })?
+        };
         for document in documents.values_mut() {
             crate::engine_generated::materialize_projected_virtual_generated_columns(
                 &columns, document, projection,
@@ -145,6 +419,21 @@ impl Engine {
             }
             return Ok(projected);
         }
+        if self.command_mutation_overlay_active() {
+            let mut projected = BTreeMap::new();
+            for doc_id in doc_ids {
+                if let Some(document) = self.get_document(table, *doc_id)? {
+                    projected.insert(
+                        *doc_id,
+                        fields
+                            .iter()
+                            .map(|field| document.get(*field).cloned().unwrap_or(Value::Null))
+                            .collect(),
+                    );
+                }
+            }
+            return Ok(projected);
+        }
         let result = t.document_store.read().get_fields_multi(doc_ids, fields);
         result.map_err(|error| document_store_read_error("read document fields", &error))
     }
@@ -175,9 +464,32 @@ impl Engine {
         field: &str,
         value: &Value,
     ) -> Result<Option<DocId>, SQLError> {
+        if let Some(doc_id) = self.command_overlay_exact_match(
+            table,
+            &[field.to_string()],
+            std::slice::from_ref(value),
+        )? {
+            return Ok(Some(doc_id));
+        }
         let t = self.require_table(table)?;
-        let result = t.document_store.read().find_doc_id_by_field(field, value);
-        result.map_err(|error| document_store_read_error("find document by field", &error))
+        let persisted = t
+            .document_store
+            .read()
+            .find_doc_id_by_field(field, value)
+            .map_err(|error| document_store_read_error("find document by field", &error))?;
+        let Some(doc_id) = persisted else {
+            return Ok(None);
+        };
+        if self.command_overlay_document(table, doc_id)?.is_none() {
+            return Ok(Some(doc_id));
+        }
+        Ok(self
+            .command_visible_documents(table)?
+            .and_then(|documents| {
+                documents.into_iter().find_map(|(doc_id, document)| {
+                    (document.get(field).unwrap_or(&Value::Null) == value).then_some(doc_id)
+                })
+            }))
     }
 
     /// Find the first document whose conflict columns all match the
@@ -204,6 +516,25 @@ impl Engine {
         if conflict_columns.is_empty() || conflict_columns.len() != values.len() {
             return Ok(None);
         }
+        if let Some(doc_id) = self.command_overlay_exact_match(table, conflict_columns, values)? {
+            return Ok(Some(doc_id));
+        }
+        let persisted = self.find_persisted_conflict(table, conflict_columns, values)?;
+        let Some(doc_id) = persisted else {
+            return Ok(None);
+        };
+        Ok(self
+            .command_overlay_document(table, doc_id)?
+            .is_none()
+            .then_some(doc_id))
+    }
+
+    fn find_persisted_conflict(
+        &self,
+        table: &str,
+        conflict_columns: &[String],
+        values: &[Value],
+    ) -> Result<Option<DocId>, SQLError> {
         let t = self.require_table(table)?;
         if conflict_columns.len() == 1 {
             if let Some(doc_id) =
@@ -463,12 +794,7 @@ impl Engine {
         Ok(true)
     }
 
-    /// Rewrite one row for SQL `UPDATE`. The caller has already acquired the
-    /// tuple lock at the strength `update_lock_strength` derived from the
-    /// changed columns and holds the relation lock, so this path must not
-    /// re-lock: taking `FOR UPDATE` here would make a non-key update conflict
-    /// with concurrent `FOR KEY SHARE` holders and publish an inflated
-    /// mutation strength, both contrary to `PostgreSQL` 18.
+    /// Rewrite one row for SQL `UPDATE`. The caller has already acquired the tuple lock at the strength `update_lock_strength` derived from the changed columns and holds the relation lock, so this path must not re-lock: taking `FOR UPDATE` here would make a non-key update conflict with concurrent `FOR KEY SHARE` holders and publish an inflated mutation strength, both contrary to `PostgreSQL` 18.
     pub(crate) fn rewrite_prepared_document(
         &self,
         table: &str,
@@ -547,7 +873,7 @@ impl Engine {
         }
         self.mark_column_stats_dirty(&table_name, &t)
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
-        self.note_row_changed(&table_name, doc_id);
+        self.note_row_changed(&table_name, doc_id)?;
         Ok(())
     }
 
@@ -597,7 +923,7 @@ impl Engine {
         self.mark_column_stats_dirty(&table_name, &t)
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
         if existed {
-            self.note_row_deleted(&table_name, doc_id);
+            self.note_row_deleted(&table_name, doc_id)?;
         }
         Ok(())
     }

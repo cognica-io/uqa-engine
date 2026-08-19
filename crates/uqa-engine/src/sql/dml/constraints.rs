@@ -151,12 +151,7 @@ fn validate_document_non_key_constraints_with_old(
     lock_document_foreign_key_dependencies(engine, table, document, false, old_document)
 }
 
-/// Acquire every referenced-parent tuple lock that already exists without
-/// rejecting a temporarily missing parent. INSERT uses this as a lock-only
-/// preflight for all input rows before taking the backend writer; ordinary
-/// constraint validation still runs in row order afterwards, so a
-/// self-referencing row can see a parent inserted earlier by the same
-/// statement and a genuinely missing parent still raises the normal error.
+/// Acquire every referenced-parent tuple lock that already exists without rejecting a temporarily missing parent. INSERT uses this as a lock-only preflight for all input rows before taking the backend writer; ordinary constraint validation still runs in row order afterwards, so a self-referencing row can see a parent inserted earlier by the same statement and a genuinely missing parent still raises the normal error.
 pub(in crate::sql) fn lock_existing_document_foreign_key_dependencies(
     engine: &Engine,
     table: &str,
@@ -217,10 +212,7 @@ fn lock_document_foreign_key_dependencies(
                 }
                 return Err(violation());
             };
-            // PostgreSQL 18 holds FOR KEY SHARE on the referenced row until
-            // the referencing transaction ends. If the lookup waits, refresh
-            // the READ COMMITTED snapshot and follow a delete/reinsert or key
-            // rewrite until the tuple carrying the requested key is locked.
+            // PostgreSQL 18 holds FOR KEY SHARE on the referenced row until the referencing transaction ends. If the lookup waits, refresh the READ COMMITTED snapshot and follow a delete/reinsert or key rewrite until the tuple carrying the requested key is locked.
             let target = lock_mutation_target(
                 engine,
                 &fk.ref_table,
@@ -281,12 +273,7 @@ pub(in crate::sql) fn key_constraint_values(
     Some(values)
 }
 
-/// Reserve every UNIQUE / PRIMARY KEY value that a new row can publish, or
-/// every such value changed by a rewrite, before the backend writer is held.
-/// The reservation is the logical equivalent of `PostgreSQL`'s speculative
-/// index-tuple wait: a deferred reader that cannot yet see another writer's
-/// uncommitted row waits on the exact key, refreshes its snapshot, and only
-/// then decides whether INSERT or ON CONFLICT applies.
+/// Reserve every UNIQUE / PRIMARY KEY value that a new row can publish, or every such value changed by a rewrite, before the backend writer is held. The reservation is the logical equivalent of `PostgreSQL`'s speculative index-tuple wait: a deferred reader that cannot yet see another writer's uncommitted row waits on the exact key, refreshes its snapshot, and only then decides whether INSERT or ON CONFLICT applies.
 pub(in crate::sql) fn lock_document_key_dependencies(
     engine: &Engine,
     table: &str,
@@ -430,36 +417,7 @@ pub(in crate::sql) fn foreign_key_lookup_values(
     }
 }
 
-pub(in crate::sql) fn rewrite_document_with_referential_actions(
-    engine: &Engine,
-    table: &str,
-    doc_id: DocId,
-    old_doc: &Document,
-    new_doc: &mut Document,
-    params: &[SQLParam],
-) -> Result<DocId, SQLError> {
-    let mut rewrite_stack = Vec::new();
-    let Some(mut prepared) = prepare_document_rewrite(
-        engine,
-        table,
-        doc_id,
-        old_doc.clone(),
-        new_doc.clone(),
-        params,
-        &mut rewrite_stack,
-    )?
-    else {
-        return Ok(doc_id);
-    };
-    engine.prepare_explicit_transaction_writer()?;
-    let rewritten_doc_id = apply_prepared_document_rewrite(engine, &mut prepared, params)?;
-    new_doc.clone_from(&prepared.new_document);
-    Ok(rewritten_doc_id)
-}
-
-/// Build the complete tuple-lock dependency tree for one rewrite while the
-/// backend transaction is still deferred. The prepared documents retain
-/// volatile SET DEFAULT results so the apply phase never re-evaluates them.
+/// Build the complete tuple-lock dependency tree for one rewrite while the backend transaction is still deferred. The prepared documents retain volatile SET DEFAULT results so the apply phase never re-evaluates them.
 pub(in crate::sql) fn prepare_document_rewrite(
     engine: &Engine,
     table: &str,
@@ -517,7 +475,7 @@ pub(in crate::sql) fn prepare_document_rewrite(
     }))
 }
 
-pub(in crate::sql) fn apply_prepared_document_rewrite(
+pub(in crate::sql) fn stage_prepared_document_rewrite(
     engine: &Engine,
     prepared: &mut PreparedDocumentRewrite,
     params: &[SQLParam],
@@ -531,11 +489,29 @@ pub(in crate::sql) fn apply_prepared_document_rewrite(
         prepared.doc_id,
     )?;
     let rewritten_doc_id =
+        integer_primary_key_doc_id(engine, &prepared.table, &prepared.new_document)?
+            .unwrap_or(prepared.doc_id);
+    if rewritten_doc_id != prepared.doc_id {
+        engine.stage_command_document(&prepared.table, prepared.doc_id, None)?;
+    }
+    engine.stage_command_document(
+        &prepared.table,
+        rewritten_doc_id,
+        Some(prepared.new_document.clone()),
+    )?;
+    for action in &mut prepared.actions {
+        stage_prepared_document_rewrite(engine, action, params)?;
+    }
+    Ok(rewritten_doc_id)
+}
+
+pub(in crate::sql) fn apply_validated_prepared_document_rewrite(
+    engine: &Engine,
+    prepared: &mut PreparedDocumentRewrite,
+) -> Result<DocId, SQLError> {
+    let rewritten_doc_id =
         match integer_primary_key_doc_id(engine, &prepared.table, &prepared.new_document)? {
-            // An integer primary key names the row's doc_id slot; keep that
-            // invariant when the key itself changes, or value -> doc_id
-            // lookups (the unique fast path and FOREIGN KEY validation) read
-            // the stale slot and miss the row.
+            // An integer primary key names the row's doc_id slot; keep that invariant when the key itself changes, or value -> doc_id lookups (the unique fast path and FOREIGN KEY validation) read the stale slot and miss the row.
             Some(new_id) if new_id != prepared.doc_id => {
                 engine.delete_document(&prepared.table, prepared.doc_id)?;
                 engine.add_prepared_document_with_vector_values(
@@ -548,7 +524,7 @@ pub(in crate::sql) fn apply_prepared_document_rewrite(
                 engine
                     .advance_next_id(&prepared.table, new_id)
                     .map_err(|err| dml_storage_error("UPDATE primary key", err))?;
-                engine.note_row_rewritten(&prepared.table, prepared.doc_id, new_id);
+                engine.note_row_rewritten(&prepared.table, prepared.doc_id, new_id)?;
                 new_id
             }
             _ => {
@@ -561,7 +537,7 @@ pub(in crate::sql) fn apply_prepared_document_rewrite(
             }
         };
     for action in &mut prepared.actions {
-        apply_prepared_document_rewrite(engine, action, params)?;
+        apply_validated_prepared_document_rewrite(engine, action)?;
     }
     Ok(rewritten_doc_id)
 }
@@ -697,11 +673,7 @@ pub(in crate::sql) fn referrers_to_for_actions(
         .map_err(|err| dml_storage_error("foreign-key lookup", err))
 }
 
-/// Lock one referencing child row for a referential action and refetch it
-/// after the wait. Returns `None` when the child vanished or its foreign-key
-/// columns no longer reference the parent key that triggered the action, so
-/// the action skips it exactly like `PostgreSQL` after an `EvalPlanQual`
-/// recheck of the referencing row.
+/// Lock one referencing child row for a referential action and refetch it after the wait. Returns `None` when the child vanished or its foreign-key columns no longer reference the parent key that triggered the action, so the action skips it exactly like `PostgreSQL` after an `EvalPlanQual` recheck of the referencing row.
 pub(in crate::sql) fn lock_referencing_child(
     engine: &Engine,
     ref_table: &str,

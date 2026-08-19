@@ -293,15 +293,15 @@ fn execute_lateral_query_block_output(
     params: &[SQLParam],
     scoped_ctes: &mut CteScope,
 ) -> Result<QueryOutput, SQLError> {
-    let inherited_lock_identities = scoped_ctes.emit_lock_identities;
+    let inherited_lock_identities = scoped_ctes.lock_identities.emit;
     let mut scoped_ctes = scoped_ctes.enter_scalar_subqueries(&stmt.subqueries);
     scoped_ctes.set_row_lock_outer_row(outer_row.clone());
     let row_identity_barrier = stmt.distinct
         || !stmt.distinct_on.is_empty()
         || matches!(stmt.compute, ComputePlan::Aggregate | ComputePlan::Window);
-    scoped_ctes.emit_lock_identities =
+    scoped_ctes.lock_identities.emit =
         !stmt.locking.is_empty() || (inherited_lock_identities && !row_identity_barrier);
-    scoped_ctes.retain_lock_identities_after_lock =
+    scoped_ctes.lock_identities.retain_after_lock =
         inherited_lock_identities && !row_identity_barrier;
     if let Some(from) = stmt.from.as_ref() {
         crate::sql::select::validate_source_set_contexts_before_build(

@@ -1045,6 +1045,28 @@ fn having_can_use_an_aggregate_not_projected_by_select() {
 }
 
 #[test]
+fn aggregate_order_and_distinct_on_keep_unprojected_group_keys() {
+    let eng = engine();
+    let ordered = eng
+        .sql(
+            "SELECT count(*) AS n FROM (VALUES (2), (1), (2)) AS input(x) GROUP BY x ORDER BY x",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(ordered.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(ordered.value_at(1, 0), Some(&Value::Int(2)));
+
+    let distinct = eng
+        .sql(
+            "SELECT DISTINCT ON (x) count(*) AS n FROM (VALUES (2), (1), (2)) AS input(x) GROUP BY x ORDER BY x",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(distinct.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(distinct.value_at(1, 0), Some(&Value::Int(2)));
+}
+
+#[test]
 fn grouped_star_expands_to_bound_source_columns() {
     let eng = engine_with_table();
     let bare = eng

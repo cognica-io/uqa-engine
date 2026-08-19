@@ -24,8 +24,9 @@ pub(in crate::sql) fn materialize_plan_ctes_with_filters<'a>(
     ctes: &mut CteScope,
     output_filters: &BTreeMap<String, (String, ScalarExpr)>,
 ) -> Result<(), SQLError> {
+    let plans = order_cte_plans(plans.into_iter().collect())?;
     for plan in plans {
-        if plan.recursive {
+        if cte_references_own_name(plan) {
             let rows = {
                 let mut cte_scope = ctes.enter_lock_identity_emission(false);
                 materialize_recursive_cte(
@@ -135,13 +136,14 @@ pub(in crate::sql) fn reachable_plan_cte_names(plan: &QueryPlan) -> BTreeSet<Str
         }
         for (index, cte) in pending {
             expanded.insert(cte.name.clone());
-            let mut visible_dependencies = plan.ctes[..index]
-                .iter()
-                .map(|dependency| dependency.name.clone())
-                .collect::<BTreeSet<_>>();
-            if cte.recursive {
-                visible_dependencies.insert(cte.name.clone());
-            }
+            let visible_dependencies = if cte.recursive {
+                targets.clone()
+            } else {
+                plan.ctes[..index]
+                    .iter()
+                    .map(|dependency| dependency.name.clone())
+                    .collect::<BTreeSet<_>>()
+            };
             collect_target_cte_references_from_nested_query(
                 &cte.query,
                 &visible_dependencies,
@@ -151,6 +153,65 @@ pub(in crate::sql) fn reachable_plan_cte_names(plan: &QueryPlan) -> BTreeSet<Str
         }
     }
     reachable
+}
+
+pub(in crate::sql) fn cte_references_own_name(cte: &CtePlan) -> bool {
+    let targets = BTreeSet::from([cte.name.clone()]);
+    let mut references = BTreeSet::new();
+    collect_target_cte_references_from_nested_query(
+        &cte.query,
+        &targets,
+        &BTreeSet::new(),
+        &mut references,
+    );
+    references.contains(&cte.name)
+}
+
+pub(in crate::sql) fn ordered_plan_ctes(plan: &QueryPlan) -> Result<Vec<&CtePlan>, SQLError> {
+    order_cte_plans(plan.ctes.iter().collect())
+}
+
+fn order_cte_plans(plans: Vec<&CtePlan>) -> Result<Vec<&CtePlan>, SQLError> {
+    if !plans.iter().any(|cte| cte.recursive) {
+        return Ok(plans);
+    }
+    let targets = plans
+        .iter()
+        .map(|cte| cte.name.clone())
+        .collect::<BTreeSet<_>>();
+    let dependencies = plans
+        .iter()
+        .map(|cte| {
+            let mut references = BTreeSet::new();
+            collect_target_cte_references_from_nested_query(
+                &cte.query,
+                &targets,
+                &BTreeSet::new(),
+                &mut references,
+            );
+            references.remove(&cte.name);
+            references
+        })
+        .collect::<Vec<_>>();
+    let mut emitted = BTreeSet::new();
+    let mut ordered = Vec::with_capacity(plans.len());
+    let mut remaining = (0..plans.len()).collect::<BTreeSet<_>>();
+    while !remaining.is_empty() {
+        let ready = remaining
+            .iter()
+            .copied()
+            .find(|index| dependencies[*index].is_subset(&emitted));
+        let Some(index) = ready else {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "mutual recursion between WITH items is not implemented".into(),
+            });
+        };
+        remaining.remove(&index);
+        emitted.insert(plans[index].name.clone());
+        ordered.push(plans[index]);
+    }
+    Ok(ordered)
 }
 
 /// Return reachable CTEs with exactly one syntactic reference in the owning query tree. Counting references outside their lexical visibility can only make this set more conservative, never cause a multiply referenced CTE to be streamed as a single-consumer input.
@@ -315,18 +376,30 @@ fn collect_target_cte_references_from_nested_query(
             .filter(|name| targets.contains(name)),
     );
     collect_target_cte_references_from_root(&plan.root, targets, &root_shadowed, references);
+    let recursive_scope = plan.ctes.iter().any(|cte| cte.recursive).then(|| {
+        plan.ctes
+            .iter()
+            .map(|cte| cte.name.clone())
+            .collect::<BTreeSet<_>>()
+    });
     let mut preceding = BTreeSet::new();
     for cte in &plan.ctes {
         if local_reachable.contains(&cte.name) {
             let mut definition_shadowed = shadowed.clone();
-            definition_shadowed.extend(
-                preceding
-                    .iter()
-                    .filter(|name| targets.contains(*name))
-                    .cloned(),
-            );
-            if cte.recursive && targets.contains(&cte.name) {
-                definition_shadowed.insert(cte.name.clone());
+            if let Some(recursive_scope) = recursive_scope.as_ref() {
+                definition_shadowed.extend(
+                    recursive_scope
+                        .iter()
+                        .filter(|name| targets.contains(*name))
+                        .cloned(),
+                );
+            } else {
+                definition_shadowed.extend(
+                    preceding
+                        .iter()
+                        .filter(|name| targets.contains(*name))
+                        .cloned(),
+                );
             }
             collect_target_cte_references_from_nested_query(
                 &cte.query,

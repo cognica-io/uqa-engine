@@ -46,9 +46,7 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
             }
         }
         DropKind::Schema => {
-            // Dropping a schema removes every relation it owns, including
-            // the label relations of a graph namespace, so each of them takes
-            // the same AccessExclusive lock a direct DROP would.
+            // Dropping a schema removes every relation it owns, including the label relations of a graph namespace, so each of them takes the same AccessExclusive lock a direct DROP would.
             for name in &stmt.names {
                 for table in engine
                     .tables_in_schema(name)

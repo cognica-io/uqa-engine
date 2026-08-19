@@ -395,10 +395,7 @@ impl Engine {
         match outcome {
             Ok(()) => Ok(()),
             Err(error) => {
-                // PostgreSQL aborts the enclosing transaction when a
-                // savepoint command or nested BEGIN fails; later statements
-                // see 25P02 until ROLLBACK. Frames that this failing command
-                // could not open or that no longer exist need no abort.
+                // PostgreSQL aborts the enclosing transaction when a savepoint command or nested BEGIN fails; later statements see 25P02 until ROLLBACK. Frames that this failing command could not open or that no longer exist need no abort.
                 let still_open = guard
                     .last()
                     .is_some_and(|frame| frame.status == TransactionStatus::Active);
@@ -513,7 +510,9 @@ impl Engine {
         SQLError,
     > {
         let Some(backend) = self.storage.backend.as_ref() else {
-            let snapshot_gate = self.row_locks.begin_change_snapshot()?;
+            let snapshot_gate = self
+                .row_locks
+                .begin_change_snapshot(&self.runtime.cancellation)?;
             self.synchronize_table_catalog()
                 .map_err(|err| Self::storage_tx_error("BEGIN table catalog refresh", &err))?;
             self.synchronize_table_data()
@@ -523,16 +522,20 @@ impl Engine {
             return Ok((self.snapshot_transaction_data()?, snapshot_gate.baseline()?));
         };
         let snapshot_gate = if read_only || defer_write_lock {
-            let gate = self.row_locks.begin_change_snapshot()?;
+            let gate = self
+                .row_locks
+                .begin_change_snapshot(&self.runtime.cancellation)?;
             backend
                 .begin_read_transaction()
                 .map_err(|err| Self::storage_tx_error("BEGIN DEFERRED", &err))?;
             gate
         } else {
-            // Take the writer registration before the snapshot gate so a
-            // writer already committing cannot deadlock with this snapshot.
+            // Take the writer registration before the snapshot gate so a writer already committing cannot deadlock with this snapshot.
             self.acquire_backend_writer_lock(0)?;
-            let gate = match self.row_locks.begin_change_snapshot() {
+            let gate = match self
+                .row_locks
+                .begin_change_snapshot(&self.runtime.cancellation)
+            {
                 Ok(gate) => gate,
                 Err(error) => {
                     self.row_locks.release_session(self.session_id);
@@ -567,12 +570,7 @@ impl Engine {
         Ok((None, baseline))
     }
 
-    /// Register the physical backend writer this session holds in the
-    /// logical lock manager. Eager writer frames (typed `begin`, direct
-    /// transactions) and promoted deferred frames must both hold the
-    /// `\0uqa-backend-writer` relation lock, otherwise a writer blocked on a
-    /// row lock is invisible to the deadlock detector and a promoting SQL
-    /// session waits at the storage layer instead of reporting `40P01`.
+    /// Register the physical backend writer this session holds in the logical lock manager. Eager writer frames (typed `begin`, direct transactions) and promoted deferred frames must both hold the `\0uqa-backend-writer` relation lock, otherwise a writer blocked on a row lock is invisible to the deadlock detector and a promoting SQL session waits at the storage layer instead of reporting `40P01`.
     fn acquire_backend_writer_lock(&self, mark: u32) -> Result<(), SQLError> {
         self.row_locks.acquire_relation(
             self.session_id,
@@ -642,7 +640,10 @@ impl Engine {
             }
         }
         let change_publication = if storage_savepoint.is_none() && !frame.row_changes.is_empty() {
-            Some(self.row_locks.begin_change_publication()?)
+            Some(
+                self.row_locks
+                    .begin_change_publication(&self.runtime.cancellation)?,
+            )
         } else {
             None
         };
@@ -673,7 +674,8 @@ impl Engine {
             .pop()
             .ok_or_else(|| SQLError::Internal("COMMIT lost its transaction frame".into()))?;
         if storage_savepoint.is_none() {
-            self.row_locks
+            let publication_result = self
+                .row_locks
                 .publish_row_changes(self.session_id, committed.row_changes.iter().copied());
             drop(change_publication);
             self.row_locks.release_session(self.session_id);
@@ -701,6 +703,7 @@ impl Engine {
             {
                 self.publish_table_data_changes();
             }
+            publication_result?;
         }
         if let Some(parent) = stack.last_mut() {
             parent.next_lock_mark = parent.next_lock_mark.max(committed.next_lock_mark);
@@ -874,11 +877,7 @@ impl Engine {
             frame.data_snapshot.clone(),
             frame.dirty_at_begin,
         );
-        // A nested frame owns a backend savepoint of its own; aborting the
-        // statement rolls the storage back to that savepoint so the outer
-        // frames' writes and locks survive, exactly like a PostgreSQL
-        // subtransaction abort. Only the outermost frame aborts the whole
-        // backend transaction.
+        // A nested frame owns a backend savepoint of its own; aborting the statement rolls the storage back to that savepoint so the outer frames' writes and locks survive, exactly like a PostgreSQL subtransaction abort. Only the outermost frame aborts the whole backend transaction.
         let frame_storage_savepoint = frame.storage_savepoint.clone();
         let frame_begin_lock_mark = frame.begin_lock_mark;
         let savepoints_deferred = Self::backend_savepoints_deferred(&stack);
@@ -886,10 +885,7 @@ impl Engine {
         let mut backend_aborted = false;
 
         if let Some(backend) = self.storage.backend.as_ref() {
-            // A deferred outer transaction has written nothing to storage, so
-            // its backend savepoints exist only logically and there is
-            // nothing to roll back at the backend for a savepoint or nested
-            // frame; the outermost abort still ends the read transaction.
+            // A deferred outer transaction has written nothing to storage, so its backend savepoints exist only logically and there is nothing to roll back at the backend for a savepoint or nested frame; the outermost abort still ends the read transaction.
             let rollback = if savepoint.is_some() || frame_storage_savepoint.is_some() {
                 if savepoints_deferred {
                     Ok(())
@@ -957,11 +953,7 @@ impl Engine {
         transaction_abort_result(error, &cleanup_errors)
     }
 
-    /// A deferred outer frame still runs a backend read transaction, which
-    /// cannot carry backend savepoints. Savepoints are then recorded on the
-    /// frame only; promotion to a writer recreates every recorded savepoint
-    /// on the write transaction, so `PostgreSQL`'s fresh READ COMMITTED
-    /// snapshot per statement survives `SAVEPOINT` and nested `BEGIN`.
+    /// A deferred outer frame still runs a backend read transaction, which cannot carry backend savepoints. Savepoints are then recorded on the frame only; promotion to a writer recreates every recorded savepoint on the write transaction, so `PostgreSQL`'s fresh READ COMMITTED snapshot per statement survives `SAVEPOINT` and nested `BEGIN`.
     fn backend_savepoints_deferred(stack: &[TransactionFrame]) -> bool {
         stack
             .first()
@@ -1098,11 +1090,7 @@ impl Engine {
         let Some(backend) = self.storage.backend.as_ref() else {
             return Ok(());
         };
-        // A statement issued by a host callback while an outer statement is
-        // still executing must keep the outer statement's snapshot: replacing
-        // the backend read transaction underneath a running scan would mix
-        // snapshots or abort the outer cursor. Only the outermost statement
-        // of the session takes a fresh READ COMMITTED snapshot.
+        // A statement issued by a host callback while an outer statement is still executing must keep the outer statement's snapshot: replacing the backend read transaction underneath a running scan would mix snapshots or abort the outer cursor. Only the outermost statement of the session takes a fresh READ COMMITTED snapshot.
         if self.session.row_lock_statements.lock().len() > 1 {
             return Ok(());
         }
@@ -1120,7 +1108,9 @@ impl Engine {
         {
             return Ok(());
         }
-        let snapshot_gate = self.row_locks.begin_change_snapshot()?;
+        let snapshot_gate = self
+            .row_locks
+            .begin_change_snapshot(&self.runtime.cancellation)?;
         self.replace_unwritten_backend_transaction(
             &mut stack,
             true,
@@ -1172,7 +1162,8 @@ impl Engine {
         {
             return Ok(());
         }
-        let mark = stack.first().map_or(0, |frame| frame.lock_mark);
+        // The physical writer lives until the outer transaction ends, so its logical registration must survive ROLLBACK TO SAVEPOINT and an error rollback that releases the current savepoint's lock mark.
+        let mark = stack.first().map_or(0, |frame| frame.begin_lock_mark);
         self.acquire_backend_writer_lock(mark)?;
         if self.storage.backend.is_none() {
             if let Some(frame) = stack.first_mut() {
@@ -1227,10 +1218,7 @@ impl Engine {
                 failure,
             ));
         }
-        // Writer promotion materializes every logical savepoint in creation
-        // order: each frame's own nested-BEGIN savepoint precedes the user
-        // savepoints declared inside that frame, and inner frames follow
-        // their parents. A refreshed read transaction keeps them logical.
+        // Writer promotion materializes every logical savepoint in creation order: each frame's own nested-BEGIN savepoint precedes the user savepoints declared inside that frame, and inner frames follow their parents. A refreshed read transaction keeps them logical.
         let mut savepoint_names = Vec::new();
         if !deferred {
             for frame in stack.iter() {

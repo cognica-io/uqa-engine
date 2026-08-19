@@ -7,14 +7,15 @@
 //! DELETE execution and referenced-key delete actions.
 
 use super::{
-    apply_prepared_document_rewrite, apply_set_action_to_child, build_join_spill_with_ctes,
-    build_returning_row, dml_join_rows, dml_returning_result, dml_target_row, eval_mutation_expr,
-    lock_mutation_target, prebuild_locking_returning_row, prepare_document_rewrite,
-    referencing_rows, referrers_to_for_actions, returning_has_row_locks,
+    apply_set_action_to_child, apply_validated_prepared_document_rewrite,
+    build_join_spill_with_ctes, build_returning_row, dml_join_rows, dml_returning_result,
+    dml_target_row, eval_mutation_expr, lock_mutation_target, prepare_document_rewrite,
+    referencing_rows, referrers_to_for_actions, stage_prepared_document_rewrite,
     validate_dml_expression_qualifiers, validate_returning_alias_relations, BTreeSet, CteScope,
-    DeletePlan, DmlReturningShape, DocId, Document, Engine, ForeignKey, ForeignKeyAction,
-    MutationLockTarget, PreparedDeleteAction, PreparedDocumentDelete, ReturningProjectionRow,
-    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
+    DeletePlan, DmlCommandMutationOverlay, DmlReturningShape, DocId, Document, Engine, ForeignKey,
+    ForeignKeyAction, MutationLockTarget, PreparedDeleteAction, PreparedDocumentDelete,
+    ReturningProjectionRow, ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult,
+    Value,
 };
 
 pub(in crate::sql) fn run_delete(
@@ -46,11 +47,7 @@ pub(in crate::sql) fn run_delete_inner(
         Document,
         Option<uqa_execution::OwnedPhysicalRow>,
     )> = Vec::new();
-    let mut returning_docs: Vec<(
-        uqa_core::DocId,
-        Document,
-        Option<uqa_execution::OwnedPhysicalRow>,
-    )> = Vec::new();
+    let mut returning_rows = Vec::new();
     let mut ctes = CteScope::new();
     crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
@@ -76,10 +73,14 @@ pub(in crate::sql) fn run_delete_inner(
             .map(uqa_execution::SharedSpill::row_schema),
     )?;
     let has_runtime_scope = !ctes.rows.is_empty() || !ctes.scalar_subqueries.is_empty();
-    // Plain `DELETE FROM t WHERE ...` resolves the WHERE through the
-    // accelerated single-table machinery instead of materialising the
-    // whole table.
-    let preselected = !has_runtime_scope && stmt.source.is_none() && stmt.predicate.is_some();
+    // A non-volatile plain predicate can use the accelerated candidate set. A VOLATILE predicate must qualify rows in command order so each prior logical deletion is visible to the next callback.
+    let predicate_is_volatile = stmt.predicate.as_ref().is_some_and(|predicate| {
+        crate::sql::volatility::expr_contains_volatile_function(engine, predicate)
+    });
+    let preselected = !has_runtime_scope
+        && stmt.source.is_none()
+        && stmt.predicate.is_some()
+        && !predicate_is_volatile;
     let doc_ids: Vec<uqa_core::DocId> = if preselected {
         let filter = stmt.predicate.as_ref().ok_or_else(|| {
             SQLError::Internal("DELETE preselection is missing its predicate".into())
@@ -95,6 +96,9 @@ pub(in crate::sql) fn run_delete_inner(
     } else {
         engine.table_doc_ids(&stmt.table)?
     };
+    let snapshot_ctes = ctes.returning_statement_snapshot_scope();
+    let qualification_overlay = DmlCommandMutationOverlay::new(engine);
+    let mut qualified_ids = BTreeSet::new();
     for doc_id in doc_ids {
         cancel.check()?;
         let candidate = if preselected {
@@ -104,7 +108,7 @@ pub(in crate::sql) fn run_delete_inner(
                 engine,
                 stmt,
                 params,
-                &ctes,
+                &snapshot_ctes,
                 using_rows.as_ref(),
                 doc_id,
             )?
@@ -126,9 +130,16 @@ pub(in crate::sql) fn run_delete_inner(
         let qualified = if recheck {
             engine.refresh_explicit_statement_snapshot()?;
             if let Some((_, Some(source_context))) = candidate.as_ref() {
-                recheck_delete_candidate(engine, stmt, params, &ctes, doc_id, Some(source_context))?
+                recheck_delete_candidate(
+                    engine,
+                    stmt,
+                    params,
+                    &snapshot_ctes,
+                    doc_id,
+                    Some(source_context),
+                )?
             } else {
-                recheck_delete_candidate(engine, stmt, params, &ctes, doc_id, None)?
+                recheck_delete_candidate(engine, stmt, params, &snapshot_ctes, doc_id, None)?
             }
         } else if let Some(candidate) = candidate {
             Some(candidate)
@@ -140,8 +151,13 @@ pub(in crate::sql) fn run_delete_inner(
         let Some((doc, returning_context)) = qualified else {
             continue;
         };
+        if !qualified_ids.insert(doc_id) {
+            continue;
+        }
+        engine.stage_command_document(&stmt.table, doc_id, None)?;
         qualified_targets.push((doc_id, doc, returning_context));
     }
+    drop(qualification_overlay);
     let to_delete = qualified_targets;
     let root_deletes: BTreeSet<(String, DocId)> = to_delete
         .iter()
@@ -150,8 +166,9 @@ pub(in crate::sql) fn run_delete_inner(
     let mut delete_stack = Vec::new();
     let mut rewrite_stack = Vec::new();
     let mut prepared_deletes = Vec::with_capacity(to_delete.len());
+    let overlay = DmlCommandMutationOverlay::new(engine);
     for (doc_id, _doc, returning_context) in to_delete {
-        if let Some(prepared) = prepare_document_delete(
+        if let Some(mut prepared) = prepare_document_delete(
             engine,
             &stmt.table,
             doc_id,
@@ -160,15 +177,10 @@ pub(in crate::sql) fn run_delete_inner(
             &mut delete_stack,
             &mut rewrite_stack,
         )? {
-            prepared_deletes.push((prepared, returning_context));
-        }
-    }
-    let prebuild_locking_returning = returning_has_row_locks(&stmt.returning, &ctes)?;
-    let mut prebuilt_returning_rows = Vec::new();
-    if !prepared_deletes.is_empty() {
-        if prebuild_locking_returning {
-            for (prepared, returning_context) in &prepared_deletes {
-                prebuilt_returning_rows.push(prebuild_locking_returning_row(
+            stage_prepared_document_delete(engine, &mut prepared, params)?;
+            affected += 1;
+            if !stmt.returning.is_empty() {
+                returning_rows.push(build_returning_row(
                     engine,
                     ReturningProjectionRow {
                         table: &stmt.table,
@@ -185,52 +197,20 @@ pub(in crate::sql) fn run_delete_inner(
                     },
                     &stmt.returning,
                     params,
-                    &ctes,
+                    &snapshot_ctes,
                 )?);
             }
+            prepared_deletes.push((prepared, returning_context));
         }
-        engine.prepare_explicit_transaction_writer()?;
     }
-    for (mut prepared, returning_context) in prepared_deletes {
-        if !stmt.returning.is_empty() && !prebuild_locking_returning {
-            returning_docs.push((
-                prepared.doc_id,
-                prepared.document.clone(),
-                returning_context,
-            ));
+    drop(overlay);
+    if !prepared_deletes.is_empty() {
+        engine.prepare_explicit_transaction_writer()?;
+        for (mut prepared, _) in prepared_deletes {
+            apply_validated_prepared_document_delete(engine, &mut prepared)?;
         }
-        apply_prepared_document_delete(engine, &mut prepared, params)?;
-        affected += 1;
     }
     if !stmt.returning.is_empty() {
-        let returning_rows = if prebuild_locking_returning {
-            prebuilt_returning_rows
-        } else {
-            returning_docs
-                .into_iter()
-                .map(|(doc_id, doc, context)| {
-                    build_returning_row(
-                        engine,
-                        ReturningProjectionRow {
-                            table: &stmt.table,
-                            target_qualifier: &stmt.target_qualifier,
-                            images: ReturningRowImages {
-                                old: Some(ReturningRowImage {
-                                    doc_id,
-                                    document: &doc,
-                                }),
-                                new: None,
-                            },
-                            aliases: &stmt.returning_aliases,
-                            context: context.as_ref(),
-                        },
-                        &stmt.returning,
-                        params,
-                        &ctes,
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?
-        };
         return dml_returning_result(
             engine,
             DmlReturningShape {
@@ -362,7 +342,7 @@ pub(in crate::sql) fn prepare_document_delete(
     }))
 }
 
-pub(in crate::sql) fn apply_prepared_document_delete(
+pub(in crate::sql) fn stage_prepared_document_delete(
     engine: &Engine,
     prepared: &mut PreparedDocumentDelete,
     params: &[SQLParam],
@@ -370,10 +350,27 @@ pub(in crate::sql) fn apply_prepared_document_delete(
     for action in &mut prepared.actions {
         match action {
             PreparedDeleteAction::Delete(delete) => {
-                apply_prepared_document_delete(engine, delete, params)?;
+                stage_prepared_document_delete(engine, delete, params)?;
             }
             PreparedDeleteAction::Rewrite(rewrite) => {
-                apply_prepared_document_rewrite(engine, rewrite, params)?;
+                stage_prepared_document_rewrite(engine, rewrite, params)?;
+            }
+        }
+    }
+    engine.stage_command_document(&prepared.table, prepared.doc_id, None)
+}
+
+pub(in crate::sql) fn apply_validated_prepared_document_delete(
+    engine: &Engine,
+    prepared: &mut PreparedDocumentDelete,
+) -> Result<(), SQLError> {
+    for action in &mut prepared.actions {
+        match action {
+            PreparedDeleteAction::Delete(delete) => {
+                apply_validated_prepared_document_delete(engine, delete)?;
+            }
+            PreparedDeleteAction::Rewrite(rewrite) => {
+                apply_validated_prepared_document_rewrite(engine, rewrite)?;
             }
         }
     }

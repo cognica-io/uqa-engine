@@ -100,7 +100,7 @@ mod engine_user_functions;
 mod row_locks;
 mod value_index;
 
-use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
+use std::collections::{btree_map::Entry, BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -360,9 +360,7 @@ struct TransactionFrame {
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
     dirty_at_begin: TransactionDirtyState,
-    /// Lock mark this frame started with. Rolling the whole frame back
-    /// releases every acquisition at or above it, independent of the
-    /// savepoint marks the frame allocated later.
+    /// Lock mark this frame started with. Rolling the whole frame back releases every acquisition at or above it, independent of the savepoint marks the frame allocated later.
     begin_lock_mark: u32,
     lock_mark: u32,
     next_lock_mark: u32,
@@ -377,6 +375,17 @@ struct TransactionSavepoint {
     dirty: TransactionDirtyState,
     lock_mark: u32,
     row_changes: Vec<row_locks::PendingRowChange>,
+}
+
+#[derive(Clone, Default)]
+struct CommandMutationOverlay {
+    documents: BTreeMap<String, BTreeMap<DocId, Option<Document>>>,
+    exact_indexes: BTreeMap<String, BTreeMap<Vec<String>, CommandExactIndex>>,
+}
+
+#[derive(Clone, Default)]
+struct CommandExactIndex {
+    doc_ids_by_key: BTreeMap<Vec<u8>, BTreeSet<DocId>>,
 }
 
 /// Lightweight SQL-session state that follows transaction/savepoint rollback

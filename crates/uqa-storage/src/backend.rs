@@ -68,9 +68,7 @@ pub struct PersistentStorageSession {
     pub backend: Arc<dyn PersistentStorageBackend>,
 }
 
-/// Stable identity of one durable database. File identities allow engine
-/// coordination to extend across independently constructed providers and OS
-/// processes; opaque identities coordinate providers inside one process.
+/// Stable identity of one durable database. File identities allow engine coordination to extend across independently constructed providers and OS processes; opaque identities coordinate providers inside one process.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum PersistentStorageIdentity {
     File(PathBuf),
@@ -78,12 +76,10 @@ pub enum PersistentStorageIdentity {
 }
 
 impl PersistentStorageIdentity {
-    /// Resolve the stable file identity for a database path. The database
-    /// file itself may not exist yet because backends materialize it on
-    /// first write, so a missing file anchors the identity on its
-    /// canonicalized parent directory instead of failing.
+    /// Resolve the stable file identity for a database path. The database file itself may not exist yet because backends materialize it on first write, so a missing file anchors the identity on its canonicalized parent directory instead of failing.
     pub fn for_database_path(path: &Path) -> StorageBackendResult<Self> {
-        match std::fs::canonicalize(path) {
+        let path = resolve_final_symlinks(path)?;
+        match std::fs::canonicalize(&path) {
             Ok(canonical) => Ok(Self::File(canonical)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 let file_name = path.file_name().ok_or_else(|| {
@@ -112,6 +108,73 @@ impl PersistentStorageIdentity {
     }
 }
 
+fn resolve_final_symlinks(path: &Path) -> StorageBackendResult<PathBuf> {
+    let mut current = path.to_path_buf();
+    let mut followed = 0usize;
+    loop {
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                followed += 1;
+                if followed > 40 {
+                    return Err(StorageBackendError::Other(format!(
+                        "database path `{}` has too many symbolic-link levels",
+                        path.display()
+                    )));
+                }
+                let target = std::fs::read_link(&current).map_err(|error| {
+                    StorageBackendError::Other(format!(
+                        "read database symbolic link `{}`: {error}",
+                        current.display()
+                    ))
+                })?;
+                current = if target.is_absolute() {
+                    target
+                } else {
+                    current
+                        .parent()
+                        .filter(|parent| !parent.as_os_str().is_empty())
+                        .unwrap_or_else(|| Path::new("."))
+                        .join(target)
+                };
+            }
+            Ok(_) => return Ok(current),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(current),
+            Err(error) => {
+                return Err(StorageBackendError::Other(format!(
+                    "inspect database path `{}`: {error}",
+                    current.display()
+                )))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_database_symlink_keeps_the_target_identity_after_creation() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("target.db");
+        let link = directory.path().join("database.db");
+        symlink("target.db", &link).unwrap();
+
+        let before = PersistentStorageIdentity::for_database_path(&link).unwrap();
+        std::fs::File::create(&target).unwrap();
+        let after = PersistentStorageIdentity::for_database_path(&link).unwrap();
+
+        assert_eq!(before, after);
+        assert_eq!(
+            after,
+            PersistentStorageIdentity::File(target.canonicalize().unwrap())
+        );
+    }
+}
+
 impl PersistentStorageSession {
     pub fn new(
         catalog: Arc<dyn CatalogFacade>,
@@ -129,10 +192,7 @@ impl PersistentStorageSession {
 pub trait PersistentStorageProvider: Send + Sync {
     fn open_session(&self) -> StorageBackendResult<PersistentStorageSession>;
 
-    /// Return the database identity shared by every session this provider
-    /// opens. Custom providers that cannot expose a stable identity may keep
-    /// the default; engines built from the same `Arc` provider still share an
-    /// in-process coordinator.
+    /// Return the database identity shared by every session this provider opens. Custom providers that cannot expose a stable identity may keep the default; engines built from the same `Arc` provider still share an in-process coordinator.
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
         Ok(None)
     }
@@ -140,17 +200,12 @@ pub trait PersistentStorageProvider: Send + Sync {
 
 /// Factory plus transaction surface for persistent table/index storage.
 pub trait PersistentStorageBackend: Send + Sync {
-    /// Return the stable database identity for independently constructed
-    /// engines over this backend. File identities also enable cross-process
-    /// row-lock coordination.
+    /// Return the stable database identity for independently constructed engines over this backend. File identities also enable cross-process row-lock coordination.
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
         Ok(None)
     }
 
-    /// Open a transaction-isolated catalog/backend pair over the same durable
-    /// database. Engines constructed from already-open backends retain this
-    /// factory so a row-lock recheck can read the latest committed tuple while
-    /// the caller's statement snapshot remains pinned.
+    /// Open a transaction-isolated catalog/backend pair over the same durable database. Engines constructed from already-open backends retain this factory so a row-lock recheck can read the latest committed tuple while the caller's statement snapshot remains pinned.
     fn open_session(&self) -> StorageBackendResult<PersistentStorageSession> {
         Err(StorageBackendError::Other(
             "independent sessions are not implemented for this persistent backend".into(),

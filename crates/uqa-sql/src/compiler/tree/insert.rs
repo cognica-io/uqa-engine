@@ -72,12 +72,15 @@ pub(in crate::compiler) fn compile_insert(
     // INSERT ... SELECT: when the body has no values_lists but does
     // have a from_clause / target_list, treat it as `INSERT FROM
     // SELECT` and forward the inner SELECT.
-    let select_source =
-        if rows.is_empty() && (!select.from_clause.is_empty() || !select.target_list.is_empty()) {
-            Some(Box::new(compile_select(select)?))
-        } else {
-            None
-        };
+    let select_source = if rows.is_empty()
+        && (select.op != pg_query::protobuf::SetOperation::SetopNone as i32
+            || !select.from_clause.is_empty()
+            || !select.target_list.is_empty())
+    {
+        Some(Box::new(compile_select(select)?))
+    } else {
+        None
+    };
     let on_conflict = stmt
         .on_conflict_clause
         .as_ref()

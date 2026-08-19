@@ -26,35 +26,21 @@ fn dml_storage_error(action: &str, err: impl std::fmt::Display) -> SQLError {
     SQLError::Internal(format!("{action} failed in storage backend: {err}"))
 }
 
-pub(in crate::sql) fn returning_has_row_locks(
-    returning: &[ProjectionPlan],
-    ctes: &CteScope,
-) -> Result<bool, SQLError> {
-    let mut subquery_ids = BTreeSet::new();
-    for projection in returning {
-        crate::sql::select::collect_subquery_ids(&projection.expr, &mut subquery_ids);
-    }
-    for subquery_id in subquery_ids {
-        let plan = ctes.scalar_subqueries.get(subquery_id).ok_or_else(|| {
-            SQLError::Internal(format!(
-                "RETURNING scalar subquery slot {subquery_id} is out of bounds"
-            ))
-        })?;
-        if crate::sql::select::query_has_row_locks(plan) {
-            return Ok(true);
-        }
-    }
-    Ok(false)
+pub(in crate::sql) struct DmlCommandMutationOverlay<'a> {
+    engine: &'a Engine,
 }
 
-pub(in crate::sql) fn prebuild_locking_returning_row(
-    engine: &Engine,
-    input: ReturningProjectionRow<'_>,
-    returning: &[ProjectionPlan],
-    params: &[SQLParam],
-    ctes: &CteScope,
-) -> Result<OwnedPhysicalRow, SQLError> {
-    build_returning_row(engine, input, returning, params, ctes)
+impl<'a> DmlCommandMutationOverlay<'a> {
+    pub(in crate::sql) fn new(engine: &'a Engine) -> Self {
+        engine.begin_command_mutation_overlay();
+        Self { engine }
+    }
+}
+
+impl Drop for DmlCommandMutationOverlay<'_> {
+    fn drop(&mut self) {
+        self.engine.end_command_mutation_overlay();
+    }
 }
 
 fn lock_mutation_row(
@@ -78,13 +64,7 @@ fn lock_mutation_row(
     }
 }
 
-/// Lock a DML target row and follow any primary-key rewrite another
-/// transaction committed while this statement waited, exactly like
-/// `PostgreSQL` 18 follows the update chain to the row version it lands on.
-/// Returns the doc id the statement must act on together with whether any
-/// wait or successor hop makes a re-qualification necessary. Callers acquire
-/// every row dependency first and promote the backend writer only after that
-/// lock phase has completed.
+/// Lock a DML target row and follow any primary-key rewrite another transaction committed while this statement waited, exactly like `PostgreSQL` 18 follows the update chain to the row version it lands on. Returns the doc id the statement must act on together with whether any wait or successor hop makes a re-qualification necessary. Callers acquire every row dependency first and promote the backend writer only after that lock phase has completed.
 pub(in crate::sql) enum MutationLockTarget {
     Present { doc_id: DocId, recheck: bool },
     Deleted,

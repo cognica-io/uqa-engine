@@ -12,17 +12,12 @@ use super::PhysicalRow;
 
 /// Base-table identity carried on a composite physical row for `FOR UPDATE`.
 ///
-/// Origins ride beside value fragments. Joins concatenate them; projections and
-/// schema remaps keep them. They are not SQL-visible columns and must not be
-/// rebuilt from named maps.
+/// Origins ride beside value fragments. Joins concatenate them; projections and schema remaps keep them. They are not SQL-visible columns and must not be rebuilt from named maps.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowLockOrigin {
-    /// Visible qualifier of the row source that currently owns the origin.
-    /// Views, CTEs, and derived tables rebind it to their own alias.
+    /// Visible qualifier of the row source that currently owns the origin. Views, CTEs, and derived tables rebind it to their own alias.
     pub qualifier: Arc<str>,
-    /// Qualifier of the base scan that produced the origin. Rebinding at a
-    /// derived-table boundary leaves it untouched, so a tuple recheck can
-    /// pin each base scan inside a view or subquery to its own tuples.
+    /// Qualifier of the base scan that produced the origin. Rebinding at a derived-table boundary leaves it untouched, so a tuple recheck can pin each base scan inside a view or subquery to its own tuples.
     pub scan_qualifier: Arc<str>,
     pub storage_name: Arc<str>,
     pub doc_id: uqa_core::DocId,
@@ -112,8 +107,7 @@ impl PhysicalRow {
         self.lock_origins.as_deref().unwrap_or(&[])
     }
 
-    /// Drop row-lock lineage at an execution boundary that cannot expose a
-    /// lockable base-row identity, such as a set operation.
+    /// Drop row-lock lineage at an execution boundary that cannot expose a lockable base-row identity, such as a set operation.
     #[must_use]
     pub fn without_lock_origins(mut self) -> Self {
         self.lock_origins = None;
@@ -125,9 +119,7 @@ impl PhysicalRow {
         self.lock_origins = None;
     }
 
-    /// Point every lock origin at the visible source qualifier. Views, CTEs,
-    /// and subqueries keep inner storage names so `FOR UPDATE OF` that alias
-    /// locks only those origins after a join.
+    /// Point every lock origin at the visible source qualifier. Views, CTEs, and subqueries keep inner storage names so `FOR UPDATE OF` that alias locks only those origins after a join.
     #[must_use]
     pub fn rebind_lock_origin_qualifiers(mut self, qualifier: impl Into<Arc<str>>) -> Self {
         self.rebind_lock_origin_qualifiers_mut(qualifier.into());

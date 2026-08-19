@@ -6,11 +6,7 @@
 
 //! Tuple pins for `PostgreSQL`-style row-lock rechecks.
 //!
-//! When a candidate row's locked tuple changed while the statement waited,
-//! the recheck re-executes the plan below the `LockRows` boundary with every
-//! base relation pinned to the candidate's exact tuple, exactly like
-//! `PostgreSQL` 18's `EvalPlanQual`: marked relations substitute the latest
-//! committed image while unmarked join partners keep their original image.
+//! When a candidate row's locked tuple changed while the statement waited, the recheck re-executes the plan below the `LockRows` boundary with every base relation pinned to the candidate's exact tuple, exactly like `PostgreSQL` 18's `EvalPlanQual`: marked relations substitute the latest committed image while unmarked join partners keep their original image.
 
 use std::sync::Arc;
 
@@ -20,11 +16,9 @@ use uqa_storage::document_store::Document;
 /// One tuple a pinned scan must emit during a recheck.
 #[derive(Clone)]
 pub(in crate::sql) struct RecheckDoc {
-    /// Row identity the pinned scan emits, already following any primary-key
-    /// rewrite to the successor id.
+    /// Row identity the pinned scan emits, already following any primary-key rewrite to the successor id.
     pub doc_id: uqa_core::DocId,
-    /// Latest committed image for a changed tuple; `None` reads the statement
-    /// snapshot image for `doc_id`.
+    /// Latest committed image for a changed tuple; `None` reads the statement snapshot image for `doc_id`.
     pub document: Option<Arc<Document>>,
 }
 
@@ -37,18 +31,13 @@ pub(in crate::sql) struct RowLockRecheckPins {
 struct TargetPins {
     qualifier: String,
     storage_name: String,
-    /// Qualifier of the base scan these tuples belong to. For a direct table
-    /// target it equals `qualifier`; for an identity-source target it names
-    /// the inner scan inside the view or derived table.
+    /// Qualifier of the base scan these tuples belong to. For a direct table target it equals `qualifier`; for an identity-source target it names the inner scan inside the view or derived table.
     scan_qualifier: String,
     identity_source: bool,
     docs: Arc<Vec<RecheckDoc>>,
 }
 
-/// Exact output of one top-level FROM leaf that is not a row-lock target.
-/// `PostgreSQL` represents these as copy row marks during `EvalPlanQual`; keeping
-/// the positional row shares its physical fragments and preserves duplicate
-/// and volatile source values without named-row materialization.
+/// Exact output of one top-level FROM leaf that is not a row-lock target. `PostgreSQL` represents these as copy row marks during `EvalPlanQual`; keeping the positional row shares its physical fragments and preserves duplicate and volatile source values without named-row materialization.
 #[derive(Clone)]
 pub(in crate::sql) struct RecheckSourceRow {
     pub schema: RowSchema,
@@ -127,10 +116,7 @@ impl RowLockRecheckPins {
         });
     }
 
-    /// Pinned tuples for a base scan addressed by its own qualifier. Direct
-    /// table targets match here; identity-source targets pin base scans
-    /// through [`Self::storage_pins_for_identity_source`] instead because the
-    /// origin qualifier was rebound at the derived-table boundary.
+    /// Pinned tuples for a base scan addressed by its own qualifier. Direct table targets match here; identity-source targets pin base scans through [`Self::storage_pins_for_identity_source`] instead because the origin qualifier was rebound at the derived-table boundary.
     pub(in crate::sql) fn docs_for_scan(
         &self,
         qualifier: &str,
@@ -146,10 +132,7 @@ impl RowLockRecheckPins {
             .map(|target| Arc::clone(&target.docs))
     }
 
-    /// Scan-level pins for the subtree of one identity-source target (a view,
-    /// derived table, or locked subquery visible as `qualifier`). Each entry
-    /// names a base storage plus the inner scan qualifier whose emitted
-    /// tuples it pins.
+    /// Scan-level pins for the subtree of one identity-source target (a view, derived table, or locked subquery visible as `qualifier`). Each entry names a base storage plus the inner scan qualifier whose emitted tuples it pins.
     pub(in crate::sql) fn storage_pins_for_identity_source(
         &self,
         qualifier: &str,

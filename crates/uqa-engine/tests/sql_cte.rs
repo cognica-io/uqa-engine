@@ -472,6 +472,36 @@ fn recursive_union_dedup() {
 }
 
 #[test]
+fn with_recursive_resolves_and_orders_later_sibling_dependencies() {
+    let engine = Engine::new();
+    let forwarded = exec(
+        &engine,
+        "WITH RECURSIVE first AS (SELECT value FROM later), later AS (SELECT 42 AS value) SELECT value FROM first",
+    );
+    assert_eq!(ints(&forwarded, "value"), vec![42]);
+
+    let recursive = exec(
+        &engine,
+        "WITH RECURSIVE seq(n) AS (SELECT n FROM seed UNION ALL SELECT n + 1 FROM seq WHERE n < 3), seed(n) AS (SELECT 1) SELECT n FROM seq ORDER BY n",
+    );
+    assert_eq!(ints(&recursive, "n"), vec![1, 2, 3]);
+}
+
+#[test]
+fn with_recursive_rejects_mutual_sibling_recursion() {
+    let engine = Engine::new();
+
+    let error = engine
+        .sql(
+            "WITH RECURSIVE first AS (SELECT * FROM second), second AS (SELECT * FROM first) SELECT * FROM first",
+            &[],
+        )
+        .unwrap_err();
+
+    assert_eq!(error.sqlstate(), Some("0A000"));
+}
+
+#[test]
 fn recursive_hierarchy() {
     let engine = Engine::new();
     exec(

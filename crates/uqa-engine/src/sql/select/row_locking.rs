@@ -595,10 +595,7 @@ fn push_unique(names: &mut Vec<String>, name: &str) {
     }
 }
 
-/// Everything needed to rebuild the plan below this `LockRows` boundary for a
-/// tuple-local recheck. The statement is the query block as it existed before
-/// order-set rewrites; the rebuild replays the same construction the original
-/// pipeline used, so the recheck output matches the boundary schema.
+/// Everything needed to rebuild the plan below this `LockRows` boundary for a tuple-local recheck. The statement is the query block as it existed before order-set rewrites; the rebuild replays the same construction the original pipeline used, so the recheck output matches the boundary schema.
 pub(in crate::sql) struct LockRowsRecheckSource {
     statement: QueryBlockPlan,
     ctes: CteScope,
@@ -627,9 +624,7 @@ pub(in crate::sql) struct LockRows<'a> {
     retry_cache: Option<std::sync::Arc<super::RowLockRetryCache>>,
     recheck_source: Option<LockRowsRecheckSource>,
     schema: RowSchema,
-    /// Base relations that already hold this statement's `RowShare` lock. A
-    /// view or derived-table target reveals its base relations only through
-    /// row origins, so the relation lock is taken on first sight of each.
+    /// Base relations that already hold this statement's `RowShare` lock. A view or derived-table target reveals its base relations only through row origins, so the relation lock is taken on first sight of each.
     relation_locked: std::collections::BTreeSet<std::sync::Arc<str>>,
 }
 
@@ -703,12 +698,7 @@ impl PhysicalOperator for LockRows<'_> {
                         row.discard_lock_origins_mut();
                     }
                     self.emitted = self.emitted.saturating_add(1);
-                    // One row per batch keeps locking demand-driven: an
-                    // enclosing consumer such as an outer LIMIT over a locking
-                    // derived table stops pulling after the rows it needs, so
-                    // rows it never consumes are never locked (PostgreSQL 18
-                    // LockRows semantics). Batching ahead would lock rows the
-                    // consumer discards.
+                    // One row per batch keeps locking demand-driven: an enclosing consumer such as an outer LIMIT over a locking derived table stops pulling after the rows it needs, so rows it never consumes are never locked (PostgreSQL 18 LockRows semantics). Batching ahead would lock rows the consumer discards.
                     return Ok(Some(Batch::from_physical_rows(
                         self.schema.clone(),
                         vec![row],
@@ -728,14 +718,10 @@ impl PhysicalOperator for LockRows<'_> {
     }
 }
 
-/// One physical tuple this candidate row must lock. A self-join names the
-/// same tuple through several visible qualifiers; the tuple is locked once
-/// at the strongest requested strength while every qualifier stays known so
-/// each marked alias is pinned to the substituted image during a recheck.
+/// One physical tuple this candidate row must lock. A self-join names the same tuple through several visible qualifiers; the tuple is locked once at the strongest requested strength while every qualifier stays known so each marked alias is pinned to the substituted image during a recheck.
 struct LockCandidate {
     qualifiers: Vec<std::sync::Arc<str>>,
-    /// Base-scan qualifiers that produced this tuple, so identity-source
-    /// rechecks pin exactly the inner scans that emitted it.
+    /// Base-scan qualifiers that produced this tuple, so identity-source rechecks pin exactly the inner scans that emitted it.
     scan_qualifiers: Vec<std::sync::Arc<str>>,
     storage_name: std::sync::Arc<str>,
     doc_id: uqa_core::DocId,
@@ -787,9 +773,7 @@ impl LockRows<'_> {
             }
         }
 
-        // PostgreSQL 18 holds RowShare on every base relation whose tuples a
-        // locking query returns, including relations reached through views
-        // and derived tables, so TRUNCATE and destructive DDL wait for them.
+        // PostgreSQL 18 holds RowShare on every base relation whose tuples a locking query returns, including relations reached through views and derived tables, so TRUNCATE and destructive DDL wait for them.
         for candidate in &candidates {
             if !self.relation_locked.contains(&candidate.storage_name) {
                 self.engine.lock_relation(
@@ -822,11 +806,7 @@ impl LockRows<'_> {
                     }
                 }
                 Ok(LockAcquire::Skipped) => {
-                    // PostgreSQL retains tuple locks acquired for earlier
-                    // target relations even when a later target makes this
-                    // joined row a SKIP LOCKED miss. They remain
-                    // transaction-scoped just like locks acquired for rows
-                    // rejected after an EvalPlanQual recheck.
+                    // PostgreSQL retains tuple locks acquired for earlier target relations even when a later target makes this joined row a SKIP LOCKED miss. They remain transaction-scoped just like locks acquired for rows rejected after an EvalPlanQual recheck.
                     return Ok(None);
                 }
                 Err(error) => {
@@ -835,18 +815,16 @@ impl LockRows<'_> {
                 }
             }
         }
-        // Inside one process, change epochs identify candidates changed after
-        // the statement snapshot. Durable candidates also verify their latest
-        // committed image unconditionally: an external writer may already
-        // have exited by the time this row acquires its lock.
+        // Inside one process, change epochs identify candidates changed after the statement snapshot. Durable candidates also verify their latest committed image unconditionally: an external writer may already have exited by the time this row acquires its lock.
         let foreign_waited = candidates.iter().any(|candidate| candidate.foreign_waited);
         let durable_coordination = self
             .engine
             .row_lock_manager()
             .has_cross_process_coordination();
-        if let Some(cache) = self.retry_cache.as_deref().filter(|_| {
-            self.engine.row_lock_change_requires_recheck() || foreign_waited || durable_coordination
-        }) {
+        let requires_recheck = self.engine.row_lock_change_requires_recheck()?
+            || foreign_waited
+            || durable_coordination;
+        if let Some(cache) = self.retry_cache.as_deref().filter(|_| requires_recheck) {
             return self.recheck_changed_candidates(row, candidates, cache);
         }
         if waited {
@@ -870,12 +848,7 @@ impl LockRows<'_> {
         Ok(Some(row))
     }
 
-    /// `PostgreSQL` 18 `EvalPlanQual`: when a selected tuple was concurrently
-    /// updated by a committed transaction whose mutation strength conflicts
-    /// with the requested row lock, re-evaluate this candidate in place. The
-    /// candidate keeps its original scan and sort position, its original join
-    /// partners stay pinned, `LIMIT` membership is decided by the recheck
-    /// outcome, and a primary-key rewrite is followed to the successor row.
+    /// `PostgreSQL` 18 `EvalPlanQual`: when a selected tuple was concurrently updated by a committed transaction whose mutation strength conflicts with the requested row lock, re-evaluate this candidate in place. The candidate keeps its original scan and sort position, its original join partners stay pinned, `LIMIT` membership is decided by the recheck outcome, and a primary-key rewrite is followed to the successor row.
     fn recheck_changed_candidates(
         &self,
         row: PhysicalRow,
@@ -884,17 +857,14 @@ impl LockRows<'_> {
     ) -> Result<Option<PhysicalRow>, SQLError> {
         let mut overrides: Vec<Option<super::RetryRowOverride>> = Vec::new();
         overrides.resize_with(candidates.len(), || None);
-        // Once this session holds a candidate's tuple lock, no other
-        // transaction can commit a further conflicting change to it, so a
-        // candidate whose committed image was fetched after its lock was
-        // acquired is final. Only successor identities surfaced by a
-        // primary-key rewrite need another pass: their lock is taken below,
-        // after which their refetched image is final too.
+        // Once this session holds a candidate's tuple lock, no other transaction can commit a further conflicting change to it, so a candidate whose committed image was fetched after its lock was acquired is final. Only successor identities surfaced by a primary-key rewrite need another pass: their lock is taken below, after which their refetched image is final too.
         let mut handled = vec![false; candidates.len()];
+        let mut visited_doc_ids = candidates
+            .iter()
+            .map(|candidate| std::collections::BTreeSet::from([candidate.doc_id]))
+            .collect::<Vec<_>>();
         let mut any_changed = false;
-        // Commits from other OS processes bypass the in-process change epochs,
-        // so every durable candidate verifies its latest committed image even
-        // after the writer process exits.
+        // Commits from other OS processes bypass the in-process change epochs, so every durable candidate verifies its latest committed image even after the writer process exits.
         let durable_coordination = self
             .engine
             .row_lock_manager()
@@ -938,11 +908,7 @@ impl LockRows<'_> {
                 )?;
                 match row_override {
                     super::RetryRowOverride::Deleted => {
-                        // Lock targets are never on the nullable side of an
-                        // active outer join, so a deleted tuple always
-                        // eliminates this candidate row. Locks already
-                        // acquired stay until transaction end, matching
-                        // PostgreSQL's treatment of dead EPQ tuples.
+                        // Lock targets are never on the nullable side of an active outer join, so a deleted tuple always eliminates this candidate row. Locks already acquired stay until transaction end, matching PostgreSQL's treatment of dead EPQ tuples.
                         return Ok(None);
                     }
                     super::RetryRowOverride::Present { doc_id, .. } => {
@@ -951,11 +917,13 @@ impl LockRows<'_> {
                             handled[index] = true;
                             continue;
                         }
-                        // PostgreSQL follows the update chain to the row the
-                        // blocker moved the tuple to, locks it, and rechecks
-                        // that successor. The refetch on the next pass reads
-                        // the successor after its lock is held, so a change
-                        // committed while waiting here is still observed.
+                        if !visited_doc_ids[index].insert(doc_id) {
+                            return Err(SQLError::Internal(format!(
+                                "row-lock successor chain for relation `{}` contains a cycle at document {doc_id}",
+                                candidate.display_name
+                            )));
+                        }
+                        // PostgreSQL follows the update chain to the row the blocker moved the tuple to, locks it, and rechecks that successor. The refetch on the next pass reads the successor after its lock is held, so a change committed while waiting here is still observed.
                         match self.engine.lock_row(
                             candidate.storage_name.as_ref(),
                             doc_id,
@@ -983,13 +951,7 @@ impl LockRows<'_> {
         self.run_candidate_recheck(&row, &candidates, &overrides)
     }
 
-    /// Whether another OS process committed a change to this candidate that
-    /// conflicts with the requested lock strength. Foreign commits are
-    /// invisible to the in-process change epochs, so the latest committed
-    /// image is compared with the statement snapshot and the mutation
-    /// strength is derived from the changed columns, exactly like the epochs
-    /// derive it from the writer's own column set. A row this transaction
-    /// already rewrote itself is authoritative as-is.
+    /// Whether another OS process committed a change to this candidate that conflicts with the requested lock strength. Foreign commits are invisible to the in-process change epochs, so the latest committed image is compared with the statement snapshot and the mutation strength is derived from the changed columns, exactly like the epochs derive it from the writer's own column set. A row this transaction already rewrote itself is authoritative as-is.
     fn cross_process_candidate_changed(
         &self,
         candidate: &LockCandidate,
@@ -998,7 +960,7 @@ impl LockRows<'_> {
         let table = candidate.storage_name.as_ref();
         if self
             .engine
-            .row_changed_in_open_transaction(table, candidate.doc_id)
+            .row_changed_in_open_transaction(table, candidate.doc_id)?
         {
             return Ok(false);
         }
@@ -1010,10 +972,7 @@ impl LockRows<'_> {
             candidate.strength,
         )?;
         let committed_document = match &committed {
-            // Primary-key rewrites from other processes were already
-            // followed through the sidecar journal by the caller, so a missing
-            // committed image here is a genuine delete; PostgreSQL 18 drops
-            // a candidate whose tuple was deleted.
+            // Primary-key rewrites from other processes were already followed through the sidecar journal by the caller, so a missing committed image here is a genuine delete; PostgreSQL 18 drops a candidate whose tuple was deleted.
             super::RetryRowOverride::Deleted => return Ok(true),
             super::RetryRowOverride::Present { document, .. } => document,
         };
@@ -1042,11 +1001,7 @@ impl LockRows<'_> {
         ))
     }
 
-    /// Re-execute the plan below this `LockRows` boundary with every base scan
-    /// pinned to the tuple that formed the original candidate. Changed lock
-    /// targets substitute their committed image; unmarked join partners keep
-    /// their statement-snapshot image, matching `PostgreSQL`'s `EvalPlanQual`
-    /// row marks.
+    /// Re-execute the plan below this `LockRows` boundary with every base scan pinned to the tuple that formed the original candidate. Changed lock targets substitute their committed image; unmarked join partners keep their statement-snapshot image, matching `PostgreSQL`'s `EvalPlanQual` row marks.
     fn run_candidate_recheck(
         &self,
         row: &PhysicalRow,
@@ -1143,11 +1098,16 @@ impl LockRows<'_> {
                 Ok(Some(batch)) => {
                     let schema = batch.schema;
                     if let Some(row) = batch.rows.into_iter().next() {
-                        break Some(
-                            schema
-                                .relayout_physical_row(row, &self.schema)
-                                .map_err(super::physical_exec_error)?,
-                        );
+                        break Some(match schema.relayout_physical_row(row, &self.schema) {
+                            Ok(row) => row,
+                            Err(error) => {
+                                return Err(super::close_after_physical_failure(
+                                    operator.as_mut(),
+                                    error,
+                                    "row-lock recheck relayout",
+                                ));
+                            }
+                        });
                     }
                 }
                 Ok(None) => break None,
@@ -1171,12 +1131,7 @@ fn rollback_row_acquisitions(
     }
 }
 
-/// Align a rebuilt recheck pipeline with the original lock boundary schema.
-/// The single-relation access path derives its scan order from the pruned
-/// projection while the join builder uses catalog column order, so the same
-/// columns can arrive in a different physical order. Positions are resolved
-/// by column identity; any column the rebuild cannot supply is an error, not
-/// a silent divergence.
+/// Align a rebuilt recheck pipeline with the original lock boundary schema. The single-relation access path derives its scan order from the pruned projection while the join builder uses catalog column order, so the same columns can arrive in a different physical order. Positions are resolved by column identity; any column the rebuild cannot supply is an error, not a silent divergence.
 fn align_recheck_schema<'a>(
     operator: Box<dyn PhysicalOperator + 'a>,
     expected: &RowSchema,
@@ -1254,9 +1209,7 @@ pub(in crate::sql) fn attach_lock_rows<'a>(
         return Ok(operator);
     };
     if ctes.row_lock_recheck_active() {
-        // A tuple-local recheck re-executes the plan below its own LockRows
-        // boundary. Locks for the candidate are already held, so nested
-        // locking is suppressed while lock identities keep flowing.
+        // A tuple-local recheck re-executes the plan below its own LockRows boundary. Locks for the candidate are already held, so nested locking is suppressed while lock identities keep flowing.
         return Ok(operator);
     }
     validate_locking_block_shape(statement, first_clause.strength)?;
@@ -1275,7 +1228,7 @@ pub(in crate::sql) fn attach_lock_rows<'a>(
         return Ok(operator);
     }
     let mut locked_relations = std::collections::BTreeSet::new();
-    for target in &targets {
+    for target in targets.iter().filter(|target| !target.identity_source) {
         if locked_relations.insert(target.storage_name.clone()) {
             engine.lock_relation(
                 &target.storage_name,
@@ -1283,10 +1236,7 @@ pub(in crate::sql) fn attach_lock_rows<'a>(
             )?;
         }
     }
-    // The recheck context is shared per SQL statement through the engine
-    // session, so every locking scope reaches it: top-level queries, DML
-    // sources, DML CTEs, CREATE TABLE AS, prepared execution, and EXPLAIN
-    // ANALYZE bodies.
+    // The recheck context is shared per SQL statement through the engine session, so every locking scope reaches it: top-level queries, DML sources, DML CTEs, CREATE TABLE AS, prepared execution, and EXPLAIN ANALYZE bodies.
     let retry_cache = engine.statement_row_lock_cache()?;
     Ok(Box::new(LockRows::new(
         operator,
@@ -1294,7 +1244,7 @@ pub(in crate::sql) fn attach_lock_rows<'a>(
         params,
         targets,
         max_rows,
-        !ctes.retain_lock_identities_after_lock,
+        !ctes.lock_identities.retain_after_lock,
         Some(retry_cache),
         recheck_source,
     )))

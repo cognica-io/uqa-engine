@@ -108,11 +108,7 @@ fn waiting_writer_refreshes_when_sqlite_commit_precedes_epoch_publication() {
     started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     assert!(done_rx.recv_timeout(Duration::from_millis(200)).is_err());
 
-    // End the physical transaction without publishing the shared epoch.
-    // This deterministically models the interval after SQLite COMMIT has
-    // released its writer lock but before Engine::commit publishes it. The
-    // logical writer registration goes with it, exactly as the real commit
-    // path releases the session's locks before publication.
+    // End the physical transaction without publishing the shared epoch. This deterministically models the interval after SQLite COMMIT has released its writer lock but before Engine::commit publishes it. The logical writer registration goes with it, exactly as the real commit path releases the session's locks before publication.
     writer
         .storage
         .backend

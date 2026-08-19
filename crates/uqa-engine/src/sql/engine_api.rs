@@ -56,6 +56,9 @@ impl Engine {
     /// All doc ids on a table, used by the SELECT path when there is no
     /// WHERE clause.
     pub fn table_doc_ids(&self, table: &str) -> Result<Vec<uqa_core::DocId>, SQLError> {
+        if let Some(documents) = self.command_visible_documents(table)? {
+            return Ok(documents.into_keys().collect());
+        }
         let Some(t) = self
             .try_table(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
@@ -68,6 +71,10 @@ impl Engine {
 
     pub(crate) fn table_doc_count(&self, table: &str) -> Result<u64, SQLError> {
         use std::sync::atomic::Ordering;
+        if let Some(documents) = self.command_visible_documents(table)? {
+            return u64::try_from(documents.len())
+                .map_err(|_| SQLError::Internal("document count exceeds u64".into()));
+        }
         let Some(t) = self
             .try_table(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?

@@ -547,9 +547,7 @@ fn deadlock_victim_aborts_and_releases_its_row_locks() {
         done_tx.send((first, result)).unwrap();
     });
     blocked_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-    // The first waiter must have registered its wait before the victim
-    // closes the cycle; the detector aborts whichever request closes it,
-    // so give the spawned request time to block without assuming timing.
+    // The first waiter must have registered its wait before the victim closes the cycle; the detector aborts whichever request closes it, so give the spawned request time to block without assuming timing.
     assert!(done_rx.recv_timeout(Duration::from_millis(200)).is_err());
 
     let victim_outcome = victim.sql("SELECT id FROM accounts WHERE id = 1 FOR UPDATE", &[]);

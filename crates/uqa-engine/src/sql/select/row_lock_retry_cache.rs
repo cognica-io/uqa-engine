@@ -4,10 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Work-memory-bounded committed-row override store for tuple-local row-lock
-//! rechecks. One instance exists per SQL statement; every locking scope of the
-//! statement shares it so repeated occurrences of one changed tuple fetch the
-//! committed override exactly once.
+//! Work-memory-bounded committed-row override store for tuple-local row-lock rechecks. One instance exists per SQL statement; every locking scope of the statement shares it so repeated occurrences of one changed tuple fetch the committed override exactly once.
 
 use parking_lot::Mutex;
 use rusqlite::OptionalExtension;
@@ -39,9 +36,7 @@ struct DiskRetryCache {
     _directory: TempDir,
 }
 
-/// Latest committed image of one row selected under a pending row lock. A
-/// primary-key rewrite surfaces the successor identity so the recheck can lock
-/// and return the row the blocker moved the tuple to.
+/// Latest committed image of one row selected under a pending row lock. A primary-key rewrite surfaces the successor identity so the recheck can lock and return the row the blocker moved the tuple to.
 #[derive(Clone)]
 pub(crate) enum RetryRowOverride {
     Deleted,
@@ -75,12 +70,7 @@ impl RowLockRetryCache {
         *self.snapshot_baseline.lock() = baseline;
     }
 
-    /// Report whether another transaction committed a change to `doc_id` that
-    /// conflicts with the requested lock strength after this statement's
-    /// snapshot, following primary-key rewrites to the final target identity.
-    /// `PostgreSQL` 18 does not recheck a `FOR KEY SHARE` candidate after a
-    /// compatible non-key update, so compatible mutation strengths return
-    /// `None` here.
+    /// Report whether another transaction committed a change to `doc_id` that conflicts with the requested lock strength after this statement's snapshot, following primary-key rewrites to the final target identity. `PostgreSQL` 18 does not recheck a `FOR KEY SHARE` candidate after a compatible non-key update, so compatible mutation strengths return `None` here.
     pub(in crate::sql) fn conflicting_change_target_since_snapshot(
         &self,
         table: &str,
@@ -92,11 +82,7 @@ impl RowLockRetryCache {
             .conflicting_change_target_after(table, doc_id, baseline, strength)
     }
 
-    /// Fetch the latest committed image for a changed candidate row, memoized
-    /// per (table, original doc id, lock strength) across duplicate occurrences
-    /// in the statement. Different strengths cannot share an image because a
-    /// non-key update may proceed after `FOR KEY SHARE` but conflict with a
-    /// stronger later scope.
+    /// Fetch the latest committed image for a changed candidate row, memoized per (table, original doc id, lock strength) across duplicate occurrences in the statement. Different strengths cannot share an image because a non-key update may proceed after `FOR KEY SHARE` but conflict with a stronger later scope.
     pub(in crate::sql) fn committed_override(
         &self,
         engine: &Engine,
@@ -226,9 +212,12 @@ impl RetryCacheState {
         if self.disk.is_some() {
             return Ok(());
         }
-        let mut disk = DiskRetryCache::new()?;
-        let entries = std::mem::take(&mut self.memory);
-        disk.insert_all(entries)?;
+        self.migrate_into_disk(DiskRetryCache::new()?)
+    }
+
+    fn migrate_into_disk(&mut self, mut disk: DiskRetryCache) -> Result<(), SQLError> {
+        disk.insert_all(&self.memory)?;
+        self.memory.clear();
         self.memory_bytes = 0;
         self.disk = Some(disk);
         Ok(())
@@ -279,7 +268,7 @@ impl DiskRetryCache {
         Ok(())
     }
 
-    fn insert_all(&mut self, entries: HashMap<Vec<u8>, Vec<u8>>) -> Result<(), SQLError> {
+    fn insert_all(&mut self, entries: &HashMap<Vec<u8>, Vec<u8>>) -> Result<(), SQLError> {
         let transaction = self.connection.transaction().map_err(|error| {
             SQLError::Internal(format!("begin row-lock retry cache spill: {error}"))
         })?;
@@ -292,7 +281,7 @@ impl DiskRetryCache {
                     SQLError::Internal(format!("prepare row-lock retry cache spill: {error}"))
                 })?;
             for (key, value) in entries {
-                statement.execute((&key, &value)).map_err(|error| {
+                statement.execute((key, value)).map_err(|error| {
                     SQLError::Internal(format!("spill row-lock retry cache entry: {error}"))
                 })?;
             }
@@ -315,4 +304,30 @@ fn decode_value(encoded: &[u8]) -> Result<Value, SQLError> {
     ciborium::de::from_reader(encoded).map_err(|error| {
         SQLError::Internal(format!("decode row-lock retry override value: {error}"))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_retry_cache_migration_preserves_memory_entries() {
+        let key = b"row".to_vec();
+        let value = b"value".to_vec();
+        let mut state = RetryCacheState {
+            budget_bytes: 1,
+            memory_bytes: key.len() + value.len(),
+            memory: HashMap::from([(key.clone(), value.clone())]),
+            disk: None,
+        };
+        let disk = DiskRetryCache::new().unwrap();
+        disk.connection
+            .execute("DROP TABLE retry_cache", [])
+            .unwrap();
+
+        assert!(state.migrate_into_disk(disk).is_err());
+        assert_eq!(state.memory.get(&key), Some(&value));
+        assert_eq!(state.memory_bytes, key.len() + value.len());
+        assert!(state.disk.is_none());
+    }
 }

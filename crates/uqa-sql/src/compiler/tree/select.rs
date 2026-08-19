@@ -164,13 +164,7 @@ pub(in crate::compiler) fn compile_select(
     Ok(compiled)
 }
 
-/// `PostgreSQL`'s planner reduces an outer join before row-lock validation when
-/// a qualification cannot be true for the join's null-extended side. The
-/// WHERE clause always qualifies; once a join is (or becomes) inner, its ON
-/// condition also filters every row and joins nested below it can reduce
-/// through it, so the rewrite iterates to a fixpoint. Keeping the rewrite in
-/// the typed tree lets execution and validation see the same effective join
-/// kind.
+/// `PostgreSQL`'s planner reduces an outer join before row-lock validation when a qualification cannot be true for the join's null-extended side. The WHERE clause always qualifies; once a join is (or becomes) inner, its ON condition also filters every row and joins nested below it can reduce through it, so the rewrite iterates to a fixpoint. Keeping the rewrite in the typed tree lets execution and validation see the same effective join kind.
 fn reduce_null_rejected_outer_joins_to_fixpoint(from: &mut FromClause, predicate: Option<&Expr>) {
     loop {
         let mut quals: Vec<Expr> = predicate.iter().map(|expr| (*expr).clone()).collect();
@@ -185,9 +179,7 @@ fn reduce_null_rejected_outer_joins_to_fixpoint(from: &mut FromClause, predicate
     }
 }
 
-/// ON conditions of joins that are inner (or reduced to inner) and every
-/// join above them is inner as well, so the condition applies to all rows the
-/// enclosing FROM item can produce.
+/// ON conditions of joins that are inner (or reduced to inner) and every join above them is inner as well, so the condition applies to all rows the enclosing FROM item can produce.
 fn collect_inner_join_quals(from: &FromClause, quals: &mut Vec<Expr>) {
     let FromClause::Join {
         left,

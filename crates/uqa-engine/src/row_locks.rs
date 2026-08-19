@@ -6,19 +6,14 @@
 
 //! Process-wide logical row locks for `FOR UPDATE` / `FOR SHARE`.
 //!
-//! Locks follow `PostgreSQL` 18 tuple-lock conflict rules and are held until
-//! the owning session's transaction ends or a savepoint rolls back the
-//! acquisition. Sessions inside one process arbitrate through the in-memory
-//! lock table; engines in separate OS processes over the same durable
-//! database additionally coordinate through native byte-range locks on a
-//! sidecar file next to the database.
+//! Locks follow `PostgreSQL` 18 tuple-lock conflict rules and are held until the owning session's transaction ends or a savepoint rolls back the acquisition. Sessions inside one process arbitrate through the in-memory lock table; engines in separate OS processes over the same durable database additionally coordinate through native byte-range locks on a sidecar file next to the database.
 
 mod cross_process;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use parking_lot::{Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use uqa_core::DocId;
@@ -31,6 +26,7 @@ use cross_process::{
 };
 
 const WAIT_SLICE: Duration = Duration::from_millis(50);
+const CHANGE_GATE_WAIT_LIMIT: Duration = Duration::from_secs(30);
 const CHANGE_GATE_SESSION: u64 = u64::MAX;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -132,9 +128,7 @@ struct LockTable {
     waiting: HashMap<u64, HashMap<RowLockKey, LockStrength>>,
     relations: HashMap<u64, Vec<RelationLockGrant>>,
     waiting_relations: HashMap<u64, HashMap<u64, RelationLockMode>>,
-    /// The sidecar byte each local session is currently blocked on, whether
-    /// its immediate holder is local or foreign. Publishing local edges lets
-    /// another process walk mixed local/cross-process deadlock cycles.
+    /// The sidecar byte each local session is currently blocked on, whether its immediate holder is local or foreign. Publishing local edges lets another process walk mixed local/cross-process deadlock cycles.
     advertised_waits: HashMap<u64, ByteClaim>,
     changes: Vec<CommittedRowChange>,
     change_epoch: u64,
@@ -156,9 +150,7 @@ enum CommittedRowChangeKind {
     Rewrite(RowLockKey),
 }
 
-/// Cross-process coordination attachment for durable file databases. A
-/// sidecar that cannot be opened surfaces its reason on the first lock
-/// attempt instead of silently degrading to process-local locking.
+/// Cross-process coordination attachment for durable file databases. A sidecar that cannot be opened surfaces its reason on the first lock attempt instead of silently degrading to process-local locking.
 enum CrossAttachment {
     Active(FileLockCoordinator),
     Unavailable(String),
@@ -228,10 +220,7 @@ impl Drop for RowChangePublication<'_> {
 pub(crate) enum LockAcquire {
     Granted {
         waited: bool,
-        /// Whether this acquisition waited for a conflicting holder in
-        /// another OS process. Cross-process commits are invisible to the
-        /// in-process change epochs, so the lock consumer rechecks such
-        /// candidates against the latest committed row images.
+        /// Whether this acquisition waited for a conflicting holder in another OS process. Cross-process commits are invisible to the in-process change epochs, so the lock consumer rechecks such candidates against the latest committed row images.
         foreign_waited: bool,
         acquisition: Option<RowLockAcquisition>,
     },
@@ -347,34 +336,53 @@ impl RowLockManager {
         }
     }
 
-    /// Whether this manager has durable cross-process coordination. Unlike
-    /// a peer-liveness check, this remains true after a peer exits, because
-    /// commits made by that peer can still be newer than a statement snapshot.
+    /// Whether this manager has durable cross-process coordination. Unlike a peer-liveness check, this remains true after a peer exits, because commits made by that peer can still be newer than a statement snapshot.
     pub(crate) fn has_cross_process_coordination(&self) -> bool {
         matches!(self.cross.as_ref(), Some(CrossAttachment::Active(_)))
     }
 
-    fn acquire_change_gate_claim(&self, write: bool) -> Result<Option<ByteClaim>, SQLError> {
+    fn acquire_change_gate_claim(
+        &self,
+        write: bool,
+        cancel: &uqa_core::CancellationToken,
+        deadline: Instant,
+    ) -> Result<Option<ByteClaim>, SQLError> {
         let Some(CrossAttachment::Active(coordinator)) = self.cross.as_ref() else {
             return Ok(None);
         };
         let claim = change_gate_claim(write);
         loop {
-            match coordinator
+            cancel.check()?;
+            if let Ok(()) = coordinator
                 .try_claim(CHANGE_GATE_SESSION, &[claim])
                 .map_err(SQLError::Internal)?
             {
-                Ok(()) => return Ok(Some(claim)),
-                Err(_) => std::thread::sleep(Duration::from_millis(1)),
+                return Ok(Some(claim));
             }
+            if Instant::now() >= deadline {
+                return Err(change_gate_timeout());
+            }
+            std::thread::sleep(Duration::from_millis(1));
         }
     }
 
-    /// Hold the shared commit/snapshot gate while a storage snapshot is pinned
-    /// and its row-change baseline is captured.
-    pub(crate) fn begin_change_snapshot(&self) -> Result<RowChangeSnapshot<'_>, SQLError> {
-        let local = self.change_gate.read();
-        let cross_claim = self.acquire_change_gate_claim(false)?;
+    /// Hold the shared commit/snapshot gate while a storage snapshot is pinned and its row-change baseline is captured.
+    pub(crate) fn begin_change_snapshot(
+        &self,
+        cancel: &uqa_core::CancellationToken,
+    ) -> Result<RowChangeSnapshot<'_>, SQLError> {
+        let deadline = Instant::now() + CHANGE_GATE_WAIT_LIMIT;
+        let local = loop {
+            cancel.check()?;
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(change_gate_timeout());
+            }
+            if let Some(local) = self.change_gate.try_read_for(remaining.min(WAIT_SLICE)) {
+                break local;
+            }
+        };
+        let cross_claim = self.acquire_change_gate_claim(false, cancel, deadline)?;
         Ok(RowChangeSnapshot {
             manager: self,
             cross_claim,
@@ -382,11 +390,23 @@ impl RowLockManager {
         })
     }
 
-    /// Hold the exclusive commit/snapshot gate from immediately before the
-    /// backend commit through publication of its row-change metadata.
-    pub(crate) fn begin_change_publication(&self) -> Result<RowChangePublication<'_>, SQLError> {
-        let local = self.change_gate.write();
-        let cross_claim = self.acquire_change_gate_claim(true)?;
+    /// Hold the exclusive commit/snapshot gate from immediately before the backend commit through publication of its row-change metadata.
+    pub(crate) fn begin_change_publication(
+        &self,
+        cancel: &uqa_core::CancellationToken,
+    ) -> Result<RowChangePublication<'_>, SQLError> {
+        let deadline = Instant::now() + CHANGE_GATE_WAIT_LIMIT;
+        let local = loop {
+            cancel.check()?;
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(change_gate_timeout());
+            }
+            if let Some(local) = self.change_gate.try_write_for(remaining.min(WAIT_SLICE)) {
+                break local;
+            }
+        };
+        let cross_claim = self.acquire_change_gate_claim(true, cancel, deadline)?;
         Ok(RowChangePublication {
             manager: self,
             cross_claim,
@@ -412,9 +432,7 @@ impl RowLockManager {
         }
     }
 
-    /// Whether the cross-process wait-for graph from `wanted` closes back on
-    /// `session_id`. Bytes held by other local sessions are followed through
-    /// those sessions' own foreign waits.
+    /// Whether the cross-process wait-for graph from `wanted` closes back on `session_id`. Bytes held by other local sessions are followed through those sessions' own foreign waits.
     fn cross_wait_cycle(
         state: &LockTable,
         coordinator: &FileLockCoordinator,
@@ -615,8 +633,14 @@ fn deadlock_detected() -> SQLError {
     }
 }
 
-/// Advertises one session's cross-process wait for the duration of an
-/// acquisition and clears it on every exit path.
+fn change_gate_timeout() -> SQLError {
+    SQLError::Internal(format!(
+        "timed out after {} seconds waiting for cross-process row-change coordination",
+        CHANGE_GATE_WAIT_LIMIT.as_secs()
+    ))
+}
+
+/// Advertises one session's cross-process wait for the duration of an acquisition and clears it on every exit path.
 struct CrossWaitGuard<'a> {
     manager: &'a RowLockManager,
     coordinator: Option<&'a FileLockCoordinator>,
@@ -662,11 +686,7 @@ impl Drop for CrossWaitGuard<'_> {
     }
 }
 
-/// Add the cross-process record-lock claims for one just-granted row
-/// acquisition. Only a new acquisition adds claims: re-acquiring an
-/// equal-or-weaker strength changes nothing another process could observe. A
-/// contended claim rolls the in-process grant back and reports the byte to
-/// wait on; an infrastructure failure rolls back and surfaces the error.
+/// Add the cross-process record-lock claims for one just-granted row acquisition. Only a new acquisition adds claims: re-acquiring an equal-or-weaker strength changes nothing another process could observe. A contended claim rolls the in-process grant back and reports the byte to wait on; an infrastructure failure rolls back and surfaces the error.
 fn claim_cross_process_bytes(
     state: &mut LockTable,
     coordinator: Option<&FileLockCoordinator>,
@@ -732,8 +752,7 @@ fn rollback_grant(state: &mut LockTable, acquisition: RowLockAcquisition) {
     }
 }
 
-/// Undo one just-granted relation acquisition whose cross-process claim
-/// failed: the newest acquisition of this session on the table.
+/// Undo one just-granted relation acquisition whose cross-process claim failed: the newest acquisition of this session on the table.
 fn rollback_relation_grant(state: &mut LockTable, session_id: u64, table: u64) {
     if let Some(grants) = state.relations.get_mut(&table) {
         grants.retain_mut(|grant| {
@@ -1024,10 +1043,7 @@ impl RowLockManager {
         ))
     }
 
-    /// Follow committed primary-key rewrites from `doc_id` to the final
-    /// identity, considering only rewrites newer than the statement snapshot.
-    /// This prevents an old update chain from attaching to a later row that
-    /// reused the same primary key.
+    /// Follow committed primary-key rewrites from `doc_id` to the final identity, considering only rewrites newer than the statement snapshot. This prevents an old update chain from attaching to a later row that reused the same primary key.
     pub(crate) fn row_successor_after(
         &self,
         table: &str,
@@ -1060,10 +1076,10 @@ impl RowLockManager {
         &self,
         session_id: u64,
         changes: impl IntoIterator<Item = PendingRowChange>,
-    ) {
+    ) -> Result<(), SQLError> {
         let changes = normalize_pending_row_changes(changes);
         if changes.is_empty() {
-            return;
+            return Ok(());
         }
         let mut state = self.state.lock();
         state.change_epoch = state.change_epoch.wrapping_add(1);
@@ -1095,28 +1111,33 @@ impl RowLockManager {
                 })
             })
             .collect::<Vec<_>>();
-        if let Some(CrossAttachment::Active(coordinator)) = self.cross.as_ref() {
-            let published = committed
-                .iter()
-                .map(|change| cross_process::PublishedRowChange {
-                    table_hash: table_hash(self.table_name(change.key.table).as_ref()),
-                    doc_id: change.key.doc_id,
-                    kind: match change.kind {
-                        CommittedRowChangeKind::Update => {
-                            cross_process::PublishedRowChangeKind::Update
-                        }
-                        CommittedRowChangeKind::Delete => {
-                            cross_process::PublishedRowChangeKind::Delete
-                        }
-                        CommittedRowChangeKind::Rewrite(successor) => {
-                            cross_process::PublishedRowChangeKind::Rewrite(successor.doc_id)
-                        }
-                    },
-                    strength: change.strength,
-                })
-                .collect::<Vec<_>>();
-            coordinator.publish_changes(&published);
-        }
+        let publication_result =
+            if let Some(CrossAttachment::Active(coordinator)) = self.cross.as_ref() {
+                let published = committed
+                    .iter()
+                    .map(|change| cross_process::PublishedRowChange {
+                        table_hash: table_hash(self.table_name(change.key.table).as_ref()),
+                        doc_id: change.key.doc_id,
+                        kind: match change.kind {
+                            CommittedRowChangeKind::Update => {
+                                cross_process::PublishedRowChangeKind::Update
+                            }
+                            CommittedRowChangeKind::Delete => {
+                                cross_process::PublishedRowChangeKind::Delete
+                            }
+                            CommittedRowChangeKind::Rewrite(successor) => {
+                                cross_process::PublishedRowChangeKind::Rewrite(successor.doc_id)
+                            }
+                        },
+                        strength: change.strength,
+                    })
+                    .collect::<Vec<_>>();
+                coordinator
+                    .publish_changes(&published)
+                    .map_err(SQLError::Internal)
+            } else {
+                Ok(())
+            };
         for change in committed {
             let key = change.key;
             if state.active_change_observers != 0
@@ -1126,6 +1147,7 @@ impl RowLockManager {
                 state.changes.push(change);
             }
         }
+        publication_result
     }
 
     pub(crate) fn rollback_acquisition(&self, acquisition: RowLockAcquisition) {

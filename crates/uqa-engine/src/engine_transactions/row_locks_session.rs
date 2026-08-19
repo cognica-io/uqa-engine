@@ -4,17 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Session-level integration between the SQL transaction stack and the
-//! row-lock manager: typed-mutation locking, statement-scoped recheck
-//! contexts, and change publication for tuple-local rechecks.
+//! Session-level integration between the SQL transaction stack and the row-lock manager: typed-mutation locking, statement-scoped recheck contexts, and change publication for tuple-local rechecks.
 
 use super::{panic_description, BackendTransactionMode, Engine, SQLError, TransactionIntent};
 
 impl Engine {
-    /// Run one typed row mutation with the same relation/tuple locking order
-    /// as SQL DML: logical locks first, backend-writer promotion second. This
-    /// prevents typed APIs from bypassing `SELECT ... FOR UPDATE` and avoids a
-    /// writer/row-lock inversion while waiting for another transaction.
+    /// Run one typed row mutation with the same relation/tuple locking order as SQL DML: logical locks first, backend-writer promotion second. This prevents typed APIs from bypassing `SELECT ... FOR UPDATE` and avoids a writer/row-lock inversion while waiting for another transaction.
     pub(crate) fn with_implicit_row_write_transaction<R>(
         &self,
         table: &str,
@@ -81,20 +76,34 @@ impl Engine {
         }
     }
 
-    pub(crate) fn row_lock_change_requires_recheck(&self) -> bool {
+    fn row_lock_table_name(&self, table: &str) -> Result<String, SQLError> {
+        self.try_resolve_table_name(table)
+            .map_err(|error| {
+                SQLError::Internal(format!("resolve row-lock table `{table}`: {error}"))
+            })
+            .map(|resolved| resolved.unwrap_or_else(|| table.to_string()))
+    }
+
+    pub(crate) fn row_lock_change_requires_recheck(&self) -> Result<bool, SQLError> {
         let Some(backend) = self.storage.backend.as_ref() else {
-            return true;
+            return Ok(true);
         };
         if self.storage.provider.is_none() {
-            return false;
+            return Ok(false);
         }
         let stack = self.session.transactions.lock();
-        stack.first().is_some_and(|frame| {
+        let deferred_reader = stack.first().is_some_and(|frame| {
             frame.intent == TransactionIntent::ReadOnly
                 || frame.backend_mode == BackendTransactionMode::Deferred
-        }) && backend
+        });
+        drop(stack);
+        if !deferred_reader {
+            return Ok(false);
+        }
+        backend
             .transaction_has_written()
-            .is_ok_and(|written| !written)
+            .map(|written| !written)
+            .map_err(|error| Self::storage_tx_error("inspect row-lock recheck snapshot", &error))
     }
 
     pub(crate) fn lock_row(
@@ -105,11 +114,7 @@ impl Engine {
         wait: uqa_sql::ast::LockWait,
         display_name: &str,
     ) -> Result<crate::row_locks::LockAcquire, SQLError> {
-        let canonical = self
-            .try_resolve_table_name(table)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| table.to_string());
+        let canonical = self.row_lock_table_name(table)?;
         let key = crate::row_locks::RowLockKey {
             table: self.row_locks.table_key(&canonical),
             doc_id,
@@ -130,11 +135,7 @@ impl Engine {
         table: &str,
         mode: crate::row_locks::RelationLockMode,
     ) -> Result<(), SQLError> {
-        let canonical = self
-            .try_resolve_table_name(table)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| table.to_string());
+        let canonical = self.row_lock_table_name(table)?;
         self.row_locks.acquire_relation(
             self.session_id,
             self.row_locks.table_key(&canonical),
@@ -144,25 +145,18 @@ impl Engine {
         )
     }
 
-    /// Whether the open transaction of this session already changed or
-    /// rewrote the row itself. Such a row's current image is authoritative
-    /// for this session, so cross-process verification must not replace it
-    /// with the older committed image.
+    /// Whether the open transaction of this session already changed or rewrote the row itself. Such a row's current image is authoritative for this session, so cross-process verification must not replace it with the older committed image.
     pub(crate) fn row_changed_in_open_transaction(
         &self,
         table: &str,
         doc_id: uqa_core::DocId,
-    ) -> bool {
-        let canonical = self
-            .try_resolve_table_name(table)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| table.to_string());
+    ) -> Result<bool, SQLError> {
+        let canonical = self.row_lock_table_name(table)?;
         let key = crate::row_locks::RowLockKey {
             table: self.row_locks.table_key(&canonical),
             doc_id,
         };
-        self.session.transactions.lock().iter().any(|frame| {
+        Ok(self.session.transactions.lock().iter().any(|frame| {
             frame.row_changes.iter().any(|change| {
                 change.key == key
                     || matches!(
@@ -171,24 +165,16 @@ impl Engine {
                             if successor == key
                     )
             })
-        })
+        }))
     }
 
-    /// The row identity a committed primary-key rewrite moved `doc_id` to,
-    /// following chained rewrites to the final identity. `None` when the row
-    /// keeps its identity in the latest committed state visible to the lock
-    /// manager. Rewrites are recorded only while a lock or observer keeps
-    /// them alive, which covers every DML statement waiting on the row.
+    /// The row identity a committed primary-key rewrite moved `doc_id` to, following chained rewrites to the final identity. `None` when the row keeps its identity in the latest committed state visible to the lock manager. Rewrites are recorded only while a lock or observer keeps them alive, which covers every DML statement waiting on the row.
     pub(crate) fn committed_row_successor(
         &self,
         table: &str,
         doc_id: uqa_core::DocId,
     ) -> Result<crate::row_locks::RowChangeTarget, SQLError> {
-        let canonical = self
-            .try_resolve_table_name(table)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| table.to_string());
+        let canonical = self.row_lock_table_name(table)?;
         self.row_locks.row_successor_after(
             &canonical,
             doc_id,
@@ -201,12 +187,8 @@ impl Engine {
         table: &str,
         doc_id: uqa_core::DocId,
         kind: crate::row_locks::PendingRowChangeKind,
-    ) {
-        let canonical = self
-            .try_resolve_table_name(table)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| table.to_string());
+    ) -> Result<(), SQLError> {
+        let canonical = self.row_lock_table_name(table)?;
         let key = crate::row_locks::RowLockKey {
             table: self.row_locks.table_key(&canonical),
             doc_id,
@@ -215,35 +197,54 @@ impl Engine {
         let change = crate::row_locks::PendingRowChange { key, kind };
         if let Some(frame) = stack.last_mut() {
             frame.row_changes.push(change);
+            Ok(())
         } else {
             drop(stack);
-            self.row_locks
+            let publication = self
+                .row_locks
+                .begin_change_publication(&self.runtime.cancellation)?;
+            let result = self
+                .row_locks
                 .publish_row_changes(self.session_id, [change]);
+            drop(publication);
+            result
         }
     }
 
-    pub(crate) fn note_row_inserted(&self, table: &str, doc_id: uqa_core::DocId) {
+    pub(crate) fn note_row_inserted(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+    ) -> Result<(), SQLError> {
         self.note_row_change(
             table,
             doc_id,
             crate::row_locks::PendingRowChangeKind::Insert,
-        );
+        )
     }
 
-    pub(crate) fn note_row_changed(&self, table: &str, doc_id: uqa_core::DocId) {
+    pub(crate) fn note_row_changed(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+    ) -> Result<(), SQLError> {
         self.note_row_change(
             table,
             doc_id,
             crate::row_locks::PendingRowChangeKind::Update,
-        );
+        )
     }
 
-    pub(crate) fn note_row_deleted(&self, table: &str, doc_id: uqa_core::DocId) {
+    pub(crate) fn note_row_deleted(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+    ) -> Result<(), SQLError> {
         self.note_row_change(
             table,
             doc_id,
             crate::row_locks::PendingRowChangeKind::Delete,
-        );
+        )
     }
 
     pub(crate) fn note_row_rewritten(
@@ -251,12 +252,8 @@ impl Engine {
         table: &str,
         old_doc_id: uqa_core::DocId,
         new_doc_id: uqa_core::DocId,
-    ) {
-        let canonical = self
-            .try_resolve_table_name(table)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| table.to_string());
+    ) -> Result<(), SQLError> {
+        let canonical = self.row_lock_table_name(table)?;
         let table = self.row_locks.table_key(&canonical);
         let old = crate::row_locks::RowLockKey {
             table,
@@ -273,10 +270,17 @@ impl Engine {
         };
         if let Some(frame) = stack.last_mut() {
             frame.row_changes.push(change);
+            Ok(())
         } else {
             drop(stack);
-            self.row_locks
+            let publication = self
+                .row_locks
+                .begin_change_publication(&self.runtime.cancellation)?;
+            let result = self
+                .row_locks
                 .publish_row_changes(self.session_id, [change]);
+            drop(publication);
+            result
         }
     }
 
@@ -284,20 +288,13 @@ impl Engine {
         std::sync::Arc::clone(&self.row_locks)
     }
 
-    /// Mark one in-flight SQL statement so every locking scope it executes,
-    /// including scopes inside query-bearing commands, prepared execution,
-    /// `EXPLAIN ANALYZE`, and DML sources, shares one row-lock recheck
-    /// context. Host-callback statements nested inside another statement push
-    /// their own frame.
+    /// Mark one in-flight SQL statement so every locking scope it executes, including scopes inside query-bearing commands, prepared execution, `EXPLAIN ANALYZE`, and DML sources, shares one row-lock recheck context. Host-callback statements nested inside another statement push their own frame.
     pub(crate) fn begin_row_lock_statement(&self) -> RowLockStatementScope<'_> {
         self.session.row_lock_statements.lock().push(None);
         RowLockStatementScope { engine: self }
     }
 
-    /// The active statement's shared row-lock recheck context, created on
-    /// first use with the statement snapshot's change epoch as its recheck
-    /// baseline. A direct engine call outside any SQL statement owns an
-    /// ephemeral context with the same baseline semantics.
+    /// The active statement's shared row-lock recheck context, created on first use with the statement snapshot's change epoch as its recheck baseline. A direct engine call outside any SQL statement owns an ephemeral context with the same baseline semantics.
     pub(crate) fn statement_row_lock_cache(
         &self,
     ) -> Result<std::sync::Arc<crate::sql::RowLockRetryCache>, SQLError> {
@@ -351,9 +348,7 @@ impl Engine {
     }
 }
 
-/// RAII frame for one in-flight SQL statement's shared row-lock recheck
-/// context. Dropping the frame releases the statement's change observation so
-/// the lock manager can prune retained row-change versions.
+/// RAII frame for one in-flight SQL statement's shared row-lock recheck context. Dropping the frame releases the statement's change observation so the lock manager can prune retained row-change versions.
 pub(crate) struct RowLockStatementScope<'engine> {
     engine: &'engine Engine,
 }

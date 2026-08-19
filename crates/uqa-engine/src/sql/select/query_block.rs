@@ -63,7 +63,9 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
             .try_table(name)
             .map_err(|err| SQLError::Internal(format!("resolve table `{name}`: {err}")))?;
         let is_virtual = name.contains('.') || (local_table.is_none() && foreign_table.is_none());
-        if alias.is_none() && !is_virtual {
+        let command_overlay =
+            ctes.reads_command_overlay() && engine.command_mutation_overlay_active();
+        if alias.is_none() && !is_virtual && !command_overlay {
             return run_single_table_select_output(
                 engine,
                 SingleRelation {

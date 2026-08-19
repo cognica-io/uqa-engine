@@ -213,11 +213,7 @@ impl Engine {
         Ok(engine)
     }
 
-    /// Build an engine from already-open persistent metadata and data
-    /// backends. The backend's session factory is retained for independent
-    /// SQL sessions and latest-committed row-lock rechecks. Prefer
-    /// [`Self::from_persistent_provider`] when a database-level owner is
-    /// already available.
+    /// Build an engine from already-open persistent metadata and data backends. The backend's session factory is retained for independent SQL sessions and latest-committed row-lock rechecks. Prefer [`Self::from_persistent_provider`] when a database-level owner is already available.
     pub fn from_persistent_backends(
         catalog: Arc<dyn uqa_storage::CatalogFacade>,
         backend: Arc<dyn PersistentStorageBackend>,

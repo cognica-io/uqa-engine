@@ -93,10 +93,7 @@ pub trait KeyValueStore: Send + Sync {
         Ok(None)
     }
 
-    /// Open an independent transaction session over the same logical store.
-    /// The default keeps simple test/custom stores source-compatible while
-    /// making the missing MVCC capability explicit when a persistent engine
-    /// needs a committed reader alongside a pinned statement snapshot.
+    /// Open an independent transaction session over the same logical store. The default keeps simple test/custom stores source-compatible while making the missing MVCC capability explicit when a persistent engine needs a committed reader alongside a pinned statement snapshot.
     fn open_session(&self) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
         Err(StorageBackendError::Other(
             "independent sessions are not implemented for this KeyValue store".into(),

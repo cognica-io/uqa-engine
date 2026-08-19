@@ -170,8 +170,7 @@ impl<'a> ColumnSelection<'a> {
         }
     }
 
-    /// Attribute inner lock origins to this source qualifier so `FOR UPDATE OF`
-    /// a view, CTE, or subquery does not lock sibling join inputs.
+    /// Attribute inner lock origins to this source qualifier so `FOR UPDATE OF` a view, CTE, or subquery does not lock sibling join inputs.
     #[must_use]
     pub fn rebinding_lock_origins(mut self, qualifier: impl Into<String>) -> Self {
         let qualifier = qualifier.into();

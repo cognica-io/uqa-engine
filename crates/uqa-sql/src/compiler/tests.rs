@@ -504,6 +504,27 @@ fn insert_with_array_literal() {
 }
 
 #[test]
+fn insert_set_operation_is_compiled_as_one_select_source() {
+    let Statement::Insert(insert) =
+        first("INSERT INTO dst SELECT id FROM lhs UNION ALL SELECT id FROM rhs LIMIT 2 OFFSET 1")
+    else {
+        panic!("not INSERT");
+    };
+    assert!(insert.rows.is_empty());
+    let source = insert
+        .select_source
+        .expect("INSERT must retain its SELECT source");
+    let set_op = source
+        .set_op
+        .as_ref()
+        .expect("INSERT source must retain its set operation");
+    assert_eq!(set_op.kind, crate::ast::SetOpKind::Union);
+    assert!(set_op.all);
+    assert!(set_op.combined_limit.is_some());
+    assert!(set_op.combined_offset.is_some());
+}
+
+#[test]
 fn select_with_function_call_and_order_by() {
     let stmt = first(
         "SELECT id, title, _score AS s FROM docs \

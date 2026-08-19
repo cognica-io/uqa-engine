@@ -33,6 +33,57 @@ use format::{
 
 const SPILL_MAGIC: &[u8] = b"UQA-SPILL\x01\n";
 
+/// Incremental exact size of one not-yet-encoded batch. When the first row with lock origins arrives, the binary format adds an empty origin-count field to every preceding origin-free row, so accounting must update those already-buffered rows as well as the new record.
+#[derive(Clone, Copy)]
+pub(crate) struct EncodedBatchSizer {
+    physical_width: usize,
+    bytes: usize,
+    origin_free_rows: usize,
+    has_lock_origins: bool,
+}
+
+impl EncodedBatchSizer {
+    pub(crate) fn new(schema: &RowSchema) -> ExecResult<Self> {
+        Ok(Self {
+            physical_width: schema.physical_width(),
+            bytes: encoded_batch_overhead_size(schema)?,
+            origin_free_rows: 0,
+            has_lock_origins: false,
+        })
+    }
+
+    pub(crate) fn append(&mut self, row: &PhysicalRow) -> ExecResult<()> {
+        let mut additional = encoded_physical_row_record_size(row, self.physical_width)?;
+        if row.lock_origins().is_empty() {
+            self.origin_free_rows = self.origin_free_rows.checked_add(1).ok_or_else(|| {
+                spill_error("incremental spill batch origin-free row count overflow")
+            })?;
+            if self.has_lock_origins {
+                additional = additional.checked_add(8).ok_or_else(|| {
+                    spill_error("incremental spill batch lock-origin size overflow")
+                })?;
+            }
+        } else if !self.has_lock_origins {
+            let preceding_metadata = self.origin_free_rows.checked_mul(8).ok_or_else(|| {
+                spill_error("incremental spill batch lock-origin metadata overflow")
+            })?;
+            additional = additional
+                .checked_add(preceding_metadata)
+                .ok_or_else(|| spill_error("incremental spill batch lock-origin size overflow"))?;
+            self.has_lock_origins = true;
+        }
+        self.bytes = self
+            .bytes
+            .checked_add(additional)
+            .ok_or_else(|| spill_error("incremental spill batch size overflow"))?;
+        Ok(())
+    }
+
+    pub(crate) fn bytes(self) -> usize {
+        self.bytes
+    }
+}
+
 /// Append-only batch buffer with an encoded-byte memory budget.
 ///
 /// The budget is exact for the serialized representation and does not claim to
@@ -162,17 +213,6 @@ impl SpillBuffer {
     /// length prefix written to disk.
     pub fn encoded_size(batch: &Batch) -> ExecResult<usize> {
         encoded_batch_size(batch)
-    }
-
-    pub(crate) fn encoded_batch_overhead_size(schema: &RowSchema) -> ExecResult<usize> {
-        encoded_batch_overhead_size(schema)
-    }
-
-    pub(crate) fn encoded_row_record_size(
-        schema: &RowSchema,
-        row: &PhysicalRow,
-    ) -> ExecResult<usize> {
-        encoded_physical_row_record_size(row, schema.physical_width())
     }
 
     /// Total buffered rows, including rows already written to disk.

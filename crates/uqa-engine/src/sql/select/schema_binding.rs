@@ -12,8 +12,9 @@
 //! the same declared `PostgreSQL` type identities as non-empty relations.
 
 use super::{
-    is_score_provenance_column, projection_columns, user_function_output_columns, CteScope, Engine,
-    QueryBlockPlan, QueryPlan, RelationalPlan, SQLError, SQLParam, ScalarExpr, SourcePlan, Value,
+    cte_references_own_name, is_score_provenance_column, ordered_plan_ctes, projection_columns,
+    user_function_output_columns, CteScope, Engine, QueryBlockPlan, QueryPlan, RelationalPlan,
+    SQLError, SQLParam, ScalarExpr, SourcePlan, Value,
 };
 use crate::sql::from_rows::{
     join_using_output_schema, resolve_join_using, table_function_column_types,
@@ -75,8 +76,9 @@ impl SchemaScope {
         preserve_top_level_unknown: bool,
     ) -> Result<RowSchema, SQLError> {
         let mut previous = Vec::with_capacity(plan.ctes.len());
-        for cte in &plan.ctes {
-            let provisional = if cte.recursive {
+        for cte in ordered_plan_ctes(plan)? {
+            let self_recursive = cte_references_own_name(cte);
+            let provisional = if self_recursive {
                 self.bind_recursive_seed(engine, &cte.query, params, outer)?
             } else {
                 self.bind_query(engine, &cte.query, params, outer)?
@@ -87,7 +89,7 @@ impl SchemaScope {
                 self.ctes.insert(cte.name.clone(), provisional),
             ));
 
-            if cte.recursive {
+            if self_recursive {
                 let complete = self.bind_query(engine, &cte.query, params, outer)?;
                 self.ctes.insert(
                     cte.name.clone(),

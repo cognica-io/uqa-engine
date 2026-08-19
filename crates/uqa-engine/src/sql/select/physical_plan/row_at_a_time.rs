@@ -4,10 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-/// Preserve row-at-a-time demand across the scalar projection immediately
-/// below `LockRows`. `PostgreSQL` evaluates that projection for the candidate it
-/// is about to lock, but it does not evaluate a whole vectorized batch after an
-/// enclosing LIMIT has already obtained enough locked rows.
+/// Preserve row-at-a-time demand across the scalar projection immediately below `LockRows`. `PostgreSQL` evaluates that projection for the candidate it is about to lock, but it does not evaluate a whole vectorized batch after an enclosing LIMIT has already obtained enough locked rows.
 pub(super) struct RowAtATime<'a> {
     input: Box<dyn uqa_execution::PhysicalOperator + 'a>,
     schema: uqa_execution::RowSchema,
@@ -57,6 +54,12 @@ impl uqa_execution::PhysicalOperator for RowAtATime<'_> {
             let Some(batch) = self.input.next()? else {
                 return Ok(None);
             };
+            if batch.schema != self.schema {
+                return Err(uqa_execution::ExecError::Other(format!(
+                    "row-at-a-time input schema mismatch: expected {:?}, got {:?}",
+                    self.schema, batch.schema
+                )));
+            }
             self.pending = batch.rows.into_iter();
         }
     }

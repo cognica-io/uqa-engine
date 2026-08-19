@@ -65,10 +65,7 @@ pub fn hash_canonical_row<'a, S: BuildHasher>(
     Ok(hasher.finish())
 }
 
-/// Encode positional SQL values in the exact equality domain used by
-/// DISTINCT and spill-backed row-key state. Callers that need an external
-/// exact index can persist this representation without relying on `Value`'s
-/// serialization format.
+/// Encode positional SQL values in the exact equality domain used by DISTINCT and spill-backed row-key state. Callers that need an external exact index can persist this representation without relying on `Value`'s serialization format.
 pub fn canonical_row_key(values: &[Value]) -> ExecResult<Vec<u8>> {
     encode_key(values)
 }
@@ -368,6 +365,12 @@ impl PhysicalOperator for Distinct<'_> {
             let Some(batch) = self.child.next()? else {
                 return Ok(None);
             };
+            if batch.schema != self.schema {
+                return Err(ExecError::Other(format!(
+                    "DISTINCT input schema mismatch: expected {:?}, got {:?}",
+                    self.schema, batch.schema
+                )));
+            }
             let mut rows = Vec::with_capacity(batch.rows.len());
             for row in batch.rows {
                 let key = self.key(&batch.schema, &row)?;
@@ -1158,6 +1161,29 @@ mod tests {
 
     struct FailingEvaluator;
 
+    struct MismatchedSchemaScan {
+        declared: RowSchema,
+        emitted: Option<Batch>,
+    }
+
+    impl PhysicalOperator for MismatchedSchemaScan {
+        fn row_schema(&self) -> &RowSchema {
+            &self.declared
+        }
+
+        fn open(&mut self) -> ExecResult<()> {
+            Ok(())
+        }
+
+        fn next(&mut self) -> ExecResult<Option<Batch>> {
+            Ok(self.emitted.take())
+        }
+
+        fn close(&mut self) -> ExecResult<()> {
+            Ok(())
+        }
+    }
+
     impl ExpressionEvaluator for FailingEvaluator {
         fn evaluate(
             &self,
@@ -1179,5 +1205,21 @@ mod tests {
         );
         let error = run_to_rows(&mut distinct).unwrap_err();
         assert!(error.to_string().contains("intentional evaluator failure"));
+    }
+
+    #[test]
+    fn distinct_rejects_a_child_batch_with_a_different_schema() {
+        let scan = MismatchedSchemaScan {
+            declared: RowSchema::new(vec!["declared".into()]),
+            emitted: Some(Batch::from_physical_rows(
+                RowSchema::new(vec!["actual".into()]),
+                vec![PhysicalRow::from_values(vec![Value::Int(1)])],
+            )),
+        };
+        let mut distinct = Distinct::all(Box::new(scan));
+
+        let error = run_to_rows(&mut distinct).unwrap_err();
+
+        assert!(error.to_string().contains("DISTINCT input schema mismatch"));
     }
 }

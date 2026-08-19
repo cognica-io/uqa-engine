@@ -14,9 +14,7 @@ pub struct Batch {
 }
 
 impl Batch {
-    /// Compatibility constructor for named rows entering the physical engine.
-    /// The resulting batch is positional immediately; maps do not flow to the
-    /// next operator.
+    /// Compatibility constructor for named rows entering the physical engine. The resulting batch is positional immediately; maps do not flow to the next operator.
     pub fn new(schema: RowSchema, rows: Vec<ResultRow>) -> Self {
         let rows = rows
             .into_iter()

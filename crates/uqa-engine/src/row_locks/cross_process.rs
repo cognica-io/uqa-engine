@@ -6,34 +6,26 @@
 
 //! Cross-process row and relation lock coordination.
 //!
-//! Independent OS processes opening the same durable database coordinate
-//! logical locks through native byte-range locks on a sidecar file
-//! next to the database. Byte offsets derive from stable hashes of the
-//! relation name and row identity; hash collisions only make coordination
-//! more conservative, never less. Record locks die with the owning process,
-//! so a crashed process can never leave a stale logical lock behind.
+//! Independent OS processes opening the same durable database coordinate logical locks through native byte-range locks on a sidecar file next to the database. Byte offsets derive from stable hashes of the relation name and row identity; hash collisions only make coordination more conservative, never less. Record locks die with the owning process, so a crashed process can never leave a stale logical lock behind.
 //!
-//! Each row maps to a two-byte range whose first byte carries key-related
-//! claims and whose second byte carries row-update claims. Mapping the four
-//! `PostgreSQL` tuple-lock strengths onto shared and exclusive claims of
-//! those two bytes reproduces the exact `PostgreSQL` 18 tuple-lock conflict
-//! matrix across processes:
+//! Each row maps to a two-byte range whose first byte carries key-related claims and whose second byte carries row-update claims. Mapping the four `PostgreSQL` tuple-lock strengths onto shared and exclusive claims of those two bytes reproduces the exact `PostgreSQL` 18 tuple-lock conflict matrix across processes:
 //!
 //! - `FOR KEY SHARE`: shared claim of the key byte.
 //! - `FOR SHARE`: shared claim of the row byte.
 //! - `FOR NO KEY UPDATE`: exclusive claim of the row byte.
 //! - `FOR UPDATE`: exclusive claims of both bytes.
 //!
-//! Fixed slot tables at the start of the sidecar record the exact session
-//! holding or waiting for each byte. A waiter can therefore walk the
-//! cross-process wait-for graph and report `40P01` only when it reaches its
-//! own `(pid, session)`, mirroring `PostgreSQL`'s deadlock detector.
+//! Fixed slot tables at the start of the sidecar record the exact session holding or waiting for each byte. A waiter can therefore walk the cross-process wait-for graph and report `40P01` only when it reaches its own `(pid, session)`, mirroring `PostgreSQL`'s deadlock detector.
 
 use uqa_sql::ast::LockStrength;
 
 use super::{RelationLockMode, RowChangeTarget};
 
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(
+    not(any(windows, all(unix, not(target_os = "emscripten")))),
+    allow(dead_code)
+)]
 pub(super) struct PublishedRowChange {
     pub table_hash: u64,
     pub doc_id: u64,
@@ -42,28 +34,27 @@ pub(super) struct PublishedRowChange {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(
+    not(any(windows, all(unix, not(target_os = "emscripten")))),
+    allow(dead_code)
+)]
 pub(super) enum PublishedRowChangeKind {
     Update,
     Delete,
     Rewrite(u64),
 }
 
-/// Sidecar layout. Coordination bytes and wait/holder slots occupy the low
-/// addresses; record-lock byte ranges for relations and rows start above them
-/// so lock offsets never alias structured data offsets.
+/// Sidecar layout. Coordination bytes and wait/holder slots occupy the low addresses; record-lock byte ranges for relations and rows start above them so lock offsets never alias structured data offsets.
 const RELATION_BASE: u64 = 1 << 20;
 const RELATION_SPAN: u64 = 1 << 20;
 const ROW_BASE: u64 = 1 << 21;
 const CHANGE_GATE_BYTE: u64 = 9;
-/// Row byte pairs occupy `[ROW_BASE, ROW_BASE + 2 * ROW_SPAN)`. Record-lock
-/// offsets travel through `off_t`, so the span is sized to the platform's
-/// `off_t` width: 2^40 rows on 64-bit `off_t`, and the largest power of two
-/// that keeps every offset below `i32::MAX` where `off_t` is 32 bits.
+/// Row byte pairs occupy `[ROW_BASE, ROW_BASE + 2 * ROW_SPAN)`. Record-lock offsets travel through `off_t`, so the span is sized to the platform's `off_t` width: 2^40 rows on 64-bit `off_t`, and the largest power of two that keeps every offset below `i32::MAX` where `off_t` is 32 bits.
 const ROW_SPAN: u64 = row_span_for_offset_width(std::mem::size_of::<OffsetWidth>());
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "emscripten")))]
 type OffsetWidth = libc::off_t;
-#[cfg(not(unix))]
+#[cfg(not(all(unix, not(target_os = "emscripten"))))]
 type OffsetWidth = i64;
 
 const fn row_span_for_offset_width(bytes: usize) -> u64 {
@@ -134,8 +125,7 @@ pub(super) fn table_hash(table: &str) -> u64 {
     stable_hash(&[table.as_bytes()])
 }
 
-/// FNV-1a: the offsets must be identical in every process, so the hash key
-/// cannot be process-random.
+/// FNV-1a: the offsets must be identical in every process, so the hash key cannot be process-random.
 fn stable_hash(parts: &[&[u8]]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for part in parts {
@@ -149,13 +139,11 @@ fn stable_hash(parts: &[&[u8]]) -> u64 {
     hash
 }
 
-#[cfg(any(unix, windows))]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(super) use file::FileLockCoordinator;
 
-#[cfg(any(unix, windows))]
-// Native record locks and process-liveness probes have no stable safe
-// wrapper in std. The unsafe surface is confined to operating-system calls
-// over file handles, process handles, and their plain C data structures.
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+// Native record locks and process-liveness probes have no stable safe wrapper in std. The unsafe surface is confined to operating-system calls over file handles, process handles, and their plain C data structures.
 #[allow(unsafe_code)]
 mod file {
     use std::collections::HashMap;
@@ -186,6 +174,7 @@ mod file {
     const HOLDER_SLOT_COUNT: u64 = 8192;
     const CHANGE_ENTRY_SIZE: u64 = 48;
     const CHANGE_ENTRY_MAGIC: u32 = 0x5551_4348;
+    const CHANGE_JOURNAL_WAIT_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
 
     #[derive(Default)]
     struct ByteClaimCounts {
@@ -207,22 +196,15 @@ mod file {
 
     struct CoordinatorState {
         claims: HashMap<u64, ByteClaimCounts>,
-        /// Sessions of this process holding each claimed byte, so a
-        /// cross-process wait-for walk can attribute a locally held byte to
-        /// the session that owns it and follow that session's own wait.
+        /// Sessions of this process holding each claimed byte, so a cross-process wait-for walk can attribute a locally held byte to the session that owns it and follow that session's own wait.
         holders: HashMap<u64, Vec<u64>>,
         /// Sidecar wait slot advertised for each locally waiting session.
         wait_slots: HashMap<u64, u64>,
-        /// Sidecar holder slots for each acquisition owned by a local session.
-        /// The vector preserves duplicate acquisitions of the same byte.
+        /// Sidecar holder slots for each acquisition owned by a local session. The vector preserves duplicate acquisitions of the same byte.
         holder_slots: HashMap<(u64, u64, bool), Vec<u64>>,
     }
 
-    /// Process-wide coordinator for one durable database. All engine sessions
-    /// of this process share one descriptor while the in-process lock table
-    /// arbitrates between local sessions. On POSIX, nothing else in the
-    /// process may open the sidecar path because closing another descriptor
-    /// to it would drop this process's record locks.
+    /// Process-wide coordinator for one durable database. All engine sessions of this process share one descriptor while the in-process lock table arbitrates between local sessions. On POSIX, nothing else in the process may open the sidecar path because closing another descriptor to it would drop this process's record locks.
     pub(in crate::row_locks) struct FileLockCoordinator {
         file: std::fs::File,
         change_file: std::fs::File,
@@ -445,15 +427,12 @@ mod file {
                 state.claims.remove(&claim.offset);
             }
             if after != before {
-                // Downgrading or unlocking a held range cannot block; an
-                // I/O-level failure here would leave a stricter record lock
-                // in place, which is conservative rather than unsound.
+                // Downgrading or unlocking a held range cannot block; an I/O-level failure here would leave a stricter record lock in place, which is conservative rather than unsound.
                 let _ = self.apply_byte_mode(claim.offset, before, after);
             }
         }
 
-        /// Try to add every claim without blocking. Either all claims are
-        /// applied, or none are and the contended claim is reported.
+        /// Try to add every claim without blocking. Either all claims are applied, or none are and the contended claim is reported.
         pub(in crate::row_locks) fn try_claim(
             &self,
             session: u64,
@@ -506,45 +485,79 @@ mod file {
             }
         }
 
-        /// Append committed tuple-version events to an unbounded sidecar
-        /// journal. Entries are never overwritten, so a long-lived statement
-        /// cannot lose the generation history needed to distinguish an update
-        /// chain from a delete followed by primary-key reuse.
-        pub(in crate::row_locks) fn publish_changes(&self, changes: &[super::PublishedRowChange]) {
+        /// Append committed tuple-version events to an unbounded sidecar journal. Entries are never overwritten, so a long-lived statement cannot lose the generation history needed to distinguish an update chain from a delete followed by primary-key reuse.
+        pub(in crate::row_locks) fn publish_changes(
+            &self,
+            changes: &[super::PublishedRowChange],
+        ) -> Result<(), String> {
             if changes.is_empty() {
-                return;
+                return Ok(());
             }
             let _guard = self.state.lock();
-            if self
-                .apply_byte_mode(CHANGE_JOURNAL_LOCK_BYTE, None, Some(true))
-                .is_err()
-            {
-                let mut attempts = 0;
-                while self
-                    .apply_byte_mode(CHANGE_JOURNAL_LOCK_BYTE, None, Some(true))
-                    .is_err()
-                {
-                    attempts += 1;
-                    if attempts > 200 {
-                        return;
+            let deadline = std::time::Instant::now() + CHANGE_JOURNAL_WAIT_LIMIT;
+            loop {
+                match self.apply_byte_mode(CHANGE_JOURNAL_LOCK_BYTE, None, Some(true)) {
+                    Ok(()) => break,
+                    Err(error) if lock_would_block(&error) => {
+                        if std::time::Instant::now() >= deadline {
+                            return Err(format!(
+                                "timed out after {} seconds acquiring the row-change journal lock",
+                                CHANGE_JOURNAL_WAIT_LIMIT.as_secs()
+                            ));
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(1));
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(1));
+                    Err(error) => {
+                        return Err(format!("acquire row-change journal lock failed: {error}"));
+                    }
                 }
             }
-            let Ok(mut next) = self.change_sequence_unlocked() else {
-                let _ = self.apply_byte_mode(CHANGE_JOURNAL_LOCK_BYTE, Some(true), None);
-                return;
+            let mut original_len = None;
+            let publication = (|| {
+                let mut next = self.change_sequence_unlocked()?;
+                let journal_len = next.checked_mul(CHANGE_ENTRY_SIZE).ok_or_else(|| {
+                    "row-change journal byte length overflow before publication".to_string()
+                })?;
+                original_len = Some(journal_len);
+                for change in changes {
+                    let offset = next.checked_mul(CHANGE_ENTRY_SIZE).ok_or_else(|| {
+                        "row-change journal byte offset overflow during publication".to_string()
+                    })?;
+                    let entry = encode_change_entry(next, change);
+                    write_all_at(&self.change_file, &entry, offset).map_err(|error| {
+                        format!("write row-change journal entry {next} failed: {error}")
+                    })?;
+                    next = next.checked_add(1).ok_or_else(|| {
+                        "row-change journal sequence overflow during publication".to_string()
+                    })?;
+                }
+                self.change_file
+                    .sync_data()
+                    .map_err(|error| format!("sync row-change journal failed: {error}"))
+            })();
+            let publication = match (publication, original_len) {
+                (Err(error), Some(original_len)) => {
+                    let rollback = self
+                        .change_file
+                        .set_len(original_len)
+                        .and_then(|()| self.change_file.sync_data())
+                        .map_err(|rollback_error| {
+                            format!(
+                                "{error}; restore row-change journal to {original_len} bytes failed: {rollback_error}"
+                            )
+                        });
+                    rollback.and(Err(error))
+                }
+                (result, _) => result,
             };
-            for change in changes {
-                let offset = next.saturating_mul(CHANGE_ENTRY_SIZE);
-                let entry = encode_change_entry(next, change);
-                if write_all_at(&self.change_file, &entry, offset).is_err() {
-                    break;
-                }
-                next = next.wrapping_add(1);
+            let unlock = self
+                .apply_byte_mode(CHANGE_JOURNAL_LOCK_BYTE, Some(true), None)
+                .map_err(|error| format!("release row-change journal lock failed: {error}"));
+            match (publication, unlock) {
+                (Ok(()), Ok(())) => Ok(()),
+                (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+                (Err(error), Err(unlock_error)) => Err(format!("{error}; {unlock_error}")),
             }
-            let _ = self.change_file.sync_data();
-            let _ = self.apply_byte_mode(CHANGE_JOURNAL_LOCK_BYTE, Some(true), None);
         }
 
         fn change_sequence_unlocked(&self) -> Result<u64, String> {
@@ -631,10 +644,7 @@ mod file {
             let _ = write_all_at(&self.file, &bytes, Self::slot_offset(index));
         }
 
-        /// Advertise what one session of this process is currently waiting
-        /// for so other processes can walk the wait-for graph. Each waiting
-        /// session owns its own slot; slot exhaustion degrades detection,
-        /// never coordination.
+        /// Advertise what one session of this process is currently waiting for so other processes can walk the wait-for graph. Each waiting session owns its own slot; slot exhaustion degrades detection, never coordination.
         pub(in crate::row_locks) fn register_wait(&self, session: u64, claim: ByteClaim) {
             let pid = std::process::id();
             let slot = WaitSlot {
@@ -656,9 +666,7 @@ mod file {
                 let index = (preferred + probe) % WAIT_SLOT_COUNT;
                 let occupied = self.read_slot(index).is_some_and(|existing| {
                     if existing.pid == pid {
-                        // A slot of this process is live only while one of
-                        // our sessions still owns it; stale slots from an
-                        // earlier incarnation of this pid are reusable.
+                        // A slot of this process is live only while one of our sessions still owns it; stale slots from an earlier incarnation of this pid are reusable.
                         state.wait_slots.values().any(|used| *used == index)
                     } else {
                         process_alive(existing.pid)
@@ -682,14 +690,7 @@ mod file {
             }
         }
 
-        /// Walk the cross-process wait-for graph from `wanted`, requested by
-        /// local `session`. Foreign edges come from exact `(pid, session)`
-        /// holder slots and the advertised wait of that same session. A byte
-        /// held by this process is attributed to its local holder sessions:
-        /// reaching the requesting session closes the cycle, an idle local
-        /// holder ends that branch without a cycle, and a local holder that
-        /// is itself waiting continues through `local_wait`, which reports
-        /// the foreign byte a local session waits on, if any.
+        /// Walk the cross-process wait-for graph from `wanted`, requested by local `session`. Foreign edges come from exact `(pid, session)` holder slots and the advertised wait of that same session. A byte held by this process is attributed to its local holder sessions: reaching the requesting session closes the cycle, an idle local holder ends that branch without a cycle, and a local holder that is itself waiting continues through `local_wait`, which reports the foreign byte a local session waits on, if any.
         pub(in crate::row_locks) fn wait_cycle_reaches_session(
             &self,
             session: u64,
@@ -724,8 +725,7 @@ mod file {
             false
         }
 
-        /// Local sessions whose claims of `claim.offset` conflict with the
-        /// requested claim.
+        /// Local sessions whose claims of `claim.offset` conflict with the requested claim.
         fn local_holders_conflicting(&self, claim: ByteClaim) -> Vec<u64> {
             let state = self.state.lock();
             let Some(counts) = state.claims.get(&claim.offset) else {
@@ -1077,17 +1077,16 @@ mod file {
     }
 }
 
-#[cfg(not(any(unix, windows)))]
+#[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
 pub(super) use fallback::FileLockCoordinator;
 
-#[cfg(not(any(unix, windows)))]
+#[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
 mod fallback {
     use std::path::Path;
 
     use super::ByteClaim;
 
-    /// Sandboxed targets without native processes retain process-local lock
-    /// semantics instead of rejecting every persistent mutation.
+    /// Sandboxed targets without native processes retain process-local lock semantics instead of rejecting every persistent mutation.
     pub(in crate::row_locks) struct FileLockCoordinator {}
 
     impl FileLockCoordinator {
@@ -1118,7 +1117,11 @@ mod fallback {
             false
         }
 
-        pub(in crate::row_locks) fn publish_changes(&self, _changes: &[super::PublishedRowChange]) {
+        pub(in crate::row_locks) fn publish_changes(
+            &self,
+            _changes: &[super::PublishedRowChange],
+        ) -> Result<(), String> {
+            Ok(())
         }
 
         pub(in crate::row_locks) fn change_sequence(&self) -> Result<u64, String> {

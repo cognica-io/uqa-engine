@@ -135,13 +135,17 @@ fn stronger_later_lock_scope_refetches_after_a_key_share_compatible_update() {
         .unwrap();
     let gate = Arc::new(Barrier::new(2));
     let callback_gate = Arc::clone(&gate);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let callback_calls = Arc::clone(&calls);
     let (entered_tx, entered_rx) = mpsc::channel();
     root.register_scalar_function_with_options(
         "lock_strength_scope_gate",
         SQLFunctionOptions::read_only(SQLFunctionVolatility::Volatile),
         move |_args: &[Value]| {
-            entered_tx.send(()).unwrap();
-            callback_gate.wait();
+            if callback_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                entered_tx.send(()).unwrap();
+                callback_gate.wait();
+            }
             Ok(Value::Int(1))
         },
     )

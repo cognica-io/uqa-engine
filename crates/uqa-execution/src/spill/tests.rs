@@ -535,13 +535,15 @@ fn encoded_byte_budget_never_retains_an_oversized_batch() {
 #[test]
 fn origin_free_batch_size_has_no_per_row_metadata_word() {
     let batch = dummy_batch(0, 3);
-    let expected = SpillBuffer::encoded_batch_overhead_size(&batch.schema)
+    let expected = encoded_batch_overhead_size(&batch.schema)
         .unwrap()
         .checked_add(
             batch
                 .rows
                 .iter()
-                .map(|row| SpillBuffer::encoded_row_record_size(&batch.schema, row).unwrap())
+                .map(|row| {
+                    encoded_physical_row_record_size(row, batch.schema.physical_width()).unwrap()
+                })
                 .sum(),
         )
         .unwrap();

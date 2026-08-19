@@ -182,6 +182,17 @@ fn sql_facets_single_and_multi_field() {
 }
 
 #[test]
+fn sql_facets_reject_an_unknown_table_field() {
+    let engine = engine();
+
+    let error = engine
+        .sql("SELECT uqa_facets(missing_field) FROM articles", &[])
+        .unwrap_err();
+
+    assert_eq!(error.sqlstate(), Some("42703"));
+}
+
+#[test]
 fn sql_facets_respect_filters_and_sort_by_value() {
     let engine = engine();
     let result = engine

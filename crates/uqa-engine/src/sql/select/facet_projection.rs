@@ -56,6 +56,19 @@ pub(in crate::sql) fn build_facet_output(
 
     let include_field = execution.fields.len() > 1;
     let table_state = engine.require_table(table)?;
+    let table_columns = table_state
+        .columns
+        .read()
+        .iter()
+        .map(|column| column.name.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    if let Some(field) = execution
+        .fields
+        .iter()
+        .find(|field| !table_columns.contains(field.as_str()))
+    {
+        return Err(SQLError::UnknownColumn(field.clone()));
+    }
     let source = ScoredDocumentSource::new(
         table,
         table_state,
@@ -194,7 +207,8 @@ pub(in crate::sql) fn score_order_top_k(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<Option<usize>, SQLError> {
-    if stmt.distinct
+    if !stmt.locking.is_empty()
+        || stmt.distinct
         || !stmt.distinct_on.is_empty()
         || !matches!(stmt.compute, ComputePlan::Project)
         || stmt.order_by.is_empty()
@@ -221,9 +235,7 @@ pub(in crate::sql) fn post_retrieval_score_top_k(
     let Some(primary_order) = stmt.order_by.first() else {
         return Ok(None);
     };
-    // A locking query must keep the complete ranked candidate stream: SKIP
-    // LOCKED skips rows, and a tuple-local recheck can drop a changed
-    // candidate, in which case PostgreSQL 18 surfaces the next candidate.
+    // A locking query must keep the complete ranked candidate stream: SKIP LOCKED skips rows, and a tuple-local recheck can drop a changed candidate, in which case PostgreSQL 18 surfaces the next candidate.
     if !stmt.locking.is_empty() {
         return Ok(None);
     }

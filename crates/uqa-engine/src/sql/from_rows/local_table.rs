@@ -45,6 +45,10 @@ pub(in crate::sql) struct EngineTableRowSource {
     lock_origin: Option<SharedLockOrigin>,
     recheck_pins: Option<Arc<Vec<crate::sql::select::RecheckDoc>>>,
     recheck_cursor: usize,
+    command_documents: Option<
+        Arc<std::collections::BTreeMap<uqa_core::DocId, uqa_storage::document_store::Document>>,
+    >,
+    command_cursor: usize,
 }
 
 fn table_lock_origin(
@@ -76,6 +80,9 @@ impl EngineTableRowSource {
         }
         if self.recheck_pins.is_some() {
             return self.next_pinned_physical_rows_batch(max_rows);
+        }
+        if self.command_documents.is_some() {
+            return self.next_command_physical_rows_batch(max_rows);
         }
         if crate::engine_generated::projection_contains_virtual_generated_column(
             &self.column_definitions,
@@ -233,11 +240,44 @@ impl EngineTableRowSource {
         Ok(rows)
     }
 
-    /// Emit exactly the candidate tuples pinned for a tuple-local row-lock
-    /// recheck: the latest committed image for a changed tuple, or the
-    /// statement-snapshot image for an unchanged join partner. Pushed
-    /// predicates re-apply to the substituted values, matching `PostgreSQL`'s
-    /// `EvalPlanQual` scan behavior for marked relations.
+    fn next_command_physical_rows_batch(
+        &mut self,
+        max_rows: usize,
+    ) -> uqa_execution::ExecResult<Vec<uqa_execution::PhysicalRow>> {
+        let Some(documents) = self.command_documents.as_ref().map(Arc::clone) else {
+            return Err(SQLError::Internal("command scan has no document overlay".into()).into());
+        };
+        let mut rows = Vec::with_capacity(max_rows);
+        for (doc_id, document) in documents.iter().skip(self.command_cursor) {
+            self.command_cursor += 1;
+            let mut document = document.clone();
+            crate::engine_generated::materialize_projected_virtual_generated_columns(
+                &self.column_definitions,
+                &mut document,
+                &self.columns,
+            )?;
+            let values = self
+                .columns
+                .iter()
+                .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
+                .collect::<Vec<_>>();
+            let value_refs = values.iter().collect::<Vec<_>>();
+            if let Some(predicate) = self.predicate.as_ref() {
+                if !predicate.keep(&value_refs)? {
+                    continue;
+                }
+            }
+            rows.push(
+                self.with_lock_identity(uqa_execution::PhysicalRow::from_values(values), *doc_id)?,
+            );
+            if rows.len() == max_rows {
+                break;
+            }
+        }
+        Ok(rows)
+    }
+
+    /// Emit exactly the candidate tuples pinned for a tuple-local row-lock recheck: the latest committed image for a changed tuple, or the statement-snapshot image for an unchanged join partner. Pushed predicates re-apply to the substituted values, matching `PostgreSQL`'s `EvalPlanQual` scan behavior for marked relations.
     fn next_pinned_physical_rows_batch(
         &mut self,
         max_rows: usize,
@@ -444,7 +484,7 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         let scan: Box<dyn uqa_execution::PhysicalOperator + 'a> =
             Box::new(uqa_execution::SharedSpillScan::new(materialized));
         let selection = uqa_execution::ColumnSelection::with_identities(scan, mapping);
-        let selection = if ctes.emit_lock_identities {
+        let selection = if ctes.lock_identities.emit {
             selection.rebinding_lock_origins(qualifier)
         } else {
             selection
@@ -491,7 +531,7 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
                 .map(|definition| definition.ty.clone())
         })
         .collect::<Vec<_>>();
-    let lock_origin = table_lock_origin(engine, name, &qualifier, ctes.emit_lock_identities)?;
+    let lock_origin = table_lock_origin(engine, name, &qualifier, ctes.lock_identities.emit)?;
     let physical_schema =
         uqa_execution::RowSchema::with_qualified_types(&qualifier, schema.clone(), column_types);
     let predicate = qualifier_filter(filters, &qualifier)
@@ -510,6 +550,18 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         .and_then(|(origin_qualifier, storage_name)| {
             ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
         });
+    let command_documents = if ctes.reads_command_overlay() {
+        engine.command_visible_documents(name)?.map(Arc::new)
+    } else {
+        None
+    };
+    let estimated_cardinality = command_documents.as_ref().map_or_else(
+        || engine.table_doc_count(name),
+        |documents| {
+            u64::try_from(documents.len())
+                .map_err(|_| SQLError::Internal("document count exceeds u64".into()))
+        },
+    )?;
     let source = EngineTableRowSource {
         table_name: name.clone(),
         table,
@@ -518,11 +570,13 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         schema,
         physical_schema,
         predicate,
-        estimated_cardinality: engine.table_doc_count(name)?,
+        estimated_cardinality,
         after: None,
         lock_origin,
         recheck_pins,
         recheck_cursor: 0,
+        command_documents,
+        command_cursor: 0,
     };
     Ok(Some((
         Box::new(uqa_execution::TableScan::new(Box::new(source))),
@@ -610,7 +664,7 @@ fn build_join_operator_with_ctes_at_path<'a>(
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(uqa_execution::SharedSpillScan::new(materialized));
                 let operator =
-                    qualify_source_operator(scan, &qualifier, prune, ctes.emit_lock_identities);
+                    qualify_source_operator(scan, &qualifier, prune, ctes.lock_identities.emit);
                 return Ok(attach_qualifier_filter(
                     operator, &qualifier, filters, engine, params, ctes,
                 ));
@@ -656,9 +710,7 @@ fn build_join_operator_with_ctes_at_path<'a>(
 
             if let Some(plan) = engine.view_plan(name)? {
                 let inherited_lock = ctes.source_row_lock_for_view(&qualifier, name);
-                // During a tuple-local recheck, a view named as the lock
-                // target pins every base scan of its storage inside this
-                // subtree to the candidate's tuples.
+                // During a tuple-local recheck, a view named as the lock target pins every base scan of its storage inside this subtree to the candidate's tuples.
                 let mut recheck_scope = ctes.enter_recheck_storage_pins(&qualifier);
                 let ctes: &mut CteScope = &mut recheck_scope;
                 let specialized_plan = filters
@@ -689,7 +741,7 @@ fn build_join_operator_with_ctes_at_path<'a>(
                         &qualifier,
                         prune,
                         &[],
-                        ctes.emit_lock_identities,
+                        ctes.lock_identities.emit,
                     );
                     return Ok(attach_qualifier_filter(
                         operator, &qualifier, filters, engine, params, ctes,
@@ -725,7 +777,7 @@ fn build_join_operator_with_ctes_at_path<'a>(
                     &qualifier,
                     prune,
                     &[],
-                    ctes.emit_lock_identities,
+                    ctes.lock_identities.emit,
                 );
                 return Ok(attach_qualifier_filter(
                     operator, &qualifier, filters, engine, params, ctes,
@@ -751,7 +803,7 @@ fn build_join_operator_with_ctes_at_path<'a>(
                     &qualifier,
                     prune,
                     &[],
-                    ctes.emit_lock_identities,
+                    ctes.lock_identities.emit,
                 );
                 return Ok(attach_qualifier_filter(
                     operator, &qualifier, filters, engine, params, ctes,
@@ -789,7 +841,7 @@ fn build_join_operator_with_ctes_at_path<'a>(
                     &qualifier,
                     prune,
                     &[],
-                    ctes.emit_lock_identities,
+                    ctes.lock_identities.emit,
                 );
                 return Ok(attach_qualifier_filter(
                     operator, &qualifier, filters, engine, params, ctes,
@@ -800,17 +852,14 @@ fn build_join_operator_with_ctes_at_path<'a>(
                 .filter(uqa_planner::optimizer::contains_retrieval)
             {
                 let lock_origin =
-                    table_lock_origin(engine, name, &qualifier, ctes.emit_lock_identities)?;
+                    table_lock_origin(engine, name, &qualifier, ctes.lock_identities.emit)?;
                 let recheck_pins =
                     lock_origin
                         .as_ref()
                         .and_then(|(origin_qualifier, storage_name)| {
                             ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
                         });
-                // A tuple-local recheck judges the substituted committed
-                // images with the retrieval predicate re-executed against the
-                // latest committed index state, not this session's pinned
-                // snapshot.
+                // A tuple-local recheck judges the substituted committed images with the retrieval predicate re-executed against the latest committed index state, not this session's pinned snapshot.
                 let entries = if recheck_pins.is_some() {
                     engine.committed_retrieval_entries(name, &predicate, params)?
                 } else {
@@ -846,7 +895,7 @@ fn build_join_operator_with_ctes_at_path<'a>(
                     scan,
                     &qualifier,
                     prune,
-                    ctes.emit_lock_identities,
+                    ctes.lock_identities.emit,
                 ));
             }
 
@@ -1099,7 +1148,7 @@ fn build_join_operator_with_ctes_at_path<'a>(
                 alias.as_deref().unwrap_or_default(),
                 prune,
                 &[],
-                ctes.emit_lock_identities,
+                ctes.lock_identities.emit,
             ))
         }
         SourcePlan::Function {
@@ -1217,7 +1266,7 @@ fn build_join_operator_with_ctes_at_path<'a>(
                 qualifier,
                 prune,
                 &[],
-                ctes.emit_lock_identities,
+                ctes.lock_identities.emit,
             );
             Ok(attach_qualifier_filter(
                 operator, qualifier, filters, engine, params, ctes,
@@ -1228,9 +1277,7 @@ fn build_join_operator_with_ctes_at_path<'a>(
             alias,
             column_aliases,
         } => {
-            // During a tuple-local recheck, a derived table named as the lock
-            // target pins every base scan of its storage inside this subtree
-            // to the candidate's tuples.
+            // During a tuple-local recheck, a derived table named as the lock target pins every base scan of its storage inside this subtree to the candidate's tuples.
             let visible_qualifier = alias.clone().unwrap_or_default();
             let mut recheck_scope = ctes.enter_recheck_storage_pins(&visible_qualifier);
             let ctes: &mut CteScope = &mut recheck_scope;
@@ -1245,7 +1292,7 @@ fn build_join_operator_with_ctes_at_path<'a>(
                     qualifier,
                     prune,
                     column_aliases,
-                    ctes.emit_lock_identities,
+                    ctes.lock_identities.emit,
                 );
                 return Ok(attach_qualifier_filter(
                     operator, qualifier, filters, engine, params, ctes,
@@ -1268,7 +1315,7 @@ fn build_join_operator_with_ctes_at_path<'a>(
                 qualifier,
                 prune,
                 column_aliases,
-                ctes.emit_lock_identities,
+                ctes.lock_identities.emit,
             );
             Ok(attach_qualifier_filter(
                 operator, qualifier, filters, engine, params, ctes,
@@ -1284,18 +1331,15 @@ fn try_build_streaming_subquery_operator<'a>(
     params: &'a [SQLParam],
     ctes: &mut CteScope,
 ) -> Result<Option<Box<dyn uqa_execution::PhysicalOperator + 'a>>, SQLError> {
-    if !body.ctes.is_empty() || query_contains_volatile_function(engine, body)? {
+    if !body.ctes.is_empty()
+        || (!ctes.streams_command_progress() && query_contains_volatile_function(engine, body)?)
+    {
         return Ok(None);
     }
     let RelationalPlan::QueryBlock(block) = &body.root else {
         return Ok(None);
     };
-    // A block whose qualification calls a registered retrieval function
-    // (text_match, knn_match, graph_traverse, rpq, ...) executes it through
-    // the operator-tree bridge of the single-table executor; the residual
-    // scalar filter of a streamed block cannot evaluate such calls. Plain
-    // comparisons keep streaming so an outer LIMIT still bounds locking
-    // demand inside the derived table.
+    // A block whose qualification calls a registered retrieval function (text_match, knn_match, graph_traverse, rpq, ...) executes it through the operator-tree bridge of the single-table executor; the residual scalar filter of a streamed block cannot evaluate such calls. Plain comparisons keep streaming so an outer LIMIT still bounds locking demand inside the derived table.
     if !matches!(block.compute, ComputePlan::Project)
         || matches!(block.access, AccessPathPlan::Hybrid)
         || block
@@ -1313,10 +1357,7 @@ fn try_build_streaming_subquery_operator<'a>(
         .from
         .as_ref()
         .expect("derived-table FROM checked above");
-    // The block's scalar subqueries live in their own arena for the whole
-    // pull pipeline: the evaluators built below snapshot this scope, so a
-    // derived table with subqueries still streams and an outer LIMIT keeps
-    // its inner locking demand-driven.
+    // The block's scalar subqueries live in their own arena for the whole pull pipeline: the evaluators built below snapshot this scope, so a derived table with subqueries still streams and an outer LIMIT keeps its inner locking demand-driven.
     let mut ctes = ctes.enter_scalar_subqueries(&block.subqueries);
     let ctes: &mut CteScope = &mut ctes;
     let source_schema = bind_source_plan_schema(engine, from, params, ctes, None)?;
@@ -1339,10 +1380,10 @@ fn try_build_streaming_subquery_operator<'a>(
         }
     }
 
-    let emit_lock_identities = ctes.emit_lock_identities || !block.locking.is_empty();
-    let previous_emit = std::mem::replace(&mut ctes.emit_lock_identities, emit_lock_identities);
-    let previous_retain =
-        std::mem::replace(&mut ctes.retain_lock_identities_after_lock, previous_emit);
+    let emit_lock_identities = ctes.lock_identities.emit || !block.locking.is_empty();
+    let previous_lock_identities = ctes.lock_identities;
+    ctes.lock_identities.emit = emit_lock_identities;
+    ctes.lock_identities.retain_after_lock = previous_lock_identities.emit;
     let result = (|| {
         let column_prune = crate::sql::select::column_prune_for_stmt(engine, block, from);
         let qualifier_filters = crate::sql::select::qualifier_filters_for_stmt(engine, block, from);
@@ -1376,7 +1417,6 @@ fn try_build_streaming_subquery_operator<'a>(
         )?;
         Ok(Some(operator))
     })();
-    ctes.emit_lock_identities = previous_emit;
-    ctes.retain_lock_identities_after_lock = previous_retain;
+    ctes.lock_identities = previous_lock_identities;
     result
 }

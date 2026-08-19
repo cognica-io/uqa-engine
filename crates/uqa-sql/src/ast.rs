@@ -970,8 +970,7 @@ pub struct SelectStmt {
     /// `SELECT DISTINCT ON (<expr>, ...)` keys. Empty for plain
     /// `SELECT DISTINCT`.
     pub distinct_on: Vec<Expr>,
-    /// `FOR { UPDATE | NO KEY UPDATE | SHARE | KEY SHARE }` row-locking
-    /// clauses, in source order. Empty when the query does not lock rows.
+    /// `FOR { UPDATE | NO KEY UPDATE | SHARE | KEY SHARE }` row-locking clauses, in source order. Empty when the query does not lock rows.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub locking: Vec<LockingClause>,
 }

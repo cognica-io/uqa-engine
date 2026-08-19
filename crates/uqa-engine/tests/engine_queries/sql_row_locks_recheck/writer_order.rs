@@ -6,6 +6,57 @@
 
 use super::*;
 
+#[path = "writer_order/insert_select_progress.rs"]
+mod insert_select_progress;
+
+#[test]
+fn writer_promoted_after_savepoint_keeps_its_deadlock_registration() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = Engine::open(&directory.path().join("savepoint-writer-lock.db")).unwrap();
+    root.sql(
+        "CREATE TABLE savepoint_writer (id INTEGER PRIMARY KEY, value INTEGER); INSERT INTO savepoint_writer VALUES (1, 0), (2, 0), (3, 0)",
+        &[],
+    )
+    .unwrap();
+    let writer = root.new_session().unwrap();
+    let blocker = root.new_session().unwrap();
+    writer.sql("BEGIN", &[]).unwrap();
+    writer.sql("SAVEPOINT promoted", &[]).unwrap();
+    writer
+        .sql("UPDATE savepoint_writer SET value = 1 WHERE id = 1", &[])
+        .unwrap();
+    writer.sql("ROLLBACK TO SAVEPOINT promoted", &[]).unwrap();
+    blocker.sql("BEGIN", &[]).unwrap();
+    blocker
+        .sql(
+            "SELECT id FROM savepoint_writer WHERE id = 2 FOR UPDATE",
+            &[],
+        )
+        .unwrap();
+
+    let (writer_tx, writer_rx) = mpsc::channel();
+    let writer_wait = std::thread::spawn(move || {
+        let result = writer.sql(
+            "SELECT id FROM savepoint_writer WHERE id = 2 FOR UPDATE",
+            &[],
+        );
+        writer.sql("ROLLBACK", &[]).ok();
+        writer_tx.send(result).unwrap();
+    });
+    assert!(writer_rx.recv_timeout(Duration::from_millis(150)).is_err());
+
+    let error = blocker
+        .sql("UPDATE savepoint_writer SET value = 1 WHERE id = 3", &[])
+        .unwrap_err();
+    assert_eq!(sqlstate(&error), "40P01");
+    blocker.sql("ROLLBACK", &[]).unwrap();
+    writer_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap()
+        .unwrap();
+    writer_wait.join().unwrap();
+}
+
 #[test]
 fn for_share_lock_rechecks_after_a_conflicting_non_key_update() {
     let directory = tempfile::tempdir().unwrap();
@@ -174,8 +225,7 @@ fn mutating_locking_select_does_not_hold_the_data_writer_while_waiting() {
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
-    // PostgreSQL evaluates the volatile target once for the original tuple
-    // and once for the EvalPlanQual replacement committed by the holder.
+    // PostgreSQL evaluates the volatile target once for the original tuple and once for the EvalPlanQual replacement committed by the holder.
     assert_eq!(result.rows[0]["sequence_value"], Value::Int(2));
 }
 
@@ -532,6 +582,360 @@ fn update_returning_locking_subquery_precedes_the_data_writer() {
         .unwrap();
     update_thread.join().unwrap();
     assert_eq!(result.rows[0]["locked_value"], Value::Int(31));
+}
+
+fn register_snapshot_visibility_functions(root: &Arc<Engine>) {
+    root.sql(
+        "CREATE TABLE snapshot_target (id INTEGER PRIMARY KEY, value INTEGER); CREATE TABLE snapshot_source (id INTEGER PRIMARY KEY, value INTEGER); INSERT INTO snapshot_source VALUES (1, 100), (2, 200), (3, 300)",
+        &[],
+    )
+    .unwrap();
+    let count_engine = Arc::downgrade(root);
+    root.register_scalar_function_with_options(
+        "visible_snapshot_count",
+        SQLFunctionOptions::read_only(SQLFunctionVolatility::Volatile),
+        move |_args: &[Value]| {
+            let engine = count_engine.upgrade().ok_or_else(|| {
+                uqa_sql::SQLError::Internal("RETURNING snapshot engine was dropped".into())
+            })?;
+            Ok(Value::Int(
+                i64::try_from(engine.table_doc_ids("snapshot_target")?.len()).unwrap(),
+            ))
+        },
+    )
+    .unwrap();
+    let sum_engine = Arc::downgrade(root);
+    root.register_scalar_function_with_options(
+        "visible_snapshot_sum",
+        SQLFunctionOptions::read_only(SQLFunctionVolatility::Volatile),
+        move |_args: &[Value]| {
+            let engine = sum_engine.upgrade().ok_or_else(|| {
+                uqa_sql::SQLError::Internal("RETURNING snapshot engine was dropped".into())
+            })?;
+            let mut sum = 0_i64;
+            for doc_id in engine.table_doc_ids("snapshot_target")? {
+                if let Some(Value::Int(value)) = engine
+                    .get_document("snapshot_target", doc_id)?
+                    .and_then(|document| document.get("value").cloned())
+                {
+                    sum += value;
+                }
+            }
+            Ok(Value::Int(sum))
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn dml_returning_scalar_subqueries_read_the_statement_snapshot() {
+    let directory = tempfile::tempdir().unwrap();
+    let root =
+        Arc::new(Engine::open(&directory.path().join("returning-statement-snapshot.db")).unwrap());
+    register_snapshot_visibility_functions(&root);
+
+    let inserted = root
+        .sql(
+            "INSERT INTO snapshot_target VALUES (1, 10), (2, 20), (3, 30) RETURNING id, (SELECT count(*) FROM snapshot_target) AS snapshot_count, (SELECT visible_snapshot_count() WHERE snapshot_target.id > 0) AS visible_count",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(inserted.rows.len(), 3);
+    assert!(inserted
+        .rows
+        .iter()
+        .all(|row| row["snapshot_count"] == Value::Int(0)));
+    assert_eq!(
+        inserted
+            .rows
+            .iter()
+            .map(|row| row["visible_count"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Int(1), Value::Int(2), Value::Int(3)]
+    );
+
+    let updated = root
+        .sql(
+            "UPDATE snapshot_target SET value = value + 1 RETURNING id, (SELECT sum(value) FROM snapshot_target) AS snapshot_sum, (SELECT visible_snapshot_sum() WHERE snapshot_target.id > 0) AS visible_sum",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(updated.rows.len(), 3);
+    assert!(updated
+        .rows
+        .iter()
+        .all(|row| row["snapshot_sum"] == Value::Int(60)));
+    assert_eq!(
+        updated
+            .rows
+            .iter()
+            .map(|row| row["visible_sum"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Int(61), Value::Int(62), Value::Int(63)]
+    );
+
+    root.sql("UPDATE snapshot_target SET value = value - 1", &[])
+        .unwrap();
+    let merged = root
+        .sql(
+            "MERGE INTO snapshot_target AS target USING snapshot_source AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.value RETURNING target.id, (SELECT sum(value) FROM snapshot_target) AS snapshot_sum, (SELECT visible_snapshot_sum() WHERE target.id > 0) AS visible_sum",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(merged.rows.len(), 3);
+    assert!(merged
+        .rows
+        .iter()
+        .all(|row| row["snapshot_sum"] == Value::Int(60)));
+    assert_eq!(
+        merged
+            .rows
+            .iter()
+            .map(|row| row["visible_sum"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Int(150), Value::Int(330), Value::Int(600)]
+    );
+
+    let deleted = root
+        .sql(
+            "DELETE FROM snapshot_target RETURNING id, (SELECT count(*) FROM snapshot_target) AS snapshot_count, (SELECT visible_snapshot_count() WHERE snapshot_target.id > 0) AS visible_count",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(deleted.rows.len(), 3);
+    assert!(deleted
+        .rows
+        .iter()
+        .all(|row| row["snapshot_count"] == Value::Int(3)));
+    assert_eq!(
+        deleted
+            .rows
+            .iter()
+            .map(|row| row["visible_count"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Int(2), Value::Int(1), Value::Int(0)]
+    );
+}
+
+fn register_command_progress_functions(root: &Arc<Engine>) {
+    let count_engine = Arc::downgrade(root);
+    root.register_scalar_function_with_options(
+        "visible_command_count",
+        SQLFunctionOptions::read_only(SQLFunctionVolatility::Volatile),
+        move |args: &[Value]| {
+            let engine = count_engine.upgrade().ok_or_else(|| {
+                uqa_sql::SQLError::Internal("INSERT command-progress engine was dropped".into())
+            })?;
+            let Some(Value::Str(table)) = args.first() else {
+                return Err(uqa_sql::SQLError::TypeMismatch(
+                    "visible_command_count expects one table name".into(),
+                ));
+            };
+            Ok(Value::Int(
+                i64::try_from(engine.table_doc_ids(table)?.len()).unwrap(),
+            ))
+        },
+    )
+    .unwrap();
+    let sum_engine = Arc::downgrade(root);
+    root.register_scalar_function_with_options(
+        "visible_command_sum",
+        SQLFunctionOptions::read_only(SQLFunctionVolatility::Volatile),
+        move |args: &[Value]| {
+            let engine = sum_engine.upgrade().ok_or_else(|| {
+                uqa_sql::SQLError::Internal("INSERT command-progress engine was dropped".into())
+            })?;
+            let Some(Value::Str(table)) = args.first() else {
+                return Err(uqa_sql::SQLError::TypeMismatch(
+                    "visible_command_sum expects one table name".into(),
+                ));
+            };
+            let mut sum = 0_i64;
+            for doc_id in engine.table_doc_ids(table)? {
+                if let Some(Value::Int(value)) = engine
+                    .get_document(table, doc_id)?
+                    .and_then(|document| document.get("seen").cloned())
+                {
+                    sum += value;
+                }
+            }
+            Ok(Value::Int(sum))
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn dml_volatile_expressions_see_preceding_command_rows() {
+    let directory = tempfile::tempdir().unwrap();
+    let root =
+        Arc::new(Engine::open(&directory.path().join("insert-command-progress.db")).unwrap());
+    register_command_progress_functions(&root);
+    root.sql(
+        "CREATE TABLE progress_values (id INTEGER PRIMARY KEY, seen INTEGER, snapshot_count INTEGER); CREATE TABLE progress_defaults (id INTEGER PRIMARY KEY, seen INTEGER DEFAULT visible_command_count('progress_defaults')); CREATE TABLE progress_conflicts (id INTEGER PRIMARY KEY, seen INTEGER); CREATE TABLE progress_updates (id INTEGER PRIMARY KEY, seen INTEGER); INSERT INTO progress_conflicts VALUES (1, 10), (2, 20), (3, 30); INSERT INTO progress_updates VALUES (1, 10), (2, 20), (3, 30)",
+        &[],
+    )
+    .unwrap();
+
+    let values = root
+        .sql(
+            "INSERT INTO progress_values VALUES (1, visible_command_count('progress_values'), (SELECT count(*) FROM progress_values)), (2, visible_command_count('progress_values'), (SELECT count(*) FROM progress_values)), (3, visible_command_count('progress_values'), (SELECT count(*) FROM progress_values)) RETURNING id, seen, snapshot_count",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        values
+            .rows
+            .iter()
+            .map(|row| row["seen"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Int(0), Value::Int(1), Value::Int(2)]
+    );
+    assert!(values
+        .rows
+        .iter()
+        .all(|row| row["snapshot_count"] == Value::Int(0)));
+
+    root.sql(
+        "INSERT INTO progress_defaults(id) VALUES (1), (2), (3)",
+        &[],
+    )
+    .unwrap();
+    let defaults = root
+        .sql("SELECT seen FROM progress_defaults ORDER BY id", &[])
+        .unwrap();
+    assert_eq!(
+        defaults
+            .rows
+            .iter()
+            .map(|row| row["seen"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Int(0), Value::Int(1), Value::Int(2)]
+    );
+
+    let conflicts = root
+        .sql(
+            "INSERT INTO progress_conflicts VALUES (1, 0), (2, 0), (3, 0) ON CONFLICT (id) DO UPDATE SET seen = visible_command_sum('progress_conflicts') RETURNING id, seen",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        conflicts
+            .rows
+            .iter()
+            .map(|row| row["seen"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Int(60), Value::Int(110), Value::Int(200)]
+    );
+
+    root.sql(
+        "UPDATE progress_updates SET seen = visible_command_sum('progress_updates')",
+        &[],
+    )
+    .unwrap();
+    let updates = root
+        .sql("SELECT seen FROM progress_updates ORDER BY id", &[])
+        .unwrap();
+    assert_eq!(
+        updates
+            .rows
+            .iter()
+            .map(|row| row["seen"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Int(60), Value::Int(110), Value::Int(200)]
+    );
+}
+
+#[test]
+fn delete_returning_preserves_snapshot_subqueries_and_command_progress_for_volatile_calls() {
+    let directory = tempfile::tempdir().unwrap();
+    let root =
+        Arc::new(Engine::open(&directory.path().join("returning-volatile-timing.db")).unwrap());
+    root.sql(
+        "CREATE TABLE timing_target (id INTEGER PRIMARY KEY); CREATE TABLE timing_locks (id INTEGER PRIMARY KEY, value INTEGER); INSERT INTO timing_target VALUES (1), (2), (3); INSERT INTO timing_locks VALUES (1, 9)",
+        &[],
+    )
+    .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed_calls = Arc::clone(&calls);
+    let callback_engine = Arc::downgrade(&root);
+    root.register_scalar_function_with_options(
+        "remaining_timing_rows",
+        SQLFunctionOptions::read_only(SQLFunctionVolatility::Volatile),
+        move |_args: &[Value]| {
+            observed_calls.fetch_add(1, Ordering::SeqCst);
+            let engine = callback_engine.upgrade().ok_or_else(|| {
+                uqa_sql::SQLError::Internal("RETURNING timing engine was dropped".into())
+            })?;
+            let mut remaining = 0_i64;
+            for doc_id in 1..=3 {
+                if engine.get_document("timing_target", doc_id)?.is_some() {
+                    remaining += 1;
+                }
+            }
+            Ok(Value::Int(remaining))
+        },
+    )
+    .unwrap();
+    let sql_calls = Arc::new(AtomicUsize::new(0));
+    let observed_sql_calls = Arc::clone(&sql_calls);
+    let sql_callback_engine = Arc::downgrade(&root);
+    root.register_scalar_function_with_options(
+        "remaining_timing_rows_sql",
+        SQLFunctionOptions::read_only(SQLFunctionVolatility::Volatile),
+        move |_args: &[Value]| {
+            observed_sql_calls.fetch_add(1, Ordering::SeqCst);
+            let engine = sql_callback_engine.upgrade().ok_or_else(|| {
+                uqa_sql::SQLError::Internal("RETURNING timing engine was dropped".into())
+            })?;
+            Ok(engine
+                .sql("SELECT count(*) AS remaining FROM timing_target", &[])?
+                .rows[0]["remaining"]
+                .clone())
+        },
+    )
+    .unwrap();
+    root.register_scalar_function_with_options(
+        "unreachable_timing_boom",
+        SQLFunctionOptions::read_only(SQLFunctionVolatility::Volatile),
+        |_args: &[Value]| {
+            Err(uqa_sql::SQLError::Internal(
+                "unreachable RETURNING branch was evaluated".into(),
+            ))
+        },
+    )
+    .unwrap();
+
+    let result = root
+        .sql(
+            "DELETE FROM timing_target RETURNING id, remaining_timing_rows() AS remaining, (SELECT count(*) FROM timing_target) AS snapshot_count, (SELECT remaining_timing_rows() WHERE timing_target.id > 0) AS nested_remaining, (SELECT remaining_timing_rows_sql() WHERE timing_target.id > 0) AS nested_sql_remaining, CASE WHEN timing_target.id = 999 THEN (SELECT unreachable_timing_boom() FROM timing_locks WHERE id = 1 FOR UPDATE) ELSE 0 END AS unreachable, (SELECT value FROM timing_locks WHERE id = 1 FOR SHARE) AS locked_value",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 6);
+    assert_eq!(sql_calls.load(Ordering::SeqCst), 3);
+    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows[0]["remaining"], Value::Int(2));
+    assert_eq!(result.rows[1]["remaining"], Value::Int(1));
+    assert_eq!(result.rows[2]["remaining"], Value::Int(0));
+    assert_eq!(result.rows[0]["nested_remaining"], Value::Int(2));
+    assert_eq!(result.rows[1]["nested_remaining"], Value::Int(1));
+    assert_eq!(result.rows[2]["nested_remaining"], Value::Int(0));
+    assert_eq!(result.rows[0]["nested_sql_remaining"], Value::Int(2));
+    assert_eq!(result.rows[1]["nested_sql_remaining"], Value::Int(1));
+    assert_eq!(result.rows[2]["nested_sql_remaining"], Value::Int(0));
+    assert!(result
+        .rows
+        .iter()
+        .all(|row| row["snapshot_count"] == Value::Int(3)));
+    assert!(result
+        .rows
+        .iter()
+        .all(|row| row["locked_value"] == Value::Int(9)));
+    assert!(result
+        .rows
+        .iter()
+        .all(|row| row["unreachable"] == Value::Int(0)));
 }
 
 #[test]

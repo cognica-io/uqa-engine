@@ -83,7 +83,7 @@ impl Engine {
                     SQLError::Internal(format!("delete indexed vector: {error}"))
                 })?;
             }
-            self.note_row_deleted(table_name, doc_id);
+            self.note_row_deleted(table_name, doc_id)?;
         }
         *t.next_id.lock() = 1;
         self.value_indexes_truncate(table_name, &t)?;

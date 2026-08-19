@@ -6,8 +6,10 @@
 
 //! SQL SELECT, set-operation, `CtePlan`, ordering, and projection execution.
 
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::fmt::Write as _;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -102,11 +104,153 @@ pub(super) fn execute_query_plan(
     execute_query_plan_with_ctes(engine, plan, params, &mut ctes)
 }
 
+pub(in crate::sql) trait QueryRowConsumer {
+    fn begin(
+        &self,
+        engine: &Engine,
+        columns: &[String],
+        schema: &uqa_execution::RowSchema,
+    ) -> Result<(), SQLError>;
+
+    fn consume(
+        &self,
+        engine: &Engine,
+        row: uqa_execution::OwnedPhysicalRow,
+    ) -> Result<QueryConsumerControl, SQLError>;
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::sql) enum QueryConsumerControl {
+    Continue,
+    Stop,
+}
+
+struct SetOperationRowConsumer {
+    downstream: Rc<dyn QueryRowConsumer>,
+    columns: Vec<String>,
+    schema: uqa_execution::RowSchema,
+    offset: Cell<u64>,
+    remaining: Cell<Option<u64>>,
+    stopped: Cell<bool>,
+}
+
+impl SetOperationRowConsumer {
+    fn new(
+        downstream: Rc<dyn QueryRowConsumer>,
+        schema: uqa_execution::RowSchema,
+        offset: u64,
+        limit: Option<u64>,
+    ) -> Self {
+        Self {
+            columns: schema.columns().to_vec(),
+            downstream,
+            schema,
+            offset: Cell::new(offset),
+            remaining: Cell::new(limit),
+            stopped: Cell::new(limit == Some(0)),
+        }
+    }
+
+    fn stopped(&self) -> bool {
+        self.stopped.get()
+    }
+}
+
+impl QueryRowConsumer for SetOperationRowConsumer {
+    fn begin(
+        &self,
+        engine: &Engine,
+        columns: &[String],
+        _schema: &uqa_execution::RowSchema,
+    ) -> Result<(), SQLError> {
+        if columns.len() != self.columns.len() {
+            return Err(SQLError::TypeMismatch(format!(
+                "set-operation input width {} does not match output width {}",
+                columns.len(),
+                self.columns.len()
+            )));
+        }
+        self.downstream.begin(engine, &self.columns, &self.schema)
+    }
+
+    fn consume(
+        &self,
+        engine: &Engine,
+        row: uqa_execution::OwnedPhysicalRow,
+    ) -> Result<QueryConsumerControl, SQLError> {
+        if self.stopped() {
+            return Ok(QueryConsumerControl::Stop);
+        }
+        if self.offset.get() > 0 {
+            self.offset.set(self.offset.get() - 1);
+            return Ok(QueryConsumerControl::Continue);
+        }
+        if self.remaining.get() == Some(0) {
+            self.stopped.set(true);
+            return Ok(QueryConsumerControl::Stop);
+        }
+        let projections = {
+            let view = row.view();
+            self.schema
+                .column_types()
+                .iter()
+                .enumerate()
+                .map(|(position, target_type)| {
+                    let source_type = row.schema.column_type(position);
+                    if target_type
+                        .as_ref()
+                        .is_some_and(|target_type| source_type != Some(target_type))
+                    {
+                        let value = view.value_at(position).cloned().ok_or_else(|| {
+                            SQLError::Internal(format!(
+                                "set-operation input lost output position {position}"
+                            ))
+                        })?;
+                        return coerce_common_context_value(
+                            value,
+                            source_type,
+                            target_type.as_ref(),
+                        )
+                        .map(uqa_execution::RowProjectionValue::Owned);
+                    }
+                    Ok(row.schema.physical_slot(position).map_or(
+                        uqa_execution::RowProjectionValue::Owned(Value::Null),
+                        uqa_execution::RowProjectionValue::InputSlot,
+                    ))
+                })
+                .collect::<Result<Vec<_>, SQLError>>()?
+        };
+        let control = self.downstream.consume(
+            engine,
+            uqa_execution::OwnedPhysicalRow::new(
+                self.schema.clone(),
+                row.row
+                    .project_with_values(projections)
+                    .without_lock_origins(),
+            ),
+        )?;
+        if matches!(control, QueryConsumerControl::Stop) {
+            self.stopped.set(true);
+            return Ok(control);
+        }
+        if let Some(remaining) = self.remaining.get() {
+            let remaining = remaining - 1;
+            self.remaining.set(Some(remaining));
+            if remaining == 0 {
+                self.stopped.set(true);
+                return Ok(QueryConsumerControl::Stop);
+            }
+        }
+        Ok(QueryConsumerControl::Continue)
+    }
+}
+
+#[derive(Clone)]
 pub(super) enum QueryOutputMode {
     Rows,
     SharedSpill,
     ExistsKeySet,
+    RowConsumer(Rc<dyn QueryRowConsumer>),
 }
 
 pub(super) enum QueryRows {
@@ -261,8 +405,14 @@ pub(super) fn execute_query_plan_output(
     if !plan.ctes.is_empty() {
         let reachable = reachable_plan_cte_names(plan);
         let single_reference = single_reference_plan_cte_names(plan);
+        let recursive = plan
+            .ctes
+            .iter()
+            .filter(|cte| cte_references_own_name(cte))
+            .map(|cte| cte.name.as_str())
+            .collect::<BTreeSet<_>>();
         for cte in plan.ctes.iter().filter(|cte| {
-            !cte.recursive
+            !recursive.contains(cte.name.as_str())
                 && reachable.contains(&cte.name)
                 && single_reference.contains(&cte.name)
                 && matches!(
@@ -277,7 +427,7 @@ pub(super) fn execute_query_plan_output(
             engine,
             plan.ctes.iter().filter(|cte| {
                 reachable.contains(&cte.name)
-                    && (cte.recursive
+                    && (recursive.contains(cte.name.as_str())
                         || !single_reference.contains(&cte.name)
                         || !matches!(
                             query_contains_volatile_function(engine, &cte.query),
@@ -304,6 +454,75 @@ pub(super) fn execute_query_plan_output(
             subqueries,
         } => {
             let set_schema = bind_query_plan_schema(engine, plan, params, ctes, None)?;
+            let streaming_consumer = match &output_mode {
+                QueryOutputMode::RowConsumer(downstream)
+                    if matches!((*kind, *all), (SetOpKind::Union, true)) && order_by.is_empty() =>
+                {
+                    Some(Rc::clone(downstream))
+                }
+                _ => None,
+            };
+            if let Some(downstream) = streaming_consumer {
+                let columns = set_schema.columns().to_vec();
+                let column_types = set_schema.column_types().to_vec();
+                let (resolved_offset, resolved_limit) = {
+                    let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
+                    (
+                        resolve_limit_offset_with_ctes(
+                            offset.as_deref(),
+                            engine,
+                            params,
+                            "OFFSET",
+                            &scoped_ctes,
+                        )?
+                        .unwrap_or(0),
+                        resolve_limit_offset_with_ctes(
+                            limit.as_deref(),
+                            engine,
+                            params,
+                            "LIMIT",
+                            &scoped_ctes,
+                        )?,
+                    )
+                };
+                let consumer = Rc::new(SetOperationRowConsumer::new(
+                    Rc::clone(&downstream),
+                    set_schema.clone(),
+                    resolved_offset,
+                    resolved_limit,
+                ));
+                if consumer.stopped() {
+                    downstream.begin(engine, &columns, &set_schema)?;
+                } else {
+                    let mut child_ctes = ctes.enter_lock_identity_emission(false);
+                    execute_query_plan_output(
+                        engine,
+                        left,
+                        params,
+                        &mut child_ctes,
+                        QueryOutputMode::RowConsumer(consumer.clone()),
+                    )?;
+                    if !consumer.stopped() {
+                        execute_query_plan_output(
+                            engine,
+                            right,
+                            params,
+                            &mut child_ctes,
+                            QueryOutputMode::RowConsumer(consumer),
+                        )?;
+                    }
+                }
+                return Ok(QueryOutput {
+                    columns: columns.clone(),
+                    column_types: column_types.clone(),
+                    internal_columns: columns,
+                    internal_types: column_types,
+                    rows: QueryRows::Rows {
+                        named: Vec::new(),
+                        positional: None,
+                    },
+                });
+            }
             // Materialize each child directly into a disk-backed, repeatable
             // stream before starting the next child. A nested set operation
             // therefore never owns two cardinality-sized `SQLResult.rows`
@@ -541,6 +760,51 @@ pub(super) fn collect_query_operator<'a>(
             operator.close().map_err(physical_exec_error)?;
             QueryRows::ExistsKeySet(keys)
         }
+        QueryOutputMode::RowConsumer(consumer) => {
+            consumer.begin(engine, &columns, &internal_schema)?;
+            if let Err(error) = operator.open() {
+                return Err(close_after_physical_failure(
+                    operator.as_mut(),
+                    error,
+                    "open row consumer input",
+                ));
+            }
+            'consume: loop {
+                let batch = match operator.next() {
+                    Ok(batch) => batch,
+                    Err(error) => {
+                        return Err(close_after_physical_failure(
+                            operator.as_mut(),
+                            error,
+                            "execute row consumer input",
+                        ));
+                    }
+                };
+                let Some(batch) = batch else {
+                    break;
+                };
+                let uqa_execution::Batch { schema, rows } = batch;
+                for row in rows {
+                    let row = uqa_execution::OwnedPhysicalRow::new(schema.clone(), row);
+                    match consumer.consume(engine, row) {
+                        Ok(QueryConsumerControl::Continue) => {}
+                        Ok(QueryConsumerControl::Stop) => break 'consume,
+                        Err(error) => {
+                            return Err(close_after_physical_failure(
+                                operator.as_mut(),
+                                uqa_execution::ExecError::SQL(error),
+                                "consume query row",
+                            ));
+                        }
+                    }
+                }
+            }
+            operator.close().map_err(physical_exec_error)?;
+            QueryRows::Rows {
+                named: Vec::new(),
+                positional: None,
+            }
+        }
     };
     Ok(QueryOutput {
         columns,
@@ -675,14 +939,14 @@ fn execute_query_block_output(
     ctes: &mut CteScope,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
-    let inherited_lock_identities = ctes.emit_lock_identities;
+    let inherited_lock_identities = ctes.lock_identities.emit;
     let mut scoped_ctes = ctes.enter_scalar_subqueries(&block.subqueries);
     let row_identity_barrier = block.distinct
         || !block.distinct_on.is_empty()
         || matches!(block.compute, ComputePlan::Aggregate | ComputePlan::Window);
-    scoped_ctes.emit_lock_identities =
+    scoped_ctes.lock_identities.emit =
         !block.locking.is_empty() || (inherited_lock_identities && !row_identity_barrier);
-    scoped_ctes.retain_lock_identities_after_lock =
+    scoped_ctes.lock_identities.retain_after_lock =
         inherited_lock_identities && !row_identity_barrier;
     let defer_distinct_limit = should_defer_distinct_limit(block);
     let execution = select_execution_stmt(block, defer_distinct_limit);
@@ -805,7 +1069,17 @@ fn execute_plan_values_output(
     let context = PhysicalEvalContext::new(None, params)
         .with_function_hook(&hook)
         .with_subquery_runner(&hook);
-    let mut output = Vec::with_capacity(rows.len());
+    let schema = uqa_execution::RowSchema::with_types(columns.clone(), column_types.clone());
+    let consumer = match &output_mode {
+        QueryOutputMode::RowConsumer(consumer) => {
+            consumer.begin(engine, &columns, &schema)?;
+            Some(consumer)
+        }
+        QueryOutputMode::Rows | QueryOutputMode::SharedSpill | QueryOutputMode::ExistsKeySet => {
+            None
+        }
+    };
+    let mut output = consumer.is_none().then(|| Vec::with_capacity(rows.len()));
     for source in rows {
         if source.len() != columns.len() {
             return Err(SQLError::TypeMismatch(format!(
@@ -829,11 +1103,36 @@ fn execute_plan_values_output(
                 column_types[index].as_ref(),
             )?);
         }
-        output.push(uqa_execution::PhysicalRow::from_values(values));
+        let row = uqa_execution::PhysicalRow::from_values(values);
+        if let Some(consumer) = consumer {
+            if matches!(
+                consumer.consume(
+                    engine,
+                    uqa_execution::OwnedPhysicalRow::new(schema.clone(), row),
+                )?,
+                QueryConsumerControl::Stop
+            ) {
+                break;
+            }
+        } else if let Some(output) = output.as_mut() {
+            output.push(row);
+        }
     }
-    let schema = uqa_execution::RowSchema::with_types(columns.clone(), column_types);
-    let scan: Box<dyn uqa_execution::PhysicalOperator + '_> =
-        Box::new(uqa_execution::TableScan::from_physical_rows(schema, output));
+    if consumer.is_some() {
+        return Ok(QueryOutput {
+            columns,
+            column_types,
+            internal_columns: schema.columns().to_vec(),
+            internal_types: schema.column_types().to_vec(),
+            rows: QueryRows::Rows {
+                named: Vec::new(),
+                positional: None,
+            },
+        });
+    }
+    let scan: Box<dyn uqa_execution::PhysicalOperator + '_> = Box::new(
+        uqa_execution::TableScan::from_physical_rows(schema, output.unwrap_or_default()),
+    );
     collect_query_operator(engine, columns, scan, output_mode)
 }
 

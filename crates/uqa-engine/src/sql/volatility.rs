@@ -138,9 +138,7 @@ pub(super) fn expr_contains_volatile_function(engine: &Engine, expr: &ScalarExpr
     expr_contains_volatile_function_with(engine, expr, true)
 }
 
-/// Query-level walks inspect a block's subquery plans themselves, so their
-/// expression scan treats a subquery reference as opaque-but-inspected
-/// (`conservative_subqueries == false`) instead of assuming volatility.
+/// Query-level walks inspect a block's subquery plans themselves, so their expression scan treats a subquery reference as opaque-but-inspected (`conservative_subqueries == false`) instead of assuming volatility.
 fn expr_contains_volatile_function_with(
     engine: &Engine,
     expr: &ScalarExpr,
@@ -232,8 +230,7 @@ fn frame_bound_contains_volatile_function_with(
     }
 }
 
-/// The block's own subquery plans are inspected separately by the query-level
-/// walk, so subquery references here are not conservatively volatile.
+/// The block's own subquery plans are inspected separately by the query-level walk, so subquery references here are not conservatively volatile.
 pub(super) fn select_contains_volatile_function(engine: &Engine, block: &QueryBlockPlan) -> bool {
     block
         .projections

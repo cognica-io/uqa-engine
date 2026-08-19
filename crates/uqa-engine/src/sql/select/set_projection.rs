@@ -37,7 +37,7 @@ struct SetProjectionPlan {
     output_batch_size: usize,
 }
 
-pub(in crate::sql) struct AggregateSetProjectionPlan {
+pub(in crate::sql) struct AggregateOutputProjectionPlan {
     pub(in crate::sql) statement: QueryBlockPlan,
     pub(in crate::sql) projections: Vec<PhysicalProjection>,
 }
@@ -1303,22 +1303,10 @@ fn rewrite_aggregate_frame_bound(
     }
 }
 
-pub(in crate::sql) fn prepare_aggregate_set_projection(
+pub(in crate::sql) fn prepare_aggregate_output_projection(
     engine: &Engine,
     statement: &QueryBlockPlan,
-    schema: &RowSchema,
-    params: &[SQLParam],
-) -> Result<Option<AggregateSetProjectionPlan>, SQLError> {
-    let physical = statement
-        .projections
-        .iter()
-        .zip(projection_columns(&statement.projections))
-        .map(|(projection, label)| (label, projection.expr.clone()))
-        .collect::<Vec<_>>();
-    if !projections_may_return_set(engine, &physical, schema, params)? {
-        return Ok(None);
-    }
-
+) -> AggregateOutputProjectionPlan {
     let labels = projection_columns(&statement.projections);
     let mut dependencies = Vec::new();
     let projections = statement
@@ -1345,10 +1333,10 @@ pub(in crate::sql) fn prepare_aggregate_set_projection(
     }
     let mut aggregate_statement = statement.clone();
     aggregate_statement.projections = dependencies;
-    Ok(Some(AggregateSetProjectionPlan {
+    AggregateOutputProjectionPlan {
         statement: aggregate_statement,
         projections,
-    }))
+    }
 }
 
 impl SetProjectionPlan {

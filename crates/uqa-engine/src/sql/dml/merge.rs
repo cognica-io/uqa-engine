@@ -7,22 +7,23 @@
 //! MERGE matching, action execution, and RETURNING projection.
 
 use super::{
-    apply_missing_column_defaults, apply_prepared_document_delete, apply_prepared_document_rewrite,
-    build_join_spill_with_ctes, build_projection_physical_row_with_ctes, decode_merge_pair,
-    decode_prepared_doc_id, decode_prepared_document_delete, decode_prepared_document_rewrite,
-    dml_join_rows, dml_null_target_row, dml_returning_result, dml_storage_error, dml_target_row,
-    doc_id_value, document_supplied_id, encode_merge_pair, encode_prepared_doc_id,
+    apply_missing_column_defaults, apply_validated_prepared_document_delete,
+    apply_validated_prepared_document_rewrite, build_join_spill_with_ctes,
+    build_projection_physical_row_with_ctes, decode_merge_pair, decode_prepared_doc_id,
+    decode_prepared_document_delete, decode_prepared_document_rewrite, dml_join_rows,
+    dml_null_target_row, dml_returning_result, dml_storage_error, dml_target_row, doc_id_value,
+    document_supplied_id, document_vectors, encode_merge_pair, encode_prepared_doc_id,
     encode_prepared_document_delete, encode_prepared_document_rewrite, eval_mutation_assignment,
     eval_mutation_expr, expanded_returning_projections, insert_identity_columns,
-    insert_prepared_document_with_constraints, integer_primary_key_doc_id,
     lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
     lock_mutation_target, merge_pair_schema, merge_source_index_value, missing_document_error,
-    prepare_document_delete, prepare_document_rewrite, returning_has_row_locks,
-    returning_row_context, update_lock_strength, validate_mutation_columns,
-    validate_returning_alias_relations, BTreeMap, BTreeSet, CteScope, DmlReturningShape, Document,
-    Engine, MergePlan, MergeWhenPlan, MutationAssignmentTarget, MutationLockTarget,
-    PreparedDocumentRewrite, ProjectionPlan, ReturningRowImage, ReturningRowImages, SQLError,
-    SQLParam, SQLResult, Value, MERGE_ACTION_COLUMN,
+    prepare_document_delete, prepare_document_rewrite, returning_row_context,
+    stage_prepared_document_delete, stage_prepared_document_rewrite, update_lock_strength,
+    validate_document_constraints, validate_mutation_columns, validate_returning_alias_relations,
+    BTreeMap, BTreeSet, CteScope, DmlCommandMutationOverlay, DmlReturningShape, Document, Engine,
+    MergePlan, MergeWhenPlan, MutationAssignmentTarget, MutationLockTarget, ProjectionPlan,
+    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
+    MERGE_ACTION_COLUMN,
 };
 
 const MERGE_PREPARED_NOTHING: i64 = 0;
@@ -184,10 +185,7 @@ pub(in crate::sql) fn run_merge_inner(
         .map_err(crate::sql::select::physical_exec_error)?;
     let merge_lock_strength = merge_target_lock_strength(engine, stmt, &target_table);
     let mut recheck_matches = false;
-    // A paired target may have been moved to a successor identity by a
-    // primary-key rewrite another transaction committed while this statement
-    // waited; PostgreSQL 18 follows the update chain, so the pairing is
-    // redirected to the successor before the actions run.
+    // A paired target may have been moved to a successor identity by a primary-key rewrite another transaction committed while this statement waited; PostgreSQL 18 follows the update chain, so the pairing is redirected to the successor before the actions run.
     let mut successors: BTreeMap<uqa_core::DocId, uqa_core::DocId> = BTreeMap::new();
     let mut deleted_targets = BTreeSet::new();
     for doc_id in matched_target_ids {
@@ -218,8 +216,13 @@ pub(in crate::sql) fn run_merge_inner(
         engine.refresh_explicit_statement_snapshot()?;
     }
     let action_schema = merge_prepared_action_schema();
-    let mut selected_actions = uqa_execution::SpillBuffer::new(work_mem);
+    let mut prepared_actions = uqa_execution::SpillBuffer::new(work_mem);
     let mut root_deletes = BTreeSet::new();
+    let mut has_mutation = false;
+    let mut rewrite_stack = Vec::new();
+    let mut delete_stack = Vec::new();
+    let snapshot_ctes = ctes.returning_statement_snapshot_scope();
+    let overlay = DmlCommandMutationOverlay::new(engine);
     let pairing_reader = pairings
         .read_rows()
         .map_err(crate::sql::select::physical_exec_error)?;
@@ -238,14 +241,7 @@ pub(in crate::sql) fn run_merge_inner(
         {
             pair.doc_id = Some(successor);
         }
-        // MERGE matched semantics: a target row is "matched" only when
-        // the join produced a source pairing. A target row that has
-        // no corresponding source counts as unmatched and falls
-        // through to the WHEN NOT MATCHED branches. A paired row that no
-        // longer exists was deleted by a transaction that committed after
-        // this statement's pairing snapshot; PostgreSQL 18 treats it as no
-        // longer matched and lets the source row fall through to the WHEN
-        // NOT MATCHED actions.
+        // MERGE matched semantics: a target row is "matched" only when the join produced a source pairing. A target row that has no corresponding source counts as unmatched and falls through to the WHEN NOT MATCHED branches. A paired row that no longer exists was deleted by a transaction that committed after this statement's pairing snapshot; PostgreSQL 18 treats it as no longer matched and lets the source row fall through to the WHEN NOT MATCHED actions.
         let mut matched = pair.doc_id.is_some();
         let mut target_document = match pair.doc_id {
             Some(doc_id) => engine.get_document(&target_table, doc_id)?,
@@ -265,7 +261,7 @@ pub(in crate::sql) fn run_merge_inner(
             && recheck_matches
             && !uqa_sql::expr::truthy(&eval_mutation_expr(
                 engine,
-                &ctes,
+                &snapshot_ctes,
                 &stmt.join_condition,
                 Some(&joined),
                 params,
@@ -285,10 +281,10 @@ pub(in crate::sql) fn run_merge_inner(
             target_document.as_ref(),
             &joined,
             params,
-            &ctes,
+            &snapshot_ctes,
         )? {
             SelectedMergeAction::Nothing => push_merge_prepared_action(
-                &mut selected_actions,
+                &mut prepared_actions,
                 &action_schema,
                 MERGE_PREPARED_NOTHING,
                 Value::Null,
@@ -297,59 +293,13 @@ pub(in crate::sql) fn run_merge_inner(
                 doc_id,
                 old_document,
                 new_document,
-            } => push_merge_prepared_action(
-                &mut selected_actions,
-                &action_schema,
-                MERGE_PREPARED_UPDATE,
-                encode_prepared_document_rewrite(PreparedDocumentRewrite {
-                    table: target_table.clone(),
+            } => {
+                let mut prepared = prepare_document_rewrite(
+                    engine,
+                    &target_table,
                     doc_id,
                     old_document,
                     new_document,
-                    actions: Vec::new(),
-                }),
-            )?,
-            SelectedMergeAction::Delete { doc_id } => {
-                root_deletes.insert((target_table.clone(), doc_id));
-                push_merge_prepared_action(
-                    &mut selected_actions,
-                    &action_schema,
-                    MERGE_PREPARED_DELETE,
-                    encode_prepared_doc_id(doc_id),
-                )?;
-            }
-            SelectedMergeAction::Insert { document } => push_merge_prepared_action(
-                &mut selected_actions,
-                &action_schema,
-                MERGE_PREPARED_INSERT,
-                Value::Map(document),
-            )?,
-        }
-    }
-    let selected_actions = selected_actions
-        .into_shared(action_schema.clone())
-        .map_err(crate::sql::select::physical_exec_error)?;
-    let mut prepared_actions = uqa_execution::SpillBuffer::new(work_mem);
-    let selected_reader = selected_actions
-        .read_rows()
-        .map_err(crate::sql::select::physical_exec_error)?;
-    let mut has_mutation = false;
-    let mut rewrite_stack = Vec::new();
-    let mut delete_stack = Vec::new();
-    for selected in selected_reader {
-        let selected = selected.map_err(crate::sql::select::physical_exec_error)?;
-        let (action, payload) = decode_merge_prepared_action(selected)?;
-        let payload = match action {
-            MERGE_PREPARED_NOTHING => Value::Null,
-            MERGE_PREPARED_UPDATE => {
-                has_mutation = true;
-                let seed = decode_prepared_document_rewrite(payload)?;
-                let prepared = prepare_document_rewrite(
-                    engine,
-                    &seed.table,
-                    seed.doc_id,
-                    seed.old_document,
-                    seed.new_document,
                     params,
                     &mut rewrite_stack,
                 )?
@@ -358,12 +308,45 @@ pub(in crate::sql) fn run_merge_inner(
                         "MERGE rewrite dependency tree was cyclic at its root".into(),
                     )
                 })?;
-                encode_prepared_document_rewrite(prepared)
-            }
-            MERGE_PREPARED_DELETE => {
+                let rewritten_doc_id =
+                    stage_prepared_document_rewrite(engine, &mut prepared, params)?;
+                if !stmt.returning.is_empty() {
+                    returning_rows.push(build_merge_returning_row(
+                        engine,
+                        MergeReturningRow {
+                            target_table: &target_table,
+                            target_qual: &target_qual,
+                            images: ReturningRowImages {
+                                old: Some(ReturningRowImage {
+                                    doc_id: prepared.doc_id,
+                                    document: &prepared.old_document,
+                                }),
+                                new: Some(ReturningRowImage {
+                                    doc_id: rewritten_doc_id,
+                                    document: &prepared.new_document,
+                                }),
+                            },
+                            returning_aliases: &stmt.returning_aliases,
+                            source_row: &pair.source_row,
+                            action: "UPDATE",
+                        },
+                        &stmt.returning,
+                        params,
+                        &snapshot_ctes,
+                    )?);
+                }
+                affected += 1;
                 has_mutation = true;
-                let doc_id = decode_prepared_doc_id(payload, "MERGE delete action")?;
-                let prepared = prepare_document_delete(
+                push_merge_prepared_action(
+                    &mut prepared_actions,
+                    &action_schema,
+                    MERGE_PREPARED_UPDATE,
+                    encode_prepared_document_rewrite(prepared),
+                )?;
+            }
+            SelectedMergeAction::Delete { doc_id } => {
+                root_deletes.insert((target_table.clone(), doc_id));
+                let mut prepared = prepare_document_delete(
                     engine,
                     &target_table,
                     doc_id,
@@ -375,15 +358,39 @@ pub(in crate::sql) fn run_merge_inner(
                 .ok_or_else(|| {
                     SQLError::Internal("MERGE delete dependency tree was cyclic at its root".into())
                 })?;
-                encode_prepared_document_delete(prepared)
-            }
-            MERGE_PREPARED_INSERT => {
+                stage_prepared_document_delete(engine, &mut prepared, params)?;
+                if !stmt.returning.is_empty() {
+                    returning_rows.push(build_merge_returning_row(
+                        engine,
+                        MergeReturningRow {
+                            target_table: &target_table,
+                            target_qual: &target_qual,
+                            images: ReturningRowImages {
+                                old: Some(ReturningRowImage {
+                                    doc_id: prepared.doc_id,
+                                    document: &prepared.document,
+                                }),
+                                new: None,
+                            },
+                            returning_aliases: &stmt.returning_aliases,
+                            source_row: &pair.source_row,
+                            action: "DELETE",
+                        },
+                        &stmt.returning,
+                        params,
+                        &snapshot_ctes,
+                    )?);
+                }
+                affected += 1;
                 has_mutation = true;
-                let Value::Map(mut document) = payload else {
-                    return Err(SQLError::Internal(
-                        "MERGE insert action spill lost its document".into(),
-                    ));
-                };
+                push_merge_prepared_action(
+                    &mut prepared_actions,
+                    &action_schema,
+                    MERGE_PREPARED_DELETE,
+                    encode_prepared_document_delete(prepared),
+                )?;
+            }
+            SelectedMergeAction::Insert { mut document } => {
                 let (auto_id_col, id_column) =
                     insert_identity_columns(engine, &target_table, "MERGE INSERT")?;
                 let doc_id = match document_supplied_id(
@@ -402,189 +409,74 @@ pub(in crate::sql) fn run_merge_inner(
                     lock_document_key_dependencies(engine, &target_table, &document, None)?;
                 engine
                     .advance_next_id(&target_table, doc_id)
-                    .map_err(|err| dml_storage_error("MERGE INSERT", err))?;
-                encode_merge_prepared_insert(doc_id, document)
+                    .map_err(|error| dml_storage_error("MERGE INSERT", error))?;
+                validate_document_constraints(engine, &target_table, &document, params, None)?;
+                engine.stage_command_document(&target_table, doc_id, Some(document.clone()))?;
+                if !stmt.returning.is_empty() {
+                    returning_rows.push(build_merge_returning_row(
+                        engine,
+                        MergeReturningRow {
+                            target_table: &target_table,
+                            target_qual: &target_qual,
+                            images: ReturningRowImages {
+                                old: None,
+                                new: Some(ReturningRowImage {
+                                    doc_id,
+                                    document: &document,
+                                }),
+                            },
+                            returning_aliases: &stmt.returning_aliases,
+                            source_row: &pair.source_row,
+                            action: "INSERT",
+                        },
+                        &stmt.returning,
+                        params,
+                        &snapshot_ctes,
+                    )?);
+                }
+                affected += 1;
+                has_mutation = true;
+                push_merge_prepared_action(
+                    &mut prepared_actions,
+                    &action_schema,
+                    MERGE_PREPARED_INSERT,
+                    encode_merge_prepared_insert(doc_id, document),
+                )?;
             }
-            _ => {
-                return Err(SQLError::Internal(format!(
-                    "MERGE selected action spill has unknown kind {action}"
-                )))
-            }
-        };
-        push_merge_prepared_action(&mut prepared_actions, &action_schema, action, payload)?;
+        }
     }
+    drop(overlay);
     let prepared_actions = prepared_actions
         .into_shared(action_schema)
         .map_err(crate::sql::select::physical_exec_error)?;
-    let prebuild_locking_returning = returning_has_row_locks(&stmt.returning, &ctes)?;
-    let mut prebuilt_returning_rows = Vec::new();
     if has_mutation {
-        if prebuild_locking_returning {
-            let mut pairing_reader = pairings
-                .read_rows()
-                .map_err(crate::sql::select::physical_exec_error)?;
-            let prepared_reader = prepared_actions
-                .read_rows()
-                .map_err(crate::sql::select::physical_exec_error)?;
-            for prepared in prepared_reader {
-                let prepared = prepared.map_err(crate::sql::select::physical_exec_error)?;
-                let pair = pairing_reader
-                    .next()
-                    .ok_or_else(|| {
-                        SQLError::Internal("MERGE RETURNING preflight has no source pairing".into())
-                    })?
-                    .map_err(crate::sql::select::physical_exec_error)?;
-                let pair = decode_merge_pair(pair)?;
-                let (action, payload) = decode_merge_prepared_action(prepared)?;
-                if let Some(row) = prebuild_merge_returning_row(
-                    engine,
-                    stmt,
-                    &target_table,
-                    &target_qual,
-                    action,
-                    payload,
-                    &pair.source_row,
-                    params,
-                    &ctes,
-                )? {
-                    prebuilt_returning_rows.push(row);
-                }
-            }
-            if pairing_reader.next().is_some() {
-                return Err(SQLError::Internal(
-                    "MERGE RETURNING preflight source pairing has no prepared action".into(),
-                ));
-            }
-        }
         engine.prepare_explicit_transaction_writer()?;
     }
-    let mut prebuilt_returning_rows = prebuilt_returning_rows.into_iter();
-    let mut pairing_reader = pairings
-        .read_rows()
-        .map_err(crate::sql::select::physical_exec_error)?;
     let prepared_reader = prepared_actions
         .read_rows()
         .map_err(crate::sql::select::physical_exec_error)?;
     for prepared in prepared_reader {
         let prepared = prepared.map_err(crate::sql::select::physical_exec_error)?;
-        let pair = pairing_reader
-            .next()
-            .ok_or_else(|| {
-                SQLError::Internal("MERGE prepared action has no source pairing".into())
-            })?
-            .map_err(crate::sql::select::physical_exec_error)?;
-        let pair = decode_merge_pair(pair)?;
         let (action, payload) = decode_merge_prepared_action(prepared)?;
-        let mut prebuilt_returning_row =
-            if prebuild_locking_returning && action != MERGE_PREPARED_NOTHING {
-                Some(prebuilt_returning_rows.next().ok_or_else(|| {
-                    SQLError::Internal("MERGE lost a prebuilt RETURNING row".into())
-                })?)
-            } else {
-                None
-            };
         match action {
             MERGE_PREPARED_NOTHING => {}
             MERGE_PREPARED_UPDATE => {
                 let mut prepared = decode_prepared_document_rewrite(payload)?;
-                let rewritten_doc_id =
-                    apply_prepared_document_rewrite(engine, &mut prepared, params)?;
-                affected += 1;
-                if !stmt.returning.is_empty() {
-                    returning_rows.push(match prebuilt_returning_row.take() {
-                        Some(row) => row,
-                        None => build_merge_returning_row(
-                            engine,
-                            MergeReturningRow {
-                                target_table: &target_table,
-                                target_qual: &target_qual,
-                                images: ReturningRowImages {
-                                    old: Some(ReturningRowImage {
-                                        doc_id: prepared.doc_id,
-                                        document: &prepared.old_document,
-                                    }),
-                                    new: Some(ReturningRowImage {
-                                        doc_id: rewritten_doc_id,
-                                        document: &prepared.new_document,
-                                    }),
-                                },
-                                returning_aliases: &stmt.returning_aliases,
-                                source_row: &pair.source_row,
-                                action: "UPDATE",
-                            },
-                            &stmt.returning,
-                            params,
-                            &ctes,
-                        )?,
-                    });
-                }
+                apply_validated_prepared_document_rewrite(engine, &mut prepared)?;
             }
             MERGE_PREPARED_DELETE => {
                 let mut prepared = decode_prepared_document_delete(payload)?;
-                apply_prepared_document_delete(engine, &mut prepared, params)?;
-                affected += 1;
-                if !stmt.returning.is_empty() {
-                    returning_rows.push(match prebuilt_returning_row.take() {
-                        Some(row) => row,
-                        None => build_merge_returning_row(
-                            engine,
-                            MergeReturningRow {
-                                target_table: &target_table,
-                                target_qual: &target_qual,
-                                images: ReturningRowImages {
-                                    old: Some(ReturningRowImage {
-                                        doc_id: prepared.doc_id,
-                                        document: &prepared.document,
-                                    }),
-                                    new: None,
-                                },
-                                returning_aliases: &stmt.returning_aliases,
-                                source_row: &pair.source_row,
-                                action: "DELETE",
-                            },
-                            &stmt.returning,
-                            params,
-                            &ctes,
-                        )?,
-                    });
-                }
+                apply_validated_prepared_document_delete(engine, &mut prepared)?;
             }
             MERGE_PREPARED_INSERT => {
                 let (doc_id, document) = decode_merge_prepared_insert(payload)?;
-                let inserted = insert_prepared_document_with_constraints(
-                    engine,
+                engine.add_prepared_document_with_vector_values(
                     &target_table,
                     doc_id,
-                    document,
-                    params,
+                    document.clone(),
+                    document_vectors(engine, &target_table, &document)?,
                     false,
                 )?;
-                affected += 1;
-                if !stmt.returning.is_empty() {
-                    returning_rows.push(match prebuilt_returning_row.take() {
-                        Some(row) => row,
-                        None => build_merge_returning_row(
-                            engine,
-                            MergeReturningRow {
-                                target_table: &target_table,
-                                target_qual: &target_qual,
-                                images: ReturningRowImages {
-                                    old: None,
-                                    new: Some(ReturningRowImage {
-                                        doc_id,
-                                        document: &inserted,
-                                    }),
-                                },
-                                returning_aliases: &stmt.returning_aliases,
-                                source_row: &pair.source_row,
-                                action: "INSERT",
-                            },
-                            &stmt.returning,
-                            params,
-                            &ctes,
-                        )?,
-                    });
-                }
             }
             _ => {
                 return Err(SQLError::Internal(format!(
@@ -592,11 +484,6 @@ pub(in crate::sql) fn run_merge_inner(
                 )))
             }
         }
-    }
-    if pairing_reader.next().is_some() {
-        return Err(SQLError::Internal(
-            "MERGE source pairing has no prepared action".into(),
-        ));
     }
     if !stmt.returning.is_empty() {
         return dml_returning_result(
@@ -828,104 +715,6 @@ fn decode_merge_prepared_insert(value: Value) -> Result<(uqa_core::DocId, Docume
     Ok((doc_id, document))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn prebuild_merge_returning_row(
-    engine: &Engine,
-    stmt: &MergePlan,
-    target_table: &str,
-    target_qual: &str,
-    action: i64,
-    payload: Value,
-    source_row: &uqa_execution::OwnedPhysicalRow,
-    params: &[SQLParam],
-    ctes: &CteScope,
-) -> Result<Option<uqa_execution::OwnedPhysicalRow>, SQLError> {
-    match action {
-        MERGE_PREPARED_NOTHING => Ok(None),
-        MERGE_PREPARED_UPDATE => {
-            let prepared = decode_prepared_document_rewrite(payload)?;
-            let rewritten_doc_id =
-                integer_primary_key_doc_id(engine, &prepared.table, &prepared.new_document)?
-                    .unwrap_or(prepared.doc_id);
-            let row = build_merge_returning_row(
-                engine,
-                MergeReturningRow {
-                    target_table,
-                    target_qual,
-                    images: ReturningRowImages {
-                        old: Some(ReturningRowImage {
-                            doc_id: prepared.doc_id,
-                            document: &prepared.old_document,
-                        }),
-                        new: Some(ReturningRowImage {
-                            doc_id: rewritten_doc_id,
-                            document: &prepared.new_document,
-                        }),
-                    },
-                    returning_aliases: &stmt.returning_aliases,
-                    source_row,
-                    action: "UPDATE",
-                },
-                &stmt.returning,
-                params,
-                ctes,
-            )?;
-            Ok(Some(row))
-        }
-        MERGE_PREPARED_DELETE => {
-            let prepared = decode_prepared_document_delete(payload)?;
-            let row = build_merge_returning_row(
-                engine,
-                MergeReturningRow {
-                    target_table,
-                    target_qual,
-                    images: ReturningRowImages {
-                        old: Some(ReturningRowImage {
-                            doc_id: prepared.doc_id,
-                            document: &prepared.document,
-                        }),
-                        new: None,
-                    },
-                    returning_aliases: &stmt.returning_aliases,
-                    source_row,
-                    action: "DELETE",
-                },
-                &stmt.returning,
-                params,
-                ctes,
-            )?;
-            Ok(Some(row))
-        }
-        MERGE_PREPARED_INSERT => {
-            let (doc_id, document) = decode_merge_prepared_insert(payload)?;
-            let row = build_merge_returning_row(
-                engine,
-                MergeReturningRow {
-                    target_table,
-                    target_qual,
-                    images: ReturningRowImages {
-                        old: None,
-                        new: Some(ReturningRowImage {
-                            doc_id,
-                            document: &document,
-                        }),
-                    },
-                    returning_aliases: &stmt.returning_aliases,
-                    source_row,
-                    action: "INSERT",
-                },
-                &stmt.returning,
-                params,
-                ctes,
-            )?;
-            Ok(Some(row))
-        }
-        _ => Err(SQLError::Internal(format!(
-            "MERGE RETURNING preflight has unknown action kind {action}"
-        ))),
-    }
-}
-
 fn merge_target_lock_strength(
     engine: &Engine,
     stmt: &MergePlan,
@@ -955,6 +744,7 @@ fn merge_target_lock_strength(
     }
 }
 
+#[derive(Clone, Copy)]
 pub(in crate::sql) struct MergeReturningRow<'a> {
     target_table: &'a str,
     target_qual: &'a str,
@@ -970,6 +760,22 @@ pub(in crate::sql) fn build_merge_returning_row(
     returning: &[ProjectionPlan],
     params: &[SQLParam],
     ctes: &CteScope,
+) -> Result<uqa_execution::OwnedPhysicalRow, SQLError> {
+    let row = merge_returning_context(engine, input)?;
+    let projections = expanded_returning_projections(
+        engine,
+        input.target_table,
+        input.target_qual,
+        input.returning_aliases,
+        returning,
+    )?;
+    let snapshot_scope = ctes.returning_statement_snapshot_scope();
+    build_projection_physical_row_with_ctes(engine, &row, &projections, params, &snapshot_scope)
+}
+
+fn merge_returning_context(
+    engine: &Engine,
+    input: MergeReturningRow<'_>,
 ) -> Result<uqa_execution::OwnedPhysicalRow, SQLError> {
     let mut row = returning_row_context(
         engine,
@@ -990,12 +796,5 @@ pub(in crate::sql) fn build_merge_returning_row(
         uqa_execution::RowSchema::join(&row.schema, &input.source_row.schema, std::iter::empty()),
         uqa_execution::PhysicalRow::concat(&row.row, &input.source_row.row),
     );
-    let projections = expanded_returning_projections(
-        engine,
-        input.target_table,
-        input.target_qual,
-        input.returning_aliases,
-        returning,
-    )?;
-    build_projection_physical_row_with_ctes(engine, &row, &projections, params, ctes)
+    Ok(row)
 }

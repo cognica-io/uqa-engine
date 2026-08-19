@@ -464,9 +464,7 @@ impl RowSchema {
         self.slot(logical)
     }
 
-    /// Resolve a structured SQL identity, including a hidden JOIN USING
-    /// alias, to its flattened physical slot. Ambiguous identities deliberately
-    /// return `None` rather than selecting an arbitrary source value.
+    /// Resolve a structured SQL identity, including a hidden JOIN USING alias, to its flattened physical slot. Ambiguous identities deliberately return `None` rather than selecting an arbitrary source value.
     pub fn physical_slot_for_identity(&self, identity: &ColumnIdentity) -> Option<usize> {
         match identity.qualifier() {
             Some(qualifier) => self.qualified_slot(qualifier, identity.column()),

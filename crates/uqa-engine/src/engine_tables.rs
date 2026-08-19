@@ -435,7 +435,7 @@ impl Engine {
             .map_err(|error| SQLError::Internal(format!("index document vector: {error}")))?;
         drop(idxs);
         self.note_table_data_changed();
-        self.note_row_changed(table, doc_id);
+        self.note_row_changed(table, doc_id)?;
         Ok(true)
     }
 
@@ -478,7 +478,7 @@ impl Engine {
             .map_err(|error| SQLError::Internal(format!("index document vectors: {error}")))?;
         drop(idxs);
         self.note_table_data_changed();
-        self.note_row_changed(table, doc_id);
+        self.note_row_changed(table, doc_id)?;
         Ok(true)
     }
 
