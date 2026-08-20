@@ -54,9 +54,9 @@ impl RowLockOrigin {
 }
 
 pub(super) fn concat_lock_origins(
-    left: Option<&Arc<[RowLockOrigin]>>,
-    right: Option<&Arc<[RowLockOrigin]>>,
-) -> Option<Arc<[RowLockOrigin]>> {
+    left: Option<&Arc<Vec<RowLockOrigin>>>,
+    right: Option<&Arc<Vec<RowLockOrigin>>>,
+) -> Option<Arc<Vec<RowLockOrigin>>> {
     match (left, right) {
         (None, None) => None,
         (Some(origins), None) | (None, Some(origins)) => Some(Arc::clone(origins)),
@@ -64,7 +64,7 @@ pub(super) fn concat_lock_origins(
             let mut origins = Vec::with_capacity(left.len() + right.len());
             origins.extend(left.iter().cloned());
             origins.extend(right.iter().cloned());
-            Some(Arc::from(origins))
+            Some(Arc::new(origins))
         }
     }
 }
@@ -73,12 +73,12 @@ impl PhysicalRow {
     #[must_use]
     pub fn with_lock_origin(mut self, origin: RowLockOrigin) -> Self {
         self.lock_origins = match self.lock_origins.take() {
-            None => Some(Arc::from([origin])),
+            None => Some(Arc::new(vec![origin])),
             Some(existing) => {
                 let mut origins = Vec::with_capacity(existing.len() + 1);
                 origins.extend(existing.iter().cloned());
                 origins.push(origin);
-                Some(Arc::from(origins))
+                Some(Arc::new(origins))
             }
         };
         self
@@ -91,12 +91,12 @@ impl PhysicalRow {
             return self;
         }
         self.lock_origins = match self.lock_origins.take() {
-            None => Some(Arc::from(origins)),
+            None => Some(Arc::new(origins)),
             Some(existing) => {
                 let mut combined = Vec::with_capacity(existing.len() + origins.len());
                 combined.extend(existing.iter().cloned());
                 combined.extend(origins);
-                Some(Arc::from(combined))
+                Some(Arc::new(combined))
             }
         };
         self
@@ -104,7 +104,9 @@ impl PhysicalRow {
 
     #[must_use]
     pub fn lock_origins(&self) -> &[RowLockOrigin] {
-        self.lock_origins.as_deref().unwrap_or(&[])
+        self.lock_origins
+            .as_deref()
+            .map_or(&[], std::vec::Vec::as_slice)
     }
 
     /// Drop row-lock lineage at an execution boundary that cannot expose a lockable base-row identity, such as a set operation.

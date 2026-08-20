@@ -14,9 +14,13 @@ use super::{
 };
 
 struct ResultMaterializationPlan {
-    template: ResultRow,
-    logical_order: Box<[usize]>,
-    take: Box<[bool]>,
+    entries: Box<[ResultMaterializationEntry]>,
+}
+
+struct ResultMaterializationEntry {
+    column: String,
+    logical: usize,
+    take: bool,
 }
 
 impl RowSchema {
@@ -68,14 +72,17 @@ impl RowSchema {
                 remaining_reads[slot] == 0
             })
             .collect::<Vec<_>>();
-        let template = logical_order
-            .iter()
-            .map(|logical| (columns[*logical].clone(), Value::Null))
-            .collect();
+        let entries = logical_order
+            .into_iter()
+            .zip(take)
+            .map(|(logical, take)| ResultMaterializationEntry {
+                column: columns[logical].clone(),
+                logical,
+                take,
+            })
+            .collect::<Vec<_>>();
         ResultMaterializationPlan {
-            template,
-            logical_order: logical_order.into_boxed_slice(),
-            take: take.into_boxed_slice(),
+            entries: entries.into_boxed_slice(),
         }
     }
 
@@ -84,25 +91,43 @@ impl RowSchema {
         row: PhysicalRow,
         plan: &ResultMaterializationPlan,
     ) -> ResultRow {
+        // A shared scan fragment cannot donate its values, so read only requested output slots instead of cloning an intermediate positional vector that is immediately dismantled.
+        if row.fragments.len() == 1 && Arc::strong_count(&row.fragments[0].values) > 1 {
+            return self.materialize_remapped_shared_fragment_row(&row.fragments[0], plan);
+        }
         let mut fragments = row.into_value_fragments();
         debug_assert_eq!(
             self.physical_width(),
             fragments.iter().map(Vec::len).sum::<usize>()
         );
-        let mut result = plan.template.clone();
-        for ((logical, take), output) in plan
-            .logical_order
-            .iter()
-            .zip(plan.take.iter())
-            .zip(result.values_mut())
-        {
-            let slot = self.index.slots[*logical];
+        let mut result = ResultRow::new();
+        for entry in &plan.entries {
+            let slot = self.index.slots[entry.logical];
             let value = if slot == NULL_SLOT {
                 Value::Null
             } else {
-                materialize_fragment_slot(&mut fragments, slot, *take)
+                materialize_fragment_slot(&mut fragments, slot, entry.take)
             };
-            *output = value;
+            result.insert(entry.column.clone(), value);
+        }
+        result
+    }
+
+    fn materialize_remapped_shared_fragment_row(
+        &self,
+        fragment: &RowFragment,
+        plan: &ResultMaterializationPlan,
+    ) -> ResultRow {
+        debug_assert_eq!(self.physical_width(), fragment.len());
+        let mut result = ResultRow::new();
+        for entry in &plan.entries {
+            let slot = self.index.slots[entry.logical];
+            let value = if slot == NULL_SLOT {
+                Value::Null
+            } else {
+                fragment.get(slot).cloned().unwrap_or(Value::Null)
+            };
+            result.insert(entry.column.clone(), value);
         }
         result
     }

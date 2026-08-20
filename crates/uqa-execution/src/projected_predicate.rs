@@ -224,6 +224,49 @@ mod tests {
     }
 
     #[test]
+    fn projected_integer_comparisons_match_every_canonical_operator_and_operand_order() {
+        let fields = vec!["value".into()];
+        for op in [
+            BinaryOp::Equal,
+            BinaryOp::NotEqual,
+            BinaryOp::Less,
+            BinaryOp::LessEqual,
+            BinaryOp::Greater,
+            BinaryOp::GreaterEqual,
+        ] {
+            for field_on_left in [true, false] {
+                let field = ScalarExpr::Column("value".into());
+                let literal = ScalarExpr::Literal(Value::Int(7));
+                let expression = ScalarExpr::Binary {
+                    op,
+                    lhs: Box::new(if field_on_left {
+                        field.clone()
+                    } else {
+                        literal.clone()
+                    }),
+                    rhs: Box::new(if field_on_left {
+                        literal.clone()
+                    } else {
+                        field.clone()
+                    }),
+                };
+                let predicate = ProjectedPredicate::compile(&expression, &fields, &[])
+                    .unwrap()
+                    .unwrap();
+                for value in [
+                    Value::Null,
+                    Value::Int(6),
+                    Value::Int(7),
+                    Value::Int(8),
+                    Value::Float(7.0),
+                ] {
+                    assert_projected_parity(&expression, &predicate, &fields, &[value], &[]);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn projected_like_predicates_match_the_canonical_evaluator() {
         for (name, pattern) in [
             ("like", "%"),

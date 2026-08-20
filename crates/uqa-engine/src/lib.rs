@@ -267,6 +267,13 @@ impl SQLStatementCache {
         self.entries.get(sql).cloned()
     }
 
+    fn get_optimized(&self, sql: &str) -> Option<Arc<uqa_planner::UnifiedPlan>> {
+        self.entries
+            .get(sql)
+            .and_then(|cached| cached.optimized_plan.as_ref())
+            .cloned()
+    }
+
     fn insert(
         &mut self,
         sql: String,
@@ -554,6 +561,17 @@ impl Engine {
 
     pub(crate) fn cached_sql_statement(&self, sql: &str) -> Option<CachedSQLStatement> {
         self.session.state.read().sql_statement_cache.get(sql)
+    }
+
+    pub(crate) fn cached_optimized_sql_plan(
+        &self,
+        sql: &str,
+    ) -> Option<Arc<uqa_planner::UnifiedPlan>> {
+        self.session
+            .state
+            .read()
+            .sql_statement_cache
+            .get_optimized(sql)
     }
 
     pub(crate) fn cache_sql_statement(

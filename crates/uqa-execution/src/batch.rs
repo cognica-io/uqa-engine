@@ -32,7 +32,8 @@ pub use owned_row::OwnedPhysicalRow;
 pub const DEFAULT_BATCH_SIZE: usize = 1024;
 
 const NULL_SLOT: usize = usize::MAX;
-const INLINE_ROW_FRAGMENTS: usize = 8;
+/// Keep the optional row-lock lineage pointer inside the pre-lineage 64-bit row footprint while retaining seven allocation-free join/projection fragments.
+const INLINE_ROW_FRAGMENTS: usize = 7;
 static NULL_VALUE: Value = Value::Null;
 
 /// Structured SQL column identity. A qualifier is metadata, never a prefix encoded into the column name, so quoted names containing `.` remain intact.
@@ -1248,7 +1249,7 @@ type RowFragments = SmallVec<[RowFragment; INLINE_ROW_FRAGMENTS]>;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PhysicalRow {
     fragments: RowFragments,
-    lock_origins: Option<Arc<[RowLockOrigin]>>,
+    lock_origins: Option<Arc<Vec<RowLockOrigin>>>,
 }
 
 /// One output position in a mixed physical projection.

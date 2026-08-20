@@ -105,6 +105,8 @@ impl ScoredDocumentSource {
         Ok(rows)
     }
 
+    /// Keep the callback-heavy scan traversal in one code body instead of duplicating its recheck and predicate dispatch into each caller.
+    #[inline(never)]
     fn for_each_kept_entry(
         &self,
         entries: &[ScoredEntry],
@@ -116,7 +118,7 @@ impl ScoredDocumentSource {
         self.for_each_snapshot_entry(entries, visitor)
     }
 
-    #[inline]
+    #[inline(never)]
     fn for_each_snapshot_entry(
         &self,
         entries: &[ScoredEntry],

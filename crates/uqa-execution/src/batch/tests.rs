@@ -9,6 +9,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 #[test]
+#[cfg(target_pointer_width = "64")]
+fn physical_row_stays_within_the_pre_lineage_footprint() {
+    assert!(std::mem::size_of::<PhysicalRow>() <= 208);
+}
+
+#[test]
 fn qualified_schema_lookup_reads_positional_values() {
     let schema = RowSchema::with_identities(
         vec!["id".into(), "id".into()],
@@ -361,6 +367,41 @@ fn result_materialization_reads_shared_projection_without_changing_storage() {
         ])]
     );
     assert_eq!(stored[0], Value::Str("unused".into()));
+}
+
+#[test]
+fn remapped_result_materialization_reads_a_shared_fragment_without_rebuilding_it() {
+    let source = RowSchema::new(vec!["first".into(), "unused".into(), "last".into()]);
+    let selected = RowSchema::select(
+        &source,
+        &[
+            ("renamed_last".into(), "last".into()),
+            ("renamed_first".into(), "first".into()),
+        ],
+    );
+    let stored = Arc::new(vec![
+        Value::Str("first payload".into()),
+        Value::Str("unused payload".into()),
+        Value::Str("last payload".into()),
+    ]);
+    let row = PhysicalRow::from_shared_values(Arc::clone(&stored), Arc::from([0, 1, 2]));
+    let batch = Batch::from_physical_rows(selected, vec![row]);
+
+    assert_eq!(
+        batch.into_result_rows(),
+        vec![BTreeMap::from([
+            ("renamed_first".into(), Value::Str("first payload".into())),
+            ("renamed_last".into(), Value::Str("last payload".into())),
+        ])]
+    );
+    assert_eq!(
+        stored.as_slice(),
+        [
+            Value::Str("first payload".into()),
+            Value::Str("unused payload".into()),
+            Value::Str("last payload".into()),
+        ]
+    );
 }
 
 #[test]

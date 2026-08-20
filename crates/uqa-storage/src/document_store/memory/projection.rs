@@ -155,8 +155,9 @@ pub(super) fn should_merge_projected_scan(doc_ids: &[DocId], document_count: usi
     id_span <= probe_budget || probe_budget >= document_count as u128
 }
 
-struct ProjectedLayout {
-    slots: Box<[usize]>,
+enum ProjectedLayout {
+    Complete(Box<[usize]>),
+    Nullable(Box<[usize]>),
 }
 
 impl ProjectedLayout {
@@ -172,8 +173,11 @@ impl ProjectedLayout {
     }
 
     fn compile(layout: &[String], fields: &[&str]) -> Self {
-        Self {
-            slots: Self::slots(layout, fields).into_boxed_slice(),
+        let slots = Self::slots(layout, fields).into_boxed_slice();
+        if slots.iter().all(|slot| *slot != MISSING_SLOT) {
+            Self::Complete(slots)
+        } else {
+            Self::Nullable(slots)
         }
     }
 
@@ -184,13 +188,20 @@ impl ProjectedLayout {
         values: &mut Vec<&'a Value>,
     ) {
         values.clear();
-        values.extend(self.slots.iter().map(|slot| {
-            if *slot == MISSING_SLOT {
-                null
-            } else {
-                &stored.values[*slot]
+        match self {
+            Self::Complete(slots) => {
+                values.extend(slots.iter().map(|slot| &stored.values[*slot]));
             }
-        }));
+            Self::Nullable(slots) => {
+                values.extend(slots.iter().map(|slot| {
+                    if *slot == MISSING_SLOT {
+                        null
+                    } else {
+                        &stored.values[*slot]
+                    }
+                }));
+            }
+        }
     }
 }
 

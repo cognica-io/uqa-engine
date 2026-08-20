@@ -259,6 +259,8 @@ fn evaluate_int_comparison(
     )?))
 }
 
+/// Keep the integer comparison in its projected-predicate caller and express the dynamic operator as membership tests, avoiding one indirect code jump per scanned row.
+#[inline]
 fn evaluate_int_comparison_truth(
     field: &Value,
     op: BinaryOp,
@@ -269,32 +271,55 @@ fn evaluate_int_comparison_truth(
         if matches!(field, Value::Null) {
             return Ok(None);
         }
-        let literal = Value::Int(literal);
-        return if field_on_left {
-            eval_comparison_truth(op, field, &literal)
-        } else {
-            eval_comparison_truth(op, &literal, field)
-        };
+        return evaluate_non_integer_comparison(field, op, literal, field_on_left);
     };
     let (lhs, rhs) = if field_on_left {
         (*field, literal)
     } else {
         (literal, *field)
     };
-    let result = match op {
-        BinaryOp::Equal => lhs == rhs,
-        BinaryOp::NotEqual => lhs != rhs,
-        BinaryOp::Less => lhs < rhs,
-        BinaryOp::LessEqual => lhs <= rhs,
-        BinaryOp::Greater => lhs > rhs,
-        BinaryOp::GreaterEqual => lhs >= rhs,
-        _ => {
-            return Err(SQLError::Internal(format!(
-                "non-comparison operator {op:?} reached integer predicate"
-            )))
-        }
+    if !is_comparison(op) {
+        return Err(invalid_int_comparison_operator(op));
+    }
+    let result = match lhs.cmp(&rhs) {
+        std::cmp::Ordering::Less => matches!(
+            op,
+            BinaryOp::NotEqual | BinaryOp::Less | BinaryOp::LessEqual
+        ),
+        std::cmp::Ordering::Equal => matches!(
+            op,
+            BinaryOp::Equal | BinaryOp::LessEqual | BinaryOp::GreaterEqual
+        ),
+        std::cmp::Ordering::Greater => matches!(
+            op,
+            BinaryOp::NotEqual | BinaryOp::Greater | BinaryOp::GreaterEqual
+        ),
     };
     Ok(Some(result))
+}
+
+#[cold]
+#[inline(never)]
+fn evaluate_non_integer_comparison(
+    field: &Value,
+    op: BinaryOp,
+    literal: i64,
+    field_on_left: bool,
+) -> Result<Option<bool>, SQLError> {
+    let literal = Value::Int(literal);
+    if field_on_left {
+        eval_comparison_truth(op, field, &literal)
+    } else {
+        eval_comparison_truth(op, &literal, field)
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn invalid_int_comparison_operator(op: BinaryOp) -> SQLError {
+    SQLError::Internal(format!(
+        "non-comparison operator {op:?} reached integer predicate"
+    ))
 }
 
 fn evaluate_int_between(field: &Value, low: i64, high: i64) -> Result<Value, SQLError> {

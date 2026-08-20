@@ -101,6 +101,21 @@ pub(super) fn execute(
     if let Err(error) = engine.cancellation_token().check() {
         return Err(abort_explicit_statement_error(engine, error.into()));
     }
+    if engine.storage.backend.is_none() && engine.transaction_depth() == 0 {
+        if let Some(plan) = engine.cached_optimized_sql_plan(sql) {
+            let executor = UnifiedPlanExecutor::new(engine, params);
+            return execute_spilled(&executor, plan.as_ref());
+        }
+    }
+    execute_uncached_or_snapshot_scoped(engine, sql, params)
+}
+
+#[inline(never)]
+fn execute_uncached_or_snapshot_scoped(
+    engine: &Engine,
+    sql: &str,
+    params: &[SQLParam],
+) -> Result<SQLCursor, SQLError> {
     let cached = engine.cached_sql_statement(sql);
     let (statement, initial_plan, cached_optimized) = if let Some(cached) = cached {
         (
@@ -129,7 +144,7 @@ pub(super) fn execute(
     let query = query_from_plan(initial_plan.as_ref())
         .map_err(|error| abort_explicit_statement_error(engine, error))?;
     let has_row_locks = query_has_row_locks(query);
-    let _row_lock_statement = engine.begin_row_lock_statement();
+    let _row_lock_statement = has_row_locks.then(|| engine.begin_row_lock_statement());
     let executor = UnifiedPlanExecutor::new(engine, params);
 
     if engine.transaction_depth() != 0 {

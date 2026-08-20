@@ -26,16 +26,21 @@ pub(in crate::sql) struct LockIdentityOptions {
     pub(in crate::sql) retain_after_lock: bool,
 }
 
+#[derive(Clone, Default)]
+struct RowLockScopeState {
+    source_row_locks: Vec<ResolvedRowLock>,
+    recheck: Option<Arc<RowLockRecheckPins>>,
+    outer_row: Option<Arc<uqa_execution::OwnedPhysicalRow>>,
+    storage_pins: Vec<RecheckStoragePin>,
+}
+
 #[derive(Clone)]
 pub(crate) struct CteScope {
     pub(in crate::sql) rows: BTreeMap<String, uqa_execution::SharedSpill>,
     deferred_ctes: BTreeMap<String, CtePlan>,
     pub(in crate::sql) scalar_subqueries: Vec<QueryPlan>,
     pub(in crate::sql) lock_identities: LockIdentityOptions,
-    source_row_locks: Vec<ResolvedRowLock>,
-    row_lock_recheck: Option<Arc<RowLockRecheckPins>>,
-    row_lock_outer_row: Option<uqa_execution::OwnedPhysicalRow>,
-    recheck_storage_pins: Vec<RecheckStoragePin>,
+    row_lock: Option<Box<RowLockScopeState>>,
     visible_cte_names: BTreeSet<String>,
     scalar_subquery_arena: u64,
     read_command_overlay: bool,
@@ -52,10 +57,7 @@ impl Default for CteScope {
             deferred_ctes: BTreeMap::new(),
             scalar_subqueries: Vec::new(),
             lock_identities: LockIdentityOptions::default(),
-            source_row_locks: Vec::new(),
-            row_lock_recheck: None,
-            row_lock_outer_row: None,
-            recheck_storage_pins: Vec::new(),
+            row_lock: None,
             visible_cte_names: BTreeSet::new(),
             scalar_subquery_arena: 0,
             read_command_overlay: true,
@@ -71,22 +73,38 @@ impl CteScope {
         Self::default()
     }
 
+    fn row_lock_state(&self) -> Option<&RowLockScopeState> {
+        self.row_lock.as_deref()
+    }
+
+    fn row_lock_state_mut(&mut self) -> &mut RowLockScopeState {
+        self.row_lock
+            .get_or_insert_with(|| Box::new(RowLockScopeState::default()))
+    }
+
     /// Enter one tuple-local recheck execution: base scans of pinned lock targets emit only the candidate's tuples and every nested `LockRows` is suppressed while lock identities keep flowing.
     pub(in crate::sql) fn activate_row_lock_recheck(&mut self, pins: Arc<RowLockRecheckPins>) {
-        self.row_lock_recheck = Some(pins);
+        self.row_lock_state_mut().recheck = Some(pins);
     }
 
     pub(in crate::sql) fn row_lock_recheck_active(&self) -> bool {
-        self.row_lock_recheck.is_some()
+        self.row_lock_state()
+            .is_some_and(|state| state.recheck.is_some())
     }
 
     /// Preserve the complete correlated outer row for a tuple-local locking recheck. The rebuilt inner query must receive the same scope overlay as its original lateral execution or its correlation predicate would see NULL after a lock wait and incorrectly discard the refreshed tuple.
     pub(in crate::sql) fn set_row_lock_outer_row(&mut self, row: uqa_execution::OwnedPhysicalRow) {
-        self.row_lock_outer_row = Some(row);
+        self.row_lock_state_mut().outer_row = Some(Arc::new(row));
     }
 
     pub(in crate::sql) fn row_lock_outer_row(&self) -> Option<&uqa_execution::OwnedPhysicalRow> {
-        self.row_lock_outer_row.as_ref()
+        self.row_lock_state()?.outer_row.as_deref()
+    }
+
+    fn clear_row_lock_outer_row(&mut self) {
+        if let Some(state) = self.row_lock.as_mut() {
+            state.outer_row = None;
+        }
     }
 
     /// Pinned tuples one base scan must emit during an active recheck.
@@ -95,12 +113,14 @@ impl CteScope {
         qualifier: &str,
         storage_name: &str,
     ) -> Option<Arc<Vec<RecheckDoc>>> {
-        if let Some(pins) = self.row_lock_recheck.as_ref() {
+        let state = self.row_lock_state()?;
+        if let Some(pins) = state.recheck.as_ref() {
             if let Some(docs) = pins.docs_for_scan(qualifier, storage_name) {
                 return Some(docs);
             }
         }
-        self.recheck_storage_pins
+        state
+            .storage_pins
             .iter()
             .find(|(pinned_storage, pinned_scan, _)| {
                 pinned_scan == qualifier
@@ -111,7 +131,8 @@ impl CteScope {
 
     /// Exact copy-row mark for one top-level FROM leaf in the active tuple recheck. Paths use 0/1 for left/right join descent and are scoped to the original `LockRows` source, so nested query aliases cannot collide.
     pub(in crate::sql) fn recheck_source_row(&self, path: &[u8]) -> Option<RecheckSourceRow> {
-        self.row_lock_recheck
+        self.row_lock_state()?
+            .recheck
             .as_ref()
             .and_then(|pins| pins.source_row(path))
     }
@@ -122,15 +143,21 @@ impl CteScope {
         qualifier: &str,
     ) -> RecheckStoragePinScope<'_> {
         let added = self
-            .row_lock_recheck
-            .as_ref()
+            .row_lock_state()
+            .and_then(|state| state.recheck.as_ref())
             .map(|pins| pins.storage_pins_for_identity_source(qualifier))
             .unwrap_or_default();
-        let previous = self.recheck_storage_pins.clone();
-        self.recheck_storage_pins.extend(added);
+        let previous = if added.is_empty() {
+            None
+        } else {
+            let state = self.row_lock_state_mut();
+            let previous = state.storage_pins.clone();
+            state.storage_pins.extend(added);
+            Some(previous)
+        };
         RecheckStoragePinScope {
             ctes: self,
-            previous: Some(previous),
+            previous,
         }
     }
 
@@ -201,10 +228,20 @@ impl CteScope {
         &mut self,
         locks: Vec<ResolvedRowLock>,
     ) -> SourceRowLockScope<'_> {
-        let previous = std::mem::replace(&mut self.source_row_locks, locks);
+        let existing_is_empty = self
+            .row_lock_state()
+            .is_none_or(|state| state.source_row_locks.is_empty());
+        let previous = if locks.is_empty() && existing_is_empty {
+            None
+        } else {
+            Some(std::mem::replace(
+                &mut self.row_lock_state_mut().source_row_locks,
+                locks,
+            ))
+        };
         SourceRowLockScope {
             ctes: self,
-            previous: Some(previous),
+            previous,
         }
     }
 
@@ -213,7 +250,8 @@ impl CteScope {
         qualifier: &str,
         storage_name: &str,
     ) -> Option<ResolvedRowLock> {
-        self.source_row_locks
+        self.row_lock_state()?
+            .source_row_locks
             .iter()
             .find(|target| {
                 target.identity_source
@@ -326,7 +364,7 @@ impl std::ops::DerefMut for RecheckStoragePinScope<'_> {
 impl Drop for RecheckStoragePinScope<'_> {
     fn drop(&mut self) {
         if let Some(previous) = self.previous.take() {
-            self.ctes.recheck_storage_pins = previous;
+            self.ctes.row_lock_state_mut().storage_pins = previous;
         }
     }
 }
@@ -348,7 +386,7 @@ impl std::ops::DerefMut for SourceRowLockScope<'_> {
 impl Drop for SourceRowLockScope<'_> {
     fn drop(&mut self) {
         if let Some(previous) = self.previous.take() {
-            self.ctes.source_row_locks = previous;
+            self.ctes.row_lock_state_mut().source_row_locks = previous;
         }
     }
 }
@@ -1085,7 +1123,7 @@ impl ScopedEngineHook<'_> {
     ) -> Result<CachedScalarSubquery, SQLError> {
         let mut scoped_ctes = self.ctes.clone();
         scoped_ctes.lock_identities.emit = false;
-        scoped_ctes.row_lock_outer_row = None;
+        scoped_ctes.clear_row_lock_outer_row();
         let output = execute_query_plan_output(
             self.engine,
             plan,
@@ -1218,5 +1256,23 @@ pub(in crate::sql) fn frame_bound_contains_subquery(bound: &ScalarFrameBound) ->
         ScalarFrameBound::UnboundedPreceding
         | ScalarFrameBound::UnboundedFollowing
         | ScalarFrameBound::CurrentRow => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CteScope;
+
+    #[test]
+    fn empty_row_lock_scopes_leave_non_locking_state_unallocated() {
+        let mut ctes = CteScope::new();
+        {
+            let _scope = ctes.enter_source_row_locks(Vec::new());
+        }
+        assert!(ctes.row_lock.is_none());
+        {
+            let _scope = ctes.enter_recheck_storage_pins("plain_source");
+        }
+        assert!(ctes.row_lock.is_none());
     }
 }

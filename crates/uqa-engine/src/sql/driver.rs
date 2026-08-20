@@ -21,6 +21,20 @@ pub(crate) fn execute(
     if let Err(error) = engine.cancellation_token().check() {
         return Err(abort_explicit_statement_error(engine, error.into()));
     }
+    if engine.storage.backend.is_none() && engine.transaction_depth() == 0 {
+        if let Some(plan) = engine.cached_optimized_sql_plan(sql) {
+            return UnifiedPlanExecutor::new(engine, params).execute(plan.as_ref());
+        }
+    }
+    execute_uncached_or_snapshot_scoped(engine, sql, params)
+}
+
+#[inline(never)]
+fn execute_uncached_or_snapshot_scoped(
+    engine: &Engine,
+    sql: &str,
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
     // Parse an uncached batch completely before executing its first statement.
     // This preserves syntax atomicity. Exact single-statement cache hits reuse
     // the parsed AST and logical plan; batches still lower each statement only
@@ -43,7 +57,6 @@ pub(crate) fn execute(
         if let Err(error) = engine.cancellation_token().check() {
             return Err(abort_explicit_statement_error(engine, error.into()));
         }
-        let _row_lock_statement = engine.begin_row_lock_statement();
         let mut executor = UnifiedPlanExecutor::new(engine, params);
         let (initial_plan, cached_optimized_plan) = if is_single_statement {
             if let Some(cached) = cached_entry.take() {
@@ -64,10 +77,15 @@ pub(crate) fn execute(
             last = executor.execute(initial_plan.as_ref())?;
             continue;
         }
-        let has_row_locks = match initial_plan.as_ref() {
-            uqa_planner::UnifiedPlan::Query(query) => query_has_row_locks(query),
-            uqa_planner::UnifiedPlan::Command(_) => false,
+        let (has_row_locks, needs_row_lock_statement) = match initial_plan.as_ref() {
+            uqa_planner::UnifiedPlan::Query(query) => {
+                let has_row_locks = query_has_row_locks(query);
+                (has_row_locks, has_row_locks)
+            }
+            uqa_planner::UnifiedPlan::Command(_) => (false, true),
         };
+        let _row_lock_statement =
+            needs_row_lock_statement.then(|| engine.begin_row_lock_statement());
 
         if engine.transaction_depth() != 0 {
             engine.ensure_transaction_usable()?;
