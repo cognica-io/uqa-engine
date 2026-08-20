@@ -190,6 +190,13 @@ impl Engine {
         !self.extensions.scalar_functions.read().is_empty()
     }
 
+    pub(crate) fn has_registered_scalar_function(&self, name: &str) -> bool {
+        self.extensions
+            .scalar_functions
+            .read()
+            .contains_key(&name.to_ascii_lowercase())
+    }
+
     pub(crate) fn call_registered_table_function(
         &self,
         name: &str,

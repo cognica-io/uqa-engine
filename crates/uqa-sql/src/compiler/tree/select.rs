@@ -15,6 +15,7 @@ use super::{
 pub(in crate::compiler) fn compile_select(
     stmt: &pg_query::protobuf::SelectStmt,
 ) -> Result<SelectStmt> {
+    let locking = super::locking::compile_locking_clauses(&stmt.locking_clause)?;
     if stmt.into_clause.is_some() {
         return Err(SQLError::Unsupported("SELECT INTO is not supported".into()));
     }
@@ -33,10 +34,25 @@ pub(in crate::compiler) fn compile_select(
             "FETCH ... WITH TIES is not supported".into(),
         ));
     }
-    if !stmt.locking_clause.is_empty() {
-        return Err(SQLError::Unsupported(
-            "SELECT row-locking clauses are not supported".into(),
-        ));
+    if stmt.op != pg_query::protobuf::SetOperation::SetopNone as i32 && !locking.is_empty() {
+        return Err(SQLError::Unsupported(format!(
+            "{} is not allowed with UNION/INTERSECT/EXCEPT",
+            locking[0].strength.sql_name()
+        )));
+    }
+    if stmt.op != pg_query::protobuf::SetOperation::SetopNone as i32 {
+        for operand in [stmt.larg.as_deref(), stmt.rarg.as_deref()]
+            .into_iter()
+            .flatten()
+        {
+            let operand_locking = super::locking::compile_locking_clauses(&operand.locking_clause)?;
+            if let Some(clause) = operand_locking.first() {
+                return Err(SQLError::Unsupported(format!(
+                    "{} is not allowed with UNION/INTERSECT/EXCEPT",
+                    clause.strength.sql_name()
+                )));
+            }
+        }
     }
     let from = compile_from_list(&stmt.from_clause)?;
     let projections = compile_projections(&stmt.target_list)?;
@@ -81,7 +97,7 @@ pub(in crate::compiler) fn compile_select(
     //     lives in `stmt.larg`. We preserve that full subtree on `SetOp::left`
     //     and mirror its basic clauses on the parent for output-column
     //     discovery and backward compatibility with serialized AST users.
-    let (projections, values, from, r#where, group_by, order_by, limit, offset) =
+    let (projections, values, mut from, r#where, group_by, order_by, limit, offset) =
         if set_op.is_some() {
             // Promote the outer (combined) clauses onto the SetOp and
             // replace the parent's clauses with the LHS branch's.
@@ -121,9 +137,12 @@ pub(in crate::compiler) fn compile_select(
             )
         };
 
-    let (distinct, distinct_on) = compile_distinct_clause(&stmt.distinct_clause)?;
+    if let Some(from) = from.as_mut() {
+        reduce_null_rejected_outer_joins_to_fixpoint(from, r#where.as_ref());
+    }
 
-    Ok(SelectStmt {
+    let (distinct, distinct_on) = compile_distinct_clause(&stmt.distinct_clause)?;
+    let mut compiled = SelectStmt {
         projections,
         values,
         from,
@@ -138,7 +157,248 @@ pub(in crate::compiler) fn compile_select(
         set_op,
         distinct,
         distinct_on,
-    })
+        locking,
+    };
+    super::locking::propagate_select_locking(&mut compiled)?;
+    super::locking::validate_select_locking(&compiled)?;
+    Ok(compiled)
+}
+
+/// `PostgreSQL`'s planner reduces an outer join before row-lock validation when a qualification cannot be true for the join's null-extended side. The WHERE clause always qualifies; once a join is (or becomes) inner, its ON condition also filters every row and joins nested below it can reduce through it, so the rewrite iterates to a fixpoint. Keeping the rewrite in the typed tree lets execution and validation see the same effective join kind.
+fn reduce_null_rejected_outer_joins_to_fixpoint(from: &mut FromClause, predicate: Option<&Expr>) {
+    loop {
+        let mut quals: Vec<Expr> = predicate.iter().map(|expr| (*expr).clone()).collect();
+        collect_inner_join_quals(from, &mut quals);
+        let mut changed = false;
+        for qual in &quals {
+            changed |= reduce_null_rejected_outer_joins(from, qual);
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
+/// ON conditions of joins that are inner (or reduced to inner) and every join above them is inner as well, so the condition applies to all rows the enclosing FROM item can produce.
+fn collect_inner_join_quals(from: &FromClause, quals: &mut Vec<Expr>) {
+    let FromClause::Join {
+        left,
+        right,
+        kind,
+        on,
+        ..
+    } = from
+    else {
+        return;
+    };
+    if !matches!(kind, JoinKind::Inner) {
+        return;
+    }
+    if let Some(on) = on.as_ref() {
+        quals.push(on.clone());
+    }
+    collect_inner_join_quals(left, quals);
+    collect_inner_join_quals(right, quals);
+}
+
+fn reduce_null_rejected_outer_joins(from: &mut FromClause, predicate: &Expr) -> bool {
+    let FromClause::Join {
+        left, right, kind, ..
+    } = from
+    else {
+        return false;
+    };
+    let mut left_names = std::collections::BTreeSet::new();
+    let mut right_names = std::collections::BTreeSet::new();
+    collect_visible_qualifiers(left, &mut left_names);
+    collect_visible_qualifiers(right, &mut right_names);
+    let rejects_left = predicate_rejects_null_extended_side(predicate, &left_names);
+    let rejects_right = predicate_rejects_null_extended_side(predicate, &right_names);
+    let reduced = match (*kind, rejects_left, rejects_right) {
+        (JoinKind::Left, _, true) | (JoinKind::Right, true, _) => JoinKind::Inner,
+        (JoinKind::Full, true, true) => JoinKind::Inner,
+        (JoinKind::Full, true, false) => JoinKind::Left,
+        (JoinKind::Full, false, true) => JoinKind::Right,
+        (kind, _, _) => kind,
+    };
+    let mut changed = reduced != *kind;
+    *kind = reduced;
+    changed |= reduce_null_rejected_outer_joins(left, predicate);
+    changed |= reduce_null_rejected_outer_joins(right, predicate);
+    changed
+}
+
+fn collect_visible_qualifiers(from: &FromClause, names: &mut std::collections::BTreeSet<String>) {
+    match from {
+        FromClause::Table {
+            name,
+            qualifier,
+            alias,
+        } => {
+            if let Some(alias) = alias {
+                names.insert(alias.clone());
+            } else {
+                names.insert(qualifier.clone());
+                names.insert(name.clone());
+                if let Some((_, local)) = name.rsplit_once('.') {
+                    names.insert(local.to_string());
+                }
+            }
+        }
+        FromClause::Join { left, right, .. } => {
+            collect_visible_qualifiers(left, names);
+            collect_visible_qualifiers(right, names);
+        }
+        FromClause::Values { alias, .. }
+        | FromClause::Subquery { alias, .. }
+        | FromClause::Function { alias, .. } => {
+            if let Some(alias) = alias {
+                names.insert(alias.clone());
+            }
+        }
+    }
+}
+
+const TRUTH_FALSE: u8 = 1;
+const TRUTH_TRUE: u8 = 2;
+const TRUTH_NULL: u8 = 4;
+const TRUTH_ANY: u8 = TRUTH_FALSE | TRUTH_TRUE | TRUTH_NULL;
+
+fn predicate_rejects_null_extended_side(
+    expression: &Expr,
+    qualifiers: &std::collections::BTreeSet<String>,
+) -> bool {
+    !qualifiers.is_empty() && truth_values_with_null_side(expression, qualifiers) & TRUTH_TRUE == 0
+}
+
+fn truth_values_with_null_side(
+    expression: &Expr,
+    qualifiers: &std::collections::BTreeSet<String>,
+) -> u8 {
+    match expression {
+        Expr::Literal(Value::Bool(value)) => {
+            if *value {
+                TRUTH_TRUE
+            } else {
+                TRUTH_FALSE
+            }
+        }
+        Expr::Literal(Value::Null) => TRUTH_NULL,
+        Expr::IsNull { expr, negated } if expression_is_null_with_side(expr, qualifiers) => {
+            if *negated {
+                TRUTH_FALSE
+            } else {
+                TRUTH_TRUE
+            }
+        }
+        Expr::Between {
+            expr, low, high, ..
+        } => {
+            let value_is_null = expression_is_null_with_side(expr, qualifiers);
+            let low_is_null = expression_is_null_with_side(low, qualifiers);
+            let high_is_null = expression_is_null_with_side(high, qualifiers);
+            if value_is_null || (low_is_null && high_is_null) {
+                TRUTH_NULL
+            } else if low_is_null || high_is_null {
+                TRUTH_FALSE | TRUTH_NULL
+            } else {
+                TRUTH_ANY
+            }
+        }
+        expression if expression_is_null_with_side(expression, qualifiers) => TRUTH_NULL,
+        Expr::Not(inner) => negate_truth_values(truth_values_with_null_side(inner, qualifiers)),
+        Expr::And(items) => items.iter().fold(TRUTH_TRUE, |left, right| {
+            combine_truth_values(left, truth_values_with_null_side(right, qualifiers), true)
+        }),
+        Expr::Or(items) => items.iter().fold(TRUTH_FALSE, |left, right| {
+            combine_truth_values(left, truth_values_with_null_side(right, qualifiers), false)
+        }),
+        _ => TRUTH_ANY,
+    }
+}
+
+/// Whether `expression` is certainly NULL when every column of the given qualifiers is NULL.
+fn expression_is_null_with_side(
+    expression: &Expr,
+    qualifiers: &std::collections::BTreeSet<String>,
+) -> bool {
+    match expression {
+        Expr::Literal(Value::Null) => true,
+        Expr::QualifiedColumn { qualifier, .. } => qualifiers.contains(qualifier),
+        Expr::Binary { lhs, rhs, .. } => {
+            expression_is_null_with_side(lhs, qualifiers)
+                || expression_is_null_with_side(rhs, qualifiers)
+        }
+        Expr::UnaryMinus(inner) | Expr::Cast { expr: inner, .. } => {
+            expression_is_null_with_side(inner, qualifiers)
+        }
+        Expr::Between {
+            expr, low, high, ..
+        } => {
+            expression_is_null_with_side(expr, qualifiers)
+                || (expression_is_null_with_side(low, qualifiers)
+                    && expression_is_null_with_side(high, qualifiers))
+        }
+        Expr::InList { expr, .. } => expression_is_null_with_side(expr, qualifiers),
+        Expr::Func {
+            name,
+            args,
+            distinct: _,
+            order_by: _,
+            filter: _,
+            binding: _,
+        } if crate::expr::builtin_scalar_function_strictness(name, args.len()) == Some(true) => {
+            args.iter()
+                .map(function_argument_value)
+                .any(|argument| expression_is_null_with_side(argument, qualifiers))
+        }
+        _ => false,
+    }
+}
+
+fn function_argument_value(expression: &Expr) -> &Expr {
+    let Expr::Func { name, args, .. } = expression else {
+        return expression;
+    };
+    if name == crate::expr::NAMED_ARG_FUNCTION {
+        args.get(1).unwrap_or(expression)
+    } else {
+        expression
+    }
+}
+
+fn negate_truth_values(values: u8) -> u8 {
+    (u8::from(values & TRUTH_FALSE != 0) * TRUTH_TRUE)
+        | (u8::from(values & TRUTH_TRUE != 0) * TRUTH_FALSE)
+        | (values & TRUTH_NULL)
+}
+
+fn combine_truth_values(left: u8, right: u8, and: bool) -> u8 {
+    let mut output = 0;
+    for lhs in [TRUTH_FALSE, TRUTH_TRUE, TRUTH_NULL] {
+        if left & lhs == 0 {
+            continue;
+        }
+        for rhs in [TRUTH_FALSE, TRUTH_TRUE, TRUTH_NULL] {
+            if right & rhs == 0 {
+                continue;
+            }
+            output |= if and {
+                match (lhs, rhs) {
+                    (TRUTH_FALSE, _) | (_, TRUTH_FALSE) => TRUTH_FALSE,
+                    (TRUTH_TRUE, TRUTH_TRUE) => TRUTH_TRUE,
+                    _ => TRUTH_NULL,
+                }
+            } else {
+                match (lhs, rhs) {
+                    (TRUTH_TRUE, _) | (_, TRUTH_TRUE) => TRUTH_TRUE,
+                    (TRUTH_FALSE, TRUTH_FALSE) => TRUTH_FALSE,
+                    _ => TRUTH_NULL,
+                }
+            };
+        }
+    }
+    output
 }
 
 pub(in crate::compiler) fn compile_values_lists(nodes: &[Node]) -> Result<Vec<Vec<Expr>>> {

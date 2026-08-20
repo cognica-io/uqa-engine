@@ -18,20 +18,42 @@ use super::{ProjectedExpr, ProjectedIntPredicate};
 use crate::PhysicalRowView;
 
 static NULL_VALUE: Value = Value::Null;
+const MISSING_INDEXED_FIELD_SLOT: usize = usize::MAX;
 
 trait FieldValues {
     fn field(&self, index: usize) -> &Value;
 }
 
 impl FieldValues for [&Value] {
+    #[inline]
     fn field(&self, index: usize) -> &Value {
         self.get(index).copied().unwrap_or(&NULL_VALUE)
     }
 }
 
 impl FieldValues for PhysicalRowView<'_> {
+    #[inline]
     fn field(&self, index: usize) -> &Value {
         self.value_at(index).unwrap_or(&NULL_VALUE)
+    }
+}
+
+struct IndexedFieldValues<'a> {
+    values: &'a [Value],
+    projection: &'a [usize],
+}
+
+impl FieldValues for IndexedFieldValues<'_> {
+    #[inline]
+    fn field(&self, index: usize) -> &Value {
+        let Some(&slot) = self.projection.get(index) else {
+            return &NULL_VALUE;
+        };
+        if slot == MISSING_INDEXED_FIELD_SLOT {
+            &NULL_VALUE
+        } else {
+            self.values.get(slot).unwrap_or(&NULL_VALUE)
+        }
     }
 }
 
@@ -49,15 +71,141 @@ impl ProjectedValue<'_> {
     }
 }
 
+#[inline]
 pub(super) fn keep(expression: &ProjectedExpr, fields: &[&Value]) -> Result<bool, SQLError> {
-    evaluate_truth(expression, fields).map(|truth| truth == Some(true))
+    keep_fields(expression, fields)
 }
 
+#[inline]
 pub(super) fn keep_row(
     expression: &ProjectedExpr,
     row: &PhysicalRowView<'_>,
 ) -> Result<bool, SQLError> {
-    evaluate_truth(expression, row).map(|truth| truth == Some(true))
+    keep_fields(expression, row)
+}
+
+#[inline]
+pub(super) fn keep_indexed(
+    expression: &ProjectedExpr,
+    values: &[Value],
+    projection: &[usize],
+) -> Result<bool, SQLError> {
+    keep_fields(expression, &IndexedFieldValues { values, projection })
+}
+
+#[inline]
+fn keep_fields<F: FieldValues + ?Sized>(
+    expression: &ProjectedExpr,
+    fields: &F,
+) -> Result<bool, SQLError> {
+    if let Some(keep) = try_keep_integer_fields(expression, fields) {
+        return Ok(keep);
+    }
+    keep_fields_slow(expression, fields)
+}
+
+#[inline]
+fn try_keep_integer_fields<F: FieldValues + ?Sized>(
+    expression: &ProjectedExpr,
+    fields: &F,
+) -> Option<bool> {
+    match expression {
+        ProjectedExpr::IntFieldComparison {
+            field,
+            op,
+            literal,
+            field_on_left,
+        } => try_keep_int_comparison(fields.field(*field), *op, *literal, *field_on_left),
+        ProjectedExpr::IntFieldBetween { field, low, high } => {
+            try_keep_int_between(fields.field(*field), *low, *high)
+        }
+        ProjectedExpr::IntFieldConjunction(items) => try_keep_int_conjunction(items, fields),
+        _ => None,
+    }
+}
+
+#[inline]
+fn try_keep_int_conjunction<F: FieldValues + ?Sized>(
+    items: &[ProjectedIntPredicate],
+    fields: &F,
+) -> Option<bool> {
+    if let [first, second, third] = items {
+        if !try_keep_int_predicate(first, fields)? {
+            return Some(false);
+        }
+        if !try_keep_int_predicate(second, fields)? {
+            return Some(false);
+        }
+        return try_keep_int_predicate(third, fields);
+    }
+    for item in items {
+        let keep = try_keep_int_predicate(item, fields)?;
+        if !keep {
+            return Some(false);
+        }
+    }
+    Some(true)
+}
+
+#[inline]
+fn try_keep_int_predicate<F: FieldValues + ?Sized>(
+    predicate: &ProjectedIntPredicate,
+    fields: &F,
+) -> Option<bool> {
+    match predicate {
+        ProjectedIntPredicate::Comparison {
+            field,
+            op,
+            literal,
+            field_on_left,
+        } => try_keep_int_comparison(fields.field(*field), *op, *literal, *field_on_left),
+        ProjectedIntPredicate::Between { field, low, high } => {
+            try_keep_int_between(fields.field(*field), *low, *high)
+        }
+    }
+}
+
+#[inline]
+fn try_keep_int_comparison(
+    field: &Value,
+    op: BinaryOp,
+    literal: i64,
+    field_on_left: bool,
+) -> Option<bool> {
+    let Value::Int(field) = field else {
+        return matches!(field, Value::Null).then_some(false);
+    };
+    let (lhs, rhs) = if field_on_left {
+        (*field, literal)
+    } else {
+        (literal, *field)
+    };
+    match op {
+        BinaryOp::Equal => Some(lhs == rhs),
+        BinaryOp::NotEqual => Some(lhs != rhs),
+        BinaryOp::Less => Some(lhs < rhs),
+        BinaryOp::LessEqual => Some(lhs <= rhs),
+        BinaryOp::Greater => Some(lhs > rhs),
+        BinaryOp::GreaterEqual => Some(lhs >= rhs),
+        _ => None,
+    }
+}
+
+#[inline]
+fn try_keep_int_between(field: &Value, low: i64, high: i64) -> Option<bool> {
+    match field {
+        Value::Null => Some(false),
+        Value::Int(value) => Some(*value >= low && *value <= high),
+        _ => None,
+    }
+}
+
+#[inline(never)]
+fn keep_fields_slow<F: FieldValues + ?Sized>(
+    expression: &ProjectedExpr,
+    fields: &F,
+) -> Result<bool, SQLError> {
+    evaluate_truth(expression, fields).map(|truth| truth == Some(true))
 }
 
 fn evaluate_truth<F: FieldValues + ?Sized>(
@@ -259,6 +407,8 @@ fn evaluate_int_comparison(
     )?))
 }
 
+/// Keep non-integer coercion and error construction out of the integer scan loop while retaining one compact, stable code body for every caller.
+#[inline(never)]
 fn evaluate_int_comparison_truth(
     field: &Value,
     op: BinaryOp,
@@ -269,12 +419,7 @@ fn evaluate_int_comparison_truth(
         if matches!(field, Value::Null) {
             return Ok(None);
         }
-        let literal = Value::Int(literal);
-        return if field_on_left {
-            eval_comparison_truth(op, field, &literal)
-        } else {
-            eval_comparison_truth(op, &literal, field)
-        };
+        return evaluate_non_integer_comparison(field, op, literal, field_on_left);
     };
     let (lhs, rhs) = if field_on_left {
         (*field, literal)
@@ -288,13 +433,33 @@ fn evaluate_int_comparison_truth(
         BinaryOp::LessEqual => lhs <= rhs,
         BinaryOp::Greater => lhs > rhs,
         BinaryOp::GreaterEqual => lhs >= rhs,
-        _ => {
-            return Err(SQLError::Internal(format!(
-                "non-comparison operator {op:?} reached integer predicate"
-            )))
-        }
+        _ => return Err(invalid_int_comparison_operator(op)),
     };
     Ok(Some(result))
+}
+
+#[cold]
+#[inline(never)]
+fn evaluate_non_integer_comparison(
+    field: &Value,
+    op: BinaryOp,
+    literal: i64,
+    field_on_left: bool,
+) -> Result<Option<bool>, SQLError> {
+    let literal = Value::Int(literal);
+    if field_on_left {
+        eval_comparison_truth(op, field, &literal)
+    } else {
+        eval_comparison_truth(op, &literal, field)
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn invalid_int_comparison_operator(op: BinaryOp) -> SQLError {
+    SQLError::Internal(format!(
+        "non-comparison operator {op:?} reached integer predicate"
+    ))
 }
 
 fn evaluate_int_between(field: &Value, low: i64, high: i64) -> Result<Value, SQLError> {
@@ -311,14 +476,22 @@ fn evaluate_int_between_truth(
     match field {
         Value::Null => Ok(None),
         Value::Int(value) => Ok(Some(*value >= low && *value <= high)),
-        value => {
-            let low = Value::Int(low);
-            let high = Value::Int(high);
-            let lower = eval_comparison_truth(BinaryOp::GreaterEqual, value, &low)?;
-            let upper = eval_comparison_truth(BinaryOp::LessEqual, value, &high)?;
-            Ok(and_truth(lower, upper))
-        }
+        value => evaluate_non_integer_between(value, low, high),
     }
+}
+
+#[cold]
+#[inline(never)]
+fn evaluate_non_integer_between(
+    value: &Value,
+    low: i64,
+    high: i64,
+) -> Result<Option<bool>, SQLError> {
+    let low = Value::Int(low);
+    let high = Value::Int(high);
+    let lower = eval_comparison_truth(BinaryOp::GreaterEqual, value, &low)?;
+    let upper = eval_comparison_truth(BinaryOp::LessEqual, value, &high)?;
+    Ok(and_truth(lower, upper))
 }
 
 fn evaluate_truth_and<F: FieldValues + ?Sized>(

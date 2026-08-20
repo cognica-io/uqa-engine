@@ -49,7 +49,10 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
             // Standalone `VALUES (...) (...)` parses as a SelectStmt
             // with empty target_list + populated values_lists. Treat
             // it as a relation-producing statement directly.
-            if stmt.target_list.is_empty() && !stmt.values_lists.is_empty() {
+            if stmt.target_list.is_empty()
+                && !stmt.values_lists.is_empty()
+                && stmt.locking_clause.is_empty()
+            {
                 let rows = compile_values_lists(&stmt.values_lists)?;
                 return Ok(Statement::Values { rows });
             }

@@ -6,6 +6,13 @@
 
 use super::*;
 use std::collections::BTreeMap;
+use std::sync::Arc;
+
+#[test]
+#[cfg(target_pointer_width = "64")]
+fn physical_row_stays_within_the_pre_lineage_footprint() {
+    assert!(std::mem::size_of::<PhysicalRow>() <= 208);
+}
 
 #[test]
 fn qualified_schema_lookup_reads_positional_values() {
@@ -87,6 +94,54 @@ fn join_composes_fragments_without_cloning_values() {
 }
 
 #[test]
+fn lock_rows_clone_keeps_shared_fragments_and_concatenated_origins() {
+    let left = PhysicalRow::from_values(vec![Value::Str("left".repeat(128))])
+        .with_lock_origin(RowLockOrigin::new("accounts", "public.accounts", 1));
+    let right = PhysicalRow::from_values(vec![Value::Str("right".repeat(128))])
+        .with_lock_origin(RowLockOrigin::new("owners", "public.owners", 2));
+    let left_fragment = Arc::clone(&left.fragments[0].values);
+    let right_fragment = Arc::clone(&right.fragments[0].values);
+    let joined = PhysicalRow::concat(&left, &right);
+    let locked = joined.clone();
+
+    assert_eq!(locked.fragment_count(), 2);
+    assert!(Arc::ptr_eq(&locked.fragments[0].values, &left_fragment));
+    assert!(Arc::ptr_eq(&locked.fragments[1].values, &right_fragment));
+    assert_eq!(locked.lock_origins().len(), 2);
+    assert_eq!(locked.lock_origins()[0].doc_id, 1);
+    assert_eq!(locked.lock_origins()[1].doc_id, 2);
+}
+
+#[test]
+fn lock_origin_metadata_is_absent_by_default_and_shared_by_clone() {
+    let clean = PhysicalRow::from_values(vec![Value::Int(1)]);
+    assert!(clean.lock_origins.is_none());
+
+    let locked = clean.with_lock_origin(RowLockOrigin::new("accounts", "public.accounts", 1));
+    let cloned = locked.clone();
+    assert!(Arc::ptr_eq(
+        locked.lock_origins.as_ref().unwrap(),
+        cloned.lock_origins.as_ref().unwrap()
+    ));
+}
+
+#[test]
+fn rebind_lock_origin_qualifiers_keeps_storage_names() {
+    let row = PhysicalRow::from_values(vec![Value::Int(1)]).with_lock_origin(RowLockOrigin::new(
+        "accounts",
+        "public.accounts",
+        7,
+    ));
+    let rebound = row.rebind_lock_origin_qualifiers(Arc::<str>::from("balances"));
+    assert_eq!(rebound.lock_origins()[0].qualifier.as_ref(), "balances");
+    assert_eq!(
+        rebound.lock_origins()[0].storage_name.as_ref(),
+        "public.accounts"
+    );
+    assert_eq!(rebound.lock_origins()[0].doc_id, 7);
+}
+
+#[test]
 fn selection_renames_by_remapping_slots() {
     let input = RowSchema::new(vec!["source".into(), "value".into()]);
     let output = RowSchema::select(&input, &[("renamed".into(), "value".into())]);
@@ -154,6 +209,77 @@ fn canonical_projection_preserves_public_columns_and_hidden_alias_slots() {
     );
     assert!(Arc::ptr_eq(&row.fragments[0].values, &projected_values));
     assert!(Arc::ptr_eq(&row.fragments[1].values, &source_values));
+}
+
+#[test]
+fn physical_relayout_shares_fragments_and_restores_hidden_alias_slots() {
+    let identity = ColumnIdentity::qualified("source", "value");
+    let source_schema = RowSchema::from_physical_layout(
+        vec!["value".into()],
+        vec![ColumnIdentity::unqualified("value")],
+        vec![None],
+        vec![Some(0)],
+        2,
+        vec![(identity.clone(), Some(1), None)],
+    )
+    .unwrap();
+    let target_schema = RowSchema::from_physical_layout(
+        vec!["value".into()],
+        vec![ColumnIdentity::unqualified("value")],
+        vec![None],
+        vec![Some(1)],
+        2,
+        vec![(identity, Some(0), None)],
+    )
+    .unwrap();
+    let row = PhysicalRow::from_values(vec![
+        Value::Str("projected".into()),
+        Value::Str("source".into()),
+    ])
+    .with_lock_origin(RowLockOrigin::new("source", "public.source", 7));
+    let stored = Arc::clone(&row.fragments[0].values);
+
+    let relaid = source_schema
+        .relayout_physical_row(row, &target_schema)
+        .unwrap();
+    let view = target_schema.view(&relaid);
+
+    assert_eq!(view.get("value"), Some(&Value::Str("projected".into())));
+    assert_eq!(
+        view.qualified_column("source", "value"),
+        Some(&Value::Str("source".into()))
+    );
+    assert!(Arc::ptr_eq(&relaid.fragments[0].values, &stored));
+    assert_eq!(relaid.lock_origins().len(), 1);
+}
+
+#[test]
+fn mixed_projection_clones_neither_direct_values_nor_lock_origins() {
+    let source = PhysicalRow::from_values(vec![
+        Value::Str("first".repeat(64)),
+        Value::Str("second".repeat(64)),
+    ])
+    .with_lock_origin(RowLockOrigin::new("source", "public.source", 11));
+    let stored = Arc::clone(&source.fragments[0].values);
+    let origins = Arc::clone(source.lock_origins.as_ref().unwrap());
+
+    let projected = source.project_with_values([
+        RowProjectionValue::InputSlot(1),
+        RowProjectionValue::Owned(Value::Int(7)),
+        RowProjectionValue::InputSlot(0),
+    ]);
+    let schema = RowSchema::new(vec!["second".into(), "computed".into(), "first".into()]);
+    let view = schema.view(&projected);
+
+    assert_eq!(view.get("second"), stored.get(1));
+    assert_eq!(view.get("computed"), Some(&Value::Int(7)));
+    assert_eq!(view.get("first"), stored.first());
+    assert!(Arc::ptr_eq(&projected.fragments[0].values, &stored));
+    assert!(Arc::ptr_eq(&projected.fragments[2].values, &stored));
+    assert!(Arc::ptr_eq(
+        projected.lock_origins.as_ref().unwrap(),
+        &origins
+    ));
 }
 
 #[test]
@@ -241,6 +367,41 @@ fn result_materialization_reads_shared_projection_without_changing_storage() {
         ])]
     );
     assert_eq!(stored[0], Value::Str("unused".into()));
+}
+
+#[test]
+fn remapped_result_materialization_reads_a_shared_fragment_without_rebuilding_it() {
+    let source = RowSchema::new(vec!["first".into(), "unused".into(), "last".into()]);
+    let selected = RowSchema::select(
+        &source,
+        &[
+            ("renamed_last".into(), "last".into()),
+            ("renamed_first".into(), "first".into()),
+        ],
+    );
+    let stored = Arc::new(vec![
+        Value::Str("first payload".into()),
+        Value::Str("unused payload".into()),
+        Value::Str("last payload".into()),
+    ]);
+    let row = PhysicalRow::from_shared_values(Arc::clone(&stored), Arc::from([0, 1, 2]));
+    let batch = Batch::from_physical_rows(selected, vec![row]);
+
+    assert_eq!(
+        batch.into_result_rows(),
+        vec![BTreeMap::from([
+            ("renamed_first".into(), Value::Str("first payload".into())),
+            ("renamed_last".into(), Value::Str("last payload".into())),
+        ])]
+    );
+    assert_eq!(
+        stored.as_slice(),
+        [
+            Value::Str("first payload".into()),
+            Value::Str("unused payload".into()),
+            Value::Str("last payload".into()),
+        ]
+    );
 }
 
 #[test]

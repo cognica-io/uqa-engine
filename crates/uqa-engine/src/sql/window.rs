@@ -69,7 +69,7 @@ pub(super) struct PhysicalWindowExecutor<'a> {
     engine: &'a Engine,
     plan: PreparedWindowPlan,
     params: &'a [SQLParam],
-    ctes: &'a CteScope,
+    ctes: CteScope,
     schema: RowSchema,
     work_mem_bytes: usize,
     input: Option<SpillBuffer>,
@@ -80,7 +80,7 @@ impl<'a> PhysicalWindowExecutor<'a> {
         engine: &'a Engine,
         plan: PreparedWindowPlan,
         params: &'a [SQLParam],
-        ctes: &'a CteScope,
+        ctes: &CteScope,
         schema: RowSchema,
         work_mem_bytes: usize,
     ) -> Self {
@@ -88,7 +88,7 @@ impl<'a> PhysicalWindowExecutor<'a> {
             engine,
             plan,
             params,
-            ctes,
+            ctes: ctes.clone(),
             schema,
             work_mem_bytes,
             input: Some(SpillBuffer::new((work_mem_bytes / 3).max(1))),
@@ -118,7 +118,7 @@ impl WindowExecutor for PhysicalWindowExecutor<'_> {
             &self.schema,
             self.work_mem_bytes,
             self.params,
-            self.ctes,
+            &self.ctes,
         )?)
     }
 }

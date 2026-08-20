@@ -233,29 +233,5 @@ pub(super) fn lower_scalar_frame_bound(
 }
 
 pub(crate) fn is_builtin_aggregate(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "count"
-            | "sum"
-            | "avg"
-            | "min"
-            | "max"
-            | "string_agg"
-            | "array_agg"
-            | "bool_and"
-            | "bool_or"
-            | "stddev"
-            | "stddev_samp"
-            | "stddev_pop"
-            | "variance"
-            | "var_samp"
-            | "var_pop"
-            | "percentile_cont"
-            | "percentile_disc"
-            | "mode"
-            | "json_agg"
-            | "jsonb_agg"
-            | "json_object_agg"
-            | "jsonb_object_agg"
-    )
+    uqa_sql::ast::is_builtin_aggregate_function(name)
 }

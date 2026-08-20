@@ -153,9 +153,12 @@ impl Engine {
         doc_id: DocId,
         document: Document,
     ) -> Result<(), SQLError> {
-        self.with_implicit_transaction(|engine| {
-            engine.add_document_impl(table, doc_id, document, false)
-        })
+        self.with_implicit_row_write_transaction(
+            table,
+            doc_id,
+            uqa_sql::ast::LockStrength::ForUpdate,
+            |engine| engine.add_document_impl(table, doc_id, document, false),
+        )
     }
 
     pub(crate) fn add_document_impl(
@@ -187,6 +190,15 @@ impl Engine {
             .map_err(|err| SQLError::Internal(format!("resolve table `{table}`: {err}")))?
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
+        };
+        let existed = if known_new {
+            false
+        } else {
+            t.document_store
+                .read()
+                .get(doc_id)
+                .map_err(|error| SQLError::Internal(format!("read existing document: {error}")))?
+                .is_some()
         };
         // Index the FTS fields whose values are strings.
         let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
@@ -250,6 +262,12 @@ impl Engine {
         let next = u128::from(doc_id) + 1;
         if next > *nx {
             *nx = next;
+        }
+        drop(nx);
+        if existed {
+            self.note_row_changed(&table_name, doc_id)?;
+        } else {
+            self.note_row_inserted(&table_name, doc_id)?;
         }
         Ok(())
     }

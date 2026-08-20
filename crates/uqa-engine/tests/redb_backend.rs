@@ -211,6 +211,38 @@ fn engine_sessions_share_commits_but_not_transaction_state() {
 }
 
 #[test]
+fn sql_begin_promotes_redb_read_transactions_before_writes_and_savepoints() {
+    let directory = tempdir().unwrap();
+    let engine = open_engine(&directory.path().join("sql-transaction-promotion.redb"));
+
+    engine.sql("BEGIN", &[]).unwrap();
+    engine
+        .sql("CREATE TABLE items (id INTEGER PRIMARY KEY)", &[])
+        .unwrap();
+    engine.sql("COMMIT", &[]).unwrap();
+
+    engine.sql("BEGIN", &[]).unwrap();
+    engine.sql("SAVEPOINT before_insert", &[]).unwrap();
+    engine.sql("INSERT INTO items VALUES (1)", &[]).unwrap();
+    engine
+        .sql("ROLLBACK TO SAVEPOINT before_insert", &[])
+        .unwrap();
+    engine.sql("RELEASE SAVEPOINT before_insert", &[]).unwrap();
+    engine.sql("COMMIT", &[]).unwrap();
+
+    assert!(engine
+        .sql("SELECT id FROM items", &[])
+        .unwrap()
+        .rows
+        .is_empty());
+
+    engine.sql("BEGIN", &[]).unwrap();
+    engine.create_sequence("mixed_api", 1, 1, false).unwrap();
+    engine.sql("COMMIT", &[]).unwrap();
+    assert!(engine.sequence_state("mixed_api").unwrap().is_some());
+}
+
+#[test]
 fn engine_rollback_restores_catalog_and_documents_together() {
     let directory = tempdir().unwrap();
     let engine = open_engine(&directory.path().join("rollback.redb"));
@@ -711,4 +743,36 @@ fn assert_table_indexes_are_physically_removed(path: &std::path::Path) {
         .btree_index_fields("public.archived")
         .unwrap()
         .is_empty());
+}
+
+#[test]
+fn independently_constructed_redb_engines_share_row_locks() {
+    let directory = tempdir().unwrap();
+    let storage: Arc<dyn PersistentStorageProvider> = Arc::new(
+        RedbStorage::open(directory.path().join("shared-locks.redb")).expect("open redb storage"),
+    );
+    let holder =
+        Engine::from_persistent_provider(Arc::clone(&storage)).expect("open holder engine");
+    holder
+        .sql(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, v INTEGER)",
+            &[],
+        )
+        .unwrap();
+    holder.sql("INSERT INTO items VALUES (1, 10)", &[]).unwrap();
+    let contender =
+        Engine::from_persistent_provider(Arc::clone(&storage)).expect("open contender engine");
+
+    holder.sql("BEGIN", &[]).unwrap();
+    holder
+        .sql("SELECT id FROM items WHERE id = 1 FOR UPDATE", &[])
+        .unwrap();
+    let error = contender
+        .sql("SELECT id FROM items WHERE id = 1 FOR UPDATE NOWAIT", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("55P03"));
+    holder.sql("COMMIT", &[]).unwrap();
+    contender
+        .sql("SELECT id FROM items WHERE id = 1 FOR UPDATE NOWAIT", &[])
+        .unwrap();
 }

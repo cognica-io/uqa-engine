@@ -105,16 +105,19 @@ pub(super) fn bind_query_plan_relations<E>(
     inherited_ctes: &std::collections::BTreeSet<String>,
     resolve: &mut impl FnMut(&str) -> Result<String, E>,
 ) -> Result<(), E> {
-    // Non-recursive CTEs see outer and preceding CTEs. A recursive CTE also
-    // sees its own name while its body is bound. This mirrors materialization
-    // order and prevents a real table with the same local name from being
-    // mistaken for a CTE (or vice versa).
+    // Non-recursive CTEs see outer and preceding CTEs. WITH RECURSIVE makes every sibling visible while each body is bound, after which execution orders dependencies before their consumers.
     let mut visible_ctes = inherited_ctes.clone();
+    let recursive_ctes = plan.ctes.iter().any(|cte| cte.recursive).then(|| {
+        plan.ctes
+            .iter()
+            .map(|cte| cte.name.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+    });
     for cte in &mut plan.ctes {
-        let mut body_ctes = visible_ctes.clone();
-        if cte.recursive {
-            body_ctes.insert(cte.name.clone());
-        }
+        let body_ctes = recursive_ctes.as_ref().map_or_else(
+            || visible_ctes.clone(),
+            |ctes| inherited_ctes.union(ctes).cloned().collect(),
+        );
         bind_query_plan_relations(&mut cte.query, &body_ctes, resolve)?;
         visible_ctes.insert(cte.name.clone());
     }

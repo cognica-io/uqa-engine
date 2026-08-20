@@ -239,6 +239,16 @@ fn set_operations_coerce_rows_and_expose_the_postgresql_common_type() {
     assert_eq!(unknown_integer.column_types, [Some(ColumnType::Integer)]);
     assert_eq!(unknown_integer.rows[1]["value"], Value::Int(2));
 
+    let null_integer = eng
+        .sql(
+            "SELECT NULL AS value UNION ALL SELECT 2::bigint AS value",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(null_integer.column_types, [Some(ColumnType::BigInteger)]);
+    assert_eq!(null_integer.rows[0]["value"], Value::Null);
+    assert_eq!(null_integer.rows[1]["value"], Value::Int(2));
+
     let dates = eng
         .sql(
             "SELECT DATE '2020-01-01' AS value UNION ALL SELECT '2020-01-02' AS value",

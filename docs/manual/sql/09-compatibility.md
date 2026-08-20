@@ -46,7 +46,6 @@ These forms currently fail during compilation without creating a partial object.
 - `GROUP BY DISTINCT`
 - Named `WINDOW` clauses
 - `FETCH ... WITH TIES`
-- `SELECT` row-locking clauses such as `FOR UPDATE`
 - Recursive CTE `SEARCH` and `CYCLE`
 - CTE `NOT MATERIALIZED`
 - Explicit `ESCAPE` for `LIKE`, `ILIKE`, and `SIMILAR TO`

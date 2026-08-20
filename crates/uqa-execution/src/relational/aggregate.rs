@@ -8,8 +8,7 @@
 
 use super::{
     compare_values, eval_scalar, Batch, DefaultExpressionEvaluator, ExecError, ExecResult,
-    PhysicalOperator, ResultRow, RowSchema, SQLParam, ScalarEvalContext, ScalarExpr, SortKey,
-    Value,
+    PhysicalOperator, RowSchema, SQLParam, ScalarEvalContext, ScalarExpr, SortKey, Value,
 };
 use crate::ProjectedRow;
 
@@ -56,6 +55,11 @@ pub trait AggregateExecutor: Send {
     /// Whether this executor can fold a borrowed, positional row without a
     /// materialized `ResultRow`. A source checks this before advancing.
     fn supports_projected_rows(&self) -> bool {
+        false
+    }
+
+    /// Whether projected-row consumption is guaranteed not to call back into the engine while a storage backend lends its row values. Sources use this stricter capability before invoking an executor under a backend read borrow.
+    fn supports_storage_borrowed_rows(&self) -> bool {
         false
     }
 

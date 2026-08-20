@@ -6,6 +6,8 @@
 
 //! Physical set-returning projection operator.
 
+use uqa_execution::RowProjectionValue;
+
 use super::{
     eval_call_arguments, Batch, ColumnType, CteScope, Engine, ExecResult, OwnedPhysicalRow,
     PhysicalOperator, PhysicalRow, PlanSubqueryArena, RowSchema, SQLError, SQLParam,
@@ -17,7 +19,7 @@ pub(in crate::sql) struct SetProjection<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
     engine: &'a Engine,
     params: &'a [SQLParam],
-    ctes: &'a CteScope,
+    ctes: CteScope,
     evaluator: SharedExpressionEvaluator<'a>,
     plan: SetProjectionPlan,
     schema: RowSchema,
@@ -53,7 +55,7 @@ impl<'a> SetProjection<'a> {
         child: Box<dyn PhysicalOperator + 'a>,
         engine: &'a Engine,
         params: &'a [SQLParam],
-        ctes: &'a CteScope,
+        ctes: &CteScope,
         evaluator: SharedExpressionEvaluator<'a>,
         plan: SetProjectionPlan,
         pass_through: bool,
@@ -100,7 +102,7 @@ impl<'a> SetProjection<'a> {
             child,
             engine,
             params,
-            ctes,
+            ctes: ctes.clone(),
             evaluator,
             plan,
             schema,
@@ -141,7 +143,7 @@ impl<'a> SetProjection<'a> {
         if !self.engine.has_registered_table_function(&identity)
             && self.engine.lookup_sql_functions(&call.name).is_some()
         {
-            let hook = ScopedEngineHook::new(self.engine, self.ctes);
+            let hook = ScopedEngineHook::new(self.engine, &self.ctes);
             let subqueries = PlanSubqueryArena::new(&self.ctes.scalar_subqueries, Some(&hook));
             let context = ScalarEvalContext::from_row_lookup(row, self.params)
                 .with_function_hook(&hook)
@@ -196,7 +198,7 @@ impl<'a> SetProjection<'a> {
             });
         }
 
-        let hook = ScopedEngineHook::new(self.engine, self.ctes);
+        let hook = ScopedEngineHook::new(self.engine, &self.ctes);
         let context = crate::sql::from_rows::SourceEvalContext::new(
             self.engine,
             self.params,
@@ -251,40 +253,68 @@ impl<'a> SetProjection<'a> {
         };
         let evaluation_row = expansion.input.row.clone().append_values(values);
         if self.pass_through {
-            let computed = self
+            let mut output = (0..expansion.input.schema.physical_width())
+                .map(RowProjectionValue::InputSlot)
+                .collect::<Vec<_>>();
+            for (_, expression) in self
                 .plan
                 .projections
                 .iter()
                 .filter(|(_, expression)| !matches!(expression, ScalarExpr::Star))
-                .map(|(_, expression)| {
-                    self.evaluator.evaluate_physical(
-                        expression,
-                        &self.evaluation_schema,
-                        &evaluation_row,
-                    )
-                })
-                .collect::<ExecResult<Vec<_>>>()?;
-            return Ok(Some(expansion.input.row.clone().append_values(computed)));
+            {
+                if let Some(position) =
+                    uqa_execution::order_expression_position(&self.evaluation_schema, expression)
+                {
+                    output.push(self.evaluation_schema.physical_slot(position).map_or(
+                        RowProjectionValue::Owned(Value::Null),
+                        RowProjectionValue::InputSlot,
+                    ));
+                } else {
+                    output.push(RowProjectionValue::Owned(
+                        self.evaluator.evaluate_physical(
+                            expression,
+                            &self.evaluation_schema,
+                            &evaluation_row,
+                        )?,
+                    ));
+                }
+            }
+            return Ok(Some(evaluation_row.project_with_values(output)));
         }
 
         let mut output = Vec::with_capacity(self.schema.len());
         for (_, expression) in &self.plan.projections {
             if matches!(expression, ScalarExpr::Star) {
-                let view = expansion.input.view();
                 for (position, column) in expansion.input.schema.columns().iter().enumerate() {
                     if self.evaluator.star_column_visible(column) {
-                        output.push(view.value_at(position).cloned().unwrap_or(Value::Null));
+                        output.push(expansion.input.schema.physical_slot(position).map_or(
+                            RowProjectionValue::Owned(Value::Null),
+                            RowProjectionValue::InputSlot,
+                        ));
                     }
                 }
+            } else if let Some(position) =
+                uqa_execution::order_expression_position(&self.evaluation_schema, expression)
+            {
+                output.push(self.evaluation_schema.physical_slot(position).map_or(
+                    RowProjectionValue::Owned(Value::Null),
+                    RowProjectionValue::InputSlot,
+                ));
             } else {
-                output.push(self.evaluator.evaluate_physical(
-                    expression,
-                    &self.evaluation_schema,
-                    &evaluation_row,
-                )?);
+                output.push(RowProjectionValue::Owned(
+                    self.evaluator.evaluate_physical(
+                        expression,
+                        &self.evaluation_schema,
+                        &evaluation_row,
+                    )?,
+                ));
             }
         }
-        Ok(Some(PhysicalRow::from_values(output)))
+        Ok(Some(
+            evaluation_row
+                .project_with_values(output)
+                .without_lock_origins(),
+        ))
     }
 }
 

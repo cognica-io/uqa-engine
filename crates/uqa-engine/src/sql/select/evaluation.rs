@@ -9,18 +9,42 @@
 use super::{
     engine_func_intercept, eval_physical_scalar, execute_lateral_subquery_output,
     execute_query_plan_output, is_score_provenance_column, physical_exec_error,
-    query_contains_volatile_function, Arc, AtomicU64, BTreeMap, Engine, ExecResult,
-    ExpressionEvaluator, Ordering, PhysicalEvalContext, PhysicalOuterRow, PhysicalSubqueryRunner,
-    QueryOutputMode, QueryPlan, QueryRows, SQLError, SQLParam, ScalarExpr, ScalarFrameBound,
-    SharedExpressionEvaluator, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN, SCORE_COLUMN,
+    query_contains_volatile_function, recheck_storage_names_match, Arc, AtomicU64, BTreeMap,
+    BTreeSet, CtePlan, Engine, ExecResult, ExpressionEvaluator, Ordering, PhysicalEvalContext,
+    PhysicalOuterRow, PhysicalSubqueryRunner, QueryOutputMode, QueryPlan, QueryRows, RecheckDoc,
+    RecheckSourceRow, ResolvedRowLock, RowLockRecheckPins, SQLError, SQLParam, ScalarExpr,
+    ScalarFrameBound, SharedExpressionEvaluator, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
+    SCORE_COLUMN,
 };
 use uqa_sql::expr::RowLookup;
+
+type RecheckStoragePin = (String, String, Arc<Vec<RecheckDoc>>);
+
+#[derive(Clone, Copy, Default)]
+pub(in crate::sql) struct LockIdentityOptions {
+    pub(in crate::sql) emit: bool,
+    pub(in crate::sql) retain_after_lock: bool,
+}
+
+#[derive(Clone, Default)]
+struct RowLockScopeState {
+    source_row_locks: Vec<ResolvedRowLock>,
+    recheck: Option<Arc<RowLockRecheckPins>>,
+    outer_row: Option<Arc<uqa_execution::OwnedPhysicalRow>>,
+    storage_pins: Vec<RecheckStoragePin>,
+}
 
 #[derive(Clone)]
 pub(crate) struct CteScope {
     pub(in crate::sql) rows: BTreeMap<String, uqa_execution::SharedSpill>,
+    deferred_ctes: BTreeMap<String, CtePlan>,
     pub(in crate::sql) scalar_subqueries: Vec<QueryPlan>,
+    pub(in crate::sql) lock_identities: LockIdentityOptions,
+    row_lock: Option<Box<RowLockScopeState>>,
+    visible_cte_names: BTreeSet<String>,
     scalar_subquery_arena: u64,
+    read_command_overlay: bool,
+    stream_command_progress: bool,
     next_scalar_subquery_arena: Arc<AtomicU64>,
     scalar_subquery_cache:
         Arc<parking_lot::Mutex<BTreeMap<(u64, usize), ScalarSubqueryCacheEntry>>>,
@@ -30,8 +54,14 @@ impl Default for CteScope {
     fn default() -> Self {
         Self {
             rows: BTreeMap::new(),
+            deferred_ctes: BTreeMap::new(),
             scalar_subqueries: Vec::new(),
+            lock_identities: LockIdentityOptions::default(),
+            row_lock: None,
+            visible_cte_names: BTreeSet::new(),
             scalar_subquery_arena: 0,
+            read_command_overlay: true,
+            stream_command_progress: false,
             next_scalar_subquery_arena: Arc::new(AtomicU64::new(1)),
             scalar_subquery_cache: Arc::new(parking_lot::Mutex::new(BTreeMap::new())),
         }
@@ -43,8 +73,110 @@ impl CteScope {
         Self::default()
     }
 
+    fn row_lock_state(&self) -> Option<&RowLockScopeState> {
+        self.row_lock.as_deref()
+    }
+
+    fn row_lock_state_mut(&mut self) -> &mut RowLockScopeState {
+        self.row_lock
+            .get_or_insert_with(|| Box::new(RowLockScopeState::default()))
+    }
+
+    /// Enter one tuple-local recheck execution: base scans of pinned lock targets emit only the candidate's tuples and every nested `LockRows` is suppressed while lock identities keep flowing.
+    pub(in crate::sql) fn activate_row_lock_recheck(&mut self, pins: Arc<RowLockRecheckPins>) {
+        self.row_lock_state_mut().recheck = Some(pins);
+    }
+
+    pub(in crate::sql) fn row_lock_recheck_active(&self) -> bool {
+        self.row_lock_state()
+            .is_some_and(|state| state.recheck.is_some())
+    }
+
+    /// Preserve the complete correlated outer row for a tuple-local locking recheck. The rebuilt inner query must receive the same scope overlay as its original lateral execution or its correlation predicate would see NULL after a lock wait and incorrectly discard the refreshed tuple.
+    pub(in crate::sql) fn set_row_lock_outer_row(&mut self, row: uqa_execution::OwnedPhysicalRow) {
+        self.row_lock_state_mut().outer_row = Some(Arc::new(row));
+    }
+
+    pub(in crate::sql) fn row_lock_outer_row(&self) -> Option<&uqa_execution::OwnedPhysicalRow> {
+        self.row_lock_state()?.outer_row.as_deref()
+    }
+
+    fn clear_row_lock_outer_row(&mut self) {
+        if let Some(state) = self.row_lock.as_mut() {
+            state.outer_row = None;
+        }
+    }
+
+    /// Pinned tuples one base scan must emit during an active recheck.
+    pub(in crate::sql) fn recheck_docs_for_scan(
+        &self,
+        qualifier: &str,
+        storage_name: &str,
+    ) -> Option<Arc<Vec<RecheckDoc>>> {
+        let state = self.row_lock_state()?;
+        if let Some(pins) = state.recheck.as_ref() {
+            if let Some(docs) = pins.docs_for_scan(qualifier, storage_name) {
+                return Some(docs);
+            }
+        }
+        state
+            .storage_pins
+            .iter()
+            .find(|(pinned_storage, pinned_scan, _)| {
+                pinned_scan == qualifier
+                    && recheck_storage_names_match(pinned_storage, storage_name)
+            })
+            .map(|(_, _, docs)| Arc::clone(docs))
+    }
+
+    /// Exact copy-row mark for one top-level FROM leaf in the active tuple recheck. Paths use 0/1 for left/right join descent and are scoped to the original `LockRows` source, so nested query aliases cannot collide.
+    pub(in crate::sql) fn recheck_source_row(&self, path: &[u8]) -> Option<RecheckSourceRow> {
+        self.row_lock_state()?
+            .recheck
+            .as_ref()
+            .and_then(|pins| pins.source_row(path))
+    }
+
+    /// Enter the build of one identity-source lock target's subtree so every base scan of its storage inside the derived table or view is pinned. Pins already active from an enclosing target stay active: the target's base scans may sit below further derived-table boundaries.
+    pub(in crate::sql) fn enter_recheck_storage_pins(
+        &mut self,
+        qualifier: &str,
+    ) -> RecheckStoragePinScope<'_> {
+        let added = self
+            .row_lock_state()
+            .and_then(|state| state.recheck.as_ref())
+            .map(|pins| pins.storage_pins_for_identity_source(qualifier))
+            .unwrap_or_default();
+        let previous = if added.is_empty() {
+            None
+        } else {
+            let state = self.row_lock_state_mut();
+            let previous = state.storage_pins.clone();
+            state.storage_pins.extend(added);
+            Some(previous)
+        };
+        RecheckStoragePinScope {
+            ctes: self,
+            previous,
+        }
+    }
+
     pub(in crate::sql) fn insert_shared(&mut self, name: String, rows: uqa_execution::SharedSpill) {
+        self.deferred_ctes.remove(&name);
         self.rows.insert(name, rows);
+    }
+
+    pub(in crate::sql) fn insert_deferred(&mut self, plan: CtePlan) {
+        self.rows.remove(&plan.name);
+        self.deferred_ctes.insert(plan.name.clone(), plan);
+    }
+
+    pub(in crate::sql) fn remove_deferred(&mut self, name: &str) -> Option<CtePlan> {
+        self.deferred_ctes.remove(name)
+    }
+
+    pub(in crate::sql) fn deferred_ctes(&self) -> &BTreeMap<String, CtePlan> {
+        &self.deferred_ctes
     }
 
     pub(in crate::sql) fn remove_materialized(
@@ -66,11 +198,106 @@ impl CteScope {
             .next_scalar_subquery_arena
             .fetch_add(1, Ordering::Relaxed);
         let previous_arena = std::mem::replace(&mut self.scalar_subquery_arena, next_arena);
+        let previous_lock_identities = self.lock_identities;
         ScalarSubqueryScope {
             ctes: self,
             previous: Some(previous),
             previous_arena,
+            previous_lock_identities,
         }
+    }
+
+    pub(in crate::sql) fn enter_lock_identity_emission(
+        &mut self,
+        enabled: bool,
+    ) -> LockIdentityEmissionScope<'_> {
+        let previous = std::mem::replace(
+            &mut self.lock_identities,
+            LockIdentityOptions {
+                emit: enabled,
+                retain_after_lock: false,
+            },
+        );
+        LockIdentityEmissionScope {
+            ctes: self,
+            previous,
+        }
+    }
+
+    pub(in crate::sql) fn enter_source_row_locks(
+        &mut self,
+        locks: Vec<ResolvedRowLock>,
+    ) -> SourceRowLockScope<'_> {
+        let existing_is_empty = self
+            .row_lock_state()
+            .is_none_or(|state| state.source_row_locks.is_empty());
+        let previous = if locks.is_empty() && existing_is_empty {
+            None
+        } else {
+            Some(std::mem::replace(
+                &mut self.row_lock_state_mut().source_row_locks,
+                locks,
+            ))
+        };
+        SourceRowLockScope {
+            ctes: self,
+            previous,
+        }
+    }
+
+    pub(in crate::sql) fn source_row_lock_for_view(
+        &self,
+        qualifier: &str,
+        storage_name: &str,
+    ) -> Option<ResolvedRowLock> {
+        self.row_lock_state()?
+            .source_row_locks
+            .iter()
+            .find(|target| {
+                target.identity_source
+                    && target.qualifier == qualifier
+                    && target.storage_name == storage_name
+            })
+            .cloned()
+    }
+
+    pub(in crate::sql) fn enter_visible_ctes<'a>(
+        &'a mut self,
+        names: impl IntoIterator<Item = &'a str>,
+    ) -> VisibleCteScope<'a> {
+        let previous = std::mem::take(&mut self.visible_cte_names);
+        self.visible_cte_names.clone_from(&previous);
+        self.visible_cte_names
+            .extend(names.into_iter().map(str::to_owned));
+        VisibleCteScope {
+            ctes: self,
+            previous: Some(previous),
+        }
+    }
+
+    /// Whether `name` resolves to a CTE in this scope: a name declared by an enclosing query's WITH list, or one whose rows or deferred plan are bound in the scope, which is how a DML statement's own WITH list reaches the query it drives.
+    pub(in crate::sql) fn is_visible_cte(&self, name: &str) -> bool {
+        self.visible_cte_names.contains(name)
+            || self.rows.contains_key(name)
+            || self.deferred_ctes.contains_key(name)
+    }
+
+    pub(in crate::sql) fn returning_statement_snapshot_scope(&self) -> Self {
+        let mut scope = self.clone();
+        scope.read_command_overlay = false;
+        scope
+    }
+
+    pub(in crate::sql) fn reads_command_overlay(&self) -> bool {
+        self.read_command_overlay
+    }
+
+    pub(in crate::sql) fn enable_command_progress_streaming(&mut self) {
+        self.stream_command_progress = true;
+    }
+
+    pub(in crate::sql) fn streams_command_progress(&self) -> bool {
+        self.stream_command_progress
     }
 }
 
@@ -78,6 +305,7 @@ pub(in crate::sql) struct ScalarSubqueryScope<'a> {
     ctes: &'a mut CteScope,
     previous: Option<Vec<QueryPlan>>,
     previous_arena: u64,
+    previous_lock_identities: LockIdentityOptions,
 }
 
 impl std::ops::Deref for ScalarSubqueryScope<'_> {
@@ -99,6 +327,113 @@ impl Drop for ScalarSubqueryScope<'_> {
         if let Some(previous) = self.previous.take() {
             self.ctes.scalar_subqueries = previous;
             self.ctes.scalar_subquery_arena = self.previous_arena;
+            self.ctes.lock_identities = self.previous_lock_identities;
+        }
+    }
+}
+
+pub(in crate::sql) struct LockIdentityEmissionScope<'a> {
+    ctes: &'a mut CteScope,
+    previous: LockIdentityOptions,
+}
+
+pub(in crate::sql) struct SourceRowLockScope<'a> {
+    ctes: &'a mut CteScope,
+    previous: Option<Vec<ResolvedRowLock>>,
+}
+
+pub(in crate::sql) struct RecheckStoragePinScope<'a> {
+    ctes: &'a mut CteScope,
+    previous: Option<Vec<RecheckStoragePin>>,
+}
+
+impl std::ops::Deref for RecheckStoragePinScope<'_> {
+    type Target = CteScope;
+
+    fn deref(&self) -> &Self::Target {
+        self.ctes
+    }
+}
+
+impl std::ops::DerefMut for RecheckStoragePinScope<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.ctes
+    }
+}
+
+impl Drop for RecheckStoragePinScope<'_> {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            self.ctes.row_lock_state_mut().storage_pins = previous;
+        }
+    }
+}
+
+impl std::ops::Deref for SourceRowLockScope<'_> {
+    type Target = CteScope;
+
+    fn deref(&self) -> &Self::Target {
+        self.ctes
+    }
+}
+
+impl std::ops::DerefMut for SourceRowLockScope<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.ctes
+    }
+}
+
+impl Drop for SourceRowLockScope<'_> {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            self.ctes.row_lock_state_mut().source_row_locks = previous;
+        }
+    }
+}
+
+impl std::ops::Deref for LockIdentityEmissionScope<'_> {
+    type Target = CteScope;
+
+    fn deref(&self) -> &Self::Target {
+        self.ctes
+    }
+}
+
+impl std::ops::DerefMut for LockIdentityEmissionScope<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.ctes
+    }
+}
+
+impl Drop for LockIdentityEmissionScope<'_> {
+    fn drop(&mut self) {
+        self.ctes.lock_identities = self.previous;
+    }
+}
+
+pub(in crate::sql) struct VisibleCteScope<'a> {
+    ctes: &'a mut CteScope,
+    previous: Option<BTreeSet<String>>,
+}
+
+impl std::ops::Deref for VisibleCteScope<'_> {
+    type Target = CteScope;
+
+    fn deref(&self) -> &Self::Target {
+        self.ctes
+    }
+}
+
+impl std::ops::DerefMut for VisibleCteScope<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.ctes
+    }
+}
+
+impl Drop for VisibleCteScope<'_> {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            self.ctes.visible_cte_names = previous;
         }
     }
 }
@@ -341,6 +676,35 @@ impl<'a> EngineExpressionEvaluator<'a> {
             ctes: ctes.clone(),
         })
     }
+
+    fn evaluate_physical_scoped(
+        &self,
+        expression: &ScalarExpr,
+        schema: &uqa_execution::RowSchema,
+        row: &uqa_execution::PhysicalRow,
+    ) -> ExecResult<Value> {
+        let view = schema.view(row);
+        let hook = ScopedEngineHook::new(self.engine, &self.ctes);
+        let context = PhysicalEvalContext::from_row_lookup(&view, self.params)
+            .with_function_hook(&hook)
+            .with_subquery_runner(&hook)
+            .with_physical_outer_row(schema, row);
+        if let ScalarExpr::Func { name, args, .. } = expression {
+            let mut evaluate = |expr: &ScalarExpr| {
+                eval_physical_scalar(expr, &self.ctes.scalar_subqueries, &context)
+            };
+            if let Some(value) =
+                engine_func_intercept(Some(self.engine), name, args, &view, &mut evaluate)?
+            {
+                return Ok(value);
+            }
+        }
+        Ok(eval_physical_scalar(
+            expression,
+            &self.ctes.scalar_subqueries,
+            &context,
+        )?)
+    }
 }
 
 impl ExpressionEvaluator for EngineExpressionEvaluator<'_> {
@@ -372,27 +736,7 @@ impl ExpressionEvaluator for EngineExpressionEvaluator<'_> {
         schema: &uqa_execution::RowSchema,
         row: &uqa_execution::PhysicalRow,
     ) -> ExecResult<Value> {
-        let view = schema.view(row);
-        let hook = ScopedEngineHook::new(self.engine, &self.ctes);
-        let context = PhysicalEvalContext::from_row_lookup(&view, self.params)
-            .with_function_hook(&hook)
-            .with_subquery_runner(&hook)
-            .with_physical_outer_row(schema, row);
-        if let ScalarExpr::Func { name, args, .. } = expression {
-            let mut evaluate = |expr: &ScalarExpr| {
-                eval_physical_scalar(expr, &self.ctes.scalar_subqueries, &context)
-            };
-            if let Some(value) =
-                engine_func_intercept(Some(self.engine), name, args, &view, &mut evaluate)?
-            {
-                return Ok(value);
-            }
-        }
-        Ok(eval_physical_scalar(
-            expression,
-            &self.ctes.scalar_subqueries,
-            &context,
-        )?)
+        self.evaluate_physical_scoped(expression, schema, row)
     }
 
     fn star_column_visible(&self, column: &str) -> bool {
@@ -709,6 +1053,7 @@ impl ScopedEngineHook<'_> {
             return Ok(None);
         };
         let mut scoped_ctes = self.ctes.clone();
+        scoped_ctes.lock_identities.emit = false;
         let result = execute_query_plan_output(
             self.engine,
             &decorrelated.inner,
@@ -777,6 +1122,8 @@ impl ScopedEngineHook<'_> {
         params: &[SQLParam],
     ) -> Result<CachedScalarSubquery, SQLError> {
         let mut scoped_ctes = self.ctes.clone();
+        scoped_ctes.lock_identities.emit = false;
+        scoped_ctes.clear_row_lock_outer_row();
         let output = execute_query_plan_output(
             self.engine,
             plan,
@@ -909,5 +1256,23 @@ pub(in crate::sql) fn frame_bound_contains_subquery(bound: &ScalarFrameBound) ->
         ScalarFrameBound::UnboundedPreceding
         | ScalarFrameBound::UnboundedFollowing
         | ScalarFrameBound::CurrentRow => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CteScope;
+
+    #[test]
+    fn empty_row_lock_scopes_leave_non_locking_state_unallocated() {
+        let mut ctes = CteScope::new();
+        {
+            let _scope = ctes.enter_source_row_locks(Vec::new());
+        }
+        assert!(ctes.row_lock.is_none());
+        {
+            let _scope = ctes.enter_recheck_storage_pins("plain_source");
+        }
+        assert!(ctes.row_lock.is_none());
     }
 }

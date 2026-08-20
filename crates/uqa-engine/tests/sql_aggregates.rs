@@ -250,6 +250,82 @@ fn projected_group_hash_reuses_high_cardinality_composite_keys() {
 }
 
 #[test]
+fn projected_compact_text_pairs_preserve_exact_group_identity() {
+    let eng = engine();
+    eng.sql(
+        "CREATE TABLE compact_text_groups (id INTEGER PRIMARY KEY, first_key TEXT, second_key TEXT, amount INTEGER)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO compact_text_groups VALUES \
+         (1, NULL, NULL, 1), (2, NULL, NULL, 2), \
+         (3, '', '', 3), (4, '', '', 4), \
+         (5, 'A', 'O', 5), (6, 'A', 'O', 6), \
+         (7, 'AB', 'C', 7), (8, 'A', 'BC', 8), \
+         (9, 'é', '한', 9), (10, 'long', 'O', 10), (11, 'long', 'O', 11)",
+        &[],
+    )
+    .unwrap();
+
+    let result = eng
+        .sql(
+            "SELECT first_key, second_key, COUNT(*) AS count, SUM(amount) AS total \
+             FROM compact_text_groups GROUP BY first_key, second_key",
+            &[],
+        )
+        .unwrap();
+    let groups = result
+        .rows
+        .iter()
+        .map(|row| {
+            let key = (
+                row.get("first_key").cloned(),
+                row.get("second_key").cloned(),
+            );
+            let value = (
+                int_col(row, "count").unwrap(),
+                int_col(row, "total").unwrap(),
+            );
+            (key, value)
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    assert_eq!(groups.len(), 7);
+    assert_eq!(groups[&(Some(Value::Null), Some(Value::Null))], (2, 3));
+    assert_eq!(
+        groups[&(
+            Some(Value::Str(String::new())),
+            Some(Value::Str(String::new()))
+        )],
+        (2, 7)
+    );
+    assert_eq!(
+        groups[&(Some(Value::Str("A".into())), Some(Value::Str("O".into())))],
+        (2, 11)
+    );
+    assert_eq!(
+        groups[&(Some(Value::Str("AB".into())), Some(Value::Str("C".into())))],
+        (1, 7)
+    );
+    assert_eq!(
+        groups[&(Some(Value::Str("A".into())), Some(Value::Str("BC".into())))],
+        (1, 8)
+    );
+    assert_eq!(
+        groups[&(Some(Value::Str("é".into())), Some(Value::Str("한".into())))],
+        (1, 9)
+    );
+    assert_eq!(
+        groups[&(
+            Some(Value::Str("long".into())),
+            Some(Value::Str("O".into()))
+        )],
+        (2, 21)
+    );
+}
+
+#[test]
 fn projected_integer_arithmetic_preserves_null_and_error_semantics() {
     let eng = engine();
     eng.sql(
@@ -1042,6 +1118,28 @@ fn having_can_use_an_aggregate_not_projected_by_select() {
     assert_eq!(result.columns, vec!["cat"]);
     assert_eq!(result.rows.len(), 1);
     assert_eq!(str_col(&result.rows[0], "cat"), Some("a"));
+}
+
+#[test]
+fn aggregate_order_and_distinct_on_keep_unprojected_group_keys() {
+    let eng = engine();
+    let ordered = eng
+        .sql(
+            "SELECT count(*) AS n FROM (VALUES (2), (1), (2)) AS input(x) GROUP BY x ORDER BY x",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(ordered.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(ordered.value_at(1, 0), Some(&Value::Int(2)));
+
+    let distinct = eng
+        .sql(
+            "SELECT DISTINCT ON (x) count(*) AS n FROM (VALUES (2), (1), (2)) AS input(x) GROUP BY x ORDER BY x",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(distinct.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(distinct.value_at(1, 0), Some(&Value::Int(2)));
 }
 
 #[test]

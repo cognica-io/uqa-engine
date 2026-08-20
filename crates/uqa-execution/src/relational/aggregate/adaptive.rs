@@ -10,9 +10,10 @@ use std::collections::BTreeMap;
 
 use super::{
     eval_scalar, fold, partial, AggregateKind, AggregateSpec, Batch, DefaultExpressionEvaluator,
-    ExecError, ExecResult, PhysicalOperator, ResultRow, RowSchema, SQLParam, ScalarEvalContext,
-    ScalarExpr, SortKey, Value,
+    ExecError, ExecResult, PhysicalOperator, RowSchema, SQLParam, ScalarEvalContext, ScalarExpr,
+    SortKey, Value,
 };
+use crate::PhysicalRow;
 use fold::{AggFold, GroupState};
 
 const GROUP_ENTRY_OVERHEAD_BYTES: usize = 192;
@@ -141,12 +142,15 @@ impl<'a> AdaptiveBuiltinAggregate<'a> {
         for (_, state) in std::mem::take(&mut self.groups) {
             pending.push(partial::encode_group(state));
             if pending.len() == crate::batch::DEFAULT_BATCH_SIZE {
-                partials.push(Batch::new(schema.clone(), std::mem::take(&mut pending)))?;
+                partials.push(Batch::from_physical_rows(
+                    schema.clone(),
+                    std::mem::take(&mut pending),
+                ))?;
                 pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
             }
         }
         if !pending.is_empty() {
-            partials.push(Batch::new(schema, pending))?;
+            partials.push(Batch::from_physical_rows(schema, pending))?;
         }
         self.retained_bytes = 0;
         Ok(())
@@ -213,11 +217,7 @@ impl<'a> AdaptiveBuiltinAggregate<'a> {
         let execution = (|| -> ExecResult<()> {
             while let Some(batch) = sorted.next()? {
                 for row in batch.rows {
-                    let state = partial::decode_group(
-                        batch.schema.view(&row).to_result_row(),
-                        group_count,
-                        self.aggregates,
-                    )?;
+                    let state = partial::decode_group(row, group_count, self.aggregates)?;
                     if current
                         .as_ref()
                         .is_some_and(|current| current.key_values != state.key_values)
@@ -258,7 +258,7 @@ fn finish_current(
     state: &mut Option<GroupState>,
     output: &mut crate::spill::SpillBuffer,
     schema: &RowSchema,
-    pending: &mut Vec<ResultRow>,
+    pending: &mut Vec<PhysicalRow>,
     group_keys: &[(String, ScalarExpr)],
     aggregates: &[AggregateSpec],
 ) -> ExecResult<()> {
@@ -276,12 +276,15 @@ fn finish_current(
 fn push_finished(
     output: &mut crate::spill::SpillBuffer,
     schema: &RowSchema,
-    pending: &mut Vec<ResultRow>,
-    row: ResultRow,
+    pending: &mut Vec<PhysicalRow>,
+    row: PhysicalRow,
 ) -> ExecResult<()> {
     pending.push(row);
     if pending.len() == crate::batch::DEFAULT_BATCH_SIZE {
-        output.push(Batch::new(schema.clone(), std::mem::take(pending)))?;
+        output.push(Batch::from_physical_rows(
+            schema.clone(),
+            std::mem::take(pending),
+        ))?;
         *pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
     }
     Ok(())
@@ -290,10 +293,13 @@ fn push_finished(
 fn flush_finished(
     output: &mut crate::spill::SpillBuffer,
     schema: &RowSchema,
-    pending: &mut Vec<ResultRow>,
+    pending: &mut Vec<PhysicalRow>,
 ) -> ExecResult<()> {
     if !pending.is_empty() {
-        output.push(Batch::new(schema.clone(), std::mem::take(pending)))?;
+        output.push(Batch::from_physical_rows(
+            schema.clone(),
+            std::mem::take(pending),
+        ))?;
     }
     Ok(())
 }

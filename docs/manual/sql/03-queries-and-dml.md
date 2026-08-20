@@ -154,6 +154,43 @@ FROM employees;
 
 Implemented ranking and offset windows are `row_number`, `rank`, `dense_rank`, `lag`, `lead`, and `ntile`. Aggregate windows include `sum`, `count`, `avg`, `min`, and `max`. Frame syntax supports implemented `ROWS`, `RANGE`, and `GROUPS` boundaries. Named `WINDOW` clauses are not implemented; place the definition directly in each `OVER` expression.
 
+## Row locking
+
+`SELECT` accepts PostgreSQL 18 row-locking clauses.
+
+1. Syntax: `FOR { UPDATE | NO KEY UPDATE | SHARE | KEY SHARE } [ OF relation [, ...] ] [ NOWAIT | SKIP LOCKED ]`. Multiple clauses may overlap: each relation uses the strongest requested lock, and its wait policy is `NOWAIT` if any applicable clause says `NOWAIT`, otherwise `SKIP LOCKED` if any says `SKIP LOCKED`, otherwise blocking.
+2. Arguments: `OF` names are unqualified SQL relation or alias identifiers from the current `FROM` clause. An aliased item can be named only by its alias; an unaliased item accepts only its unqualified table name. Repeating a name is harmless, and one unqualified name can select multiple unaliased same-name relations from different schemas. Identifiers are not values and cannot be parameters. Omitting `OF` selects every lockable relation in the query block.
+3. Result: the same rows the query would return without the clause. `_score` and other output columns are unchanged. Lock identity columns stay internal.
+4. Effects: each returned tuple from a selected base table or lockable view/subquery is locked until the current transaction ends; rows skipped by `OFFSET` are locked as well. An outer clause cannot lock through a CTE, aggregate, window, distinct, or set-operation row-identity barrier, so place the clause inside the underlying query when that behavior is required. If a target tuple changes between the command-snapshot scan and lock acquisition, the current committed tuple is substituted and the query qualifications are rechecked while unchanged inputs remain on the original command snapshot; a pure lock wait does not admit later inserts. Autocommit statements take a statement transaction and release locks when that statement finishes. `UPDATE`, `DELETE`, and `MERGE`, including rows changed by referential actions, take `FOR NO KEY UPDATE` or `FOR UPDATE` locks on the rows they mutate. Locking queries also retain a relation lock, so operations such as `TRUNCATE` wait until the locking transaction ends. `ROLLBACK TO SAVEPOINT` removes row and relation acquisitions and strength upgrades made after that savepoint. Independent engines over the same durable database coordinate row and relation locks within one OS process and across OS processes; cross-process coordination uses a `<database>.uqa-locks` sidecar file created next to the database.
+5. Errors: `DISTINCT`, `GROUP BY`, `HAVING`, aggregate functions, window functions, and directly locked set-operation queries reject the clause (`0A000`). An explicit `OF` target rejects a CTE reference or table function; an unqualified clause silently skips CTEs, table functions, and `VALUES` sources because they have no lockable rows. A top-level `VALUES` statement, a foreign table, a virtual catalog relation, and a lockable relation on the nullable side of an outer join reject the clause (`0A000`), while a `WHERE` qualification that cannot be true for the join's null-extended side reduces the outer join first and makes that side lockable. An `OF` name that is not visible in `FROM`, including a base name hidden by an alias, is `42P01`. `NOWAIT` that cannot lock immediately is `55P03`. A wait-for cycle is `40P01`. Cancellation during a wait is `57014`.
+6. Example:
+
+```sql execute
+CREATE TABLE accounts (
+    id INTEGER PRIMARY KEY,
+    owner TEXT NOT NULL,
+    balance INTEGER NOT NULL
+);
+INSERT INTO accounts (id, owner, balance) VALUES (1, 'ann', 100);
+BEGIN;
+SELECT id, balance
+FROM accounts
+WHERE id = 1
+FOR UPDATE;
+UPDATE accounts SET balance = balance - 10 WHERE id = 1;
+COMMIT;
+```
+
+`SKIP LOCKED` skips rows that another session already holds incompatibly and continues so `ORDER BY ... LIMIT` can take the next unlocked row. `NOWAIT` fails instead of waiting. Same-session lock upgrades keep the stronger strength. `FOR KEY SHARE` does not conflict with a non-key `UPDATE`; it does conflict with `FOR UPDATE` and `DELETE`.
+
+```sql
+SELECT a.id, o.active
+FROM accounts AS a
+JOIN owners AS o ON o.name = a.owner
+WHERE a.id = 1
+FOR UPDATE OF a;
+```
+
 ## VALUES
 
 `VALUES` can be a top-level relation, a CTE body, or an insert source:

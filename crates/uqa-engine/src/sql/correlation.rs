@@ -183,6 +183,19 @@ fn query_has_external_reference(
     scopes: &mut Vec<QueryScope>,
 ) -> Result<bool, SQLError> {
     let mut ctes = BTreeMap::new();
+    if plan.ctes.iter().any(|cte| cte.recursive) {
+        for cte in &plan.ctes {
+            let columns = if cte.columns.is_empty() {
+                query_output_columns(&cte.query)
+            } else {
+                RelationColumns {
+                    names: cte.columns.iter().cloned().collect(),
+                    complete: true,
+                }
+            };
+            ctes.insert(cte.name.clone(), columns);
+        }
+    }
     for cte in &plan.ctes {
         let columns = if cte.columns.is_empty() {
             query_output_columns(&cte.query)

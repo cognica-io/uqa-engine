@@ -16,14 +16,14 @@ mod error;
 mod store;
 mod transaction;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use redb::Database;
 use uqa_storage::{
     CatalogFacade, KeyValueCatalog, KeyValueStorageBackend, KeyValueStore,
-    PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession,
-    StorageBackendResult,
+    PersistentStorageBackend, PersistentStorageIdentity, PersistentStorageProvider,
+    PersistentStorageSession, StorageBackendError, StorageBackendResult,
 };
 
 pub use store::RedbKeyValueStore;
@@ -35,21 +35,30 @@ use store::initialize_database;
 #[derive(Clone)]
 pub struct RedbStorage {
     database: Arc<Database>,
+    identity: PathBuf,
 }
 
 impl RedbStorage {
     /// Open an existing redb database or create a new one at `path`.
     pub fn open(path: impl AsRef<Path>) -> StorageBackendResult<Self> {
+        let path = path.as_ref();
         let database = Database::create(path).map_err(redb_error)?;
         initialize_database(&database)?;
+        let identity = std::fs::canonicalize(path).map_err(|error| {
+            StorageBackendError::Other(format!(
+                "canonicalize redb database `{}`: {error}",
+                path.display()
+            ))
+        })?;
         Ok(Self {
             database: Arc::new(database),
+            identity,
         })
     }
 
     /// Create a transaction-isolated physical store session.
     pub fn store(&self) -> RedbKeyValueStore {
-        RedbKeyValueStore::new(Arc::clone(&self.database))
+        RedbKeyValueStore::new(Arc::clone(&self.database), self.identity.clone())
     }
 }
 
@@ -60,5 +69,9 @@ impl PersistentStorageProvider for RedbStorage {
         let backend: Arc<dyn PersistentStorageBackend> =
             Arc::new(KeyValueStorageBackend::new(store));
         Ok(PersistentStorageSession::new(catalog, backend))
+    }
+
+    fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
+        Ok(Some(PersistentStorageIdentity::File(self.identity.clone())))
     }
 }

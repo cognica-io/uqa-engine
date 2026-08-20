@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use uqa_analysis::Analyzer;
 use uqa_core::{DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList, Value};
 
-use crate::backend::PersistentStorageBackend;
+use crate::backend::{PersistentStorageBackend, PersistentStorageIdentity};
 use crate::document_store::{Document, DocumentStore};
 use crate::inverted_index::{AnalyzerPhase, InvertedIndex};
 use crate::vector_index::{
@@ -89,6 +89,17 @@ pub trait KeyValueBatch {
 
 /// Ordered byte-key storage used by Key/Value catalog and index backends.
 pub trait KeyValueStore: Send + Sync {
+    fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
+        Ok(None)
+    }
+
+    /// Open an independent transaction session over the same logical store. The default keeps simple test/custom stores source-compatible while making the missing MVCC capability explicit when a persistent engine needs a committed reader alongside a pinned statement snapshot.
+    fn open_session(&self) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
+        Err(StorageBackendError::Other(
+            "independent sessions are not implemented for this KeyValue store".into(),
+        ))
+    }
+
     fn get(&self, key: &[u8]) -> StorageBackendResult<Option<Vec<u8>>>;
     fn contains_key(&self, key: &[u8]) -> StorageBackendResult<bool> {
         self.get(key).map(|value| value.is_some())

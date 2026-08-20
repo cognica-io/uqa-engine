@@ -30,6 +30,13 @@ impl Engine {
         reference: &str,
     ) -> StorageBackendResult<String> {
         self.refresh_sequences_from_catalog()?;
+        self.resolve_stored_sequence_reference_from_loaded_registry(reference)
+    }
+
+    pub(crate) fn resolve_stored_sequence_reference_from_loaded_registry(
+        &self,
+        reference: &str,
+    ) -> StorageBackendResult<String> {
         let (schema, local_name) =
             RelationIdentity::parse_reference(reference).map_err(|error| {
                 StorageBackendError::Other(format!(
@@ -286,7 +293,18 @@ impl Engine {
             .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         let relation = Self::resolved_relation_identity(&name)
             .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
-        let current = if let Some(catalog) = self.storage.catalog.as_ref() {
+        let sequence_session = self
+            .open_nontransactional_sequence_session()
+            .map_err(|error| format!("open sequence session: {error}"))?;
+        if sequence_session.is_none() {
+            self.prepare_explicit_transaction_writer()
+                .map_err(|error| format!("prepare sequence writer: {error}"))?;
+        }
+        let catalog = sequence_session
+            .as_ref()
+            .map(|session| session.catalog.as_ref())
+            .or(self.storage.catalog.as_deref());
+        let current = if let Some(catalog) = catalog {
             catalog
                 .next_sequence_value(&name)
                 .map_err(|err| format!("allocate sequence value: {err}"))?
@@ -343,7 +361,18 @@ impl Engine {
             .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         let relation = Self::resolved_relation_identity(&name)
             .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
-        if let Some(catalog) = self.storage.catalog.as_ref() {
+        let sequence_session = self
+            .open_nontransactional_sequence_session()
+            .map_err(|error| format!("open sequence session: {error}"))?;
+        if sequence_session.is_none() {
+            self.prepare_explicit_transaction_writer()
+                .map_err(|error| format!("prepare sequence writer: {error}"))?;
+        }
+        let catalog = sequence_session
+            .as_ref()
+            .map(|session| session.catalog.as_ref())
+            .or(self.storage.catalog.as_deref());
+        if let Some(catalog) = catalog {
             catalog
                 .set_sequence_value(&name, value)
                 .map_err(|err| format!("persist sequence value: {err}"))?
@@ -406,7 +435,12 @@ impl Engine {
     }
 
     pub(crate) fn refresh_sequences_from_catalog(&self) -> StorageBackendResult<()> {
-        let Some(catalog) = self.storage.catalog.as_ref() else {
+        let sequence_session = self.open_nontransactional_sequence_session()?;
+        let catalog = sequence_session
+            .as_ref()
+            .map(|session| session.catalog.as_ref())
+            .or(self.storage.catalog.as_deref());
+        let Some(catalog) = catalog else {
             return Ok(());
         };
         let rows = catalog.load_sequence_rows()?;
@@ -415,6 +449,20 @@ impl Engine {
             .map(Self::sequence_state_from_row)
             .collect::<StorageBackendResult<_>>()?;
         Ok(())
+    }
+
+    fn open_nontransactional_sequence_session(
+        &self,
+    ) -> StorageBackendResult<Option<uqa_storage::PersistentStorageSession>> {
+        if !self.backend_transaction_is_deferred()
+            || self.session.row_lock_statements.lock().is_empty()
+        {
+            return Ok(None);
+        }
+        self.storage
+            .provider
+            .as_ref()
+            .map_or(Ok(None), |provider| provider.open_session().map(Some))
     }
 
     /// Consume the legacy all-sequences metadata snapshot during initial

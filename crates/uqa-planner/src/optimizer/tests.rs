@@ -579,7 +579,7 @@ fn join_reordering_preserves_outer_join_boundary() {
     let plan = optimized_with_rows(
         "SELECT a.id FROM a \
          LEFT JOIN b ON a.id = b.a_id \
-         JOIN c ON b.id = c.b_id",
+         JOIN c ON a.id = c.a_id",
         &[("a", 1_000_000), ("b", 10_000), ("c", 1)],
     );
     let source = query_block(&plan).from.as_ref().expect("join source");

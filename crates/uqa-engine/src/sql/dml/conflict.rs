@@ -6,16 +6,229 @@
 
 //! INSERT conflict resolution, identity extraction, and RETURNING assembly.
 
+use std::sync::Arc;
+
 use super::{
-    bind_projection_output_schema, build_projection_physical_row_with_ctes,
-    dml_append_hidden_qualified_row, dml_storage_error, dml_target_row, doc_id_value,
-    eval_mutation_assignment, eval_mutation_expr, key_constraint_values, missing_document_error,
-    rewrite_document_with_referential_actions, BTreeSet, ConflictActionPlan, ConflictPlan,
-    CteScope, DocId, Document, Engine, MutationAssignmentTarget, ProjectionPlan, SQLError,
-    SQLParam, SQLResult, Value, DOC_ID_COLUMN,
+    bind_projection_output_schema, build_projection_physical_row_with_ctes, decode_prepared_doc_id,
+    decode_prepared_document_rewrite, dml_append_hidden_qualified_row, dml_storage_error,
+    dml_target_row, doc_id_value, encode_prepared_doc_id, encode_prepared_document_rewrite,
+    eval_mutation_assignment, eval_mutation_expr, key_constraint_values,
+    lock_document_key_dependencies, lock_mutation_target, missing_document_error,
+    prepare_document_rewrite, update_lock_strength, BTreeMap, BTreeSet, ConflictActionPlan,
+    ConflictPlan, CteScope, DocId, Document, Engine, MutationAssignmentTarget, MutationLockTarget,
+    PreparedDocumentRewrite, ProjectionPlan, SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN,
 };
+use rusqlite::OptionalExtension;
 use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_sql::ast::ReturningAliases;
+
+enum CurrentInsertConflict {
+    Overlay,
+    Base(DocId),
+}
+
+pub(in crate::sql) struct InsertConflictPreparation<'a> {
+    pub(in crate::sql) engine: &'a Engine,
+    pub(in crate::sql) table: &'a str,
+    pub(in crate::sql) target_qualifier: &'a str,
+    pub(in crate::sql) on_conflict: &'a ConflictPlan,
+    pub(in crate::sql) document: &'a Document,
+    pub(in crate::sql) params: &'a [SQLParam],
+    pub(in crate::sql) scope: &'a CteScope,
+}
+
+/// Disk-backed view of rows inserted or rewritten earlier by the same INSERT command. `PostgreSQL` resolves `ON CONFLICT` inputs sequentially: a key moved away by an earlier update becomes insertable, while a later `DO UPDATE` that reaches a row already inserted or updated by the command raises 21000. Keeping the exact key index in a temporary `SQLite` database preserves those semantics without retaining a cardinality-sized map above `work_mem`.
+struct InsertConflictOverlay {
+    connection: rusqlite::Connection,
+    _directory: tempfile::TempDir,
+    constraints: Vec<uqa_sql::ast::TableKeyConstraint>,
+    relevant_constraints: Vec<usize>,
+    next_insert_identity: u64,
+}
+
+impl InsertConflictOverlay {
+    fn new(engine: &Engine, table: &str, on_conflict: &ConflictPlan) -> Result<Self, SQLError> {
+        let constraints = engine
+            .try_key_constraints(table)
+            .map_err(|error| dml_storage_error("INSERT conflict overlay", error))?;
+        let relevant_constraints = if on_conflict.conflict_columns.is_empty() {
+            (0..constraints.len()).collect()
+        } else {
+            let target = on_conflict
+                .conflict_columns
+                .iter()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>();
+            if target.len() != on_conflict.conflict_columns.len() {
+                return Err(SQLError::TypeMismatch(format!(
+                    "ON CONFLICT target ({}) names a column more than once",
+                    on_conflict.conflict_columns.join(", ")
+                )));
+            }
+            let index = constraints
+                .iter()
+                .position(|constraint| {
+                    constraint.columns.len() == target.len()
+                        && constraint
+                            .columns
+                            .iter()
+                            .map(String::as_str)
+                            .collect::<BTreeSet<_>>()
+                            == target
+                })
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(format!(
+                        "ON CONFLICT target ({}) does not match a PRIMARY KEY or UNIQUE constraint",
+                        on_conflict.conflict_columns.join(", ")
+                    ))
+                })?;
+            vec![index]
+        };
+        let directory = tempfile::Builder::new()
+            .prefix("uqa-insert-conflict-")
+            .tempdir()
+            .map_err(|error| {
+                SQLError::Internal(format!("create INSERT conflict overlay directory: {error}"))
+            })?;
+        let connection = rusqlite::Connection::open(directory.path().join("overlay.sqlite"))
+            .map_err(|error| {
+                SQLError::Internal(format!("open INSERT conflict overlay: {error}"))
+            })?;
+        connection
+            .execute_batch(
+                "PRAGMA journal_mode = OFF;
+                 PRAGMA synchronous = OFF;
+                 CREATE TABLE overlay_keys (
+                     constraint_index INTEGER NOT NULL,
+                     key BLOB NOT NULL,
+                     identity BLOB NOT NULL,
+                     PRIMARY KEY (constraint_index, key)
+                 ) WITHOUT ROWID;
+                 CREATE TABLE overridden_documents (
+                     doc_id BLOB PRIMARY KEY
+                 ) WITHOUT ROWID;",
+            )
+            .map_err(|error| {
+                SQLError::Internal(format!("initialize INSERT conflict overlay: {error}"))
+            })?;
+        Ok(Self {
+            connection,
+            _directory: directory,
+            constraints,
+            relevant_constraints,
+            next_insert_identity: 0,
+        })
+    }
+
+    fn find(
+        &self,
+        engine: &Engine,
+        table: &str,
+        document: &Document,
+    ) -> Result<Option<CurrentInsertConflict>, SQLError> {
+        for &index in &self.relevant_constraints {
+            let constraint = &self.constraints[index];
+            let constraint_index = i64::try_from(index).map_err(|_| {
+                SQLError::Internal("INSERT conflict constraint index exceeds i64".into())
+            })?;
+            let Some(values) = key_constraint_values(constraint, document) else {
+                continue;
+            };
+            let key = uqa_execution::canonical_row_key(&values)
+                .map_err(crate::sql::select::physical_exec_error)?;
+            let overlay = self
+                .connection
+                .query_row(
+                    "SELECT 1 FROM overlay_keys WHERE constraint_index = ?1 AND key = ?2",
+                    rusqlite::params![constraint_index, key],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(|error| {
+                    SQLError::Internal(format!("probe INSERT conflict overlay: {error}"))
+                })?;
+            if overlay.is_some() {
+                return Ok(Some(CurrentInsertConflict::Overlay));
+            }
+            let Some(doc_id) = engine.find_conflict(table, &constraint.columns, &values)? else {
+                continue;
+            };
+            let overridden = self
+                .connection
+                .query_row(
+                    "SELECT 1 FROM overridden_documents WHERE doc_id = ?1",
+                    [doc_id.to_be_bytes().as_slice()],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(|error| {
+                    SQLError::Internal(format!(
+                        "probe overridden INSERT conflict document: {error}"
+                    ))
+                })?;
+            if overridden.is_none() {
+                return Ok(Some(CurrentInsertConflict::Base(doc_id)));
+            }
+        }
+        Ok(None)
+    }
+
+    fn note_insert(&mut self, document: &Document) -> Result<(), SQLError> {
+        let mut identity = Vec::with_capacity(9);
+        identity.push(b'i');
+        identity.extend_from_slice(&self.next_insert_identity.to_be_bytes());
+        self.next_insert_identity = self.next_insert_identity.checked_add(1).ok_or_else(|| {
+            SQLError::Internal("INSERT conflict overlay identity space is exhausted".into())
+        })?;
+        self.note_keys(&identity, document)
+    }
+
+    fn note_update(&mut self, doc_id: DocId, document: &Document) -> Result<(), SQLError> {
+        let mut identity = Vec::with_capacity(9);
+        identity.push(b'b');
+        identity.extend_from_slice(&doc_id.to_be_bytes());
+        self.connection
+            .execute(
+                "INSERT OR IGNORE INTO overridden_documents (doc_id) VALUES (?1)",
+                [doc_id.to_be_bytes().as_slice()],
+            )
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "record overridden INSERT conflict document: {error}"
+                ))
+            })?;
+        self.note_keys(&identity, document)
+    }
+
+    fn note_keys(&mut self, identity: &[u8], document: &Document) -> Result<(), SQLError> {
+        for (index, constraint) in self.constraints.iter().enumerate() {
+            let constraint_index = i64::try_from(index).map_err(|_| {
+                SQLError::Internal("INSERT conflict constraint index exceeds i64".into())
+            })?;
+            let Some(values) = key_constraint_values(constraint, document) else {
+                continue;
+            };
+            let key = uqa_execution::canonical_row_key(&values)
+                .map_err(crate::sql::select::physical_exec_error)?;
+            self.connection
+                .execute(
+                    "INSERT OR IGNORE INTO overlay_keys (constraint_index, key, identity) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![constraint_index, key, identity],
+                )
+                .map_err(|error| {
+                    SQLError::Internal(format!("record INSERT conflict overlay key: {error}"))
+                })?;
+        }
+        Ok(())
+    }
+}
+
+fn on_conflict_cardinality_violation() -> SQLError {
+    SQLError::Routine {
+        sqlstate: "21000".into(),
+        message: "ON CONFLICT DO UPDATE command cannot affect row a second time\nHINT: Ensure that no rows proposed for insertion within the same command have duplicate constrained values.".into(),
+    }
+}
 
 pub(in crate::sql) fn find_insert_conflict(
     engine: &Engine,
@@ -72,124 +285,404 @@ pub(in crate::sql) fn find_insert_conflict(
     Ok(None)
 }
 
-pub(in crate::sql) enum InsertConflictResolution {
-    Insert,
+pub(in crate::sql) enum PreparedInsertConflict {
+    Unresolved,
+    Insert { doc_id: DocId, supplied: bool },
     Skip,
-    Updated {
-        old_doc_id: DocId,
-        doc_id: DocId,
+    Updated(PreparedDocumentRewrite),
+}
+
+pub(in crate::sql) fn encode_prepared_insert_conflict(prepared: PreparedInsertConflict) -> Value {
+    match prepared {
+        PreparedInsertConflict::Unresolved => Value::Str("unresolved".into()),
+        PreparedInsertConflict::Insert { doc_id, supplied } => Value::Map(BTreeMap::from([
+            ("kind".into(), Value::Str("insert".into())),
+            ("doc_id".into(), encode_prepared_doc_id(doc_id)),
+            ("supplied".into(), Value::Bool(supplied)),
+        ])),
+        PreparedInsertConflict::Skip => Value::Str("skip".into()),
+        PreparedInsertConflict::Updated(rewrite) => Value::Map(BTreeMap::from([
+            ("kind".into(), Value::Str("updated".into())),
+            ("rewrite".into(), encode_prepared_document_rewrite(rewrite)),
+        ])),
+    }
+}
+
+pub(in crate::sql) fn decode_prepared_insert_conflict(
+    value: Value,
+) -> Result<PreparedInsertConflict, SQLError> {
+    match value {
+        Value::Str(kind) if kind == "unresolved" => Ok(PreparedInsertConflict::Unresolved),
+        Value::Str(kind) if kind == "skip" => Ok(PreparedInsertConflict::Skip),
+        Value::Map(mut fields) => match fields.remove("kind") {
+            Some(Value::Str(kind)) if kind == "insert" => Ok(PreparedInsertConflict::Insert {
+                doc_id: decode_prepared_doc_id(
+                    fields.remove("doc_id").ok_or_else(|| {
+                        SQLError::Internal(
+                            "prepared INSERT payload has no document identity".into(),
+                        )
+                    })?,
+                    "prepared INSERT action",
+                )?,
+                supplied: match fields.remove("supplied") {
+                    Some(Value::Bool(supplied)) => supplied,
+                    _ => {
+                        return Err(SQLError::Internal(
+                            "prepared INSERT payload has no supplied-id flag".into(),
+                        ))
+                    }
+                },
+            }),
+            Some(Value::Str(kind)) if kind == "updated" => Ok(PreparedInsertConflict::Updated(
+                decode_prepared_document_rewrite(fields.remove("rewrite").ok_or_else(|| {
+                    SQLError::Internal(
+                        "prepared INSERT conflict payload has no rewrite plan".into(),
+                    )
+                })?)?,
+            )),
+            _ => Err(SQLError::Internal(
+                "prepared INSERT conflict payload has an unknown kind".into(),
+            )),
+        },
+        _ => Err(SQLError::Internal(
+            "prepared INSERT conflict payload has an invalid representation".into(),
+        )),
+    }
+}
+
+enum BuiltConflictUpdate {
+    Skip,
+    Update {
         old_document: Document,
-        document: Document,
+        new_document: Document,
     },
 }
 
-pub(in crate::sql) fn resolve_insert_conflict(
+#[allow(clippy::too_many_arguments)]
+fn build_conflict_update(
     engine: &Engine,
     table: &str,
     target_qualifier: &str,
-    on_conflict: &ConflictPlan,
+    existing_id: DocId,
     document: &Document,
+    assignments: &[uqa_planner::AssignmentPlan],
+    predicate: Option<&uqa_execution::ScalarExpr>,
     params: &[SQLParam],
     scope: &CteScope,
-) -> Result<InsertConflictResolution, SQLError> {
-    let Some(existing_id) = find_insert_conflict(engine, table, on_conflict, document)? else {
-        return Ok(InsertConflictResolution::Insert);
+) -> Result<BuiltConflictUpdate, SQLError> {
+    let existing_doc = engine
+        .get_document(table, existing_id)?
+        .ok_or_else(|| missing_document_error("INSERT ON CONFLICT", table, existing_id))?;
+    let target_row = dml_target_row(engine, table, target_qualifier, existing_id, &existing_doc)?;
+    let definitions = engine
+        .try_describe_table(table)
+        .map_err(|error| dml_storage_error("INSERT EXCLUDED schema", error))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let mut excluded_document = document.clone();
+    crate::engine_generated::materialize_virtual_generated_columns(
+        &definitions,
+        &mut excluded_document,
+    )?;
+    let excluded_columns = if definitions.is_empty() {
+        excluded_document.keys().cloned().collect::<Vec<_>>()
+    } else {
+        definitions
+            .iter()
+            .map(|definition| definition.name.clone())
+            .collect::<Vec<_>>()
     };
-    match &on_conflict.action {
-        ConflictActionPlan::Nothing => Ok(InsertConflictResolution::Skip),
-        ConflictActionPlan::Update {
+    let excluded_types = excluded_columns
+        .iter()
+        .map(|column| {
+            definitions
+                .iter()
+                .find(|definition| definition.name == *column)
+                .map(|definition| definition.ty.clone())
+        })
+        .collect::<Vec<_>>();
+    let excluded_values = excluded_columns
+        .iter()
+        .map(|column| {
+            excluded_document
+                .get(column)
+                .cloned()
+                .unwrap_or(Value::Null)
+        })
+        .collect();
+    let conflict_row = dml_append_hidden_qualified_row(
+        &target_row,
+        "excluded",
+        &excluded_columns,
+        &excluded_types,
+        excluded_values,
+    );
+    if let Some(predicate) = predicate {
+        let keep = eval_mutation_expr(engine, scope, predicate, Some(&conflict_row), params)?;
+        if !uqa_sql::expr::truthy(&keep) {
+            return Ok(BuiltConflictUpdate::Skip);
+        }
+    }
+    let mut updated_doc = existing_doc.clone();
+    for assignment in assignments {
+        let value = eval_mutation_assignment(
+            engine,
+            scope,
+            MutationAssignmentTarget {
+                table,
+                column: &assignment.column,
+                action: "INSERT ON CONFLICT DO UPDATE",
+            },
+            &assignment.value,
+            Some(&conflict_row),
+            params,
+        )?;
+        if let Some(value) = value {
+            updated_doc.insert(assignment.column.clone(), value);
+        } else {
+            updated_doc.remove(&assignment.column);
+        }
+    }
+    Ok(BuiltConflictUpdate::Update {
+        old_document: existing_doc,
+        new_document: updated_doc,
+    })
+}
+
+struct TransientConflictLocks {
+    manager: Arc<crate::row_locks::RowLockManager>,
+    acquisitions: Vec<crate::row_locks::RowLockAcquisition>,
+}
+
+impl TransientConflictLocks {
+    fn new(engine: &Engine) -> Self {
+        Self {
+            manager: Arc::clone(&engine.row_locks),
+            acquisitions: Vec::new(),
+        }
+    }
+
+    fn lock(
+        &mut self,
+        engine: &Engine,
+        table: &str,
+        display_name: &str,
+        doc_id: DocId,
+    ) -> Result<bool, SQLError> {
+        match engine.lock_row(
+            table,
+            doc_id,
+            uqa_sql::ast::LockStrength::ForKeyShare,
+            uqa_sql::ast::LockWait::Block,
+            display_name,
+        )? {
+            crate::row_locks::LockAcquire::Granted {
+                acquisition,
+                waited,
+                ..
+            } => {
+                self.acquisitions.extend(acquisition);
+                Ok(waited)
+            }
+            crate::row_locks::LockAcquire::Skipped => Err(SQLError::Internal(
+                "blocking INSERT conflict wait unexpectedly skipped a row".into(),
+            )),
+        }
+    }
+}
+
+/// Locks every currently visible ON CONFLICT dependency for an INSERT input set while the storage transaction is still a reader. DO NOTHING locks are retained only until writer promotion; DO UPDATE target locks keep their normal transaction lifetime. Once the single backend writer is held no concurrent transaction can create a new physical conflict and make the execution phase wait behind a tuple owner.
+pub(in crate::sql) struct InsertConflictLocks {
+    transient: TransientConflictLocks,
+    overlay: Option<InsertConflictOverlay>,
+}
+
+impl InsertConflictLocks {
+    pub(in crate::sql) fn new(engine: &Engine) -> Self {
+        Self {
+            transient: TransientConflictLocks::new(engine),
+            overlay: None,
+        }
+    }
+
+    pub(in crate::sql) fn lock_document(
+        &mut self,
+        engine: &Engine,
+        table: &str,
+        target_qualifier: &str,
+        on_conflict: &ConflictPlan,
+        document: &Document,
+    ) -> Result<(), SQLError> {
+        for _ in 0..=64 {
+            let Some(existing_id) = find_insert_conflict(engine, table, on_conflict, document)?
+            else {
+                return Ok(());
+            };
+            let (locked_id, recheck) = match &on_conflict.action {
+                ConflictActionPlan::Nothing => (
+                    existing_id,
+                    self.transient
+                        .lock(engine, table, target_qualifier, existing_id)?,
+                ),
+                ConflictActionPlan::Update { assignments, .. } => {
+                    match lock_mutation_target(
+                        engine,
+                        table,
+                        target_qualifier,
+                        existing_id,
+                        update_lock_strength(
+                            engine,
+                            table,
+                            &assignments
+                                .iter()
+                                .map(|assignment| assignment.column.clone())
+                                .collect::<Vec<_>>(),
+                        ),
+                    )? {
+                        MutationLockTarget::Present { doc_id, recheck } => (doc_id, recheck),
+                        MutationLockTarget::Deleted => {
+                            engine.refresh_explicit_statement_snapshot()?;
+                            continue;
+                        }
+                    }
+                }
+            };
+            if recheck {
+                engine.refresh_explicit_statement_snapshot()?;
+            }
+            if find_insert_conflict(engine, table, on_conflict, document)? == Some(locked_id) {
+                return Ok(());
+            }
+        }
+        Err(SQLError::Internal(format!(
+            "INSERT conflict lookup for `{table}` did not converge"
+        )))
+    }
+
+    pub(in crate::sql) fn prepare_document(
+        &mut self,
+        preparation: InsertConflictPreparation<'_>,
+    ) -> Result<PreparedInsertConflict, SQLError> {
+        let InsertConflictPreparation {
+            engine,
+            table,
+            target_qualifier,
+            on_conflict,
+            document,
+            params,
+            scope,
+        } = preparation;
+        let key_acquisitions = lock_document_key_dependencies(engine, table, document, None)?;
+        if self.overlay.is_none() {
+            self.overlay = Some(InsertConflictOverlay::new(engine, table, on_conflict)?);
+        }
+        let current = self
+            .overlay
+            .as_ref()
+            .ok_or_else(|| SQLError::Internal("INSERT conflict overlay is absent".into()))?
+            .find(engine, table, document)?;
+        match current {
+            None => {
+                self.overlay
+                    .as_mut()
+                    .ok_or_else(|| SQLError::Internal("INSERT conflict overlay is absent".into()))?
+                    .note_insert(document)?;
+                return Ok(PreparedInsertConflict::Unresolved);
+            }
+            Some(CurrentInsertConflict::Overlay) => {
+                rollback_lock_acquisitions(engine, key_acquisitions);
+                return match &on_conflict.action {
+                    ConflictActionPlan::Nothing => Ok(PreparedInsertConflict::Skip),
+                    ConflictActionPlan::Update { .. } => Err(on_conflict_cardinality_violation()),
+                };
+            }
+            Some(CurrentInsertConflict::Base(_)) => {}
+        }
+        self.lock_document(engine, table, target_qualifier, on_conflict, document)?;
+        let current = self
+            .overlay
+            .as_ref()
+            .ok_or_else(|| SQLError::Internal("INSERT conflict overlay is absent".into()))?
+            .find(engine, table, document)?;
+        let existing_id = match current {
+            None => {
+                self.overlay
+                    .as_mut()
+                    .ok_or_else(|| SQLError::Internal("INSERT conflict overlay is absent".into()))?
+                    .note_insert(document)?;
+                return Ok(PreparedInsertConflict::Unresolved);
+            }
+            Some(CurrentInsertConflict::Overlay) => {
+                rollback_lock_acquisitions(engine, key_acquisitions);
+                return match &on_conflict.action {
+                    ConflictActionPlan::Nothing => Ok(PreparedInsertConflict::Skip),
+                    ConflictActionPlan::Update { .. } => Err(on_conflict_cardinality_violation()),
+                };
+            }
+            Some(CurrentInsertConflict::Base(doc_id)) => doc_id,
+        };
+        self.transient.acquisitions.extend(key_acquisitions);
+        let ConflictActionPlan::Update {
             assignments,
             predicate,
-        } => {
-            let existing_doc = engine
-                .get_document(table, existing_id)?
-                .ok_or_else(|| missing_document_error("INSERT ON CONFLICT", table, existing_id))?;
-            let target_row =
-                dml_target_row(engine, table, target_qualifier, existing_id, &existing_doc)?;
-            let definitions = engine
-                .try_describe_table(table)
-                .map_err(|error| dml_storage_error("INSERT EXCLUDED schema", error))?
-                .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-            let mut excluded_document = document.clone();
-            crate::engine_generated::materialize_virtual_generated_columns(
-                &definitions,
-                &mut excluded_document,
-            )?;
-            let excluded_columns = if definitions.is_empty() {
-                excluded_document.keys().cloned().collect::<Vec<_>>()
-            } else {
-                definitions
-                    .iter()
-                    .map(|definition| definition.name.clone())
-                    .collect::<Vec<_>>()
-            };
-            let excluded_types = excluded_columns
-                .iter()
-                .map(|column| {
-                    definitions
-                        .iter()
-                        .find(|definition| definition.name == *column)
-                        .map(|definition| definition.ty.clone())
-                })
-                .collect::<Vec<_>>();
-            let excluded_values = excluded_columns
-                .iter()
-                .map(|column| {
-                    excluded_document
-                        .get(column)
-                        .cloned()
-                        .unwrap_or(Value::Null)
-                })
-                .collect();
-            let conflict_row = dml_append_hidden_qualified_row(
-                &target_row,
-                "excluded",
-                &excluded_columns,
-                &excluded_types,
-                excluded_values,
-            );
-            if let Some(predicate) = predicate {
-                let keep =
-                    eval_mutation_expr(engine, scope, predicate, Some(&conflict_row), params)?;
-                if !uqa_sql::expr::truthy(&keep) {
-                    return Ok(InsertConflictResolution::Skip);
-                }
-            }
-            let mut updated_doc = existing_doc.clone();
-            for assignment in assignments {
-                let value = eval_mutation_assignment(
+        } = &on_conflict.action
+        else {
+            return Ok(PreparedInsertConflict::Skip);
+        };
+        match build_conflict_update(
+            engine,
+            table,
+            target_qualifier,
+            existing_id,
+            document,
+            assignments,
+            predicate.as_ref(),
+            params,
+            scope,
+        )? {
+            BuiltConflictUpdate::Skip => Ok(PreparedInsertConflict::Skip),
+            BuiltConflictUpdate::Update {
+                old_document,
+                new_document,
+            } => {
+                let mut rewrite_stack = Vec::new();
+                let prepared = prepare_document_rewrite(
                     engine,
-                    scope,
-                    MutationAssignmentTarget {
-                        table,
-                        column: &assignment.column,
-                        action: "INSERT ON CONFLICT DO UPDATE",
-                    },
-                    &assignment.value,
-                    Some(&conflict_row),
+                    table,
+                    existing_id,
+                    old_document,
+                    new_document,
                     params,
-                )?;
-                if let Some(value) = value {
-                    updated_doc.insert(assignment.column.clone(), value);
-                } else {
-                    updated_doc.remove(&assignment.column);
-                }
+                    &mut rewrite_stack,
+                )?
+                .ok_or_else(|| {
+                    SQLError::Internal(
+                        "INSERT ON CONFLICT rewrite dependency tree was cyclic at its root".into(),
+                    )
+                })?;
+                self.overlay
+                    .as_mut()
+                    .ok_or_else(|| SQLError::Internal("INSERT conflict overlay is absent".into()))?
+                    .note_update(existing_id, &prepared.new_document)?;
+                Ok(PreparedInsertConflict::Updated(prepared))
             }
-            let rewritten_doc_id = rewrite_document_with_referential_actions(
-                engine,
-                table,
-                existing_id,
-                &existing_doc,
-                &mut updated_doc,
-                params,
-            )?;
-            Ok(InsertConflictResolution::Updated {
-                old_doc_id: existing_id,
-                doc_id: rewritten_doc_id,
-                old_document: existing_doc,
-                document: updated_doc,
-            })
         }
+    }
+}
+
+impl Drop for TransientConflictLocks {
+    fn drop(&mut self) {
+        for acquisition in self.acquisitions.drain(..).rev() {
+            self.manager.rollback_acquisition(acquisition);
+        }
+    }
+}
+
+fn rollback_lock_acquisitions(
+    engine: &Engine,
+    acquisitions: Vec<crate::row_locks::RowLockAcquisition>,
+) {
+    for acquisition in acquisitions.into_iter().rev() {
+        engine.rollback_row_lock_acquisition(acquisition);
     }
 }
 
@@ -334,6 +827,7 @@ fn returning_context_schema(
     RowSchema::with_identity_aliases(&schema, &identity_aliases)
 }
 
+#[derive(Clone, Copy)]
 pub(in crate::sql) struct ReturningProjectionRow<'a> {
     pub table: &'a str,
     pub target_qualifier: &'a str,
@@ -349,6 +843,22 @@ pub(in crate::sql) fn build_returning_row(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<OwnedPhysicalRow, SQLError> {
+    let row = returning_projection_context(engine, input)?;
+    let projections = expanded_returning_projections(
+        engine,
+        input.table,
+        input.target_qualifier,
+        input.aliases,
+        returning,
+    )?;
+    let snapshot_scope = ctes.returning_statement_snapshot_scope();
+    build_projection_physical_row_with_ctes(engine, &row, &projections, params, &snapshot_scope)
+}
+
+pub(in crate::sql) fn returning_projection_context(
+    engine: &Engine,
+    input: ReturningProjectionRow<'_>,
+) -> Result<OwnedPhysicalRow, SQLError> {
     let target = returning_row_context(
         engine,
         input.table,
@@ -362,14 +872,7 @@ pub(in crate::sql) fn build_returning_row(
             PhysicalRow::concat(&target.row, &context.row),
         )
     });
-    let projections = expanded_returning_projections(
-        engine,
-        input.table,
-        input.target_qualifier,
-        input.aliases,
-        returning,
-    )?;
-    build_projection_physical_row_with_ctes(engine, &row, &projections, params, ctes)
+    Ok(row)
 }
 
 pub(in crate::sql) struct DmlReturningShape<'a> {

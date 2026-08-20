@@ -97,9 +97,10 @@ mod engine_tables;
 mod engine_transactions;
 mod engine_truncate;
 mod engine_user_functions;
+mod row_locks;
 mod value_index;
 
-use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
+use std::collections::{btree_map::Entry, BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -238,6 +239,8 @@ pub struct Engine {
     extensions: RuntimeExtensions,
     epochs: EpochCoordinator,
     runtime: QueryRuntime,
+    row_locks: Arc<row_locks::RowLockManager>,
+    session_id: u64,
 }
 
 #[derive(Clone, Default)]
@@ -262,6 +265,13 @@ struct PreparedStatementPlan {
 impl SQLStatementCache {
     fn get(&self, sql: &str) -> Option<CachedSQLStatement> {
         self.entries.get(sql).cloned()
+    }
+
+    fn get_optimized(&self, sql: &str) -> Option<Arc<uqa_planner::UnifiedPlan>> {
+        self.entries
+            .get(sql)
+            .and_then(|cached| cached.optimized_plan.as_ref())
+            .cloned()
     }
 
     fn insert(
@@ -329,14 +339,40 @@ struct TransactionDirtyState {
     catalog_registry: bool,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TransactionIntent {
+    ReadOnly,
+    ReadWrite,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BackendTransactionMode {
+    Deferred,
+    Writer,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TransactionStatus {
+    Active,
+    Failed,
+    FailedBackendAborted,
+}
+
 struct TransactionFrame {
     storage_savepoint: Option<String>,
-    read_only: bool,
+    intent: TransactionIntent,
+    backend_mode: BackendTransactionMode,
+    status: TransactionStatus,
     savepoints: Vec<TransactionSavepoint>,
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
     dirty_at_begin: TransactionDirtyState,
+    /// Lock mark this frame started with. Rolling the whole frame back releases every acquisition at or above it, independent of the savepoint marks the frame allocated later.
+    begin_lock_mark: u32,
+    lock_mark: u32,
+    next_lock_mark: u32,
+    snapshot_change_baseline: row_locks::RowChangeBaseline,
+    row_changes: Vec<row_locks::PendingRowChange>,
 }
 
 struct TransactionSavepoint {
@@ -344,6 +380,19 @@ struct TransactionSavepoint {
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
     dirty: TransactionDirtyState,
+    lock_mark: u32,
+    row_changes: Vec<row_locks::PendingRowChange>,
+}
+
+#[derive(Clone, Default)]
+struct CommandMutationOverlay {
+    documents: BTreeMap<String, BTreeMap<DocId, Option<Arc<Document>>>>,
+    exact_indexes: BTreeMap<String, BTreeMap<Vec<String>, CommandExactIndex>>,
+}
+
+#[derive(Clone, Default)]
+struct CommandExactIndex {
+    doc_ids_by_key: BTreeMap<Vec<u8>, BTreeSet<DocId>>,
 }
 
 /// Lightweight SQL-session state that follows transaction/savepoint rollback
@@ -487,9 +536,17 @@ impl Default for Engine {
     }
 }
 
+impl Drop for Engine {
+    fn drop(&mut self) {
+        self.row_locks.release_session(self.session_id);
+    }
+}
+
 impl Engine {
     /// In-memory engine. State lives only as long as this `Engine`.
     pub fn new() -> Self {
+        let row_locks = Arc::new(row_locks::RowLockManager::new());
+        let session_id = row_locks.allocate_session();
         Self {
             storage: StorageContext::memory(),
             durable: DurableCatalogState::new(),
@@ -497,11 +554,24 @@ impl Engine {
             extensions: RuntimeExtensions::new(),
             epochs: EpochCoordinator::new(),
             runtime: QueryRuntime::new(SQL_FUNCTION_DEPTH_LIMIT),
+            row_locks,
+            session_id,
         }
     }
 
     pub(crate) fn cached_sql_statement(&self, sql: &str) -> Option<CachedSQLStatement> {
         self.session.state.read().sql_statement_cache.get(sql)
+    }
+
+    pub(crate) fn cached_optimized_sql_plan(
+        &self,
+        sql: &str,
+    ) -> Option<Arc<uqa_planner::UnifiedPlan>> {
+        self.session
+            .state
+            .read()
+            .sql_statement_cache
+            .get_optimized(sql)
     }
 
     pub(crate) fn cache_sql_statement(

@@ -403,9 +403,12 @@ impl Engine {
         field: &str,
         vector: Vec<f32>,
     ) -> Result<bool, SQLError> {
-        self.with_implicit_transaction(|engine| {
-            engine.add_vector_inner(table, doc_id, field, vector)
-        })
+        self.with_implicit_row_write_transaction(
+            table,
+            doc_id,
+            uqa_sql::ast::LockStrength::ForNoKeyUpdate,
+            |engine| engine.add_vector_inner(table, doc_id, field, vector),
+        )
     }
 
     fn add_vector_inner(
@@ -432,6 +435,7 @@ impl Engine {
             .map_err(|error| SQLError::Internal(format!("index document vector: {error}")))?;
         drop(idxs);
         self.note_table_data_changed();
+        self.note_row_changed(table, doc_id)?;
         Ok(true)
     }
 
@@ -442,9 +446,12 @@ impl Engine {
         field: &str,
         vectors: Vec<Vec<f32>>,
     ) -> Result<bool, SQLError> {
-        self.with_implicit_transaction(|engine| {
-            engine.add_vector_values_inner(table, doc_id, field, vectors)
-        })
+        self.with_implicit_row_write_transaction(
+            table,
+            doc_id,
+            uqa_sql::ast::LockStrength::ForNoKeyUpdate,
+            |engine| engine.add_vector_values_inner(table, doc_id, field, vectors),
+        )
     }
 
     fn add_vector_values_inner(
@@ -471,6 +478,7 @@ impl Engine {
             .map_err(|error| SQLError::Internal(format!("index document vectors: {error}")))?;
         drop(idxs);
         self.note_table_data_changed();
+        self.note_row_changed(table, doc_id)?;
         Ok(true)
     }
 
@@ -540,9 +548,15 @@ impl Engine {
         document: Document,
         vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
     ) -> Result<(), SQLError> {
-        self.with_implicit_transaction(|engine| {
-            engine.add_document_with_vector_values_inner(table, doc_id, document, vectors, false)
-        })
+        self.with_implicit_row_write_transaction(
+            table,
+            doc_id,
+            uqa_sql::ast::LockStrength::ForUpdate,
+            |engine| {
+                engine
+                    .add_document_with_vector_values_inner(table, doc_id, document, vectors, false)
+            },
+        )
     }
 
     pub(crate) fn add_document_with_vector_values_inner(
@@ -556,7 +570,7 @@ impl Engine {
         self.validate_vector_values(table, &vectors)?;
         self.add_document_impl(table, doc_id, document, known_new)?;
         for (field, vectors) in vectors {
-            self.add_vector_values(table, doc_id, &field, vectors)?;
+            self.add_vector_values_inner(table, doc_id, &field, vectors)?;
         }
         Ok(())
     }
@@ -569,11 +583,16 @@ impl Engine {
         vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
         known_new: bool,
     ) -> Result<(), SQLError> {
-        self.with_implicit_transaction(|engine| {
-            engine.add_prepared_document_with_vector_values_inner(
-                table, doc_id, document, vectors, known_new,
-            )
-        })
+        self.with_implicit_row_write_transaction(
+            table,
+            doc_id,
+            uqa_sql::ast::LockStrength::ForUpdate,
+            |engine| {
+                engine.add_prepared_document_with_vector_values_inner(
+                    table, doc_id, document, vectors, known_new,
+                )
+            },
+        )
     }
 
     pub(crate) fn add_prepared_document_with_vector_values_inner(
@@ -587,7 +606,7 @@ impl Engine {
         self.validate_vector_values(table, &vectors)?;
         self.add_prepared_document_impl(table, doc_id, document, known_new)?;
         for (field, vectors) in vectors {
-            self.add_vector_values(table, doc_id, &field, vectors)?;
+            self.add_vector_values_inner(table, doc_id, &field, vectors)?;
         }
         Ok(())
     }

@@ -66,7 +66,7 @@ pub(crate) fn with_cleanup<T>(
 /// during `open`; pipelined operators (filter / project / limit) emit
 /// batches as they arrive.
 pub trait PhysicalOperator: Send {
-    /// Complete logical-to-physical row layout emitted by this operator.
+    /// Complete logical-to-physical row layout emitted by this operator. Every [`Batch`] returned by [`Self::next`] must carry this exact schema; operators must reject a child that violates that invariant.
     fn row_schema(&self) -> &RowSchema;
 
     /// Schema column names in logical output order.

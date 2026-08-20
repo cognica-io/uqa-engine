@@ -11,7 +11,7 @@ use super::{
     expr_contains_volatile_function, has_aggregate, physical_exec_error, physical_projections,
     physical_work_mem_bytes, projection_label_at, ComputePlan, CteScope, Engine,
     EngineExpressionEvaluator, PhysicalEvalContext, ProjectionPlan, QueryBlockPlan, QueryOutput,
-    QueryOutputMode, QueryRows, ResultRow, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
+    QueryOutputMode, QueryRows, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
     ScoredDocumentSource, ScoredInput, Value, SCORE_COLUMN,
 };
 
@@ -51,11 +51,24 @@ pub(in crate::sql) fn build_facet_output(
 ) -> Result<QueryOutput, SQLError> {
     use uqa_execution::{
         AggregateKind, AggregateSpec, ExternalSort, Filter, HashAggregate, PhysicalOperator,
-        ProjectSet, SortKey,
+        PhysicalProjectSet, RowProjectionValue, RowSchema, SortKey,
     };
 
     let include_field = execution.fields.len() > 1;
     let table_state = engine.require_table(table)?;
+    let table_columns = table_state
+        .columns
+        .read()
+        .iter()
+        .map(|column| column.name.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    if let Some(field) = execution
+        .fields
+        .iter()
+        .find(|field| !table_columns.contains(field.as_str()))
+    {
+        return Err(SQLError::UnknownColumn(field.clone()));
+    }
     let source = ScoredDocumentSource::new(
         table,
         table_state,
@@ -74,34 +87,46 @@ pub(in crate::sql) fn build_facet_output(
         ));
     }
 
-    let facet_fields = execution.fields.to_vec();
     let facet_columns = if include_field {
         vec!["facet_field".into(), "facet_value".into()]
     } else {
         vec!["facet_value".into()]
     };
-    let facet_rows: Box<dyn PhysicalOperator + '_> = Box::new(ProjectSet::new(
-        source,
-        facet_columns.clone(),
-        Box::new(move |document: &ResultRow| {
-            let mut rows = Vec::with_capacity(facet_fields.len());
-            for field in &facet_fields {
-                let Some(value) = document.get(field) else {
-                    continue;
-                };
-                if matches!(value, Value::Null) {
-                    continue;
-                }
-                let mut row = ResultRow::new();
-                if include_field {
-                    row.insert("facet_field".into(), Value::Str(field.clone()));
-                }
-                row.insert("facet_value".into(), value.clone());
-                rows.push(row);
-            }
-            Ok(Box::new(rows.into_iter().map(Ok)) as uqa_execution::ProjectRows)
-        }),
-    ));
+    let facet_layout = execution
+        .fields
+        .iter()
+        .filter_map(|field| {
+            let logical = source.row_schema().position(field)?;
+            let physical = source.row_schema().physical_slot(logical)?;
+            Some((field.clone(), logical, physical))
+        })
+        .collect::<Vec<_>>();
+    let facet_rows: Box<dyn PhysicalOperator + '_> =
+        Box::new(PhysicalProjectSet::new(
+            source,
+            RowSchema::new(facet_columns.clone()),
+            Box::new(move |document: uqa_execution::OwnedPhysicalRow| {
+                let rows = facet_layout.clone().into_iter().filter_map(
+                    move |(field, logical, physical)| {
+                        if matches!(document.view().value_at(logical), None | Some(Value::Null)) {
+                            return None;
+                        }
+                        let projected = if include_field {
+                            document.row.project_with_values([
+                                RowProjectionValue::Owned(Value::Str(field)),
+                                RowProjectionValue::InputSlot(physical),
+                            ])
+                        } else {
+                            document
+                                .row
+                                .project_with_values([RowProjectionValue::InputSlot(physical)])
+                        };
+                        Some(Ok(projected))
+                    },
+                );
+                Ok(Box::new(rows) as uqa_execution::PhysicalProjectRows)
+            }),
+        ));
 
     // End the document/evaluator borrow phase in a bounded spill. The generic
     // external aggregate can then own a static scan while its group map and
@@ -182,7 +207,8 @@ pub(in crate::sql) fn score_order_top_k(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<Option<usize>, SQLError> {
-    if stmt.distinct
+    if !stmt.locking.is_empty()
+        || stmt.distinct
         || !stmt.distinct_on.is_empty()
         || !matches!(stmt.compute, ComputePlan::Project)
         || stmt.order_by.is_empty()
@@ -209,6 +235,10 @@ pub(in crate::sql) fn post_retrieval_score_top_k(
     let Some(primary_order) = stmt.order_by.first() else {
         return Ok(None);
     };
+    // A locking query must keep the complete ranked candidate stream: SKIP LOCKED skips rows, and a tuple-local recheck can drop a changed candidate, in which case PostgreSQL 18 surfaces the next candidate.
+    if !stmt.locking.is_empty() {
+        return Ok(None);
+    }
     if stmt.distinct
         || !stmt.distinct_on.is_empty()
         || !matches!(stmt.compute, ComputePlan::Project)

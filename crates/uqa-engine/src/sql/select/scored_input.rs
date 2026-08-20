@@ -9,8 +9,8 @@
 mod materialize;
 
 use super::{
-    doc_id_value, Arc, DocId, ExecResult, ResultRow, SQLError, ScoredEntry, Value, DOC_ID_COLUMN,
-    SCORE_COLUMN, SCORE_PROVENANCE_COLUMN,
+    doc_id_value, Arc, DocId, ExecResult, RecheckDoc, ResultRow, SQLError, ScoredEntry, Value,
+    DOC_ID_COLUMN, SCORE_COLUMN, SCORE_PROVENANCE_COLUMN,
 };
 
 pub(in crate::sql) enum ScoredInput {
@@ -187,6 +187,10 @@ pub(in crate::sql) struct ScoredDocumentSource {
     hidden_columns: HiddenColumns,
     ordering: Vec<uqa_execution::PhysicalOrder>,
     input_guarantees_presence: bool,
+    lock_origin: Option<(Arc<str>, Arc<str>)>,
+    recheck_pinned: bool,
+    recheck_documents:
+        std::collections::BTreeMap<DocId, Arc<uqa_storage::document_store::Document>>,
 }
 
 pub(in crate::sql) enum ScoredInputCursor {
@@ -302,7 +306,61 @@ impl ScoredDocumentSource {
             hidden_columns,
             ordering,
             input_guarantees_presence,
+            lock_origin: None,
+            recheck_pinned: false,
+            recheck_documents: std::collections::BTreeMap::new(),
         }
+    }
+
+    pub(in crate::sql) fn with_lock_origin(mut self, origin: Option<(Arc<str>, Arc<str>)>) -> Self {
+        self.lock_origin = origin;
+        self
+    }
+
+    /// Pin this scan to a tuple-local recheck candidate's tuples. A ranked input (retrieval predicate) was re-executed against the latest index state when the recheck rebuilt the scan, so a pinned tuple survives only if the retrieval still matches it, exactly like `PostgreSQL` re-evaluating the WHERE clause on the substituted tuple; its score is the re-executed retrieval score. A plain scan input keeps every pinned tuple and lets the residual predicates decide.
+    pub(in crate::sql) fn with_recheck_pins(mut self, pins: Option<Arc<Vec<RecheckDoc>>>) -> Self {
+        let Some(pins) = pins else {
+            return self;
+        };
+        let ranked: Option<std::collections::BTreeMap<DocId, f64>> = match &mut self.input {
+            ScoredInputCursor::Entries(entries) => Some(
+                entries
+                    .by_ref()
+                    .map(|entry| (entry.doc_id, entry.score))
+                    .collect(),
+            ),
+            ScoredInputCursor::All { .. } => None,
+        };
+        let entries = pins
+            .iter()
+            .filter_map(|pin| match ranked.as_ref() {
+                Some(scores) => scores.get(&pin.doc_id).map(|score| ScoredEntry {
+                    doc_id: pin.doc_id,
+                    score: *score,
+                }),
+                None => Some(ScoredEntry {
+                    doc_id: pin.doc_id,
+                    score: 0.0,
+                }),
+            })
+            .collect::<Vec<_>>();
+        if !entries
+            .windows(2)
+            .all(|pair| pair[0].doc_id <= pair[1].doc_id)
+        {
+            self.ordering.clear();
+        }
+        self.recheck_documents = pins
+            .iter()
+            .filter_map(|pin| {
+                pin.document
+                    .as_ref()
+                    .map(|document| (pin.doc_id, Arc::clone(document)))
+            })
+            .collect();
+        self.recheck_pinned = true;
+        self.input = ScoredInputCursor::Entries(entries.into_iter());
+        self
     }
 
     /// Bind every visible column to its relation without changing public labels or copying values.
@@ -386,6 +444,9 @@ impl uqa_execution::RowSource for ScoredDocumentSource {
         &mut self,
         max_rows: usize,
     ) -> ExecResult<Vec<uqa_execution::PhysicalRow>> {
+        if let Some(rows) = self.next_shared_physical_batch(max_rows)? {
+            return Ok(rows);
+        }
         loop {
             let entries = self.next_entries(max_rows)?;
             if entries.is_empty() {
@@ -406,7 +467,18 @@ impl uqa_execution::RowSource for ScoredDocumentSource {
         if !executor.supports_projected_rows() {
             return Ok(false);
         }
+        let supports_storage_borrowed_rows = executor.supports_storage_borrowed_rows();
         loop {
+            if supports_storage_borrowed_rows {
+                if let Some(reached_end) =
+                    self.aggregate_shared_batch(uqa_execution::batch::DEFAULT_BATCH_SIZE, executor)?
+                {
+                    if reached_end {
+                        return Ok(true);
+                    }
+                    continue;
+                }
+            }
             let entries = self.next_entries(uqa_execution::batch::DEFAULT_BATCH_SIZE)?;
             if entries.is_empty() {
                 return Ok(true);
@@ -519,6 +591,38 @@ mod tests {
     }
 
     #[test]
+    fn recheck_pins_clear_primary_key_ordering_when_their_order_is_not_ascending() {
+        let engine = crate::Engine::new();
+        engine
+            .sql(
+                "CREATE TABLE pinned_order (id BIGINT PRIMARY KEY, payload TEXT)",
+                &[],
+            )
+            .unwrap();
+        let table = engine.require_table("pinned_order").unwrap();
+        let source = ScoredDocumentSource::new(
+            "pinned_order",
+            table,
+            ScoredInput::All,
+            vec!["id".into()],
+            Some("id".into()),
+            None,
+        )
+        .with_recheck_pins(Some(Arc::new(vec![
+            RecheckDoc {
+                doc_id: 2,
+                document: None,
+            },
+            RecheckDoc {
+                doc_id: 1,
+                document: None,
+            },
+        ])));
+
+        assert!(source.output_ordering().is_empty());
+    }
+
+    #[test]
     fn store_cursor_materializes_empty_projection_without_losing_rows() {
         let engine = crate::Engine::new();
         engine
@@ -572,9 +676,43 @@ mod tests {
         assert_eq!(schema.columns(), ["id"]);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].fragment_count(), 1);
+        assert!(rows[0].lock_origins().is_empty());
         assert_eq!(
             schema.view(&rows[0]).qualified_column("a", "id"),
             Some(&Value::Int(7))
         );
+    }
+
+    #[test]
+    fn locking_physical_cursor_attaches_the_requested_origin() {
+        let engine = crate::Engine::new();
+        engine
+            .sql("CREATE TABLE locking_source (id BIGINT PRIMARY KEY)", &[])
+            .unwrap();
+        engine
+            .sql("INSERT INTO locking_source (id) VALUES (7)", &[])
+            .unwrap();
+        let table = engine.require_table("locking_source").unwrap();
+        let mut source = ScoredDocumentSource::new(
+            "locking_source",
+            table,
+            ScoredInput::All,
+            vec!["id".into()],
+            Some("id".into()),
+            None,
+        )
+        .with_qualifier("l")
+        .with_lock_origin(Some((Arc::from("l"), Arc::from("locking_source"))));
+
+        let rows = source.next_physical_batch(16).unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].lock_origins().len(), 1);
+        assert_eq!(rows[0].lock_origins()[0].qualifier.as_ref(), "l");
+        assert_eq!(
+            rows[0].lock_origins()[0].storage_name.as_ref(),
+            "locking_source"
+        );
+        assert_eq!(rows[0].lock_origins()[0].doc_id, 7);
     }
 }

@@ -46,7 +46,7 @@ mod catalog;
 mod correlation;
 mod cursor;
 mod ddl;
-mod dml;
+pub(crate) mod dml;
 mod driver;
 mod engine_api;
 mod from_rows;
@@ -70,6 +70,8 @@ use planning::compile_logical_plans;
 use planning::lower_statement;
 pub(super) use planning::{execute_compiled_statement, optimize_engine_plan};
 pub(crate) use plpgsql_exec::{call_bound_user_scalar_function, call_user_scalar_function};
+use select::query_has_row_locks;
+pub(crate) use select::RowLockRetryCache;
 
 use aggregates::{
     aggregate_value, contains_aggregate, has_aggregate, projection_label_at, AggregateAccumulator,
@@ -117,7 +119,7 @@ type RowUpdateVectors = BTreeMap<String, Vec<Vec<f32>>>;
 type RowIndependentUpdateValues = (RowUpdateValues, RowUpdateVectors);
 
 const SCORE_COLUMN: &str = "_score";
-const DOC_ID_COLUMN: &str = "_doc_id";
+pub(in crate::sql) const DOC_ID_COLUMN: &str = "_doc_id";
 const MERGE_ACTION_COLUMN: &str = "_merge_action";
 // NUL cannot occur in a SQL identifier, so this row-carried field cannot
 // collide with a user column. Its value is the score emitted by an executed
@@ -518,6 +520,56 @@ mod unified_plan_tests {
         assert!(
             engine.cached_sql_statement(query).is_none(),
             "a committed data change must invalidate the optimized plan"
+        );
+    }
+
+    #[test]
+    fn cached_memory_read_plan_is_not_reused_inside_explicit_transaction() {
+        let engine = Engine::new();
+        engine
+            .sql("CREATE TABLE items (id INTEGER PRIMARY KEY)", &[])
+            .expect("create table");
+        engine
+            .sql("INSERT INTO items (id) VALUES (1), (2)", &[])
+            .expect("seed rows");
+        let query = "SELECT id FROM items ORDER BY id";
+
+        engine.sql(query, &[]).expect("warm statement cache");
+        assert!(
+            engine
+                .cached_sql_statement(query)
+                .is_some_and(|cached| cached.optimized_plan.is_some()),
+            "memory read caches its optimized plan"
+        );
+
+        engine.begin().expect("begin explicit transaction");
+        engine.sql(query, &[]).expect("execute transactional read");
+        assert!(
+            engine
+                .cached_sql_statement(query)
+                .is_some_and(|cached| cached.optimized_plan.is_none()),
+            "the regular SQL entry point must replan inside an explicit transaction"
+        );
+        engine.rollback().expect("rollback explicit transaction");
+
+        engine.begin().expect("begin second explicit transaction");
+        let cursor = engine
+            .sql_cursor(query, &[])
+            .expect("execute transactional cursor read");
+        assert_eq!(cursor.row_count(), 2);
+        assert!(
+            engine
+                .cached_sql_statement(query)
+                .is_some_and(|cached| cached.optimized_plan.is_none()),
+            "the cursor entry point must replan inside an explicit transaction"
+        );
+        drop(cursor);
+        engine.rollback().expect("rollback explicit transaction");
+        assert!(
+            engine
+                .cached_sql_statement(query)
+                .is_some_and(|cached| cached.optimized_plan.is_some()),
+            "rollback restores the optimized plan cached before the transaction"
         );
     }
 

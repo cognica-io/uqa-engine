@@ -114,6 +114,18 @@ impl<'a> Window<'a> {
         output_types: Vec<Option<uqa_sql::ast::ColumnType>>,
         executor: Box<dyn WindowExecutor + 'a>,
     ) -> Self {
+        Self::with_row_schema_executor(
+            child,
+            RowSchema::with_types(output_schema, output_types),
+            executor,
+        )
+    }
+
+    pub fn with_row_schema_executor(
+        child: Box<dyn PhysicalOperator + 'a>,
+        schema: RowSchema,
+        executor: Box<dyn WindowExecutor + 'a>,
+    ) -> Self {
         Self {
             child,
             spec: WindowSpec {
@@ -122,7 +134,7 @@ impl<'a> Window<'a> {
             },
             functions: Vec::new(),
             params: Vec::new(),
-            schema: RowSchema::with_types(output_schema, output_types),
+            schema,
             executor: Some(executor),
             work_mem_bytes: 0,
             output: None,
@@ -367,7 +379,8 @@ fn emit_builtin_window_partition(
         previous_order_key = Some(order_key);
         pending.push(
             row.append_values(window_values)
-                .project_slots(&output_slots),
+                .project_slots(&output_slots)
+                .without_lock_origins(),
         );
         if pending.len() == crate::batch::DEFAULT_BATCH_SIZE {
             output.push(Batch::from_physical_rows(

@@ -238,6 +238,7 @@ impl QueryBlockPlan {
                 .collect(),
             subqueries,
             access: AccessPathPlan::Row,
+            locking: statement.locking,
         }
     }
 

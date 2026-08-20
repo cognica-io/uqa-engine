@@ -13,7 +13,7 @@ use super::{
     QueryPlan, RelationalPlan, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, ScopedEngineHook,
     SourceEvalContext, SourcePlan, TableFunctionCall,
 };
-use crate::sql::select::expand_from_star_columns;
+use crate::sql::select::{expand_from_star_columns, resolve_row_locks};
 
 pub(in crate::sql) struct EngineLateralSource<'a> {
     pub(super) engine: &'a Engine,
@@ -22,6 +22,7 @@ pub(in crate::sql) struct EngineLateralSource<'a> {
     pub(super) params: &'a [SQLParam],
     pub(super) ctes: CteScope,
     pub(super) right_schema: uqa_execution::RowSchema,
+    pub(super) pinned_right: Option<uqa_execution::OwnedPhysicalRow>,
 }
 
 impl uqa_execution::LateralSource for EngineLateralSource<'_> {
@@ -29,6 +30,9 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
         &mut self,
         left_row: &uqa_execution::OwnedPhysicalRow,
     ) -> uqa_execution::ExecResult<uqa_execution::LateralRows> {
+        if let Some(row) = self.pinned_right.as_ref() {
+            return Ok(Box::new(std::iter::once(Ok(row.clone()))));
+        }
         if let SourcePlan::Function {
             name,
             output_name,
@@ -219,6 +223,7 @@ fn execute_lateral_relational_root_output(
                         distinct_on: Vec::new(),
                         subqueries: subqueries.clone(),
                         access: AccessPathPlan::Row,
+                        locking: Vec::new(),
                     }
                 });
             let execution = crate::sql::select::SetSpillExecution::new(
@@ -288,7 +293,16 @@ fn execute_lateral_query_block_output(
     params: &[SQLParam],
     scoped_ctes: &mut CteScope,
 ) -> Result<QueryOutput, SQLError> {
+    let inherited_lock_identities = scoped_ctes.lock_identities.emit;
     let mut scoped_ctes = scoped_ctes.enter_scalar_subqueries(&stmt.subqueries);
+    scoped_ctes.set_row_lock_outer_row(outer_row.clone());
+    let row_identity_barrier = stmt.distinct
+        || !stmt.distinct_on.is_empty()
+        || matches!(stmt.compute, ComputePlan::Aggregate | ComputePlan::Window);
+    scoped_ctes.lock_identities.emit =
+        !stmt.locking.is_empty() || (inherited_lock_identities && !row_identity_barrier);
+    scoped_ctes.lock_identities.retain_after_lock =
+        inherited_lock_identities && !row_identity_barrier;
     if let Some(from) = stmt.from.as_ref() {
         crate::sql::select::validate_source_set_contexts_before_build(
             engine,
@@ -300,8 +314,18 @@ fn execute_lateral_query_block_output(
     }
     let operator: Box<dyn uqa_execution::PhysicalOperator + '_> =
         if let Some(from) = stmt.from.as_ref() {
-            let child =
-                build_join_operator_with_ctes(engine, from, params, &mut scoped_ctes, None, None)?;
+            let source_row_locks = resolve_row_locks(
+                engine,
+                from,
+                &stmt.locking,
+                stmt.r#where.as_ref(),
+                params,
+                &scoped_ctes,
+            )?;
+            let child = {
+                let mut source_scope = scoped_ctes.enter_source_row_locks(source_row_locks);
+                build_join_operator_with_ctes(engine, from, params, &mut source_scope, None, None)?
+            };
             Box::new(uqa_execution::ScopeOverlay::new(child, outer_row.clone()))
         } else {
             let child: Box<dyn uqa_execution::PhysicalOperator + '_> =

@@ -9,8 +9,9 @@
 use super::{
     execute_query_block_operator_output, expand_from_star_columns, expr_contains_subquery,
     expr_contains_volatile_function, final_filter_after_qualifier_pushdown, has_window,
-    projection_columns, qualifier_filters_for_stmt, run_select_without_from_output,
-    run_single_foreign_select_output, run_single_table_select_output, validate_query_set_contexts,
+    projection_columns, qualifier_filters_for_stmt, resolve_row_locks,
+    run_select_without_from_output, run_single_foreign_select_output,
+    run_single_table_select_output, validate_query_set_contexts,
     validate_source_set_contexts_before_build, BTreeSet, ColumnPrune, CteScope, Engine,
     QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr, SingleRelation,
     SourcePlan,
@@ -62,7 +63,9 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
             .try_table(name)
             .map_err(|err| SQLError::Internal(format!("resolve table `{name}`: {err}")))?;
         let is_virtual = name.contains('.') || (local_table.is_none() && foreign_table.is_none());
-        if alias.is_none() && !is_virtual {
+        let command_overlay =
+            ctes.reads_command_overlay() && engine.command_mutation_overlay_active();
+        if alias.is_none() && !is_virtual && !command_overlay {
             return run_single_table_select_output(
                 engine,
                 SingleRelation {
@@ -84,14 +87,25 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
 
     let column_prune = column_prune_for_stmt(engine, stmt, from);
     let qualifier_filters = qualifier_filters_for_stmt(engine, stmt, from);
-    let operator = crate::sql::from_rows::build_join_operator_with_ctes(
+    let source_row_locks = resolve_row_locks(
         engine,
         from,
+        &stmt.locking,
+        stmt.r#where.as_ref(),
         params,
         ctes,
-        column_prune.as_ref(),
-        qualifier_filters.as_ref(),
     )?;
+    let operator = {
+        let mut scoped_ctes = ctes.enter_source_row_locks(source_row_locks);
+        crate::sql::from_rows::build_join_operator_with_ctes(
+            engine,
+            from,
+            params,
+            &mut scoped_ctes,
+            column_prune.as_ref(),
+            qualifier_filters.as_ref(),
+        )?
+    };
     let source_schema = operator.row_schema().clone();
     let physical_filter =
         final_filter_after_qualifier_pushdown(engine, stmt, from, qualifier_filters.as_ref());

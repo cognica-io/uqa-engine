@@ -12,8 +12,9 @@
 //! the same declared `PostgreSQL` type identities as non-empty relations.
 
 use super::{
-    is_score_provenance_column, projection_columns, user_function_output_columns, CteScope, Engine,
-    QueryBlockPlan, QueryPlan, RelationalPlan, SQLError, SQLParam, ScalarExpr, SourcePlan, Value,
+    cte_references_own_name, is_score_provenance_column, ordered_plan_ctes, projection_columns,
+    user_function_output_columns, CteScope, Engine, QueryBlockPlan, QueryPlan, RelationalPlan,
+    SQLError, SQLParam, ScalarExpr, SourcePlan, Value,
 };
 use crate::sql::from_rows::{
     join_using_output_schema, resolve_join_using, table_function_column_types,
@@ -29,6 +30,7 @@ type ProjectionStarColumn = (String, Option<ColumnType>);
 #[derive(Default)]
 struct SchemaScope {
     ctes: BTreeMap<String, RowSchema>,
+    deferred_ctes: BTreeMap<String, uqa_planner::CtePlan>,
     visiting_views: BTreeSet<String>,
 }
 
@@ -40,6 +42,7 @@ impl SchemaScope {
                 .iter()
                 .map(|(name, rows)| (name.clone(), rows.row_schema().clone()))
                 .collect(),
+            deferred_ctes: ctes.deferred_ctes().clone(),
             visiting_views: BTreeSet::new(),
         }
     }
@@ -73,8 +76,9 @@ impl SchemaScope {
         preserve_top_level_unknown: bool,
     ) -> Result<RowSchema, SQLError> {
         let mut previous = Vec::with_capacity(plan.ctes.len());
-        for cte in &plan.ctes {
-            let provisional = if cte.recursive {
+        for cte in ordered_plan_ctes(plan)? {
+            let self_recursive = cte_references_own_name(cte);
+            let provisional = if self_recursive {
                 self.bind_recursive_seed(engine, &cte.query, params, outer)?
             } else {
                 self.bind_query(engine, &cte.query, params, outer)?
@@ -85,7 +89,7 @@ impl SchemaScope {
                 self.ctes.insert(cte.name.clone(), provisional),
             ));
 
-            if cte.recursive {
+            if self_recursive {
                 let complete = self.bind_query(engine, &cte.query, params, outer)?;
                 self.ctes.insert(
                     cte.name.clone(),
@@ -291,6 +295,13 @@ impl SchemaScope {
                 let qualifier = alias.as_deref().unwrap_or(qualifier);
                 if let Some(schema) = self.ctes.get(name) {
                     return Ok(rename_schema(schema, &[], Some(qualifier)));
+                }
+                if let Some(plan) = self.deferred_ctes.remove(name) {
+                    let result = self
+                        .bind_query(engine, &plan.query, params, outer)
+                        .map(|schema| rename_schema(&schema, &plan.columns, Some(qualifier)));
+                    self.deferred_ctes.insert(name.clone(), plan);
+                    return result;
                 }
                 if let Some(plan) = engine.view_plan(name)? {
                     let key = name.to_ascii_lowercase();

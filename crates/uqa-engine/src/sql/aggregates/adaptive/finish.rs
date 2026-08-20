@@ -105,7 +105,7 @@ impl AdaptiveAggregateSet {
             {
                 for row in batch.rows {
                     let (key, accumulators) = super::super::partial_state::decode_partial_group(
-                        batch.schema.view(&row).to_result_row(),
+                        row,
                         &self.aggregate_targets,
                         self.accumulator_budget,
                         group_count,

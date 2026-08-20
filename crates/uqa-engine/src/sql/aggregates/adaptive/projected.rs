@@ -49,6 +49,22 @@ impl AdaptiveAggregateSet {
         params: &[SQLParam],
     ) -> Result<bool, SQLError> {
         if self.statement.group_by.is_empty() {
+            if self.groups.len() == 1 {
+                observe_direct_entry(
+                    &self.projected_aggregate_plans,
+                    self.variable_state,
+                    &mut self.retained_bytes,
+                    &mut self.groups[0],
+                    row,
+                    params,
+                )?;
+                return Ok(true);
+            }
+            if self.groups.len() > 1 {
+                return Err(SQLError::Internal(
+                    "ungrouped aggregate retained more than one group".into(),
+                ));
+            }
             let hash = self.group_hash(&[])?;
             if !self.observe_direct_key(hash, &[], row, params)? {
                 if !self.insert_group(&[], hash)? {
@@ -58,15 +74,44 @@ impl AdaptiveAggregateSet {
                     return Err(uninitialized_group());
                 }
             }
+            return Ok(true);
+        }
+        if self.projected_group_columns.is_none() {
+            return Ok(false);
+        }
+        let compact_key = super::super::projected::compact_text_pair(
+            self.projected_group_columns
+                .as_ref()
+                .expect("projected group columns disappeared"),
+            row,
+        );
+        if let Some(compact_key) = compact_key {
+            if !self.observe_direct_compact_text(compact_key, row, params)? {
+                let null = Value::Null;
+                let key = super::super::projected::group_key(
+                    self.projected_group_columns
+                        .as_ref()
+                        .expect("projected group columns disappeared"),
+                    row,
+                    &null,
+                );
+                if !self.insert_group(&key, compact_key)? {
+                    return Ok(true);
+                }
+                if !self.observe_direct_compact_text(compact_key, row, params)? {
+                    return Err(uninitialized_group());
+                }
+            }
             self.handle_state_overflow()?;
             return Ok(true);
         }
-        let Some(columns) = self.projected_group_columns.as_ref() else {
-            return Ok(false);
-        };
+        let columns = self
+            .projected_group_columns
+            .as_ref()
+            .expect("projected group columns disappeared");
         let hash = super::super::projected::group_hash(columns, row, self.group_index.hasher())
             .map_err(super::super::sort_fallback::exec_to_sql_error)?;
-        if !Self::observe_direct_borrowed(
+        let observed = Self::observe_direct_borrowed(
             &mut self.groups,
             BorrowedGroupProbe {
                 group_index: &self.group_index,
@@ -78,7 +123,8 @@ impl AdaptiveAggregateSet {
             self.variable_state,
             &mut self.retained_bytes,
             params,
-        )? {
+        )?;
+        if !observed {
             let null = Value::Null;
             let key = super::super::projected::group_key(columns, row, &null);
             if !self.insert_group(&key, hash)? {
@@ -89,6 +135,32 @@ impl AdaptiveAggregateSet {
             }
         }
         self.handle_state_overflow()?;
+        Ok(true)
+    }
+
+    fn observe_direct_compact_text(
+        &mut self,
+        key: u64,
+        row: &ProjectedRow<'_, '_>,
+        params: &[SQLParam],
+    ) -> Result<bool, SQLError> {
+        let index = self.compact_text_group_index.as_ref().ok_or_else(|| {
+            SQLError::Internal("compact text aggregate group index is unavailable".into())
+        })?;
+        let Some(&index) = index.get(&key) else {
+            return Ok(false);
+        };
+        let entry = self.groups.get_mut(index).ok_or_else(|| {
+            SQLError::Internal("compact text aggregate group index is stale".into())
+        })?;
+        observe_direct_entry(
+            &self.projected_aggregate_plans,
+            self.variable_state,
+            &mut self.retained_bytes,
+            entry,
+            row,
+            params,
+        )?;
         Ok(true)
     }
 

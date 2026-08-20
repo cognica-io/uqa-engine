@@ -23,7 +23,7 @@ enum AggregateSet {
 pub(in crate::sql) struct PhysicalAggregateExecutor<'a> {
     engine: &'a Engine,
     params: &'a [SQLParam],
-    ctes: &'a CteScope,
+    ctes: CteScope,
     input_row_schema: RowSchema,
     output_schema: RowSchema,
     output_budget: usize,
@@ -35,7 +35,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
         engine: &'a Engine,
         statement: &QueryBlockPlan,
         params: &'a [SQLParam],
-        ctes: &'a CteScope,
+        ctes: &CteScope,
         input_schema: RowSchema,
         output_schema: RowSchema,
         work_mem_bytes: usize,
@@ -90,7 +90,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
         Ok(Self {
             engine,
             params,
-            ctes,
+            ctes: ctes.clone(),
             input_row_schema: input_schema,
             output_schema,
             output_budget: (work_mem_bytes / 3).max(1),
@@ -101,7 +101,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
     fn finish_set(&self, set: AggregateSet) -> Result<SpillBuffer, SQLError> {
         match set {
             AggregateSet::Adaptive(set) => {
-                (*set).finish(self.engine, &self.output_schema, self.params, self.ctes)
+                (*set).finish(self.engine, &self.output_schema, self.params, &self.ctes)
             }
             AggregateSet::Sorted {
                 statement,
@@ -117,7 +117,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
                         self.engine,
                         &self.output_schema,
                         self.params,
-                        self.ctes,
+                        &self.ctes,
                     );
                 }
                 super::sort_fallback::aggregate_sorted_input(
@@ -127,7 +127,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
                     &self.input_row_schema,
                     &self.output_schema,
                     self.params,
-                    self.ctes,
+                    &self.ctes,
                     phase_budget,
                     relaxed,
                 )
@@ -141,14 +141,14 @@ impl AggregateExecutor for PhysicalAggregateExecutor<'_> {
         for set in &mut self.sets {
             match set {
                 AggregateSet::Adaptive(set) => {
-                    set.consume(self.engine, &batch, self.params, self.ctes)?;
+                    set.consume(self.engine, &batch, self.params, &self.ctes)?;
                 }
                 AggregateSet::Sorted {
                     input, optimistic, ..
                 } => {
                     input.push(batch.clone())?;
                     if let Some(candidate) = optimistic.as_mut() {
-                        candidate.consume(self.engine, &batch, self.params, self.ctes)?;
+                        candidate.consume(self.engine, &batch, self.params, &self.ctes)?;
                         if candidate.is_abandoned() {
                             *optimistic = None;
                         }
@@ -165,6 +165,12 @@ impl AggregateExecutor for PhysicalAggregateExecutor<'_> {
         })
     }
 
+    fn supports_storage_borrowed_rows(&self) -> bool {
+        self.sets.iter().all(|set| {
+            matches!(set, AggregateSet::Adaptive(set) if set.supports_storage_borrowed_rows())
+        })
+    }
+
     fn consume_projected_row(&mut self, row: &ProjectedRow<'_, '_>) -> ExecResult<()> {
         for set in &mut self.sets {
             let AggregateSet::Adaptive(set) = set else {
@@ -172,7 +178,7 @@ impl AggregateExecutor for PhysicalAggregateExecutor<'_> {
                     "sort aggregate cannot consume a projected row".into(),
                 ));
             };
-            set.consume_projected_row(self.engine, row, self.params, self.ctes)?;
+            set.consume_projected_row(self.engine, row, self.params, &self.ctes)?;
         }
         Ok(())
     }

@@ -47,6 +47,15 @@ fn assert_scoring_params_absent(engine: &Engine, key: &str) {
     );
 }
 
+fn assert_nested_view_error(error: &SQLError) {
+    assert!(
+        error
+            .to_string()
+            .contains("nested view callback failed after mutations"),
+        "{error}"
+    );
+}
+
 fn assert_nested_view_failure_rolls_back(engine: &Arc<Engine>) -> i64 {
     engine
         .sql("CREATE SEQUENCE nested_view_sequence START 1", &[])
@@ -86,9 +95,7 @@ fn assert_nested_view_failure_rolls_back(engine: &Arc<Engine>) -> i64 {
     let error = engine
         .sql("SELECT marker, failure FROM nested_callback_outer", &[])
         .unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("nested view callback failed after mutations"));
+    assert_nested_view_error(&error);
     assert_scoring_params_absent(engine, NESTED_VIEW_KEY);
     assert_eq!(
         engine
@@ -129,9 +136,7 @@ fn assert_nested_view_failure_rolls_back(engine: &Arc<Engine>) -> i64 {
     let error = engine
         .sql("SELECT marker, failure FROM nested_setval_outer", &[])
         .unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("nested view callback failed after mutations"));
+    assert_nested_view_error(&error);
     assert_scoring_params_absent(engine, NESTED_VIEW_KEY);
     assert_eq!(
         engine.currval("nested_view_sequence").unwrap(),

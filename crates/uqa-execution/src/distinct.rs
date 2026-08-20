@@ -24,7 +24,7 @@ use uqa_core::{DecimalValue, TemporalValue, Value};
 use uqa_sql::ResultRow;
 
 use crate::{
-    Batch, ExecError, ExecResult, PhysicalOperator, RowSchema, ScalarExpr,
+    Batch, ExecError, ExecResult, PhysicalOperator, PhysicalRow, RowSchema, ScalarExpr,
     SharedExpressionEvaluator,
 };
 
@@ -63,6 +63,37 @@ pub fn hash_canonical_row<'a, S: BuildHasher>(
         }
     }
     Ok(hasher.finish())
+}
+
+/// Pack exactly two text-or-NULL values of at most three bytes each into an injective integer key. `None` selects the general collision-safe encoder for every other row.
+pub fn try_pack_compact_text_pair<'a>(
+    values: impl ExactSizeIterator<Item = Option<&'a Value>>,
+) -> Option<u64> {
+    if values.len() != 2 {
+        return None;
+    }
+    let mut values = values;
+    let first = compact_text_component(values.next()?)?;
+    let second = compact_text_component(values.next()?)?;
+    Some(u64::from(first) << 32 | u64::from(second))
+}
+
+fn compact_text_component(value: Option<&Value>) -> Option<u32> {
+    match value {
+        None | Some(Value::Null) => Some(0),
+        Some(Value::Str(value)) if value.len() <= 3 => {
+            let mut packed = [0u8; 4];
+            packed[0] = u8::try_from(value.len()).ok()? + 1;
+            packed[1..][..value.len()].copy_from_slice(value.as_bytes());
+            Some(u32::from_be_bytes(packed))
+        }
+        Some(_) => None,
+    }
+}
+
+/// Encode positional SQL values in the exact equality domain used by DISTINCT and spill-backed row-key state. Callers that need an external exact index can persist this representation without relying on `Value`'s serialization format.
+pub fn canonical_row_key(values: &[Value]) -> ExecResult<Vec<u8>> {
+    encode_key(values)
 }
 
 /// Collision-safe in-memory set for positional SQL rows.
@@ -207,6 +238,22 @@ impl ExactRowSet {
         self.seen.contains(&encode_key(values)?)
     }
 
+    /// Insert a physical row directly in logical schema order without constructing a named row or cloning its values.
+    pub fn insert_physical(&mut self, row: &PhysicalRow, schema: &RowSchema) -> ExecResult<bool> {
+        let view = schema.view(row);
+        self.seen.insert(encode_key_borrowed(
+            (0..schema.len()).map(|position| view.value_at(position)),
+        )?)
+    }
+
+    /// Probe a physical row directly in logical schema order without constructing a named row or cloning its values.
+    pub fn contains_physical(&mut self, row: &PhysicalRow, schema: &RowSchema) -> ExecResult<bool> {
+        let view = schema.view(row);
+        self.seen.contains(&encode_key_borrowed(
+            (0..schema.len()).map(|position| view.value_at(position)),
+        )?)
+    }
+
     pub fn has_spilled(&self) -> bool {
         self.seen.has_spilled()
     }
@@ -217,11 +264,7 @@ impl ExactRowSet {
 }
 
 fn row_key(row: &ResultRow, schema: &[String]) -> ExecResult<Vec<u8>> {
-    let values = schema
-        .iter()
-        .map(|column| row.get(column).cloned().unwrap_or(Value::Null))
-        .collect::<Vec<_>>();
-    encode_key(&values)
+    encode_key_borrowed(schema.iter().map(|column| row.get(column)))
 }
 
 /// Stable SQL duplicate elimination.
@@ -317,24 +360,19 @@ impl<'a> Distinct<'a> {
         self.seen = SeenKeySet::new(self.work_mem_bytes, self.spill_directory.clone());
     }
 
-    fn key(&self, schema: &RowSchema, row: &crate::PhysicalRow) -> ExecResult<Vec<Value>> {
+    fn key(&self, schema: &RowSchema, row: &crate::PhysicalRow) -> ExecResult<Vec<u8>> {
         if let Some(keys) = self.keys.as_ref() {
             let evaluator = self.evaluator.as_ref().ok_or_else(|| {
                 ExecError::Other("DISTINCT ON evaluator is not configured".into())
             })?;
-            return keys
+            let values = keys
                 .iter()
                 .map(|expression| evaluator.evaluate_physical(expression, schema, row))
-                .collect();
+                .collect::<ExecResult<Vec<_>>>()?;
+            return encode_key(&values);
         }
         let row = schema.view(row);
-        Ok(self
-            .schema
-            .columns()
-            .iter()
-            .enumerate()
-            .map(|(index, _)| row.value_at(index).cloned().unwrap_or(Value::Null))
-            .collect())
+        encode_key_borrowed((0..self.schema.len()).map(|index| row.value_at(index)))
     }
 }
 
@@ -353,11 +391,17 @@ impl PhysicalOperator for Distinct<'_> {
             let Some(batch) = self.child.next()? else {
                 return Ok(None);
             };
+            if batch.schema != self.schema {
+                return Err(ExecError::Other(format!(
+                    "DISTINCT input schema mismatch: expected {:?}, got {:?}",
+                    self.schema, batch.schema
+                )));
+            }
             let mut rows = Vec::with_capacity(batch.rows.len());
             for row in batch.rows {
-                let key = encode_key(&self.key(&batch.schema, &row)?)?;
+                let key = self.key(&batch.schema, &row)?;
                 if self.seen.insert(key)? {
-                    rows.push(row);
+                    rows.push(row.without_lock_origins());
                 }
             }
             if !rows.is_empty() {
@@ -630,11 +674,20 @@ fn distinct_error(message: impl Into<String>) -> ExecError {
 /// equality behavior as UQA's SQL comparisons. Every structural value carries
 /// lengths/counts, preventing concatenation and nested-container collisions.
 pub(crate) fn encode_key(values: &[Value]) -> ExecResult<Vec<u8>> {
+    encode_key_borrowed(values.iter().map(Some))
+}
+
+fn encode_key_borrowed<'a>(
+    values: impl ExactSizeIterator<Item = Option<&'a Value>>,
+) -> ExecResult<Vec<u8>> {
     let estimated_capacity = encoded_key_capacity(values.len())?;
     let mut output = Vec::with_capacity(estimated_capacity);
     encode_len(values.len(), &mut output)?;
     for value in values {
-        encode_value(value, &mut output)?;
+        match value {
+            Some(value) => encode_value(value, &mut output)?,
+            None => encode_value(&Value::Null, &mut output)?,
+        }
     }
     Ok(output)
 }
@@ -880,7 +933,7 @@ mod tests {
     use super::*;
     use crate::physical::run_to_rows;
     use crate::scan::TableScan;
-    use crate::{ExpressionEvaluator, ScalarEvalContext};
+    use crate::{ExpressionEvaluator, PhysicalRow, ScalarEvalContext};
 
     fn row(a: i64, b: i64) -> ResultRow {
         [("a".into(), Value::Int(a)), ("b".into(), Value::Int(b))]
@@ -924,6 +977,18 @@ mod tests {
         );
         let (_, on_rows) = run_to_rows(&mut on).unwrap();
         assert_eq!(on_rows, vec![row(1, 10), row(2, 20)]);
+    }
+
+    #[test]
+    fn distinct_is_a_row_lock_identity_barrier() {
+        let schema = RowSchema::new(vec!["v".into()]);
+        let row = PhysicalRow::from_values(vec![Value::Int(1)])
+            .with_lock_origin(crate::RowLockOrigin::new("source", "public.source", 1));
+        let scan = TableScan::from_physical_rows(schema, vec![row]);
+        let mut distinct = Distinct::all_with_work_mem(Box::new(scan), 1);
+
+        let batches = crate::physical::run_to_batches(&mut distinct).unwrap();
+        assert!(batches[0].rows[0].lock_origins().is_empty());
     }
 
     #[test]
@@ -1061,6 +1126,43 @@ mod tests {
     }
 
     #[test]
+    fn compact_text_pair_key_is_stable_for_borrowed_and_owned_values() {
+        let first = Value::Str("A".into());
+        let second = Value::Str("O".into());
+        let values = [Some(&first), Some(&second)];
+
+        let key = try_pack_compact_text_pair(values.into_iter()).unwrap();
+        let owned = [first.clone(), second.clone()];
+        assert_eq!(
+            key,
+            try_pack_compact_text_pair(owned.iter().map(Some)).unwrap(),
+        );
+        let long = Value::Str("x".repeat(64));
+        assert_eq!(
+            try_pack_compact_text_pair([Some(&long), Some(&second)].into_iter()),
+            None,
+        );
+
+        let candidates = [
+            Value::Null,
+            Value::Str(String::new()),
+            Value::Str("A".into()),
+            Value::Str("AB".into()),
+            Value::Str("ABC".into()),
+            Value::Str("é".into()),
+            Value::Str("한".into()),
+        ];
+        let mut keys = std::collections::BTreeSet::new();
+        for first in &candidates {
+            for second in &candidates {
+                assert!(keys.insert(
+                    try_pack_compact_text_pair([Some(first), Some(second)].into_iter()).unwrap()
+                ));
+            }
+        }
+    }
+
+    #[test]
     fn canonical_row_hash_set_copies_only_new_keys_and_probes_borrowed() {
         let one = Value::Int(1);
         let two = Value::Int(2);
@@ -1122,6 +1224,29 @@ mod tests {
 
     struct FailingEvaluator;
 
+    struct MismatchedSchemaScan {
+        declared: RowSchema,
+        emitted: Option<Batch>,
+    }
+
+    impl PhysicalOperator for MismatchedSchemaScan {
+        fn row_schema(&self) -> &RowSchema {
+            &self.declared
+        }
+
+        fn open(&mut self) -> ExecResult<()> {
+            Ok(())
+        }
+
+        fn next(&mut self) -> ExecResult<Option<Batch>> {
+            Ok(self.emitted.take())
+        }
+
+        fn close(&mut self) -> ExecResult<()> {
+            Ok(())
+        }
+    }
+
     impl ExpressionEvaluator for FailingEvaluator {
         fn evaluate(
             &self,
@@ -1143,5 +1268,21 @@ mod tests {
         );
         let error = run_to_rows(&mut distinct).unwrap_err();
         assert!(error.to_string().contains("intentional evaluator failure"));
+    }
+
+    #[test]
+    fn distinct_rejects_a_child_batch_with_a_different_schema() {
+        let scan = MismatchedSchemaScan {
+            declared: RowSchema::new(vec!["declared".into()]),
+            emitted: Some(Batch::from_physical_rows(
+                RowSchema::new(vec!["actual".into()]),
+                vec![PhysicalRow::from_values(vec![Value::Int(1)])],
+            )),
+        };
+        let mut distinct = Distinct::all(Box::new(scan));
+
+        let error = run_to_rows(&mut distinct).unwrap_err();
+
+        assert!(error.to_string().contains("DISTINCT input schema mismatch"));
     }
 }

@@ -304,6 +304,69 @@ fn shared_cursor_combines_id_scan_and_projection() {
 }
 
 #[test]
+fn borrowed_cursor_projects_stored_values_without_shared_row_handles() {
+    let mut store = MemoryDocumentStore::new();
+    store
+        .put(1, doc([("alpha", Value::Int(1)), ("zulu", Value::Int(2))]))
+        .unwrap();
+    store
+        .put(3, doc([("alpha", Value::Int(3)), ("zulu", Value::Int(4))]))
+        .unwrap();
+
+    let mut seen = Vec::new();
+    let visited = store
+        .for_each_next_fields(
+            Some(1),
+            2,
+            &["zulu", "missing", "alpha"],
+            &mut |doc_id, values| {
+                seen.push((
+                    doc_id,
+                    values.iter().map(|value| (*value).clone()).collect(),
+                ));
+                true
+            },
+        )
+        .unwrap();
+
+    assert_eq!(visited, Some(1));
+    assert_eq!(
+        seen,
+        vec![(3, vec![Value::Int(4), Value::Null, Value::Int(3)])]
+    );
+}
+
+#[test]
+fn borrowed_cursor_honors_zero_limit_and_visitor_stop() {
+    let mut store = MemoryDocumentStore::new();
+    for doc_id in 1..=3 {
+        store
+            .put(doc_id, doc([("value", Value::Int(doc_id as i64))]))
+            .unwrap();
+    }
+
+    let mut invoked = false;
+    let visited = store
+        .for_each_next_fields(None, 0, &["value"], &mut |_, _| {
+            invoked = true;
+            true
+        })
+        .unwrap();
+    assert_eq!(visited, Some(0));
+    assert!(!invoked);
+
+    let mut seen = Vec::new();
+    let visited = store
+        .for_each_next_fields(None, 3, &["value"], &mut |doc_id, values| {
+            seen.push((doc_id, (*values[0]).clone()));
+            false
+        })
+        .unwrap();
+    assert_eq!(visited, Some(1));
+    assert_eq!(seen, vec![(1, Value::Int(1))]);
+}
+
+#[test]
 fn shared_snapshot_remains_isolated_after_a_write() {
     let mut s = MemoryDocumentStore::new();
     s.put(1, doc([("value", Value::Int(1))])).unwrap();

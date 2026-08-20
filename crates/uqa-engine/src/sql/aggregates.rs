@@ -16,7 +16,7 @@ use uqa_core::{DecimalValue, Value};
 use uqa_execution::{eval_scalar, ScalarEvalContext, ScalarExpr, ScalarOrder, SpillBuffer};
 use uqa_planner::{ProjectionPlan, QueryBlockPlan};
 use uqa_sql::expr::{cast_value, value_to_json_text};
-use uqa_sql::{ResultRow, SQLError, SQLParam};
+use uqa_sql::{SQLError, SQLParam};
 
 use crate::{Engine, SQLAggregateFunction, SQLAggregateState};
 

@@ -17,7 +17,7 @@ use super::defaults::validate_default_expression;
 
 pub(in crate::sql) fn run_alter_table(
     engine: &Engine,
-    stmt: AlterTableStmt,
+    mut stmt: AlterTableStmt,
 ) -> Result<SQLResult, SQLError> {
     if matches!(
         &stmt.action,
@@ -28,10 +28,6 @@ pub(in crate::sql) fn run_alter_table(
                 .into(),
         ));
     }
-    engine.with_implicit_transaction(move |engine| run_alter_table_inner(engine, stmt))
-}
-
-fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQLResult, SQLError> {
     match engine
         .try_resolve_relation_kind(&stmt.table)
         .map_err(|err| ddl_storage_error("ALTER TABLE", err))?
@@ -50,6 +46,14 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
             )));
         }
     }
+    engine.lock_relation(
+        &stmt.table,
+        crate::row_locks::RelationLockMode::AccessExclusive,
+    )?;
+    engine.with_implicit_transaction(move |engine| run_alter_table_inner(engine, stmt))
+}
+
+fn run_alter_table_inner(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLResult, SQLError> {
     match stmt.action {
         AlterTableAction::AddColumn {
             mut column,

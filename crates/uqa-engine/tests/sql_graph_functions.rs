@@ -275,3 +275,20 @@ fn graph_traverse_unknown_graph_errors() {
     let msg = format!("{err}");
     assert!(msg.contains("missing"), "{msg}");
 }
+
+#[test]
+fn graph_traverse_predicate_inside_a_derived_table_uses_the_retrieval_bridge() {
+    let engine = engine_with_simple_graph();
+    let result = engine
+        .sql(
+            "SELECT * FROM (SELECT id FROM seeds WHERE graph_traverse('g', 1, 'knows', 2)) AS s ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    let ids = result
+        .rows
+        .iter()
+        .map(|row| row["id"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+}

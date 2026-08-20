@@ -3649,8 +3649,10 @@ dependencies = [
  "arrow-array",
  "arrow-ipc",
  "arrow-schema",
+ "ciborium",
  "criterion",
  "duckdb",
+ "libc",
  "parking_lot",
  "proptest",
  "regex",
@@ -3676,6 +3678,7 @@ dependencies = [
  "uqa-storage",
  "uqa-storage-redb",
  "uqa-storage-sqlite",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

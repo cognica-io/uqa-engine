@@ -8,9 +8,9 @@
 
 use super::{
     eval_scalar, fold, AggregateSpec, Batch, DefaultExpressionEvaluator, ExecError, ExecResult,
-    PhysicalOperator, ResultRow, RowSchema, SQLParam, ScalarEvalContext, ScalarExpr, SortKey,
-    Value,
+    PhysicalOperator, RowSchema, SQLParam, ScalarEvalContext, ScalarExpr, SortKey, Value,
 };
+use crate::PhysicalRow;
 use fold::{AggFold, GroupState};
 
 pub(super) fn execute(
@@ -123,14 +123,17 @@ fn finish_group(
     aggregates: &[AggregateSpec],
     schema: &RowSchema,
     output: &mut crate::spill::SpillBuffer,
-    pending: &mut Vec<ResultRow>,
+    pending: &mut Vec<PhysicalRow>,
 ) -> ExecResult<()> {
     let state = state
         .take()
         .ok_or_else(|| ExecError::Other("active aggregate group has no state".into()))?;
     pending.push(fold::finalise_builtin_group(state, group_keys, aggregates)?);
     if pending.len() == crate::batch::DEFAULT_BATCH_SIZE {
-        output.push(Batch::new(schema.clone(), std::mem::take(pending)))?;
+        output.push(Batch::from_physical_rows(
+            schema.clone(),
+            std::mem::take(pending),
+        ))?;
         *pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
     }
     Ok(())
@@ -139,10 +142,13 @@ fn finish_group(
 fn flush_pending(
     output: &mut crate::spill::SpillBuffer,
     schema: &RowSchema,
-    pending: &mut Vec<ResultRow>,
+    pending: &mut Vec<PhysicalRow>,
 ) -> ExecResult<()> {
     if !pending.is_empty() {
-        output.push(Batch::new(schema.clone(), std::mem::take(pending)))?;
+        output.push(Batch::from_physical_rows(
+            schema.clone(),
+            std::mem::take(pending),
+        ))?;
     }
     Ok(())
 }

@@ -106,7 +106,7 @@ pub(in crate::sql) fn materialize_recursive_cte(
     let mut accumulated = uqa_execution::SpillBuffer::new(state_budget);
     let mut seen = (!*all).then(|| uqa_execution::ExactRowSet::new(state_budget));
     if let Some(seen) = seen.as_mut() {
-        working = filter_new_recursive_rows(&working, &anchor_columns, seen)?;
+        working = filter_new_recursive_rows(&working, seen)?;
     }
 
     const MAX_ITERATIONS: usize = 1024;
@@ -133,7 +133,7 @@ pub(in crate::sql) fn materialize_recursive_cte(
         let step = step_result?;
         working = alias_query_output_to_shared(engine, step, &anchor_columns)?;
         if let Some(seen) = seen.as_mut() {
-            working = filter_new_recursive_rows(&working, &anchor_columns, seen)?;
+            working = filter_new_recursive_rows(&working, seen)?;
         }
     }
 
@@ -159,6 +159,7 @@ pub(in crate::sql) fn materialize_recursive_cte(
         distinct_on: Vec::new(),
         subqueries: subqueries.clone(),
         access: AccessPathPlan::Row,
+        locking: Vec::new(),
     };
     let ordering_scope = ctes.enter_scalar_subqueries(subqueries);
     let operation: Box<dyn uqa_execution::PhysicalOperator + '_> =
@@ -172,6 +173,7 @@ pub(in crate::sql) fn materialize_recursive_cte(
         params,
         &ordering_scope,
         EngineExpressionEvaluator::shared(engine, params, &ordering_scope),
+        None,
     )?;
     let output = collect_query_operator(
         engine,
@@ -225,6 +227,17 @@ pub(in crate::sql) fn alias_query_output_to_shared(
             operator, mapping,
         ));
     }
+    let identity = operator
+        .row_schema()
+        .columns()
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(position, column)| (column, position))
+        .collect();
+    operator = Box::new(uqa_execution::ColumnSelection::compacting_with_positions(
+        operator, identity,
+    ));
     let output = collect_query_operator(engine, columns, operator, QueryOutputMode::SharedSpill)?;
     let QueryRows::SharedSpill(rows) = output.rows else {
         return Err(SQLError::Internal(
@@ -249,7 +262,6 @@ pub(in crate::sql) fn append_shared_spill(
 
 pub(in crate::sql) fn filter_new_recursive_rows(
     input: &uqa_execution::SharedSpill,
-    columns: &[String],
     seen: &mut uqa_execution::ExactRowSet,
 ) -> Result<uqa_execution::SharedSpill, SQLError> {
     // The source is already disk-backed. Retain no cardinality-sized tail
@@ -261,9 +273,8 @@ pub(in crate::sql) fn filter_new_recursive_rows(
         let batch = batch.map_err(physical_exec_error)?;
         let mut rows = Vec::with_capacity(batch.rows.len().min(uqa_execution::DEFAULT_BATCH_SIZE));
         for row in batch.rows {
-            let result_row = batch.schema.view(&row).to_result_row();
             if seen
-                .insert_row(&result_row, columns)
+                .insert_physical(&row, &batch.schema)
                 .map_err(physical_exec_error)?
             {
                 rows.push(row);

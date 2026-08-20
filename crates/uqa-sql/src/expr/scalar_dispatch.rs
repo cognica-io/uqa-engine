@@ -58,6 +58,11 @@ pub(super) fn eval_sequence_function(
 
 pub(super) fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
     let name = name.strip_prefix("pg_catalog.").unwrap_or(name);
+    if super::builtin_scalar_function_strictness(name, args.len()) == Some(true)
+        && args.iter().any(|argument| matches!(argument, Value::Null))
+    {
+        return Ok(Value::Null);
+    }
     let dispatchers: &[ScalarFunctionDispatcher] = &[
         super::scalar_core::eval_core_functions,
         super::scalar_math::eval_math_functions,

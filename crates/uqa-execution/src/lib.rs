@@ -80,12 +80,15 @@ pub mod spill_scan;
 pub mod type_resolution;
 
 pub use batch::{
-    Batch, ColumnIdentity, OwnedPhysicalRow, PhysicalRow, PhysicalRowView, RowSchema,
-    DEFAULT_BATCH_SIZE,
+    Batch, ColumnIdentity, OwnedPhysicalRow, PhysicalRow, PhysicalRowView, RowLockOrigin,
+    RowProjectionValue, RowSchema, DEFAULT_BATCH_SIZE,
 };
 pub use column_selection::ColumnSelection;
 pub use columnar_batch::{ColumnVector, ColumnarBatch};
-pub use distinct::{hash_canonical_row, CanonicalRowHashSet, Distinct, ExactRowSet};
+pub use distinct::{
+    canonical_row_key, hash_canonical_row, try_pack_compact_text_pair, CanonicalRowHashSet,
+    Distinct, ExactRowSet,
+};
 pub use external_sort::{ExternalSort, EXTERNAL_SORT_MERGE_FAN_IN};
 pub use join::{HashJoin, NestedLoopJoin};
 pub use join_output::{JoinOutput, JoinOutputSource};
@@ -95,7 +98,10 @@ pub use physical::{
     order_expression_position, ordering_satisfies, ExecError, ExecResult, OperatorBatchCursor,
     PhysicalOperator, PhysicalOrder,
 };
-pub use project_set::{ProjectRows, ProjectSet, SetProjector};
+pub use project_set::{
+    PhysicalProjectRows, PhysicalProjectSet, PhysicalSetProjector, ProjectRows, ProjectSet,
+    SetProjector,
+};
 pub use projected_predicate::ProjectedPredicate;
 pub use projected_row::{ProjectedRow, ProjectedValueSlot};
 pub use relational::{

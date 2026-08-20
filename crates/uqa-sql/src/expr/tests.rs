@@ -368,3 +368,36 @@ fn collection_and_string_sizes_fail_without_wrapping_or_panicking() {
         Value::Str("abcx".into())
     );
 }
+
+#[test]
+fn builtin_strictness_matches_null_call_semantics() {
+    assert_eq!(builtin_scalar_function_strictness("abs", 1), Some(true));
+    assert_eq!(
+        builtin_scalar_function_strictness("pg_catalog.upper", 1),
+        Some(true)
+    );
+    assert_eq!(
+        builtin_scalar_function_strictness("coalesce", 2),
+        Some(false)
+    );
+    assert_eq!(
+        builtin_scalar_function_strictness("array_to_string", 2),
+        Some(true)
+    );
+    assert_eq!(
+        builtin_scalar_function_strictness("array_to_string", 3),
+        Some(false)
+    );
+    assert_eq!(
+        builtin_scalar_function_strictness("application_fn", 1),
+        None
+    );
+    assert_eq!(
+        eval_scalar_function("abs", &[Value::Null]).unwrap(),
+        Value::Null
+    );
+    assert_eq!(
+        eval_scalar_function("to_json", &[Value::Null]).unwrap(),
+        Value::Null
+    );
+}

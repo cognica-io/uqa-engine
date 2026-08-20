@@ -13,6 +13,37 @@ use super::{DocId, MemoryDocumentStore, SharedDocumentRow, StoredDocument, Value
 const MISSING_SLOT: usize = usize::MAX;
 
 impl MemoryDocumentStore {
+    pub(super) fn visit_next_rows(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> usize {
+        use std::ops::Bound::{Excluded, Unbounded};
+
+        if limit == 0 {
+            return 0;
+        }
+        let layout_projections = self
+            .layouts
+            .iter()
+            .map(|layout| ProjectedLayout::compile(layout, fields))
+            .collect::<Vec<_>>();
+        let lower = after.map_or(Unbounded, Excluded);
+        let null = Value::Null;
+        let mut values = Vec::with_capacity(fields.len());
+        let mut visited = 0usize;
+        for (doc_id, stored) in self.documents.range((lower, Unbounded)).take(limit) {
+            visited += 1;
+            layout_projections[stored.layout_id].project(stored, &null, &mut values);
+            if !visitor(*doc_id, &values) {
+                break;
+            }
+        }
+        visited
+    }
+
     pub(super) fn next_shared_rows(
         &self,
         after: Option<DocId>,
@@ -155,8 +186,9 @@ pub(super) fn should_merge_projected_scan(doc_ids: &[DocId], document_count: usi
     id_span <= probe_budget || probe_budget >= document_count as u128
 }
 
-struct ProjectedLayout {
-    slots: Box<[usize]>,
+enum ProjectedLayout {
+    Complete(Box<[usize]>),
+    Nullable(Box<[usize]>),
 }
 
 impl ProjectedLayout {
@@ -172,8 +204,11 @@ impl ProjectedLayout {
     }
 
     fn compile(layout: &[String], fields: &[&str]) -> Self {
-        Self {
-            slots: Self::slots(layout, fields).into_boxed_slice(),
+        let slots = Self::slots(layout, fields).into_boxed_slice();
+        if slots.iter().all(|slot| *slot != MISSING_SLOT) {
+            Self::Complete(slots)
+        } else {
+            Self::Nullable(slots)
         }
     }
 
@@ -184,13 +219,20 @@ impl ProjectedLayout {
         values: &mut Vec<&'a Value>,
     ) {
         values.clear();
-        values.extend(self.slots.iter().map(|slot| {
-            if *slot == MISSING_SLOT {
-                null
-            } else {
-                &stored.values[*slot]
+        match self {
+            Self::Complete(slots) => {
+                values.extend(slots.iter().map(|slot| &stored.values[*slot]));
             }
-        }));
+            Self::Nullable(slots) => {
+                values.extend(slots.iter().map(|slot| {
+                    if *slot == MISSING_SLOT {
+                        null
+                    } else {
+                        &stored.values[*slot]
+                    }
+                }));
+            }
+        }
     }
 }
 

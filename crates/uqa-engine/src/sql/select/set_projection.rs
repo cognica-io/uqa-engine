@@ -37,7 +37,7 @@ struct SetProjectionPlan {
     output_batch_size: usize,
 }
 
-pub(in crate::sql) struct AggregateSetProjectionPlan {
+pub(in crate::sql) struct AggregateOutputProjectionPlan {
     pub(in crate::sql) statement: QueryBlockPlan,
     pub(in crate::sql) projections: Vec<PhysicalProjection>,
 }
@@ -546,6 +546,16 @@ pub(in crate::sql) fn validate_query_set_contexts(
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
     validate_projection_set_contexts(engine, &statement.projections, schema, params)?;
+    if let Some(locking) = statement.locking.first() {
+        for projection in &statement.projections {
+            if expression_may_return_set(engine, &projection.expr, schema, params)? {
+                return Err(SQLError::Unsupported(format!(
+                    "{} is not allowed with set-returning functions in the target list",
+                    locking.strength.sql_name()
+                )));
+            }
+        }
+    }
     for expression in statement
         .group_by
         .iter()
@@ -1293,22 +1303,10 @@ fn rewrite_aggregate_frame_bound(
     }
 }
 
-pub(in crate::sql) fn prepare_aggregate_set_projection(
+pub(in crate::sql) fn prepare_aggregate_output_projection(
     engine: &Engine,
     statement: &QueryBlockPlan,
-    schema: &RowSchema,
-    params: &[SQLParam],
-) -> Result<Option<AggregateSetProjectionPlan>, SQLError> {
-    let physical = statement
-        .projections
-        .iter()
-        .zip(projection_columns(&statement.projections))
-        .map(|(projection, label)| (label, projection.expr.clone()))
-        .collect::<Vec<_>>();
-    if !projections_may_return_set(engine, &physical, schema, params)? {
-        return Ok(None);
-    }
-
+) -> AggregateOutputProjectionPlan {
     let labels = projection_columns(&statement.projections);
     let mut dependencies = Vec::new();
     let projections = statement
@@ -1335,10 +1333,10 @@ pub(in crate::sql) fn prepare_aggregate_set_projection(
     }
     let mut aggregate_statement = statement.clone();
     aggregate_statement.projections = dependencies;
-    Ok(Some(AggregateSetProjectionPlan {
+    AggregateOutputProjectionPlan {
         statement: aggregate_statement,
         projections,
-    }))
+    }
 }
 
 impl SetProjectionPlan {
@@ -1373,7 +1371,7 @@ pub(in crate::sql) fn build_set_projection<'a>(
     mut operator: Box<dyn PhysicalOperator + 'a>,
     engine: &'a Engine,
     params: &'a [SQLParam],
-    ctes: &'a CteScope,
+    ctes: &CteScope,
     evaluator: SharedExpressionEvaluator<'a>,
     projections: Vec<PhysicalProjection>,
     pass_through: bool,

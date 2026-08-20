@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Implemented PostgreSQL 18 `SELECT` row-locking clauses (`FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`, `FOR KEY SHARE`, `OF`, `NOWAIT`, and `SKIP LOCKED`), including join and view targets, wait and skip policies, savepoint release, and matching `UPDATE`/`DELETE` row locks.
+
 ## [0.1.5] - 2026-08-17
 
 ### Added

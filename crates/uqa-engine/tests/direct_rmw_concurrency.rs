@@ -207,11 +207,11 @@ fn auto_estimation_rechecks_params_after_waiting_for_the_writer() {
     let custom_for_writer = custom.clone();
     let writer = thread::spawn(move || {
         manual.transaction(|engine| {
+            engine.save_scoring_params("docs.body", &custom_for_writer)?;
             manual_ready.wait();
-            // Give the automatic reader enough time to observe the missing
-            // value and queue for the writer lock held by this transaction.
+            // Give the automatic reader enough time to observe the uncommitted value as missing and queue for the writer lock held by this transaction.
             thread::sleep(Duration::from_millis(200));
-            engine.save_scoring_params("docs.body", &custom_for_writer)
+            Ok(())
         })
     });
 
