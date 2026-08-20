@@ -386,7 +386,7 @@ struct TransactionSavepoint {
 
 #[derive(Clone, Default)]
 struct CommandMutationOverlay {
-    documents: BTreeMap<String, BTreeMap<DocId, Option<Document>>>,
+    documents: BTreeMap<String, BTreeMap<DocId, Option<Arc<Document>>>>,
     exact_indexes: BTreeMap<String, BTreeMap<Vec<String>, CommandExactIndex>>,
 }
 

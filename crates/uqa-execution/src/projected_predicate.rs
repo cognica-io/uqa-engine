@@ -108,13 +108,21 @@ impl ProjectedPredicate {
         }
     }
 
+    #[inline]
     pub fn keep(&self, values: &[&Value]) -> Result<bool, SQLError> {
         evaluate::keep(&self.expression, values)
+    }
+
+    /// Evaluate against backend-owned values through a positional projection without constructing an intermediate reference array. A `usize::MAX` projection slot reads as SQL NULL.
+    #[inline]
+    pub fn keep_indexed(&self, values: &[Value], projection: &[usize]) -> Result<bool, SQLError> {
+        evaluate::keep_indexed(&self.expression, values, projection)
     }
 
     /// Evaluate directly against a composite physical row. Column names and
     /// qualifiers were resolved to logical positions during compilation, so
     /// the hot path neither builds a named row nor allocates a reference list.
+    #[inline]
     pub fn keep_row(&self, row: &crate::PhysicalRowView<'_>) -> Result<bool, SQLError> {
         evaluate::keep_row(&self.expression, row)
     }
@@ -145,6 +153,10 @@ mod tests {
         assert!(predicate.keep(&[&Value::Int(3), &Value::Null]).unwrap());
         assert!(!predicate.keep(&[&Value::Int(5), &Value::Null]).unwrap());
         assert!(!predicate.keep(&[&Value::Null, &Value::Null]).unwrap());
+
+        let stored = [Value::Null, Value::Int(3)];
+        assert!(predicate.keep_indexed(&stored, &[1, 0]).unwrap());
+        assert!(!predicate.keep_indexed(&stored, &[usize::MAX, 0]).unwrap());
     }
 
     #[test]
@@ -175,7 +187,6 @@ mod tests {
             &predicate.expression,
             ProjectedExpr::IntFieldConjunction(items) if items.len() == 3
         ));
-
         let discounts = [Value::Null, Value::Int(1), Value::Int(2), Value::Int(8)];
         let quantities = [
             Value::Null,

@@ -17,6 +17,203 @@ type KeptEntryVisitor<'visitor> =
     dyn FnMut(DocId, &ScoredEntry, &[&str], &[&Value]) -> ExecResult<()> + 'visitor;
 
 impl ScoredDocumentSource {
+    /// Feed an unranked in-memory scan directly from storage-owned values into a projected aggregate. `Some(true)` means the scan reached EOF, `Some(false)` means another batch remains, and `None` selects the backend-neutral fallback.
+    pub(super) fn aggregate_shared_batch(
+        &mut self,
+        max_rows: usize,
+        executor: &mut dyn uqa_execution::AggregateExecutor,
+    ) -> ExecResult<Option<bool>> {
+        if self.lock_origin.is_some()
+            || self.recheck_pinned
+            || crate::engine_generated::projection_contains_virtual_generated_column(
+                &self.column_definitions,
+                &self.projected_fields,
+            )
+        {
+            return Ok(None);
+        }
+        let after = match &self.input {
+            super::ScoredInputCursor::All { after } => *after,
+            super::ScoredInputCursor::Entries(_) => return Ok(None),
+        };
+        if max_rows == 0 {
+            return Ok(Some(false));
+        }
+        let fields = self
+            .projected_fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let mut last = None;
+        let mut aggregate_error = None;
+        let visited = self
+            .table
+            .document_store
+            .read()
+            .for_each_next_fields(after, max_rows, &fields, &mut |doc_id, values| {
+                last = Some(doc_id);
+                let result = (|| -> ExecResult<()> {
+                    if let Some(predicate) = self.predicate.as_ref() {
+                        if !predicate.keep(values)? {
+                            return Ok(());
+                        }
+                    }
+                    let metadata = self.row_metadata(doc_id, 0.0);
+                    let extras = [
+                        metadata.doc_id()?,
+                        metadata.score(),
+                        metadata.score_provenance(),
+                    ];
+                    let row = uqa_execution::ProjectedRow::new(
+                        &self.schema,
+                        &self.projected_slots,
+                        values,
+                        &extras,
+                    );
+                    executor.consume_projected_row(&row)
+                })();
+                if let Err(error) = result {
+                    aggregate_error = Some(error);
+                    return false;
+                }
+                true
+            })
+            .map_err(|error| -> uqa_execution::ExecError {
+                SQLError::Internal(format!(
+                    "aggregate `{}` borrowed projected documents: {error}",
+                    self.table_name
+                ))
+                .into()
+            })?;
+        let Some(visited) = visited else {
+            return Ok(None);
+        };
+        if let Some(error) = aggregate_error {
+            return Err(error);
+        }
+        let Some(last) = last else {
+            return Ok(Some(true));
+        };
+        let super::ScoredInputCursor::All { after } = &mut self.input else {
+            unreachable!("shared aggregate input changed variants")
+        };
+        *after = Some(last);
+        Ok(Some(visited < max_rows))
+    }
+
+    pub(super) fn next_shared_physical_batch(
+        &mut self,
+        max_rows: usize,
+    ) -> ExecResult<Option<Vec<uqa_execution::PhysicalRow>>> {
+        if self.lock_origin.is_some()
+            || self.recheck_pinned
+            || crate::engine_generated::projection_contains_virtual_generated_column(
+                &self.column_definitions,
+                &self.projected_fields,
+            )
+        {
+            return Ok(None);
+        }
+        let mut after = match &self.input {
+            super::ScoredInputCursor::All { after } => *after,
+            super::ScoredInputCursor::Entries(_) => return Ok(None),
+        };
+        if max_rows == 0 {
+            return Ok(Some(Vec::new()));
+        }
+        let fields = self
+            .projected_fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        loop {
+            let shared_rows = self
+                .table
+                .document_store
+                .read()
+                .next_shared_fields(after, max_rows, &fields)
+                .map_err(|error| -> uqa_execution::ExecError {
+                    SQLError::Internal(format!(
+                        "scan `{}` shared projected documents: {error}",
+                        self.table_name
+                    ))
+                    .into()
+                })?;
+            let Some(shared_rows) = shared_rows else {
+                return Ok(None);
+            };
+            let reached_end = shared_rows.len() < max_rows;
+            let Some(last) = shared_rows.last().map(|(doc_id, _)| *doc_id) else {
+                return Ok(Some(Vec::new()));
+            };
+            after = Some(last);
+            let super::ScoredInputCursor::All { after: cursor } = &mut self.input else {
+                unreachable!("shared scan input changed variants")
+            };
+            *cursor = after;
+            let mut rows = Vec::with_capacity(shared_rows.len());
+            for (doc_id, shared) in shared_rows {
+                let (values, projection) = shared.indexed_values();
+                let keep = self.predicate.as_ref().map_or(Ok(true), |predicate| {
+                    predicate.keep_indexed(values, projection)
+                })?;
+                if keep {
+                    rows.push(self.physical_row_from_shared(doc_id, 0.0, shared)?);
+                }
+            }
+            if !rows.is_empty() || reached_end {
+                return Ok(Some(rows));
+            }
+        }
+    }
+
+    fn physical_row_from_shared(
+        &self,
+        doc_id: DocId,
+        score: f64,
+        shared: uqa_storage::document_store::SharedDocumentRow,
+    ) -> ExecResult<uqa_execution::PhysicalRow> {
+        let (values, projection) = shared.into_parts();
+        let source = uqa_execution::PhysicalRow::from_shared_values(values, projection);
+        if self
+            .projected_slots
+            .iter()
+            .enumerate()
+            .all(|(expected, slot)| {
+                matches!(slot, uqa_execution::ProjectedValueSlot::Field(actual) if *actual == expected)
+            })
+        {
+            return Ok(source);
+        }
+        let metadata = self.row_metadata(doc_id, score);
+        let extras = [
+            metadata.doc_id()?,
+            metadata.score(),
+            metadata.score_provenance(),
+        ];
+        Ok(
+            source.project_with_values(self.projected_slots.iter().map(|slot| {
+                match slot {
+                    uqa_execution::ProjectedValueSlot::Field(index) => {
+                        uqa_execution::RowProjectionValue::InputSlot(*index)
+                    }
+                    uqa_execution::ProjectedValueSlot::Extra(index) => {
+                        uqa_execution::RowProjectionValue::Owned(
+                            extras
+                                .get(*index)
+                                .and_then(Option::as_ref)
+                                .cloned()
+                                .unwrap_or(Value::Null),
+                        )
+                    }
+                    uqa_execution::ProjectedValueSlot::Missing => {
+                        uqa_execution::RowProjectionValue::Owned(Value::Null)
+                    }
+                }
+            })),
+        )
+    }
+
     pub(super) fn materialize_entries(
         &self,
         entries: &[ScoredEntry],
@@ -105,8 +302,6 @@ impl ScoredDocumentSource {
         Ok(rows)
     }
 
-    /// Keep the callback-heavy scan traversal in one code body instead of duplicating its recheck and predicate dispatch into each caller.
-    #[inline(never)]
     fn for_each_kept_entry(
         &self,
         entries: &[ScoredEntry],
@@ -118,7 +313,6 @@ impl ScoredDocumentSource {
         self.for_each_snapshot_entry(entries, visitor)
     }
 
-    #[inline(never)]
     fn for_each_snapshot_entry(
         &self,
         entries: &[ScoredEntry],

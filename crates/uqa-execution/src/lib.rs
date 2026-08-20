@@ -86,7 +86,8 @@ pub use batch::{
 pub use column_selection::ColumnSelection;
 pub use columnar_batch::{ColumnVector, ColumnarBatch};
 pub use distinct::{
-    canonical_row_key, hash_canonical_row, CanonicalRowHashSet, Distinct, ExactRowSet,
+    canonical_row_key, hash_canonical_row, try_pack_compact_text_pair, CanonicalRowHashSet,
+    Distinct, ExactRowSet,
 };
 pub use external_sort::{ExternalSort, EXTERNAL_SORT_MERGE_FAN_IN};
 pub use join::{HashJoin, NestedLoopJoin};

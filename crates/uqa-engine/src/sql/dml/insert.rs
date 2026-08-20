@@ -8,6 +8,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use super::{
     apply_validated_prepared_document_rewrite, build_returning_row, coerce_to_column_type,
@@ -241,6 +242,7 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
             engine,
             stmt,
             &document,
+            None,
             &mut prepared_conflict,
             params,
             snapshot_scope,
@@ -368,7 +370,7 @@ pub(in crate::sql) fn run_insert_inner(
                     )
                 })?,
             )?;
-            apply_validated_prepared_insert(engine, &stmt.table, &document, &mut prepared, false)?;
+            apply_validated_prepared_insert(engine, &stmt.table, document, &mut prepared, false)?;
         }
         if !stmt.returning.is_empty() {
             return dml_returning_result(
@@ -490,10 +492,12 @@ pub(in crate::sql) fn run_insert_inner(
         };
         let mut prepared = attach_prepared_insert_identity(prepared, insert_identity);
         let prepared_effect = !matches!(&prepared, PreparedInsertConflict::Skip);
+        let document = Arc::new(document);
         if let Some(returning) = stage_prepared_insert_row(
             engine,
             stmt,
-            &document,
+            document.as_ref(),
+            Some(&document),
             &mut prepared,
             params,
             &snapshot_scope,
@@ -512,13 +516,16 @@ pub(in crate::sql) fn run_insert_inner(
         engine.prepare_explicit_transaction_writer()?;
     }
     drop(conflict_locks);
-    for (document, prepared) in documents.iter().zip(&mut prepared_conflicts) {
+    for (document, prepared) in documents.into_iter().zip(&mut prepared_conflicts) {
         cancel.check()?;
         let supplied = matches!(
             prepared,
             PreparedInsertConflict::Insert { supplied: true, .. }
         );
         let known_new = stmt.on_conflict.is_none() && (!supplied || id_column_is_unique_key);
+        let document = Arc::try_unwrap(document).map_err(|_| {
+            SQLError::Internal("INSERT command overlay retained a staged document".into())
+        })?;
         apply_validated_prepared_insert(engine, &stmt.table, document, prepared, known_new)?;
     }
     if !stmt.returning.is_empty() {
@@ -576,6 +583,7 @@ fn stage_prepared_insert_row(
     engine: &Engine,
     stmt: &InsertPlan,
     document: &Document,
+    shared_document: Option<&Arc<Document>>,
     prepared: &mut PreparedInsertConflict,
     params: &[SQLParam],
     scope: &CteScope,
@@ -584,7 +592,15 @@ fn stage_prepared_insert_row(
     let images = match prepared {
         PreparedInsertConflict::Insert { doc_id, .. } => {
             validate_key_constraints(engine, &stmt.table, document, None)?;
-            engine.stage_command_document(&stmt.table, *doc_id, Some(document.clone()))?;
+            if let Some(shared_document) = shared_document {
+                engine.stage_shared_command_document(
+                    &stmt.table,
+                    *doc_id,
+                    Some(Arc::clone(shared_document)),
+                )?;
+            } else {
+                engine.stage_command_document(&stmt.table, *doc_id, Some(document.clone()))?;
+            }
             ReturningRowImages {
                 old: None,
                 new: Some(ReturningRowImage {
@@ -636,7 +652,7 @@ fn stage_prepared_insert_row(
 fn apply_validated_prepared_insert(
     engine: &Engine,
     table: &str,
-    document: &Document,
+    document: Document,
     prepared: &mut PreparedInsertConflict,
     known_new: bool,
 ) -> Result<bool, SQLError> {
@@ -647,12 +663,9 @@ fn apply_validated_prepared_insert(
             Ok(true)
         }
         PreparedInsertConflict::Insert { doc_id, .. } => {
+            let vectors = document_vectors(engine, table, &document)?;
             engine.add_prepared_document_with_vector_values(
-                table,
-                *doc_id,
-                document.clone(),
-                document_vectors(engine, table, document)?,
-                known_new,
+                table, *doc_id, document, vectors, known_new,
             )?;
             Ok(true)
         }

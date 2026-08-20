@@ -444,6 +444,9 @@ impl uqa_execution::RowSource for ScoredDocumentSource {
         &mut self,
         max_rows: usize,
     ) -> ExecResult<Vec<uqa_execution::PhysicalRow>> {
+        if let Some(rows) = self.next_shared_physical_batch(max_rows)? {
+            return Ok(rows);
+        }
         loop {
             let entries = self.next_entries(max_rows)?;
             if entries.is_empty() {
@@ -464,7 +467,18 @@ impl uqa_execution::RowSource for ScoredDocumentSource {
         if !executor.supports_projected_rows() {
             return Ok(false);
         }
+        let supports_storage_borrowed_rows = executor.supports_storage_borrowed_rows();
         loop {
+            if supports_storage_borrowed_rows {
+                if let Some(reached_end) =
+                    self.aggregate_shared_batch(uqa_execution::batch::DEFAULT_BATCH_SIZE, executor)?
+                {
+                    if reached_end {
+                        return Ok(true);
+                    }
+                    continue;
+                }
+            }
             let entries = self.next_entries(uqa_execution::batch::DEFAULT_BATCH_SIZE)?;
             if entries.is_empty() {
                 return Ok(true);

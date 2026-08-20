@@ -280,6 +280,16 @@ impl DocumentStore for MemoryDocumentStore {
         Ok(Some(self.next_shared_rows(after, limit, fields)))
     }
 
+    fn for_each_next_fields(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        Ok(Some(self.visit_next_rows(after, limit, fields, visitor)))
+    }
+
     fn len(&self) -> StorageBackendResult<usize> {
         Ok(self.documents.len())
     }

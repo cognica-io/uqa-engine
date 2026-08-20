@@ -7,7 +7,7 @@
 //! Document lookup, conflict probing, mutation, rewrite, and deletion.
 
 use super::{
-    document_store_read_error, document_store_write_error, BTreeMap, DocId, Document, Engine,
+    document_store_read_error, document_store_write_error, Arc, BTreeMap, DocId, Document, Engine,
     FieldName, IndexConflictProbe, SQLError, TableState, Value,
 };
 
@@ -81,6 +81,15 @@ impl Engine {
         table: &str,
         doc_id: DocId,
         document: Option<Document>,
+    ) -> Result<(), SQLError> {
+        self.stage_shared_command_document(table, doc_id, document.map(Arc::new))
+    }
+
+    pub(crate) fn stage_shared_command_document(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Option<Arc<Document>>,
     ) -> Result<(), SQLError> {
         let table = self.command_overlay_table_name(table)?;
         let mut overlays = self.session.command_mutation_overlays.lock();
@@ -170,7 +179,9 @@ impl Engine {
                     .get(&table)
                     .and_then(|documents| documents.get(&doc_id))
                     .map(|document| match document {
-                        Some(document) => CommandOverlayDocument::Present(document.clone()),
+                        Some(document) => {
+                            CommandOverlayDocument::Present(document.as_ref().clone())
+                        }
                         None => CommandOverlayDocument::Deleted,
                     })
             }))
@@ -240,11 +251,12 @@ impl Engine {
         let mut changes = BTreeMap::new();
         for overlay in overlays.iter() {
             if let Some(documents) = overlay.documents.get(&canonical) {
-                changes.extend(
-                    documents
-                        .iter()
-                        .map(|(doc_id, document)| (*doc_id, document.clone())),
-                );
+                changes.extend(documents.iter().map(|(doc_id, document)| {
+                    (
+                        *doc_id,
+                        document.as_ref().map(|document| document.as_ref().clone()),
+                    )
+                }));
             }
         }
         Ok(Some(changes))

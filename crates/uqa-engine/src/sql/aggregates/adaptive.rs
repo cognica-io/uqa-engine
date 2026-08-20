@@ -20,7 +20,7 @@ use super::{
     AggregateStatePlan, CteScope, DecimalValue, Engine, PlanSubqueryArena, QueryBlockPlan,
     SQLError, SQLParam, ScalarEvalContext, ScalarExpr, ScopedEngineHook, SpillBuffer, Value,
 };
-use uqa_execution::{hash_canonical_row, Batch, RowSchema};
+use uqa_execution::{hash_canonical_row, try_pack_compact_text_pair, Batch, RowSchema};
 
 const GROUP_ENTRY_OVERHEAD_BYTES: usize = 256;
 
@@ -42,9 +42,10 @@ struct GroupEntry {
 
 type GroupIndexBucket = SmallVec<[usize; 1]>;
 type GroupIndex = HashMap<u64, GroupIndexBucket, ahash::RandomState>;
+type CompactTextGroupIndex = HashMap<u64, usize, ahash::RandomState>;
 
 pub(super) struct AdaptiveAggregateSet {
-    statement: QueryBlockPlan,
+    statement: Box<QueryBlockPlan>,
     aggregate_targets: Vec<ScalarExpr>,
     accumulator_templates: Vec<AggregateAccumulatorTemplate>,
     output_plan: super::output::AggregateOutputPlan,
@@ -53,6 +54,7 @@ pub(super) struct AdaptiveAggregateSet {
     accumulator_budget: usize,
     groups: Vec<GroupEntry>,
     group_index: GroupIndex,
+    compact_text_group_index: Option<CompactTextGroupIndex>,
     retained_bytes: usize,
     partials: Option<SpillBuffer>,
     variable_state: bool,
@@ -108,13 +110,22 @@ impl AdaptiveAggregateSet {
             })?;
         let projected_group_columns =
             super::projected::ProjectedGroupColumn::compile(&statement.group_by, input_schema);
+        let compact_text_group_index = projected_group_columns
+            .as_ref()
+            .is_some_and(|columns| {
+                columns.len() == 2
+                    && columns.iter().all(|column| {
+                        matches!(column, super::projected::ProjectedGroupColumn::Text(_))
+                    })
+            })
+            .then(|| HashMap::with_hasher(ahash::RandomState::new()));
         let projected_aggregate_plans = super::projected_input::ProjectedAggregatePlans::compile(
             engine,
             &aggregate_targets,
             input_schema,
         );
         Ok(Self {
-            statement,
+            statement: Box::new(statement),
             aggregate_targets,
             accumulator_templates,
             output_plan,
@@ -123,6 +134,7 @@ impl AdaptiveAggregateSet {
             accumulator_budget,
             groups: Vec::new(),
             group_index: HashMap::with_hasher(ahash::RandomState::new()),
+            compact_text_group_index,
             retained_bytes: 0,
             partials: None,
             variable_state,
@@ -168,6 +180,12 @@ impl AdaptiveAggregateSet {
 
     pub(super) fn statement_subqueries_are_empty(&self) -> bool {
         self.statement.subqueries.is_empty()
+    }
+
+    pub(super) fn supports_storage_borrowed_rows(&self) -> bool {
+        self.statement.subqueries.is_empty()
+            && self.projected_group_columns.is_some()
+            && self.projected_aggregate_plans.all_direct()
     }
 
     pub(super) fn consume(
@@ -258,8 +276,23 @@ impl AdaptiveAggregateSet {
     }
 
     fn group_hash(&self, key: &[Value]) -> Result<u64, SQLError> {
+        if let Some(key) = self.compact_text_group_key(key) {
+            return Ok(key);
+        }
         hash_canonical_row(self.group_index.hasher(), key.iter().map(Some))
             .map_err(super::sort_fallback::exec_to_sql_error)
+    }
+
+    fn compact_text_group_key(&self, key: &[Value]) -> Option<u64> {
+        let columns = self.projected_group_columns.as_ref()?;
+        if columns.len() != key.len()
+            || !columns
+                .iter()
+                .all(|column| matches!(column, super::projected::ProjectedGroupColumn::Text(_)))
+        {
+            return None;
+        }
+        try_pack_compact_text_pair(key.iter().map(Some))
     }
 
     fn insert_group(&mut self, key: &[Value], hash: u64) -> Result<bool, SQLError> {
@@ -288,6 +321,7 @@ impl AdaptiveAggregateSet {
                 }
             }
         }
+        let compact_text_key = self.compact_text_group_key(key);
         self.retained_bytes = self
             .retained_bytes
             .checked_add(group_bytes)
@@ -301,6 +335,11 @@ impl AdaptiveAggregateSet {
             },
         });
         self.group_index.entry(hash).or_default().push(index);
+        if let (Some(key), Some(compact_index)) =
+            (compact_text_key, self.compact_text_group_index.as_mut())
+        {
+            compact_index.insert(key, index);
+        }
         Ok(true)
     }
 
@@ -332,6 +371,9 @@ impl AdaptiveAggregateSet {
     fn abandon(&mut self) {
         self.groups.clear();
         self.group_index.clear();
+        if let Some(index) = self.compact_text_group_index.as_mut() {
+            index.clear();
+        }
         self.partials = None;
         self.retained_bytes = 0;
         self.abandoned = true;
@@ -348,6 +390,9 @@ impl AdaptiveAggregateSet {
         let mut pending = Vec::with_capacity(uqa_execution::batch::DEFAULT_BATCH_SIZE);
         let mut groups = std::mem::take(&mut self.groups);
         self.group_index.clear();
+        if let Some(index) = self.compact_text_group_index.as_mut() {
+            index.clear();
+        }
         for entry in groups.drain(..) {
             pending.push(super::partial_state::encode_partial_group(
                 entry.key,

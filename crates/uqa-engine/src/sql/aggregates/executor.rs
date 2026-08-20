@@ -165,6 +165,12 @@ impl AggregateExecutor for PhysicalAggregateExecutor<'_> {
         })
     }
 
+    fn supports_storage_borrowed_rows(&self) -> bool {
+        self.sets.iter().all(|set| {
+            matches!(set, AggregateSet::Adaptive(set) if set.supports_storage_borrowed_rows())
+        })
+    }
+
     fn consume_projected_row(&mut self, row: &ProjectedRow<'_, '_>) -> ExecResult<()> {
         for set in &mut self.sets {
             let AggregateSet::Adaptive(set) = set else {

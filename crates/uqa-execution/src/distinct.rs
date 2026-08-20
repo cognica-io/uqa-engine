@@ -65,6 +65,32 @@ pub fn hash_canonical_row<'a, S: BuildHasher>(
     Ok(hasher.finish())
 }
 
+/// Pack exactly two text-or-NULL values of at most three bytes each into an injective integer key. `None` selects the general collision-safe encoder for every other row.
+pub fn try_pack_compact_text_pair<'a>(
+    values: impl ExactSizeIterator<Item = Option<&'a Value>>,
+) -> Option<u64> {
+    if values.len() != 2 {
+        return None;
+    }
+    let mut values = values;
+    let first = compact_text_component(values.next()?)?;
+    let second = compact_text_component(values.next()?)?;
+    Some(u64::from(first) << 32 | u64::from(second))
+}
+
+fn compact_text_component(value: Option<&Value>) -> Option<u32> {
+    match value {
+        None | Some(Value::Null) => Some(0),
+        Some(Value::Str(value)) if value.len() <= 3 => {
+            let mut packed = [0u8; 4];
+            packed[0] = u8::try_from(value.len()).ok()? + 1;
+            packed[1..][..value.len()].copy_from_slice(value.as_bytes());
+            Some(u32::from_be_bytes(packed))
+        }
+        Some(_) => None,
+    }
+}
+
 /// Encode positional SQL values in the exact equality domain used by DISTINCT and spill-backed row-key state. Callers that need an external exact index can persist this representation without relying on `Value`'s serialization format.
 pub fn canonical_row_key(values: &[Value]) -> ExecResult<Vec<u8>> {
     encode_key(values)
@@ -1097,6 +1123,43 @@ mod tests {
             hash_canonical_row(&hash_state, std::iter::once(None)).unwrap(),
             hash_canonical_row(&hash_state, std::iter::once(Some(&null))).unwrap()
         );
+    }
+
+    #[test]
+    fn compact_text_pair_key_is_stable_for_borrowed_and_owned_values() {
+        let first = Value::Str("A".into());
+        let second = Value::Str("O".into());
+        let values = [Some(&first), Some(&second)];
+
+        let key = try_pack_compact_text_pair(values.into_iter()).unwrap();
+        let owned = [first.clone(), second.clone()];
+        assert_eq!(
+            key,
+            try_pack_compact_text_pair(owned.iter().map(Some)).unwrap(),
+        );
+        let long = Value::Str("x".repeat(64));
+        assert_eq!(
+            try_pack_compact_text_pair([Some(&long), Some(&second)].into_iter()),
+            None,
+        );
+
+        let candidates = [
+            Value::Null,
+            Value::Str(String::new()),
+            Value::Str("A".into()),
+            Value::Str("AB".into()),
+            Value::Str("ABC".into()),
+            Value::Str("é".into()),
+            Value::Str("한".into()),
+        ];
+        let mut keys = std::collections::BTreeSet::new();
+        for first in &candidates {
+            for second in &candidates {
+                assert!(keys.insert(
+                    try_pack_compact_text_pair([Some(first), Some(second)].into_iter()).unwrap()
+                ));
+            }
+        }
     }
 
     #[test]

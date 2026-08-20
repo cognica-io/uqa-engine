@@ -58,6 +58,11 @@ pub trait AggregateExecutor: Send {
         false
     }
 
+    /// Whether projected-row consumption is guaranteed not to call back into the engine while a storage backend lends its row values. Sources use this stricter capability before invoking an executor under a backend read borrow.
+    fn supports_storage_borrowed_rows(&self) -> bool {
+        false
+    }
+
     /// Fold one projected row. Implementations advertising support must
     /// preserve the same expression and aggregate semantics as [`Self::consume`].
     fn consume_projected_row(&mut self, _row: &ProjectedRow<'_, '_>) -> ExecResult<()> {

@@ -84,6 +84,11 @@ impl SharedDocumentRow {
         }
     }
 
+    /// Borrow the storage-owned values and the projection from requested field positions to value slots. A `usize::MAX` projection slot represents a missing field and therefore SQL NULL.
+    pub fn indexed_values(&self) -> (&[Value], &[usize]) {
+        (&self.values, &self.projection)
+    }
+
     /// Transfer the shared vector and its fragment-local projection into a
     /// physical row without cloning either allocation.
     pub fn into_parts(self) -> (Arc<Vec<Value>>, Arc<[usize]>) {
@@ -383,6 +388,17 @@ pub trait DocumentStore: Send + Sync {
         _limit: usize,
         _fields: &[&str],
     ) -> StorageBackendResult<Option<Vec<(DocId, SharedDocumentRow)>>> {
+        Ok(None)
+    }
+
+    /// Visit the next bounded id range through a reusable borrowed projection of each backend-owned row. Missing fields are exposed as SQL NULL. `Some(count)` means the backend supports this borrowed cursor and reports how many rows it visited; `None` selects the ordinary cursor path without invoking `visitor`.
+    fn for_each_next_fields(
+        &self,
+        _after: Option<DocId>,
+        _limit: usize,
+        _fields: &[&str],
+        _visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
         Ok(None)
     }
 
