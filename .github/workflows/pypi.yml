@@ -217,7 +217,7 @@ jobs:
           set -euo pipefail
           version="${RELEASE_TAG#v}"
           notes_file="$RUNNER_TEMP/release-notes.md"
-          gh release view "$RELEASE_TAG" --json body --jq .body > "$notes_file"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$notes_file"
           python3 - "$notes_file" "$version" <<'PY'
           import sys
           from pathlib import Path
@@ -238,4 +238,4 @@ jobs:
               lines.extend(["", "## PyPI", "", status])
           path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
           PY
-          gh release edit "$RELEASE_TAG" --notes-file "$notes_file"
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$notes_file"
