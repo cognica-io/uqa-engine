@@ -1,0 +1,96 @@
+UQA-RS Noncommercial Application Exception
+Version 1.0, 3 August 2026
+
+Copyright (c) 2023-2026 Cognica, Inc.
+
+This Exception is an additional permission under section 7 of the GNU Affero
+General Public License version 3 (the "AGPL"). It applies only to UQA-RS
+material for which Cognica, Inc. has authority to grant this permission (the
+"Program") and that is distributed with a notice referring to this Exception.
+
+The AGPL itself permits commercial use. This Exception does not prohibit,
+limit, or charge for any activity already permitted by the AGPL. It grants an
+optional additional permission only for the qualifying uses defined below.
+
+1. Definitions
+
+"Application" means a work, other than the Program, that uses the Program
+through a documented interface. Interfaces include Rust crate interfaces,
+application binary interfaces, static or dynamic linking, foreign-function
+interfaces, inter-process interfaces, language bindings, module imports, and
+WebAssembly imports or bundling.
+
+"Eligible User" means:
+
+  a. a natural person acting only on that person's own behalf;
+
+  b. an accredited educational institution or public research institution;
+     or
+
+  c. a nonprofit or charitable organization that does not distribute profits
+     to private owners or shareholders.
+
+"Noncommercial Purpose" means personal learning, teaching, independent
+academic research, reproducibility research, or charitable research that:
+
+  a. is not performed for direct or indirect monetary compensation or
+     commercial advantage;
+
+  b. does not support production operations, customer workloads, paid
+     consulting, advertising, subscriptions, sales, licensing, or another
+     revenue-generating activity;
+
+  c. is not development, testing, or evaluation of a product or service that
+     is intended for commercial use; and
+
+  d. is not performed for a for-profit sponsor that receives proprietary,
+     exclusive, or preferential rights in the work or its results.
+
+"Qualifying Noncommercial Application" means an Application used and, if
+applicable, conveyed by an Eligible User solely for a Noncommercial Purpose.
+
+2. Additional permission
+
+An Eligible User may combine the Program with a Qualifying Noncommercial
+Application and use, reproduce, and convey the resulting combination without
+applying the AGPL to the independent code of that Application solely because
+of that combination. The independent application code may remain private or
+under terms chosen by its copyright holder.
+
+You may reproduce the minimum interface declarations reasonably necessary to
+perform that combination without changing the license of the independent
+application code. This permission does not extend to copied implementation
+code from the Program.
+
+3. Conditions and retained obligations
+
+This Exception does not relicense the Program. The Program, modifications to
+the Program, and Program implementation code copied into another work remain
+governed by the AGPL. All AGPL obligations that apply to those portions,
+including corresponding-source and remote-network-interaction obligations,
+remain in force.
+
+When conveying an application under this Exception, you must provide a copy of
+this Exception with the licensing notices for the Program and identify the
+Program portions as AGPL-3.0-only with this additional permission.
+
+Each user and each use must independently satisfy the definitions above. If a
+user or use ceases to qualify, this additional permission no longer applies to
+that use. The user may continue under the AGPL or under separate written terms
+from Cognica. Rights that the user otherwise has under the AGPL remain
+unaffected.
+
+Use by a for-profit entity, government operational use, paid or commercially
+sponsored research, and commercial evaluation are not presumed to qualify.
+They require compliance with the AGPL or separate written terms from Cognica.
+
+4. No trademark or third-party grant
+
+This Exception grants no right to use Cognica or UQA trademarks. It grants no
+right in third-party material included with or used by the Program.
+
+5. Removal
+
+You may remove this additional permission from a copy or modified version as
+allowed by section 7 of the AGPL. A copy from which it has been removed remains
+available under the AGPL without this Exception.

@@ -4,20 +4,22 @@ The `uqa-client` crate provides `HttpEngine`, an asynchronous Rust SQL interface
 
 ## Install a released binding
 
-UQA-RS release artifacts are attached to the [GitHub release](https://github.com/cognica-io/uqa-rs/releases/tag/v0.1.5); they are not currently published to crates.io, PyPI, or npm. Pin the application and its deployment artifact to the same release:
+UQA-RS release artifacts are attached to the [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.1.6). Public Rust crates are published separately to crates.io. Python, Node.js, and Browser WASM remain GitHub-release artifacts only and are not published to PyPI or npm. To use the source from GitHub, pin a Rust application to the same release tag:
 
 ```toml
 [dependencies]
-uqa-client = { git = "https://github.com/cognica-io/uqa-rs", tag = "v0.1.5" }
+uqa-client = { git = "https://github.com/cognica-io/uqa-engine", tag = "v0.1.6" }
 ```
+
+The same version can be taken from the registry as `uqa = "0.1.6"`, `uqa-client = "0.1.6"`, or `uqa-engine = "0.1.6"`.
 
 ```sh
-python -m pip install ./uqa-0.1.5-cp38-abi3-PLATFORM.whl
-npm install ./uqa-0.1.5-PLATFORM.tgz
-npm install ./uqa-wasm-0.1.5.tgz
+python -m pip install ./uqa-0.1.6-cp38-abi3-PLATFORM.whl
+npm install ./uqa-0.1.6-PLATFORM.tgz
+npm install ./uqa-wasm-0.1.6.tgz
 ```
 
-The platform-specific Node.js archive includes the native addon; the unqualified `uqa-0.1.5.tgz` archive contains only the JavaScript package and expects a compatible addon package to be installed separately. An application runtime does not need to spawn or bundle the `uqa` CLI when trusted deployment configuration supplies `UQA_URL` and `UQA_TOKEN`.
+The platform-specific Node.js archive includes the native addon; the unqualified `uqa-0.1.6.tgz` archive contains only the JavaScript package and expects a compatible addon package to be installed separately. An application runtime does not need to spawn or bundle the `uqa` CLI when trusted deployment configuration supplies `UQA_URL` and `UQA_TOKEN`.
 
 ## Connect by project name
 

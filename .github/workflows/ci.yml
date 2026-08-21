@@ -29,6 +29,10 @@ jobs:
         run: bash scripts/check-rust-file-headers.sh
       - name: Check Rust file line limit
         run: bash scripts/check-rust-file-lines.sh
+      - name: Check imported parser pin
+        run: python3 scripts/sync-uqa-pg-query.py --check
+      - name: Check crate legal file copies
+        run: python3 scripts/sync-crate-legal-files.py --check
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -44,7 +48,8 @@ jobs:
         run: python3 scripts/check-release-licenses.py
       - name: Check PostgreSQL 18 compatibility manifest
         run: python3 tests/parity/pg18/run_diff.py --validate-manifest
-      - run: cargo fmt --all --check
+      - name: Check rustfmt
+        run: bash scripts/check-rustfmt.sh
 
   release-package-licenses:
     name: release package licenses
@@ -64,6 +69,15 @@ jobs:
         run: npm pack --pack-destination "${RUNNER_TEMP}/uqa-packages"
       - name: Check package license contents
         run: python3 scripts/check-release-licenses.py "${RUNNER_TEMP}"/uqa-packages/*.tgz
+
+  cargo-package:
+    name: cargo package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Package publishable crates
+        run: bash scripts/package-publishable-crates.sh
 
   msrv:
     name: cargo check (Rust 1.90)

@@ -7,13 +7,11 @@
 //! Skip-pointer and block-max index coverage.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use uqa_analysis::standard_analyzer;
-use uqa_core::{IndexStats, PostingList};
-use uqa_scoring::{BM25Params, BM25Scorer};
+use uqa_core::PostingList;
 use uqa_storage::sqlite::{Catalog, ManagedConnection};
-use uqa_storage::{BlockMaxIndex, InvertedIndex, SQLiteInvertedIndex};
+use uqa_storage::{BlockMaxIndex, BlockMaxScorer, InvertedIndex, SQLiteInvertedIndex};
 
 fn sqlite_conn() -> ManagedConnection {
     let conn = ManagedConnection::open_in_memory().unwrap();
@@ -38,11 +36,17 @@ fn fields(pairs: &[(&str, String)]) -> BTreeMap<String, String> {
         .collect()
 }
 
-fn scorer(total_docs: u64, avg_doc_length: f64) -> BM25Scorer {
-    let mut stats = IndexStats::default();
-    stats.total_docs = total_docs;
-    stats.avg_doc_length = avg_doc_length;
-    BM25Scorer::new(BM25Params::default(), Arc::new(stats))
+struct TestScorer;
+
+impl BlockMaxScorer for TestScorer {
+    fn score(&self, term_freq: u64, doc_length: u64, doc_freq: u64) -> f64 {
+        let normalized_tf = term_freq as f64 / doc_length.max(1) as f64;
+        normalized_tf + 1.0 / doc_freq.max(1) as f64
+    }
+}
+
+fn scorer(_total_docs: u64, _avg_doc_length: f64) -> TestScorer {
+    TestScorer
 }
 
 #[test]

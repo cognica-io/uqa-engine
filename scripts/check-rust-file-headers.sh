@@ -7,6 +7,7 @@ failed=0
 
 while IFS= read -r -d '' file; do
   [[ -f "$file" ]] || continue
+  [[ "$file" == crates/uqa-pg-query/* ]] && continue
   first_five=$(sed -n '1,5p' "$file")
   checked=$((checked + 1))
   if [[ "$first_five" != "$expected_header" ]]; then

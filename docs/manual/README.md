@@ -15,7 +15,7 @@ The manual is divided by reader intent:
 
 Use the repository-root [llms.txt](../../llms.txt) as a compact discovery map, then follow its links into this manual for the complete contract. The map intentionally does not duplicate detailed syntax or behavior.
 
-Codex and Claude Code can also discover the shared [UQA-RS skill](../../.agents/skills/uqa-rs/SKILL.md). The skill supplies the query-authoring and verification workflow; this manual remains authoritative for product behavior.
+Codex and Claude Code can also discover the shared [UQA Engine skill](../../.agents/skills/uqa-engine/SKILL.md). The skill supplies the query-authoring and verification workflow; this manual remains authoritative for product behavior.
 
 ## File naming
 
@@ -57,6 +57,6 @@ New users should read the [quick start](reference/01-quick-start.md), then work 
 
 ## Version and compatibility scope
 
-This manual targets UQA-RS 0.1.5 and Rust 1.90 or newer. UQA-RS implements a large PostgreSQL-oriented surface, but it is an embedded engine rather than a PostgreSQL server clone. The [compatibility guide](sql/09-compatibility.md) states important differences and unsupported behavior.
+This manual targets UQA-RS 0.1.6 and Rust 1.90 or newer. UQA-RS implements a large PostgreSQL-oriented surface, but it is an embedded engine rather than a PostgreSQL server clone. The [compatibility guide](sql/09-compatibility.md) states important differences and unsupported behavior.
 
 The implementation and tests are authoritative when behavior changes. Source paths are included throughout the internal documentation to make each claim traceable.

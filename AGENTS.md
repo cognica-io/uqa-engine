@@ -2,7 +2,7 @@
 
 Read `llms.txt` first.
 
-For UQA-RS SQL, documentation, and feature verification, follow `.agents/skills/uqa-rs/SKILL.md`.
+For UQA Engine SQL, documentation, and feature verification, follow `.agents/skills/uqa-engine/SKILL.md`.
 
 The manual is authoritative for public behavior. Verify ambiguous claims against implementation and tests.
 

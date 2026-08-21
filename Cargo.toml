@@ -14,10 +14,12 @@ members = [
     "crates/uqa-joins",
     "crates/uqa-planner",
     "crates/uqa-execution",
+    "crates/uqa-pg-query",
     "crates/uqa-sql",
     "crates/uqa-pg-wire",
     "crates/uqa-fdw",
     "crates/uqa-engine",
+    "crates/uqa",
     "crates/uqa-client",
     "crates/uqa-api",
     "crates/uqa-cli",
@@ -35,39 +37,41 @@ members = [
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 # This is the base license. Optional additional permissions and commercial
 # terms are documented in LICENSING.md.
 license = "AGPL-3.0-only"
-license-file = "LICENSE"
 authors = ["Jaepil Jeong <jaepil@cognica.io>"]
-repository = "https://github.com/cognica-io/uqa-rs"
-homepage = "https://github.com/cognica-io/uqa-rs"
+repository = "https://github.com/cognica-io/uqa-engine"
+homepage = "https://github.com/cognica-io/uqa-engine"
 readme = "README.md"
 rust-version = "1.90"
+exclude = ["/tests", "/benches", "/examples"]
 
 [workspace.dependencies]
 # Internal crates
-uqa-core = { version = "0.1.5", path = "crates/uqa-core" }
-uqa-analysis = { version = "0.1.5", path = "crates/uqa-analysis" }
-uqa-storage = { version = "0.1.5", path = "crates/uqa-storage" }
-uqa-storage-redb = { version = "0.1.5", path = "crates/uqa-storage-redb" }
-uqa-storage-sqlite = { version = "0.1.5", path = "crates/uqa-storage-sqlite" }
-uqa-scoring = { version = "0.1.5", path = "crates/uqa-scoring" }
-uqa-fusion = { version = "0.1.5", path = "crates/uqa-fusion" }
-uqa-operators = { version = "0.1.5", path = "crates/uqa-operators" }
-uqa-ml = { version = "0.1.5", path = "crates/uqa-ml" }
-uqa-graph = { version = "0.1.5", path = "crates/uqa-graph" }
-uqa-joins = { version = "0.1.5", path = "crates/uqa-joins" }
-uqa-planner = { version = "0.1.5", path = "crates/uqa-planner" }
-uqa-execution = { version = "0.1.5", path = "crates/uqa-execution" }
-uqa-sql = { version = "0.1.5", path = "crates/uqa-sql" }
-uqa-pg-wire = { version = "0.1.5", path = "crates/uqa-pg-wire" }
-uqa-fdw = { version = "0.1.5", path = "crates/uqa-fdw" }
-uqa-engine = { version = "0.1.5", path = "crates/uqa-engine" }
-uqa-client = { version = "0.1.5", path = "crates/uqa-client" }
-uqa-api = { version = "0.1.5", path = "crates/uqa-api" }
+uqa-core = { version = "0.1.6", path = "crates/uqa-core" }
+uqa-analysis = { version = "0.1.6", path = "crates/uqa-analysis" }
+uqa-storage = { version = "0.1.6", path = "crates/uqa-storage" }
+uqa-storage-redb = { version = "0.1.6", path = "crates/uqa-storage-redb" }
+uqa-storage-sqlite = { version = "0.1.6", path = "crates/uqa-storage-sqlite" }
+uqa-scoring = { version = "0.1.6", path = "crates/uqa-scoring" }
+uqa-fusion = { version = "0.1.6", path = "crates/uqa-fusion" }
+uqa-operators = { version = "0.1.6", path = "crates/uqa-operators" }
+uqa-ml = { version = "0.1.6", path = "crates/uqa-ml" }
+uqa-graph = { version = "0.1.6", path = "crates/uqa-graph" }
+uqa-joins = { version = "0.1.6", path = "crates/uqa-joins" }
+uqa-planner = { version = "0.1.6", path = "crates/uqa-planner" }
+uqa-execution = { version = "0.1.6", path = "crates/uqa-execution" }
+uqa-pg-query = { version = "0.1.6", path = "crates/uqa-pg-query" }
+uqa-sql = { version = "0.1.6", path = "crates/uqa-sql" }
+uqa-pg-wire = { version = "0.1.6", path = "crates/uqa-pg-wire" }
+uqa-fdw = { version = "0.1.6", path = "crates/uqa-fdw" }
+uqa-engine = { version = "0.1.6", path = "crates/uqa-engine" }
+uqa = { version = "0.1.6", path = "crates/uqa" }
+uqa-client = { version = "0.1.6", path = "crates/uqa-client" }
+uqa-api = { version = "0.1.6", path = "crates/uqa-api" }
 
 # Shared external dependencies (versions added when first consumer pulls them in)
 serde = { version = "1.0", features = ["derive"] }
@@ -86,7 +90,6 @@ unicode-normalization = "0.1"
 num-bigint = "0.4"
 num-traits = "0.2"
 rusqlite = { version = "0.39", default-features = false, features = ["bundled-sqlcipher-vendored-openssl", "blob", "cache"] }
-pg_query = { version = "6.1.1", git = "https://github.com/jaepil/pg_query.rs", rev = "516b3a03fed42e606ce01bc8b5a864a1698c210d" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 argon2 = { version = "0.5", default-features = false }
 chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }

@@ -6,12 +6,13 @@ description = "Document sets, finite-support relations, posting storage, and val
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-license-file.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 rust-version.workspace = true
+documentation = "https://docs.rs/uqa-core"
+exclude.workspace = true
 
 [dependencies]
 chrono = { workspace = true }

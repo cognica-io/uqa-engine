@@ -15,3 +15,12 @@ LICENSE-NOTICE.md                   text eol=lf
 LICENSING.md                        text eol=lf
 UQA-FOSS-EXCEPTION-1.0.txt          text eol=lf
 UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt text eol=lf
+
+# Imported PostgreSQL 18 parser snapshot. Preserve upstream bytes exactly;
+# SHA256SUMS, rather than Git's whitespace heuristic, verifies this tree.
+crates/uqa-pg-query/libpg_query/** -whitespace linguist-vendored
+crates/uqa-pg-query/src/protobuf.rs linguist-generated
+crates/uqa-pg-query/src/node_enum.rs linguist-generated
+crates/uqa-pg-query/src/node_mut.rs linguist-generated
+crates/uqa-pg-query/src/node_ref.rs linguist-generated
+crates/uqa-pg-query/src/node_structs.rs linguist-generated

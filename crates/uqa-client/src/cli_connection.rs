@@ -188,20 +188,30 @@ mod tests {
     use secrecy::ExposeSecret;
 
     #[cfg(unix)]
-    use std::fs;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
+    use std::io::Write;
     #[cfg(unix)]
     use std::path::PathBuf;
+    #[cfg(unix)]
+    use std::process::{Command as StdCommand, Stdio as StdStdio};
 
     #[cfg(unix)]
     fn executable_script(source: &str) -> (tempfile::TempDir, PathBuf) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("uqa");
-        fs::write(&path, source).unwrap();
-        let mut permissions = fs::metadata(&path).unwrap().permissions();
-        permissions.set_mode(0o700);
-        fs::set_permissions(&path, permissions).unwrap();
+        // Create fixtures in a child so parallel forks cannot inherit writable executable descriptors and cause Linux ETXTBSY.
+        let mut writer = StdCommand::new("/bin/sh")
+            .args(["-c", "cat > \"$1\" && chmod 700 \"$1\"", "uqa-test-fixture"])
+            .arg(&path)
+            .stdin(StdStdio::piped())
+            .spawn()
+            .unwrap();
+        writer
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(source.as_bytes())
+            .unwrap();
+        assert!(writer.wait().unwrap().success());
         (directory, path)
     }
 
@@ -301,7 +311,10 @@ mod tests {
         .await
         .err()
         .expect("CLI must fail");
-        assert!(matches!(error, HttpEngineError::CLIConnectionFailed));
+        assert!(
+            matches!(error, HttpEngineError::CLIConnectionFailed),
+            "unexpected error: {error:?}"
+        );
         assert!(!error.to_string().contains(secret));
         assert!(!format!("{error:?}").contains(secret));
     }
@@ -320,7 +333,10 @@ mod tests {
         .await
         .err()
         .expect("oversized output must fail");
-        assert!(matches!(error, HttpEngineError::CLIOutputTooLarge));
+        assert!(
+            matches!(error, HttpEngineError::CLIOutputTooLarge),
+            "unexpected error: {error:?}"
+        );
 
         let (_directory, cli) = executable_script("#!/bin/sh\nwhile :; do :; done\n");
         let error = resolve(

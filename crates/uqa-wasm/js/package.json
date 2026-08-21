@@ -1,14 +1,14 @@
 {
   "name": "uqa-wasm",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Browser bindings for embedded UQA WASM and local or Cloud HTTP SQL",
   "license": "AGPL-3.0-only",
   "author": "Jaepil Jeong <jaepil@cognica.io>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cognica-io/uqa-rs"
+    "url": "https://github.com/cognica-io/uqa-engine"
   },
-  "homepage": "https://github.com/cognica-io/uqa-rs",
+  "homepage": "https://github.com/cognica-io/uqa-engine",
   "type": "module",
   "main": "index.mjs",
   "types": "index.d.ts",

@@ -18,7 +18,7 @@ while IFS= read -r -d '' file; do
   fi
 done < <(
   find . \
-    \( -path './.git' -o -type d -name target \) -prune -o \
+    \( -path './.git' -o -path './crates/uqa-pg-query' -o -type d -name target \) -prune -o \
     -type f -name '*.rs' -print0
 )
 

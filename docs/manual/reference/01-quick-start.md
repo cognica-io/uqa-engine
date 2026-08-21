@@ -72,11 +72,10 @@ cargo run -p uqa-cli --bin usql -- --db notes.uqa -c "SELECT count(*) FROM notes
 
 ## Embed the engine in Rust
 
-Add the workspace crate in a workspace member or use the published dependency appropriate for the release you target. The embedded API has the same SQL behavior as the CLI.
+Use the `uqa` facade package for the embedded API. It re-exports `uqa-engine` and the core `Value` type; depend directly on `uqa-engine` only when the implementation package name is required. The embedded API has the same SQL behavior as the CLI.
 
 ```rust
-use uqa_core::Value;
-use uqa_engine::{Engine, SQLParam};
+use uqa::{Engine, SQLParam, Value};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = Engine::new();

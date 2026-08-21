@@ -6,12 +6,13 @@ description = "Graph store, RPQ, Cypher (lexer/parser/AST/compiler), graph algor
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-license-file.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 rust-version.workspace = true
+documentation = "https://docs.rs/uqa-graph"
+exclude.workspace = true
 
 [dependencies]
 uqa-core = { workspace = true }

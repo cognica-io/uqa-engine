@@ -1,6 +1,6 @@
 # Rust Engine API
 
-The `uqa-engine` crate is the main embedded interface. It owns durable storage, session-local SQL state, runtime extensions, epochs, and query execution.
+The `uqa` facade is the primary application dependency and re-exports the `uqa-engine` crate documented here. `uqa-engine` owns durable storage, session-local SQL state, runtime extensions, epochs, and query execution and remains available as a direct dependency.
 
 ## Construct an engine
 

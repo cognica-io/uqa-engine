@@ -1,0 +1,85 @@
+UQA-RS FOSS Exception
+Version 1.0, 3 August 2026
+
+Copyright (c) 2023-2026 Cognica, Inc.
+
+This Exception is an additional permission under section 7 of the GNU Affero
+General Public License version 3 (the "AGPL"). It applies only to UQA-RS
+material for which Cognica, Inc. has authority to grant this permission (the
+"Program") and that is distributed with a notice referring to this Exception.
+
+1. Definitions
+
+"Application" means a work, other than the Program, that uses the Program
+through a documented interface. Interfaces include Rust crate interfaces,
+application binary interfaces, static or dynamic linking, foreign-function
+interfaces, inter-process interfaces, language bindings, module imports, and
+WebAssembly imports or bundling.
+
+"Qualifying FOSS Application" means an Application for which:
+
+  a. the complete source code of the Application is made available under one
+     or more licenses approved by the Open Source Initiative at the time the
+     Application is conveyed or made available for remote use;
+
+  b. the source provided is the form preferred for making modifications and
+     includes the material reasonably required to build and run the
+     Application, excluding the Program, System Libraries as defined by the
+     AGPL, and unmodified third-party dependencies under their own licenses;
+     and
+
+  c. the Application is not merely a nominal or thin open-source wrapper whose
+     effective function is supplied by proprietary application code combined
+     with, loaded by, controlled by, or specifically designed for that
+     wrapper.
+
+"Combined Work" means a work formed by combining the Program with a
+Qualifying FOSS Application through one or more Interfaces.
+
+2. Additional permission
+
+To the extent permitted by the applicable license or licenses of the
+Qualifying FOSS Application, you may combine the Program with that Application
+and run, reproduce, and convey the resulting Combined Work without applying
+the AGPL to the independent code of the Qualifying FOSS Application solely
+because of that combination. The independent application code may remain
+under its applicable OSI-approved license or licenses.
+
+You may reproduce the minimum interface declarations reasonably necessary to
+perform that combination without changing the license of the independent
+application code. This permission does not extend to copied implementation
+code from the Program.
+
+3. Conditions and retained obligations
+
+This Exception does not relicense the Program. The Program, modifications to
+the Program, and Program implementation code copied into another work remain
+governed by the AGPL. All AGPL obligations that apply to those portions,
+including corresponding-source and remote-network-interaction obligations,
+remain in force.
+
+When conveying or making a Combined Work available under this Exception, you
+must provide a copy of this Exception with the licensing notices for the
+Program and identify the Program portions as AGPL-3.0-only with this additional
+permission.
+
+No permission is granted for a proprietary Application, for an Application
+whose complete source is not available as required above, or for proprietary
+modules that form part of the effective Application. If the requirements of
+this Exception are not met, no additional permission is granted; rights that
+you otherwise have under the AGPL remain unaffected.
+
+This Exception grants permission only from the copyright holders of the
+Program. It does not alter the license of the Qualifying FOSS Application or
+guarantee that the Application's license permits the proposed combination.
+
+4. No trademark or third-party grant
+
+This Exception grants no right to use Cognica or UQA trademarks. It grants no
+right in third-party material included with or used by the Program.
+
+5. Removal
+
+You may remove this additional permission from a copy or modified version as
+allowed by section 7 of the AGPL. A copy from which it has been removed remains
+available under the AGPL without this Exception.

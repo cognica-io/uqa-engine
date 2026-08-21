@@ -43,12 +43,13 @@ def validate_manifest() -> dict:
         if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
             raise RuntimeError(f"PG18 manifest {field} must be a full Git revision")
     cargo_manifest = (REPO_ROOT / "Cargo.toml").read_text()
-    dependency = re.search(r"^pg_query\s*=\s*\{([^}]*)\}$", cargo_manifest, re.MULTILINE)
-    if dependency is None:
-        raise RuntimeError("workspace pg_query dependency is missing")
-    revision = re.search(r'rev\s*=\s*"([0-9a-f]{40})"', dependency.group(1))
-    if revision is None or revision.group(1) != parser_chain["wrapper_revision"]:
-        raise RuntimeError("PG18 manifest wrapper revision does not match Cargo.toml")
+    if re.search(r'^uqa-pg-query\s*=\s*\{[^}]*path\s*=\s*"crates/uqa-pg-query"', cargo_manifest, re.MULTILINE) is None:
+        raise RuntimeError("workspace uqa-pg-query dependency is missing")
+    upstream = (REPO_ROOT / "crates" / "uqa-pg-query" / "UPSTREAM.md").read_text()
+    if parser_chain["wrapper_revision"] not in upstream:
+        raise RuntimeError("PG18 manifest wrapper revision does not match uqa-pg-query")
+    if parser_chain["library_revision"] not in upstream:
+        raise RuntimeError("PG18 manifest library revision does not match uqa-pg-query")
 
     milestones = manifest.get("milestones")
     expected_milestones = {f"M{index}" for index in range(7)}

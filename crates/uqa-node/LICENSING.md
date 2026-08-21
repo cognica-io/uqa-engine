@@ -45,7 +45,7 @@ For-profit evaluation and proof-of-concept use are not automatically covered by 
 
 ## 4. Commercial license
 
-Cognica offers separate commercial terms for proprietary applications, closed modifications, software-as-a-service deployments, OEM distribution, devices, appliances, and customers that require contractual support, warranties, or other assurances. See [COMMERCIAL.md](https://github.com/cognica-io/uqa-rs/blob/main/COMMERCIAL.md).
+Cognica offers separate commercial terms for proprietary applications, closed modifications, software-as-a-service deployments, OEM distribution, devices, appliances, and customers that require contractual support, warranties, or other assurances. See [COMMERCIAL.md](https://github.com/cognica-io/uqa-engine/blob/main/COMMERCIAL.md).
 
 A commercial license is granted only through a separate signed agreement. The public repository does not itself grant commercial-license rights.
 
@@ -74,7 +74,7 @@ Official source and registry distributions must carry a licensing notice that id
 
 ## Contributions
 
-Alternative licensing requires Cognica to retain sufficient rights in every accepted contribution. External copyrightable contributions of code or documentation are governed by [CONTRIBUTOR_POLICY.md](https://github.com/cognica-io/uqa-rs/blob/main/CONTRIBUTOR_POLICY.md). Issues, design discussion, bug reports, and other feedback that do not contribute copyrightable material do not require a contributor agreement.
+Alternative licensing requires Cognica to retain sufficient rights in every accepted contribution. External copyrightable contributions of code or documentation are governed by [CONTRIBUTOR_POLICY.md](https://github.com/cognica-io/uqa-engine/blob/main/CONTRIBUTOR_POLICY.md). Issues, design discussion, bug reports, and other feedback that do not contribute copyrightable material do not require a contributor agreement.
 
 ## Questions
 

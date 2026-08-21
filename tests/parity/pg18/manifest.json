@@ -9,6 +9,7 @@
     "tpch_fixture": "benchmarks/tpch/expected/pg18.json"
   },
   "parser_chain": {
+    "crate": "crates/uqa-pg-query",
     "wrapper_repository": "https://github.com/jaepil/pg_query.rs",
     "wrapper_revision": "516b3a03fed42e606ce01bc8b5a864a1698c210d",
     "library_repository": "https://github.com/jaepil/libpg_query",

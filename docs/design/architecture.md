@@ -126,10 +126,12 @@ graph TD
 | `uqa-operators` | Posting-list, Boolean, hybrid, staged, sparse, hierarchical, aggregation, fusion, and deep-fusion operators |
 | `uqa-graph` | Named graph stores, Cypher, RPQ automata, graph algebra, centrality, message passing, temporal traversal, and graph indexes |
 | `uqa-joins` | Relational and cross-paradigm join algorithms for text, vectors, graphs, and structured values |
-| `uqa-sql` | `libpg_query` parsing, syntax ASTs, PostgreSQL-oriented statement compilation, scalar IR, and SQL function registry |
+| `uqa-pg-query` | Imported PostgreSQL 18 `libpg_query` pin; library name stays `pg_query` |
+| `uqa-sql` | `uqa-pg-query` parsing, syntax ASTs, PostgreSQL-oriented statement compilation, scalar IR, and SQL function registry |
 | `uqa-execution` | Volcano-style physical operators, columnar result batches, spill formats, sorting, aggregation, joins, and bounded materialization |
 | `uqa-planner` | Cardinality and cost models, DPccp join enumeration, unified-plan optimization, and physical text top-K selection |
 | `uqa-engine` | Composition root, SQL lifecycle, transactions, catalog restore, persistent state, graph/model integration, and public embedded API |
+| `uqa` | Thin application facade re-exporting `uqa-engine` and the core `Value` type |
 | `uqa-client` | Authenticated direct HTTP SQL, atomic batch, and bounded NDJSON stream client shared by local and Cloud UQA nodes |
 | `uqa-fdw` | Foreign server/table contracts and pushdown handlers for DuckDB, Arrow IPC, and in-memory data |
 | `uqa-api` | Fluent `QueryBuilder` for common SQL, retrieval, graph, fusion, highlight, facet, and ML flows |

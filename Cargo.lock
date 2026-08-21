@@ -104,6 +104,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrayref"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb"
+
+[[package]]
+name = "arrayvec"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23b62fc65de8e4e7f52534fb52b0f3ed04746ae267519eef2a83941e8085068b"
+
+[[package]]
 name = "arrow"
 version = "58.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -178,7 +190,7 @@ dependencies = [
  "arrow-schema",
  "arrow-select",
  "atoi",
- "base64",
+ "base64 0.22.1",
  "chrono",
  "comfy-table",
  "half",
@@ -374,6 +386,12 @@ dependencies = [
 
 [[package]]
 name = "base64"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
+
+[[package]]
+name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
@@ -435,6 +453,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe"
 dependencies = [
  "digest",
+]
+
+[[package]]
+name = "blake2b_simd"
+version = "0.5.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "afa748e348ad3be8263be728124b24a24f268266f6f5d58af9d75f6a40b5c587"
+dependencies = [
+ "arrayref",
+ "arrayvec",
+ "constant_time_eq",
 ]
 
 [[package]]
@@ -654,6 +683,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clippy"
+version = "0.0.302"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d911ee15579a3f50880d8c1d59ef6e79f9533127a3bd342462f5d584f5e8c294"
+dependencies = [
+ "term",
+]
+
+[[package]]
 name = "cmake"
 version = "0.1.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -704,6 +742,12 @@ dependencies = [
  "once_cell",
  "tiny-keccak",
 ]
+
+[[package]]
+name = "constant_time_eq"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 
 [[package]]
 name = "convert_case"
@@ -894,6 +938,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dirs"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3fd78930633bd1c6e35c4b42b1df7b0cbc6bc191146e512bb3bedf243fcc3901"
+dependencies = [
+ "libc",
+ "redox_users",
+ "winapi",
+]
+
+[[package]]
 name = "displaydoc"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -963,7 +1018,7 @@ checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 
 [[package]]
 name = "example-extensibility"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "uqa-core",
  "uqa-engine",
@@ -972,7 +1027,7 @@ dependencies = [
 
 [[package]]
 name = "example-graph-cypher"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "uqa-core",
  "uqa-engine",
@@ -980,7 +1035,7 @@ dependencies = [
 
 [[package]]
 name = "example-storage-transactions"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "uqa-core",
  "uqa-engine",
@@ -990,7 +1045,7 @@ dependencies = [
 
 [[package]]
 name = "example-unified-search"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "uqa-core",
  "uqa-engine",
@@ -999,7 +1054,7 @@ dependencies = [
 
 [[package]]
 name = "example-vector-knn"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "uqa-engine",
 ]
@@ -1208,6 +1263,17 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
+version = "0.1.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fc3cb4d91f53b50155bdcfd23f6a4c39ae1969c2ae85982b135750cccaf5fce"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "wasi 0.9.0+wasi-snapshot-preview1",
+]
+
+[[package]]
+name = "getrandom"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
@@ -1215,7 +1281,7 @@ dependencies = [
  "cfg-if",
  "js-sys",
  "libc",
- "wasi",
+ "wasi 0.11.1+wasi-snapshot-preview1",
  "wasm-bindgen",
 ]
 
@@ -1424,7 +1490,7 @@ version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "futures-channel",
  "futures-util",
@@ -1975,7 +2041,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30d65c71f1ce40ab09135ce117d742b9f8a19ff91a41a8b57ed50bc2de59c427"
 dependencies = [
  "libc",
- "wasi",
+ "wasi 0.11.1+wasi-snapshot-preview1",
  "windows-sys 0.61.2",
 ]
 
@@ -2191,7 +2257,7 @@ checksum = "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1"
 dependencies = [
  "cfg-if",
  "libc",
- "redox_syscall",
+ "redox_syscall 0.5.18",
  "smallvec",
  "windows-link",
 ]
@@ -2209,7 +2275,7 @@ dependencies = [
  "arrow-ipc",
  "arrow-schema",
  "arrow-select",
- "base64",
+ "base64 0.22.1",
  "brotli",
  "bytes",
  "chrono",
@@ -2255,23 +2321,6 @@ checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
 dependencies = [
  "fixedbitset",
  "indexmap",
-]
-
-[[package]]
-name = "pg_query"
-version = "6.1.1"
-source = "git+https://github.com/jaepil/pg_query.rs?rev=516b3a03fed42e606ce01bc8b5a864a1698c210d#516b3a03fed42e606ce01bc8b5a864a1698c210d"
-dependencies = [
- "bindgen",
- "cc",
- "fs_extra",
- "glob",
- "itertools 0.10.5",
- "prost",
- "prost-build",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2660,11 +2709,28 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
+version = "0.1.57"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41cc0f7e4d5d4544e8861606a285bb08d3e70712ccc7d2b84d7c0ccfaf4b05ce"
+
+[[package]]
+name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "redox_users"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de0737333e7a9502c789a36d7c7fa6092a49895d4faa31ca5df163857ded2e9d"
+dependencies = [
+ "getrandom 0.1.16",
+ "redox_syscall 0.1.57",
+ "rust-argon2",
 ]
 
 [[package]]
@@ -2702,7 +2768,7 @@ version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "futures-core",
  "http",
@@ -2791,6 +2857,18 @@ dependencies = [
  "libsqlite3-sys",
  "smallvec",
  "sqlite-wasm-rs",
+]
+
+[[package]]
+name = "rust-argon2"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b18820d944b33caa75a71378964ac46f58517c92b6ae5f762636247c09e78fb"
+dependencies = [
+ "base64 0.13.1",
+ "blake2b_simd",
+ "constant_time_eq",
+ "crossbeam-utils",
 ]
 
 [[package]]
@@ -3299,6 +3377,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "term"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd106a334b7657c10b7c540a0106114feadeb4dc314513e97df481d5d966f42"
+dependencies = [
+ "byteorder",
+ "dirs",
+ "winapi",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3569,8 +3658,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
+name = "uqa"
+version = "0.1.6"
+dependencies = [
+ "uqa-core",
+ "uqa-engine",
+]
+
+[[package]]
 name = "uqa-analysis"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "parking_lot",
  "regex",
@@ -3584,7 +3681,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-api"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -3597,7 +3694,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-cli"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "rpassword",
  "rustyline",
@@ -3612,7 +3709,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-client"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "axum",
  "reqwest",
@@ -3629,7 +3726,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "chrono",
  "criterion",
@@ -3643,7 +3740,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-engine"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "ahash",
  "arrow-array",
@@ -3683,7 +3780,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-execution"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "ahash",
  "parking_lot",
@@ -3698,7 +3795,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-fdw"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "arrow-array",
  "arrow-ipc",
@@ -3712,7 +3809,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-fusion"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "criterion",
  "proptest",
@@ -3722,7 +3819,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-graph"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "criterion",
  "icu_properties",
@@ -3741,7 +3838,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-joins"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "uqa-analysis",
  "uqa-core",
@@ -3751,7 +3848,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-ml"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "serde",
  "serde_json",
@@ -3764,7 +3861,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-node"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "napi",
  "napi-build",
@@ -3781,7 +3878,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-operators"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "criterion",
  "proptest",
@@ -3793,15 +3890,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "uqa-pg-query"
+version = "0.1.6"
+dependencies = [
+ "bindgen",
+ "cc",
+ "clippy",
+ "fs_extra",
+ "glob",
+ "itertools 0.10.5",
+ "prost",
+ "prost-build",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "uqa-pg-wire"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "uqa-planner"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "criterion",
  "proptest",
@@ -3819,7 +3933,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-python"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "pyo3",
  "serde_json",
@@ -3834,7 +3948,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-scoring"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "chrono",
  "criterion",
@@ -3849,25 +3963,25 @@ dependencies = [
 
 [[package]]
 name = "uqa-sql"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "chrono",
  "crc32fast",
  "getrandom 0.3.4",
  "icu_casemap",
  "libm",
- "pg_query",
  "proptest",
  "regex",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
  "uqa-core",
+ "uqa-pg-query",
 ]
 
 [[package]]
 name = "uqa-storage"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "argon2",
  "chacha20poly1305",
@@ -3887,13 +4001,12 @@ dependencies = [
  "thiserror 1.0.69",
  "uqa-analysis",
  "uqa-core",
- "uqa-scoring",
  "zstd",
 ]
 
 [[package]]
 name = "uqa-storage-redb"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "parking_lot",
  "redb",
@@ -3904,7 +4017,7 @@ dependencies = [
 
 [[package]]
 name = "uqa-storage-sqlite"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "rusqlite",
  "tempfile",
@@ -3915,9 +4028,9 @@ dependencies = [
 
 [[package]]
 name = "uqa-wasm"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "parking_lot",
  "serde_json",
  "uqa-core",
@@ -3933,7 +4046,7 @@ version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dea7109cdcd5864d4eeb1b58a1648dc9bf520360d7af16ec26d0a9354bafcfc0"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "log",
  "percent-encoding",
  "rustls",
@@ -3949,7 +4062,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e994ba84b0bd1b1b0cf92878b7ef898a5c1760108fe7b6010327e274917a808c"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "http",
  "httparse",
  "log",
@@ -4024,6 +4137,12 @@ checksum = "bfa7760aed19e106de2c7c0b581b509f2f25d3dacaf737cb82ac61bc6d760b0e"
 dependencies = [
  "try-lock",
 ]
+
+[[package]]
+name = "wasi"
+version = "0.9.0+wasi-snapshot-preview1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cccddf32554fecc6acb585f82a32a72e28b48f8c4c1883ddfeeeaa96f7d8e519"
 
 [[package]]
 name = "wasi"

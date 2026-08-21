@@ -1,6 +1,6 @@
 # UQA-RS
 
-> UQA-RS 0.1.5 is an embedded Rust database that combines PostgreSQL-oriented relational SQL, full-text and vector retrieval, graph queries, ranked fusion, and host-language SQL callbacks in one runtime, with a direct authenticated HTTP client that native applications can initialize by local or Cloud project name through the installed `uqa` CLI.
+> UQA-RS 0.1.6 is an embedded Rust database that combines PostgreSQL-oriented relational SQL, full-text and vector retrieval, graph queries, ranked fusion, and host-language SQL callbacks in one runtime, with a direct authenticated HTTP client that native applications can initialize by local or Cloud project name through the installed `uqa` CLI.
 
 The manual is the canonical product contract. Parser acceptance alone does not prove execution support; follow the documented argument shape, result schema, state effects, and errors, then verify executable claims against tests or the engine.
 
@@ -23,7 +23,7 @@ When generating SQL:
 - [Supported SQL](docs/manual/sql/README.md): SQL surface, parameters, names, ranking columns, and the function contract format.
 - [Compatibility](docs/manual/sql/09-compatibility.md): PostgreSQL alignment, deliberate differences, and unsupported behavior.
 - [Runnable examples](examples/README.md): Matching unified-search, vector-KNN, graph/Cypher, storage/transaction, and extensibility programs for Rust, Python, Node.js, and Browser WASM.
-- [UQA-RS agent skill](.agents/skills/uqa-rs/SKILL.md): Repository workflow for authoring and verifying queries or documentation.
+- [UQA Engine agent skill](.agents/skills/uqa-engine/SKILL.md): Repository workflow for authoring and verifying queries or documentation.
 
 ## SQL contracts
 
