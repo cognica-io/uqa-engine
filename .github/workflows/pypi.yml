@@ -18,15 +18,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
-    name: publish uqa
+  prepare:
+    name: prepare uqa distributions
     runs-on: ubuntu-24.04
-    environment:
-      name: pypi
-      url: https://pypi.org/p/uqa
     permissions:
       contents: read
-      id-token: write
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
@@ -92,6 +88,28 @@ jobs:
             fi
           done
           python3 scripts/check-release-licenses.py "${actual[@]}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-pypi-distributions
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: publish uqa
+    needs: prepare
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/uqa
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-pypi-distributions
+          path: dist/
 
       - name: Publish the Python distributions to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
