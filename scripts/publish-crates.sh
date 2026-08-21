@@ -67,8 +67,8 @@ bootstrap_crates=(
 if (( live )); then
   echo "Live crates.io publish of ${#crates[@]} crates" >&2
   for crate in "${crates[@]}"; do
-    cargo publish --dry-run -p "$crate" --locked "${cargo_args[@]}"
-    cargo publish -p "$crate" --locked "${cargo_args[@]}"
+    cargo publish --dry-run -p "$crate" --locked "${cargo_args[@]+"${cargo_args[@]}"}"
+    cargo publish -p "$crate" --locked "${cargo_args[@]+"${cargo_args[@]}"}"
   done
 else
   echo "Dry-run crates.io preflight for ${#bootstrap_crates[@]} registry-independent crates" >&2
