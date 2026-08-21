@@ -1,8 +1,6 @@
 name: Publish Python to PyPI
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -21,13 +19,15 @@ jobs:
   prepare:
     name: prepare uqa distributions
     runs-on: ubuntu-24.04
+    outputs:
+      publish: ${{ steps.pypi.outputs.publish }}
     permissions:
       contents: read
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+      RELEASE_TAG: ${{ inputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
@@ -87,9 +87,91 @@ jobs:
               exit 1
             fi
           done
+          digest_file="$RUNNER_TEMP/release-asset-digests.tsv"
+          gh release view "$RELEASE_TAG" \
+            --json assets \
+            --jq '.assets[] | [.name, .digest] | @tsv' > "$digest_file"
+          for filename in "${expected[@]}"; do
+            asset_digest="$(awk -F '\t' -v filename="$filename" \
+              '$1 == filename { print $2 }' "$digest_file")"
+            if [[ ! "$asset_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "missing or invalid GitHub Release digest for $filename" >&2
+              exit 1
+            fi
+            local_digest="sha256:$(sha256sum "dist/$filename" | awk '{print $1}')"
+            if [ "$local_digest" != "$asset_digest" ]; then
+              echo "GitHub Release digest mismatch for $filename" >&2
+              echo "expected: $asset_digest" >&2
+              echo "actual:   $local_digest" >&2
+              exit 1
+            fi
+          done
           python3 scripts/check-release-licenses.py "${actual[@]}"
 
-      - uses: actions/upload-artifact@v4
+      - name: Check whether PyPI already has this exact release
+        id: pypi
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          python3 - "$version" "$GITHUB_OUTPUT" <<'PY'
+          import hashlib
+          import json
+          import sys
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          version, output_path = sys.argv[1:]
+
+          def sha256(path):
+              digest = hashlib.sha256()
+              with path.open("rb") as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return digest.hexdigest()
+
+          local = {path.name: sha256(path) for path in sorted(Path("dist").iterdir())}
+          request = urllib.request.Request(
+              f"https://pypi.org/pypi/uqa/{version}/json",
+              headers={"User-Agent": "uqa-engine-pypi-workflow"},
+          )
+          try:
+              with urllib.request.urlopen(request) as response:
+                  payload = json.load(response)
+          except urllib.error.HTTPError as error:
+              if error.code != 404:
+                  raise
+              with open(output_path, "a", encoding="utf-8") as output:
+                  output.write("publish=true\n")
+              raise SystemExit(0)
+
+          remote = {}
+          for item in payload.get("urls", []):
+              filename = item.get("filename")
+              digest = (item.get("digests") or {}).get("sha256")
+              if not filename or not digest or filename in remote:
+                  raise SystemExit("PyPI returned an invalid release inventory")
+              remote[filename] = digest
+          if remote != local:
+              missing = sorted(set(local) - set(remote))
+              unexpected = sorted(set(remote) - set(local))
+              mismatched = sorted(
+                  filename
+                  for filename in set(local) & set(remote)
+                  if local[filename] != remote[filename]
+              )
+              raise SystemExit(
+                  "PyPI already has a different release inventory: "
+                  f"missing={missing}, unexpected={unexpected}, mismatched={mismatched}"
+              )
+          print(f"PyPI already has the verified uqa {version} distributions; skipping upload")
+          with open(output_path, "a", encoding="utf-8") as output:
+              output.write("publish=false\n")
+          PY
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: ${{ steps.pypi.outputs.publish == 'true' }}
         with:
           name: python-pypi-distributions
           path: dist/
@@ -98,6 +180,7 @@ jobs:
   publish:
     name: publish uqa
     needs: prepare
+    if: ${{ needs.prepare.outputs.publish == 'true' }}
     runs-on: ubuntu-24.04
     environment:
       name: pypi
@@ -106,7 +189,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: python-pypi-distributions
           path: dist/
@@ -116,3 +199,43 @@ jobs:
         with:
           packages-dir: dist/
           print-hash: true
+
+  record:
+    name: record PyPI publication
+    needs: [prepare, publish]
+    if: ${{ always() && needs.prepare.result == 'success' && (needs.publish.result == 'success' || needs.publish.result == 'skipped') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Update the GitHub release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          gh release view "$RELEASE_TAG" --json body --jq .body > "$notes_file"
+          python3 - "$notes_file" "$version" <<'PY'
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          version = sys.argv[2]
+          status = (
+              f"PyPI status: Published as [`uqa=={version}`]"
+              f"(https://pypi.org/project/uqa/{version}/)."
+          )
+          lines = path.read_text(encoding="utf-8").splitlines()
+          replaced = False
+          for index, line in enumerate(lines):
+              if line.startswith("PyPI status:"):
+                  lines[index] = status
+                  replaced = True
+          if not replaced:
+              lines.extend(["", "## PyPI", "", status])
+          path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+          PY
+          gh release edit "$RELEASE_TAG" --notes-file "$notes_file"
