@@ -1,0 +1,100 @@
+name: Publish Python to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing GitHub release tag to publish, for example v0.1.6
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pypi-uqa
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish uqa
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/uqa
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Validate the release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RELEASE_TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *)
+              echo "invalid release tag: $RELEASE_TAG" >&2
+              exit 1
+              ;;
+          esac
+          project_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' pyproject.toml)"
+          if [ "$RELEASE_TAG" != "v$project_version" ]; then
+            echo "release tag $RELEASE_TAG does not match Python project version $project_version" >&2
+            exit 1
+          fi
+          gh release view "$RELEASE_TAG" --json isDraft --jq 'select(.isDraft == false) | true' | grep -qx true
+
+      - name: Download the released Python distributions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$RELEASE_TAG" \
+            --dir dist \
+            --pattern 'uqa-*.whl' \
+            --pattern 'uqa-*.tar.gz'
+
+      - name: Verify the Python release inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          expected=(
+            "uqa-${version}.tar.gz"
+            "uqa-${version}-cp38-abi3-macosx_10_12_x86_64.whl"
+            "uqa-${version}-cp38-abi3-macosx_11_0_arm64.whl"
+            "uqa-${version}-cp38-abi3-manylinux_2_28_aarch64.whl"
+            "uqa-${version}-cp38-abi3-manylinux_2_28_x86_64.whl"
+            "uqa-${version}-cp38-abi3-win_amd64.whl"
+            "uqa-${version}-cp38-abi3-win_arm64.whl"
+          )
+          shopt -s nullglob
+          actual=(dist/*)
+          if [ "${#actual[@]}" -ne "${#expected[@]}" ]; then
+            echo "expected ${#expected[@]} Python distributions, found ${#actual[@]}" >&2
+            printf '%s\n' "${actual[@]}" >&2
+            exit 1
+          fi
+          for filename in "${expected[@]}"; do
+            if [ ! -f "dist/$filename" ]; then
+              echo "missing Python distribution: $filename" >&2
+              exit 1
+            fi
+          done
+          python3 scripts/check-release-licenses.py "${actual[@]}"
+
+      - name: Publish the Python distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+          print-hash: true

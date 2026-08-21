@@ -1,10 +1,10 @@
 name: Release
 
 # Pushing a `v*` tag builds every distributable package and publishes a
-# GitHub release with all of them attached. Nothing is pushed to PyPI or npm:
-# the artifacts are attached to the release only. crates.io stays dry-run
-# unless workflow_dispatch sets publish_crates_io and CARGO_REGISTRY_TOKEN
-# is present.
+# GitHub release with all of them attached. Publishing the GitHub release
+# triggers pypi.yml to upload the released Python distributions to PyPI.
+# npm remains release-asset only. crates.io stays dry-run unless
+# workflow_dispatch sets publish_crates_io and CARGO_REGISTRY_TOKEN is present.
 on:
   push:
     tags:
@@ -373,7 +373,7 @@ jobs:
           print()
           print("## Packages")
           print()
-          print("Python wheels, a Python source distribution, the Node.js JS-only npm package, self-contained per-platform npm tarballs, standalone native addons, and the browser WASM package are attached to this release. They are not published to PyPI or npm. Public Rust crates are packaged for crates.io; a live registry upload is a separate dispatch step.")
+          print("Python wheels, a Python source distribution, the Node.js JS-only npm package, self-contained per-platform npm tarballs, standalone native addons, and the browser WASM package are attached to this release. The Python distributions are also published to PyPI by the dedicated trusted-publishing workflow. The npm packages remain GitHub-release artifacts only. Public Rust crates are packaged for crates.io; a live registry upload is a separate dispatch step.")
 
           missing = [line.strip() for line in os.environ.get("MISSING", "").splitlines()]
           missing = [name for name in missing if name]
