@@ -2,7 +2,7 @@
 """Differential PG18-vs-uqa probe runner.
 
 Runs each probe from probes.sql against real PostgreSQL 18 (docker
-container uqa-pg18 via psql) and against usql (uqa-rs release
+container uqa-pg18 via psql) and against usql (uqa-engine release
 binary), normalizes both outputs, and reports mismatches by category.
 """
 

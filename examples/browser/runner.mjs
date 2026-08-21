@@ -18,7 +18,7 @@ const selected = new URLSearchParams(window.location.search).get("example") ?? "
 if (!EXAMPLES.has(selected)) {
   output.textContent = `Unknown example: ${selected}`;
 } else {
-  document.title = `UQA-RS ${selected}`;
+  document.title = `UQA Engine ${selected}`;
   output.textContent = `Running ${selected}...`;
   try {
     const module = await import(`./${selected}.mjs`);

@@ -1,6 +1,6 @@
 # Graphs
 
-UQA-RS stores named property graphs and composes graph results with relational SQL. Applications can use typed engine methods, Cypher through a SQL table function, regular path queries, and graph analytics functions.
+UQA Engine stores named property graphs and composes graph results with relational SQL. Applications can use typed engine methods, Cypher through a SQL table function, regular path queries, and graph analytics functions.
 
 ## Create a named graph
 
@@ -64,7 +64,7 @@ $$) AS (name agtype, age agtype)
 ORDER BY name;
 ```
 
-UQA-RS accepts typed definition lists such as `member_id int` when the returned property should join directly to a relational integer. This is a UQA-RS extension to the AGE-shaped interface.
+UQA Engine accepts typed definition lists such as `member_id int` when the returned property should join directly to a relational integer. This is a UQA Engine extension to the AGE-shaped interface.
 
 ## Supported Cypher surface
 

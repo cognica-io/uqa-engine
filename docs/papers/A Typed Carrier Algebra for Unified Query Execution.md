@@ -278,10 +278,10 @@ $$
 Sparse storage omits entries equal to $0$. For the Boolean semiring
 
 $$
-K_\mathbb B=(\{\bot,\top\},\lor,\land,\bot,\top),
+K_{\mathbb B}=(\{\bot,\top\},\lor,\land,\bot,\top),
 $$
 
-the characteristic map $\chi:D_U\to R_{K_\mathbb B}(U)$ satisfies
+the characteristic map $\chi:D_U\to R_{K_{\mathbb B}}(U)$ satisfies
 
 $$
 \chi(A\cup B)=\chi(A)\oplus\chi(B),\qquad
@@ -954,9 +954,9 @@ This is an implementation refinement theorem under assumptions that serializatio
 
 ## 10. Implementation Correspondence and Validation
 
-### 10.1 Correspondence to UQA-RS
+### 10.1 Correspondence to UQA Engine
 
-The UQA-RS 0.1.0 preproduction implementation [20] maps the theory to concrete boundaries.
+The UQA Engine 0.1.0 preproduction implementation [20] maps the theory to concrete boundaries.
 
 | Formal component     | Implementation component                                     | Enforced contract                                            |
 | -------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
@@ -1014,7 +1014,7 @@ Heterogeneous query execution does not require a false choice between one univer
 
 Document support is Boolean. Weighted relations are semiring-valued. Decorated postings preserve operational payloads without inheriting laws they do not satisfy. Ranking owns order and truncation. SQL retains bags and null semantics. Joins retain tuples. Graph results retain graph context. Probabilistic fusion distinguishes prior-free evidence from priors and separates exact inference from useful heuristics.
 
-These carriers can still participate in one system because their operators are typed, their adapters are explicit, their rewrites are law-indexed, and their plans share one exhaustive execution hierarchy. The current UQA-RS implementation demonstrates that this is not merely a taxonomy: the distinctions determine concrete optimizer guards, score types, graph codecs, output variants, top-$k$ fallbacks, transaction boundaries, and validation tests.
+These carriers can still participate in one system because their operators are typed, their adapters are explicit, their rewrites are law-indexed, and their plans share one exhaustive execution hierarchy. The current UQA Engine implementation demonstrates that this is not merely a taxonomy: the distinctions determine concrete optimizer guards, score types, graph codecs, output variants, top-$k$ fallbacks, transaction boundaries, and validation tests.
 
 The central claim is therefore substantial but precise: a single embedded runtime can compose relational, lexical, vector, graph, and probabilistic queries under one mathematical and physical planning framework, provided that unification preserves rather than erases the semantics of each carrier.
 
@@ -1039,7 +1039,7 @@ The central claim is therefore substantial but precise: a single embedded runtim
 17. Jeong, J. (2023). *A Unified Mathematical Framework for Query Algebras Across Heterogeneous Data Paradigms*. OSF Preprints. https://doi.org/10.31219/osf.io/f56j2_v2
 18. Jeong, J. (2024). *Extending the Unified Mathematical Framework to Support Graph Data Structures*. OSF Preprints. https://doi.org/10.31219/osf.io/cgfae_v1
 19. Jeong, J. (2026). *A Unified Bayesian Framework for Hybrid Search: Calibration and Log-Odds Fusion of Lexical and Vector Retrieval*. Zenodo. https://doi.org/10.5281/zenodo.20768747
-20. Jeong, J. and Cognica, Inc. (2026). UQA-RS 0.1.0 preproduction software artifact. https://github.com/cognica-io/uqa-engine
+20. Jeong, J. and Cognica, Inc. (2026). UQA Engine 0.1.0 preproduction software artifact. https://github.com/cognica-io/uqa-engine
 21. Joglekar, M. R., Puttagunta, R., and Ré, C. (2016). AJAR: Aggregations and joins over annotated relations. In *Proceedings of PODS 2016*, 91–106. https://doi.org/10.1145/2902251.2902293
 22. Kepner, J., Aaltonen, P., Bader, D. A., Buluç, A., Franchetti, F., Gilbert, J. R., Hutchison, D., Kumar, M., Lumsdaine, A., Meyerhenke, H., McMillan, S., Yang, C., Owens, J. D., Zalewski, M., Mattson, T. G., and Moreira, J. E. (2016). Mathematical foundations of the GraphBLAS. In *Proceedings of IEEE HPEC 2016*, 1–9. https://doi.org/10.1109/HPEC.2016.7761646
 23. Libkin, L., Martens, W., and Vrgoč, D. (2016). Querying graphs with data. *Journal of the ACM*, 63(2).

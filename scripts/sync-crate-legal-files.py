@@ -89,12 +89,12 @@ def copy_legal_files(destination: pathlib.Path) -> None:
 
 
 def write_internal_readme(destination: pathlib.Path, name: str) -> None:
-    role = CRATE_ROLES.get(name, "an internal UQA-RS component")
+    role = CRATE_ROLES.get(name, "an internal UQA Engine component")
     destination.joinpath("README.md").write_text(
         (
             f"# {name}\n"
             "\n"
-            f"`{name}` is the UQA-RS crate for {role}.\n"
+            f"`{name}` is the UQA Engine crate for {role}.\n"
             "\n"
             "Applications should depend on `uqa-engine` or `uqa-client`. See the "
             "[repository README](https://github.com/cognica-io/uqa-engine) and the "

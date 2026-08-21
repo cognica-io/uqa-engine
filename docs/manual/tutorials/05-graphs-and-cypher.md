@@ -115,7 +115,7 @@ WHERE m.city = 'seoul'
 ORDER BY m.member_id;
 ```
 
-The typed `int` definition lets the graph property join directly to the relational primary key. This typed definition is a UQA-RS extension to the AGE-shaped interface.
+The typed `int` definition lets the graph property join directly to the relational primary key. This typed definition is a UQA Engine extension to the AGE-shaped interface.
 
 ## 7. Mutate and verify
 

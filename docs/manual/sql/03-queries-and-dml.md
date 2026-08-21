@@ -1,6 +1,6 @@
 # Queries and DML
 
-UQA-RS executes relational SQL together with retrieval and graph relations. This chapter covers ordinary query blocks and mutations; ranked predicates are detailed in [Retrieval SQL](06-retrieval.md).
+UQA Engine executes relational SQL together with retrieval and graph relations. This chapter covers ordinary query blocks and mutations; ranked predicates are detailed in [Retrieval SQL](06-retrieval.md).
 
 ## SELECT pipeline
 
@@ -125,7 +125,7 @@ Operands must have compatible column counts and coercible types. Apply final ord
 
 ## Grouping sets
 
-UQA-RS expands `GROUPING SETS`, `ROLLUP`, and `CUBE`:
+UQA Engine expands `GROUPING SETS`, `ROLLUP`, and `CUBE`:
 
 ```sql
 SELECT region, product, sum(amount) AS total

@@ -46,7 +46,7 @@ flamegraph.svg
 /.claude/*
 !/.claude/skills/
 /.claude/skills/*
-!/.claude/skills/uqa-rs
+!/.claude/skills/uqa-engine
 
 # emscripten build outputs copied into the WASM npm package
 crates/uqa-wasm/js/uqa.js

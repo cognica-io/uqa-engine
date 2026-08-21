@@ -1,6 +1,6 @@
-# UQA-RS design documents
+# UQA Engine design documents
 
-The design directory records current architecture contracts, security boundaries, migration decisions, compatibility fixtures, and benchmark evidence. The repository README explains how to use UQA-RS; documents here explain why the implementation is shaped the way it is and which invariants future changes must preserve.
+The design directory records current architecture contracts, security boundaries, migration decisions, compatibility fixtures, and benchmark evidence. The repository README explains how to use UQA Engine; documents here explain why the implementation is shaped the way it is and which invariants future changes must preserve.
 
 The research-level foundation is developed separately in [A Typed Carrier Algebra for Unified Query Execution](../papers/A%20Typed%20Carrier%20Algebra%20for%20Unified%20Query%20Execution.pdf), whose relationship to the DOI-published source papers is stated in the manuscript and in the repository's [citation metadata](../../CITATION.cff).
 

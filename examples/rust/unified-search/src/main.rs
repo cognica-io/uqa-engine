@@ -238,7 +238,7 @@ fn show_udf_ranking(engine: &Engine) -> Result<i64, Box<dyn std::error::Error>> 
 /// every mechanism combined in a single statement.
 fn show_graph_composition(engine: &Engine, seed: i64) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== 6. Graph traversal, joined to the table in one statement ===");
-    println!("Paper {seed} ranked first, so walk what it cites. `cypher(...)` is a table function, so the traversal is a relation: declaring its column `int` lets it join the integer primary key with no cast. That typed definition list is a UQA-RS extension; Apache AGE requires agtype.\n");
+    println!("Paper {seed} ranked first, so walk what it cites. `cypher(...)` is a table function, so the traversal is a relation: declaring its column `int` lets it join the integer primary key with no cast. That typed definition list is a UQA Engine extension; Apache AGE requires agtype.\n");
     let cited = engine.sql(
         &format!(
             "SELECT p.id, p.title, p.venue, p.year, recency_boost(p.year) AS boost \

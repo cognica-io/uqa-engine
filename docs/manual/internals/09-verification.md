@@ -1,6 +1,6 @@
 # Verification and Evidence
 
-UQA-RS uses layered verification because algebra, SQL compatibility, storage atomicity, retrieval exactness, graph semantics, bindings, and performance have different oracles. A green unit test in one layer does not replace end-to-end evidence in another.
+UQA Engine uses layered verification because algebra, SQL compatibility, storage atomicity, retrieval exactness, graph semantics, bindings, and performance have different oracles. A green unit test in one layer does not replace end-to-end evidence in another.
 
 ## Verification layers
 

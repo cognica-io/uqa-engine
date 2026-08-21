@@ -1,6 +1,6 @@
-# UQA-RS system architecture
+# UQA Engine system architecture
 
-This document is the technical overview of UQA-RS. It describes the boundaries that new code must preserve, while focused contracts for state ownership, storage security, compatibility, and performance live in neighboring design documents.
+This document is the technical overview of UQA Engine. It describes the boundaries that new code must preserve, while focused contracts for state ownership, storage security, compatibility, and performance live in neighboring design documents.
 
 ## Design goals
 
@@ -365,7 +365,7 @@ The all-workspace benchmark command is a compile gate, not a published performan
 | Key/Value storage backends | [`kv-storage-backends.md`](kv-storage-backends.md) |
 | Parity fixtures | [`parity.md`](parity.md) |
 | Performance evidence | [`performance.md`](performance.md) |
-| Staged implementation plan | [`../plans/0001-uqa-rs-implementation-plan.md`](../plans/0001-uqa-rs-implementation-plan.md) |
+| Staged implementation plan | [`../plans/0001-uqa-engine-implementation-plan.md`](../plans/0001-uqa-engine-implementation-plan.md) |
 | Document-set algebra tests | [`../../crates/uqa-core/tests/algebra.rs`](../../crates/uqa-core/tests/algebra.rs) |
 | Query optimizer | [`../../crates/uqa-planner/src/query_optimizer.rs`](../../crates/uqa-planner/src/query_optimizer.rs) |
 | SQL compiler | [`../../crates/uqa-sql/src/compiler.rs`](../../crates/uqa-sql/src/compiler.rs) |

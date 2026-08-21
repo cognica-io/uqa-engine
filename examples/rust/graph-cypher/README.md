@@ -14,7 +14,7 @@ That framing is the point. Because a traversal is a relation, it can be:
 
 Declaring the definition-list column as `int` rather than `agtype` is what removes the cast: the traversal enters the relational algebra as a native integer relation instead of a payload the application has to unpack.
 
-**This part is a UQA-RS extension, not AGE-compatible behaviour.** Apache AGE on PostgreSQL requires the column definition list to be `agtype`, and joining a traversal to an integer key there needs an explicit conversion, roughly:
+**This part is a UQA Engine extension, not AGE-compatible behaviour.** Apache AGE on PostgreSQL requires the column definition list to be `agtype`, and joining a traversal to an integer key there needs an explicit conversion, roughly:
 
 ```sql
 -- Apache AGE: agtype only, cast at the join

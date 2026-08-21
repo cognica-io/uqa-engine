@@ -27,7 +27,7 @@ fn migrates_python_uqa_catalog_from_directory() {
 
     let source = nested.join("uqa.sqlite");
     create_python_catalog(&source);
-    let destination = tmp.path().join("uqa-rs.sqlite");
+    let destination = tmp.path().join("uqa-engine.sqlite");
 
     let report = migrate_python_database(&source_dir, &destination).unwrap();
     assert_eq!(report.tables, 1);
@@ -119,7 +119,7 @@ fn migrates_python_uqa_catalog_from_directory() {
 fn late_python_migration_failure_rolls_back_the_entire_destination() {
     let tmp = tempdir().unwrap();
     let source = tmp.path().join("python.sqlite");
-    let destination = tmp.path().join("uqa-rs.sqlite");
+    let destination = tmp.path().join("uqa-engine.sqlite");
     create_python_catalog(&source);
     Connection::open(&source)
         .unwrap()

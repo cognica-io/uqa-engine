@@ -1,6 +1,6 @@
 # Text Analyzer Pipelines
 
-An analyzer converts source text into the token stream used by a full-text index or a search expression. UQA-RS analyzers are ordered, named, field-bound pipelines; analyzer selection is therefore part of the search schema rather than a presentation-only setting.
+An analyzer converts source text into the token stream used by a full-text index or a search expression. UQA Engine analyzers are ordered, named, field-bound pipelines; analyzer selection is therefore part of the search schema rather than a presentation-only setting.
 
 ## Pipeline model
 

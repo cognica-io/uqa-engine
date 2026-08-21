@@ -1,6 +1,6 @@
 # Supported SQL
 
-UQA-RS parses PostgreSQL-oriented SQL with `libpg_query`, compiles it into UQA-RS AST and plans, and executes it inside the embedded engine. Syntax acceptance does not imply complete PostgreSQL server behavior; this manual states the implemented contract.
+UQA Engine parses PostgreSQL-oriented SQL with `libpg_query`, compiles it into UQA Engine AST and plans, and executes it inside the embedded engine. Syntax acceptance does not imply complete PostgreSQL server behavior; this manual states the implemented contract.
 
 ## Reference map
 
@@ -68,7 +68,7 @@ Vectors and tensors have explicit `SQLParam::vector` and `SQLParam::tensor` cons
 
 ## Names and schemas
 
-Unquoted identifiers follow PostgreSQL-style case folding. Double quotes preserve an identifier's spelling and can contain dots without turning them into name separators. UQA-RS supports schema-qualified names and `search_path`, but not cross-database three-part references.
+Unquoted identifiers follow PostgreSQL-style case folding. Double quotes preserve an identifier's spelling and can contain dots without turning them into name separators. UQA Engine supports schema-qualified names and `search_path`, but not cross-database three-part references.
 
 ```sql
 CREATE SCHEMA app;
@@ -107,4 +107,4 @@ EXPLAIN (ANALYZE, FORMAT JSON)
 SELECT id FROM articles WHERE status = 'open';
 ```
 
-The virtual `information_schema` and `pg_catalog` relations expose UQA-RS catalog state for inspection and compatibility. They are not a complete PostgreSQL system catalog.
+The virtual `information_schema` and `pg_catalog` relations expose UQA Engine catalog state for inspection and compatibility. They are not a complete PostgreSQL system catalog.

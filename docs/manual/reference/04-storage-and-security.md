@@ -1,6 +1,6 @@
 # Storage and Security
 
-UQA-RS separates the query API from the persistence provider. Choose a backend according to durability, deployment, and security requirements rather than SQL syntax: SQL and retrieval behavior are shared across supported providers.
+UQA Engine separates the query API from the persistence provider. Choose a backend according to durability, deployment, and security requirements rather than SQL syntax: SQL and retrieval behavior are shared across supported providers.
 
 ## Backend matrix
 
@@ -70,7 +70,7 @@ Read the complete [compressed VFS security contract](../../design/compressed-vfs
 
 ## Transactions and durability
 
-Persistent mutations become visible according to the provider transaction contract. UQA-RS coordinates relational rows, catalog records, text postings, vector indexes, and graph state so commit publishes a consistent state and rollback discards the transaction changes.
+Persistent mutations become visible according to the provider transaction contract. UQA Engine coordinates relational rows, catalog records, text postings, vector indexes, and graph state so commit publishes a consistent state and rollback discards the transaction changes.
 
 ```mermaid
 sequenceDiagram

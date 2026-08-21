@@ -57,7 +57,7 @@ pub enum PythonMigrationError {
     SameSourceAndDestination(PathBuf),
     #[error("destination database is not empty: {0}")]
     DestinationNotEmpty(String),
-    #[error("destination exists but is not an empty uqa-rs catalog: {0}")]
+    #[error("destination exists but is not an empty uqa-engine catalog: {0}")]
     DestinationNotEmptyCatalog(PathBuf),
     #[error("sqlite error: {0}")]
     SQLite(#[from] rusqlite::Error),

@@ -1,6 +1,6 @@
 # Search and Ranking
 
-UQA-RS provides full-text, vector, tensor, and hybrid retrieval through SQL and typed engine APIs. Retrieval predicates produce ranked document support and expose the score as `_score` in SQL.
+UQA Engine provides full-text, vector, tensor, and hybrid retrieval through SQL and typed engine APIs. Retrieval predicates produce ranked document support and expose the score as `_score` in SQL.
 
 ## Full-text setup
 
@@ -69,7 +69,7 @@ Operator precedence is `NOT`, then `AND`, then `OR`. Adjacent terms imply `AND`.
 
 ## BM25
 
-For a query term, UQA-RS uses the inverse document frequency
+For a query term, UQA Engine uses the inverse document frequency
 
 $$
 \operatorname{IDF}(t) = \ln\left(\frac{N - n_t + 0.5}{n_t + 0.5} + 1\right),
@@ -170,7 +170,7 @@ These functions execute both operand expressions against the physical relation i
 
 ## Hybrid retrieval
 
-UQA-RS offers two distinct fusion contracts:
+UQA Engine offers two distinct fusion contracts:
 
 1. `fuse_bayesian_evidence`, its exact alias `fuse_log_odds`, automatic mixed-modality SQL, and `Engine::hybrid_search` combine calibrated, conditionally independent evidence exactly in signed log-odds space with one prior.
 2. `pool_positive_evidence` and `Engine::robust_hybrid_search` implement the separately named robust positive-evidence ranking heuristic.

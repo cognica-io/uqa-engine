@@ -1,4 +1,4 @@
-# UQA-RS examples
+# UQA Engine examples
 
 The example suite is organized by language binding and platform. Every public binding provides the same five scenarios so that users can compare equivalent SQL, data, assertions, and lifecycle behavior without translating from Rust first.
 

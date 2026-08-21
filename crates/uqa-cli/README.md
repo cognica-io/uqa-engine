@@ -1,13 +1,13 @@
-# UQA-RS
+# UQA Engine
 
-UQA-RS is an embeddable database engine that lets one application use PostgreSQL-oriented SQL, full-text search, vector search, graph queries, and ranked retrieval through a shared Rust runtime.
+UQA Engine is an embeddable database engine that lets one application use PostgreSQL-oriented SQL, full-text search, vector search, graph queries, and ranked retrieval through a shared Rust runtime.
 
 It is designed for applications that need more than a relational table but do not want to assemble a separate database, search server, vector store, and graph engine for every query path.
 
 > [!IMPORTANT]
 > **Open source with broad application exceptions**
 >
-> UQA-RS uses AGPL-3.0-only as its base license, with FOSS and noncommercial application exceptions. Qualifying open-source applications, including commercial ones, and qualifying personal, educational, academic, or charitable applications may keep their independent code under their own licenses or chosen terms. In practice, separate commercial terms are mainly needed for proprietary commercial products or services that must keep their application or UQA-RS changes closed. UQA-RS and modifications to UQA-RS remain under the AGPL when using the public paths. See the [licensing policy](LICENSING.md) for the exact conditions.
+> UQA Engine uses AGPL-3.0-only as its base license, with FOSS and noncommercial application exceptions. Qualifying open-source applications, including commercial ones, and qualifying personal, educational, academic, or charitable applications may keep their independent code under their own licenses or chosen terms. In practice, separate commercial terms are mainly needed for proprietary commercial products or services that must keep their application or UQA Engine changes closed. UQA Engine and modifications to UQA Engine remain under the AGPL when using the public paths. See the [licensing policy](LICENSING.md) for the exact conditions.
 
 > [!TIP]
 > **Using an LLM or coding agent?**
@@ -24,11 +24,11 @@ It is designed for applications that need more than a relational table but do no
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
 > [!NOTE]
-> UQA-RS is under active development at version 0.1.6. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
+> UQA Engine is under active development at version 0.1.6. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
 
 ## Mathematical foundation
 
-[A Typed Carrier Algebra for Unified Query Execution](docs/papers/A%20Typed%20Carrier%20Algebra%20for%20Unified%20Query%20Execution.pdf) states the implementation-grounded theory behind UQA-RS. It distinguishes document support, weighted relations, decorated postings, ranked views, SQL bags, join tuples, graph context, and aggregate state while showing how they compose through one typed planning and execution framework.
+[A Typed Carrier Algebra for Unified Query Execution](docs/papers/A%20Typed%20Carrier%20Algebra%20for%20Unified%20Query%20Execution.pdf) states the implementation-grounded theory behind UQA Engine. It distinguishes document support, weighted relations, decorated postings, ranked views, SQL bags, join tuples, graph context, and aggregate state while showing how they compose through one typed planning and execution framework.
 
 The manuscript consolidates and revises the published work on [unified query algebra](https://doi.org/10.31219/osf.io/f56j2_v2), its [graph-data extension](https://doi.org/10.31219/osf.io/cgfae_v1), and the [Bayesian framework for hybrid search](https://doi.org/10.5281/zenodo.20768747). For academic use, cite the software and the papers relevant to the features used; machine-readable metadata is provided in [CITATION.cff](CITATION.cff).
 
@@ -299,11 +299,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local gates, test conventions, crate 
 
 ## License
 
-UQA-RS is open-source software licensed under AGPL-3.0-only. See [LICENSE](https://github.com/cognica-io/uqa-engine/blob/main/LICENSE).
+UQA Engine is open-source software licensed under AGPL-3.0-only. See [LICENSE](https://github.com/cognica-io/uqa-engine/blob/main/LICENSE).
 
 Two optional additional permissions are available:
 
-- the [FOSS exception](https://github.com/cognica-io/uqa-engine/blob/main/LICENSES/UQA-FOSS-EXCEPTION-1.0.txt) lets a complete qualifying open-source application retain its OSI-approved license while UQA-RS and modifications to UQA-RS remain under the AGPL; and
-- the [noncommercial application exception](https://github.com/cognica-io/uqa-engine/blob/main/LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt) lets a qualifying personal, educational, academic, or charitable application keep its independent code under terms chosen by its author while UQA-RS and modifications to UQA-RS remain under the AGPL.
+- the [FOSS exception](https://github.com/cognica-io/uqa-engine/blob/main/LICENSES/UQA-FOSS-EXCEPTION-1.0.txt) lets a complete qualifying open-source application retain its OSI-approved license while UQA Engine and modifications to UQA Engine remain under the AGPL; and
+- the [noncommercial application exception](https://github.com/cognica-io/uqa-engine/blob/main/LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt) lets a qualifying personal, educational, academic, or charitable application keep its independent code under terms chosen by its author while UQA Engine and modifications to UQA Engine remain under the AGPL.
 
 Separate [commercial licensing](https://github.com/cognica-io/uqa-engine/blob/main/COMMERCIAL.md) is available for proprietary applications, closed modifications, SaaS, and OEM distribution. The complete decision guide is in the [licensing policy](https://github.com/cognica-io/uqa-engine/blob/main/LICENSING.md).

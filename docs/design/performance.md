@@ -1,6 +1,6 @@
 # Performance baseline
 
-This document records UQA-RS benchmark baselines measured on developer hardware. The commands and deterministic inputs are reproducible, but the absolute numbers are machine-specific and have not been independently reproduced. Unless a section explicitly compares another engine, the measurements are internal regression baselines rather than evidence of competitive OLAP performance. Measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`) unless a section explicitly records a package-scoped `release` runner.
+This document records UQA Engine benchmark baselines measured on developer hardware. The commands and deterministic inputs are reproducible, but the absolute numbers are machine-specific and have not been independently reproduced. Unless a section explicitly compares another engine, the measurements are internal regression baselines rather than evidence of competitive OLAP performance. Measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`) unless a section explicitly records a package-scoped `release` runner.
 
 ## PostgreSQL 17 TPC-H-derived compatibility pass (2026-08-09)
 

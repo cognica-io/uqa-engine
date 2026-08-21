@@ -1,6 +1,6 @@
 # Transactions, Sessions, and Routines
 
-UQA-RS implements SQL transaction control, savepoints, prepared statements, session variables, SQL-language routines, and a tested PL/pgSQL subset.
+UQA Engine implements SQL transaction control, savepoints, prepared statements, session variables, SQL-language routines, and a tested PL/pgSQL subset.
 
 ## Transaction control
 

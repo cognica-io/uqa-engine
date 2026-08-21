@@ -1,6 +1,6 @@
 # Reference Manual
 
-The reference manual describes public ways to operate and embed UQA-RS.
+The reference manual describes public ways to operate and embed UQA Engine.
 
 | Document | Subject |
 | --- | --- |

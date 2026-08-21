@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: >-
-  If you use UQA-RS, cite the software and the papers under references that
+  If you use UQA Engine, cite the software and the papers under references that
   correspond to the features used.
-title: UQA-RS
+title: UQA Engine
 type: software
 authors:
   - family-names: Jeong

@@ -107,7 +107,7 @@ def download_archive(url: str, destination: pathlib.Path, expected_hash: str) ->
     started = time.perf_counter()
     digest = hashlib.sha256()
     try:
-        request = urllib.request.Request(url, headers={"User-Agent": "uqa-rs-beir-benchmark/1"})
+        request = urllib.request.Request(url, headers={"User-Agent": "uqa-engine-beir-benchmark/1"})
         with urllib.request.urlopen(request) as response, temporary.open("wb") as output:
             while chunk := response.read(CHUNK_BYTES):
                 output.write(chunk)

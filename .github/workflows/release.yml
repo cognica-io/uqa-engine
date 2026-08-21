@@ -403,7 +403,7 @@ jobs:
             gh release edit "$TAG" --notes-file release-notes.md
           else
             gh release create "$TAG" \
-              --title "UQA-RS $TAG" \
+              --title "UQA Engine $TAG" \
               --notes-file release-notes.md \
               dist/*
           fi

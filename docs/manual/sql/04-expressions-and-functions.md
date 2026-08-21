@@ -1,6 +1,6 @@
 # Expressions and Functions
 
-This chapter is a name-level catalog of built-in expression functions. Most signatures follow familiar PostgreSQL forms, but only the names and argument shapes implemented by UQA-RS are available. Validate a migration with executable fixtures instead of assuming the complete PostgreSQL overload set.
+This chapter is a name-level catalog of built-in expression functions. Most signatures follow familiar PostgreSQL forms, but only the names and argument shapes implemented by UQA Engine are available. Validate a migration with executable fixtures instead of assuming the complete PostgreSQL overload set.
 
 ## Operators and conditional expressions
 
@@ -102,7 +102,7 @@ Implemented helpers include `current_database`, `current_catalog`, `current_user
 
 ## Spatial helpers
 
-`point`, `st_distance`, `st_within`, `st_dwithin`, and `overlaps` provide the implemented point and range operations. UQA-RS does not expose an SQL R-tree index access method, so verify physical behavior for spatial workloads.
+`point`, `st_distance`, `st_within`, `st_dwithin`, and `overlaps` provide the implemented point and range operations. UQA Engine does not expose an SQL R-tree index access method, so verify physical behavior for spatial workloads.
 
 ## Sequence functions
 

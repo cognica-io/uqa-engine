@@ -1,10 +1,10 @@
-UQA-RS Noncommercial Application Exception
+UQA Engine Noncommercial Application Exception
 Version 1.0, 3 August 2026
 
 Copyright (c) 2023-2026 Cognica, Inc.
 
 This Exception is an additional permission under section 7 of the GNU Affero
-General Public License version 3 (the "AGPL"). It applies only to UQA-RS
+General Public License version 3 (the "AGPL"). It applies only to UQA Engine
 material for which Cognica, Inc. has authority to grant this permission (the
 "Program") and that is distributed with a notice referring to this Exception.
 

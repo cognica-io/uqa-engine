@@ -132,7 +132,7 @@ fn show_relational_composition(engine: &Engine) -> Result<(), Box<dyn std::error
     // Because a traversal is a relation, it joins against a table directly.
     // Declaring the column `int` rather than `agtype` lets it match the
     // integer primary key with no cast. That typed definition list is a
-    // UQA-RS extension: Apache AGE requires `agtype` here and would need
+    // UQA Engine extension: Apache AGE requires `agtype` here and would need
     // `(followed.member_id::text)::int` in the join condition instead.
     println!("\nGraph traversal joined against the members table:");
     let joined = engine.sql(

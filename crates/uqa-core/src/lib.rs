@@ -7,7 +7,7 @@
 //! Document supports, finite-support relations, posting storage, ranked views,
 //! and shared value types for UQA.
 //!
-//! See `docs/plans/0001-uqa-rs-implementation-plan.md` Section 2.1 for the
+//! See `docs/plans/0001-uqa-engine-implementation-plan.md` Section 2.1 for the
 //! algebraic invariants this crate must preserve.
 
 pub mod cancel;

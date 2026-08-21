@@ -106,7 +106,7 @@ FROM cypher('network', $$
 $$) AS result(service_id int, name agtype);
 ```
 
-The arguments are the graph name, Cypher source, and optional parameters through the typed API path. SQL calls require an output definition list. `agtype` returns canonical AGE-shaped text; UQA-RS also allows concrete SQL types in the list for direct relational composition.
+The arguments are the graph name, Cypher source, and optional parameters through the typed API path. SQL calls require an output definition list. `agtype` returns canonical AGE-shaped text; UQA Engine also allows concrete SQL types in the list for direct relational composition.
 
 ## Supported Cypher clauses
 

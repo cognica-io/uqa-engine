@@ -2,7 +2,7 @@
 
 ## Goal
 
-The long-term goal is complete PostgreSQL 18 compatibility at every externally observable boundary: SQL parsing and execution, data types and casts, catalogs, errors, transactions and concurrency, frontend/backend protocol 3.0 and 3.2, and behavior seen by standard PostgreSQL clients. UQA-RS may retain its own internal storage and execution architecture, but an implementation difference is not a reason to expose different PostgreSQL behavior.
+The long-term goal is complete PostgreSQL 18 compatibility at every externally observable boundary: SQL parsing and execution, data types and casts, catalogs, errors, transactions and concurrency, frontend/backend protocol 3.0 and 3.2, and behavior seen by standard PostgreSQL clients. UQA Engine may retain its own internal storage and execution architecture, but an implementation difference is not a reason to expose different PostgreSQL behavior.
 
 This plan distinguishes a PostgreSQL 18 baseline from complete compatibility. The baseline is reached when PostgreSQL 18 grammar, metadata, fixtures, and protocol primitives are authoritative and every unimplemented PostgreSQL 18 shape fails explicitly. Complete compatibility is reached only when the PostgreSQL 18 regression, isolation, protocol, catalog, and client matrices pass without semantic exemptions.
 
@@ -20,7 +20,7 @@ This plan distinguishes a PostgreSQL 18 baseline from complete compatibility. Th
 
 The historical starting point used `pg_query` 6.1.1 with PostgreSQL 17 grammar, reported `server_version` as `17.0-uqa`, stored the active TPC-H-derived oracle in `expected/pg17.json`, and accepted only frontend/backend protocol 3.0 primitives. Active assets now use `pg18`, session metadata reports `18.0-uqa`, and the checked-in 22-query oracle records PostgreSQL 18.4 server and platform provenance.
 
-The PostgreSQL 18 parser migration replaces the four DML `returning_list` fields with complete `returning_clause` handling. PostgreSQL 18's PL/pgSQL JSON producer also needs to serialize `retvarno` for datum-backed `RETURN` and `RETURN NEXT`; UQA-RS consumes those slots directly and does not rewrite routine source. The reproducible parser chain is imported as the `uqa-pg-query` workspace crate from `jaepil/pg_query.rs@516b3a03fed42e606ce01bc8b5a864a1698c210d` and `jaepil/libpg_query@898cd71c96375d6d4219916996701571dbe2b239`; the latter contains the PostgreSQL 18 parser, corrected PL/pgSQL datum serialization, structured `%TYPE` and `%ROWTYPE` identifier metadata, trigger-promise and type-cache fixes, and a process-wide pthread exit key with a `PTHREAD_KEYS_MAX + 1` regression test so one integration-test executable can safely create parser threads throughout its lifetime.
+The PostgreSQL 18 parser migration replaces the four DML `returning_list` fields with complete `returning_clause` handling. PostgreSQL 18's PL/pgSQL JSON producer also needs to serialize `retvarno` for datum-backed `RETURN` and `RETURN NEXT`; UQA Engine consumes those slots directly and does not rewrite routine source. The reproducible parser chain is imported as the `uqa-pg-query` workspace crate from `jaepil/pg_query.rs@516b3a03fed42e606ce01bc8b5a864a1698c210d` and `jaepil/libpg_query@898cd71c96375d6d4219916996701571dbe2b239`; the latter contains the PostgreSQL 18 parser, corrected PL/pgSQL datum serialization, structured `%TYPE` and `%ROWTYPE` identifier metadata, trigger-promise and type-cache fixes, and a process-wide pthread exit key with a `PTHREAD_KEYS_MAX + 1` regression test so one integration-test executable can safely create parser threads throughout its lifetime.
 
 | Area | Current status | Remaining gate |
 | --- | --- | --- |
@@ -89,7 +89,7 @@ For each function, add exact overload resolution, return type metadata, strictne
 
 Preserve declared source and result types through the physical plan instead of inferring them from shared runtime carriers. OID, XID, bytea, narrowing integer, character, domain, array, and assignment casts must resolve from the declared source type, emit PostgreSQL 18 SQLSTATEs, and retain exact metadata through scans, joins, CTEs, spills, DML, cursors, and wire row descriptions. `ALTER COLUMN TYPE USING` is an executable expression over the old row, not ignorable syntax, and migration must reject unknown type identities.
 
-Audit PostgreSQL 18 migration changes that overlap UQA-RS, including timezone-abbreviation precedence, CSV `COPY` end markers, inheritance-aware `VACUUM` and `ANALYZE`, full-text collation behavior, and EXPLAIN output. Server-internal AIO and optimizer implementation changes do not need identical internals, but their externally visible plans, errors, and results remain differential targets.
+Audit PostgreSQL 18 migration changes that overlap UQA Engine, including timezone-abbreviation precedence, CSV `COPY` end markers, inheritance-aware `VACUUM` and `ANALYZE`, full-text collation behavior, and EXPLAIN output. Server-internal AIO and optimizer implementation changes do not need identical internals, but their externally visible plans, errors, and results remain differential targets.
 
 ### 6. Frontend/backend protocol 3.2
 
@@ -152,6 +152,6 @@ Run repository policy scripts, binding builds and examples, and supported-platfo
 
 ## Completion accounting
 
-Maintain the machine-readable PostgreSQL 18 compatibility manifest at `tests/parity/pg18/manifest.json` alongside the differential harness. Each item records the PostgreSQL reference section or regression test, UQA-RS test, supported version, status, and any open issue. `run_diff.py` validates the manifest independently of the live oracle and refuses a complete-compatibility claim while an item or milestone remains incomplete. Milestone completion requires positive evidence for every row; absence of a failing test is not evidence.
+Maintain the machine-readable PostgreSQL 18 compatibility manifest at `tests/parity/pg18/manifest.json` alongside the differential harness. Each item records the PostgreSQL reference section or regression test, UQA Engine test, supported version, status, and any open issue. `run_diff.py` validates the manifest independently of the live oracle and refuses a complete-compatibility claim while an item or milestone remains incomplete. Milestone completion requires positive evidence for every row; absence of a failing test is not evidence.
 
 The final complete-compatibility audit must inspect the current parser revision, manifest, test results, live server provenance, protocol traces, client matrix, catalog diffs, persistent reopen behavior, and manual. The project must not declare complete PostgreSQL 18 compatibility while any item is missing, explicitly rejected, silently approximated, or supported only by an indirect test.

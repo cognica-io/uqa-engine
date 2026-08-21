@@ -1,10 +1,10 @@
 # SQL Data Types
 
-UQA-RS has PostgreSQL-oriented type names mapped to the value carriers implemented by `uqa-core` and the SQL engine. Casts and assignment checks use these engine types rather than PostgreSQL binary storage formats.
+UQA Engine has PostgreSQL-oriented type names mapped to the value carriers implemented by `uqa-core` and the SQL engine. Casts and assignment checks use these engine types rather than PostgreSQL binary storage formats.
 
 ## Type matrix
 
-| SQL declaration | UQA-RS representation and notes |
+| SQL declaration | UQA Engine representation and notes |
 | --- | --- |
 | `SMALLINT`, `INTEGER`, `BIGINT` | Distinct declared widths with checked PostgreSQL ranges over a signed 64-bit runtime carrier |
 | `INT2`, `INT4`, `INT8`, `INT` | PostgreSQL aliases preserving the corresponding declared width |

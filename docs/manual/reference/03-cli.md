@@ -107,4 +107,4 @@ FROM information_schema.tables
 ORDER BY table_schema, table_name;
 ```
 
-The virtual `information_schema` and `pg_catalog` relations support tooling and portable inspection. They expose UQA-RS state, not a complete PostgreSQL server catalog.
+The virtual `information_schema` and `pg_catalog` relations support tooling and portable inspection. They expose UQA Engine state, not a complete PostgreSQL server catalog.

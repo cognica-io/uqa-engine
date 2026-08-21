@@ -1,10 +1,10 @@
 # Contributor Licensing Policy
 
-UQA-RS uses public open-source licensing together with optional exceptions and commercial licensing. Cognica must therefore retain sufficient rights to publish every accepted contribution through each supported licensing path.
+UQA Engine uses public open-source licensing together with optional exceptions and commercial licensing. Cognica must therefore retain sufficient rights to publish every accepted contribution through each supported licensing path.
 
 ## Public-core commitment
 
-Code accepted into the public UQA-RS core will remain available under at least one license approved by the Open Source Initiative. Commercial licensing will not withdraw or narrow open-source rights already granted for an accepted contribution.
+Code accepted into the public UQA Engine core will remain available under at least one license approved by the Open Source Initiative. Commercial licensing will not withdraw or narrow open-source rights already granted for an accepted contribution.
 
 ## Copyrightable contributions of code and documentation
 

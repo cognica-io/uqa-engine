@@ -1,4 +1,4 @@
-# Plan 0001: UQA-RS Implementation Plan
+# Plan 0001: UQA Engine Implementation Plan
 
 Status: Living implementation plan Target repo: `uqa-engine`
 
@@ -6,7 +6,7 @@ Status: Living implementation plan Target repo: `uqa-engine`
 
 ### 1.1 Goal
 
-Build UQA-RS as an embeddable Rust engine for the Unified Query Algebra:
+Build UQA Engine as an embeddable Rust engine for the Unified Query Algebra:
 
 1. **Contract-faithful.** Document support, payload merge, graph encoding, scoring, fusion, and aggregation each have their own property or golden tests.
 2. **SQL and API compatible.** The public contract is the UQA SQL surface, `Engine`, `QueryBuilder`, `usql`, graph APIs, and crate-level Rust APIs.
@@ -39,7 +39,7 @@ Cardinality estimates are planner heuristics, not data-correctness contracts. Sa
 
 ## 3. Workspace layout
 
-UQA-RS is a Cargo workspace with narrow crate boundaries:
+UQA Engine is a Cargo workspace with narrow crate boundaries:
 
 | Crate | Responsibility |
 | --- | --- |
@@ -92,7 +92,7 @@ The public SQL and API surface includes:
 
 ## 7. CLI contract
 
-`usql` is the interactive SQL shell for UQA-RS:
+`usql` is the interactive SQL shell for UQA Engine:
 
 - Prompt history, completion, syntax highlighting, and multiline editing are part of the shipped UX.
 - Completion uses engine metadata for schemas, tables, columns, commands, and command arguments.

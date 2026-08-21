@@ -1,6 +1,6 @@
 # Analyzer SQL
 
-UQA-RS exposes analyzer catalog operations as row-producing SQL functions and binds analyzers to physical GIN fields. PostgreSQL `CREATE TEXT SEARCH CONFIGURATION`, dictionary, and parser DDL are not implemented; the supported contract is the JSON pipeline described here and in the [text analyzer reference](../reference/06-text-analyzers.md).
+UQA Engine exposes analyzer catalog operations as row-producing SQL functions and binds analyzers to physical GIN fields. PostgreSQL `CREATE TEXT SEARCH CONFIGURATION`, dictionary, and parser DDL are not implemented; the supported contract is the JSON pipeline described here and in the [text analyzer reference](../reference/06-text-analyzers.md).
 
 ## Function summary
 
@@ -263,7 +263,7 @@ Persistent engines store custom analyzer JSON and table-field assignments in the
 
 ## Limits and deliberate differences
 
-- UQA-RS does not implement PostgreSQL text-search parser, dictionary, configuration, or template DDL.
+- UQA Engine does not implement PostgreSQL text-search parser, dictionary, configuration, or template DDL.
 - SQL has no analyzer token-preview function; construct `uqa_analysis::Analyzer` and call `analyze` in Rust to inspect a pipeline directly.
 - SQL does not return the raw JSON definition for every named analyzer. Rust `Engine::get_table_analyzer` returns the normalized serialized configuration for an assigned phase.
 - SQL `uqa_highlight` uses the built-in English `standard` analyzer rather than inheriting the field assignment.

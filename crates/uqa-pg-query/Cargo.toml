@@ -1,7 +1,7 @@
 [package]
 name = "uqa-pg-query"
 autotests = false
-description = "PostgreSQL 18 libpg_query parser pin used by UQA-RS"
+description = "PostgreSQL 18 libpg_query parser pin used by UQA Engine"
 version.workspace = true
 edition = "2021"
 license = "MIT"

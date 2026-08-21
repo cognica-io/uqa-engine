@@ -1,6 +1,6 @@
 # Parity Fixtures
 
-UQA-RS keeps three kinds of golden fixtures under `tests/parity/`:
+UQA Engine keeps three kinds of golden fixtures under `tests/parity/`:
 
 - **SQL golden file** (`sql_golden_fixture.json`) -- replayed by [`crates/uqa-engine/tests/sql_golden.rs`](../../crates/uqa-engine/tests/sql_golden.rs). Each case is a `(name, sql, expected: [{column: value, ...}])` triple. The harness applies `schema_sql` and `data_sql` once, then runs every case against a fresh in-memory `Engine` and compares the result rows column by column.
 - **BEIR-style relevance fixture** (`beir_fixture.json`) -- replayed by [`crates/uqa-engine/tests/beir_fixture.rs`](../../crates/uqa-engine/tests/beir_fixture.rs). Encodes the corpus, a query set, graded judgments per query, and the floors for `NDCG@K` and `MAP@K` the harness must clear.

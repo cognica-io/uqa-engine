@@ -4,11 +4,11 @@ Thanks for considering a contribution. This document explains the gates every ch
 
 ## Contributor licensing
 
-UQA-RS is distributed under AGPL-3.0-only, optional public exceptions, and separate commercial terms. Cognica must have sufficient rights to distribute every accepted contribution through all of those paths.
+UQA Engine is distributed under AGPL-3.0-only, optional public exceptions, and separate commercial terms. Cognica must have sufficient rights to distribute every accepted contribution through all of those paths.
 
 External copyrightable contributions of code or documentation require a contributor agreement accepted by Cognica. The execution workflow and final agreement are not yet published, so such contributions will not be merged until that process is available. Issues, bug reports, design discussion, and non-copyrightable factual corrections remain welcome. See [CONTRIBUTOR_POLICY.md](CONTRIBUTOR_POLICY.md) for the complete policy and the public-core commitment.
 
-The master plan in [`docs/plans/0001-uqa-rs-implementation-plan.md`](docs/plans/0001-uqa-rs-implementation-plan.md) is the source of truth for staged deliverables and explicit deferrals. Read the relevant section before starting work on a new crate or operator.
+The master plan in [`docs/plans/0001-uqa-engine-implementation-plan.md`](docs/plans/0001-uqa-engine-implementation-plan.md) is the source of truth for staged deliverables and explicit deferrals. Read the relevant section before starting work on a new crate or operator.
 
 ## Local gates
 

@@ -1,6 +1,6 @@
 # PostgreSQL Compatibility and Limits
 
-UQA-RS deliberately uses PostgreSQL-oriented syntax and behavior while remaining an embedded engine with its own storage, planner, catalog, and extension model. PostgreSQL 18 is the behavioral oracle: every externally observable difference is a compatibility bug, including differences in features not yet implemented.
+UQA Engine deliberately uses PostgreSQL-oriented syntax and behavior while remaining an embedded engine with its own storage, planner, catalog, and extension model. PostgreSQL 18 is the behavioral oracle: every externally observable difference is a compatibility bug, including differences in features not yet implemented.
 
 ## Compatibility baseline
 
@@ -15,7 +15,7 @@ The fixture coverage is evidence for those queries and types, not a claim of com
 
 ## Embedded runtime architecture
 
-UQA-RS does not yet implement PostgreSQL processes, network protocol semantics as its core API, MVCC storage pages, roles, grants, extensions, background workers, replication, WAL administration, or server configuration. The optional PostgreSQL wire and FDW crates are adapters around the engine. Every externally visible difference caused by this architecture remains an open compatibility bug rather than an accepted alternative behavior.
+UQA Engine does not yet implement PostgreSQL processes, network protocol semantics as its core API, MVCC storage pages, roles, grants, extensions, background workers, replication, WAL administration, or server configuration. The optional PostgreSQL wire and FDW crates are adapters around the engine. Every externally visible difference caused by this architecture remains an open compatibility bug rather than an accepted alternative behavior.
 
 Some declared SQL types share an internal runtime carrier, but scans and relational plans retain the declared `ColumnType`, integer writes and casts enforce `int2`/`int4`/`int8` ranges, source-sensitive OID/XID/bytea casts retain source width, and result schemas do not infer identity from values. Any remaining PostgreSQL 18 overflow, cast, storage, collation, binary-format, or display difference is an open compatibility bug.
 
@@ -77,7 +77,7 @@ Supported declarations retain distinct `SMALLINT`, `INTEGER`, `BIGINT`, `OID`, `
 - Large declared `NUMERIC` precision is bounded by the engine decimal carrier in actual values.
 - Collation and locale behavior is not a complete PostgreSQL collation implementation.
 - Type I/O routine OIDs are present in implemented `pg_type` rows, but the complete corresponding `pg_proc`, typmod, binary I/O, and extension-type catalog surface remains open.
-- `VECTOR(n)` and `TENSOR(n)` are UQA-RS retrieval types rather than PostgreSQL core types.
+- `VECTOR(n)` and `TENSOR(n)` are UQA Engine retrieval types rather than PostgreSQL core types.
 
 ## Open PostgreSQL 18 catalog and administration bugs
 
@@ -93,19 +93,19 @@ Known mutable settings are `search_path`, `client_encoding`, `datestyle`, `timez
 
 SQL and PL/pgSQL routines cover a broad tested subset, including overloads, defaults, set returns, procedures, control flow, dynamic SQL, recursion limits, diagnostics, exception handling, qualified named types, table-backed `%TYPE`, strict assignment/return casts, and bound cursors used entirely within one routine activation. Dynamic cursor queries, `MOVE`, non-`NEXT` fetch directions, `refcursor` parameters and returns, and cursors that survive routine exit are not implemented because session portal state is not available. The routine surface does not claim the full PL/pgSQL language, PostgreSQL extension languages, security-definer ecosystem, or server privilege model.
 
-Volatility affects planning, but UQA-RS does not reproduce every PostgreSQL catalog and privilege consequence of routine declarations.
+Volatility affects planning, but UQA Engine does not reproduce every PostgreSQL catalog and privilege consequence of routine declarations.
 
 ## Graph compatibility
 
-The `cypher` table function follows an Apache AGE-shaped SQL interface and uses `agtype` output. UQA-RS adds concrete SQL output types for direct joins. The Cypher parser is an implemented subset rather than complete AGE or Neo4j Cypher.
+The `cypher` table function follows an Apache AGE-shaped SQL interface and uses `agtype` output. UQA Engine adds concrete SQL output types for direct joins. The Cypher parser is an implemented subset rather than complete AGE or Neo4j Cypher.
 
 Graph and label management follows AGE's `graph_commands.c` and `label_commands.c`: `create_graph`, `drop_graph`, `graph_exists`, `create_vlabel`, `create_elabel`, `drop_label`, and `alter_graph` validate names with AGE's Unicode identifier rules and raise AGE's messages and SQLSTATEs, and `ag_catalog.ag_graph` / `ag_catalog.ag_label` report the same rows an AGE database holds. Label relations such as `graph._ag_label_vertex` are catalog metadata only; entities are read through `cypher(...)`, and `LOAD 'age'` is a no-op rather than a shared-library load. One deliberate difference: AGE's `drop_label` runs `DROP TABLE ... RESTRICT`, which removes an empty default label relation and leaves the graph unusable, while the engine always rejects dropping `_ag_label_vertex` and `_ag_label_edge` with `cannot drop table graph.label because other objects depend on it` (`2BP01`) because every graph depends on its default labels.
 
-Regular path query syntax and functions such as `graph_traverse` and `graph_pagerank` are UQA-RS extensions.
+Regular path query syntax and functions such as `graph_traverse` and `graph_pagerank` are UQA Engine extensions.
 
 ## Retrieval compatibility
 
-GIN, IVF, and HNSW names describe UQA-RS physical indexes and do not promise byte-format or parameter parity with PostgreSQL extensions. `_score`, retrieval predicates, Bayesian evidence functions, and model operators are UQA-RS query extensions.
+GIN, IVF, and HNSW names describe UQA Engine physical indexes and do not promise byte-format or parameter parity with PostgreSQL extensions. `_score`, retrieval predicates, Bayesian evidence functions, and model operators are UQA Engine query extensions.
 
 Approximate IVF and HNSW results can differ from exact KNN by design. Text top-K remains exact when the planner selects WAND or Block-Max WAND because unsafe skipping falls back to scoring.
 

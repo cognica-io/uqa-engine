@@ -4,7 +4,7 @@ The `uqa-client` crate provides `HttpEngine`, an asynchronous Rust SQL interface
 
 ## Install a released binding
 
-UQA-RS release artifacts are attached to the [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.1.6). Public Rust crates are published separately to crates.io. Python, Node.js, and Browser WASM remain GitHub-release artifacts only and are not published to PyPI or npm. To use the source from GitHub, pin a Rust application to the same release tag:
+UQA Engine release artifacts are attached to the [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.1.6). Public Rust crates are published separately to crates.io. Python, Node.js, and Browser WASM remain GitHub-release artifacts only and are not published to PyPI or npm. To use the source from GitHub, pin a Rust application to the same release tag:
 
 ```toml
 [dependencies]

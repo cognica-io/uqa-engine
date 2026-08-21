@@ -52,7 +52,7 @@ A generation expression can reference non-generated columns in the same row and 
 
 Virtual generated values are absent from physical row storage and are evaluated only when a logical projection or enforced constraint requires them. Stored generated values are recomputed exactly once at the prepared-write boundary of every insert, update, upsert, merge, referential action, and direct document replacement. Assigning a generated column directly is rejected; `DEFAULT` requests recomputation and is the only accepted explicit assignment.
 
-Virtual generated columns cannot use user-defined routines or UQA-RS engine-defined types and cannot own primary-key, unique, foreign-key, or index constraints. Stored generated columns can participate in those constraints and indexes.
+Virtual generated columns cannot use user-defined routines or UQA Engine engine-defined types and cannot own primary-key, unique, foreign-key, or index constraints. Stored generated columns can participate in those constraints and indexes.
 
 `ALTER TABLE ADD COLUMN` supports both generated kinds, and `ALTER COLUMN ... SET EXPRESSION AS (...)` replaces a generation expression. `DROP EXPRESSION` is available for a stored generated column and retains its last stored values; PostgreSQL 18 rejects that operation for a virtual generated column.
 
@@ -210,7 +210,7 @@ FROM orders
 WHERE state = 'pending';
 ```
 
-CTAS creates and populates a table from a query. CTAS column-name lists, `WITH NO DATA`, temporary persistence, storage options, access methods, `ON COMMIT`, and tablespaces are not implemented. `SELECT INTO` is not an alias for CTAS in UQA-RS.
+CTAS creates and populates a table from a query. CTAS column-name lists, `WITH NO DATA`, temporary persistence, storage options, access methods, `ON COMMIT`, and tablespaces are not implemented. `SELECT INTO` is not an alias for CTAS in UQA Engine.
 
 ## Sequences
 

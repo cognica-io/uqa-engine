@@ -88,7 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "INSERT INTO notes (id, body) VALUES ($1, $2)",
         &[
             SQLParam::scalar(Value::Int(1)),
-            SQLParam::scalar(Value::Str("hello from UQA-RS".into())),
+            SQLParam::scalar(Value::Str("hello from UQA Engine".into())),
         ],
     )?;
 
