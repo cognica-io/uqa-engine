@@ -1,10 +1,11 @@
 name: Release
 
 # Pushing a `v*` tag builds every distributable package and publishes a
-# GitHub release with all of them attached. Nothing is pushed to PyPI or npm:
-# the artifacts are attached to the release only. crates.io stays dry-run
-# unless workflow_dispatch sets publish_crates_io and CARGO_REGISTRY_TOKEN
-# is present.
+# GitHub release with all of them attached. After all seven Python
+# distributions are attached, this workflow explicitly dispatches pypi.yml.
+# That workflow is idempotent and records successful PyPI publication in the
+# GitHub release notes. npm remains release-asset only. crates.io stays dry-run unless
+# workflow_dispatch sets publish_crates_io and CARGO_REGISTRY_TOKEN is present.
 on:
   push:
     tags:
@@ -267,6 +268,7 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     permissions:
+      actions: write
       contents: write
     steps:
       - uses: actions/checkout@v4
@@ -373,7 +375,9 @@ jobs:
           print()
           print("## Packages")
           print()
-          print("Python wheels, a Python source distribution, the Node.js JS-only npm package, self-contained per-platform npm tarballs, standalone native addons, and the browser WASM package are attached to this release. They are not published to PyPI or npm. Public Rust crates are packaged for crates.io; a live registry upload is a separate dispatch step.")
+          print("Python wheels, a Python source distribution, the Node.js JS-only npm package, self-contained per-platform npm tarballs, standalone native addons, and the browser WASM package are attached to this release. The npm packages remain GitHub-release artifacts only. Public Rust crates are packaged for crates.io; a live registry upload is a separate dispatch step.")
+          print()
+          print(f"PyPI status: Pending publication of `uqa=={version}` by the dedicated trusted-publishing workflow.")
 
           missing = [line.strip() for line in os.environ.get("MISSING", "").splitlines()]
           missing = [name for name in missing if name]
@@ -407,3 +411,36 @@ jobs:
               --notes-file release-notes.md \
               dist/*
           fi
+
+      - name: Dispatch PyPI publication for a complete Python inventory
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          expected=(
+            "uqa-${version}.tar.gz"
+            "uqa-${version}-cp38-abi3-macosx_10_12_x86_64.whl"
+            "uqa-${version}-cp38-abi3-macosx_11_0_arm64.whl"
+            "uqa-${version}-cp38-abi3-manylinux_2_28_aarch64.whl"
+            "uqa-${version}-cp38-abi3-manylinux_2_28_x86_64.whl"
+            "uqa-${version}-cp38-abi3-win_amd64.whl"
+            "uqa-${version}-cp38-abi3-win_arm64.whl"
+          )
+          release_assets="$RUNNER_TEMP/release-assets.txt"
+          gh release view "$TAG" --json assets --jq '.assets[].name' > "$release_assets"
+          missing=()
+          for filename in "${expected[@]}"; do
+            if [ ! -f "dist/$filename" ] || ! grep -Fxq "$filename" "$release_assets"; then
+              missing+=("$filename")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf '::warning::PyPI publication not dispatched; missing Python distributions: %s\n' \
+              "${missing[*]}"
+            exit 0
+          fi
+          gh workflow run pypi.yml --ref "$DEFAULT_BRANCH" -f tag="$TAG"
