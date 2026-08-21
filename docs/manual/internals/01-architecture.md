@@ -85,10 +85,12 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 | `uqa-operators` | Retrieval, Boolean, staged, sparse, aggregation, fusion, and model operator trees |
 | `uqa-graph` | Named graph stores, Cypher, RPQ automata, graph algebra, centrality, temporal traversal, and graph indexes |
 | `uqa-joins` | Relational and cross-paradigm join algorithms |
-| `uqa-sql` | `libpg_query` frontend, SQL AST, statement compiler, scalar IR definitions, and syntax registry |
+| `uqa-pg-query` | Imported PostgreSQL 18 `libpg_query` pin used through the `pg_query` library name |
+| `uqa-sql` | `uqa-pg-query` frontend, SQL AST, statement compiler, scalar IR definitions, and syntax registry |
 | `uqa-execution` | Pull-based physical rows, batches, spill structures, sorting, grouping, windows, and joins |
 | `uqa-planner` | Cardinality, cost, DPccp join ordering, unified-plan optimization, and physical access selection |
 | `uqa-engine` | Composition, SQL lifecycle, sessions, transactions, restore, publication, and public API |
+| `uqa` | Application facade over `uqa-engine` with the core `Value` type re-exported |
 | `uqa-fdw` | Foreign server and table contracts plus DuckDB, Arrow, and memory handlers |
 | `uqa-ml` | Serializable model specifications, inference, analytical training, and optional MLX integration |
 | `uqa-api` | Fluent `QueryBuilder` and result adapters |

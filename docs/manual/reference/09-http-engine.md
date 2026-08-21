@@ -4,12 +4,14 @@ The `uqa-client` crate provides `HttpEngine`, an asynchronous Rust SQL interface
 
 ## Install a released binding
 
-UQA-RS release artifacts are attached to the [GitHub release](https://github.com/cognica-io/uqa-rs/releases/tag/v0.1.5); they are not currently published to crates.io, PyPI, or npm. Pin the application and its deployment artifact to the same release:
+UQA-RS release artifacts are attached to the [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.1.5). Public Rust crates are packaged for crates.io but are not on the registry until the next crates.io publish step. Python, Node.js, and Browser WASM remain GitHub-release artifacts only and are not published to PyPI or npm. Until that registry publish, pin a Rust application to the same GitHub release tag:
 
 ```toml
 [dependencies]
-uqa-client = { git = "https://github.com/cognica-io/uqa-rs", tag = "v0.1.5" }
+uqa-client = { git = "https://github.com/cognica-io/uqa-engine", tag = "v0.1.5" }
 ```
+
+After the crates.io publish step, the same version can be taken from the registry as `uqa-client = "0.1.5"` or `uqa-engine = "0.1.5"`. Do not use those registry dependencies until the crates exist on crates.io.
 
 ```sh
 python -m pip install ./uqa-0.1.5-cp38-abi3-PLATFORM.whl

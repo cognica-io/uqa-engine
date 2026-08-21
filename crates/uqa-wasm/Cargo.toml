@@ -4,12 +4,12 @@ description = "Browser bindings for embedded UQA WASM and local or Cloud HTTP SQ
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-license-file.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
+publish = false
 
 [[bin]]
 name = "uqa"

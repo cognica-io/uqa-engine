@@ -1,0 +1,62 @@
+[package]
+name = "uqa-pg-query"
+autotests = false
+description = "PostgreSQL 18 libpg_query parser pin used by UQA-RS"
+version.workspace = true
+edition = "2021"
+license = "MIT"
+authors = [
+    "Paul Mason <paul@form1.co.nz>",
+    "Duboce Labs, Inc. (pganalyze) <team@pganalyze.com>",
+]
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/uqa-pg-query"
+readme = "README.md"
+rust-version.workspace = true
+include = [
+    "README.md",
+    "UPSTREAM.md",
+    "LICENSE",
+    "LIBPG_QUERY-LICENSE",
+    "build.rs",
+    "tests/integration.rs",
+    "src/**/*.rs",
+    "libpg_query/Makefile",
+    "libpg_query/pg_query.h",
+    "libpg_query/postgres_deparse.h",
+    "libpg_query/src/**/*",
+    "libpg_query/vendor/**/*",
+    "libpg_query/protobuf/pg_query.pb-c.c",
+    "libpg_query/protobuf/pg_query.pb-c.h",
+    "libpg_query/protobuf/pg_query.proto",
+]
+
+[lib]
+name = "pg_query"
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[dependencies]
+itertools = "0.10.3"
+prost = "0.13.5"
+serde = { version = "1.0.139", features = ["derive"] }
+serde_json = "1.0.82"
+thiserror = "1.0.31"
+
+[build-dependencies]
+bindgen = "0.66.1"
+clippy = { version = "0.0.302", optional = true }
+prost-build = "0.13.5"
+fs_extra = "1.2.0"
+cc = "1.0.83"
+glob = "0.3.1"
+
+# Keep the imported Rust wrapper byte-for-byte synchronized with upstream.
+[lints.clippy]
+clone_on_copy = "allow"
+len_zero = "allow"
+mem_replace_option_with_some = "allow"
+redundant_field_names = "allow"

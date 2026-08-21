@@ -4,12 +4,13 @@ description = "Foreign data wrappers (DuckDB, Arrow IPC)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-license-file.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 rust-version.workspace = true
+documentation = "https://docs.rs/uqa-fdw"
+exclude.workspace = true
 
 [dependencies]
 uqa-core = { workspace = true }

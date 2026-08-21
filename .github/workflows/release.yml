@@ -2,7 +2,9 @@ name: Release
 
 # Pushing a `v*` tag builds every distributable package and publishes a
 # GitHub release with all of them attached. Nothing is pushed to PyPI or npm:
-# the artifacts are attached to the release only.
+# the artifacts are attached to the release only. crates.io stays dry-run
+# unless workflow_dispatch sets publish_crates_io and CARGO_REGISTRY_TOKEN
+# is present.
 on:
   push:
     tags:
@@ -15,6 +17,11 @@ on:
           workflow from that same tag ref so the jobs build the tagged commit.
         required: true
         type: string
+      publish_crates_io:
+        description: Publish public Rust crates to crates.io
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -222,6 +229,33 @@ jobs:
           path: crates/uqa-wasm/js/*.tgz
           if-no-files-found: error
 
+  crates-io:
+    name: crates.io
+    needs: [resolve]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Free Linux runner disk
+        run: bash .github/scripts/free-linux-runner-disk.sh
+
+      - name: Package publishable crates
+        run: bash scripts/package-publishable-crates.sh
+
+      - name: Publish or dry-run crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          PUBLISH_CRATES_IO: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_crates_io || false }}
+        run: |
+          set -euo pipefail
+          if [ "$PUBLISH_CRATES_IO" = "true" ] && [ -n "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            bash scripts/publish-crates.sh --live
+          else
+            bash scripts/publish-crates.sh
+          fi
+
   release:
     name: publish release
     needs: [resolve, python, node, node-package, wasm]
@@ -339,7 +373,7 @@ jobs:
           print()
           print("## Packages")
           print()
-          print("Python wheels, a Python source distribution, the Node.js JS-only npm package, self-contained per-platform npm tarballs, standalone native addons, and the browser WASM package are attached to this release. They are not published to PyPI or npm.")
+          print("Python wheels, a Python source distribution, the Node.js JS-only npm package, self-contained per-platform npm tarballs, standalone native addons, and the browser WASM package are attached to this release. They are not published to PyPI or npm. Public Rust crates are packaged for crates.io; a live registry upload is a separate dispatch step.")
 
           missing = [line.strip() for line in os.environ.get("MISSING", "").splitlines()]
           missing = [name for name in missing if name]

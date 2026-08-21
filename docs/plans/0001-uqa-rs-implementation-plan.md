@@ -1,6 +1,6 @@
 # Plan 0001: UQA-RS Implementation Plan
 
-Status: Living implementation plan Target repo: `uqa-rs`
+Status: Living implementation plan Target repo: `uqa-engine`
 
 ## 1. Goal and non-goals
 

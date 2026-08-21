@@ -9,6 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 
 - Implemented PostgreSQL 18 `SELECT` row-locking clauses (`FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`, `FOR KEY SHARE`, `OF`, `NOWAIT`, and `SKIP LOCKED`), including join and view targets, wait and skip policies, savepoint release, and matching `UPDATE`/`DELETE` row locks.
+- Added the `uqa` facade package, which re-exports the embedded `uqa-engine` API and core `Value` type as the primary Rust dependency.
+
+### Changed
+
+- Prepared every public Rust workspace package for crates.io, imported the PostgreSQL 18 parser pin as `uqa-pg-query`, and kept the Python, Node.js, and Browser WASM binding crates off crates.io.
+- Renamed the canonical GitHub repository and repository-local agent skill to `uqa-engine` while keeping `uqa-engine` as the engine package and adding `uqa` as the user-facing facade package.
 
 ## [0.1.5] - 2026-08-17
 

@@ -1,0 +1,22 @@
+[package]
+name = "uqa"
+description = "Convenience facade for the embedded UQA engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/uqa"
+readme = "README.md"
+rust-version.workspace = true
+exclude.workspace = true
+keywords = ["database", "sql", "full-text-search", "vector-search", "graph"]
+categories = ["database-implementations"]
+
+[dependencies]
+uqa-core = { workspace = true }
+uqa-engine = { workspace = true }
+
+[lints]
+workspace = true

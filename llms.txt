@@ -23,7 +23,7 @@ When generating SQL:
 - [Supported SQL](docs/manual/sql/README.md): SQL surface, parameters, names, ranking columns, and the function contract format.
 - [Compatibility](docs/manual/sql/09-compatibility.md): PostgreSQL alignment, deliberate differences, and unsupported behavior.
 - [Runnable examples](examples/README.md): Matching unified-search, vector-KNN, graph/Cypher, storage/transaction, and extensibility programs for Rust, Python, Node.js, and Browser WASM.
-- [UQA-RS agent skill](.agents/skills/uqa-rs/SKILL.md): Repository workflow for authoring and verifying queries or documentation.
+- [UQA Engine agent skill](.agents/skills/uqa-engine/SKILL.md): Repository workflow for authoring and verifying queries or documentation.
 
 ## SQL contracts
 

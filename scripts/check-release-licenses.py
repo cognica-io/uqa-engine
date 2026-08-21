@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import subprocess
 import sys
 import tarfile
 import tomllib
@@ -25,10 +26,16 @@ LEGAL_FILES = (
     "LICENSES/UQA-FOSS-EXCEPTION-1.0.txt",
     "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt",
 )
+AGPL_NOTICE = "LICENSE-NOTICE.md"
+MIT_PARSER_FILES = (
+    "LICENSE",
+    "LIBPG_QUERY-LICENSE",
+)
 NPM_PACKAGES = (
     ROOT / "crates" / "uqa-node",
     ROOT / "crates" / "uqa-wasm" / "js",
 )
+MIT_PARSER_CRATE = "uqa-pg-query"
 
 
 def canonical_payloads() -> dict[str, bytes]:
@@ -64,6 +71,66 @@ def check_npm_sources(payloads: dict[str, bytes]) -> None:
                 raise RuntimeError(f"npm legal copy differs from canonical file: {package_path}")
 
 
+def workspace_packages() -> list[dict[str, object]]:
+    result = subprocess.run(
+        ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    metadata = json.loads(result.stdout)
+    members = set(metadata["workspace_members"])
+    return [package for package in metadata["packages"] if package["id"] in members]
+
+
+def is_publishable(package: dict[str, object]) -> bool:
+    publish = package.get("publish")
+    if publish is None:
+        return True
+    if publish is False:
+        return False
+    if isinstance(publish, list) and len(publish) == 0:
+        return False
+    return True
+
+
+def check_cargo_sources(payloads: dict[str, bytes]) -> None:
+    notice = (ROOT / "crates" / "uqa-node" / AGPL_NOTICE).read_bytes()
+    for package in workspace_packages():
+        name = str(package["name"])
+        if not is_publishable(package):
+            continue
+        crate_root = pathlib.Path(str(package["manifest_path"])).parent
+        if name == MIT_PARSER_CRATE:
+            for relative in MIT_PARSER_FILES:
+                path = crate_root / relative
+                try:
+                    path.read_bytes()
+                except OSError as error:
+                    raise RuntimeError(f"cannot read {path}: {error}") from error
+            agpl_license = payloads["LICENSE"]
+            parser_license = (crate_root / "LICENSE").read_bytes()
+            if parser_license == agpl_license:
+                raise RuntimeError(f"{crate_root / 'LICENSE'} must remain the MIT wrapper license")
+            continue
+        for relative, expected in payloads.items():
+            path = crate_root / relative
+            try:
+                actual = path.read_bytes()
+            except OSError as error:
+                raise RuntimeError(f"cannot read {path}: {error}") from error
+            if actual != expected:
+                raise RuntimeError(f"crate legal copy differs from canonical file: {path}")
+        notice_path = crate_root / AGPL_NOTICE
+        try:
+            actual_notice = notice_path.read_bytes()
+        except OSError as error:
+            raise RuntimeError(f"cannot read {notice_path}: {error}") from error
+        if actual_notice != notice:
+            raise RuntimeError(f"crate legal copy differs from canonical file: {notice_path}")
+
+
 def check_maturin_sources() -> None:
     pyproject_path = ROOT / "pyproject.toml"
     try:
@@ -95,7 +162,7 @@ def archive_members(path: pathlib.Path) -> dict[str, bytes]:
                 }
         except (OSError, zipfile.BadZipFile) as error:
             raise RuntimeError(f"cannot read wheel {path}: {error}") from error
-    if path.name.endswith((".tar.gz", ".tgz")):
+    if path.name.endswith((".tar.gz", ".tgz", ".crate")):
         try:
             with tarfile.open(path, "r:gz") as archive:
                 return {
@@ -120,6 +187,13 @@ def matching_members(members: dict[str, bytes], relative: str) -> list[tuple[str
 
 def check_archive(path: pathlib.Path, payloads: dict[str, bytes]) -> None:
     members = archive_members(path)
+    if path.name.startswith(f"{MIT_PARSER_CRATE}-") and path.name.endswith(".crate"):
+        for relative in MIT_PARSER_FILES:
+            if not matching_members(members, relative):
+                raise RuntimeError(f"{path} omits {relative}")
+        if matching_members(members, "LICENSING.md"):
+            raise RuntimeError(f"{path} must not ship the AGPL licensing policy as its own license")
+        return
     for relative, expected in payloads.items():
         matches = matching_members(members, relative)
         if not matches:
@@ -127,10 +201,10 @@ def check_archive(path: pathlib.Path, payloads: dict[str, bytes]) -> None:
         if not any(payload == expected for _, payload in matches):
             names = [name for name, _ in matches]
             raise RuntimeError(f"{path} contains a noncanonical {relative}: {names}")
-    if path.name.endswith(".tgz") and not matching_members(
-        members, "LICENSE-NOTICE.md"
+    if path.name.endswith((".tgz", ".crate")) and not matching_members(
+        members, AGPL_NOTICE
     ):
-        raise RuntimeError(f"{path} omits LICENSE-NOTICE.md")
+        raise RuntimeError(f"{path} omits {AGPL_NOTICE}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -144,6 +218,7 @@ def main() -> int:
     payloads = canonical_payloads()
     check_npm_sources(payloads)
     check_maturin_sources()
+    check_cargo_sources(payloads)
     for archive in args.archives:
         check_archive(archive.resolve(), payloads)
     archive_suffix = f" and {len(args.archives)} archive(s)" if args.archives else ""

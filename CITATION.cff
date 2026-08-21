@@ -10,8 +10,8 @@ authors:
     orcid: "https://orcid.org/0009-0006-5881-8907"
 version: 0.1.5
 date-released: 2026-08-17
-repository-code: "https://github.com/cognica-io/uqa-rs"
-url: "https://github.com/cognica-io/uqa-rs"
+repository-code: "https://github.com/cognica-io/uqa-engine"
+url: "https://github.com/cognica-io/uqa-engine"
 license: AGPL-3.0-only
 keywords:
   - database

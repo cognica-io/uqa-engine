@@ -4,12 +4,13 @@ description = "redb physical KeyValue storage provider for UQA"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-license-file.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 rust-version.workspace = true
+documentation = "https://docs.rs/uqa-storage-redb"
+exclude.workspace = true
 
 [dependencies]
 uqa-storage = { workspace = true }

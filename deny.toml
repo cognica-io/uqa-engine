@@ -1,4 +1,4 @@
-# cargo-deny configuration for uqa-rs.
+# cargo-deny configuration for uqa-engine.
 #
 # Run locally (after `cargo install cargo-deny --locked`):
 #
@@ -63,4 +63,4 @@ skip-tree = []
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = ["https://github.com/jaepil/pg_query.rs"]
+allow-git = []

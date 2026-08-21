@@ -1,8 +1,9 @@
 {
   "schema_version": 1,
   "dependency_budgets": {
+    "uqa": 2,
     "uqa-engine": 13,
-    "uqa-sql": 1
+    "uqa-sql": 2
   },
   "runtime_workspace_dependencies": {
     "example-extensibility": [
@@ -26,6 +27,10 @@
       "uqa-sql"
     ],
     "example-vector-knn": [
+      "uqa-engine"
+    ],
+    "uqa": [
+      "uqa-core",
       "uqa-engine"
     ],
     "uqa-analysis": [
@@ -106,6 +111,7 @@
       "uqa-scoring",
       "uqa-storage"
     ],
+    "uqa-pg-query": [],
     "uqa-pg-wire": [],
     "uqa-planner": [
       "uqa-core",
@@ -129,7 +135,8 @@
       "uqa-storage"
     ],
     "uqa-sql": [
-      "uqa-core"
+      "uqa-core",
+      "uqa-pg-query"
     ],
     "uqa-storage": [
       "uqa-analysis",

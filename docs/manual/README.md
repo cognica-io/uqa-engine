@@ -15,7 +15,7 @@ The manual is divided by reader intent:
 
 Use the repository-root [llms.txt](../../llms.txt) as a compact discovery map, then follow its links into this manual for the complete contract. The map intentionally does not duplicate detailed syntax or behavior.
 
-Codex and Claude Code can also discover the shared [UQA-RS skill](../../.agents/skills/uqa-rs/SKILL.md). The skill supplies the query-authoring and verification workflow; this manual remains authoritative for product behavior.
+Codex and Claude Code can also discover the shared [UQA Engine skill](../../.agents/skills/uqa-engine/SKILL.md). The skill supplies the query-authoring and verification workflow; this manual remains authoritative for product behavior.
 
 ## File naming
 

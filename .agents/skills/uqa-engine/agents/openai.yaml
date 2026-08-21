@@ -1,0 +1,4 @@
+interface:
+  display_name: "UQA Engine"
+  short_description: "Author and verify UQA Engine SQL and documentation"
+  default_prompt: "Use $uqa-engine to write and verify this UQA Engine query or documentation change."
