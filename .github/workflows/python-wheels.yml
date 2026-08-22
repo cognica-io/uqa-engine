@@ -6,23 +6,13 @@ on:
   # attaches the artifacts it uploads to the GitHub release. Keeping the tag
   # trigger here as well would build every wheel twice for the same tag.
   workflow_call:
-  pull_request:
-    paths:
-      - ".github/workflows/python-wheels.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "LICENSE"
-      - "LICENSES/**"
-      - "LICENSING.md"
-      - "crates/uqa-*/**"
-      - "examples/python/**"
-      - "pyproject.toml"
-      - "python/**"
-      - "scripts/check-release-licenses.py"
-      - "tests/python/**"
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always

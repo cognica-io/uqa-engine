@@ -25,7 +25,7 @@ cargo deny --workspace check         # cargo install cargo-deny --locked
 cargo bench --workspace --no-run --locked     # benches must compile, run is opt-in
 ```
 
-CI runs the same set on `ubuntu-24.04` and `macos-14`. A red CI is a hard block for merge.
+PR pushes run only the fast repository-hygiene and formatting gate. Once review changes are complete and the final commit is pushed, run `bash scripts/run-premerge-ci.sh`; it dispatches the complete Rust, JavaScript/WebAssembly, and Python wheel suites for that exact remote pull-request HEAD. A red pre-merge run is a hard block, and any later push requires one new run for the new HEAD.
 
 If a clippy lint surfaces something legitimately user-driven, prefer fixing the root cause over adding `#[allow(clippy::...)]`. The `#[allow]` form is acceptable only with a `// reason: ...` comment and only at the smallest scope that silences it.
 

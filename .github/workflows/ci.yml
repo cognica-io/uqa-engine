@@ -1,9 +1,19 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
+    inputs:
+      base_revision:
+        description: Base commit to use for the analytical regression comparison
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -18,39 +28,6 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
-  fmt:
-    name: cargo fmt
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check public repository hygiene
-        run: bash scripts/check-public-repository-hygiene.sh
-      - name: Check Rust file headers
-        run: bash scripts/check-rust-file-headers.sh
-      - name: Check Rust file line limit
-        run: bash scripts/check-rust-file-lines.sh
-      - name: Check imported parser pin
-        run: python3 scripts/sync-uqa-pg-query.py --check
-      - name: Check crate legal file copies
-        run: python3 scripts/sync-crate-legal-files.py --check
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - name: Test analytical benchmark gate
-        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
-      - name: Check workspace dependency policy
-        run: python3 scripts/check-workspace-dependencies.py
-      - name: Check benchmark coverage
-        run: python3 scripts/check-benchmark-coverage.py
-      - name: Check integration test harness coverage
-        run: python3 scripts/check-integration-test-harnesses.py
-      - name: Check release license sources
-        run: python3 scripts/check-release-licenses.py
-      - name: Check PostgreSQL 18 compatibility manifest
-        run: python3 tests/parity/pg18/run_diff.py --validate-manifest
-      - name: Check rustfmt
-        run: bash scripts/check-rustfmt.sh
-
   release-package-licenses:
     name: release package licenses
     runs-on: ubuntu-24.04
@@ -290,7 +267,7 @@ jobs:
           cache-targets: false
       - name: Run paired base/head analytical regression
         env:
-          UQA_ANALYTICAL_BASE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          UQA_ANALYTICAL_BASE_REVISION: ${{ inputs.base_revision }}
         run: python3 scripts/run-analytical-regression.py "${UQA_ANALYTICAL_BASE_REVISION}"
       - uses: actions/upload-artifact@v4
         if: always()
