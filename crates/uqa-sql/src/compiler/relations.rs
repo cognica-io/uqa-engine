@@ -13,10 +13,98 @@ use super::{
     NodeEnum, Result, SQLError, Statement,
 };
 
+struct IntoTarget {
+    name: String,
+    column_names: Vec<String>,
+    skip_data: bool,
+}
+
+fn compile_into_target(into: &pg_query::protobuf::IntoClause, command: &str) -> Result<IntoTarget> {
+    use pg_query::protobuf::OnCommitAction;
+
+    let relation = into
+        .rel
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal(format!("{command} target has no name")))?;
+    validate_durable_create_relation(relation, command)?;
+    let column_names = into
+        .col_names
+        .iter()
+        .map(extract_string)
+        .collect::<Result<Vec<_>>>()?;
+    if !into.access_method.is_empty() {
+        return Err(SQLError::Unsupported(format!(
+            "{command} USING access methods are not supported"
+        )));
+    }
+    if !into.options.is_empty() {
+        return Err(SQLError::Unsupported(format!(
+            "{command} storage options are not supported"
+        )));
+    }
+    if !matches!(
+        into.on_commit(),
+        OnCommitAction::Undefined | OnCommitAction::OncommitNoop
+    ) {
+        return Err(SQLError::Unsupported(format!(
+            "{command} ON COMMIT is not supported"
+        )));
+    }
+    if !into.table_space_name.is_empty() {
+        return Err(SQLError::Unsupported(format!(
+            "{command} TABLESPACE is not supported"
+        )));
+    }
+    if into.view_query.is_some() {
+        return Err(SQLError::Unsupported(format!(
+            "{command} view-query payloads are not supported"
+        )));
+    }
+    Ok(IntoTarget {
+        name: range_var_name(relation),
+        column_names,
+        skip_data: into.skip_data,
+    })
+}
+
+fn take_select_into_clause(
+    stmt: &mut pg_query::protobuf::SelectStmt,
+) -> Option<Box<pg_query::protobuf::IntoClause>> {
+    stmt.into_clause
+        .take()
+        .or_else(|| stmt.larg.as_deref_mut().and_then(take_select_into_clause))
+}
+
+fn select_has_into_clause(stmt: &pg_query::protobuf::SelectStmt) -> bool {
+    stmt.into_clause.is_some() || stmt.larg.as_deref().is_some_and(select_has_into_clause)
+}
+
+pub(super) fn compile_top_level_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<Statement> {
+    if !select_has_into_clause(stmt) {
+        return compile_select(stmt).map(|select| Statement::Select(Box::new(select)));
+    }
+    let mut body = stmt.clone();
+    let into = take_select_into_clause(&mut body)
+        .ok_or_else(|| SQLError::Internal("SELECT INTO target disappeared".into()))?;
+    let target = compile_into_target(&into, "SELECT INTO")?;
+    if target.skip_data {
+        return Err(SQLError::Internal(
+            "SELECT INTO unexpectedly requested WITH NO DATA".into(),
+        ));
+    }
+    Ok(Statement::CreateTableAs {
+        name: target.name,
+        if_not_exists: false,
+        column_names: target.column_names,
+        with_no_data: false,
+        body: Box::new(compile_select(&body)?),
+    })
+}
+
 pub(super) fn compile_create_table_as(
     stmt: &pg_query::protobuf::CreateTableAsStmt,
 ) -> Result<Statement> {
-    use pg_query::protobuf::{ObjectType, OnCommitAction};
+    use pg_query::protobuf::ObjectType;
 
     match stmt.objtype() {
         ObjectType::ObjectTable => {}
@@ -31,52 +119,16 @@ pub(super) fn compile_create_table_as(
             )));
         }
     }
-    if stmt.is_select_into {
-        return Err(SQLError::Unsupported("SELECT INTO is not supported".into()));
-    }
     let into = stmt
         .into
         .as_ref()
         .ok_or_else(|| SQLError::Internal("CREATE TABLE AS without target".into()))?;
-    let relation = into
-        .rel
-        .as_ref()
-        .ok_or_else(|| SQLError::Internal("CREATE TABLE AS target has no name".into()))?;
-    validate_durable_create_relation(relation, "CREATE TABLE AS")?;
-    let column_names = into
-        .col_names
-        .iter()
-        .map(extract_string)
-        .collect::<Result<Vec<_>>>()?;
-    if !into.access_method.is_empty() {
-        return Err(SQLError::Unsupported(
-            "CREATE TABLE AS USING access methods are not supported".into(),
-        ));
-    }
-    if !into.options.is_empty() {
-        return Err(SQLError::Unsupported(
-            "CREATE TABLE AS storage options are not supported".into(),
-        ));
-    }
-    if !matches!(
-        into.on_commit(),
-        OnCommitAction::Undefined | OnCommitAction::OncommitNoop
-    ) {
-        return Err(SQLError::Unsupported(
-            "CREATE TABLE AS ON COMMIT is not supported".into(),
-        ));
-    }
-    if !into.table_space_name.is_empty() {
-        return Err(SQLError::Unsupported(
-            "CREATE TABLE AS TABLESPACE is not supported".into(),
-        ));
-    }
-    if into.view_query.is_some() {
-        return Err(SQLError::Unsupported(
-            "CREATE TABLE AS view-query payloads are not supported".into(),
-        ));
-    }
-    let name = range_var_name(relation);
+    let command = if stmt.is_select_into {
+        "SELECT INTO"
+    } else {
+        "CREATE TABLE AS"
+    };
+    let target = compile_into_target(into, command)?;
     let body = stmt
         .query
         .as_deref()
@@ -94,10 +146,10 @@ pub(super) fn compile_create_table_as(
         }
     };
     Ok(Statement::CreateTableAs {
-        name,
+        name: target.name,
         if_not_exists: stmt.if_not_exists,
-        column_names,
-        with_no_data: into.skip_data,
+        column_names: target.column_names,
+        with_no_data: target.skip_data,
         body: Box::new(select),
     })
 }

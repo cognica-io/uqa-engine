@@ -618,16 +618,6 @@ fn select_with_function_call_and_order_by() {
 }
 
 #[test]
-fn unsupported_select_clauses_fail_instead_of_losing_semantics() {
-    let sql = "SELECT 1 INTO created_by_select";
-    let error = compile(sql).expect_err(sql);
-    assert!(
-        matches!(&error, SQLError::Unsupported(message) if message.contains("SELECT INTO")),
-        "unexpected error for {sql}: {error}"
-    );
-}
-
-#[test]
 fn named_windows_resolve_inheritance_and_frames() {
     let Statement::Select(select) = first(
         "SELECT sum(x) OVER child FROM measurements \
@@ -1054,6 +1044,43 @@ fn create_table_as_preserves_positional_column_names() {
         panic!("expected CREATE TABLE AS");
     };
     assert!(!with_no_data);
+}
+
+#[test]
+fn select_into_lowers_to_the_create_table_as_contract() {
+    let Statement::CreateTableAs {
+        name,
+        if_not_exists,
+        column_names,
+        with_no_data,
+        body,
+    } = first("SELECT 1::smallint AS value INTO app.\"Copied\"")
+    else {
+        panic!("expected SELECT INTO to lower as CREATE TABLE AS");
+    };
+    assert_eq!(name, "app.\"Copied\"");
+    assert!(!if_not_exists);
+    assert!(column_names.is_empty());
+    assert!(!with_no_data);
+    assert_eq!(body.projections.len(), 1);
+    assert_eq!(body.projections[0].alias.as_deref(), Some("value"));
+
+    let Statement::CreateTableAs { name, body, .. } = first(
+        "SELECT 1 AS value INTO union_copy \
+         UNION ALL SELECT 2",
+    ) else {
+        panic!("expected set-operation SELECT INTO");
+    };
+    assert_eq!(name, "union_copy");
+    assert!(body.set_op.is_some());
+
+    let Statement::Prepare { body, .. } = first(
+        "PREPARE make_copy AS \
+         SELECT 7::smallint AS value INTO prepared_copy",
+    ) else {
+        panic!("expected PREPARE");
+    };
+    assert!(matches!(*body, Statement::CreateTableAs { .. }));
 }
 
 #[test]

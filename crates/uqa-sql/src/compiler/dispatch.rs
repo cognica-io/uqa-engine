@@ -16,13 +16,13 @@ use super::merge::compile_merge;
 use super::relations::{
     compile_create_foreign_server, compile_create_foreign_table, compile_create_schema,
     compile_create_table_as, compile_create_view, compile_deallocate, compile_execute,
-    compile_prepare,
+    compile_prepare, compile_top_level_select,
 };
 use super::routines::{compile_call, compile_create_function, compile_do};
 use super::sequences::{compile_alter_sequence, compile_create_sequence};
 use super::{
-    compile_create_index, compile_create_table, compile_insert, compile_select,
-    compile_values_lists, Node, NodeEnum, Result, SQLError, Statement,
+    compile_create_index, compile_create_table, compile_insert, compile_values_lists, Node,
+    NodeEnum, Result, SQLError, Statement,
 };
 
 pub fn compile(sql: &str) -> Result<Vec<Statement>> {
@@ -59,7 +59,7 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
                 let rows = compile_values_lists(&stmt.values_lists)?;
                 return Ok(Statement::Values { rows });
             }
-            compile_select(stmt).map(|s| Statement::Select(Box::new(s)))
+            compile_top_level_select(stmt)
         }
         NodeEnum::UpdateStmt(stmt) => compile_update(stmt).map(Statement::Update),
         NodeEnum::DeleteStmt(stmt) => compile_delete(stmt).map(Statement::Delete),
