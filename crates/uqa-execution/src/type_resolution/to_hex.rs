@@ -6,7 +6,9 @@
 
 //! PostgreSQL-compatible `to_hex` overload resolution.
 
-use super::{base_type, named_argument_value, scalar_type_inner, FunctionTypeResolver};
+use super::common::base_type;
+use super::functions::named_argument_value;
+use super::{scalar_type_inner, FunctionTypeResolver};
 use crate::{RowSchema, ScalarExpr};
 use uqa_core::Value;
 use uqa_sql::ast::{ColumnType, FunctionBinding};

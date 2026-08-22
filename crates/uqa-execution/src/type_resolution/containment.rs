@@ -12,7 +12,9 @@ use uqa_sql::{SQLError, SQLParam};
 
 use crate::{RowSchema, ScalarExpr};
 
-use super::{base_type, named_argument_value, scalar_type_inner, FunctionTypeResolver};
+use super::common::base_type;
+use super::functions::named_argument_value;
+use super::{scalar_type_inner, FunctionTypeResolver};
 
 pub(super) fn is_operator(name: &str) -> bool {
     matches!(name, "contains_op" | "contained_by_op")
