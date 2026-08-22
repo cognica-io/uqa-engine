@@ -84,10 +84,7 @@ pub(super) fn value_type(value: &Value) -> Option<ColumnType> {
         Value::Int(value) if i32::try_from(*value).is_ok() => Some(ColumnType::Integer),
         Value::Int(_) => Some(ColumnType::BigInteger),
         Value::Float(_) => Some(ColumnType::DoublePrecision),
-        Value::Decimal(_) => Some(ColumnType::Numeric {
-            precision: None,
-            scale: None,
-        }),
+        Value::Decimal(_) => Some(numeric_type()),
         Value::Str(_) => Some(ColumnType::Text),
         Value::FixedChar(value) => u32::try_from(value.chars().count())
             .ok()
@@ -194,10 +191,7 @@ pub(super) fn common_numeric_type(left: &ColumnType, right: &ColumnType) -> Opti
         0 => ColumnType::SmallInteger,
         1 => ColumnType::Integer,
         2 => ColumnType::BigInteger,
-        3 => ColumnType::Numeric {
-            precision: None,
-            scale: None,
-        },
+        3 => numeric_type(),
         4 => ColumnType::Real,
         _ => ColumnType::DoublePrecision,
     })

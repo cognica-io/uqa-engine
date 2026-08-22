@@ -266,3 +266,68 @@ fn common_type_binding_coerces_selector_results_before_runtime_evaluation() {
         Some(ColumnType::DoublePrecision)
     );
 }
+
+#[test]
+fn nested_builtin_type_resolution_visits_each_argument_once() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingResolver(AtomicUsize);
+
+    impl FunctionTypeResolver for CountingResolver {
+        fn resolve_function_type(
+            &self,
+            _name: &str,
+            _binding: Option<&FunctionBinding>,
+            _argument_names: &[Option<String>],
+            _argument_types: &[Option<ColumnType>],
+        ) -> Result<Option<ColumnType>, SQLError> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(Some(ColumnType::Integer))
+        }
+    }
+
+    let mut expression = ScalarExpr::Func {
+        name: "application.identity".into(),
+        binding: None,
+        args: vec![ScalarExpr::Literal(Value::Int(1))],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    for _ in 0..16 {
+        expression = ScalarExpr::Func {
+            name: "round".into(),
+            binding: None,
+            args: vec![expression],
+            distinct: false,
+            order_by: Vec::new(),
+            filter: None,
+        };
+    }
+    let resolver = CountingResolver(AtomicUsize::new(0));
+
+    assert_eq!(
+        scalar_type_with_resolver(&expression, &RowSchema::default(), &[], &resolver).unwrap(),
+        Some(ColumnType::DoublePrecision)
+    );
+    assert_eq!(resolver.0.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn null_only_transcendental_calls_resolve_to_double_precision() {
+    for function in ["sqrt", "ln", "log", "log10"] {
+        let expression = ScalarExpr::Func {
+            name: function.into(),
+            binding: None,
+            args: vec![ScalarExpr::Literal(Value::Null)],
+            distinct: false,
+            order_by: Vec::new(),
+            filter: None,
+        };
+        assert_eq!(
+            scalar_type(&expression, &RowSchema::default(), &[]).unwrap(),
+            Some(ColumnType::DoublePrecision),
+            "{function}"
+        );
+    }
+}

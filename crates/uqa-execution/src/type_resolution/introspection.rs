@@ -112,15 +112,7 @@ fn bind_type_introspection_inner(
                 .and_then(|ty| unary_minus_result_type(&ty).ok());
             bind_type_introspection_in_place(expr.as_mut(), schema, params, resolver);
             if let Some(source_type) = source_type {
-                let source_name = source_type.sql_name();
-                if !matches!(expr.as_ref(), ScalarExpr::Cast { ty, .. } if ty.eq_ignore_ascii_case(&source_name))
-                {
-                    let inner = std::mem::replace(expr.as_mut(), ScalarExpr::Literal(Value::Null));
-                    *expr = ScalarExpr::Cast {
-                        expr: Box::new(inner),
-                        ty: source_name,
-                    };
-                }
+                wrap_in_declared_cast(expr.as_mut(), &source_type);
             }
             ScalarExpr::UnaryMinus(expr)
         }
@@ -250,15 +242,7 @@ fn bind_type_introspection_inner(
                 .flatten();
             bind_type_introspection_in_place(expr.as_mut(), schema, params, resolver);
             if let Some(source_type) = source_type {
-                let source_name = source_type.sql_name();
-                if !matches!(expr.as_ref(), ScalarExpr::Cast { ty, .. } if ty.eq_ignore_ascii_case(&source_name))
-                {
-                    let inner = std::mem::replace(expr.as_mut(), ScalarExpr::Literal(Value::Null));
-                    *expr = ScalarExpr::Cast {
-                        expr: Box::new(inner),
-                        ty: source_name,
-                    };
-                }
+                wrap_in_declared_cast(expr.as_mut(), &source_type);
             }
             ScalarExpr::Cast { expr, ty }
         }
@@ -368,10 +352,9 @@ fn is_pg_typeof(name: &str) -> bool {
 }
 
 fn is_common_type_function(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "coalesce" | "greatest" | "least"
-    )
+    ["coalesce", "greatest", "least"]
+        .iter()
+        .any(|candidate| name.eq_ignore_ascii_case(candidate))
 }
 
 fn bind_common_type_expressions(
@@ -426,6 +409,18 @@ fn bind_common_type_cast(
     *expression = ScalarExpr::Cast {
         expr: Box::new(inner),
         ty: target.sql_name(),
+    };
+}
+
+fn wrap_in_declared_cast(expression: &mut ScalarExpr, source_type: &ColumnType) {
+    let source_name = source_type.sql_name();
+    if matches!(expression, ScalarExpr::Cast { ty, .. } if ty.eq_ignore_ascii_case(&source_name)) {
+        return;
+    }
+    let inner = std::mem::replace(expression, ScalarExpr::Literal(Value::Null));
+    *expression = ScalarExpr::Cast {
+        expr: Box::new(inner),
+        ty: source_name,
     };
 }
 

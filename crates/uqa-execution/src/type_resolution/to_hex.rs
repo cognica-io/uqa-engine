@@ -18,9 +18,7 @@ use uqa_sql::{SQLError, SQLParam};
 pub(super) fn resolve_type(
     name: &str,
     args: &[ScalarExpr],
-    schema: &RowSchema,
-    params: &[SQLParam],
-    resolver: Option<&dyn FunctionTypeResolver>,
+    argument_types: &[Option<ColumnType>],
 ) -> Result<Option<ColumnType>, SQLError> {
     let [argument] = args else {
         return Err(undefined_function(name, None));
@@ -29,7 +27,7 @@ pub(super) fn resolve_type(
     let argument_type = if matches!(argument, ScalarExpr::Literal(Value::Str(_) | Value::Null)) {
         None
     } else {
-        scalar_type_inner(argument, schema, params, resolver)?
+        argument_types.first().cloned().flatten()
     };
     match argument_type.as_ref().map(base_type) {
         Some(ColumnType::Integer | ColumnType::BigInteger) => Ok(Some(ColumnType::Text)),
