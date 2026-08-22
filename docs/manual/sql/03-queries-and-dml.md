@@ -66,7 +66,16 @@ FULL JOIN (VALUES (1, 'right')) AS r(id, right_value)
 USING (id) AS merged;
 ```
 
-Duplicate or missing `USING` names, ambiguous common input names, and unsupported equality/common-type pairs are rejected with PostgreSQL SQLSTATEs before execution. Differently declared columns use the implemented PostgreSQL 18 common-type coercion matrix; collations, domains, user-defined equality operators, and the complete common-type matrix remain open. Parenthesized join aliases are also outside the supported surface.
+Duplicate or missing `USING` names, ambiguous common input names, and unsupported equality/common-type pairs are rejected with PostgreSQL SQLSTATEs before execution. Differently declared columns use the implemented PostgreSQL 18 common-type coercion matrix; collations, domains, user-defined equality operators, and the complete common-type matrix remain open.
+
+An alias after a parenthesized join names the complete shaped output and hides every input relation and `USING` alias from the enclosing query level. Its optional column aliases apply positionally after `USING` or `NATURAL` has placed merged columns first, may rename only an initial prefix, and are visible to later joins and LATERAL sources.
+
+```sql execute
+SELECT joined.joined_id, joined.left_value, joined.right_value
+FROM ((VALUES (1, 'left')) AS l(id, left_value)
+JOIN (VALUES (1, 'right')) AS r(id, right_value)
+USING (id)) AS joined(joined_id);
+```
 
 ## LATERAL
 

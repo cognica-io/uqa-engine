@@ -267,6 +267,8 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             on,
             using,
             natural,
+            alias,
+            column_aliases,
             lateral,
         } => FromClause::Join {
             left: Box::new(bind_from(left, r)?),
@@ -275,6 +277,8 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             on: bind_opt_expr(on.as_ref(), r)?,
             using: using.clone(),
             natural: *natural,
+            alias: alias.clone(),
+            column_aliases: column_aliases.clone(),
             lateral: *lateral,
         },
         FromClause::Values {

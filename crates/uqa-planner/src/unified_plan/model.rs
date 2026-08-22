@@ -141,6 +141,10 @@ pub enum SourcePlan {
         using: Option<uqa_sql::ast::JoinUsing>,
         #[serde(default)]
         natural: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        alias: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        column_aliases: Vec<String>,
         lateral: bool,
         #[serde(default)]
         strategy: JoinExecutionStrategy,

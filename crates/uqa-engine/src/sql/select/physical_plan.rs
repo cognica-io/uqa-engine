@@ -13,8 +13,7 @@ use super::{
     prepare_correlated_exists_predicate, prepare_distinct_grouping_sets,
     prepare_group_set_projection, prepare_window_plan, projection_columns,
     projections_may_return_set, qualifier_filters_for_stmt, resolve_fetch_limit_with_ties,
-    resolve_limit_offset_with_ctes, should_defer_distinct_limit,
-    validate_query_block_expression_types, validate_query_set_contexts, Arc, ComputePlan, CteScope,
+    resolve_limit_offset_with_ctes, should_defer_distinct_limit, Arc, ComputePlan, CteScope,
     Engine, EngineExpressionEvaluator, HashSet, OutputColumnMapping, PhysicalAggregateExecutor,
     PhysicalProjection, PhysicalWindowExecutor, ProjectionPlan, QueryBlockPlan, QueryOutput,
     QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr, SharedExpressionEvaluator, Value,
@@ -643,8 +642,6 @@ pub(in crate::sql) fn execute_query_block_operator_output<'a>(
     columns: Vec<String>,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
-    validate_query_block_expression_types(engine, statement, operator.row_schema(), params)?;
-    validate_query_set_contexts(engine, statement, operator.row_schema(), params)?;
     if matches!(&output_mode, QueryOutputMode::ExistsKeySet)
         && matches!(statement.compute, ComputePlan::Project)
         && statement.order_by.is_empty()

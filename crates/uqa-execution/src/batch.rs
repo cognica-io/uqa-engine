@@ -427,6 +427,13 @@ impl RowSchema {
             .any(|identity| identity.qualifier() == Some(qualifier))
     }
 
+    /// Whether a visible or hidden lookup identity contains this exact qualified column, independently of its static type or ambiguity.
+    #[must_use]
+    pub fn has_qualified_column(&self, qualifier: &str, column: &str) -> bool {
+        let identity = ColumnIdentity::qualified(qualifier, column);
+        self.index.qualified.contains_key(&identity) || self.index.aliases.contains_key(&identity)
+    }
+
     pub fn identity(&self, logical: usize) -> Option<&ColumnIdentity> {
         self.index.identities.get(logical)
     }
@@ -980,6 +987,35 @@ impl RowSchema {
             input.physical_width(),
             lookup_aliases,
             alias_types,
+        )
+    }
+
+    /// Select logical positions with fresh SQL identities while deliberately dropping every input lookup alias. A relation alias on a complete parenthesized JOIN uses this boundary because `PostgreSQL` hides all names exposed by the joined inputs.
+    pub(crate) fn remap_typed_identities_without_input_aliases(
+        input: &Self,
+        columns: &[(String, ColumnIdentity, usize, Option<ColumnType>)],
+    ) -> Self {
+        let output_names = columns
+            .iter()
+            .map(|(output, _, _, _)| output.clone())
+            .collect();
+        let identities = columns
+            .iter()
+            .map(|(_, identity, _, _)| identity.clone())
+            .collect();
+        let slots = columns
+            .iter()
+            .map(|(_, _, logical, _)| input.slot(*logical).unwrap_or(NULL_SLOT))
+            .collect();
+        let types = columns.iter().map(|(_, _, _, ty)| ty.clone()).collect();
+        Self::from_typed_parts_with_aliases(
+            output_names,
+            identities,
+            types,
+            slots,
+            input.physical_width(),
+            HashMap::new(),
+            HashMap::new(),
         )
     }
 

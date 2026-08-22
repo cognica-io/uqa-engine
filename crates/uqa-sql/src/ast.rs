@@ -1048,6 +1048,14 @@ pub enum FromClause {
         /// input row types at binding time.
         #[serde(default)]
         natural: bool,
+        /// Alias applied to the complete parenthesized JOIN result. When
+        /// present, the input relation names are hidden from the enclosing
+        /// query level.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        alias: Option<String>,
+        /// Positional aliases for the JOIN output after USING/NATURAL shaping.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        column_aliases: Vec<String>,
         #[allow(dead_code)]
         lateral: bool,
     },

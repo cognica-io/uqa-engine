@@ -771,6 +771,25 @@ fn unsupported_from_forms_fail_instead_of_becoming_cross_joins() {
 }
 
 #[test]
+fn parenthesized_join_alias_survives_compilation() {
+    let Statement::Select(select) = first(
+        "SELECT j.left_id FROM ((VALUES (1)) AS l(id) JOIN (VALUES (1)) AS r(id) ON l.id = r.id) AS j(left_id, right_id)",
+    ) else {
+        panic!("not SELECT");
+    };
+    let Some(FromClause::Join {
+        alias,
+        column_aliases,
+        ..
+    }) = select.from
+    else {
+        panic!("not JOIN");
+    };
+    assert_eq!(alias.as_deref(), Some("j"));
+    assert_eq!(column_aliases, ["left_id", "right_id"]);
+}
+
+#[test]
 fn table_function_with_ordinality_survives_compilation() {
     let Statement::Select(select) = first(
         "SELECT * FROM pg_catalog.generate_series(1, 2) \

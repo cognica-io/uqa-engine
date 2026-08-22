@@ -465,6 +465,17 @@ SELECT id, l.id, r.id, t.id FROM (VALUES (1), (2)) AS l(id) JOIN (VALUES (1), (3
 WITH left_cte(id, shared, lval) AS (VALUES (1, 'same', 'l1'), (2, 'left', 'l2')) SELECT l.lval FROM left_cte l NATURAL JOIN (VALUES (1, 'same', 'r1'), (3, 'right', 'r3')) AS r(id, shared, rval)
 SELECT * FROM (VALUES (1)) AS l(id) JOIN (VALUES (1)) AS r(id) USING (id, id)
 SELECT * FROM (VALUES (1)) AS l(id) JOIN (VALUES (1)) AS r(id) USING (missing)
+-- aliases on parenthesized joins
+SELECT j.* FROM ((VALUES (1,'l')) AS l(id,lv) JOIN (VALUES (1,'r')) AS r(id,rv) ON l.id=r.id) AS j
+SELECT j.a,j.lv,j.rv FROM ((VALUES (1,'l')) AS l(id,lv) JOIN (VALUES (1,'r')) AS r(id,rv) USING(id)) AS j(a)
+SELECT j.id FROM ((VALUES (1)) AS l(id) LEFT JOIN (VALUES (1)) AS r(id) ON l.id=r.id) AS j(id,right_id) WHERE j.right_id IS NOT NULL
+SELECT j.*, q.n FROM ((VALUES (1)) AS l(id) JOIN (VALUES (1)) AS r(id) USING(id)) AS j CROSS JOIN LATERAL (SELECT j.id+1 AS n) AS q
+SELECT l.id FROM ((VALUES (1)) AS l(id) JOIN (VALUES (1)) AS r(id) USING(id)) AS j
+SELECT j.* FROM ((VALUES (1)) AS l(id) JOIN (VALUES (1)) AS r(id) USING(id)) AS j(a,b)
+SELECT j.a FROM ((VALUES (1)) AS l(id) JOIN (VALUES (1)) AS r(id) ON l.id=r.id) AS j(a,a)
+SELECT j.* FROM ((VALUES (1)) AS l(id) JOIN (VALUES (1)) AS r(id) ON j.id=r.id) AS j
+SELECT j.* FROM ((VALUES (1)) AS l(id) JOIN (VALUES (1)) AS r(id) USING(id)) AS j FOR UPDATE OF j
+SELECT merged.id FROM ((VALUES (1)) AS l(id) JOIN (VALUES (1)) AS r(id) USING(id) AS merged) AS j
 -- appended: PG18 semantics round (3VL edges, intervals, operators)
 SELECT interval '-1 day 3 hours'
 SELECT interval '1 day -3 hours'

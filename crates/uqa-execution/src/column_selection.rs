@@ -133,6 +133,35 @@ impl<'a> ColumnSelection<'a> {
         }
     }
 
+    /// Select positions under identities that replace, rather than extend, the child's SQL namespace.
+    pub fn with_fresh_identities(
+        child: Box<dyn PhysicalOperator + 'a>,
+        columns: Vec<(String, ColumnIdentity, usize)>,
+    ) -> Self {
+        let input_positions = columns
+            .iter()
+            .map(|(_, _, position)| Some(*position))
+            .collect::<Vec<_>>();
+        let ordering = remap_ordering(child.output_ordering(), &input_positions);
+        let columns = columns
+            .into_iter()
+            .map(|(label, identity, position)| {
+                let ty = child.row_schema().column_type(position).cloned();
+                (label, identity, position, ty)
+            })
+            .collect::<Vec<_>>();
+        let schema =
+            RowSchema::remap_typed_identities_without_input_aliases(child.row_schema(), &columns);
+        Self {
+            child,
+            schema,
+            ordering,
+            rebind_lock_qualifier: None,
+            discard_lock_origins: false,
+            compact_slots: None,
+        }
+    }
+
     /// Select logical input positions and compact them to one canonical positional layout. Use this only at an explicit state boundary, such as recursive working-table materialization, where independently planned inputs must share an identical physical schema.
     pub fn compacting_with_positions(
         child: Box<dyn PhysicalOperator + 'a>,

@@ -8,6 +8,7 @@ use super::{
     bind_source_plan_schema, CteScope, Engine, RowSchema, SQLError, SQLParam, ScalarExpr,
     SourcePlan, Value,
 };
+use crate::sql::from_rows::{join_alias_input_schemas, resolve_join_using};
 
 pub(super) fn reduce_null_rejected_outer_joins_to_fixpoint(
     engine: &Engine,
@@ -72,6 +73,10 @@ fn reduce_null_rejected_outer_joins(
         left,
         right,
         kind,
+        using,
+        natural,
+        alias,
+        column_aliases,
         lateral,
         ..
     } = source
@@ -84,18 +89,30 @@ fn reduce_null_rejected_outer_joins(
         (*lateral || implicit_lateral_function).then(|| overlay_outer_schema(&left_schema, outer));
     let right_outer = right_scope.as_ref().or(outer);
     let right_schema = bind_source_plan_schema(engine, right, params, ctes, right_outer)?;
+    let resolved_using = resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
+    let (left_predicate_schema, right_predicate_schema) = match alias.as_deref() {
+        Some(alias) => join_alias_input_schemas(
+            *kind,
+            &left_schema,
+            &right_schema,
+            resolved_using.as_ref(),
+            alias,
+            column_aliases,
+        )?,
+        None => (left_schema.clone(), right_schema.clone()),
+    };
     let rejects_left = predicate_rejects_null_extended_side(
         engine,
         predicate,
-        &left_schema,
-        &right_schema,
+        &left_predicate_schema,
+        &right_predicate_schema,
         params,
     )?;
     let rejects_right = predicate_rejects_null_extended_side(
         engine,
         predicate,
-        &right_schema,
-        &left_schema,
+        &right_predicate_schema,
+        &left_predicate_schema,
         params,
     )?;
     let reduced = match (*kind, rejects_left, rejects_right) {
@@ -215,10 +232,9 @@ fn expression_is_null_with_side(
         ScalarExpr::Literal(Value::Null) => Ok(true),
         ScalarExpr::Column(column) => Ok(side.unqualified_position(column).is_some()
             && other.unqualified_position(column).is_none()),
-        ScalarExpr::QualifiedColumn { qualifier, column } => {
-            Ok(side.qualified_position(qualifier, column).is_some()
-                && other.qualified_position(qualifier, column).is_none())
-        }
+        ScalarExpr::QualifiedColumn { qualifier, column } => Ok(side
+            .has_qualified_column(qualifier, column)
+            && !other.has_qualified_column(qualifier, column)),
         ScalarExpr::Binary { lhs, rhs, .. } => Ok(expression_is_null_with_side(
             engine, lhs, side, other, params,
         )? || expression_is_null_with_side(

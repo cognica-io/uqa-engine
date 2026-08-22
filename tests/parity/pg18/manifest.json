@@ -58,6 +58,14 @@
       "open_issue": "Collations, domains, user-defined equality operators, and the complete PostgreSQL common-type matrix remain."
     },
     {
+      "id": "query.parenthesized-join-alias",
+      "postgresql_reference": "PostgreSQL 18.4 live parenthesized JOIN alias results and SQLSTATEs plus table-expression and row-locking documentation",
+      "uqa_test": "cargo test -p uqa-sql --lib parenthesized_join_alias; cargo test -p uqa-engine --test integration parenthesized_join_alias; cargo test -p uqa-engine --test integration row_locking_distinguishes_a_join_alias_from_its_inputs; tests/parity/pg18/probes.sql",
+      "supported_version": "PostgreSQL 18.4 final JOIN-output qualification, positional and partial column aliases, input-name hiding, outer JOIN and LATERAL visibility, ambiguity and alias-count validation, and row-lock targeting",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "query.fetch-with-ties",
       "postgresql_reference": "PostgreSQL 18.4 live results and SQLSTATEs for FETCH FIRST ... WITH TIES",
       "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::fetch_with_ties_preserves_its_boundary_and_requires_ordering; cargo test -p uqa-execution --lib fetch_with_ties_extends_the_boundary_across_batches; cargo test -p uqa-engine --test integration fetch_with_ties; tests/parity/pg18/probes.sql",

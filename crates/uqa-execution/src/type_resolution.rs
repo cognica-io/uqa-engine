@@ -53,6 +53,15 @@ fn scalar_type_inner(
         ScalarExpr::Column(column) => Ok(schema.type_of(column).cloned()),
         ScalarExpr::Position(position) => Ok(schema.column_type(*position).cloned()),
         ScalarExpr::QualifiedColumn { qualifier, column } => {
+            if schema.qualified_column_is_ambiguous(qualifier, column) {
+                return Err(SQLError::AmbiguousColumn(format!("{qualifier}.{column}")));
+            }
+            if !schema.has_qualifier(qualifier) {
+                return Err(SQLError::UnknownTable(qualifier.clone()));
+            }
+            if !schema.has_qualified_column(qualifier, column) {
+                return Err(SQLError::UnknownColumn(format!("{qualifier}.{column}")));
+            }
             Ok(schema.qualified_type(qualifier, column).cloned())
         }
         ScalarExpr::Literal(value) => Ok(value_type(value)),

@@ -208,9 +208,15 @@ fn from_qualifiers(from: &SourcePlan) -> BTreeSet<String> {
 
 fn collect_from_qualifiers(from: &SourcePlan, out: &mut BTreeSet<String>) {
     match from {
-        SourcePlan::Join { left, right, .. } => {
-            collect_from_qualifiers(left, out);
-            collect_from_qualifiers(right, out);
+        SourcePlan::Join {
+            left, right, alias, ..
+        } => {
+            if let Some(alias) = alias {
+                out.insert(alias.clone());
+            } else {
+                collect_from_qualifiers(left, out);
+                collect_from_qualifiers(right, out);
+            }
         }
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }

@@ -17,7 +17,7 @@ use super::{
     SQLError, SQLParam, ScalarExpr, SourcePlan, Value,
 };
 use crate::sql::from_rows::{
-    apply_table_function_aliases, join_using_output_schema, resolve_join_using,
+    alias_join_schema, apply_table_function_aliases, join_using_output_schema, resolve_join_using,
     table_function_column_types, table_function_empty_schema, validate_table_function_alias_count,
     TableFunctionTypeRequest,
 };
@@ -439,8 +439,11 @@ impl SchemaScope {
                 left,
                 right,
                 kind,
+                on,
                 using,
                 natural,
+                alias,
+                column_aliases,
                 lateral,
                 ..
             } => {
@@ -456,9 +459,15 @@ impl SchemaScope {
                     params,
                     right_scope.as_ref().or(outer),
                 )?;
+                if let Some(on) = on {
+                    let input =
+                        RowSchema::join(&left_schema, &right_schema, std::iter::empty::<String>());
+                    let input = overlay_outer_schema(&input, outer);
+                    uqa_execution::scalar_type_with_resolver(on, &input, params, engine)?;
+                }
                 let resolved =
                     resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
-                resolved.map_or_else(
+                let schema = resolved.map_or_else(
                     || {
                         Ok(RowSchema::join(
                             &left_schema,
@@ -467,7 +476,8 @@ impl SchemaScope {
                         ))
                     },
                     |using| join_using_output_schema(*kind, &left_schema, &right_schema, &using),
-                )
+                )?;
+                alias_join_schema(&schema, alias.as_deref(), column_aliases)
             }
         }
     }
@@ -630,7 +640,10 @@ fn rename_schema(schema: &RowSchema, aliases: &[String], qualifier: Option<&str>
     }
 }
 
-fn overlay_outer_schema(current: &RowSchema, outer: Option<&RowSchema>) -> RowSchema {
+pub(in crate::sql) fn overlay_outer_schema(
+    current: &RowSchema,
+    outer: Option<&RowSchema>,
+) -> RowSchema {
     let Some(outer) = outer else {
         return current.clone();
     };

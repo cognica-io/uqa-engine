@@ -99,6 +99,85 @@ pub(in crate::sql) fn qualify_source_operator_with_columns<'a>(
     }
 }
 
+fn join_alias_columns(
+    schema: &uqa_execution::RowSchema,
+    alias: &str,
+    column_aliases: &[String],
+) -> Result<Vec<String>, SQLError> {
+    let available = schema.len();
+    let specified = column_aliases.len();
+    if specified > available {
+        return Err(SQLError::Routine {
+            sqlstate: "42P10".into(),
+            message: format!(
+                "join expression \"{alias}\" has {available} columns available but {specified} columns specified"
+            ),
+        });
+    }
+    Ok(schema
+        .columns()
+        .iter()
+        .enumerate()
+        .map(|(position, column)| {
+            column_aliases
+                .get(position)
+                .cloned()
+                .unwrap_or_else(|| schema.public_name(position).unwrap_or(column).to_string())
+        })
+        .collect())
+}
+
+pub(in crate::sql) fn alias_join_schema(
+    schema: &uqa_execution::RowSchema,
+    alias: Option<&str>,
+    column_aliases: &[String],
+) -> Result<uqa_execution::RowSchema, SQLError> {
+    let Some(alias) = alias else {
+        if column_aliases.is_empty() {
+            return Ok(schema.clone());
+        }
+        return Err(SQLError::Internal(
+            "JOIN column aliases exist without a relation alias".into(),
+        ));
+    };
+    let columns = join_alias_columns(schema, alias, column_aliases)?;
+    Ok(uqa_execution::RowSchema::with_qualified_types(
+        alias,
+        columns,
+        schema.column_types().to_vec(),
+    ))
+}
+
+pub(in crate::sql) fn alias_join_operator<'a>(
+    operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
+    alias: Option<&str>,
+    column_aliases: &[String],
+) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
+    let Some(alias) = alias else {
+        if column_aliases.is_empty() {
+            return Ok(operator);
+        }
+        return Err(SQLError::Internal(
+            "JOIN column aliases exist without a relation alias".into(),
+        ));
+    };
+    let columns = join_alias_columns(operator.row_schema(), alias, column_aliases)?;
+    let mapping = columns
+        .into_iter()
+        .enumerate()
+        .map(|(position, column)| {
+            (
+                column.clone(),
+                uqa_execution::ColumnIdentity::qualified(alias, column),
+                position,
+            )
+        })
+        .collect();
+    Ok(Box::new(
+        uqa_execution::ColumnSelection::with_fresh_identities(operator, mapping),
+    ))
+}
+
 pub(in crate::sql) fn attach_qualifier_filter<'a>(
     operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
     qualifier: &str,

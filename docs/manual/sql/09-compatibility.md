@@ -40,7 +40,6 @@ These forms currently fail during compilation without creating a partial object.
 ## Open PostgreSQL 18 query-clause bugs
 
 - Collations, domains, user-defined equality operators, and the complete common-type matrix for `JOIN ... USING` columns with different declared types
-- Aliases on parenthesized join expressions
 - Multi-function `ROWS FROM`
 - Recursive CTE `SEARCH` and `CYCLE`
 - CTE `NOT MATERIALIZED`
