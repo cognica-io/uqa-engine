@@ -380,6 +380,7 @@ fn select_of_expr(expr: Expr) -> Statement {
         having: None,
         order_by: Vec::new(),
         limit: None,
+        with_ties: false,
         offset: None,
         with: Vec::new(),
         set_op: None,

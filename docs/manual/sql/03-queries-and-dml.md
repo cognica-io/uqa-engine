@@ -18,6 +18,19 @@ LIMIT 20 OFFSET 0;
 
 Ascending order defaults to NULLS LAST and descending order defaults to NULLS FIRST. Use explicit `NULLS FIRST` or `NULLS LAST` when portability matters.
 
+### FETCH WITH TIES
+
+`FETCH FIRST count ROWS WITH TIES` takes the requested prefix from the available ordered rows and extends it through every following row whose complete `ORDER BY` key is equal to the last requested row. `OFFSET` is applied first, an omitted count defaults to one row, and a zero count returns no rows.
+
+```sql
+SELECT player_id, score
+FROM leaderboard
+ORDER BY score DESC
+FETCH FIRST 10 ROWS WITH TIES;
+```
+
+`WITH TIES` requires `ORDER BY`; otherwise UQA Engine raises SQLSTATE `42601`. A NULL count raises SQLSTATE `2201W` instead of behaving like an unlimited `LIMIT`.
+
 ## DISTINCT and DISTINCT ON
 
 ```sql
@@ -267,4 +280,4 @@ Implemented matched actions are `UPDATE`, `DELETE`, and `DO NOTHING`. Implemente
 
 ## Determinism and bags
 
-SQL results are bags until an operation explicitly removes duplicates, and row order is unspecified without `ORDER BY`. A `LIMIT` without a complete ordering can select different tied rows after data, plan, or index changes. Use a stable unique key as the final ordering term for repeatable APIs and fixtures.
+SQL results are bags until an operation explicitly removes duplicates, and row order is unspecified without `ORDER BY`. A `LIMIT` without a complete ordering can select different tied rows after data, plan, or index changes. Use a stable unique key as the final ordering term for repeatable APIs and fixtures; omit that unique key intentionally when `FETCH ... WITH TIES` should return every peer at the boundary.

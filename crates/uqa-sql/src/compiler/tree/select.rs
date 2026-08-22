@@ -29,10 +29,12 @@ pub(in crate::compiler) fn compile_select(
             "named WINDOW clauses are not supported".into(),
         ));
     }
-    if stmt.limit_option() == pg_query::protobuf::LimitOption::WithTies {
-        return Err(SQLError::Unsupported(
-            "FETCH ... WITH TIES is not supported".into(),
-        ));
+    let with_ties = stmt.limit_option() == pg_query::protobuf::LimitOption::WithTies;
+    if with_ties && stmt.sort_clause.is_empty() {
+        return Err(SQLError::Routine {
+            sqlstate: "42601".into(),
+            message: "WITH TIES cannot be specified without ORDER BY clause".into(),
+        });
     }
     if stmt.op != pg_query::protobuf::SetOperation::SetopNone as i32 && !locking.is_empty() {
         return Err(SQLError::Unsupported(format!(
@@ -54,17 +56,17 @@ pub(in crate::compiler) fn compile_select(
             }
         }
     }
-    let from = compile_from_list(&stmt.from_clause)?;
-    let projections = compile_projections(&stmt.target_list)?;
-    let values = compile_values_lists(&stmt.values_lists)?;
+    let mut from = compile_from_list(&stmt.from_clause)?;
+    let mut projections = compile_projections(&stmt.target_list)?;
+    let mut values = compile_values_lists(&stmt.values_lists)?;
     let r#where = stmt
         .where_clause
         .as_ref()
         .map(|w| compile_expr(w))
         .transpose()?;
     let order_by = compile_order_by(&stmt.sort_clause)?;
-    let limit = compile_limit_offset_expr(stmt.limit_count.as_deref())?;
-    let offset = compile_limit_offset_expr(stmt.limit_offset.as_deref())?;
+    let limit = compile_limit_offset_expr(stmt.limit_count.as_deref(), !with_ties)?;
+    let offset = compile_limit_offset_expr(stmt.limit_offset.as_deref(), true)?;
     let (group_by, grouping_sets) = compile_group_clause(&stmt.group_clause)?;
     // Resolve GROUP BY 1 / GROUP BY <alias> against the SELECT list.
     // Postgres prefers a real column when one matches, falling back to
@@ -86,6 +88,18 @@ pub(in crate::compiler) fn compile_select(
         Some(wc) => compile_with_clause(wc)?,
         None => Vec::new(),
     };
+    // A bare VALUES statement can use the compact Statement::Values path, but ordering or slicing turns VALUES into a complete query expression. Put its rows below a star projection so those clauses are planned instead of being discarded by the standalone VALUES executor.
+    if !values.is_empty() && (!order_by.is_empty() || limit.is_some() || offset.is_some()) {
+        from = Some(FromClause::Values {
+            rows: std::mem::take(&mut values),
+            alias: None,
+            column_aliases: Vec::new(),
+        });
+        projections = vec![Projection {
+            expr: Expr::Star,
+            alias: None,
+        }];
+    }
     let mut set_op = compile_set_op(stmt)?;
 
     // For UNION / INTERSECT / EXCEPT shapes the outer SelectStmt carries:
@@ -97,13 +111,14 @@ pub(in crate::compiler) fn compile_select(
     //     lives in `stmt.larg`. We preserve that full subtree on `SetOp::left`
     //     and mirror its basic clauses on the parent for output-column
     //     discovery and backward compatibility with serialized AST users.
-    let (projections, values, mut from, r#where, group_by, order_by, limit, offset) =
+    let (projections, values, mut from, r#where, group_by, order_by, limit, with_ties, offset) =
         if set_op.is_some() {
             // Promote the outer (combined) clauses onto the SetOp and
             // replace the parent's clauses with the LHS branch's.
             if let Some(so) = set_op.as_mut() {
                 so.combined_order_by = order_by;
                 so.combined_limit = limit;
+                so.combined_with_ties = with_ties;
                 so.combined_offset = offset;
             }
             let lhs_node = stmt
@@ -122,6 +137,7 @@ pub(in crate::compiler) fn compile_select(
                 lhs.group_by,
                 lhs.order_by,
                 lhs.limit,
+                lhs.with_ties,
                 lhs.offset,
             )
         } else {
@@ -133,6 +149,7 @@ pub(in crate::compiler) fn compile_select(
                 group_by,
                 order_by,
                 limit,
+                with_ties,
                 offset,
             )
         };
@@ -152,6 +169,7 @@ pub(in crate::compiler) fn compile_select(
         having,
         order_by,
         limit,
+        with_ties,
         offset,
         with,
         set_op,
@@ -778,6 +796,7 @@ pub(in crate::compiler) fn compile_set_op(
         // resolved yet. Default to empty / None until then.
         combined_order_by: Vec::new(),
         combined_limit: None,
+        combined_with_ties: false,
         combined_offset: None,
     })))
 }
@@ -841,13 +860,11 @@ pub(in crate::compiler) fn compile_with_clause(
     Ok(out)
 }
 
-/// Compile a `LIMIT` / `OFFSET` operand into an [`Expr`]. The
-/// expression is resolved to an integer at execute time, so `LIMIT $1`
-/// and other parameter-bearing forms work end-to-end. `None` means the
-/// clause was absent entirely (`SELECT ... LIMIT NULL` is also `None`
-/// because PG treats `NULL` as "no limit").
-pub(in crate::compiler) fn compile_limit_offset_expr(node: Option<&Node>) -> Result<Option<Expr>> {
-    use pg_query::protobuf::a_const::Val;
+/// Compile a `LIMIT` / `OFFSET` operand into an [`Expr`]. The expression is coerced to bigint at execute time, so parameter-bearing forms work end-to-end. Ordinary `LIMIT NULL` is absent, while `FETCH ... WITH TIES` preserves NULL to raise `PostgreSQL`'s clause-specific error.
+pub(in crate::compiler) fn compile_limit_offset_expr(
+    node: Option<&Node>,
+    null_is_absent: bool,
+) -> Result<Option<Expr>> {
     let Some(node) = node else { return Ok(None) };
     let inner = node
         .node
@@ -856,13 +873,8 @@ pub(in crate::compiler) fn compile_limit_offset_expr(node: Option<&Node>) -> Res
     // `SELECT ... LIMIT NULL` parses as an `AConst` with no `val` --
     // treat it like an absent clause.
     if let NodeEnum::AConst(c) = inner {
-        if c.val.is_none() {
+        if c.val.is_none() && null_is_absent {
             return Ok(None);
-        }
-        if let Some(Val::Ival(i)) = &c.val {
-            if i.ival < 0 {
-                return Err(SQLError::Internal("negative LIMIT/OFFSET".into()));
-            }
         }
     }
     Ok(Some(compile_expr(node)?))

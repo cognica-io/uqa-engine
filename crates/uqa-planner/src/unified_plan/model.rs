@@ -51,6 +51,8 @@ pub enum RelationalPlan {
         right: Box<QueryPlan>,
         order_by: Vec<OrderPlan>,
         limit: Option<Box<ScalarExpr>>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        with_ties: bool,
         offset: Option<Box<ScalarExpr>>,
         subqueries: Vec<QueryPlan>,
     },
@@ -76,6 +78,8 @@ pub struct QueryBlockPlan {
     pub having: Option<ScalarExpr>,
     pub order_by: Vec<OrderPlan>,
     pub limit: Option<ScalarExpr>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub with_ties: bool,
     pub offset: Option<ScalarExpr>,
     pub distinct: bool,
     pub distinct_on: Vec<ScalarExpr>,

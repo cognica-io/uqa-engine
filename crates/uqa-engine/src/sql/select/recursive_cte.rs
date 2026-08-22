@@ -38,6 +38,7 @@ pub(in crate::sql) fn materialize_recursive_cte(
         right,
         order_by,
         limit,
+        with_ties,
         offset,
         subqueries,
     } = &cte.query.root
@@ -154,6 +155,7 @@ pub(in crate::sql) fn materialize_recursive_cte(
         having: None,
         order_by: order_by.clone(),
         limit: limit.as_deref().cloned(),
+        with_ties: *with_ties,
         offset: offset.as_deref().cloned(),
         distinct: false,
         distinct_on: Vec::new(),

@@ -1154,6 +1154,7 @@ mod tests {
             having: None,
             order_by: Vec::new(),
             limit: None,
+            with_ties: false,
             offset: None,
             distinct: false,
             distinct_on: Vec::new(),

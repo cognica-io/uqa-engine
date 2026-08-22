@@ -956,6 +956,9 @@ pub struct SelectStmt {
     /// other constant-folding integer expression resolves at execute
     /// time. `None` means no LIMIT clause was supplied.
     pub limit: Option<Expr>,
+    /// `FETCH ... WITH TIES`. The row-count expression remains in [`Self::limit`]; this flag extends the boundary through every row whose complete `ORDER BY` key equals the last requested row.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub with_ties: bool,
     /// `OFFSET <expr>`. Same shape as [`SelectStmt::limit`].
     pub offset: Option<Expr>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
@@ -999,6 +1002,9 @@ pub struct SetOp {
     /// `LIMIT` applied to the combined result. `None` means no
     /// outer LIMIT clause was supplied.
     pub combined_limit: Option<Expr>,
+    /// Whether the combined set-operation limit is `FETCH ... WITH TIES`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub combined_with_ties: bool,
     /// `OFFSET` applied to the combined result.
     pub combined_offset: Option<Expr>,
 }

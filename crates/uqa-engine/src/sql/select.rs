@@ -446,13 +446,16 @@ pub(super) fn execute_query_plan_output(
             right,
             order_by,
             limit,
+            with_ties,
             offset,
             subqueries,
         } => {
             let set_schema = bind_query_plan_schema(engine, plan, params, ctes, None)?;
             let streaming_consumer = match &output_mode {
                 QueryOutputMode::RowConsumer(downstream)
-                    if matches!((*kind, *all), (SetOpKind::Union, true)) && order_by.is_empty() =>
+                    if matches!((*kind, *all), (SetOpKind::Union, true))
+                        && order_by.is_empty()
+                        && !*with_ties =>
                 {
                     Some(Rc::clone(downstream))
                 }
@@ -567,6 +570,7 @@ pub(super) fn execute_query_plan_output(
                     having: None,
                     order_by: order_by.clone(),
                     limit: limit.as_deref().cloned(),
+                    with_ties: *with_ties,
                     offset: offset.as_deref().cloned(),
                     distinct: false,
                     distinct_on: Vec::new(),

@@ -229,6 +229,7 @@ pub fn bind_select(stmt: &SelectStmt, r: &mut dyn VariableResolver) -> Result<Se
         having: bind_opt_expr(stmt.having.as_ref(), r)?,
         order_by: bind_order_by(&stmt.order_by, r)?,
         limit: bind_opt_expr(stmt.limit.as_ref(), r)?,
+        with_ties: stmt.with_ties,
         offset: bind_opt_expr(stmt.offset.as_ref(), r)?,
         with: bind_ctes(&stmt.with, r)?,
         set_op: match stmt.set_op.as_ref() {
@@ -243,6 +244,7 @@ pub fn bind_select(stmt: &SelectStmt, r: &mut dyn VariableResolver) -> Result<Se
                 right: bind_select(&op.right, r)?,
                 combined_order_by: bind_order_by(&op.combined_order_by, r)?,
                 combined_limit: bind_opt_expr(op.combined_limit.as_ref(), r)?,
+                combined_with_ties: op.combined_with_ties,
                 combined_offset: bind_opt_expr(op.combined_offset.as_ref(), r)?,
             })),
             None => None,

@@ -60,6 +60,31 @@ fn set_operations_and_ctes_are_structural_children() {
 }
 
 #[test]
+fn fetch_with_ties_survives_query_block_and_set_operation_lowering() {
+    let UnifiedPlan::Query(query) = one("SELECT x FROM t ORDER BY x FETCH FIRST 2 ROWS WITH TIES")
+    else {
+        panic!("expected query plan");
+    };
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("expected query block");
+    };
+    assert!(block.with_ties);
+
+    let UnifiedPlan::Query(query) = one(
+        "SELECT x FROM left_t UNION ALL SELECT x FROM right_t ORDER BY x FETCH FIRST 2 ROWS WITH TIES",
+    ) else {
+        panic!("expected set-operation query plan");
+    };
+    assert!(matches!(
+        query.root,
+        RelationalPlan::SetOp {
+            with_ties: true,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn values_is_a_query_plan_not_a_command_escape_hatch() {
     let plan = one("VALUES (1 + 2), (3 + 4)");
     let UnifiedPlan::Query(query) = plan else {

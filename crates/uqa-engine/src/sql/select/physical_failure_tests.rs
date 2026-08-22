@@ -65,15 +65,12 @@ fn physical_failure_reports_both_execution_and_close_errors() {
 }
 
 #[test]
-fn floating_limit_rejects_non_finite_fractional_and_out_of_range_values() {
+fn floating_limit_uses_postgresql_bigint_rounding_and_range_checks() {
     assert_eq!(float_limit_offset(42.0, "LIMIT").unwrap(), 42);
-    for value in [
-        f64::NAN,
-        f64::INFINITY,
-        -1.0,
-        1.5,
-        18_446_744_073_709_551_616.0,
-    ] {
+    assert_eq!(float_limit_offset(1.5, "LIMIT").unwrap(), 2);
+    assert_eq!(float_limit_offset(2.5, "LIMIT").unwrap(), 2);
+    assert_eq!(float_limit_offset(-0.5, "LIMIT").unwrap(), 0);
+    for value in [f64::NAN, f64::INFINITY, -1.0, 9_223_372_036_854_775_808.0] {
         assert!(float_limit_offset(value, "LIMIT").is_err(), "{value}");
     }
 }

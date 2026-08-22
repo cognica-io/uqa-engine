@@ -198,6 +198,41 @@ fn limit_with_offset() {
 }
 
 #[test]
+fn fetch_with_ties_extends_the_boundary_across_batches() {
+    let mut rows = (0..1022)
+        .map(|id| row([("id", Value::Int(id)), ("key", Value::Int(id))]))
+        .collect::<Vec<_>>();
+    rows.extend([
+        row([("id", Value::Int(1022)), ("key", Value::Int(10_000))]),
+        row([("id", Value::Int(1023)), ("key", Value::Int(20_000))]),
+        row([("id", Value::Int(1024)), ("key", Value::Int(20_000))]),
+        row([("id", Value::Int(1025)), ("key", Value::Int(20_000))]),
+        row([("id", Value::Int(1026)), ("key", Value::Int(30_000))]),
+    ]);
+    let scan = boxed_scan(vec!["id".into(), "key".into()], rows);
+    let mut limit = Limit::with_ties(
+        scan,
+        1022,
+        2,
+        vec![SortKey {
+            expr: col("key"),
+            descending: false,
+            nulls_first: None,
+        }],
+        DefaultExpressionEvaluator::shared(vec![]),
+    );
+    let (_, rows) = run_to_rows(&mut limit).unwrap();
+    let ids = rows
+        .iter()
+        .map(|row| match row["id"] {
+            Value::Int(id) => id,
+            ref other => panic!("unexpected id: {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ids, [1022, 1023, 1024, 1025]);
+}
+
+#[test]
 fn sort_descending() {
     let scan = boxed_scan(
         vec!["x".into()],

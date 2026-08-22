@@ -71,6 +71,16 @@ pub type Result<T> = std::result::Result<T, SQLError>;
 
 impl From<pg_query::Error> for SQLError {
     fn from(value: pg_query::Error) -> Self {
-        SQLError::Parse(value.to_string())
+        match value {
+            pg_query::Error::Parse(message)
+                if message == "WITH TIES cannot be specified without ORDER BY clause" =>
+            {
+                SQLError::Routine {
+                    sqlstate: "42601".into(),
+                    message,
+                }
+            }
+            other => SQLError::Parse(other.to_string()),
+        }
     }
 }

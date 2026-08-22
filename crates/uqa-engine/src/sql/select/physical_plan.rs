@@ -12,7 +12,7 @@ use super::{
     is_score_provenance_column, prepare_aggregate_output_projection,
     prepare_correlated_exists_predicate, prepare_group_set_projection, prepare_window_plan,
     projection_columns, projections_may_return_set, qualifier_filters_for_stmt,
-    resolve_limit_offset_with_ctes, should_defer_distinct_limit,
+    resolve_fetch_limit_with_ties, resolve_limit_offset_with_ctes, should_defer_distinct_limit,
     validate_query_block_expression_types, validate_query_set_contexts, Arc, ComputePlan, CteScope,
     Engine, EngineExpressionEvaluator, HashSet, OutputColumnMapping, PhysicalAggregateExecutor,
     PhysicalProjection, PhysicalWindowExecutor, ProjectionPlan, QueryBlockPlan, QueryOutput,
@@ -45,6 +45,9 @@ use ordering::{
     one_based_output_position, output_position_error, output_target_position,
     prior_distinct_key_index, split_locking_order_projections, validate_distinct_ordering,
 };
+mod limit;
+pub(in crate::sql) use limit::attach_order_limit;
+use limit::resolved_sort_keys;
 
 pub(in crate::sql) fn expand_from_star_columns(
     columns: Vec<String>,
@@ -414,6 +417,15 @@ fn prepare_order_set_projections(
             continue;
         }
         let expression = resolve_order_expression(&order.expr, output_columns)?;
+        if statement.with_ties {
+            let column = format!("{ORDER_SET_COLUMN_PREFIX}{index}");
+            if !projections.iter().any(|(name, _)| name == &column) {
+                projections.push((column.clone(), expression));
+            }
+            prepared.get_or_insert_with(|| statement.clone()).order_by[index].expr =
+                ScalarExpr::Column(column);
+            continue;
+        }
         if let Some((column, _)) = projections
             .iter()
             .find(|(_, projected)| crate::sql::aggregates::exprs_match(projected, &expression))
@@ -529,109 +541,6 @@ pub(in crate::sql) fn execute_filter_rows(
     let mut filter = Filter::with_evaluator(scan, predicate, evaluator);
     let (_, rows) = run_to_rows(&mut filter).map_err(physical_exec_error)?;
     Ok(rows)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(in crate::sql) fn attach_order_limit<'a>(
-    mut operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
-    statement: &QueryBlockPlan,
-    output_columns: &[OutputColumnMapping],
-    engine: &'a Engine,
-    params: &'a [SQLParam],
-    ctes: &CteScope,
-    evaluator: SharedExpressionEvaluator<'a>,
-    recheck_source: Option<crate::sql::select::LockRowsRecheckSource>,
-) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
-    use uqa_execution::{ExternalSort, Limit, SortKey};
-
-    let offset =
-        resolve_limit_offset_with_ctes(statement.offset.as_ref(), engine, params, "OFFSET", ctes)?;
-    let limit =
-        resolve_limit_offset_with_ctes(statement.limit.as_ref(), engine, params, "LIMIT", ctes)?;
-    if !statement.order_by.is_empty() {
-        let work_mem_bytes = physical_work_mem_bytes(engine)?;
-        let keys =
-            statement
-                .order_by
-                .iter()
-                .try_fold(Vec::<SortKey>::new(), |mut keys, order| {
-                    let key = SortKey {
-                        expr: resolve_order_expression(&order.expr, output_columns)?,
-                        descending: order.descending,
-                        nulls_first: order
-                            .nulls
-                            .map(|nulls| matches!(nulls, uqa_sql::ast::NullsOrder::First)),
-                    };
-                    if !keys.iter().any(|existing| {
-                        crate::sql::aggregates::exprs_match(&existing.expr, &key.expr)
-                    }) {
-                        keys.push(key);
-                    }
-                    Ok::<_, SQLError>(keys)
-                })?;
-        let keep = if let Some(limit) = limit {
-            let keep = offset
-                .unwrap_or(0)
-                .checked_add(limit)
-                .ok_or_else(|| SQLError::TypeMismatch("OFFSET + LIMIT overflow".into()))?;
-            Some(usize::try_from(keep).map_err(|_| {
-                SQLError::TypeMismatch(format!(
-                    "OFFSET + LIMIT {keep} exceeds the platform row-count range"
-                ))
-            })?)
-        } else {
-            None
-        };
-        let required_ordering = keys
-            .iter()
-            .map(|key| {
-                uqa_execution::order_expression_position(operator.row_schema(), &key.expr).map(
-                    |position| uqa_execution::PhysicalOrder {
-                        position,
-                        descending: key.descending,
-                        nulls_first: Some(key.nulls_first.unwrap_or(key.descending)),
-                        nullable: true,
-                    },
-                )
-            })
-            .collect::<Option<Vec<_>>>();
-        let already_ordered = required_ordering.as_ref().is_some_and(|required| {
-            uqa_execution::ordering_satisfies(operator.output_ordering(), required)
-        });
-        if !already_ordered {
-            // A locking query must keep the complete sorted candidate stream: SKIP LOCKED skips rows, and a tuple-local recheck can drop a changed candidate, in which case PostgreSQL 18 surfaces the next candidate in sort order instead of returning fewer rows.
-            operator = Box::new(ExternalSort::new(
-                operator,
-                keys,
-                evaluator,
-                keep.filter(|_| statement.locking.is_empty()),
-                work_mem_bytes,
-            ));
-        }
-    }
-    if !statement.locking.is_empty() {
-        let max_rows = limit
-            .map(|limit| {
-                offset
-                    .unwrap_or(0)
-                    .checked_add(limit)
-                    .ok_or_else(|| SQLError::TypeMismatch("OFFSET + LIMIT overflow".into()))
-            })
-            .transpose()?;
-        operator = crate::sql::select::attach_lock_rows(
-            engine,
-            operator,
-            statement,
-            params,
-            ctes,
-            max_rows,
-            recheck_source,
-        )?;
-    }
-    if offset.is_some() || limit.is_some() {
-        operator = Box::new(Limit::new(operator, offset.unwrap_or(0), limit));
-    }
-    Ok(operator)
 }
 
 /// Rebuild the plan below one `LockRows` boundary for a tuple-local recheck. The construction replays the same source, filter, and scalar target projection below the original `LockRows` boundary, with the recheck pins active in `ctes` so every lock-target base scan emits only the candidate's tuples while unmarked relations rescan under the statement snapshot. Sorting, locking, and `LIMIT` never run here: the candidate keeps its original position in the outer stream.
@@ -863,19 +772,40 @@ pub(in crate::sql) fn finish_query_block_operator_output<'a>(
             "OFFSET",
             ctes,
         )?;
-        let limit =
-            resolve_limit_offset_with_ctes(original.limit.as_ref(), engine, params, "LIMIT", ctes)?;
-        operator = Box::new(Limit::new(operator, offset.unwrap_or(0), limit));
+        if original.with_ties {
+            let limit =
+                resolve_fetch_limit_with_ties(original.limit.as_ref(), engine, params, ctes)?;
+            let output = identity_order_columns(&columns);
+            let keys = resolved_sort_keys(original, &output, Some(operator.row_schema()))?;
+            operator = Box::new(Limit::with_ties(
+                operator,
+                offset.unwrap_or(0),
+                limit,
+                keys,
+                EngineExpressionEvaluator::shared(engine, params, ctes),
+            ));
+        } else {
+            let limit = resolve_limit_offset_with_ctes(
+                original.limit.as_ref(),
+                engine,
+                params,
+                "LIMIT",
+                ctes,
+            )?;
+            operator = Box::new(Limit::new(operator, offset.unwrap_or(0), limit));
+        }
     }
-    if operator
-        .schema()
-        .iter()
-        .any(|column| column.starts_with(DISTINCT_SET_COLUMN_PREFIX))
-    {
+    if operator.schema().iter().any(|column| {
+        column.starts_with(DISTINCT_SET_COLUMN_PREFIX)
+            || column.starts_with(ORDER_SET_COLUMN_PREFIX)
+    }) {
         let visible = operator
             .schema()
             .iter()
-            .filter(|column| !column.starts_with(DISTINCT_SET_COLUMN_PREFIX))
+            .filter(|column| {
+                !column.starts_with(DISTINCT_SET_COLUMN_PREFIX)
+                    && !column.starts_with(ORDER_SET_COLUMN_PREFIX)
+            })
             .cloned()
             .collect();
         operator = Box::new(ColumnSelection::new(operator, visible));
@@ -1084,9 +1014,23 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                     operator.row_schema(),
                     params,
                 )?;
+                let deferred_tie_columns = if statement.distinct && statement.with_ties {
+                    physical
+                        .iter()
+                        .filter(|(column, _)| column.starts_with(ORDER_SET_COLUMN_PREFIX))
+                        .map(|(column, _)| column.clone())
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
                 append_score_provenance_mappings(&mut output, operator.schema());
                 output.extend(
                     distinct_columns
+                        .into_iter()
+                        .map(|column| (column.clone(), ScalarExpr::Column(column))),
+                );
+                output.extend(
+                    deferred_tie_columns
                         .into_iter()
                         .map(|column| (column.clone(), ScalarExpr::Column(column))),
                 );
@@ -1199,6 +1143,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                     }
                     sort_statement.locking.clear();
                     sort_statement.limit = None;
+                    sort_statement.with_ties = false;
                     sort_statement.offset = None;
                     operator = attach_order_limit(
                         operator,
@@ -1213,11 +1158,11 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                     operator =
                         append_row_at_time_projection(operator, after_sort, Arc::clone(&evaluator));
                     let mut lock_statement = statement.clone();
-                    lock_statement.order_by.clear();
+                    lock_statement.order_by = sort_statement.order_by;
                     operator = attach_order_limit(
                         operator,
                         &lock_statement,
-                        &[],
+                        &order_output,
                         engine,
                         params,
                         ctes,
@@ -1279,7 +1224,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                 ctes,
                 evaluator,
             )?;
-            if key_statement.is_some() {
+            if key_statement.is_some() && !(statement.distinct && statement.with_ties) {
                 let visible = operator
                     .schema()
                     .iter()
@@ -1333,7 +1278,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                 ctes,
                 evaluator,
             )?;
-            if order_statement.is_some() {
+            if order_statement.is_some() && !(statement.distinct && statement.with_ties) {
                 let visible = operator
                     .schema()
                     .iter()
