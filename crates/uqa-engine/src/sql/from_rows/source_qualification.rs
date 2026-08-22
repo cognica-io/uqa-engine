@@ -130,25 +130,18 @@ pub(in crate::sql) fn table_function_empty_schema(
     alias: Option<&str>,
     column_aliases: &[String],
     output_width: usize,
+    ordinality: bool,
 ) -> Vec<String> {
     let lower = crate::sql::builtin_function_dispatch_name(&name.to_ascii_lowercase());
-    if lower == "unnest" {
+    let columns = if lower == "unnest" {
         let width = output_width.max(1);
         let default_column = if width == 1 {
             alias.unwrap_or(output_name)
         } else {
             output_name
         };
-        return (0..width)
-            .map(|position| {
-                column_aliases
-                    .get(position)
-                    .cloned()
-                    .unwrap_or_else(|| default_column.to_string())
-            })
-            .collect();
-    }
-    if column_aliases.is_empty() {
+        vec![default_column.to_string(); width]
+    } else {
         match lower.as_str() {
             "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
                 vec!["key".into(), "value".into()]
@@ -163,16 +156,65 @@ pub(in crate::sql) fn table_function_empty_schema(
             | "cross_paradigm_join" => {
                 vec!["left_doc_id".into(), "right_doc_id".into(), "_score".into()]
             }
-            _ => vec![scalar_table_function_default_column(
+            "generate_series"
+            | "regexp_split_to_table"
+            | "string_to_table"
+            | "json_array_elements"
+            | "jsonb_array_elements"
+            | "json_array_elements_text"
+            | "jsonb_array_elements_text"
+            | "json_object_keys"
+            | "jsonb_object_keys" => vec![scalar_table_function_default_column(
                 &lower,
                 output_name,
                 alias,
-                column_aliases,
+                &[],
             )],
+            _ => {
+                let minimum_width = 1;
+                let aliased_value_width = if ordinality && column_aliases.len() > minimum_width {
+                    column_aliases.len() - 1
+                } else {
+                    column_aliases.len()
+                };
+                vec![
+                    scalar_table_function_default_column(&lower, output_name, alias, &[]);
+                    minimum_width.max(aliased_value_width)
+                ]
+            }
         }
-    } else {
-        column_aliases.to_vec()
+    };
+    apply_table_function_aliases(columns, column_aliases, ordinality)
+}
+
+pub(in crate::sql) fn apply_table_function_aliases(
+    mut columns: Vec<String>,
+    column_aliases: &[String],
+    ordinality: bool,
+) -> Vec<String> {
+    if ordinality {
+        columns.push("ordinality".into());
     }
+    for (column, alias) in columns.iter_mut().zip(column_aliases) {
+        column.clone_from(alias);
+    }
+    columns
+}
+
+pub(in crate::sql) fn validate_table_function_alias_count(
+    table_alias: &str,
+    available: usize,
+    specified: usize,
+) -> Result<(), SQLError> {
+    if specified <= available {
+        return Ok(());
+    }
+    Err(SQLError::Routine {
+        sqlstate: "42P10".into(),
+        message: format!(
+            "table \"{table_alias}\" has {available} columns available but {specified} columns specified"
+        ),
+    })
 }
 
 pub(in crate::sql) fn multi_unnest_internal_columns(width: usize) -> Vec<String> {
@@ -181,84 +223,109 @@ pub(in crate::sql) fn multi_unnest_internal_columns(width: usize) -> Vec<String>
         .collect()
 }
 
+pub(in crate::sql) struct TableFunctionTypeRequest<'a> {
+    pub(in crate::sql) name: &'a str,
+    pub(in crate::sql) args: &'a [ScalarExpr],
+    pub(in crate::sql) declared_types: &'a [String],
+    pub(in crate::sql) columns: &'a [String],
+    pub(in crate::sql) ordinality: bool,
+}
+
 pub(in crate::sql) fn table_function_column_types(
     engine: &Engine,
-    name: &str,
-    args: &[ScalarExpr],
-    declared_types: &[String],
-    columns: &[String],
+    request: TableFunctionTypeRequest<'_>,
     input_schema: &uqa_execution::RowSchema,
     params: &[SQLParam],
 ) -> Vec<Option<ColumnType>> {
+    let TableFunctionTypeRequest {
+        name,
+        args,
+        declared_types,
+        columns,
+        ordinality,
+    } = request;
+    let value_columns = if ordinality {
+        columns
+            .get(..columns.len().saturating_sub(1))
+            .unwrap_or(&[])
+    } else {
+        columns
+    };
     let align = |types: Vec<Option<ColumnType>>| {
-        if types.len() == columns.len() {
+        if types.len() == value_columns.len() {
             types
         } else if let [ty] = types.as_slice() {
-            vec![ty.clone(); columns.len()]
+            vec![ty.clone(); value_columns.len()]
         } else {
-            vec![None; columns.len()]
+            vec![None; value_columns.len()]
         }
     };
-    if !declared_types.is_empty() {
-        return align(
+    let mut types = if declared_types.is_empty() {
+        let normalized = crate::sql::builtin_function_dispatch_name(&name.to_ascii_lowercase());
+        let argument_type = |position: usize| {
+            args.get(position)
+                .and_then(|argument| {
+                    uqa_execution::scalar_type(argument, input_schema, params).ok()
+                })
+                .flatten()
+        };
+        align(match normalized.as_str() {
+            "generate_series" => vec![argument_type(0)],
+            "unnest" => args
+                .iter()
+                .map(|argument| {
+                    uqa_execution::scalar_type(argument, input_schema, params)
+                        .ok()
+                        .flatten()
+                        .and_then(|ty| match ty {
+                            ColumnType::Array(element) => Some(*element),
+                            _ => None,
+                        })
+                })
+                .collect(),
+            "regexp_split_to_table"
+            | "string_to_table"
+            | "json_object_keys"
+            | "jsonb_object_keys" => vec![Some(ColumnType::Text)],
+            "json_array_elements" => vec![Some(ColumnType::Json)],
+            "jsonb_array_elements" => vec![Some(ColumnType::JsonB)],
+            "json_array_elements_text" | "jsonb_array_elements_text" => {
+                vec![Some(ColumnType::Text)]
+            }
+            "json_each" => vec![Some(ColumnType::Text), Some(ColumnType::Json)],
+            "jsonb_each" => vec![Some(ColumnType::Text), Some(ColumnType::JsonB)],
+            "json_each_text" | "jsonb_each_text" => {
+                vec![Some(ColumnType::Text), Some(ColumnType::Text)]
+            }
+            "pagerank" | "graph_pagerank" | "hits" | "graph_hits" | "betweenness"
+            | "graph_betweenness" => vec![
+                Some(ColumnType::BigInteger),
+                Some(ColumnType::DoublePrecision),
+            ],
+            "rpq" => vec![Some(ColumnType::BigInteger)],
+            "text_similarity_join"
+            | "vector_similarity_join"
+            | "graph_join"
+            | "hybrid_join"
+            | "cross_paradigm_join" => vec![
+                Some(ColumnType::BigInteger),
+                Some(ColumnType::BigInteger),
+                Some(ColumnType::DoublePrecision),
+            ],
+            _ => user_table_function_column_types(engine, name, args, input_schema, params),
+        })
+    } else {
+        align(
             declared_types
                 .iter()
                 .map(|ty| ColumnType::from_sql_name(ty).ok())
                 .collect(),
-        );
+        )
+    };
+    if ordinality {
+        types.push(Some(ColumnType::BigInteger));
     }
-
-    let normalized = crate::sql::builtin_function_dispatch_name(&name.to_ascii_lowercase());
-    let argument_type = |position: usize| {
-        args.get(position)
-            .and_then(|argument| uqa_execution::scalar_type(argument, input_schema, params).ok())
-            .flatten()
-    };
-    let types = match normalized.as_str() {
-        "generate_series" => vec![argument_type(0)],
-        "unnest" => args
-            .iter()
-            .map(|argument| {
-                uqa_execution::scalar_type(argument, input_schema, params)
-                    .ok()
-                    .flatten()
-                    .and_then(|ty| match ty {
-                        ColumnType::Array(element) => Some(*element),
-                        _ => None,
-                    })
-            })
-            .collect(),
-        "regexp_split_to_table" | "string_to_table" | "json_object_keys" | "jsonb_object_keys" => {
-            vec![Some(ColumnType::Text)]
-        }
-        "json_array_elements" => vec![Some(ColumnType::Json)],
-        "jsonb_array_elements" => vec![Some(ColumnType::JsonB)],
-        "json_array_elements_text" | "jsonb_array_elements_text" => {
-            vec![Some(ColumnType::Text)]
-        }
-        "json_each" => vec![Some(ColumnType::Text), Some(ColumnType::Json)],
-        "jsonb_each" => vec![Some(ColumnType::Text), Some(ColumnType::JsonB)],
-        "json_each_text" | "jsonb_each_text" => {
-            vec![Some(ColumnType::Text), Some(ColumnType::Text)]
-        }
-        "pagerank" | "graph_pagerank" | "hits" | "graph_hits" | "betweenness"
-        | "graph_betweenness" => vec![
-            Some(ColumnType::BigInteger),
-            Some(ColumnType::DoublePrecision),
-        ],
-        "rpq" => vec![Some(ColumnType::BigInteger)],
-        "text_similarity_join"
-        | "vector_similarity_join"
-        | "graph_join"
-        | "hybrid_join"
-        | "cross_paradigm_join" => vec![
-            Some(ColumnType::BigInteger),
-            Some(ColumnType::BigInteger),
-            Some(ColumnType::DoublePrecision),
-        ],
-        _ => user_table_function_column_types(engine, name, args, input_schema, params),
-    };
-    align(types)
+    types
 }
 
 fn user_table_function_column_types(

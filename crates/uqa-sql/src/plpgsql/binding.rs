@@ -292,6 +292,7 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             args,
             alias,
             column_aliases,
+            ordinality,
             column_types,
         } => FromClause::Function {
             name: name.clone(),
@@ -300,6 +301,7 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             args: bind_exprs(args, r)?,
             alias: alias.clone(),
             column_aliases: column_aliases.clone(),
+            ordinality: *ordinality,
             column_types: column_types.clone(),
         },
         FromClause::Subquery {

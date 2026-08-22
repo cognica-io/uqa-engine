@@ -116,4 +116,20 @@ fn sql_language_table_function() {
     assert_eq!(result.rows.len(), 3);
     assert_eq!(result.rows[2].get("x"), Some(&Value::Int(3)));
     assert_eq!(result.rows[2].get("y"), Some(&Value::Int(30)));
+
+    let ordinal = exec(
+        &eng,
+        "SELECT * FROM pairs(10) WITH ORDINALITY AS p(a, b, n) ORDER BY n",
+    );
+    assert_eq!(ordinal.columns, ["a", "b", "n"]);
+    assert_eq!(
+        ordinal.column_types,
+        [
+            Some(ColumnType::Integer),
+            Some(ColumnType::Integer),
+            Some(ColumnType::BigInteger),
+        ]
+    );
+    assert_eq!(ordinal.value_at(2, 0), Some(&Value::Int(3)));
+    assert_eq!(ordinal.value_at(2, 2), Some(&Value::Int(3)));
 }

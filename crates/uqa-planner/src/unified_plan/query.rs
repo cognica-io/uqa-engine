@@ -351,6 +351,7 @@ impl SourcePlan {
                 args,
                 alias,
                 column_aliases,
+                ordinality,
                 column_types,
             } => Self::Function {
                 name,
@@ -362,6 +363,7 @@ impl SourcePlan {
                     .collect(),
                 alias,
                 column_aliases,
+                ordinality,
                 column_types,
             },
             FromClause::Subquery {

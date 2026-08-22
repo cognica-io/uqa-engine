@@ -17,8 +17,9 @@ use super::{
     SQLError, SQLParam, ScalarExpr, SourcePlan, Value,
 };
 use crate::sql::from_rows::{
-    join_using_output_schema, resolve_join_using, table_function_column_types,
-    table_function_empty_schema,
+    apply_table_function_aliases, join_using_output_schema, resolve_join_using,
+    table_function_column_types, table_function_empty_schema, validate_table_function_alias_count,
+    TableFunctionTypeRequest,
 };
 use crate::sql::virtual_relation_schema;
 use std::collections::{BTreeMap, BTreeSet};
@@ -388,38 +389,38 @@ impl SchemaScope {
                 args,
                 alias,
                 column_aliases,
+                ordinality,
                 column_types,
                 ..
             } => {
-                let columns = if column_aliases.is_empty() {
-                    user_function_output_columns(engine, name).map_or_else(
-                        || {
-                            table_function_empty_schema(
-                                name,
-                                output_name,
-                                alias.as_deref(),
-                                column_aliases,
-                                args.len(),
-                            )
-                        },
-                        |columns| columns,
-                    )
-                } else {
-                    table_function_empty_schema(
-                        name,
-                        output_name,
-                        alias.as_deref(),
-                        column_aliases,
-                        args.len(),
-                    )
-                };
+                let columns = user_function_output_columns(engine, name).map_or_else(
+                    || {
+                        table_function_empty_schema(
+                            name,
+                            output_name,
+                            alias.as_deref(),
+                            column_aliases,
+                            args.len(),
+                            *ordinality,
+                        )
+                    },
+                    |columns| apply_table_function_aliases(columns, column_aliases, *ordinality),
+                );
+                validate_table_function_alias_count(
+                    alias.as_deref().unwrap_or(output_name),
+                    columns.len(),
+                    column_aliases.len(),
+                )?;
                 let input = outer.cloned().unwrap_or_default();
                 let types = table_function_column_types(
                     engine,
-                    name,
-                    args,
-                    column_types,
-                    &columns,
+                    TableFunctionTypeRequest {
+                        name,
+                        args,
+                        declared_types: column_types,
+                        columns: &columns,
+                        ordinality: *ordinality,
+                    },
                     &input,
                     params,
                 );

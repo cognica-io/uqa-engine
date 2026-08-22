@@ -11,7 +11,7 @@ use super::{
     multi_unnest_internal_columns, projection_columns, query_output_shared, AccessPathPlan,
     ComputePlan, CteScope, Engine, PlanSubqueryArena, QueryBlockPlan, QueryOutput, QueryOutputMode,
     QueryPlan, RelationalPlan, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, ScopedEngineHook,
-    SourceEvalContext, SourcePlan, TableFunctionCall,
+    SourceEvalContext, SourcePlan, TableFunctionCall, TABLE_FUNCTION_ORDINALITY_COLUMN,
 };
 use crate::sql::select::{expand_from_star_columns, resolve_row_locks};
 
@@ -40,6 +40,7 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
             args,
             alias,
             column_aliases,
+            ordinality,
             column_types,
         } = &self.right
         {
@@ -51,27 +52,41 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
                 &hook,
                 &self.ctes.scalar_subqueries,
             );
-            let call = TableFunctionCall::new(
+            let call = TableFunctionCall {
                 name,
                 output_name,
-                relation.as_deref(),
+                relation: relation.as_deref(),
                 args,
-                alias.as_deref(),
+                alias: alias.as_deref(),
                 column_aliases,
+                ordinality: *ordinality,
                 column_types,
-            );
+            };
             let rows = build_table_function_row_stream_with_row(&context, call, Some(left_row))?;
             let schema = self.right_schema.clone();
-            let input_schema =
-                if crate::sql::builtin_function_dispatch_name(name) == "unnest" && args.len() > 1 {
-                    uqa_execution::RowSchema::with_identities(
-                        multi_unnest_internal_columns(args.len()),
-                        schema.identities().to_vec(),
-                        schema.column_types().to_vec(),
-                    )
+            let multi_unnest =
+                crate::sql::builtin_function_dispatch_name(name) == "unnest" && args.len() > 1;
+            let input_schema = if multi_unnest || *ordinality {
+                let mut columns = if multi_unnest {
+                    multi_unnest_internal_columns(args.len())
                 } else {
-                    schema.clone()
+                    schema.columns().to_vec()
                 };
+                if *ordinality {
+                    if multi_unnest {
+                        columns.push(TABLE_FUNCTION_ORDINALITY_COLUMN.into());
+                    } else if let Some(column) = columns.last_mut() {
+                        *column = TABLE_FUNCTION_ORDINALITY_COLUMN.into();
+                    }
+                }
+                uqa_execution::RowSchema::with_identities(
+                    columns,
+                    schema.identities().to_vec(),
+                    schema.column_types().to_vec(),
+                )
+            } else {
+                schema.clone()
+            };
             return Ok(Box::new(rows.map(move |row| {
                 row.map(|row| {
                     let physical = uqa_execution::PhysicalRow::from_result_row(&input_schema, row);

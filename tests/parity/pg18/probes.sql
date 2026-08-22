@@ -400,6 +400,12 @@ VALUES (generate_series(1, 2))
 SELECT * FROM generate_series(1, generate_series(1, 2))
 SELECT * FROM generate_series(5, 1, -2)
 SELECT * FROM unnest(ARRAY['x', 'y'])
+SELECT * FROM generate_series(4, 6) WITH ORDINALITY
+SELECT value, sequence, pg_typeof(sequence) FROM generate_series(4, 5) WITH ORDINALITY AS g(value, sequence)
+SELECT * FROM json_each('{"a": 1}') WITH ORDINALITY AS j(k)
+SELECT v.n, g.value, g.ordinality FROM (VALUES (2), (0), (1)) AS v(n) CROSS JOIN LATERAL generate_series(1, v.n) WITH ORDINALITY AS g(value, ordinality) ORDER BY v.n DESC, g.ordinality
+SELECT * FROM unnest(ARRAY[1, 2], ARRAY['x']) WITH ORDINALITY AS u(a, b, n)
+SELECT * FROM generate_series(1, 1) WITH ORDINALITY AS g(a, b, c)
 SELECT x FROM (VALUES (1), (2)) AS t(x) ORDER BY x DESC LIMIT 1
 -- FETCH WITH TIES
 SELECT x FROM (VALUES (1), (2), (2), (3)) AS t(x) ORDER BY x FETCH FIRST 2 ROWS WITH TIES

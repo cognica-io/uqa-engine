@@ -82,6 +82,14 @@
       "open_issue": null
     },
     {
+      "id": "query.table-function-with-ordinality",
+      "postgresql_reference": "PostgreSQL 18.4 live table-function WITH ORDINALITY results and SQLSTATEs plus table-expression documentation",
+      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::table_function_with_ordinality_survives_compilation; cargo test -p uqa-engine --test integration engine_functions::sql_table_functions::; tests/parity/pg18/probes.sql",
+      "supported_version": "PostgreSQL 18.4 one-based bigint ordinality for built-in, registered, and SQL table functions, including default, positional, partial, and multi-column aliases plus per-LATERAL-invocation reset",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "dml.returning-row-images",
       "postgresql_reference": "PostgreSQL 18 SQL DML RETURNING documentation",
       "uqa_test": "crates/uqa-engine/tests/sql_update_delete.rs",
