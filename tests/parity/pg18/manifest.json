@@ -138,6 +138,14 @@
       "open_issue": null
     },
     {
+      "id": "ddl.select-into",
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live SELECT INTO results, catalogs, side-effect probes, prepared execution, and SQLSTATEs plus SELECT INTO documentation",
+      "uqa_test": "cargo test -p uqa-sql --lib select_into_lowers_to_the_create_table_as_contract; cargo test -p uqa-engine --test integration engine_catalog::sql_ctas::select_into",
+      "supported_version": "PostgreSQL 18.4 ordinary durable SELECT INTO tables with CTAS-equivalent static analysis, exact declared types, nullable columns, validation ordering, transactional creation, and durable reopen behavior",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "functions.identified-pg18-additions",
       "postgresql_reference": "PostgreSQL 18 functions and operators covered by the PG18 semantic suite",
       "uqa_test": "crates/uqa-engine/tests/pg18_semantics.rs; tests/parity/pg18/probes.sql",
