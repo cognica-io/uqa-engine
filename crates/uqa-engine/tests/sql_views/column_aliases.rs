@@ -329,12 +329,13 @@ fn legacy_query_only_view_definitions_still_restore() {
         serde_json::to_string(&engine.view("legacy_view").unwrap().unwrap()).unwrap()
     };
     let connection = rusqlite::Connection::open(&path).unwrap();
-    connection
+    let updated_rows = connection
         .execute(
             "UPDATE _views SET definition_json = ?1 WHERE schema_name = 'public' AND relation_name = 'legacy_view'",
             [legacy_json],
         )
         .unwrap();
+    assert_eq!(updated_rows, 1, "legacy view fixture must update one row");
     drop(connection);
 
     let engine = Engine::open(&path).unwrap();
