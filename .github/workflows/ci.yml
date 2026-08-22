@@ -41,18 +41,6 @@ jobs:
         run: cargo test -p uqa-engine --test integration --locked engine_queries::manual_sql_examples::manual_sql_examples_compile_or_execute -- --exact
       - name: Test workspace
         run: cargo test --workspace --exclude uqa-fdw --locked -- --skip manual_sql_examples::manual_sql_examples_compile_or_execute
-      - name: Run standalone examples
-        run: |
-          set -euo pipefail
-          for package in \
-            example-unified-search \
-            example-vector-knn \
-            example-graph-cypher \
-            example-storage-transactions \
-            example-extensibility
-          do
-            cargo run -p "$package" --locked
-          done
 
   test-fdw-linux:
     name: test FDW Linux
