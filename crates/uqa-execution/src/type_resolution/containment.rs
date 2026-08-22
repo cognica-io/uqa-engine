@@ -12,7 +12,9 @@ use uqa_sql::{SQLError, SQLParam};
 
 use crate::{RowSchema, ScalarExpr};
 
-use super::{base_type, named_argument_value, scalar_type_inner, FunctionTypeResolver};
+use super::common::base_type;
+use super::functions::named_argument_value;
+use super::{scalar_type_inner, FunctionTypeResolver};
 
 pub(super) fn is_operator(name: &str) -> bool {
     matches!(name, "contains_op" | "contained_by_op")
@@ -21,9 +23,7 @@ pub(super) fn is_operator(name: &str) -> bool {
 pub(super) fn resolve_operator_type(
     name: &str,
     args: &[ScalarExpr],
-    schema: &RowSchema,
-    params: &[SQLParam],
-    resolver: Option<&dyn FunctionTypeResolver>,
+    argument_types: &[Option<ColumnType>],
 ) -> Result<Option<ColumnType>, SQLError> {
     if args.len() != 2 {
         return Err(SQLError::BadArity {
@@ -32,8 +32,8 @@ pub(super) fn resolve_operator_type(
             actual: args.len(),
         });
     }
-    let left = argument_type(&args[0], schema, params, resolver)?;
-    let right = argument_type(&args[1], schema, params, resolver)?;
+    let left = argument_type(&args[0], argument_types[0].as_ref());
+    let right = argument_type(&args[1], argument_types[1].as_ref());
     let symbol = operator_symbol(name);
     let compatible = match (&left, &right) {
         (Some(left), Some(right)) => match (base_type(left), base_type(right)) {
@@ -99,14 +99,12 @@ pub(super) fn bind_unknown_arguments(
 
 fn argument_type(
     expression: &ScalarExpr,
-    schema: &RowSchema,
-    params: &[SQLParam],
-    resolver: Option<&dyn FunctionTypeResolver>,
-) -> Result<Option<ColumnType>, SQLError> {
+    resolved_type: Option<&ColumnType>,
+) -> Option<ColumnType> {
     if is_unknown_literal(expression) {
-        Ok(None)
+        None
     } else {
-        scalar_type_inner(named_argument_value(expression), schema, params, resolver)
+        resolved_type.cloned()
     }
 }
 
