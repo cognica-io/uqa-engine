@@ -96,6 +96,7 @@ fn named_windows_share_and_extend_definitions() {
         (6, 2, 80),
         (7, 1, 200),
     ];
+    assert_eq!(result.rows.len(), expected.len());
     for (row, (id, rank, running_total)) in result.rows.iter().zip(expected) {
         assert_eq!(row.get("id"), Some(&Value::Int(id)));
         assert_eq!(row.get("rn"), Some(&Value::Int(rank)));
