@@ -47,6 +47,7 @@ fn select_with_where(filter: Expr) -> SelectStmt {
         r#where: Some(filter),
         group_by: Vec::new(),
         grouping_sets: Vec::new(),
+        group_distinct: false,
         having: None,
         order_by: Vec::new(),
         limit: None,

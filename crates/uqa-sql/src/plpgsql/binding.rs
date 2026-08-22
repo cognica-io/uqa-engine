@@ -226,6 +226,7 @@ pub fn bind_select(stmt: &SelectStmt, r: &mut dyn VariableResolver) -> Result<Se
             .iter()
             .map(|set| bind_exprs(set, r))
             .collect::<Result<Vec<_>>>()?,
+        group_distinct: stmt.group_distinct,
         having: bind_opt_expr(stmt.having.as_ref(), r)?,
         order_by: bind_order_by(&stmt.order_by, r)?,
         limit: bind_opt_expr(stmt.limit.as_ref(), r)?,

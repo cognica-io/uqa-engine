@@ -43,7 +43,6 @@ These forms currently fail during compilation without creating a partial object.
 - Aliases on parenthesized join expressions
 - Multi-function `ROWS FROM`
 - Table functions `WITH ORDINALITY`
-- `GROUP BY DISTINCT`
 - Named `WINDOW` clauses
 - Recursive CTE `SEARCH` and `CYCLE`
 - CTE `NOT MATERIALIZED`

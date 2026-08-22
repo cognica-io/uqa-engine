@@ -152,6 +152,7 @@ pub(in crate::sql) fn materialize_recursive_cte(
         compute: ComputePlan::Project,
         group_by: Vec::new(),
         grouping_sets: Vec::new(),
+        group_distinct: false,
         having: None,
         order_by: order_by.clone(),
         limit: limit.as_deref().cloned(),

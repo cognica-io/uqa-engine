@@ -45,6 +45,7 @@ mod expression_shape;
 mod facet_projection;
 mod filter_pushdown;
 mod foreign_access;
+mod grouping_sets;
 mod physical_plan;
 mod query_block;
 mod recursive_cte;
@@ -66,6 +67,7 @@ pub(in crate::sql) use expression_shape::*;
 pub(in crate::sql) use facet_projection::*;
 pub(in crate::sql) use filter_pushdown::*;
 pub(in crate::sql) use foreign_access::*;
+pub(in crate::sql) use grouping_sets::*;
 pub(in crate::sql) use physical_plan::*;
 pub(in crate::sql) use query_block::*;
 pub(in crate::sql) use recursive_cte::*;
@@ -567,6 +569,7 @@ pub(super) fn execute_query_plan_output(
                     compute: ComputePlan::Project,
                     group_by: Vec::new(),
                     grouping_sets: Vec::new(),
+                    group_distinct: false,
                     having: None,
                     order_by: order_by.clone(),
                     limit: limit.as_deref().cloned(),

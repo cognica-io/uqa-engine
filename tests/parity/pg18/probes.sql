@@ -370,6 +370,24 @@ SELECT count(*) FROM (VALUES (1), (2)) AS t(x) ORDER BY generate_series(1, 2)
 SELECT row_number() OVER () FROM (VALUES (1), (2)) AS t(x) ORDER BY generate_series(1, 2)
 SELECT generate_series(1, 2), count(*) FROM (VALUES (1), (2)) AS t(x) GROUP BY generate_series(1, 2) ORDER BY 1
 SELECT generate_series(1, 2), count(*) FROM (VALUES (1)) AS t(x) GROUP BY generate_series(1, 3) ORDER BY 1
+SELECT count(*) FROM (SELECT a, count(*) FROM (VALUES (1), (1), (2)) AS v(a) GROUP BY DISTINCT a) AS grouped
+SELECT count(*) FROM (SELECT a, count(*) FROM (VALUES (1), (1), (2)) AS v(a) GROUP BY DISTINCT GROUPING SETS ((a), (a), ())) AS grouped
+SELECT count(*) FROM (SELECT a, count(*) FROM (VALUES (1), (1), (2)) AS v(a) GROUP BY ALL GROUPING SETS ((a), (a), ())) AS grouped
+SELECT count(*) FROM (SELECT a, b, count(*) FROM (VALUES (1, 10), (1, 20), (2, 10)) AS v(a, b) GROUP BY DISTINCT GROUPING SETS ((a, b), (b, a))) AS grouped
+SELECT count(*) FROM (SELECT a, count(*) FROM (VALUES (1), (1), (2)) AS v(a) GROUP BY DISTINCT ROLLUP(a, a)) AS grouped
+SELECT count(*) FROM (SELECT a, count(*) FROM (VALUES (1), (1), (2)) AS v(a) GROUP BY DISTINCT CUBE(a, a)) AS grouped
+SELECT count(*) FROM (SELECT a, count(*) FROM (VALUES (1), (1), (2)) AS v(a) GROUP BY ALL CUBE(a, a)) AS grouped
+SELECT count(*) FROM (SELECT count(*) FROM (VALUES (1), (2)) AS v(a) GROUP BY DISTINCT GROUPING SETS ((a + 1), (a + 1.0), (a + 1.00))) AS grouped
+SELECT count(*) FROM (SELECT count(*) FROM (VALUES (1), (2)) AS v(a) GROUP BY DISTINCT GROUPING SETS ((a + 1), (((a + 1))))) AS grouped
+SELECT count(*) FROM (SELECT count(*) FROM (VALUES (1)) AS v(a) WHERE false GROUP BY DISTINCT GROUPING SETS ((), ())) AS grouped
+SELECT count(*) FROM (SELECT count(*) FROM (VALUES (1, 10), (2, 20)) AS v(a, b) GROUP BY DISTINCT GROUPING SETS ((ROW(a, b)), (ROW(b, a)))) AS grouped
+SELECT count(*) FROM (SELECT count(*) FROM (VALUES (1), (2)) AS v(a) GROUP BY DISTINCT GROUPING SETS ((a + 1), (a + 1::integer))) AS grouped
+SELECT count(*) FROM (SELECT count(*) FROM (VALUES (1::bigint), (2::bigint)) AS v(a) GROUP BY DISTINCT GROUPING SETS ((a + 1), (a + 1::bigint))) AS grouped
+SELECT count(*) FROM (SELECT count(*) FROM (VALUES (1), (2)) AS v(a) GROUP BY DISTINCT GROUPING SETS ((a), (v.a))) AS grouped
+SELECT count(*) FROM (SELECT count(*) FROM (VALUES (1), (2)) AS v(a) GROUP BY DISTINCT GROUPING SETS ((a + NULL), (a + NULL::integer))) AS grouped
+SELECT count(*) FROM (SELECT count(*) FROM (VALUES ('A'::text), ('B'::text)) AS v(a) GROUP BY DISTINCT GROUPING SETS ((lower(a)), (pg_catalog.lower(a)))) AS grouped
+SELECT count(*) FROM (SELECT count(*) GROUP BY DISTINCT GROUPING SETS ((lower(NULL)), (lower(NULL::text)))) AS grouped
+SELECT count(*) FROM (SELECT count(*) FROM (VALUES ('a'::text), ('b'::text)) AS v(a) GROUP BY DISTINCT GROUPING SETS ((a || NULL), (a || NULL::text))) AS grouped
 SELECT CASE WHEN true THEN generate_series(1, 2) END
 SELECT coalesce(generate_series(1, 2), 0)
 SELECT 1 WHERE generate_series(1, 2) > 0

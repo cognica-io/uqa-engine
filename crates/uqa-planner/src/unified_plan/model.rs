@@ -75,6 +75,8 @@ pub struct QueryBlockPlan {
     pub compute: ComputePlan,
     pub group_by: Vec<ScalarExpr>,
     pub grouping_sets: Vec<Vec<ScalarExpr>>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub group_distinct: bool,
     pub having: Option<ScalarExpr>,
     pub order_by: Vec<OrderPlan>,
     pub limit: Option<ScalarExpr>,
