@@ -291,7 +291,7 @@ impl SourcePlan {
                 output_name, alias, ..
             } => Some(alias.as_deref().unwrap_or(output_name)),
             Self::Values { alias, .. } | Self::Subquery { alias, .. } => alias.as_deref(),
-            Self::Join { .. } => None,
+            Self::Join { alias, .. } => alias.as_deref(),
         }
     }
 
@@ -317,6 +317,8 @@ impl SourcePlan {
                 on,
                 using,
                 natural,
+                alias,
+                column_aliases,
                 lateral,
             } => Self::Join {
                 left: Box::new(Self::lower_with(*left, aggregates, subqueries)),
@@ -325,6 +327,8 @@ impl SourcePlan {
                 on: on.map(|expr| lower_scalar_expression(expr, aggregates, subqueries)),
                 using,
                 natural,
+                alias,
+                column_aliases,
                 lateral,
                 strategy: JoinExecutionStrategy::Auto,
             },

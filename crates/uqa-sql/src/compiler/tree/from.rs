@@ -63,11 +63,6 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
             })
         }
         NodeEnum::JoinExpr(j) => {
-            if j.alias.is_some() {
-                return Err(SQLError::Unsupported(
-                    "aliases on parenthesized JOIN expressions are not supported".into(),
-                ));
-            }
             let left = j
                 .larg
                 .as_ref()
@@ -108,6 +103,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                 ));
             }
             let lateral = right_is_lateral(right);
+            let (alias, column_aliases) = compile_alias(j.alias.as_ref())?;
             Ok(FromClause::Join {
                 left: Box::new(compile_from_node(left)?),
                 right: Box::new(compile_from_node(right)?),
@@ -115,6 +111,8 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                 on,
                 using,
                 natural: j.is_natural,
+                alias,
+                column_aliases,
                 lateral,
             })
         }

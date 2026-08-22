@@ -247,6 +247,124 @@ pub(in crate::sql) fn join_using_output_schema(
         .map_err(super::super::select::physical_exec_error)
 }
 
+/// Add a parenthesized JOIN alias to the input-side schemas for null-rejection analysis. Merged FULL JOIN columns belong to neither side exclusively because their value is a coalesce of both inputs.
+pub(in crate::sql) fn join_alias_input_schemas(
+    kind: JoinKind,
+    left: &RowSchema,
+    right: &RowSchema,
+    using: Option<&ResolvedJoinUsing>,
+    alias: &str,
+    column_aliases: &[String],
+) -> Result<(RowSchema, RowSchema), SQLError> {
+    #[derive(Clone, Copy)]
+    enum Owner {
+        Left(usize),
+        Right(usize),
+        Neither,
+    }
+
+    let mut output = Vec::<(String, Owner)>::new();
+    if let Some(using) = using {
+        let mut left_used = vec![false; left.len()];
+        let mut right_used = vec![false; right.len()];
+        for column in &using.columns {
+            left_used[column.left] = true;
+            right_used[column.right] = true;
+            let owner = match kind {
+                JoinKind::Inner | JoinKind::Left => Owner::Left(column.left),
+                JoinKind::Right => Owner::Right(column.right),
+                JoinKind::Full => Owner::Neither,
+                JoinKind::Cross => {
+                    return Err(SQLError::Internal(
+                        "CROSS JOIN cannot carry a USING qualification".into(),
+                    ));
+                }
+            };
+            output.push((column.name.clone(), owner));
+        }
+        output.extend(
+            left.columns()
+                .iter()
+                .enumerate()
+                .filter(|(position, _)| !left_used[*position])
+                .map(|(position, column)| {
+                    (
+                        left.public_name(position).unwrap_or(column).to_string(),
+                        Owner::Left(position),
+                    )
+                }),
+        );
+        output.extend(
+            right
+                .columns()
+                .iter()
+                .enumerate()
+                .filter(|(position, _)| !right_used[*position])
+                .map(|(position, column)| {
+                    (
+                        right.public_name(position).unwrap_or(column).to_string(),
+                        Owner::Right(position),
+                    )
+                }),
+        );
+    } else {
+        output.extend(left.columns().iter().enumerate().map(|(position, column)| {
+            (
+                left.public_name(position).unwrap_or(column).to_string(),
+                Owner::Left(position),
+            )
+        }));
+        output.extend(
+            right
+                .columns()
+                .iter()
+                .enumerate()
+                .map(|(position, column)| {
+                    (
+                        right.public_name(position).unwrap_or(column).to_string(),
+                        Owner::Right(position),
+                    )
+                }),
+        );
+    }
+
+    if column_aliases.len() > output.len() {
+        return Err(SQLError::Routine {
+            sqlstate: "42P10".into(),
+            message: format!(
+                "join expression \"{alias}\" has {} columns available but {} columns specified",
+                output.len(),
+                column_aliases.len()
+            ),
+        });
+    }
+    for (position, column_alias) in column_aliases.iter().enumerate() {
+        output[position].0.clone_from(column_alias);
+    }
+
+    let mut counts = BTreeMap::<String, usize>::new();
+    for (column, _) in &output {
+        *counts.entry(column.clone()).or_default() += 1;
+    }
+    let mut left_aliases = Vec::new();
+    let mut right_aliases = Vec::new();
+    for (column, owner) in output {
+        if counts.get(&column) != Some(&1) {
+            continue;
+        }
+        let identity = ColumnIdentity::qualified(alias, column);
+        match owner {
+            Owner::Left(position) => left_aliases.push((identity, position)),
+            Owner::Right(position) => right_aliases.push((identity, position)),
+            Owner::Neither => {}
+        }
+    }
+    Ok((
+        RowSchema::with_identity_aliases(left, &left_aliases),
+        RowSchema::with_identity_aliases(right, &right_aliases),
+    ))
+}
+
 fn join_using_layout(
     kind: JoinKind,
     left: &RowSchema,

@@ -7,14 +7,14 @@
 //! Query-block preparation and column-pruning analysis.
 
 use super::{
-    execute_query_block_operator_output, expand_from_star_columns, expr_contains_subquery,
-    expr_contains_volatile_function, final_filter_after_qualifier_pushdown, has_window,
-    projection_columns, qualifier_filters_for_stmt, resolve_row_locks,
-    run_select_without_from_output, run_single_foreign_select_output,
-    run_single_table_select_output, validate_query_set_contexts,
-    validate_source_set_contexts_before_build, BTreeSet, ColumnPrune, CteScope, Engine,
-    QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr, SingleRelation,
-    SourcePlan,
+    bind_source_plan_schema, execute_query_block_operator_output, expand_from_star_columns,
+    expr_contains_subquery, expr_contains_volatile_function, final_filter_after_qualifier_pushdown,
+    has_window, overlay_outer_schema, projection_columns, qualifier_filters_for_stmt,
+    resolve_row_locks, run_select_without_from_output, run_single_foreign_select_output,
+    run_single_table_select_output, validate_query_block_expression_types,
+    validate_query_set_contexts, validate_source_set_contexts_before_build, BTreeSet, ColumnPrune,
+    CteScope, Engine, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr,
+    SingleRelation, SourcePlan,
 };
 
 pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
@@ -25,11 +25,19 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
     ctes: &mut CteScope,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
+    let outer = ctes.row_lock_outer_row().map(|row| &row.schema);
+    let source_schema = stmt.from.as_ref().map_or_else(
+        || Ok(uqa_execution::RowSchema::default()),
+        |source| bind_source_plan_schema(engine, source, params, ctes, outer),
+    )?;
+    let expression_schema = overlay_outer_schema(&source_schema, outer);
+    validate_query_block_expression_types(engine, stmt, &expression_schema, params)?;
+    validate_query_set_contexts(engine, stmt, &expression_schema, params)?;
+
     let Some(from) = stmt.from.as_ref() else {
-        validate_query_set_contexts(engine, stmt, &uqa_execution::RowSchema::default(), params)?;
         return run_select_without_from_output(engine, block, stmt, params, ctes, output_mode);
     };
-    validate_source_set_contexts_before_build(engine, from, params, ctes, None)?;
+    validate_source_set_contexts_before_build(engine, from, params, ctes, outer)?;
 
     // Set-op branches, CTEs, and derived-table bodies still need the same
     // search-aware single-table physical access path as top-level queries;
@@ -150,7 +158,8 @@ pub(in crate::sql) fn column_prune_for_stmt_with_filter(
     from: &SourcePlan,
     filter: Option<&ScalarExpr>,
 ) -> Option<ColumnPrune> {
-    if has_window(&stmt.projections)
+    if source_contains_join_alias(from)
+        || has_window(&stmt.projections)
         || stmt.projections.iter().any(|projection| {
             matches!(projection.expr, ScalarExpr::Star)
                 || expr_contains_subquery(&projection.expr)
@@ -200,6 +209,20 @@ pub(in crate::sql) fn column_prune_for_stmt_with_filter(
         return None;
     }
     Some(prune)
+}
+
+fn source_contains_join_alias(source: &SourcePlan) -> bool {
+    match source {
+        SourcePlan::Join {
+            left, right, alias, ..
+        } => {
+            alias.is_some() || source_contains_join_alias(left) || source_contains_join_alias(right)
+        }
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::Subquery { .. } => false,
+    }
 }
 
 fn collect_join_binding_prune_columns(engine: &Engine, from: &SourcePlan, prune: &mut ColumnPrune) {
@@ -338,9 +361,15 @@ fn add_all_source_columns_to_prune(engine: &Engine, source: &SourcePlan, prune: 
 
 pub(in crate::sql) fn collect_from_qualifiers(from: &SourcePlan, out: &mut Vec<String>) {
     match from {
-        SourcePlan::Join { left, right, .. } => {
-            collect_from_qualifiers(left, out);
-            collect_from_qualifiers(right, out);
+        SourcePlan::Join {
+            left, right, alias, ..
+        } => {
+            if let Some(alias) = alias {
+                out.push(alias.clone());
+            } else {
+                collect_from_qualifiers(left, out);
+                collect_from_qualifiers(right, out);
+            }
         }
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }

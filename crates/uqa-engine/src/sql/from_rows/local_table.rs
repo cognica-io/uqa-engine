@@ -7,10 +7,11 @@
 //! Local table scans and recursive physical source assembly.
 
 use super::{
-    apply_table_function_aliases, attach_qualifier_filter, build_info_schema_rows,
-    build_table_function_row_stream, build_values_physical_rows, combine_filters,
-    decide_join_sides, execute_query_plan_output, execute_view_plan_output_with_parent_cache,
-    has_filters_for_qualifier, is_score_provenance_column, join_conjuncts, join_using_predicate,
+    alias_join_operator, apply_table_function_aliases, attach_qualifier_filter,
+    build_info_schema_rows, build_table_function_row_stream, build_values_physical_rows,
+    combine_filters, decide_join_sides, execute_query_plan_output,
+    execute_view_plan_output_with_parent_cache, has_filters_for_qualifier,
+    is_score_provenance_column, join_conjuncts, join_using_predicate,
     multi_unnest_internal_columns, null_row_for_schema, physical_work_mem_bytes,
     propagated_join_filters, push_output_filter_into_query_plan, qualifier_filter, qualifier_for,
     qualify_source_operator, qualify_source_operator_with_columns,
@@ -32,6 +33,10 @@ use uqa_planner::{AccessPathPlan, ComputePlan, RelationalPlan};
 
 #[path = "local_table_command_scan.rs"]
 mod command_scan;
+#[path = "local_table_join_validation.rs"]
+mod join_validation;
+
+use join_validation::validate_join_on_schema;
 
 type StreamingLocalTableScan<'a> = (Box<dyn uqa_execution::PhysicalOperator + 'a>, bool);
 type SharedLockOrigin = (Arc<str>, Arc<str>);
@@ -893,6 +898,8 @@ fn build_join_operator_with_ctes_at_path<'a>(
             on,
             using,
             natural,
+            alias,
+            column_aliases,
             lateral,
             strategy,
         } => {
@@ -936,6 +943,14 @@ fn build_join_operator_with_ctes_at_path<'a>(
                 let left_nulls = null_row_for_schema(left_schema.columns());
                 let right_schema =
                     bind_source_plan_schema(engine, right, params, ctes, Some(&left_schema))?;
+                validate_join_on_schema(
+                    engine,
+                    on.as_ref(),
+                    &left_schema,
+                    &right_schema,
+                    params,
+                    ctes,
+                )?;
                 let right_nulls = null_row_for_schema(right_schema.columns());
                 let resolved_using =
                     resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
@@ -974,11 +989,12 @@ fn build_join_operator_with_ctes_at_path<'a>(
                         right_nulls,
                         right_schema.clone(),
                     ));
-                return if let Some(using) = resolved_using.as_ref() {
+                let joined = if let Some(using) = resolved_using.as_ref() {
                     shape_join_using_output(joined, *kind, &left_schema, &right_schema, using)
                 } else {
                     Ok(joined)
-                };
+                }?;
+                return alias_join_operator(joined, alias.as_deref(), column_aliases);
             }
 
             let right_filters = filters
@@ -996,6 +1012,14 @@ fn build_join_operator_with_ctes_at_path<'a>(
 
             let left_schema = left_operator.row_schema().clone();
             let right_schema = right_operator.row_schema().clone();
+            validate_join_on_schema(
+                engine,
+                on.as_ref(),
+                &left_schema,
+                &right_schema,
+                params,
+                ctes,
+            )?;
             let resolved_using =
                 resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
             let effective_on = resolved_using
@@ -1081,11 +1105,12 @@ fn build_join_operator_with_ctes_at_path<'a>(
                     ));
                 }
             };
-            if let Some(using) = resolved_using.as_ref() {
+            let joined = if let Some(using) = resolved_using.as_ref() {
                 shape_join_using_output(joined, *kind, &left_schema, &right_schema, using)
             } else {
                 Ok(joined)
-            }
+            }?;
+            alias_join_operator(joined, alias.as_deref(), column_aliases)
         }
         SourcePlan::Values {
             rows,

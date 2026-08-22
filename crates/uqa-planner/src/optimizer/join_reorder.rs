@@ -313,9 +313,14 @@ fn flatten_reorderable_inner_join(
             on,
             using: None,
             natural: false,
+            alias: None,
+            column_aliases,
             lateral: false,
             strategy: _,
         } => {
+            if !column_aliases.is_empty() {
+                return false;
+            }
             if !flatten_reorderable_inner_join(left, atoms, predicates)
                 || !flatten_reorderable_inner_join(right, atoms, predicates)
             {
@@ -633,6 +638,8 @@ fn materialize_join_order(
             on: None,
             using: None,
             natural: false,
+            alias: None,
+            column_aliases: Vec::new(),
             lateral: false,
             strategy: match algorithm {
                 JoinAlgorithm::Hash => JoinExecutionStrategy::Hash,
@@ -645,6 +652,8 @@ fn materialize_join_order(
             on: None,
             using: None,
             natural: false,
+            alias: None,
+            column_aliases: Vec::new(),
             lateral: false,
             strategy: JoinExecutionStrategy::Auto,
         }),
@@ -691,6 +700,11 @@ fn attach_join_predicates(
 fn source_qualifiers(source: &SourcePlan) -> BTreeSet<String> {
     let mut qualifiers = BTreeSet::new();
     match source {
+        SourcePlan::Join {
+            alias: Some(alias), ..
+        } => {
+            qualifiers.insert(alias.clone());
+        }
         SourcePlan::Join { .. } => {}
         SourcePlan::Table { .. }
         | SourcePlan::Function { .. }

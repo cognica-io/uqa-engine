@@ -215,12 +215,18 @@ pub(in crate::sql) fn final_filter_after_qualifier_pushdown(
 pub(in crate::sql) fn qualifier_filter_elision_safe(from: &SourcePlan) -> bool {
     match from {
         SourcePlan::Join {
-            left, right, kind, ..
+            left,
+            right,
+            kind,
+            alias,
+            ..
         } => {
-            matches!(
-                kind,
-                uqa_sql::ast::JoinKind::Inner | uqa_sql::ast::JoinKind::Cross
-            ) && qualifier_filter_elision_safe(left)
+            alias.is_none()
+                && matches!(
+                    kind,
+                    uqa_sql::ast::JoinKind::Inner | uqa_sql::ast::JoinKind::Cross
+                )
+                && qualifier_filter_elision_safe(left)
                 && qualifier_filter_elision_safe(right)
         }
         SourcePlan::Table { .. }
@@ -677,9 +683,13 @@ fn collect_source_column_owners(engine: &Engine, source: &SourcePlan, owners: &m
             }
             register_column_owners(owners, qualifier, columns);
         }
-        SourcePlan::Join { left, right, .. } => {
-            collect_source_column_owners(engine, left, owners);
-            collect_source_column_owners(engine, right, owners);
+        SourcePlan::Join {
+            left, right, alias, ..
+        } => {
+            if alias.is_none() {
+                collect_source_column_owners(engine, left, owners);
+                collect_source_column_owners(engine, right, owners);
+            }
         }
         SourcePlan::Values {
             rows,
@@ -1138,6 +1148,8 @@ mod tests {
             on: Some(on),
             using: None,
             natural: false,
+            alias: None,
+            column_aliases: Vec::new(),
             lateral: false,
             strategy: JoinExecutionStrategy::Hash,
         }

@@ -213,9 +213,15 @@ fn collect_from_tables(
             Some(alias.as_ref().unwrap_or(qualifier).clone()),
             name.clone(),
         )),
-        SourcePlan::Join { left, right, .. } => {
-            collect_from_tables(left, out, has_opaque_source);
-            collect_from_tables(right, out, has_opaque_source);
+        SourcePlan::Join {
+            left, right, alias, ..
+        } => {
+            if alias.is_some() {
+                *has_opaque_source = true;
+            } else {
+                collect_from_tables(left, out, has_opaque_source);
+                collect_from_tables(right, out, has_opaque_source);
+            }
         }
         _ => *has_opaque_source = true,
     }

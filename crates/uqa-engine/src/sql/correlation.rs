@@ -336,19 +336,35 @@ fn source_scope(
                 columns: relation_columns(engine, name, ctes)?,
             })
         }
-        SourcePlan::Join { left, right, .. } => {
+        SourcePlan::Join {
+            left,
+            right,
+            alias,
+            column_aliases,
+            ..
+        } => {
             let left = source_scope(engine, left, ctes)?;
             let right = source_scope(engine, right, ctes)?;
-            let mut qualifiers = left.qualifiers;
-            qualifiers.extend(right.qualifiers);
+            let complete = left.columns.complete && right.columns.complete;
             let mut names = left.columns.names;
             names.extend(right.columns.names);
+            if let Some(alias) = alias {
+                if !column_aliases.is_empty() {
+                    names = column_aliases.iter().cloned().collect();
+                }
+                return Ok(QueryScope {
+                    qualifiers: [alias.clone()].into_iter().collect(),
+                    columns: RelationColumns {
+                        names,
+                        complete: complete && column_aliases.is_empty(),
+                    },
+                });
+            }
+            let mut qualifiers = left.qualifiers;
+            qualifiers.extend(right.qualifiers);
             Ok(QueryScope {
                 qualifiers,
-                columns: RelationColumns {
-                    names,
-                    complete: left.columns.complete && right.columns.complete,
-                },
+                columns: RelationColumns { names, complete },
             })
         }
         SourcePlan::Values {

@@ -256,9 +256,15 @@ fn collect_visible_qualifiers(from: &FromClause, names: &mut std::collections::B
                 }
             }
         }
-        FromClause::Join { left, right, .. } => {
-            collect_visible_qualifiers(left, names);
-            collect_visible_qualifiers(right, names);
+        FromClause::Join {
+            left, right, alias, ..
+        } => {
+            if let Some(alias) = alias {
+                names.insert(alias.clone());
+            } else {
+                collect_visible_qualifiers(left, names);
+                collect_visible_qualifiers(right, names);
+            }
         }
         FromClause::Values { alias, .. }
         | FromClause::Subquery { alias, .. }
@@ -455,6 +461,8 @@ pub(in crate::compiler) fn compile_from_list(nodes: &[Node]) -> Result<Option<Fr
             on: None,
             using: None,
             natural: false,
+            alias: None,
+            column_aliases: Vec::new(),
             lateral,
         };
     }

@@ -68,12 +68,58 @@ pub(in crate::compiler) fn validate_select_locking(statement: &SelectStmt) -> Re
     let Some(from) = statement.from.as_ref() else {
         return Ok(());
     };
+    validate_join_alias_lock_targets(from, &statement.locking)?;
     let targets = collect_lock_sources(from, false, &statement.with);
     let defer_nullable_validation = statement.r#where.as_ref().is_some_and(|expression| {
         expression.contains_unqualified_column()
             || expression.contains_function_with_unknown_strictness()
+            || contains_any_join_alias(from)
     });
     apply_locking_targets(&statement.locking, &targets, defer_nullable_validation)
+}
+
+fn contains_any_join_alias(from: &FromClause) -> bool {
+    match from {
+        FromClause::Join {
+            left, right, alias, ..
+        } => alias.is_some() || contains_any_join_alias(left) || contains_any_join_alias(right),
+        FromClause::Table { .. }
+        | FromClause::Values { .. }
+        | FromClause::Function { .. }
+        | FromClause::Subquery { .. } => false,
+    }
+}
+
+fn contains_join_alias(from: &FromClause, target: &str) -> bool {
+    match from {
+        FromClause::Join {
+            left, right, alias, ..
+        } => {
+            alias.as_deref() == Some(target)
+                || contains_join_alias(left, target)
+                || contains_join_alias(right, target)
+        }
+        FromClause::Table { .. }
+        | FromClause::Values { .. }
+        | FromClause::Function { .. }
+        | FromClause::Subquery { .. } => false,
+    }
+}
+
+fn validate_join_alias_lock_targets(from: &FromClause, clauses: &[LockingClause]) -> Result<()> {
+    for clause in clauses {
+        if clause
+            .relations
+            .iter()
+            .any(|relation| contains_join_alias(from, relation))
+        {
+            return Err(SQLError::Unsupported(format!(
+                "{} cannot be applied to a join",
+                clause.strength.sql_name()
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Push a query block's row marks into selected derived tables. `PostgreSQL` merges those pushed-down clauses with row marks written inside the derived query, so the strongest lock and strictest wait policy are applied before either clause can block independently.
@@ -90,6 +136,7 @@ pub(in crate::compiler) fn propagate_select_locking(statement: &mut SelectStmt) 
     let Some(from) = statement.from.as_mut() else {
         return Ok(());
     };
+    validate_join_alias_lock_targets(from, &clauses)?;
     push_clauses_into_selected_subqueries(from, &clauses, &cte_names)
 }
 

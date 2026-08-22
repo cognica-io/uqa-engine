@@ -14,7 +14,11 @@ use uqa_sql::{SQLError, SQLParam};
 use crate::{RowSchema, ScalarExpr};
 
 mod containment;
+mod equality;
+mod qualified_column;
 mod to_hex;
+
+pub use equality::equality_operand_type;
 
 pub trait FunctionTypeResolver: Send + Sync {
     fn resolve_function_type(
@@ -53,7 +57,7 @@ fn scalar_type_inner(
         ScalarExpr::Column(column) => Ok(schema.type_of(column).cloned()),
         ScalarExpr::Position(position) => Ok(schema.column_type(*position).cloned()),
         ScalarExpr::QualifiedColumn { qualifier, column } => {
-            Ok(schema.qualified_type(qualifier, column).cloned())
+            qualified_column::resolve(schema, qualifier, column)
         }
         ScalarExpr::Literal(value) => Ok(value_type(value)),
         ScalarExpr::Param(index) => Ok(index
@@ -1451,41 +1455,6 @@ fn numeric_rank(ty: &ColumnType) -> Option<u8> {
         ColumnType::Real => Some(4),
         ColumnType::DoublePrecision => Some(5),
         _ => None,
-    }
-}
-
-pub fn equality_operand_type(
-    left: &ColumnType,
-    right: &ColumnType,
-) -> Result<ColumnType, SQLError> {
-    if matches!(left, ColumnType::Json) || matches!(right, ColumnType::Json) {
-        return Err(undefined_equality_operator(left, right));
-    }
-    if matches!(left, ColumnType::Array(_)) || matches!(right, ColumnType::Array(_)) {
-        if left == right {
-            return Ok(left.clone());
-        }
-        return Err(undefined_equality_operator(left, right));
-    }
-    if left.is_character_string() && right.is_character_string() {
-        if matches!(left, ColumnType::Bpchar | ColumnType::Character(_))
-            || matches!(right, ColumnType::Bpchar | ColumnType::Character(_))
-        {
-            return Ok(ColumnType::Bpchar);
-        }
-        return Ok(ColumnType::Text);
-    }
-    common_type(left, right).map_err(|_| undefined_equality_operator(left, right))
-}
-
-fn undefined_equality_operator(left: &ColumnType, right: &ColumnType) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "42883".into(),
-        message: format!(
-            "operator does not exist: {} = {}",
-            left.sql_name(),
-            right.sql_name()
-        ),
     }
 }
 

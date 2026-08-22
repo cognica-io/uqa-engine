@@ -81,6 +81,18 @@ pub(in crate::sql) fn resolve_row_locks(
         params,
         ctes,
     )?;
+    for clause in locking {
+        if clause
+            .relations
+            .iter()
+            .any(|relation| source_contains_join_alias(&effective_from, relation))
+        {
+            return Err(SQLError::Unsupported(format!(
+                "{} cannot be applied to a join",
+                clause.strength.sql_name()
+            )));
+        }
+    }
     let sources = collect_source_leaves(engine, &effective_from, false, ctes)?;
     let mut assigned: Vec<Option<(LockStrength, LockWait)>> = vec![None; sources.len()];
     for clause in locking {
@@ -151,6 +163,22 @@ pub(in crate::sql) fn resolve_row_locks(
         });
     }
     Ok(resolved)
+}
+
+fn source_contains_join_alias(source: &SourcePlan, target: &str) -> bool {
+    match source {
+        SourcePlan::Join {
+            left, right, alias, ..
+        } => {
+            alias.as_deref() == Some(target)
+                || source_contains_join_alias(left, target)
+                || source_contains_join_alias(right, target)
+        }
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::Subquery { .. } => false,
+    }
 }
 
 mod null_rejection;

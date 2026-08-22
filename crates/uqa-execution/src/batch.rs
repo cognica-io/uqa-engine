@@ -25,6 +25,7 @@ use crate::physical::{ExecError, ExecResult};
 mod materialization;
 mod outer_scope;
 mod owned_row;
+mod schema_remap;
 
 pub use owned_row::OwnedPhysicalRow;
 
@@ -425,6 +426,13 @@ impl RowSchema {
             .iter()
             .chain(self.index.aliases.keys())
             .any(|identity| identity.qualifier() == Some(qualifier))
+    }
+
+    /// Whether a visible or hidden lookup identity contains this exact qualified column, independently of its static type or ambiguity.
+    #[must_use]
+    pub fn has_qualified_column(&self, qualifier: &str, column: &str) -> bool {
+        let identity = ColumnIdentity::qualified(qualifier, column);
+        self.index.qualified.contains_key(&identity) || self.index.aliases.contains_key(&identity)
     }
 
     pub fn identity(&self, logical: usize) -> Option<&ColumnIdentity> {
@@ -930,42 +938,6 @@ impl RowSchema {
             .cloned()
             .map(ColumnIdentity::unqualified)
             .collect();
-        let mut lookup_aliases = input.index.aliases.clone();
-        let mut alias_types = input.index.cold.aliases.clone();
-        for (identity, logical) in aliases {
-            lookup_aliases.insert(identity.clone(), input.slot(*logical).unwrap_or(NULL_SLOT));
-            alias_types.insert(identity.clone(), input.column_type(*logical).cloned());
-        }
-        Self::from_typed_parts_with_aliases(
-            output_names,
-            identities,
-            types,
-            slots,
-            input.physical_width(),
-            lookup_aliases,
-            alias_types,
-        )
-    }
-
-    /// Select logical positions with explicit public labels, SQL identities, and types while preserving hidden aliases and physical fragments.
-    pub(crate) fn remap_typed_identities(
-        input: &Self,
-        columns: &[(String, ColumnIdentity, usize, Option<ColumnType>)],
-        aliases: &[(ColumnIdentity, usize)],
-    ) -> Self {
-        let output_names = columns
-            .iter()
-            .map(|(output, _, _, _)| output.clone())
-            .collect();
-        let identities = columns
-            .iter()
-            .map(|(_, identity, _, _)| identity.clone())
-            .collect();
-        let slots = columns
-            .iter()
-            .map(|(_, _, logical, _)| input.slot(*logical).unwrap_or(NULL_SLOT))
-            .collect();
-        let types = columns.iter().map(|(_, _, _, ty)| ty.clone()).collect();
         let mut lookup_aliases = input.index.aliases.clone();
         let mut alias_types = input.index.cold.aliases.clone();
         for (identity, logical) in aliases {
