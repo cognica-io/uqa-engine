@@ -264,6 +264,9 @@ fn resolve_score_slice_top_k(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<Option<usize>, SQLError> {
+    if stmt.with_ties {
+        return Ok(None);
+    }
     if stmt
         .limit
         .iter()
@@ -311,34 +314,122 @@ pub(in crate::sql) fn resolve_limit_offset_with_ctes(
     let Some(expr) = expr else {
         return Ok(None);
     };
+    let value = evaluate_limit_offset_with_ctes(expr, engine, params, ctes)?;
+    coerce_limit_offset(value, expr, label)
+}
+
+/// Resolve the mandatory row count for `FETCH ... WITH TIES`. `PostgreSQL` uses `invalid_row_count_in_result_offset_clause` for both a NULL and a negative boundary, with a clause-specific diagnostic for NULL.
+pub(in crate::sql) fn resolve_fetch_limit_with_ties(
+    expr: Option<&ScalarExpr>,
+    engine: &Engine,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<u64, SQLError> {
+    let Some(expr) = expr else {
+        return Err(SQLError::Internal(
+            "FETCH ... WITH TIES is missing its row-count expression".into(),
+        ));
+    };
+    let value = evaluate_limit_offset_with_ctes(expr, engine, params, ctes)?;
+    match value {
+        Value::Null => Err(SQLError::Routine {
+            sqlstate: "2201W".into(),
+            message: "row count cannot be null in FETCH FIRST ... WITH TIES clause".into(),
+        }),
+        value => coerce_limit_offset(value, expr, "LIMIT")?.ok_or_else(|| {
+            SQLError::Internal("FETCH ... WITH TIES resolved without a row count".into())
+        }),
+    }
+}
+
+fn evaluate_limit_offset_with_ctes(
+    expr: &ScalarExpr,
+    engine: &Engine,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<Value, SQLError> {
     let hook = ScopedEngineHook::new(engine, ctes);
     let ctx = PhysicalEvalContext::new(None, params)
         .with_function_hook(&hook)
         .with_subquery_runner(&hook);
-    let value = eval_physical_scalar(expr, &ctes.scalar_subqueries, &ctx)?;
-    match value {
-        Value::Null => Ok(None),
-        Value::Int(n) if n >= 0 => Ok(Some(u64::try_from(n).map_err(|_| {
-            SQLError::TypeMismatch(format!("{label} exceeds the u64 execution range"))
-        })?)),
-        Value::Int(_) => Err(SQLError::TypeMismatch(format!(
-            "{label} must be non-negative"
-        ))),
-        Value::Float(value) => float_limit_offset(value, label).map(Some),
-        other => Err(SQLError::TypeMismatch(format!(
-            "{label} must be a non-negative integer, got {other:?}"
-        ))),
+    eval_physical_scalar(expr, &ctes.scalar_subqueries, &ctx)
+}
+
+fn coerce_limit_offset(
+    value: Value,
+    expression: &ScalarExpr,
+    label: &str,
+) -> Result<Option<u64>, SQLError> {
+    if matches!(value, Value::Null) {
+        return Ok(None);
+    }
+    let allow_unknown_string = matches!(
+        expression,
+        ScalarExpr::Literal(Value::Str(_)) | ScalarExpr::Param(_)
+    );
+    let value = match &value {
+        Value::Int(value) => Value::Int(*value),
+        Value::Float(value) => Value::Int(
+            i64::try_from(float_limit_offset(*value, label)?)
+                .expect("PostgreSQL bigint row count fits i64"),
+        ),
+        Value::Decimal(decimal) if decimal.is_nan() => {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "cannot convert NaN to bigint".into(),
+            });
+        }
+        Value::Decimal(decimal) if decimal.is_infinite() => {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "cannot convert infinity to bigint".into(),
+            });
+        }
+        Value::Decimal(_) => uqa_sql::expr::cast_value(&value, "bigint")?,
+        Value::Str(_) if allow_unknown_string => uqa_sql::expr::cast_value(&value, "bigint")?,
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "argument of {label} must be type bigint, got {other:?}"
+            )));
+        }
+    };
+    let Value::Int(value) = value else {
+        return Err(SQLError::Internal(
+            "row-count bigint coercion did not return an integer".into(),
+        ));
+    };
+    if value < 0 {
+        return Err(negative_row_count(label));
+    }
+    Ok(Some(u64::try_from(value).map_err(|_| {
+        SQLError::Internal("non-negative bigint did not fit u64".into())
+    })?))
+}
+
+fn negative_row_count(label: &str) -> SQLError {
+    if label == "OFFSET" {
+        SQLError::Routine {
+            sqlstate: "2201X".into(),
+            message: "OFFSET must not be negative".into(),
+        }
+    } else {
+        SQLError::Routine {
+            sqlstate: "2201W".into(),
+            message: "LIMIT must not be negative".into(),
+        }
     }
 }
 
 pub(in crate::sql) fn float_limit_offset(value: f64, label: &str) -> Result<u64, SQLError> {
-    const U64_UPPER_EXCLUSIVE: f64 = 18_446_744_073_709_551_616.0;
-    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value >= U64_UPPER_EXCLUSIVE {
-        return Err(SQLError::TypeMismatch(format!(
-            "{label} must be a finite non-negative integer within the u64 execution range, got {value}"
-        )));
+    let Value::Int(value) = uqa_sql::expr::cast_value(&Value::Float(value), "bigint")? else {
+        return Err(SQLError::Internal(
+            "float row-count coercion did not return an integer".into(),
+        ));
+    };
+    if value < 0 {
+        return Err(negative_row_count(label));
     }
-    Ok(value as u64)
+    Ok(u64::try_from(value).expect("non-negative bigint fits u64"))
 }
 
 pub(in crate::sql) fn projection_columns(projections: &[ProjectionPlan]) -> Vec<String> {

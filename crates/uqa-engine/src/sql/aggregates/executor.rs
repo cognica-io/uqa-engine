@@ -232,6 +232,7 @@ fn grouping_set_statements(statement: &QueryBlockPlan) -> Vec<(QueryBlockPlan, b
         .map(|(mut statement, relaxed)| {
             statement.order_by.clear();
             statement.limit = None;
+            statement.with_ties = false;
             statement.offset = None;
             (statement, relaxed)
         })

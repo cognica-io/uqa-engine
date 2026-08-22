@@ -38,6 +38,7 @@ pub(super) fn choose_access_path(block: &QueryBlockPlan) -> AccessPathPlan {
     };
     if operator_compatible(predicate) {
         let score_limit_pushdown = block.limit.is_some()
+            && !block.with_ties
             && root_score_retrieval(predicate)
             && !block.order_by.is_empty()
             && block.order_by.iter().all(|order| {

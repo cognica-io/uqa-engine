@@ -4,10 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! End-to-end coverage for `LIMIT` / `OFFSET` across every SELECT
-//! shape: bare projection, ORDER BY by source column, parameterised
-//! LIMIT / OFFSET, GROUP BY, JOIN, set operations, CTE, and the
-//! search-aware `_score` ordering path.
+//! End-to-end coverage for `LIMIT`, `OFFSET`, and `FETCH ... WITH TIES` across every SELECT shape: bare projection, ORDER BY by source column, parameterised slicing, GROUP BY, JOIN, set operations, CTEs, row locking, and the search-aware `_score` ordering path.
 
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLParam};
@@ -42,6 +39,18 @@ fn ids(eng: &Engine, sql: &str, params: &[SQLParam]) -> Vec<i64> {
         .map(|r| match r.get("id").unwrap() {
             Value::Int(n) => *n,
             other => panic!("non-int id: {other:?}"),
+        })
+        .collect()
+}
+
+fn integers(eng: &Engine, sql: &str, column: &str, params: &[SQLParam]) -> Vec<i64> {
+    eng.sql(sql, params)
+        .unwrap()
+        .rows
+        .iter()
+        .map(|row| match row.get(column).unwrap() {
+            Value::Int(value) => *value,
+            other => panic!("non-int {column}: {other:?}"),
         })
         .collect()
 }
@@ -86,6 +95,256 @@ fn limit_with_offset_combines() {
         &[],
     );
     assert_eq!(r, vec![2, 3]);
+}
+
+#[test]
+fn fetch_with_ties_extends_the_complete_order_boundary() {
+    let eng = Engine::new();
+    let values = integers(
+        &eng,
+        "SELECT x FROM (VALUES (1, 1), (2, 2), (3, 2), (4, 3)) AS v(x, key) ORDER BY key FETCH FIRST 2 ROWS WITH TIES",
+        "x",
+        &[],
+    );
+    assert_eq!(values, [1, 2, 3]);
+
+    let values = integers(
+        &eng,
+        "SELECT x FROM (VALUES (1, 1, 1), (2, 1, 2), (3, 1, 2), (4, 1, 3)) AS v(x, a, b) ORDER BY a, b FETCH FIRST 2 ROWS WITH TIES",
+        "x",
+        &[],
+    );
+    assert_eq!(values, [1, 2, 3]);
+}
+
+#[test]
+fn fetch_with_ties_applies_offset_before_extending_null_peers() {
+    let eng = Engine::new();
+    let result = eng
+        .sql(
+            "SELECT x FROM (VALUES (1), (2), (NULL), (NULL)) AS v(x) ORDER BY x NULLS LAST OFFSET 2 FETCH FIRST 1 ROW WITH TIES",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows.len(), 2);
+    assert!(result.rows.iter().all(|row| row["x"] == Value::Null));
+}
+
+#[test]
+fn fetch_with_ties_supports_omitted_and_parameterised_counts() {
+    let eng = Engine::new();
+    let omitted = integers(
+        &eng,
+        "SELECT x FROM (VALUES (1), (1), (2)) AS v(x) ORDER BY x FETCH FIRST ROW WITH TIES",
+        "x",
+        &[],
+    );
+    assert_eq!(omitted, [1, 1]);
+    let parameterised = integers(
+        &eng,
+        "SELECT x FROM (VALUES (1), (2), (2), (3)) AS v(x) ORDER BY x FETCH FIRST $1 ROWS WITH TIES",
+        "x",
+        &[SQLParam::scalar(Value::Int(2))],
+    );
+    assert_eq!(parameterised, [1, 2, 2]);
+    let zero = eng
+        .sql(
+            "SELECT x FROM (VALUES (1), (1)) AS v(x) ORDER BY x FETCH FIRST 0 ROWS WITH TIES",
+            &[],
+        )
+        .unwrap();
+    assert!(zero.rows.is_empty());
+
+    let numeric_rounding = integers(
+        &eng,
+        "SELECT x FROM generate_series(1, 5) AS g(x) ORDER BY x FETCH FIRST 2.5 ROWS WITH TIES",
+        "x",
+        &[],
+    );
+    assert_eq!(numeric_rounding, [1, 2, 3]);
+    let float_rounding = integers(
+        &eng,
+        "SELECT x FROM generate_series(1, 5) AS g(x) ORDER BY x FETCH FIRST (2.5::float8) ROWS WITH TIES",
+        "x",
+        &[],
+    );
+    assert_eq!(float_rounding, [1, 2]);
+    let unknown_literal = integers(
+        &eng,
+        "SELECT x FROM generate_series(1, 5) AS g(x) ORDER BY x FETCH FIRST '2' ROWS WITH TIES",
+        "x",
+        &[],
+    );
+    assert_eq!(unknown_literal, [1, 2]);
+}
+
+#[test]
+fn fetch_with_ties_reports_postgresql_clause_errors() {
+    let eng = Engine::new();
+    let missing_order = eng
+        .sql("SELECT 1 FETCH FIRST 1 ROW WITH TIES", &[])
+        .unwrap_err();
+    assert_eq!(missing_order.sqlstate(), Some("42601"));
+    assert_eq!(
+        missing_order.to_string(),
+        "WITH TIES cannot be specified without ORDER BY clause"
+    );
+
+    let null_count = eng
+        .sql("SELECT 1 ORDER BY 1 FETCH FIRST NULL ROWS WITH TIES", &[])
+        .unwrap_err();
+    assert_eq!(null_count.sqlstate(), Some("2201W"));
+    assert_eq!(
+        null_count.to_string(),
+        "row count cannot be null in FETCH FIRST ... WITH TIES clause"
+    );
+
+    let negative = eng
+        .sql("SELECT 1 ORDER BY 1 FETCH FIRST -1 ROWS WITH TIES", &[])
+        .unwrap_err();
+    assert_eq!(negative.sqlstate(), Some("2201W"));
+    assert_eq!(negative.to_string(), "LIMIT must not be negative");
+
+    let negative_offset = eng
+        .sql(
+            "SELECT 1 ORDER BY 1 OFFSET -1 FETCH FIRST 1 ROW WITH TIES",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(negative_offset.sqlstate(), Some("2201X"));
+    assert_eq!(negative_offset.to_string(), "OFFSET must not be negative");
+
+    let typed_text = eng
+        .sql(
+            "SELECT 1 ORDER BY 1 FETCH FIRST ('2'::text) ROWS WITH TIES",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(typed_text.sqlstate(), Some("42804"));
+    let numeric_nan = eng
+        .sql(
+            "SELECT 1 ORDER BY 1 FETCH FIRST ('NaN'::numeric) ROWS WITH TIES",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(numeric_nan.sqlstate(), Some("0A000"));
+    assert_eq!(numeric_nan.to_string(), "cannot convert NaN to bigint");
+}
+
+#[test]
+fn fetch_with_ties_applies_to_set_operations_and_ctes() {
+    let eng = Engine::new();
+    let direct_values = integers(
+        &eng,
+        "VALUES (1), (2), (2), (3) ORDER BY 1 FETCH FIRST 2 ROWS WITH TIES",
+        "column1",
+        &[],
+    );
+    assert_eq!(direct_values, [1, 2, 2]);
+    let set = integers(
+        &eng,
+        "SELECT x FROM (VALUES (1), (2)) AS l(x) UNION ALL SELECT x FROM (VALUES (2), (3)) AS r(x) ORDER BY x FETCH FIRST 2 ROWS WITH TIES",
+        "x",
+        &[],
+    );
+    assert_eq!(set, [1, 2, 2]);
+    let cte = integers(
+        &eng,
+        "WITH ranked AS (SELECT x FROM (VALUES (1), (2), (2), (3)) AS v(x) ORDER BY x FETCH FIRST 2 ROWS WITH TIES) SELECT x FROM ranked ORDER BY x",
+        "x",
+        &[],
+    );
+    assert_eq!(cte, [1, 2, 2]);
+}
+
+#[test]
+fn fetch_with_ties_runs_after_aggregation_windowing_and_distinct() {
+    let eng = Engine::new();
+    let aggregate = integers(
+        &eng,
+        "SELECT x, count(*) AS n FROM (VALUES (1), (1), (2), (2), (3)) AS v(x) GROUP BY x ORDER BY n DESC FETCH FIRST 1 ROW WITH TIES",
+        "x",
+        &[],
+    );
+    assert_eq!(aggregate, [1, 2]);
+
+    let window = integers(
+        &eng,
+        "SELECT x, dense_rank() OVER (ORDER BY x) AS rank FROM (VALUES (1), (2), (2), (3)) AS v(x) ORDER BY rank FETCH FIRST 2 ROWS WITH TIES",
+        "x",
+        &[],
+    );
+    assert_eq!(window, [1, 2, 2]);
+
+    let distinct = integers(
+        &eng,
+        "SELECT DISTINCT x, key FROM (VALUES (1, 1), (1, 1), (2, 1), (3, 2)) AS v(x, key) ORDER BY key FETCH FIRST 1 ROW WITH TIES",
+        "x",
+        &[],
+    );
+    assert_eq!(distinct, [1, 2]);
+
+    let distinct_on = integers(
+        &eng,
+        "SELECT DISTINCT ON (x) x FROM (VALUES (1, 2), (1, 1), (2, 2), (3, 2)) AS v(x, key) ORDER BY x, key FETCH FIRST 2 ROWS WITH TIES",
+        "x",
+        &[],
+    );
+    assert_eq!(distinct_on, [1, 2]);
+}
+
+#[test]
+fn fetch_with_ties_evaluates_volatile_order_keys_once_per_input_row() {
+    let eng = Engine::new();
+    eng.sql("CREATE SEQUENCE fetch_tie_order_key START 1", &[])
+        .unwrap();
+    let result = integers(
+        &eng,
+        "SELECT x FROM (VALUES (10), (20), (30), (40)) AS v(x) ORDER BY nextval('fetch_tie_order_key') FETCH FIRST 2 ROWS WITH TIES",
+        "x",
+        &[],
+    );
+    assert_eq!(result, [10, 20]);
+    assert_eq!(eng.nextval("fetch_tie_order_key").unwrap(), 5);
+
+    eng.sql("CREATE SEQUENCE fetch_tie_distinct_key START 1", &[])
+        .unwrap();
+    let result = integers(
+        &eng,
+        "SELECT DISTINCT ON (x) x FROM (VALUES (1), (1), (2), (3)) AS v(x) ORDER BY x, nextval('fetch_tie_distinct_key') FETCH FIRST 2 ROWS WITH TIES",
+        "x",
+        &[],
+    );
+    assert_eq!(result, [1, 2]);
+    assert_eq!(eng.nextval("fetch_tie_distinct_key").unwrap(), 5);
+}
+
+#[test]
+fn fetch_with_ties_retains_order_keys_through_row_locking() {
+    let eng = engine();
+    eng.sql("INSERT INTO notes (body, qty) VALUES ('zeta', 20)", &[])
+        .unwrap();
+    let locked = ids(
+        &eng,
+        "SELECT id FROM notes ORDER BY qty FETCH FIRST 2 ROWS WITH TIES FOR UPDATE",
+        &[],
+    );
+    assert_eq!(locked, [1, 2, 6]);
+}
+
+#[test]
+fn fetch_with_ties_disables_lossy_score_top_k_pushdown() {
+    let eng = engine();
+    eng.sql("INSERT INTO notes (body, qty) VALUES ('alpha', 60)", &[])
+        .unwrap();
+    eng.sql("CREATE INDEX notes_body_idx ON notes USING gin (body)", &[])
+        .unwrap();
+    let matched = ids(
+        &eng,
+        "SELECT id FROM notes WHERE text_match(body, 'alpha') ORDER BY _score DESC FETCH FIRST 1 ROW WITH TIES",
+        &[],
+    );
+    assert_eq!(matched, [1, 6]);
 }
 
 #[test]

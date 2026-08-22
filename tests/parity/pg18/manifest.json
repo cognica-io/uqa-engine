@@ -58,6 +58,14 @@
       "open_issue": "Collations, domains, user-defined equality operators, and the complete PostgreSQL common-type matrix remain."
     },
     {
+      "id": "query.fetch-with-ties",
+      "postgresql_reference": "PostgreSQL 18.4 live results and SQLSTATEs for FETCH FIRST ... WITH TIES",
+      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::fetch_with_ties_preserves_its_boundary_and_requires_ordering; cargo test -p uqa-execution --lib fetch_with_ties_extends_the_boundary_across_batches; cargo test -p uqa-engine --test integration fetch_with_ties; tests/parity/pg18/probes.sql",
+      "supported_version": "PostgreSQL 18.4 query blocks and set operations with OFFSET, omitted, zero, NULL, negative, parameterized, multi-key, NULL-order, aggregate, window, distinct, row-locking, and retrieval-score boundaries",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "dml.returning-row-images",
       "postgresql_reference": "PostgreSQL 18 SQL DML RETURNING documentation",
       "uqa_test": "crates/uqa-engine/tests/sql_update_delete.rs",

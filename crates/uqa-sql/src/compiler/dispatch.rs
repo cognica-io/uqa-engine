@@ -52,6 +52,9 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
             if stmt.target_list.is_empty()
                 && !stmt.values_lists.is_empty()
                 && stmt.locking_clause.is_empty()
+                && stmt.sort_clause.is_empty()
+                && stmt.limit_count.is_none()
+                && stmt.limit_offset.is_none()
             {
                 let rows = compile_values_lists(&stmt.values_lists)?;
                 return Ok(Statement::Values { rows });

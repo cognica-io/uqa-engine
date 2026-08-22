@@ -158,6 +158,7 @@ pub(super) fn lower_relational_root(
         limit: set_op
             .combined_limit
             .map(|expr| Box::new(lower_scalar_expression(expr, aggregates, &mut subqueries))),
+        with_ties: set_op.combined_with_ties,
         offset: set_op
             .combined_offset
             .map(|expr| Box::new(lower_scalar_expression(expr, aggregates, &mut subqueries))),
@@ -227,6 +228,7 @@ impl QueryBlockPlan {
             limit: statement
                 .limit
                 .map(|expr| lower_scalar_expression(expr, aggregates, &mut subqueries)),
+            with_ties: statement.with_ties,
             offset: statement
                 .offset
                 .map(|expr| lower_scalar_expression(expr, aggregates, &mut subqueries)),

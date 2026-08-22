@@ -569,10 +569,6 @@ fn unsupported_select_clauses_fail_instead_of_losing_semantics() {
             "SELECT row_number() OVER named_window FROM employees WINDOW named_window AS (ORDER BY id)",
             "named WINDOW",
         ),
-        (
-            "SELECT * FROM employees ORDER BY id FETCH FIRST 1 ROW WITH TIES",
-            "WITH TIES",
-        ),
     ] {
         let error = compile(sql).expect_err(sql);
         assert!(
@@ -580,6 +576,48 @@ fn unsupported_select_clauses_fail_instead_of_losing_semantics() {
             "unexpected error for {sql}: {error}"
         );
     }
+}
+
+#[test]
+fn fetch_with_ties_preserves_its_boundary_and_requires_ordering() {
+    let Statement::Select(select) =
+        first("SELECT id FROM employees ORDER BY department, id DESC FETCH FIRST 2 ROWS WITH TIES")
+    else {
+        panic!("not SELECT");
+    };
+    assert!(select.with_ties);
+    assert_eq!(select.order_by.len(), 2);
+    assert!(matches!(
+        select.limit,
+        Some(Expr::Literal(uqa_core::Value::Int(2)))
+    ));
+
+    let Statement::Select(null_count) =
+        first("SELECT id FROM employees ORDER BY id FETCH FIRST NULL ROWS WITH TIES")
+    else {
+        panic!("not SELECT");
+    };
+    assert!(null_count.with_ties);
+    assert!(matches!(
+        null_count.limit,
+        Some(Expr::Literal(uqa_core::Value::Null))
+    ));
+
+    let error = compile("SELECT id FROM employees FETCH FIRST 1 ROW WITH TIES").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42601"));
+    assert_eq!(
+        error.to_string(),
+        "WITH TIES cannot be specified without ORDER BY clause"
+    );
+
+    let Statement::Select(values) =
+        first("VALUES (1), (2), (2) ORDER BY 1 FETCH FIRST 2 ROWS WITH TIES")
+    else {
+        panic!("ordered VALUES must be a SELECT query block");
+    };
+    assert!(values.with_ties);
+    assert!(matches!(values.from, Some(FromClause::Values { .. })));
+    assert!(matches!(values.projections[0].expr, Expr::Star));
 }
 
 #[test]

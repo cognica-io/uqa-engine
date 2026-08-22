@@ -147,6 +147,21 @@ fn selects_operator_tree_access_and_pushes_relational_limit() {
 }
 
 #[test]
+fn fetch_with_ties_keeps_the_complete_retrieval_score_boundary() {
+    let plan = optimized(
+        "SELECT id FROM docs WHERE text_match(body, 'rust') ORDER BY _score DESC FETCH FIRST 5 ROWS WITH TIES",
+    );
+    let block = query_block(&plan);
+    assert!(block.with_ties);
+    assert!(matches!(
+        block.access,
+        AccessPathPlan::OperatorTree {
+            score_limit_pushdown: false
+        }
+    ));
+}
+
+#[test]
 fn implicitly_fuses_mixed_text_and_vector_retrieval() {
     let plan = optimized(
         "SELECT id, _score FROM docs \

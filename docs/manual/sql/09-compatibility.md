@@ -45,7 +45,6 @@ These forms currently fail during compilation without creating a partial object.
 - Table functions `WITH ORDINALITY`
 - `GROUP BY DISTINCT`
 - Named `WINDOW` clauses
-- `FETCH ... WITH TIES`
 - Recursive CTE `SEARCH` and `CYCLE`
 - CTE `NOT MATERIALIZED`
 - Explicit `ESCAPE` for `LIKE`, `ILIKE`, and `SIMILAR TO`
