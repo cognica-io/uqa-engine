@@ -47,7 +47,6 @@ These forms currently fail during compilation without creating a partial object.
 - Named `WINDOW` clauses
 - Recursive CTE `SEARCH` and `CYCLE`
 - CTE `NOT MATERIALIZED`
-- Explicit `ESCAPE` for `LIKE`, `ILIKE`, and `SIMILAR TO`
 - `MERGE WHEN NOT MATCHED BY SOURCE`
 
 Each missing clause above must be implemented with PostgreSQL 18 semantics; source-query rewriting is not an accepted compatibility solution.

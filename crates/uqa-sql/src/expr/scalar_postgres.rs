@@ -269,16 +269,21 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
             }
             "similar_to" => {
                 // SIMILAR TO: SQL regex anchored over the whole string.
-                if args.len() < 2 {
-                    return Err(SQLError::TypeMismatch("similar_to takes 2 args".into()));
+                if !matches!(args.len(), 2 | 3) {
+                    return Err(SQLError::TypeMismatch(
+                        "similar_to takes 2 or 3 args".into(),
+                    ));
                 }
-                if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                if matches!(args[1], Value::Null) || matches!(args.get(2), Some(Value::Null)) {
+                    return Ok(Value::Null);
+                }
+                let escape = args.get(2).map(value_to_string);
+                let pat = similar_to_regex(&value_to_string(&args[1]), escape.as_deref())?;
+                if matches!(args[0], Value::Null) {
                     return Ok(Value::Null);
                 }
                 let s = value_to_string(&args[0]);
-                let pat = similar_to_regex(&value_to_string(&args[1]));
-                let re = regex::Regex::new(&pat)
-                    .map_err(|e| SQLError::TypeMismatch(format!("SIMILAR TO pattern: {e}")))?;
+                let re = compile_pg_regex(&pat, "", false)?;
                 Ok(Value::Bool(re.is_match(&s)))
             }
             "num_nulls" => Ok(Value::Int(

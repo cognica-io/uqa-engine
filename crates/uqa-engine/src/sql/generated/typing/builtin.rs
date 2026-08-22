@@ -126,8 +126,13 @@ pub(super) fn infer_builtin_function(
             require_signature(name, args, &[TypeClass::Integer, TypeClass::Integer])?;
             GenerationType::Integer
         }
-        "starts_with" | "like" | "ilike" | "similar_to" => {
+        "starts_with" => {
             require_signature(name, args, &[TypeClass::Text, TypeClass::Text])?;
+            GenerationType::Boolean
+        }
+        "like" | "ilike" | "similar_to" => {
+            require_arity(name, args, 2, 3)?;
+            require_class(name, args, TypeClass::Text)?;
             GenerationType::Boolean
         }
         "position" | "strpos" => {

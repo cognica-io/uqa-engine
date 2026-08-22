@@ -108,7 +108,6 @@ fn malformed_sort_and_window_flags_are_rejected() {
 #[test]
 fn unsupported_expression_shapes_fail_instead_of_losing_semantics() {
     for (sql, expected) in [
-        ("SELECT 'abc' LIKE 'a%' ESCAPE '!'", "explicit ESCAPE"),
         (
             "SELECT 2 > ANY (SELECT value FROM values_table)",
             "ANY subquery operator",

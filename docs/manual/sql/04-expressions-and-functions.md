@@ -15,7 +15,13 @@ SELECT CASE
 FROM predictions;
 ```
 
-Explicit `ESCAPE` clauses for `LIKE`, `ILIKE`, and `SIMILAR TO` are not implemented.
+`LIKE`, `ILIKE`, and `SIMILAR TO` accept `ESCAPE` with a runtime text expression. Omitting the clause uses PostgreSQL's default backslash escape, `ESCAPE ''` disables escaping, `ESCAPE NULL` produces NULL, and every nonempty escape must contain exactly one character. Escaped wildcard and regular-expression metacharacters are treated literally, while escaped alphanumeric characters in `SIMILAR TO` retain the implemented PostgreSQL regular-expression escape behavior.
+
+```sql execute
+SELECT value
+FROM (VALUES ('a_b'), ('axb')) AS candidates(value)
+WHERE value LIKE 'a!_b' ESCAPE '!';
+```
 
 ## NULL and comparison helpers
 

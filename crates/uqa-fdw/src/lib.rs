@@ -378,9 +378,9 @@ fn string_predicate(
         )));
     };
     let matched = if case_insensitive {
-        sql_like(&haystack.to_lowercase(), &pattern.to_lowercase())
+        sql_like(&haystack.to_lowercase(), &pattern.to_lowercase())?
     } else {
-        sql_like(haystack, pattern)
+        sql_like(haystack, pattern)?
     };
     if negate {
         Ok(!matched)
@@ -392,19 +392,36 @@ fn string_predicate(
 /// SQL `LIKE` matcher with `%` (zero+ chars) and `_` (single char)
 /// wildcards. Greedy backtracking; safe on non-ASCII because we work
 /// in `char`s, not bytes.
-fn sql_like(haystack: &str, pattern: &str) -> bool {
+fn sql_like(haystack: &str, pattern: &str) -> Result<bool, FDWError> {
     let h: Vec<char> = haystack.chars().collect();
     let p: Vec<char> = pattern.chars().collect();
     like_match(&h, &p)
 }
 
-fn like_match(h: &[char], p: &[char]) -> bool {
+fn like_match(h: &[char], p: &[char]) -> Result<bool, FDWError> {
     let mut hi = 0;
     let mut pi = 0;
     let mut star_h: Option<usize> = None;
     let mut star_p: Option<usize> = None;
     while hi < h.len() {
         match p.get(pi) {
+            Some('\\') => {
+                let Some(literal) = p.get(pi + 1) else {
+                    return Err(FDWError::InvalidPredicate(
+                        "LIKE pattern must not end with escape character".into(),
+                    ));
+                };
+                if *literal == h[hi] {
+                    hi += 1;
+                    pi += 2;
+                } else if let (Some(sp), Some(sh)) = (star_p, star_h) {
+                    pi = sp + 1;
+                    star_h = Some(sh + 1);
+                    hi = sh + 1;
+                } else {
+                    return Ok(false);
+                }
+            }
             Some('%') => {
                 star_p = Some(pi);
                 star_h = Some(hi);
@@ -424,7 +441,7 @@ fn like_match(h: &[char], p: &[char]) -> bool {
                     star_h = Some(sh + 1);
                     hi = sh + 1;
                 } else {
-                    return false;
+                    return Ok(false);
                 }
             }
         }
@@ -432,7 +449,7 @@ fn like_match(h: &[char], p: &[char]) -> bool {
     while p.get(pi) == Some(&'%') {
         pi += 1;
     }
-    pi == p.len()
+    Ok(pi == p.len())
 }
 
 #[cfg(test)]
@@ -612,10 +629,13 @@ mod tests {
 
     #[test]
     fn like_pattern_matches_with_percent_and_underscore() {
-        assert!(sql_like("alpha", "a%a"));
-        assert!(sql_like("alpha", "alp_a"));
-        assert!(sql_like("alpha", "%pha"));
-        assert!(!sql_like("alpha", "beta"));
+        assert!(sql_like("alpha", "a%a").unwrap());
+        assert!(sql_like("alpha", "alp_a").unwrap());
+        assert!(sql_like("alpha", "%pha").unwrap());
+        assert!(!sql_like("alpha", "beta").unwrap());
+        assert!(sql_like("a_b", r"a\_b").unwrap());
+        assert!(!sql_like("a", r"a\").unwrap());
+        assert!(sql_like("ab", r"a\").is_err());
     }
 
     #[test]

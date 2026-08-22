@@ -111,7 +111,16 @@ pub fn build_where_clause(
                 )));
             }
             (_, op) => {
-                clauses.push(format!("{column} {} ?", op.sql_token()));
+                let escape = matches!(
+                    op,
+                    PredicateOp::Like
+                        | PredicateOp::NotLike
+                        | PredicateOp::ILike
+                        | PredicateOp::NotILike
+                )
+                .then_some(" ESCAPE '\\'")
+                .unwrap_or_default();
+                clauses.push(format!("{column} {} ?{escape}", op.sql_token()));
                 params.push(p.value.clone());
             }
         }
@@ -648,7 +657,8 @@ mod tests {
                  INSERT INTO books VALUES
                    (1, 'Rust', 2024),
                    (2, 'Python', 2023),
-                   (3, 'UQA', 2024);",
+                   (3, 'UQA', 2024),
+                   (4, 'R_st', 2024);",
             )
             .unwrap();
         }
@@ -681,5 +691,20 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].get("title"), Some(&Value::Str("Rust".into())));
         assert!(!rows[0].contains_key("id"));
+
+        let rows = handler
+            .scan(
+                &table,
+                Some(&cols),
+                &[FDWPredicate {
+                    column: "title".into(),
+                    operator: PredicateOp::Like,
+                    value: Value::Str(r"R\_st".into()),
+                }],
+                None,
+            )
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].get("title"), Some(&Value::Str("R_st".into())));
     }
 }

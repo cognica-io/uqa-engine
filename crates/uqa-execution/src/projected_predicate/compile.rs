@@ -83,20 +83,37 @@ pub(super) fn compile(
             {
                 return Ok(None);
             }
-            let [expression, pattern] = args.as_slice() else {
-                return Ok(None);
+            let (expression, pattern, escape) = match args.as_slice() {
+                [expression, pattern] => (expression, pattern, None),
+                [expression, pattern, escape] => (expression, pattern, Some(escape)),
+                _ => return Ok(None),
             };
             let pattern = match pattern {
                 ScalarExpr::Literal(value) => value.clone(),
                 ScalarExpr::Param(index) => parameter(*index, params)?,
                 _ => return Ok(None),
             };
+            if matches!(&pattern, Value::Null) {
+                return Ok(Some(ProjectedExpr::Literal(Value::Null)));
+            }
+            let escape = match escape {
+                Some(ScalarExpr::Literal(value)) => Some(value.clone()),
+                Some(ScalarExpr::Param(index)) => Some(parameter(*index, params)?),
+                Some(_) => return Ok(None),
+                None => None,
+            };
+            if matches!(&escape, Some(Value::Null)) {
+                return Ok(Some(ProjectedExpr::Literal(Value::Null)));
+            }
+            let pattern_text = uqa_sql::expr::value_to_string(&pattern);
+            let escape_text = escape.as_ref().map(uqa_sql::expr::value_to_string);
             ProjectedExpr::Like {
                 expression: Box::new(require(expression, schema, params)?),
-                pattern: uqa_sql::expr::CompiledLikePattern::from_value(
-                    &pattern,
+                pattern: uqa_sql::expr::CompiledLikePattern::with_escape(
+                    &pattern_text,
                     normalized.eq_ignore_ascii_case("ilike"),
-                ),
+                    escape_text.as_deref(),
+                )?,
             }
         }
         ScalarExpr::Cast { expr, ty } => {
