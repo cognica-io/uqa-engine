@@ -202,9 +202,9 @@ dispatch_workflow() {
     gh run list \
       --workflow "$workflow" \
       --commit "$local_head" \
-      --limit 1 \
+      --limit 100 \
       --json url,status,conclusion \
-      --jq '.[0] | select(.status != "completed" or .conclusion == "success") | .url // empty'
+      --jq '[.[] | select(.status != "completed" or .conclusion == "success") | .url][0] // empty'
   )"
 
   if [[ -n "$existing_url" && "$force" == 0 ]]; then

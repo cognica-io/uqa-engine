@@ -98,6 +98,11 @@ class PremergeCITest(unittest.TestCase):
                   [[ "$*" == *"--json url,status,conclusion"* ]] || exit 4
                   case "$UQA_TEST_EXISTING_RUN_STATE" in
                     success|in_progress) echo "https://example.test/run/1" ;;
+                    failure_then_success)
+                      if [[ "$*" == *"--limit 100"* && "$*" == *"[.[] | select"* ]]; then
+                        echo "https://example.test/run/older-success"
+                      fi
+                      ;;
                   esac
                 elif [[ "$1 $2" == "workflow run" ]]; then
                   if [[ "$UQA_TEST_BRANCH_ADVANCED" == "1" && "$*" == *"--ref fix/premerge-ci"* ]]; then
@@ -279,6 +284,18 @@ class PremergeCITest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(gh_invocations), 3)
         self.assertEqual(len(git_invocations), 2)
+
+    def test_newest_failure_does_not_hide_an_older_success(self) -> None:
+        result, gh_invocations, git_invocations = self.run_script(
+            existing_run_state="failure_then_success"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(gh_invocations, [])
+        self.assertEqual(git_invocations, [])
+        self.assertEqual(
+            result.stdout.count("already has a successful or in-progress run"), 3
+        )
 
     def test_branch_advance_cannot_retarget_later_suites(self) -> None:
         result, gh_invocations, git_invocations = self.run_script(
