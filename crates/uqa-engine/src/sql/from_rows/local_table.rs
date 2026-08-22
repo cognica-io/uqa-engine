@@ -879,9 +879,7 @@ fn build_join_operator_with_ctes_at_path<'a>(
             let Some((operator, filter_pushed)) =
                 try_streaming_local_table_scan(engine, from, ctes, prune, filters, params)?
             else {
-                return Err(SQLError::Unsupported(format!(
-                    "relation `{name}` does not exist"
-                )));
+                return Err(SQLError::UnknownTable(name.clone()));
             };
             if filter_pushed {
                 Ok(operator)

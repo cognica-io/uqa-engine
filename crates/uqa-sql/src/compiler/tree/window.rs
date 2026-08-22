@@ -499,6 +499,21 @@ pub(in crate::compiler) fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) 
     if !type_name.array_bounds.is_empty() && !ty.ends_with("[]") {
         ty.push_str("[]");
     }
+    if matches!(
+        arg.node.as_ref(),
+        Some(NodeEnum::AConst(constant))
+            if matches!(
+                constant.val.as_ref(),
+                Some(pg_query::protobuf::a_const::Val::Sval(_))
+            )
+    ) {
+        let Expr::Literal(value) = &inner else {
+            return Err(SQLError::Internal(
+                "string constant did not compile to a literal".into(),
+            ));
+        };
+        crate::expr::cast_value(value, &ty)?;
+    }
     Ok(Expr::Cast {
         expr: Box::new(inner),
         ty,

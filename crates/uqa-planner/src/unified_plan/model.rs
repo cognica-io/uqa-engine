@@ -351,6 +351,7 @@ pub enum CommandPlan {
         name: String,
         if_not_exists: bool,
         column_names: Vec<String>,
+        with_no_data: bool,
         query: Box<QueryPlan>,
     },
     Prepare {

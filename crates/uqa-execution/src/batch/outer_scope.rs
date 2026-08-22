@@ -119,6 +119,7 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases,
                 alias_types,
+                binding_only: input.index.cold.binding_only.clone(),
                 extra_ambiguous_unqualified: outer_ambiguous,
                 extra_ambiguous_qualified: ambiguous_qualified,
                 ..SchemaBuildMetadata::default()
@@ -244,6 +245,7 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases,
                 alias_types,
+                binding_only: input.index.cold.binding_only.clone(),
                 extra_ambiguous_unqualified: ambiguous_unqualified,
                 extra_ambiguous_qualified: ambiguous_qualified,
                 ..SchemaBuildMetadata::default()

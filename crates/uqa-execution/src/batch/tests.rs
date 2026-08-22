@@ -74,6 +74,43 @@ fn named_map_exact_key_precedes_qualified_metadata_suffixes() {
 }
 
 #[test]
+fn typed_virtual_identities_bind_without_changing_visible_layout() {
+    let input = RowSchema::with_qualified_types(
+        "documents",
+        vec!["title".into()],
+        vec![Some(ColumnType::Text)],
+    );
+    let schema = RowSchema::with_typed_virtual_identities(
+        &input,
+        &[
+            (
+                ColumnIdentity::qualified("documents", "_doc_id"),
+                Some(ColumnType::BigInteger),
+            ),
+            (
+                ColumnIdentity::unqualified("_doc_id"),
+                Some(ColumnType::BigInteger),
+            ),
+        ],
+    );
+
+    assert_eq!(schema.columns(), ["title"]);
+    assert!(schema.has_unqualified_column("_doc_id"));
+    assert!(schema.has_qualified_column("documents", "_doc_id"));
+    assert_eq!(schema.type_of("_doc_id"), Some(&ColumnType::BigInteger));
+    assert_eq!(
+        schema.qualified_type("documents", "_doc_id"),
+        Some(&ColumnType::BigInteger)
+    );
+    assert!(schema
+        .qualified_star_layout("documents")
+        .iter()
+        .all(|(column, _, _)| column != "_doc_id"));
+    assert_eq!(schema.lookup_aliases().len(), 0);
+    assert_eq!(schema.typed_virtual_identities().count(), 2);
+}
+
+#[test]
 fn join_composes_fragments_without_cloning_values() {
     let left_schema = RowSchema::new(vec!["l.value".into()]);
     let right_schema = RowSchema::new(vec!["r.value".into()]);

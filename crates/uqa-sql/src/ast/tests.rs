@@ -63,27 +63,44 @@ fn alter_sequence_restart_reads_legacy_and_current_serde_shapes() {
 }
 
 #[test]
-fn create_table_as_reads_legacy_statements_without_column_names() {
+fn create_table_as_reads_legacy_statements_without_optional_fields() {
     let mut statement = crate::compile("CREATE TABLE copy AS SELECT 1")
         .unwrap()
         .remove(0);
-    let Statement::CreateTableAs { column_names, .. } = &statement else {
+    let Statement::CreateTableAs {
+        column_names,
+        with_no_data,
+        ..
+    } = &statement
+    else {
         panic!("expected CREATE TABLE AS");
     };
     assert!(column_names.is_empty());
+    assert!(!with_no_data);
 
-    let Statement::CreateTableAs { column_names, .. } = &mut statement else {
+    let Statement::CreateTableAs {
+        column_names,
+        with_no_data,
+        ..
+    } = &mut statement
+    else {
         unreachable!();
     };
     column_names.push("renamed".into());
+    *with_no_data = true;
     let mut encoded = serde_json::to_value(statement).unwrap();
-    encoded["CreateTableAs"]
-        .as_object_mut()
-        .unwrap()
-        .remove("column_names");
+    let fields = encoded["CreateTableAs"].as_object_mut().unwrap();
+    fields.remove("column_names");
+    fields.remove("with_no_data");
     let legacy: Statement = serde_json::from_value(encoded).unwrap();
-    let Statement::CreateTableAs { column_names, .. } = legacy else {
+    let Statement::CreateTableAs {
+        column_names,
+        with_no_data,
+        ..
+    } = legacy
+    else {
         panic!("expected CREATE TABLE AS");
     };
     assert!(column_names.is_empty());
+    assert!(!with_no_data);
 }

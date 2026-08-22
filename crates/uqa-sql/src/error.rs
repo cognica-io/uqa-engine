@@ -12,7 +12,7 @@ pub enum SQLError {
     Parse(String),
     #[error("unsupported SQL feature: {0}")]
     Unsupported(String),
-    #[error("unknown table: {0}")]
+    #[error("relation \"{0}\" does not exist")]
     UnknownTable(String),
     #[error("unknown column: {0}")]
     UnknownColumn(String),

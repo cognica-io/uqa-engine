@@ -1271,6 +1271,8 @@ pub enum Statement {
         if_not_exists: bool,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         column_names: Vec<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        with_no_data: bool,
         body: Box<SelectStmt>,
     },
     /// `PREPARE name AS <inner>`.

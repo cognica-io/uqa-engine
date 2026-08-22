@@ -37,14 +37,31 @@ pub(in crate::sql) fn run_create_table_as(
     name: String,
     if_not_exists: bool,
     column_names: &[String],
+    with_no_data: bool,
     query: &uqa_planner::QueryPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
     if engine.transaction_depth() != 0 {
-        run_create_table_as_inner(engine, name, if_not_exists, column_names, query, params)
+        run_create_table_as_inner(
+            engine,
+            name,
+            if_not_exists,
+            column_names,
+            with_no_data,
+            query,
+            params,
+        )
     } else {
         engine.transaction(move |engine| {
-            run_create_table_as_inner(engine, name, if_not_exists, column_names, query, params)
+            run_create_table_as_inner(
+                engine,
+                name,
+                if_not_exists,
+                column_names,
+                with_no_data,
+                query,
+                params,
+            )
         })
     }
 }
@@ -54,16 +71,13 @@ fn run_create_table_as_inner(
     name: String,
     if_not_exists: bool,
     column_names: &[String],
+    with_no_data: bool,
     query: &uqa_planner::QueryPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    let query_schema = crate::sql::select::bind_query_plan_schema(
-        engine,
-        query,
-        params,
-        &crate::sql::select::CteScope::new(),
-        None,
-    )?;
+    let ctes = crate::sql::select::CteScope::new();
+    let query_schema =
+        crate::sql::select::analyze_query_plan_schema(engine, query, params, &ctes, None)?;
     if engine
         .try_has_table(&name)
         .map_err(|err| ddl_storage_error("CREATE TABLE AS", err))?
@@ -77,34 +91,61 @@ fn run_create_table_as_inner(
         });
     }
     let columns = create_table_as_columns(&query_schema, column_names)?;
-    let result = crate::sql::select::execute_query_plan(engine, query, params)?;
-    if result.columns.len() != columns.len() {
-        return Err(SQLError::Internal(format!(
-            "CREATE TABLE AS query schema width {} changed to {} during execution",
-            columns.len(),
-            result.columns.len()
-        )));
-    }
+    let result = if with_no_data {
+        None
+    } else {
+        let result = crate::sql::select::execute_query_plan(engine, query, params)?;
+        if result.columns.len() != columns.len() {
+            return Err(SQLError::Internal(format!(
+                "CREATE TABLE AS query schema width {} changed to {} during execution",
+                columns.len(),
+                result.columns.len()
+            )));
+        }
+        Some(result)
+    };
+    create_table_as_relation(engine, &name, &columns)?;
+    let affected = result.as_ref().map_or(Ok(0), |result| {
+        materialize_create_table_as_rows(engine, &name, &columns, result)
+    })?;
+    Ok(SQLResult::from_affected(affected))
+}
+
+fn create_table_as_relation(
+    engine: &Engine,
+    name: &str,
+    columns: &[uqa_sql::ast::ColumnDef],
+) -> Result<(), SQLError> {
     let analyzer = uqa_analysis::analyzer::standard_analyzer("english");
     engine
-        .create_table(name.clone(), analyzer, Vec::new())
+        .create_table(name.to_owned(), analyzer, Vec::new())
         .map_err(|err| ddl_storage_error("CREATE TABLE AS", err))?;
-    for column in &columns {
+    for column in columns {
         if let ColumnType::Vector(dimensions) | ColumnType::Tensor(dimensions) = column.ty {
             engine
-                .create_vector_field(&name, column.name.clone(), dimensions)
+                .create_vector_field(name, column.name.clone(), dimensions)
                 .map_err(|err| ddl_storage_error("CREATE TABLE AS vector field", err))?;
         }
     }
-    if let Some(t) = engine
-        .try_table(&name)
+    let table = engine
+        .try_table(name)
         .map_err(|err| ddl_storage_error("CREATE TABLE AS schema", err))?
-    {
-        (*t.columns.write()).clone_from(&columns);
-    }
+        .ok_or_else(|| {
+            SQLError::Internal(format!("new CREATE TABLE AS relation `{name}` disappeared"))
+        })?;
+    *table.columns.write() = columns.to_vec();
     engine
-        .try_persist_table_schema(&name)
+        .try_persist_table_schema(name)
         .map_err(|err| ddl_storage_error("CREATE TABLE AS schema", err))?;
+    Ok(())
+}
+
+fn materialize_create_table_as_rows(
+    engine: &Engine,
+    name: &str,
+    columns: &[uqa_sql::ast::ColumnDef],
+    result: &SQLResult,
+) -> Result<u64, SQLError> {
     for (row_index, _) in result.rows.iter().enumerate() {
         let doc_id = u64::try_from(row_index)
             .ok()
@@ -122,12 +163,11 @@ fn run_create_table_as_inner(
                 })?;
             document.insert(column.name.clone(), value);
         }
-        let vectors = crate::sql::dml::document_vectors(engine, &name, &document)?;
-        engine.add_document_with_vector_values(&name, doc_id, document, vectors)?;
+        let vectors = crate::sql::dml::document_vectors(engine, name, &document)?;
+        engine.add_document_with_vector_values(name, doc_id, document, vectors)?;
     }
-    let affected = u64::try_from(result.rows.len())
-        .map_err(|_| SQLError::Internal("CREATE TABLE AS row count overflow".into()))?;
-    Ok(SQLResult::from_affected(affected))
+    u64::try_from(result.rows.len())
+        .map_err(|_| SQLError::Internal("CREATE TABLE AS row count overflow".into()))
 }
 
 fn create_table_as_columns(
