@@ -8,7 +8,8 @@
 
 use super::{
     compile_expr, compile_qualified_name, compile_sort_options, compile_window_frame, DecimalValue,
-    Expr, NodeEnum, OrderBy, Result, SQLError, Value, WindowSpec,
+    Expr, NodeEnum, OrderBy, Result, SQLError, Value, WindowReference, WindowReferenceKind,
+    WindowSpec,
 };
 
 pub(in crate::compiler) fn compile_const(c: &pg_query::protobuf::AConst) -> Result<Expr> {
@@ -199,11 +200,39 @@ pub(in crate::compiler) fn compile_func_call(f: &pg_query::protobuf::FuncCall) -
 pub(in crate::compiler) fn compile_window_spec(
     w: &pg_query::protobuf::WindowDef,
 ) -> Result<WindowSpec> {
-    if !w.name.is_empty() || !w.refname.is_empty() {
-        return Err(SQLError::Unsupported(
-            "named window references are not represented by WindowSpec".into(),
-        ));
-    }
+    let reference = match (w.name.is_empty(), w.refname.is_empty()) {
+        (true, true) => None,
+        (false, true) => Some(WindowReference {
+            name: w.name.clone(),
+            kind: WindowReferenceKind::Direct,
+        }),
+        (true, false) => Some(WindowReference {
+            name: w.refname.clone(),
+            kind: WindowReferenceKind::Copy,
+        }),
+        (false, false) => {
+            return Err(SQLError::Internal(
+                "window call carries both direct and copied references".into(),
+            ));
+        }
+    };
+    compile_window_spec_parts(w, reference)
+}
+
+pub(in crate::compiler) fn compile_named_window_spec(
+    w: &pg_query::protobuf::WindowDef,
+) -> Result<WindowSpec> {
+    let reference = (!w.refname.is_empty()).then(|| WindowReference {
+        name: w.refname.clone(),
+        kind: WindowReferenceKind::Copy,
+    });
+    compile_window_spec_parts(w, reference)
+}
+
+fn compile_window_spec_parts(
+    w: &pg_query::protobuf::WindowDef,
+    reference: Option<WindowReference>,
+) -> Result<WindowSpec> {
     let partition_by: Vec<Expr> = w
         .partition_clause
         .iter()
@@ -234,6 +263,7 @@ pub(in crate::compiler) fn compile_window_spec(
     }
     let frame = compile_window_frame(w)?;
     Ok(WindowSpec {
+        reference,
         partition_by,
         order_by,
         frame,

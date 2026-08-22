@@ -179,7 +179,18 @@ SELECT employee_id, department_id, salary,
 FROM employees;
 ```
 
-Implemented ranking and offset windows are `row_number`, `rank`, `dense_rank`, `lag`, `lead`, and `ntile`. Aggregate windows include `sum`, `count`, `avg`, `min`, and `max`. Frame syntax supports implemented `ROWS`, `RANGE`, and `GROUPS` boundaries. Named `WINDOW` clauses are not implemented; place the definition directly in each `OVER` expression.
+Implemented ranking and offset windows are `row_number`, `rank`, `dense_rank`, `lag`, `lead`, and `ntile`. Aggregate windows include `sum`, `count`, `avg`, `min`, and `max`. Frame syntax supports implemented `ROWS`, `RANGE`, and `GROUPS` boundaries. A named `WINDOW` clause can share a complete definition or extend an earlier frameless definition with a missing `ORDER BY` or frame; definitions are processed left to right, `PARTITION BY` is inherited but cannot be added or overridden by a referencing definition, an existing ordering cannot be overridden, and copying a definition that already has a frame is rejected as in PostgreSQL 18. A direct `OVER window_name` reference uses the named frame without copying it.
+
+```sql execute
+SELECT department, salary,
+       row_number() OVER ranked AS position,
+       sum(salary) OVER running AS running_payroll
+FROM (VALUES ('engineering', 120), ('engineering', 100), ('sales', 90)) AS employees(department, salary)
+WINDOW by_department AS (PARTITION BY department),
+       ranked AS (by_department ORDER BY salary DESC),
+       running AS (by_department ORDER BY salary ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+ORDER BY department, salary DESC;
+```
 
 ## Row locking
 
