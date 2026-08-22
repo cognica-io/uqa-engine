@@ -33,40 +33,13 @@ use uqa_planner::{AccessPathPlan, ComputePlan, RelationalPlan};
 
 #[path = "local_table_command_scan.rs"]
 mod command_scan;
+#[path = "local_table_join_validation.rs"]
+mod join_validation;
+
+use join_validation::validate_join_on_schema;
 
 type StreamingLocalTableScan<'a> = (Box<dyn uqa_execution::PhysicalOperator + 'a>, bool);
 type SharedLockOrigin = (Arc<str>, Arc<str>);
-
-fn validate_join_on_schema(
-    engine: &Engine,
-    on: Option<&ScalarExpr>,
-    left: &uqa_execution::RowSchema,
-    right: &uqa_execution::RowSchema,
-    params: &[SQLParam],
-    ctes: &CteScope,
-) -> Result<(), SQLError> {
-    let Some(on) = on else {
-        return Ok(());
-    };
-    let mut schema = uqa_execution::RowSchema::join(left, right, std::iter::empty::<String>());
-    if let Some(outer) = ctes.row_lock_outer_row() {
-        let identities = outer
-            .schema
-            .identities()
-            .iter()
-            .enumerate()
-            .map(|(position, identity)| {
-                (
-                    identity.clone(),
-                    outer.schema.column_type(position).cloned(),
-                )
-            })
-            .collect::<Vec<_>>();
-        schema = uqa_execution::RowSchema::with_typed_outer_identities(&schema, &identities);
-    }
-    uqa_execution::scalar_type_with_resolver(on, &schema, params, engine)?;
-    Ok(())
-}
 
 pub(in crate::sql) struct EngineTableRowSource {
     table_name: String,
