@@ -146,6 +146,14 @@
       "open_issue": null
     },
     {
+      "id": "ddl.view-column-aliases",
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live CREATE VIEW column-name list results, catalogs, replacement checks, side-effect probes, and SQLSTATEs plus CREATE VIEW documentation",
+      "uqa_test": "cargo test -p uqa-sql --lib create_view_preserves_positional_column_names; cargo test -p uqa-engine --test integration engine_catalog::sql_views::",
+      "supported_version": "PostgreSQL 18.4 positional and partial view column-name lists, quoted identifier case, fixed typed output schemas, duplicate and alias-count validation order, nonexecuting static analysis, CREATE OR REPLACE compatibility and trailing-column extension, transactionality, nested views, and durable legacy-compatible reopen behavior",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "functions.identified-pg18-additions",
       "postgresql_reference": "PostgreSQL 18 functions and operators covered by the PG18 semantic suite",
       "uqa_test": "crates/uqa-engine/tests/pg18_semantics.rs; tests/parity/pg18/probes.sql",

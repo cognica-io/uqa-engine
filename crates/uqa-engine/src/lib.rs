@@ -136,7 +136,7 @@ pub use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions, SQLiteError}
 
 use engine_state::{
     DurableCatalogSnapshot, DurableCatalogState, EpochCoordinator, QueryRuntime, RuntimeExtensions,
-    SessionContext, StorageContext,
+    SessionContext, StorageContext, StoredView,
 };
 use functions::RegisteredSQLFunction;
 pub use functions::{

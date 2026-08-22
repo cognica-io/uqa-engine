@@ -671,11 +671,15 @@ fn collect_source_column_owners(engine: &Engine, source: &SourcePlan, owners: &m
             let mut columns = engine.try_table_columns(name).unwrap_or_default();
             if columns.is_empty() {
                 columns = engine
-                    .view_plan(name)
+                    .view_definition(name)
                     .ok()
                     .flatten()
                     .as_ref()
-                    .and_then(query_plan_output_columns)
+                    .and_then(|view| {
+                        view.output_columns
+                            .clone()
+                            .or_else(|| query_plan_output_columns(&view.query))
+                    })
                     .unwrap_or_default();
             }
             if columns.is_empty() {

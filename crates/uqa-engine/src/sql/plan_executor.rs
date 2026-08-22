@@ -82,24 +82,17 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     fn execute_create_view(
         &self,
         name: &str,
+        column_names: &[String],
         query: &QueryPlan,
         or_replace: bool,
     ) -> Result<SQLResult, SQLError> {
-        if self
-            .engine
-            .has_table(name)
-            .map_err(|err| SQLError::Internal(format!("resolve table `{name}`: {err}")))?
-        {
-            return Err(SQLError::Unsupported(format!(
-                "CREATE VIEW: relation `{name}` already exists as a table"
-            )));
-        }
-        if !or_replace && self.engine.view_plan(name)?.is_some() {
-            return Err(SQLError::Unsupported(format!(
-                "CREATE VIEW: relation `{name}` already exists"
-            )));
-        }
-        self.engine.register_view_plan(name, query.clone())?;
+        self.engine.register_view_plan(
+            name,
+            column_names,
+            query.clone(),
+            or_replace,
+            self.params,
+        )?;
         Ok(SQLResult::empty())
     }
 
@@ -339,9 +332,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             }
             CommandPlan::CreateView {
                 name,
+                column_names,
                 query,
                 or_replace,
-            } => self.execute_create_view(name, query, *or_replace),
+            } => self.execute_create_view(name, column_names, query, *or_replace),
             CommandPlan::CreateSchema {
                 name,
                 if_not_exists,

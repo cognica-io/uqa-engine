@@ -171,12 +171,14 @@ impl UnifiedPlan {
             }
             Statement::CreateView {
                 name,
+                column_names,
                 body,
                 or_replace,
             } => {
                 let query = Box::new(QueryPlan::lower_with(*body, aggregates));
                 Self::Command(Box::new(CommandPlan::CreateView {
                     name,
+                    column_names,
                     query,
                     or_replace,
                 }))

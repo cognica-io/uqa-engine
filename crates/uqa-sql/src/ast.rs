@@ -1199,11 +1199,11 @@ pub enum Statement {
     Delete(DeleteStmt),
     Drop(DropStmt),
     AlterTable(AlterTableStmt),
-    /// `CREATE [OR REPLACE] VIEW name AS SELECT ...`. The body is the
-    /// underlying `SelectStmt`; views are materialised lazily on every
-    /// reference (no row caching).
+    /// `CREATE [OR REPLACE] VIEW name [(column_name, ...)] AS SELECT ...`. The body is the underlying `SelectStmt`; views are materialised lazily on every reference (no row caching).
     CreateView {
         name: String,
+        #[serde(default)]
+        column_names: Vec<String>,
         body: Box<SelectStmt>,
         or_replace: bool,
     },

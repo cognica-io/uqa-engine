@@ -11,10 +11,11 @@ use super::helpers::{
     current_user_name, default_expr_text, info_character_maximum_length,
     info_character_octet_length, info_data_type, info_datetime_precision, info_numeric_precision,
     info_numeric_scale, info_udt_name, int_value, row, schema_expr_text, split_schema_name,
-    stable_oid, str_value, ConstraintCatalogKind, PG18_BUILTIN_ROUTINES,
+    stable_oid, str_value, view_columns_for, ConstraintCatalogKind, PG18_BUILTIN_ROUTINES,
 };
 use super::{
-    registered_names, routine_signature_types, value_to_text, Engine, ResultRow, SQLError, Value,
+    registered_names, routine_signature_types, value_to_text, Engine, ResultRow, SQLColumnDef,
+    SQLError, Value,
 };
 
 pub(super) fn build_info_catalog_name() -> Vec<ResultRow> {
@@ -108,6 +109,102 @@ pub(super) fn build_info_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
     Ok(out)
 }
 
+fn information_schema_column_row(
+    schema: String,
+    table: String,
+    index: usize,
+    column: &SQLColumnDef,
+    updatable: bool,
+) -> Result<ResultRow, SQLError> {
+    Ok(row([
+        ("table_catalog", catalog_name()),
+        ("table_schema", str_value(schema)),
+        ("table_name", str_value(table)),
+        ("column_name", str_value(column.name.clone())),
+        (
+            "ordinal_position",
+            int_value(catalog_ordinal(index, "information_schema column")?),
+        ),
+        ("column_default", default_expr_text(column.default.as_ref())),
+        (
+            "is_nullable",
+            str_value(if column.not_null || column.primary_key {
+                "NO"
+            } else {
+                "YES"
+            }),
+        ),
+        ("data_type", str_value(info_data_type(&column.ty))),
+        (
+            "character_maximum_length",
+            info_character_maximum_length(&column.ty),
+        ),
+        (
+            "character_octet_length",
+            info_character_octet_length(&column.ty),
+        ),
+        ("numeric_precision", info_numeric_precision(&column.ty)),
+        ("numeric_precision_radix", Value::Int(10)),
+        ("numeric_scale", info_numeric_scale(&column.ty)),
+        ("datetime_precision", info_datetime_precision(&column.ty)),
+        ("interval_type", Value::Null),
+        ("interval_precision", Value::Null),
+        ("character_set_catalog", Value::Null),
+        ("character_set_schema", Value::Null),
+        ("character_set_name", Value::Null),
+        ("collation_catalog", Value::Null),
+        ("collation_schema", Value::Null),
+        ("collation_name", Value::Null),
+        ("domain_catalog", Value::Null),
+        ("domain_schema", Value::Null),
+        ("domain_name", Value::Null),
+        ("udt_catalog", catalog_name()),
+        ("udt_schema", str_value("pg_catalog")),
+        ("udt_name", str_value(info_udt_name(&column.ty))),
+        ("scope_catalog", Value::Null),
+        ("scope_schema", Value::Null),
+        ("scope_name", Value::Null),
+        ("maximum_cardinality", Value::Null),
+        ("dtd_identifier", str_value((index + 1).to_string())),
+        (
+            "is_self_referencing",
+            str_value(if column.references.is_some() {
+                "YES"
+            } else {
+                "NO"
+            }),
+        ),
+        (
+            "is_identity",
+            str_value(if column.auto_increment { "YES" } else { "NO" }),
+        ),
+        ("identity_generation", Value::Null),
+        ("identity_start", Value::Null),
+        ("identity_increment", Value::Null),
+        ("identity_maximum", Value::Null),
+        ("identity_minimum", Value::Null),
+        ("identity_cycle", str_value("NO")),
+        (
+            "is_generated",
+            str_value(if column.generated.is_some() {
+                "ALWAYS"
+            } else {
+                "NEVER"
+            }),
+        ),
+        (
+            "generation_expression",
+            column.generated.as_ref().map_or(Value::Null, |generated| {
+                str_value(schema_expr_text(&generated.expression))
+            }),
+        ),
+        (
+            "is_updatable",
+            str_value(if updatable { "YES" } else { "NO" }),
+        ),
+    ]))
+}
+
 pub(super) fn build_info_columns(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
     let mut tables = engine
@@ -121,92 +218,27 @@ pub(super) fn build_info_columns(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
         else {
             continue;
         };
+        let (schema, table) = split_schema_name(&tname)?;
         for (idx, col) in cols.iter().enumerate() {
-            let (schema, table) = split_schema_name(&tname)?;
-            out.push(row([
-                ("table_catalog", catalog_name()),
-                ("table_schema", str_value(schema)),
-                ("table_name", str_value(table)),
-                ("column_name", str_value(col.name.clone())),
-                (
-                    "ordinal_position",
-                    int_value(catalog_ordinal(idx, "information_schema column")?),
-                ),
-                ("column_default", default_expr_text(col.default.as_ref())),
-                (
-                    "is_nullable",
-                    str_value(if col.not_null || col.primary_key {
-                        "NO"
-                    } else {
-                        "YES"
-                    }),
-                ),
-                ("data_type", str_value(info_data_type(&col.ty))),
-                (
-                    "character_maximum_length",
-                    info_character_maximum_length(&col.ty),
-                ),
-                (
-                    "character_octet_length",
-                    info_character_octet_length(&col.ty),
-                ),
-                ("numeric_precision", info_numeric_precision(&col.ty)),
-                ("numeric_precision_radix", Value::Int(10)),
-                ("numeric_scale", info_numeric_scale(&col.ty)),
-                ("datetime_precision", info_datetime_precision(&col.ty)),
-                ("interval_type", Value::Null),
-                ("interval_precision", Value::Null),
-                ("character_set_catalog", Value::Null),
-                ("character_set_schema", Value::Null),
-                ("character_set_name", Value::Null),
-                ("collation_catalog", Value::Null),
-                ("collation_schema", Value::Null),
-                ("collation_name", Value::Null),
-                ("domain_catalog", Value::Null),
-                ("domain_schema", Value::Null),
-                ("domain_name", Value::Null),
-                ("udt_catalog", catalog_name()),
-                ("udt_schema", str_value("pg_catalog")),
-                ("udt_name", str_value(info_udt_name(&col.ty))),
-                ("scope_catalog", Value::Null),
-                ("scope_schema", Value::Null),
-                ("scope_name", Value::Null),
-                ("maximum_cardinality", Value::Null),
-                ("dtd_identifier", str_value((idx + 1).to_string())),
-                (
-                    "is_self_referencing",
-                    str_value(if col.references.is_some() {
-                        "YES"
-                    } else {
-                        "NO"
-                    }),
-                ),
-                (
-                    "is_identity",
-                    str_value(if col.auto_increment { "YES" } else { "NO" }),
-                ),
-                ("identity_generation", Value::Null),
-                ("identity_start", Value::Null),
-                ("identity_increment", Value::Null),
-                ("identity_maximum", Value::Null),
-                ("identity_minimum", Value::Null),
-                ("identity_cycle", str_value("NO")),
-                (
-                    "is_generated",
-                    str_value(if col.generated.is_some() {
-                        "ALWAYS"
-                    } else {
-                        "NEVER"
-                    }),
-                ),
-                (
-                    "generation_expression",
-                    col.generated.as_ref().map_or(Value::Null, |generated| {
-                        str_value(schema_expr_text(&generated.expression))
-                    }),
-                ),
-                ("is_updatable", str_value("YES")),
-            ]));
+            out.push(information_schema_column_row(
+                schema.clone(),
+                table.clone(),
+                idx,
+                col,
+                true,
+            )?);
+        }
+    }
+    for view_name in engine.list_views()? {
+        let (schema, view) = split_schema_name(&view_name)?;
+        for (idx, column) in view_columns_for(engine, &view_name)?.iter().enumerate() {
+            out.push(information_schema_column_row(
+                schema.clone(),
+                view.clone(),
+                idx,
+                column,
+                false,
+            )?);
         }
     }
     out.extend(super::ag_catalog::age_info_column_rows(engine)?);

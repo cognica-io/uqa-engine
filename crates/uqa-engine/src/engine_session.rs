@@ -9,7 +9,7 @@
 use super::{
     build_histogram, build_mcv, distinct_count, Arc, BTreeMap, CatalogFacade, CatalogIndexRow,
     ColumnStatsInput, DocId, DocumentStore, Engine, Ordering, RelationIdentity, SQLError,
-    StorageBackendError, StorageBackendResult, TableState, Value, ViewRow,
+    StorageBackendError, StorageBackendResult, StoredView, TableState, Value, ViewRow,
 };
 use uqa_execution::ScalarExpr;
 use uqa_planner::{QueryPlan, RelationalPlan, SourcePlan};

@@ -264,11 +264,11 @@ pub(super) fn compile_create_view(stmt: &pg_query::protobuf::ViewStmt) -> Result
         .as_ref()
         .ok_or_else(|| SQLError::Internal("CREATE VIEW without name".into()))?;
     validate_durable_create_relation(relation, "CREATE VIEW")?;
-    if !stmt.aliases.is_empty() {
-        return Err(SQLError::Unsupported(
-            "CREATE VIEW column aliases are not supported".into(),
-        ));
-    }
+    let column_names = stmt
+        .aliases
+        .iter()
+        .map(extract_string)
+        .collect::<Result<Vec<_>>>()?;
     if !stmt.options.is_empty() {
         return Err(SQLError::Unsupported(
             "CREATE VIEW options are not supported".into(),
@@ -301,6 +301,7 @@ pub(super) fn compile_create_view(stmt: &pg_query::protobuf::ViewStmt) -> Result
     };
     Ok(Statement::CreateView {
         name,
+        column_names,
         body: Box::new(select),
         or_replace: stmt.replace,
     })

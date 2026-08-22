@@ -482,6 +482,38 @@ pub(super) fn table_columns_for(
         .unwrap_or_default())
 }
 
+pub(super) fn view_columns_for(engine: &Engine, view: &str) -> Result<Vec<SQLColumnDef>, SQLError> {
+    let schema = engine.view_schema(view)?.ok_or_else(|| {
+        SQLError::Internal(format!(
+            "view `{view}` disappeared while reading its catalog schema"
+        ))
+    })?;
+    Ok(schema
+        .columns()
+        .iter()
+        .enumerate()
+        .map(|(position, name)| SQLColumnDef {
+            name: schema.public_name(position).unwrap_or(name).to_string(),
+            ty: schema
+                .column_type(position)
+                .cloned()
+                .unwrap_or(ColumnType::Text),
+            primary_key: false,
+            not_null: false,
+            not_null_explicit: false,
+            not_null_name: None,
+            auto_increment: false,
+            unique: false,
+            default: None,
+            generated: None,
+            check: None,
+            check_name: None,
+            check_enforced: true,
+            references: None,
+        })
+        .collect())
+}
+
 pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
     match ty {
         ColumnType::SmallInteger => 21,

@@ -13,7 +13,10 @@ use std::sync::{
 
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult, SQLScalarFunction};
-use uqa_sql::SQLError;
+use uqa_sql::{ColumnType, SQLError};
+
+#[path = "sql_views/column_aliases.rs"]
+mod column_aliases;
 
 struct CountCalls {
     calls: Arc<AtomicUsize>,
