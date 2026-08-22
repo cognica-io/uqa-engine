@@ -51,6 +51,8 @@ jobs:
   python:
     name: python
     uses: ./.github/workflows/python-wheels.yml
+    with:
+      full_matrix: true
 
   node:
     name: node ${{ matrix.label }}

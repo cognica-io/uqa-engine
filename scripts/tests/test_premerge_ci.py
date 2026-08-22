@@ -27,6 +27,11 @@ class PremergeCITest(unittest.TestCase):
         remote_head: str = HEAD,
         existing_run: bool = False,
         branch_advanced: bool = False,
+        changed_files: tuple[str, ...] = (
+            "crates/uqa-engine/src/lib.rs",
+            "crates/uqa-node/src/lib.rs",
+            "crates/uqa-python/src/lib.rs",
+        ),
     ) -> tuple[subprocess.CompletedProcess[str], list[str], list[str]]:
         with tempfile.TemporaryDirectory() as temporary:
             temporary_path = pathlib.Path(temporary)
@@ -44,6 +49,9 @@ class PremergeCITest(unittest.TestCase):
                     echo "fix/premerge-ci"
                     ;;
                   diff)
+                    if [[ "$*" == *"--name-only"* ]]; then
+                      printf '%s\n' "$UQA_TEST_CHANGED_FILES"
+                    fi
                     exit 0
                     ;;
                   rev-parse)
@@ -89,6 +97,7 @@ class PremergeCITest(unittest.TestCase):
                     "PATH": f"{bin_path}:{environment['PATH']}",
                     "UQA_TEST_BASE": BASE,
                     "UQA_TEST_BRANCH_ADVANCED": "1" if branch_advanced else "0",
+                    "UQA_TEST_CHANGED_FILES": "\n".join(changed_files),
                     "UQA_TEST_EXISTING_RUN": "1" if existing_run else "0",
                     "UQA_TEST_GH_LOG": str(gh_log_path),
                     "UQA_TEST_GIT_LOG": str(git_log_path),
@@ -138,11 +147,33 @@ class PremergeCITest(unittest.TestCase):
         self.assertEqual(
             gh_invocations,
             [
-                f"workflow run ci.yml --ref {tag} -f base_revision={BASE}",
+                f"workflow run ci.yml --ref {tag} -f run_rust=true",
                 f"workflow run javascript-bindings.yml --ref {tag}",
                 f"workflow run python-wheels.yml --ref {tag}",
             ],
         )
+
+    def test_rust_change_skips_binding_suites(self) -> None:
+        result, gh_invocations, git_invocations = self.run_script(
+            changed_files=("crates/uqa-engine/src/lib.rs",)
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(gh_invocations), 1)
+        self.assertIn("workflow run ci.yml", gh_invocations[0])
+        self.assertIn("-f run_rust=true", gh_invocations[0])
+        self.assertEqual(len(git_invocations), 2)
+
+    def test_prose_change_skips_expensive_suites(self) -> None:
+        result, gh_invocations, git_invocations = self.run_script(
+            changed_files=("CONTRIBUTING.md",)
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(gh_invocations), 1)
+        self.assertIn("workflow run ci.yml", gh_invocations[0])
+        self.assertIn("-f run_rust=false", gh_invocations[0])
+        self.assertEqual(len(git_invocations), 2)
 
     def test_rejects_a_local_head_that_is_not_the_pull_request_head(self) -> None:
         result, gh_invocations, git_invocations = self.run_script(remote_head="c" * 40)

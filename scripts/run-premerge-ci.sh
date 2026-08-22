@@ -4,7 +4,7 @@
 #
 # Copyright (c) 2023-2026 Cognica, Inc.
 #
-# Dispatch the complete CI suites once for the exact remote pull-request HEAD.
+# Dispatch change-aware pre-merge suites once for the exact remote pull-request HEAD.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -91,6 +91,44 @@ if [[ "$local_head" != "$remote_head" ]]; then
   exit 1
 fi
 
+changed_files="$(git diff --name-only "$base_revision" "$local_head")"
+run_rust=false
+run_javascript=false
+run_python=false
+
+while IFS= read -r path; do
+  [[ -n "$path" ]] || continue
+
+  case "$path" in
+    Cargo.toml|Cargo.lock)
+      run_rust=true
+      run_javascript=true
+      run_python=true
+      ;;
+    deny.toml|rust-toolchain*|.cargo/*|crates/*.rs|crates/*/Cargo.toml|\
+      crates/*/build.rs|crates/uqa-pg-query/libpg_query/*|examples/rust/*|\
+      benchmarks/*|tests/*.rs|tests/parity/*|docs/manual/*|\
+      .github/scripts/*|.github/workflows/ci.yml)
+      run_rust=true
+      ;;
+  esac
+
+  case "$path" in
+    crates/uqa-node/*|crates/uqa-wasm/*|tests/node/*|tests/wasm/*|\
+      examples/node/*|examples/browser/*|scripts/build-wasm.sh|\
+      scripts/npm-release.py|.github/workflows/javascript-bindings.yml)
+      run_javascript=true
+      ;;
+  esac
+
+  case "$path" in
+    pyproject.toml|python/*|crates/uqa-python/*|tests/python/*|\
+      examples/python/*|.github/workflows/python-wheels.yml)
+      run_python=true
+      ;;
+  esac
+done <<<"$changed_files"
+
 temporary_tag=""
 
 cleanup_temporary_tag() {
@@ -155,10 +193,17 @@ dispatch_workflow() {
 echo "pre-merge CI target: $pr_url"
 echo "head: $local_head"
 echo "base: $base_revision"
+echo "Rust suite: $run_rust"
+echo "JavaScript/WebAssembly suite: $run_javascript"
+echo "Python suite: $run_python"
 
-dispatch_workflow ci.yml -f "base_revision=$base_revision"
-dispatch_workflow javascript-bindings.yml
-dispatch_workflow python-wheels.yml
+dispatch_workflow ci.yml -f "run_rust=$run_rust"
+if [[ "$run_javascript" == true ]]; then
+  dispatch_workflow javascript-bindings.yml
+fi
+if [[ "$run_python" == true ]]; then
+  dispatch_workflow python-wheels.yml
+fi
 
 if [[ "$dry_run" == 0 ]]; then
   echo "pre-merge CI dispatched; monitor with: gh run list --commit $local_head"

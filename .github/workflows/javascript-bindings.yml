@@ -36,7 +36,7 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Build native addon
         working-directory: crates/uqa-node
-        run: npx napi build --platform --no-js --profile release-stripped
+        run: npx napi build --platform --no-js
       - name: Test native addon
         run: node --test tests/node/test_uqa_node.mjs
       - name: Run Node.js examples
