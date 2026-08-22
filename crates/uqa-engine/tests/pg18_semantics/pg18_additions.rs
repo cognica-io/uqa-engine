@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL 18 additions that span multiple expression families.
+//! `PostgreSQL` 18 additions that span multiple expression families.
 
 use super::*;
 
