@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use uqa_sql::ast::ColumnType;
 
-use super::{ColumnIdentity, RowSchema, NULL_SLOT};
+use super::{ColumnIdentity, RowSchema, SchemaBuildMetadata, NULL_SLOT};
 
 impl RowSchema {
     /// Select logical positions with explicit public labels, SQL identities, and types while preserving hidden aliases and physical fragments.
@@ -38,14 +38,18 @@ impl RowSchema {
             lookup_aliases.insert(identity.clone(), input.slot(*logical).unwrap_or(NULL_SLOT));
             alias_types.insert(identity.clone(), input.column_type(*logical).cloned());
         }
-        Self::from_typed_parts_with_aliases(
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
             output_names,
             identities,
             types,
             slots,
             input.physical_width(),
-            lookup_aliases,
-            alias_types,
+            SchemaBuildMetadata {
+                aliases: lookup_aliases,
+                alias_types,
+                binding_only: input.index.cold.binding_only.clone(),
+                ..SchemaBuildMetadata::default()
+            },
         )
     }
 
@@ -67,14 +71,18 @@ impl RowSchema {
             .map(|(_, _, logical, _)| input.slot(*logical).unwrap_or(NULL_SLOT))
             .collect();
         let types = columns.iter().map(|(_, _, _, ty)| ty.clone()).collect();
-        Self::from_typed_parts_with_aliases(
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
             output_names,
             identities,
             types,
             slots,
             input.physical_width(),
-            HashMap::new(),
-            HashMap::new(),
+            SchemaBuildMetadata {
+                aliases: HashMap::new(),
+                alias_types: HashMap::new(),
+                binding_only: HashMap::new(),
+                ..SchemaBuildMetadata::default()
+            },
         )
     }
 }

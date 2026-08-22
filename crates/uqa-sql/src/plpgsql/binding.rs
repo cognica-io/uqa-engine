@@ -386,11 +386,13 @@ pub fn bind_statement(stmt: &Statement, r: &mut dyn VariableResolver) -> Result<
             name,
             if_not_exists,
             column_names,
+            with_no_data,
             body,
         } => Statement::CreateTableAs {
             name: name.clone(),
             if_not_exists: *if_not_exists,
             column_names: column_names.clone(),
+            with_no_data: *with_no_data,
             body: Box::new(bind_select(body, r)?),
         },
         Statement::Explain {

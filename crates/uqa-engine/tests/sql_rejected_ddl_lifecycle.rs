@@ -24,7 +24,6 @@ fn rejected_create_syntax_has_no_current_or_reopened_catalog_side_effects() {
         "CREATE VIEW checked AS SELECT 1 WITH LOCAL CHECK OPTION",
         "CREATE MATERIALIZED VIEW materialized AS SELECT 1",
         "CREATE TEMP TABLE temp_as AS SELECT 1",
-        "CREATE TABLE no_data AS SELECT 1 WITH NO DATA",
         "CREATE TEMP SEQUENCE temp_sequence",
     ];
 
@@ -46,7 +45,6 @@ fn rejected_create_syntax_has_no_current_or_reopened_catalog_side_effects() {
             "child",
             "materialized",
             "temp_as",
-            "no_data",
         ] {
             assert!(
                 !engine.has_table(relation).unwrap(),

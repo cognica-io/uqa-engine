@@ -1034,14 +1034,35 @@ fn create_table_as_preserves_positional_column_names() {
         name,
         if_not_exists,
         column_names,
+        with_no_data,
         ..
-    } = first("CREATE TABLE IF NOT EXISTS app.copy (renamed, \"Mixed\") AS SELECT 1, 2, 3")
+    } = first(
+        "CREATE TABLE IF NOT EXISTS app.copy (renamed, \"Mixed\") AS \
+         SELECT 1, 2, 3 WITH NO DATA",
+    )
     else {
         panic!("expected CREATE TABLE AS");
     };
     assert_eq!(name, "app.copy");
     assert!(if_not_exists);
     assert_eq!(column_names, ["renamed", "Mixed"]);
+    assert!(with_no_data);
+
+    let Statement::CreateTableAs { with_no_data, .. } =
+        first("CREATE TABLE populated AS SELECT 1 WITH DATA")
+    else {
+        panic!("expected CREATE TABLE AS");
+    };
+    assert!(!with_no_data);
+}
+
+#[test]
+fn direct_unknown_literal_casts_are_validated_during_analysis() {
+    let error = compile("SELECT 'bad'::integer").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22P02"));
+
+    compile("SELECT ('bad'::text)::integer").unwrap();
+    compile("SELECT 999999999999::integer").unwrap();
 }
 
 #[test]
@@ -1088,10 +1109,6 @@ fn unsupported_create_ddl_never_loses_lifecycle_semantics() {
             "MATERIALIZED VIEW",
         ),
         ("CREATE TEMP TABLE temp_as AS SELECT 1", "TEMPORARY"),
-        (
-            "CREATE TABLE no_data AS SELECT 1 WITH NO DATA",
-            "WITH NO DATA",
-        ),
         ("CREATE TEMP SEQUENCE temp_sequence", "TEMPORARY"),
     ] {
         let error = compile(sql).expect_err(sql);

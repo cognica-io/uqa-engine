@@ -23,6 +23,7 @@ use uqa_sql::ResultRow;
 use crate::physical::{ExecError, ExecResult};
 
 mod materialization;
+mod name_binding;
 mod outer_scope;
 mod owned_row;
 mod schema_remap;
@@ -100,6 +101,9 @@ struct SchemaColdMetadata {
     /// `None` is an as-yet unresolved type, not a runtime NULL value.
     columns: Box<[Option<ColumnType>]>,
     aliases: HashMap<ColumnIdentity, Option<ColumnType>>,
+    /// Static name-binding identities with no runtime slot. Unlike aliases,
+    /// these are never part of qualified wildcard expansion or spill layout.
+    binding_only: HashMap<ColumnIdentity, Option<ColumnType>>,
     identity_layout: bool,
 }
 
@@ -107,6 +111,7 @@ struct SchemaColdMetadata {
 struct SchemaBuildMetadata {
     aliases: HashMap<ColumnIdentity, usize>,
     alias_types: HashMap<ColumnIdentity, Option<ColumnType>>,
+    binding_only: HashMap<ColumnIdentity, Option<ColumnType>>,
     exact_unqualified_precedence: bool,
     extra_ambiguous_unqualified: HashSet<Box<str>>,
     extra_ambiguous_qualified: HashSet<ColumnIdentity>,
@@ -259,29 +264,6 @@ impl RowSchema {
         )
     }
 
-    fn from_typed_parts_with_aliases(
-        columns: Vec<String>,
-        identities: Vec<ColumnIdentity>,
-        types: Vec<Option<ColumnType>>,
-        slots: Vec<usize>,
-        physical_width: usize,
-        aliases: HashMap<ColumnIdentity, usize>,
-        alias_types: HashMap<ColumnIdentity, Option<ColumnType>>,
-    ) -> Self {
-        Self::from_typed_parts_with_aliases_and_exact_precedence(
-            columns,
-            identities,
-            types,
-            slots,
-            physical_width,
-            SchemaBuildMetadata {
-                aliases,
-                alias_types,
-                ..SchemaBuildMetadata::default()
-            },
-        )
-    }
-
     fn from_parts_with_aliases_and_exact_precedence(
         columns: Vec<String>,
         identities: Vec<ColumnIdentity>,
@@ -311,6 +293,7 @@ impl RowSchema {
         let SchemaBuildMetadata {
             aliases,
             alias_types,
+            binding_only,
             exact_unqualified_precedence,
             extra_ambiguous_unqualified,
             extra_ambiguous_qualified,
@@ -377,6 +360,7 @@ impl RowSchema {
                 cold: Box::new(SchemaColdMetadata {
                     columns: types.into_boxed_slice(),
                     aliases: alias_types,
+                    binding_only,
                     identity_layout,
                 }),
             }),
@@ -416,23 +400,6 @@ impl RowSchema {
     /// Structured SQL identities aligned with [`Self::columns`].
     pub fn identities(&self) -> &[ColumnIdentity] {
         &self.index.identities
-    }
-
-    /// Whether a visible or hidden lookup identity belongs to `qualifier`.
-    #[must_use]
-    pub fn has_qualifier(&self, qualifier: &str) -> bool {
-        self.index
-            .identities
-            .iter()
-            .chain(self.index.aliases.keys())
-            .any(|identity| identity.qualifier() == Some(qualifier))
-    }
-
-    /// Whether a visible or hidden lookup identity contains this exact qualified column, independently of its static type or ambiguity.
-    #[must_use]
-    pub fn has_qualified_column(&self, qualifier: &str, column: &str) -> bool {
-        let identity = ColumnIdentity::qualified(qualifier, column);
-        self.index.qualified.contains_key(&identity) || self.index.aliases.contains_key(&identity)
     }
 
     pub fn identity(&self, logical: usize) -> Option<&ColumnIdentity> {
@@ -521,43 +488,6 @@ impl RowSchema {
             .filter(|slot| *slot != NULL_SLOT)
     }
 
-    /// Resolve an unqualified logical identity to its static type.
-    pub fn type_of(&self, name: &str) -> Option<&ColumnType> {
-        if self.index.ambiguous_unqualified.contains(name) {
-            return None;
-        }
-        self.index
-            .unqualified
-            .get(name)
-            .and_then(|logical| self.column_type(*logical))
-            .or_else(|| {
-                self.index
-                    .cold
-                    .aliases
-                    .get(&ColumnIdentity::unqualified(name))
-                    .and_then(Option::as_ref)
-            })
-    }
-
-    /// Resolve a qualified logical identity to its static type.
-    pub fn qualified_type(&self, qualifier: &str, column: &str) -> Option<&ColumnType> {
-        let identity = ColumnIdentity::qualified(qualifier, column);
-        if self.index.ambiguous_qualified.contains(&identity) {
-            return None;
-        }
-        self.index
-            .qualified
-            .get(&identity)
-            .and_then(|logical| self.column_type(*logical))
-            .or_else(|| {
-                self.index
-                    .cold
-                    .aliases
-                    .get(&identity)
-                    .and_then(Option::as_ref)
-            })
-    }
-
     /// Physical projection layout for `qualifier.*` in relation-column order. Hidden identities introduced by `JOIN ... USING` remain selectable, so each side's wildcard retains its own merged-column value.
     pub fn qualified_star_layout(
         &self,
@@ -607,16 +537,6 @@ impl RowSchema {
             .collect()
     }
 
-    pub fn column_is_ambiguous(&self, name: &str) -> bool {
-        self.index.ambiguous_unqualified.contains(name)
-    }
-
-    pub fn qualified_column_is_ambiguous(&self, qualifier: &str, column: &str) -> bool {
-        self.index
-            .ambiguous_qualified
-            .contains(&ColumnIdentity::qualified(qualifier, column))
-    }
-
     fn qualified_slot(&self, qualifier: &str, column: &str) -> Option<usize> {
         let identity = ColumnIdentity::qualified(qualifier, column);
         if self.index.ambiguous_qualified.contains(&identity) {
@@ -650,14 +570,18 @@ impl RowSchema {
             .cloned()
             .map(ColumnIdentity::unqualified)
             .collect();
-        Self::from_typed_parts_with_aliases(
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
             output_names,
             identities,
             types,
             slots,
             input.physical_width(),
-            HashMap::new(),
-            HashMap::new(),
+            SchemaBuildMetadata {
+                aliases: HashMap::new(),
+                alias_types: HashMap::new(),
+                binding_only: HashMap::new(),
+                ..SchemaBuildMetadata::default()
+            },
         )
     }
 
@@ -695,14 +619,18 @@ impl RowSchema {
                     slots.push(slot);
                 }
             }
-            return Self::from_typed_parts_with_aliases(
+            return Self::from_typed_parts_with_aliases_and_exact_precedence(
                 columns,
                 identities,
                 types,
                 slots,
                 next_computed_slot,
-                input.index.aliases.clone(),
-                input.index.cold.aliases.clone(),
+                SchemaBuildMetadata {
+                    aliases: input.index.aliases.clone(),
+                    alias_types: input.index.cold.aliases.clone(),
+                    binding_only: input.index.cold.binding_only.clone(),
+                    ..SchemaBuildMetadata::default()
+                },
             );
         }
 
@@ -716,14 +644,18 @@ impl RowSchema {
             columns.push(name);
             types.push(ty);
         }
-        Self::from_typed_parts_with_aliases(
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
             columns,
             identities,
             types,
             slots,
             next_computed_slot,
-            HashMap::new(),
-            HashMap::new(),
+            SchemaBuildMetadata {
+                aliases: HashMap::new(),
+                alias_types: HashMap::new(),
+                binding_only: HashMap::new(),
+                ..SchemaBuildMetadata::default()
+            },
         )
     }
 
@@ -769,14 +701,18 @@ impl RowSchema {
             })
             .collect();
         (
-            Self::from_typed_parts_with_aliases(
+            Self::from_typed_parts_with_aliases_and_exact_precedence(
                 self.columns().to_vec(),
                 self.identities().to_vec(),
                 self.column_types().to_vec(),
                 slots,
                 source_slots.len(),
-                aliases,
-                self.index.cold.aliases.clone(),
+                SchemaBuildMetadata {
+                    aliases,
+                    alias_types: self.index.cold.aliases.clone(),
+                    binding_only: self.index.cold.binding_only.clone(),
+                    ..SchemaBuildMetadata::default()
+                },
             ),
             source_slots,
         )
@@ -845,14 +781,18 @@ impl RowSchema {
             }
             alias_types.insert(identity, ty);
         }
-        Ok(Self::from_typed_parts_with_aliases(
+        Ok(Self::from_typed_parts_with_aliases_and_exact_precedence(
             columns,
             identities,
             types,
             slots,
             physical_width,
-            lookup_aliases,
-            alias_types,
+            SchemaBuildMetadata {
+                aliases: lookup_aliases,
+                alias_types,
+                binding_only: HashMap::new(),
+                ..SchemaBuildMetadata::default()
+            },
         ))
     }
 
@@ -884,25 +824,6 @@ impl RowSchema {
                 )
             })
             .collect()
-    }
-
-    /// Add hidden structured lookup identities for existing logical positions.
-    pub fn with_identity_aliases(input: &Self, aliases: &[(ColumnIdentity, usize)]) -> Self {
-        let mut lookup_aliases = input.index.aliases.clone();
-        let mut alias_types = input.index.cold.aliases.clone();
-        for (identity, logical) in aliases {
-            lookup_aliases.insert(identity.clone(), input.slot(*logical).unwrap_or(NULL_SLOT));
-            alias_types.insert(identity.clone(), input.column_type(*logical).cloned());
-        }
-        Self::from_typed_parts_with_aliases(
-            input.columns().to_vec(),
-            input.identities().to_vec(),
-            input.column_types().to_vec(),
-            input.index.slots.to_vec(),
-            input.physical_width(),
-            lookup_aliases,
-            alias_types,
-        )
     }
 
     /// Select logical input positions and attach hidden lookup identities without copying their physical values. Existing hidden aliases are retained, so nested join qualification survives another remap.
@@ -944,14 +865,18 @@ impl RowSchema {
             lookup_aliases.insert(identity.clone(), input.slot(*logical).unwrap_or(NULL_SLOT));
             alias_types.insert(identity.clone(), input.column_type(*logical).cloned());
         }
-        Self::from_typed_parts_with_aliases(
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
             output_names,
             identities,
             types,
             slots,
             input.physical_width(),
-            lookup_aliases,
-            alias_types,
+            SchemaBuildMetadata {
+                aliases: lookup_aliases,
+                alias_types,
+                binding_only: input.index.cold.binding_only.clone(),
+                ..SchemaBuildMetadata::default()
+            },
         )
     }
 
@@ -986,14 +911,18 @@ impl RowSchema {
                 slots.push(slot);
             }
         }
-        Self::from_typed_parts_with_aliases(
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
             columns,
             identities,
             types,
             slots,
             base + names.len(),
-            input.index.aliases.clone(),
-            input.index.cold.aliases.clone(),
+            SchemaBuildMetadata {
+                aliases: input.index.aliases.clone(),
+                alias_types: input.index.cold.aliases.clone(),
+                binding_only: input.index.cold.binding_only.clone(),
+                ..SchemaBuildMetadata::default()
+            },
         )
     }
 
@@ -1012,6 +941,7 @@ impl RowSchema {
         let right_base = left.physical_width();
         let mut aliases = left.index.aliases.clone();
         let mut alias_types = left.index.cold.aliases.clone();
+        let mut binding_only = left.index.cold.binding_only.clone();
         aliases.extend(right.index.aliases.iter().map(|(name, slot)| {
             (
                 name.clone(),
@@ -1030,6 +960,14 @@ impl RowSchema {
                 .iter()
                 .map(|(name, ty)| (name.clone(), ty.clone())),
         );
+        binding_only.extend(
+            right
+                .index
+                .cold
+                .binding_only
+                .iter()
+                .map(|(identity, ty)| (identity.clone(), ty.clone())),
+        );
         for (right_logical, column) in right.columns().iter().enumerate() {
             let slot = right
                 .slot(right_logical)
@@ -1047,14 +985,18 @@ impl RowSchema {
                 slots.push(NULL_SLOT);
             }
         }
-        Self::from_typed_parts_with_aliases(
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
             columns,
             identities,
             types,
             slots,
             left.physical_width() + right.physical_width(),
-            aliases,
-            alias_types,
+            SchemaBuildMetadata {
+                aliases,
+                alias_types,
+                binding_only,
+                ..SchemaBuildMetadata::default()
+            },
         )
     }
 

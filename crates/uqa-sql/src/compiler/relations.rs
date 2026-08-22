@@ -76,11 +76,6 @@ pub(super) fn compile_create_table_as(
             "CREATE TABLE AS view-query payloads are not supported".into(),
         ));
     }
-    if into.skip_data {
-        return Err(SQLError::Unsupported(
-            "CREATE TABLE AS WITH NO DATA is not supported".into(),
-        ));
-    }
     let name = range_var_name(relation);
     let body = stmt
         .query
@@ -102,6 +97,7 @@ pub(super) fn compile_create_table_as(
         name,
         if_not_exists: stmt.if_not_exists,
         column_names,
+        with_no_data: into.skip_data,
         body: Box::new(select),
     })
 }

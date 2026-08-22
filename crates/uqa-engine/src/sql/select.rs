@@ -401,15 +401,16 @@ pub(super) fn execute_query_plan_output(
     let mut visible_ctes = ctes.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
     let ctes = &mut *visible_ctes;
     if !plan.ctes.is_empty() {
+        let ordered_ctes = ordered_plan_ctes(plan)?;
         let reachable = reachable_plan_cte_names(plan);
         let single_reference = single_reference_plan_cte_names(plan);
-        let recursive = plan
-            .ctes
+        let recursive = ordered_ctes
             .iter()
+            .copied()
             .filter(|cte| cte_references_own_name(cte))
             .map(|cte| cte.name.as_str())
             .collect::<BTreeSet<_>>();
-        for cte in plan.ctes.iter().filter(|cte| {
+        for cte in ordered_ctes.iter().copied().filter(|cte| {
             !recursive.contains(cte.name.as_str())
                 && reachable.contains(&cte.name)
                 && single_reference.contains(&cte.name)
@@ -423,7 +424,7 @@ pub(super) fn execute_query_plan_output(
         let filters = cte_output_filters(engine, plan);
         materialize_plan_ctes_with_filters(
             engine,
-            plan.ctes.iter().filter(|cte| {
+            ordered_ctes.into_iter().filter(|cte| {
                 reachable.contains(&cte.name)
                     && (recursive.contains(cte.name.as_str())
                         || !single_reference.contains(&cte.name)

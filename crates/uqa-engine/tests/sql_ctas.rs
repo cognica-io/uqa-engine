@@ -257,3 +257,213 @@ fn ctas_column_names_preserve_vector_field_schema() {
         .unwrap();
     assert_eq!(hits.first().map(|hit| hit.doc_id), Some(1));
 }
+
+#[test]
+fn ctas_with_no_data_builds_the_typed_schema_without_executing_the_query() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE source (small SMALLINT, label VARCHAR(3), embedding VECTOR(2), features TENSOR(2))",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO source (small, label, embedding) VALUES (7, 'abc', ARRAY[1.0, 0.0])",
+        &[],
+    )
+    .unwrap();
+    eng.sql("CREATE SEQUENCE no_data_sequence START WITH 41", &[])
+        .unwrap();
+
+    let created = eng
+        .sql(
+            "CREATE TABLE empty_copy (renamed) AS \
+             SELECT small, label, nextval('no_data_sequence') AS sequence_value, \
+                    coalesce(source._doc_id, 0::bigint) AS document_id, \
+                    coalesce(_doc_id, 0::bigint) AS unqualified_document_id, \
+                    (SELECT coalesce(source._doc_id, 0::bigint)) AS correlated_document_id, \
+                    embedding, features, 1 / 0 AS failure \
+             FROM source WITH NO DATA",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(created.affected_rows, 0);
+    let empty = eng
+        .sql(
+            "SELECT renamed, label, sequence_value, document_id, unqualified_document_id, correlated_document_id, embedding, features, failure FROM empty_copy",
+            &[],
+        )
+        .unwrap();
+    assert!(empty.rows.is_empty());
+    assert_eq!(
+        empty.column_types,
+        [
+            Some(ColumnType::SmallInteger),
+            Some(ColumnType::Varchar(Some(3))),
+            Some(ColumnType::BigInteger),
+            Some(ColumnType::BigInteger),
+            Some(ColumnType::BigInteger),
+            Some(ColumnType::BigInteger),
+            Some(ColumnType::Vector(2)),
+            Some(ColumnType::Tensor(2)),
+            Some(ColumnType::Integer),
+        ]
+    );
+
+    let first_sequence_value = eng.sql("SELECT nextval('no_data_sequence')", &[]).unwrap();
+    assert_eq!(first_sequence_value.value_at(0, 0), Some(&Value::Int(41)));
+
+    eng.sql(
+        "INSERT INTO empty_copy (renamed, label, embedding) \
+         VALUES (8, 'xy', ARRAY[0.0, 1.0])",
+        &[],
+    )
+    .unwrap();
+    let hits = eng
+        .knn_search("empty_copy", "embedding", vec![0.0, 1.0], 1)
+        .unwrap();
+    assert_eq!(hits.first().map(|hit| hit.doc_id), Some(1));
+
+    eng.sql(
+        "CREATE TABLE populated AS \
+         SELECT nextval('no_data_sequence') AS sequence_value WITH DATA",
+        &[],
+    )
+    .unwrap();
+    let populated = eng
+        .sql("SELECT sequence_value FROM populated", &[])
+        .unwrap();
+    assert_eq!(populated.value_at(0, 0), Some(&Value::Int(42)));
+}
+
+#[test]
+fn ctas_with_no_data_matches_postgresql_analysis_and_if_not_exists_order() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE source (value INTEGER)", &[]).unwrap();
+    for (table, sql, sqlstate) in [
+        (
+            "missing_source",
+            "CREATE TABLE missing_source AS \
+             SELECT * FROM does_not_exist WITH NO DATA",
+            "42P01",
+        ),
+        (
+            "missing_column",
+            "CREATE TABLE missing_column AS \
+             SELECT absent FROM source WITH NO DATA",
+            "42703",
+        ),
+        (
+            "missing_function",
+            "CREATE TABLE missing_function AS \
+             SELECT does_not_exist(1) WITH NO DATA",
+            "42883",
+        ),
+        (
+            "invalid_cast",
+            "CREATE TABLE invalid_cast AS \
+             SELECT 'bad'::integer WITH NO DATA",
+            "22P02",
+        ),
+        (
+            "too_many",
+            "CREATE TABLE too_many (a, b) AS SELECT 1 WITH NO DATA",
+            "42601",
+        ),
+        (
+            "duplicate_names",
+            "CREATE TABLE duplicate_names AS \
+             SELECT 1 AS value, 2 AS value WITH NO DATA",
+            "42701",
+        ),
+    ] {
+        let error = eng.sql(sql, &[]).expect_err(sql);
+        assert_eq!(error.sqlstate(), Some(sqlstate), "{sql}: {error}");
+        assert!(
+            !eng.has_table(table).unwrap(),
+            "{table} leaked after {error}"
+        );
+    }
+
+    let empty_input_error = eng
+        .sql(
+            "CREATE TABLE missing_function_with_data AS \
+             SELECT does_not_exist(value) FROM source",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(empty_input_error.sqlstate(), Some("42883"));
+    assert!(!eng.has_table("missing_function_with_data").unwrap());
+
+    eng.sql(
+        "CREATE TABLE deferred_cast AS \
+         SELECT ('bad'::text)::integer AS value WITH NO DATA",
+        &[],
+    )
+    .unwrap();
+    assert!(eng
+        .sql("SELECT value FROM deferred_cast", &[])
+        .unwrap()
+        .rows
+        .is_empty());
+
+    eng.sql("CREATE TABLE existing (kept INTEGER)", &[])
+        .unwrap();
+    eng.sql(
+        "CREATE TABLE IF NOT EXISTS existing (a, b) AS \
+         SELECT 1 / 0 WITH NO DATA",
+        &[],
+    )
+    .unwrap();
+    let missing_source = eng
+        .sql(
+            "CREATE TABLE IF NOT EXISTS existing AS \
+             SELECT * FROM does_not_exist WITH NO DATA",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(missing_source.sqlstate(), Some("42P01"));
+}
+
+#[test]
+fn ctas_with_no_data_schema_and_vector_index_survive_reopen() {
+    let directory = tempfile::TempDir::new().unwrap();
+    let database = directory.path().join("ctas-no-data.db");
+    {
+        let eng = Engine::open(&database).unwrap();
+        eng.sql(
+            "CREATE TABLE source (embedding VECTOR(2), features TENSOR(2), label VARCHAR(3))",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "CREATE TABLE durable (renamed) AS \
+             SELECT embedding, features, label FROM source WITH NO DATA",
+            &[],
+        )
+        .unwrap();
+    }
+
+    let reopened = Engine::open(&database).unwrap();
+    let empty = reopened
+        .sql("SELECT renamed, features, label FROM durable", &[])
+        .unwrap();
+    assert!(empty.rows.is_empty());
+    assert_eq!(
+        empty.column_types,
+        [
+            Some(ColumnType::Vector(2)),
+            Some(ColumnType::Tensor(2)),
+            Some(ColumnType::Varchar(Some(3))),
+        ]
+    );
+    reopened
+        .sql(
+            "INSERT INTO durable (renamed, label) VALUES (ARRAY[1.0, 0.0], 'xy')",
+            &[],
+        )
+        .unwrap();
+    let hits = reopened
+        .knn_search("durable", "renamed", vec![1.0, 0.0], 1)
+        .unwrap();
+    assert_eq!(hits.first().map(|hit| hit.doc_id), Some(1));
+}
