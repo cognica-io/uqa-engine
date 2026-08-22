@@ -49,6 +49,18 @@ jobs:
           .venv/bin/python -m pip install maturin==1.11.5 pytest
       - name: Build and install the development extension
         run: maturin develop --locked
+      - name: Check the stable ABI contract
+        run: |
+          python - <<'PY'
+          import pathlib
+          import tomllib
+
+          manifest = tomllib.loads(
+              pathlib.Path("crates/uqa-python/Cargo.toml").read_text(encoding="utf-8")
+          )
+          features = manifest["dependencies"]["pyo3"]["features"]
+          assert "abi3-py38" in features, features
+          PY
       - name: Exercise the CLI and Python API
         run: |
           set -euo pipefail

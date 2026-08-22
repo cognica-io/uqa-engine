@@ -91,6 +91,17 @@ if [[ "$local_head" != "$remote_head" ]]; then
   exit 1
 fi
 
+if ! git cat-file -e "${base_revision}^{commit}" 2>/dev/null; then
+  git fetch --quiet origin "$base_revision" || {
+    echo "base commit $base_revision is not available locally; run: git fetch origin main" >&2
+    exit 1
+  }
+  if ! git cat-file -e "${base_revision}^{commit}" 2>/dev/null; then
+    echo "base commit $base_revision is still unavailable after fetching it" >&2
+    exit 1
+  fi
+fi
+
 changed_files="$(git diff --name-only "$base_revision" "$local_head")"
 run_rust=false
 run_javascript=false
@@ -105,25 +116,45 @@ while IFS= read -r path; do
       run_javascript=true
       run_python=true
       ;;
-    deny.toml|rust-toolchain*|.cargo/*|crates/*.rs|crates/*/Cargo.toml|\
-      crates/*/build.rs|crates/uqa-pg-query/libpg_query/*|examples/rust/*|\
-      benchmarks/*|tests/*.rs|tests/parity/*|docs/manual/*|\
-      .github/scripts/*|.github/workflows/ci.yml)
+    deny.toml | \
+    rust-toolchain* | \
+    .cargo/* | \
+    crates/*.rs | \
+    crates/*/Cargo.toml | \
+    crates/*/build.rs | \
+    crates/uqa-pg-query/libpg_query/* | \
+    examples/rust/* | \
+    benchmarks/* | \
+    tests/*.rs | \
+    tests/parity/* | \
+    docs/manual/* | \
+    .github/scripts/* | \
+    .github/workflows/ci.yml)
       run_rust=true
       ;;
   esac
 
   case "$path" in
-    crates/uqa-node/*|crates/uqa-wasm/*|tests/node/*|tests/wasm/*|\
-      examples/node/*|examples/browser/*|scripts/build-wasm.sh|\
-      scripts/npm-release.py|.github/workflows/javascript-bindings.yml)
+    crates/uqa-node/* | \
+    crates/uqa-wasm/* | \
+    tests/node/* | \
+    tests/wasm/* | \
+    examples/node/* | \
+    examples/browser/* | \
+    scripts/build-wasm.sh | \
+    scripts/npm-release.py | \
+    .github/workflows/javascript-bindings.yml)
       run_javascript=true
       ;;
   esac
 
   case "$path" in
-    pyproject.toml|python/*|crates/uqa-python/*|tests/python/*|\
-      examples/python/*|.github/workflows/python-wheels.yml)
+    pyproject.toml | \
+    python/* | \
+    crates/uqa-python/* | \
+    tests/python/* | \
+    examples/python/* | \
+    .github/workflows/python-wheels.yml)
       run_python=true
       ;;
   esac
@@ -172,12 +203,12 @@ dispatch_workflow() {
       --workflow "$workflow" \
       --commit "$local_head" \
       --limit 1 \
-      --json url \
-      --jq '.[0].url // empty'
+      --json url,status,conclusion \
+      --jq '.[0] | select(.status != "completed" or .conclusion == "success") | .url // empty'
   )"
 
   if [[ -n "$existing_url" && "$force" == 0 ]]; then
-    echo "$workflow already has a run for $local_head: $existing_url"
+    echo "$workflow already has a successful or in-progress run for $local_head: $existing_url"
     return
   fi
 

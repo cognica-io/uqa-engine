@@ -61,6 +61,7 @@ jobs:
               "win32-arm64-msvc",
           ):
               (output / f"uqa.{suffix}.node").write_bytes(b"npm metadata fixture\n")
+          # These checked-out-tree files are metadata-only WASM package placeholders.
           Path("crates/uqa-wasm/js/uqa.js").write_text("export default {};\n", encoding="utf-8")
           Path("crates/uqa-wasm/js/uqa.wasm").write_bytes(b"npm metadata fixture\n")
           PY

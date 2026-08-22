@@ -25,8 +25,10 @@ class PremergeCITest(unittest.TestCase):
         self,
         *arguments: str,
         remote_head: str = HEAD,
-        existing_run: bool = False,
+        existing_run_state: str = "",
         branch_advanced: bool = False,
+        dirty_state: str = "",
+        base_available: bool = True,
         changed_files: tuple[str, ...] = (
             "crates/uqa-engine/src/lib.rs",
             "crates/uqa-node/src/lib.rs",
@@ -39,6 +41,7 @@ class PremergeCITest(unittest.TestCase):
             bin_path.mkdir()
             gh_log_path = temporary_path / "gh.log"
             git_log_path = temporary_path / "git.log"
+            fetch_marker_path = temporary_path / "base-fetched"
             self.write_executable(
                 bin_path / "git",
                 """
@@ -49,10 +52,26 @@ class PremergeCITest(unittest.TestCase):
                     echo "fix/premerge-ci"
                     ;;
                   diff)
+                    if [[ "$UQA_TEST_DIRTY_STATE" == "working" && "$*" == "diff --quiet" ]]; then
+                      exit 1
+                    fi
+                    if [[ "$UQA_TEST_DIRTY_STATE" == "cached" && "$*" == "diff --cached --quiet" ]]; then
+                      exit 1
+                    fi
                     if [[ "$*" == *"--name-only"* ]]; then
                       printf '%s\n' "$UQA_TEST_CHANGED_FILES"
                     fi
                     exit 0
+                    ;;
+                  cat-file)
+                    if [[ "$UQA_TEST_BASE_AVAILABLE" == "1" || -e "$UQA_TEST_FETCH_MARKER" ]]; then
+                      exit 0
+                    fi
+                    exit 1
+                    ;;
+                  fetch)
+                    echo "$*" >> "$UQA_TEST_GIT_LOG"
+                    : > "$UQA_TEST_FETCH_MARKER"
                     ;;
                   rev-parse)
                     echo "$UQA_TEST_LOCAL_HEAD"
@@ -76,9 +95,10 @@ class PremergeCITest(unittest.TestCase):
                   printf 'OPEN\tfalse\t14\tmain\t%s\tfix/premerge-ci\t%s\thttps://example.test/pr/14\n' \
                     "$UQA_TEST_BASE" "$UQA_TEST_REMOTE_HEAD"
                 elif [[ "$1 $2" == "run list" ]]; then
-                  if [[ "$UQA_TEST_EXISTING_RUN" == "1" ]]; then
-                    echo "https://example.test/run/1"
-                  fi
+                  [[ "$*" == *"--json url,status,conclusion"* ]] || exit 4
+                  case "$UQA_TEST_EXISTING_RUN_STATE" in
+                    success|in_progress) echo "https://example.test/run/1" ;;
+                  esac
                 elif [[ "$1 $2" == "workflow run" ]]; then
                   if [[ "$UQA_TEST_BRANCH_ADVANCED" == "1" && "$*" == *"--ref fix/premerge-ci"* ]]; then
                     echo "mutable branch ref used after branch advance" >&2
@@ -96,9 +116,12 @@ class PremergeCITest(unittest.TestCase):
                 {
                     "PATH": f"{bin_path}:{environment['PATH']}",
                     "UQA_TEST_BASE": BASE,
+                    "UQA_TEST_BASE_AVAILABLE": "1" if base_available else "0",
                     "UQA_TEST_BRANCH_ADVANCED": "1" if branch_advanced else "0",
                     "UQA_TEST_CHANGED_FILES": "\n".join(changed_files),
-                    "UQA_TEST_EXISTING_RUN": "1" if existing_run else "0",
+                    "UQA_TEST_DIRTY_STATE": dirty_state,
+                    "UQA_TEST_EXISTING_RUN_STATE": existing_run_state,
+                    "UQA_TEST_FETCH_MARKER": str(fetch_marker_path),
                     "UQA_TEST_GH_LOG": str(gh_log_path),
                     "UQA_TEST_GIT_LOG": str(git_log_path),
                     "UQA_TEST_LOCAL_HEAD": HEAD,
@@ -175,6 +198,50 @@ class PremergeCITest(unittest.TestCase):
         self.assertIn("-f run_rust=false", gh_invocations[0])
         self.assertEqual(len(git_invocations), 2)
 
+    def test_each_continued_pattern_selects_its_suite(self) -> None:
+        cases = (
+            ("benchmarks/tpch/README.md", ("ci.yml",), "true"),
+            ("examples/python/basic.py", ("ci.yml", "python-wheels.yml"), "false"),
+            (
+                "examples/node/basic.mjs",
+                ("ci.yml", "javascript-bindings.yml"),
+                "false",
+            ),
+            (".github/workflows/ci.yml", ("ci.yml",), "true"),
+        )
+
+        for changed_file, expected_workflows, run_rust in cases:
+            with self.subTest(changed_file=changed_file):
+                result, gh_invocations, git_invocations = self.run_script(
+                    changed_files=(changed_file,)
+                )
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                workflows = tuple(invocation.split()[2] for invocation in gh_invocations)
+                self.assertEqual(workflows, expected_workflows)
+                self.assertIn(f"-f run_rust={run_rust}", gh_invocations[0])
+                self.assertEqual(len(git_invocations), 2)
+
+    def test_fetches_a_missing_base_commit_before_classification(self) -> None:
+        result, _, git_invocations = self.run_script(base_available=False)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            git_invocations[0], f"fetch --quiet origin {BASE}"
+        )
+
+    def test_rejects_dirty_tracked_state(self) -> None:
+        for dirty_state in ("working", "cached"):
+            with self.subTest(dirty_state=dirty_state):
+                result, gh_invocations, git_invocations = self.run_script(
+                    dirty_state=dirty_state
+                )
+
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("commit tracked changes", result.stderr)
+                self.assertEqual(gh_invocations, [])
+                self.assertEqual(git_invocations, [])
+
     def test_rejects_a_local_head_that_is_not_the_pull_request_head(self) -> None:
         result, gh_invocations, git_invocations = self.run_script(remote_head="c" * 40)
 
@@ -184,16 +251,29 @@ class PremergeCITest(unittest.TestCase):
         self.assertEqual(git_invocations, [])
 
     def test_does_not_duplicate_existing_runs_without_force(self) -> None:
-        result, gh_invocations, git_invocations = self.run_script(existing_run=True)
+        result, gh_invocations, git_invocations = self.run_script(
+            existing_run_state="success"
+        )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(gh_invocations, [])
         self.assertEqual(git_invocations, [])
-        self.assertEqual(result.stdout.count("already has a run"), 3)
+        self.assertEqual(
+            result.stdout.count("already has a successful or in-progress run"), 3
+        )
 
     def test_force_repeats_existing_runs(self) -> None:
         result, gh_invocations, git_invocations = self.run_script(
-            "--force", existing_run=True
+            "--force", existing_run_state="success"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(gh_invocations), 3)
+        self.assertEqual(len(git_invocations), 2)
+
+    def test_failed_runs_are_retried_without_force(self) -> None:
+        result, gh_invocations, git_invocations = self.run_script(
+            existing_run_state="failure"
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)

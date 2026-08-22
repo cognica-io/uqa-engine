@@ -30,6 +30,8 @@ jobs:
       RUSTFLAGS: "-D warnings -C linker-features=-lld"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - name: Free Linux runner disk
         run: bash .github/scripts/free-linux-runner-disk.sh
@@ -48,6 +50,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - name: Free Linux runner disk
         run: bash .github/scripts/free-linux-runner-disk.sh
@@ -63,6 +67,8 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -84,6 +90,8 @@ jobs:
             os: macos-14
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -102,6 +110,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.90.0
       - name: Free Linux runner disk
         run: bash .github/scripts/free-linux-runner-disk.sh
@@ -119,6 +129,8 @@ jobs:
       RUSTDOCFLAGS: "-D warnings"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - name: Free Linux runner disk
         run: bash .github/scripts/free-linux-runner-disk.sh
@@ -134,6 +146,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
