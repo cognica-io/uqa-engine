@@ -1,0 +1,255 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Schema definition, declared type, routine type, and key-constraint compilation.
+
+use super::*;
+
+#[test]
+fn sequence_options_do_not_truncate_or_ignore_values() {
+    assert!(compile("CREATE SEQUENCE s START 1.5").is_err());
+    let error = compile("CREATE SEQUENCE s CACHE 10").unwrap_err();
+    assert!(error.to_string().contains("not supported"));
+}
+
+#[test]
+fn create_table_with_vector_column() {
+    let stmt = first("CREATE TABLE docs (id INTEGER PRIMARY KEY, title TEXT, embedding VECTOR(4))");
+    let Statement::CreateTable(ct) = stmt else {
+        panic!("not CREATE TABLE");
+    };
+    assert_eq!(ct.name, "docs");
+    assert_eq!(ct.columns.len(), 3);
+    assert!(matches!(ct.columns[0].ty, ColumnType::Integer));
+    assert!(ct.columns[0].primary_key);
+    assert!(matches!(ct.columns[1].ty, ColumnType::Text));
+    assert!(matches!(ct.columns[2].ty, ColumnType::Vector(4)));
+}
+
+#[test]
+fn create_table_preserves_boolean_column_type() {
+    let Statement::CreateTable(table) = first("CREATE TABLE flags (enabled BOOLEAN)") else {
+        panic!("not CREATE TABLE");
+    };
+    assert!(matches!(table.columns[0].ty, ColumnType::Boolean));
+}
+
+#[test]
+fn create_table_preserves_fixed_character_length() {
+    let Statement::CreateTable(table) = first("CREATE TABLE labels (code CHAR(7))") else {
+        panic!("not CREATE TABLE");
+    };
+    assert_eq!(table.columns[0].ty, ColumnType::Character(7));
+}
+
+#[test]
+fn create_table_preserves_postgresql_scalar_type_identity() {
+    let Statement::CreateTable(table) = first(
+        "CREATE TABLE typed_values (
+            small_value SMALLINT,
+            integer_value INTEGER,
+            big_value BIGINT,
+            oid_value OID,
+            xid_value XID,
+            real_value REAL,
+            double_value DOUBLE PRECISION,
+            text_value TEXT,
+            name_value NAME,
+            uuid_value UUID,
+            varying_value VARCHAR(12),
+            interval_value INTERVAL
+        )",
+    ) else {
+        panic!("not CREATE TABLE");
+    };
+    assert_eq!(
+        table
+            .columns
+            .iter()
+            .map(|column| column.ty.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            ColumnType::SmallInteger,
+            ColumnType::Integer,
+            ColumnType::BigInteger,
+            ColumnType::Oid,
+            ColumnType::Xid,
+            ColumnType::Real,
+            ColumnType::DoublePrecision,
+            ColumnType::Text,
+            ColumnType::Name,
+            ColumnType::Uuid,
+            ColumnType::Varchar(Some(12)),
+            ColumnType::Interval,
+        ]
+    );
+}
+
+#[test]
+fn serial_family_preserves_width_and_sequence_semantics() {
+    let Statement::CreateTable(table) =
+        first("CREATE TABLE generated_ids (small_id SMALLSERIAL, id SERIAL4, big_id SERIAL8)")
+    else {
+        panic!("not CREATE TABLE");
+    };
+    assert_eq!(
+        table
+            .columns
+            .iter()
+            .map(|column| (column.ty.clone(), column.auto_increment))
+            .collect::<Vec<_>>(),
+        vec![
+            (ColumnType::SmallInteger, true),
+            (ColumnType::Integer, true),
+            (ColumnType::BigInteger, true),
+        ]
+    );
+}
+
+#[test]
+fn create_table_preserves_array_element_types_and_dimensions() {
+    let Statement::CreateTable(table) =
+        first("CREATE TABLE arrays (tags TEXT[], matrix INTEGER[][])")
+    else {
+        panic!("not CREATE TABLE");
+    };
+    assert_eq!(
+        table.columns[0].ty,
+        ColumnType::Array(Box::new(ColumnType::Text))
+    );
+    assert_eq!(
+        table.columns[1].ty,
+        ColumnType::Array(Box::new(ColumnType::Array(Box::new(ColumnType::Integer))))
+    );
+}
+
+#[test]
+fn routine_type_names_preserve_percent_type_and_named_type_qualification() {
+    let Statement::CreateFunction(function) = first(
+        "CREATE FUNCTION typed_value(v app.items.value%TYPE, d app.amount_domain)
+         RETURNS app.items.id%TYPE LANGUAGE sql AS $$ SELECT 1 $$",
+    ) else {
+        panic!("not CREATE FUNCTION");
+    };
+    assert_eq!(function.params[0].type_name, "app.items.value%type");
+    assert_eq!(
+        function.params[0].type_reference,
+        Some(crate::ast::RoutineColumnTypeReference::new(
+            Some("app".into()),
+            "items".into(),
+            "value".into()
+        ))
+    );
+    assert_eq!(function.params[1].type_name, "app.amount_domain");
+    assert!(matches!(
+        function.returns,
+        crate::ast::FunctionReturns::Scalar { type_name }
+            if type_name == "app.items.id%type"
+    ));
+}
+
+#[test]
+fn routine_builtin_array_names_use_sql_array_spelling() {
+    let Statement::CreateFunction(function) = first(
+        "CREATE FUNCTION array_names(integer[]) RETURNS text[] LANGUAGE sql AS $$ SELECT ARRAY['x'] $$",
+    ) else {
+        panic!("not CREATE FUNCTION");
+    };
+    assert_eq!(function.params[0].type_name, "int4[]");
+    assert!(matches!(
+        function.returns,
+        crate::ast::FunctionReturns::Scalar { type_name } if type_name == "text[]"
+    ));
+}
+
+#[test]
+fn routine_percent_type_keeps_quoted_dotted_components_structured() {
+    let Statement::CreateFunction(function) = first(
+        "CREATE FUNCTION typed_dot(v \"app.dot\".\"items.dot\".\"value.dot\"%TYPE)
+         RETURNS \"app.dot\".\"items.dot\".\"value.dot\"%TYPE LANGUAGE sql AS $$ SELECT $1 $$",
+    ) else {
+        panic!("not CREATE FUNCTION");
+    };
+    let expected = crate::ast::RoutineColumnTypeReference::new(
+        Some("app.dot".into()),
+        "items.dot".into(),
+        "value.dot".into(),
+    );
+    assert_eq!(function.params[0].type_reference, Some(expected.clone()));
+    assert_eq!(function.return_type_reference, Some(expected));
+    assert_eq!(
+        function.params[0].type_name,
+        "\"app.dot\".\"items.dot\".\"value.dot\"%type"
+    );
+}
+
+#[test]
+fn create_table_preserves_typed_composite_keys_and_null_policy() {
+    let Statement::CreateTable(table) = first(
+        "CREATE TABLE memberships (
+            tenant TEXT,
+            member TEXT,
+            email TEXT,
+            CONSTRAINT memberships_pkey PRIMARY KEY (tenant, member),
+            CONSTRAINT memberships_email_key UNIQUE NULLS NOT DISTINCT (tenant, email)
+        )",
+    ) else {
+        panic!("not CREATE TABLE");
+    };
+
+    assert_eq!(table.key_constraints.len(), 2);
+    assert_eq!(
+        table.key_constraints[0].kind,
+        TableKeyConstraintKind::PrimaryKey
+    );
+    assert_eq!(table.key_constraints[0].columns, vec!["tenant", "member"]);
+    assert_eq!(
+        table.key_constraints[0].name.as_deref(),
+        Some("memberships_pkey")
+    );
+    assert_eq!(
+        table.key_constraints[1].kind,
+        TableKeyConstraintKind::Unique
+    );
+    assert_eq!(table.key_constraints[1].columns, vec!["tenant", "email"]);
+    assert!(table.key_constraints[1].nulls_not_distinct);
+
+    assert!(table.columns[0].not_null);
+    assert!(table.columns[1].not_null);
+    assert!(!table.columns[0].primary_key);
+    assert!(!table.columns[1].primary_key);
+}
+
+#[test]
+fn create_table_preserves_named_column_keys() {
+    let Statement::CreateTable(table) = first(
+        "CREATE TABLE users (
+            id INTEGER CONSTRAINT users_pkey PRIMARY KEY,
+            email TEXT CONSTRAINT users_email_key UNIQUE
+        )",
+    ) else {
+        panic!("not CREATE TABLE");
+    };
+    assert_eq!(table.key_constraints.len(), 2);
+    assert_eq!(table.key_constraints[0].name.as_deref(), Some("users_pkey"));
+    assert_eq!(
+        table.key_constraints[1].name.as_deref(),
+        Some("users_email_key")
+    );
+    assert!(table.columns[0].not_null);
+}
+
+#[test]
+fn create_table_rejects_invalid_key_declarations() {
+    for sql in [
+        "CREATE TABLE t (a INTEGER, CONSTRAINT same UNIQUE (a), CONSTRAINT same CHECK (a > 0))",
+        "CREATE TABLE t (a INTEGER, UNIQUE (missing))",
+        "CREATE TABLE t (a INTEGER, UNIQUE (a, a))",
+        "CREATE TABLE t (a INTEGER PRIMARY KEY, b INTEGER, PRIMARY KEY (b))",
+    ] {
+        assert!(compile(sql).is_err(), "expected invalid DDL to fail: {sql}");
+    }
+}
