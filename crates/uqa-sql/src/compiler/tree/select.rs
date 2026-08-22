@@ -7,9 +7,9 @@
 //! SELECT clauses, grouping, ordering, set operations, and CTEs.
 
 use super::{
-    compile_expr, compile_from_node, extract_strings, right_is_lateral, Expr, FromClause, JoinKind,
-    Node, NodeEnum, OrderBy, Projection, Result, SQLError, SelectStmt, SetOp, SetOpKind, Value,
-    CTE,
+    compile_expr, compile_from_node, compile_named_windows, extract_strings, right_is_lateral,
+    Expr, FromClause, JoinKind, Node, NodeEnum, OrderBy, Projection, Result, SQLError, SelectStmt,
+    SetOp, SetOpKind, Value, CTE,
 };
 
 pub(in crate::compiler) fn compile_select(
@@ -19,11 +19,7 @@ pub(in crate::compiler) fn compile_select(
     if stmt.into_clause.is_some() {
         return Err(SQLError::Unsupported("SELECT INTO is not supported".into()));
     }
-    if !stmt.window_clause.is_empty() {
-        return Err(SQLError::Unsupported(
-            "named WINDOW clauses are not supported".into(),
-        ));
-    }
+    let named_windows = compile_named_windows(&stmt.window_clause)?;
     let with_ties = stmt.limit_option() == pg_query::protobuf::LimitOption::WithTies;
     if with_ties && stmt.sort_clause.is_empty() {
         return Err(SQLError::Routine {
@@ -173,6 +169,7 @@ pub(in crate::compiler) fn compile_select(
         distinct_on,
         locking,
     };
+    super::resolve_named_windows_in_select(&mut compiled, &named_windows)?;
     super::locking::propagate_select_locking(&mut compiled)?;
     super::locking::validate_select_locking(&compiled)?;
     Ok(compiled)

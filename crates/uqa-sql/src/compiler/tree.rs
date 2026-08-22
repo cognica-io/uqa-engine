@@ -13,7 +13,7 @@ use uqa_core::{DecimalValue, Value};
 use crate::ast::{
     BinaryOp, ColumnDef, CreateIndex, CreateTable, Expr, FromClause, InsertStmt, JoinKind, OrderBy,
     Projection, SelectStmt, SetOp, SetOpKind, TableKeyConstraint, TableKeyConstraintKind,
-    WindowSpec, CTE,
+    WindowReference, WindowReferenceKind, WindowSpec, CTE,
 };
 use crate::error::{Result, SQLError};
 

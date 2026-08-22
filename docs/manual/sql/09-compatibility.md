@@ -42,7 +42,6 @@ These forms currently fail during compilation without creating a partial object.
 - Collations, domains, user-defined equality operators, and the complete common-type matrix for `JOIN ... USING` columns with different declared types
 - Aliases on parenthesized join expressions
 - Multi-function `ROWS FROM`
-- Named `WINDOW` clauses
 - Recursive CTE `SEARCH` and `CYCLE`
 - CTE `NOT MATERIALIZED`
 - `MERGE WHEN NOT MATCHED BY SOURCE`

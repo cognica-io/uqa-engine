@@ -90,6 +90,7 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
             name: name.clone(),
             args: bind_exprs(args, r)?,
             spec: crate::ast::WindowSpec {
+                reference: spec.reference.clone(),
                 partition_by: bind_exprs(&spec.partition_by, r)?,
                 order_by: bind_order_by(&spec.order_by, r)?,
                 frame: spec.frame.clone(),

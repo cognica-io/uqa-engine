@@ -6,7 +6,275 @@
 
 //! Window-frame and type-cast lowering.
 
-use super::{compile_expr, extract_strings, Expr, NodeEnum, Result, SQLError};
+use std::collections::BTreeMap;
+
+use super::{
+    compile_expr, compile_named_window_spec, extract_strings, Expr, FromClause, Node, NodeEnum,
+    Result, SQLError, SelectStmt, WindowReferenceKind, WindowSpec,
+};
+
+pub(in crate::compiler) type NamedWindows = BTreeMap<String, WindowSpec>;
+
+pub(in crate::compiler) fn compile_named_windows(nodes: &[Node]) -> Result<NamedWindows> {
+    let mut windows = NamedWindows::new();
+    for node in nodes {
+        let Some(NodeEnum::WindowDef(definition)) = node.node.as_ref() else {
+            return Err(SQLError::Internal(format!(
+                "WINDOW clause expected WindowDef, got {:?}",
+                node.node
+            )));
+        };
+        if definition.name.is_empty() {
+            return Err(SQLError::Internal(
+                "WINDOW clause definition has an empty name".into(),
+            ));
+        }
+        if windows.contains_key(&definition.name) {
+            return Err(window_error(
+                "42P20",
+                format!("window \"{}\" is already defined", definition.name),
+            ));
+        }
+        let mut spec = compile_named_window_spec(definition)?;
+        resolve_window_spec(&mut spec, &windows)?;
+        resolve_window_spec_expressions(&mut spec, &windows)?;
+        windows.insert(definition.name.clone(), spec);
+    }
+    Ok(windows)
+}
+
+pub(in crate::compiler) fn resolve_named_windows_in_expr(
+    expr: &mut Expr,
+    windows: &NamedWindows,
+) -> Result<()> {
+    match expr {
+        Expr::Default
+        | Expr::Literal(_)
+        | Expr::Param(_)
+        | Expr::Column(_)
+        | Expr::QualifiedColumn { .. }
+        | Expr::Star
+        | Expr::QualifiedStar(_)
+        | Expr::ScalarSubquery(_)
+        | Expr::Exists { .. } => {}
+        Expr::Func {
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            resolve_named_windows_in_exprs(args, windows)?;
+            for order in order_by {
+                resolve_named_windows_in_expr(&mut order.expr, windows)?;
+            }
+            if let Some(filter) = filter {
+                resolve_named_windows_in_expr(filter, windows)?;
+            }
+        }
+        Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
+            resolve_named_windows_in_exprs(items, windows)?;
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            resolve_named_windows_in_expr(lhs, windows)?;
+            resolve_named_windows_in_expr(rhs, windows)?;
+        }
+        Expr::UnaryMinus(inner) | Expr::Not(inner) | Expr::Cast { expr: inner, .. } => {
+            resolve_named_windows_in_expr(inner, windows)?;
+        }
+        Expr::IsNull { expr, .. } => resolve_named_windows_in_expr(expr, windows)?,
+        Expr::Between { expr, low, high } => {
+            resolve_named_windows_in_expr(expr, windows)?;
+            resolve_named_windows_in_expr(low, windows)?;
+            resolve_named_windows_in_expr(high, windows)?;
+        }
+        Expr::InList { expr, list, .. } => {
+            resolve_named_windows_in_expr(expr, windows)?;
+            resolve_named_windows_in_exprs(list, windows)?;
+        }
+        Expr::WindowCall { args, spec, .. } => {
+            resolve_named_windows_in_exprs(args, windows)?;
+            resolve_window_spec(spec, windows)?;
+            resolve_window_spec_expressions(spec, windows)?;
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            if let Some(base) = base {
+                resolve_named_windows_in_expr(base, windows)?;
+            }
+            for (condition, result) in when {
+                resolve_named_windows_in_expr(condition, windows)?;
+                resolve_named_windows_in_expr(result, windows)?;
+            }
+            if let Some(branch) = else_branch {
+                resolve_named_windows_in_expr(branch, windows)?;
+            }
+        }
+        Expr::InSubquery { expr, .. } => resolve_named_windows_in_expr(expr, windows)?,
+    }
+    Ok(())
+}
+
+pub(in crate::compiler) fn resolve_named_windows_in_select(
+    select: &mut SelectStmt,
+    windows: &NamedWindows,
+) -> Result<()> {
+    for projection in &mut select.projections {
+        resolve_named_windows_in_expr(&mut projection.expr, windows)?;
+    }
+    for row in &mut select.values {
+        resolve_named_windows_in_exprs(row, windows)?;
+    }
+    if let Some(from) = &mut select.from {
+        resolve_named_windows_in_from(from, windows)?;
+    }
+    for expression in select
+        .r#where
+        .iter_mut()
+        .chain(&mut select.group_by)
+        .chain(select.grouping_sets.iter_mut().flatten())
+        .chain(select.having.iter_mut())
+        .chain(select.limit.iter_mut())
+        .chain(select.offset.iter_mut())
+        .chain(&mut select.distinct_on)
+    {
+        resolve_named_windows_in_expr(expression, windows)?;
+    }
+    for order in &mut select.order_by {
+        resolve_named_windows_in_expr(&mut order.expr, windows)?;
+    }
+    if let Some(set_op) = &mut select.set_op {
+        for order in &mut set_op.combined_order_by {
+            resolve_named_windows_in_expr(&mut order.expr, windows)?;
+        }
+        for expression in set_op
+            .combined_limit
+            .iter_mut()
+            .chain(set_op.combined_offset.iter_mut())
+        {
+            resolve_named_windows_in_expr(expression, windows)?;
+        }
+    }
+    Ok(())
+}
+
+fn resolve_named_windows_in_from(from: &mut FromClause, windows: &NamedWindows) -> Result<()> {
+    match from {
+        FromClause::Table { .. } | FromClause::Subquery { .. } => {}
+        FromClause::Join {
+            left, right, on, ..
+        } => {
+            resolve_named_windows_in_from(left, windows)?;
+            resolve_named_windows_in_from(right, windows)?;
+            if let Some(on) = on {
+                resolve_named_windows_in_expr(on, windows)?;
+            }
+        }
+        FromClause::Values { rows, .. } => {
+            for row in rows {
+                resolve_named_windows_in_exprs(row, windows)?;
+            }
+        }
+        FromClause::Function { args, .. } => {
+            resolve_named_windows_in_exprs(args, windows)?;
+        }
+    }
+    Ok(())
+}
+
+fn resolve_named_windows_in_exprs(exprs: &mut [Expr], windows: &NamedWindows) -> Result<()> {
+    for expr in exprs {
+        resolve_named_windows_in_expr(expr, windows)?;
+    }
+    Ok(())
+}
+
+fn resolve_window_spec(spec: &mut WindowSpec, windows: &NamedWindows) -> Result<()> {
+    let Some(reference) = spec.reference.take() else {
+        return Ok(());
+    };
+    let base = windows.get(&reference.name).ok_or_else(|| {
+        window_error(
+            "42704",
+            format!("window \"{}\" does not exist", reference.name),
+        )
+    })?;
+    match reference.kind {
+        WindowReferenceKind::Direct => {
+            if !spec.partition_by.is_empty() || !spec.order_by.is_empty() || spec.frame.is_some() {
+                return Err(SQLError::Internal(format!(
+                    "direct window reference `{}` unexpectedly carries an inline definition",
+                    reference.name
+                )));
+            }
+            *spec = base.clone();
+        }
+        WindowReferenceKind::Copy => {
+            if base.frame.is_some() {
+                return Err(window_error(
+                    "42P20",
+                    format!(
+                        "cannot copy window \"{}\" because it has a frame clause",
+                        reference.name
+                    ),
+                ));
+            }
+            if !spec.partition_by.is_empty() {
+                return Err(window_error(
+                    "42P20",
+                    format!(
+                        "cannot override PARTITION BY clause of window \"{}\"",
+                        reference.name
+                    ),
+                ));
+            }
+            if !base.order_by.is_empty() && !spec.order_by.is_empty() {
+                return Err(window_error(
+                    "42P20",
+                    format!(
+                        "cannot override ORDER BY clause of window \"{}\"",
+                        reference.name
+                    ),
+                ));
+            }
+            spec.partition_by.clone_from(&base.partition_by);
+            if spec.order_by.is_empty() {
+                spec.order_by.clone_from(&base.order_by);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn resolve_window_spec_expressions(spec: &mut WindowSpec, windows: &NamedWindows) -> Result<()> {
+    resolve_named_windows_in_exprs(&mut spec.partition_by, windows)?;
+    for order in &mut spec.order_by {
+        resolve_named_windows_in_expr(&mut order.expr, windows)?;
+    }
+    if let Some(frame) = &mut spec.frame {
+        for bound in [&mut frame.start, &mut frame.end] {
+            match bound {
+                crate::ast::FrameBound::Preceding(expr)
+                | crate::ast::FrameBound::Following(expr) => {
+                    resolve_named_windows_in_expr(expr, windows)?;
+                }
+                crate::ast::FrameBound::UnboundedPreceding
+                | crate::ast::FrameBound::UnboundedFollowing
+                | crate::ast::FrameBound::CurrentRow => {}
+            }
+        }
+    }
+    Ok(())
+}
+
+fn window_error(sqlstate: &str, message: String) -> SQLError {
+    SQLError::Routine {
+        sqlstate: sqlstate.into(),
+        message,
+    }
+}
 
 pub(in crate::compiler) fn compile_window_frame(
     w: &pg_query::protobuf::WindowDef,

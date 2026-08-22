@@ -185,6 +185,10 @@ pub(super) fn lower_scalar_window_spec(
     aggregates: &dyn AggregateClassifier,
     subqueries: &mut Vec<QueryPlan>,
 ) -> ScalarWindowSpec {
+    assert!(
+        spec.reference.is_none(),
+        "named window reference must be resolved before unified-plan lowering"
+    );
     ScalarWindowSpec {
         partition_by: spec
             .partition_by

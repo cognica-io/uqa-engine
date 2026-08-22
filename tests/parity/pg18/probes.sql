@@ -350,6 +350,14 @@ SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY x) FROM (VALUES (1), (2), (3)
 SELECT mode() WITHIN GROUP (ORDER BY x) FROM (VALUES (1), (1), (2)) AS t(x)
 SELECT json_agg(x) FROM (VALUES (1), (2)) AS t(x)
 SELECT jsonb_object_agg(k, v) FROM (VALUES ('a', 1), ('b', 2)) AS t(k, v)
+-- named windows
+SELECT grp, x, row_number() OVER w AS rn, sum(x) OVER w AS running FROM (VALUES ('a', 2), ('a', 1), ('b', 3)) AS t(grp, x) WINDOW w AS (PARTITION BY grp ORDER BY x) ORDER BY grp, x
+SELECT grp, x, sum(x) OVER w2 FROM (VALUES ('a', 2), ('a', 1), ('b', 3)) AS t(grp, x) WINDOW w AS (PARTITION BY grp), w2 AS (w ORDER BY x ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) ORDER BY grp, x
+SELECT sum(x) OVER missing FROM (VALUES (1)) AS t(x)
+SELECT sum(x) OVER w FROM (VALUES (1)) AS t(x) WINDOW w AS (), w AS ()
+SELECT sum(x) OVER w2 FROM (VALUES (1)) AS t(x) WINDOW w AS (), w2 AS (w PARTITION BY x)
+SELECT sum(x) OVER w2 FROM (VALUES (1)) AS t(x) WINDOW w AS (ORDER BY x), w2 AS (w ORDER BY x)
+SELECT sum(x) OVER (w) FROM (VALUES (1)) AS t(x) WINDOW w AS (ORDER BY x ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
 -- rows / set returning / misc
 SELECT * FROM generate_series(1, 3)
 SELECT generate_series(1, 3)

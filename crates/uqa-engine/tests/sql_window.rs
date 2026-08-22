@@ -72,6 +72,39 @@ fn row_number_over_partition() {
 }
 
 #[test]
+fn named_windows_share_and_extend_definitions() {
+    let eng = corpus();
+    let result = eng
+        .sql(
+            "SELECT id, \
+                    row_number() OVER ranked AS rn, \
+                    sum(amount) OVER running AS running_total \
+             FROM sales \
+             WINDOW base AS (PARTITION BY rep), \
+                    ranked AS (base ORDER BY amount DESC, id), \
+                    running AS (base ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) \
+             ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    let expected = [
+        (1, 3, 100),
+        (2, 1, 300),
+        (3, 2, 500),
+        (4, 1, 150),
+        (5, 2, 200),
+        (6, 2, 80),
+        (7, 1, 200),
+    ];
+    assert_eq!(result.rows.len(), expected.len());
+    for (row, (id, rank, running_total)) in result.rows.iter().zip(expected) {
+        assert_eq!(row.get("id"), Some(&Value::Int(id)));
+        assert_eq!(row.get("rn"), Some(&Value::Int(rank)));
+        assert_eq!(row.get("running_total"), Some(&Value::Int(running_total)));
+    }
+}
+
+#[test]
 fn row_number_inside_projection_expression() {
     let eng = corpus();
     let r = eng

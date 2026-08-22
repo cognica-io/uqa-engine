@@ -90,6 +90,14 @@
       "open_issue": null
     },
     {
+      "id": "query.named-window",
+      "postgresql_reference": "PostgreSQL 18.4 live named WINDOW results and SQLSTATEs plus SELECT documentation",
+      "uqa_test": "cargo test -p uqa-sql --lib named_window; cargo test -p uqa-engine --test integration named_windows_share_and_extend_definitions; tests/parity/pg18/probes.sql",
+      "supported_version": "PostgreSQL 18.4 named window definitions, direct references, left-to-right partition and ordering inheritance, legal ordering and frame extension, and definition validation",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "dml.returning-row-images",
       "postgresql_reference": "PostgreSQL 18 SQL DML RETURNING documentation",
       "uqa_test": "crates/uqa-engine/tests/sql_update_delete.rs",

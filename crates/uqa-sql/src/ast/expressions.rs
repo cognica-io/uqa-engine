@@ -33,11 +33,28 @@ pub enum NullsOrder {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowSpec {
+    /// Named window referenced by this specification while the SQL compiler resolves a `WINDOW` clause. Compiler-produced plans clear this field before lowering into the unified scalar IR.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<WindowReference>,
     pub partition_by: Vec<Expr>,
     pub order_by: Vec<OrderBy>,
     /// `ROWS` / `RANGE` frame, or `None` when not specified (defaults
     /// to `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`).
     pub frame: Option<WindowFrame>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowReference {
+    pub name: String,
+    pub kind: WindowReferenceKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WindowReferenceKind {
+    /// `OVER window_name` uses the named definition directly, including its frame.
+    Direct,
+    /// `OVER (window_name ...)` or `WINDOW child AS (parent ...)` copies and may extend a frameless definition.
+    Copy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

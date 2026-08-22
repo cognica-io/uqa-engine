@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use crate::ast::{ColumnType, FromClause, JoinKind, Projection, TableKeyConstraintKind};
+use crate::ast::{ColumnType, FromClause, JoinKind, OrderBy, Projection, TableKeyConstraintKind};
 
 #[test]
 fn bundled_parser_is_postgresql_18_4() {
@@ -619,16 +619,100 @@ fn select_with_function_call_and_order_by() {
 
 #[test]
 fn unsupported_select_clauses_fail_instead_of_losing_semantics() {
-    for (sql, expected) in [
-        ("SELECT 1 INTO created_by_select", "SELECT INTO"),
+    let sql = "SELECT 1 INTO created_by_select";
+    let error = compile(sql).expect_err(sql);
+    assert!(
+        matches!(&error, SQLError::Unsupported(message) if message.contains("SELECT INTO")),
+        "unexpected error for {sql}: {error}"
+    );
+}
+
+#[test]
+fn named_windows_resolve_inheritance_and_frames() {
+    let Statement::Select(select) = first(
+        "SELECT sum(x) OVER child FROM measurements \
+         WINDOW base AS (PARTITION BY grp), \
+         child AS (base ORDER BY x ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)",
+    ) else {
+        panic!("not SELECT");
+    };
+    let Expr::WindowCall { spec, .. } = &select.projections[0].expr else {
+        panic!("not a window call");
+    };
+    assert!(spec.reference.is_none());
+    assert!(matches!(spec.partition_by.as_slice(), [Expr::Column(name)] if name == "grp"));
+    assert!(matches!(
+        spec.order_by.as_slice(),
+        [OrderBy {
+            expr: Expr::Column(name),
+            descending: false,
+            ..
+        }] if name == "x"
+    ));
+    assert!(matches!(
+        spec.frame,
+        Some(crate::ast::WindowFrame {
+            mode: crate::ast::FrameMode::Rows,
+            start: crate::ast::FrameBound::UnboundedPreceding,
+            end: crate::ast::FrameBound::CurrentRow,
+        })
+    ));
+
+    let Statement::Select(direct) = first(
+        "SELECT sum(x) OVER framed FROM measurements \
+         WINDOW framed AS (ORDER BY x ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)",
+    ) else {
+        panic!("not SELECT");
+    };
+    let Expr::WindowCall { spec, .. } = &direct.projections[0].expr else {
+        panic!("not a window call");
+    };
+    assert!(spec.frame.is_some());
+}
+
+#[test]
+fn named_window_definition_errors_match_postgresql() {
+    for (sql, sqlstate, message) in [
         (
-            "SELECT row_number() OVER named_window FROM employees WINDOW named_window AS (ORDER BY id)",
-            "named WINDOW",
+            "SELECT sum(x) OVER missing FROM measurements",
+            "42704",
+            "window \"missing\" does not exist",
+        ),
+        (
+            "SELECT sum(x) OVER w FROM measurements WINDOW w AS (), w AS ()",
+            "42P20",
+            "window \"w\" is already defined",
+        ),
+        (
+            "SELECT sum(x) OVER w2 FROM measurements WINDOW w2 AS (w), w AS ()",
+            "42704",
+            "window \"w\" does not exist",
+        ),
+        (
+            "SELECT sum(x) OVER w2 FROM measurements WINDOW w AS (PARTITION BY x), w2 AS (w PARTITION BY x)",
+            "42P20",
+            "cannot override PARTITION BY clause",
+        ),
+        (
+            "SELECT sum(x) OVER w2 FROM measurements WINDOW w AS (), w2 AS (w PARTITION BY x)",
+            "42P20",
+            "cannot override PARTITION BY clause",
+        ),
+        (
+            "SELECT sum(x) OVER w2 FROM measurements WINDOW w AS (ORDER BY x), w2 AS (w ORDER BY x)",
+            "42P20",
+            "cannot override ORDER BY clause",
+        ),
+        (
+            "SELECT sum(x) OVER (w) FROM measurements WINDOW w AS (ORDER BY x ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)",
+            "42P20",
+            "cannot copy window \"w\" because it has a frame clause",
         ),
     ] {
         let error = compile(sql).expect_err(sql);
+        assert_eq!(error.sqlstate(), Some(sqlstate), "unexpected error: {error}");
         assert!(
-            matches!(&error, SQLError::Unsupported(message) if message.contains(expected)),
+            error.to_string().contains(message),
             "unexpected error for {sql}: {error}"
         );
     }
