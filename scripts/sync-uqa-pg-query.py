@@ -181,6 +181,15 @@ def import_tree(source: pathlib.Path) -> list[tuple[str, pathlib.Path]]:
     return imported
 
 
+def format_imported_rust() -> None:
+    run(["cargo", "fmt", "--package", "uqa-pg-query"], cwd=ROOT)
+
+
+def finalize_import(imported: list[tuple[str, pathlib.Path]]) -> None:
+    format_imported_rust()
+    write_checksums(imported)
+
+
 def check_tree() -> None:
     expected = parse_checksums()
     expected_map = {relative: digest for digest, relative in expected}
@@ -243,7 +252,7 @@ def main() -> int:
     DEST.mkdir(parents=True, exist_ok=True)
     clear_imported_files()
     imported = import_tree(source)
-    write_checksums(imported)
+    finalize_import(imported)
     print(f"Imported {len(imported)} files into {DEST}")
     return 0
 

@@ -37,7 +37,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cached_hash = std::fs::read_to_string(&hash_file).unwrap_or_default();
 
     if cached_hash.trim() != current_hash {
-        let copy_options = CopyOptions { overwrite: true, ..CopyOptions::default() };
+        let copy_options = CopyOptions {
+            overwrite: true,
+            ..CopyOptions::default()
+        };
         fs_extra::copy_items(&source_paths, &out_dir, &copy_options)?;
         std::fs::write(&hash_file, &current_hash)?;
     }
@@ -45,8 +48,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Compile the C library.
     let mut build = cc::Build::new();
     build
-        .files(glob(out_dir.join("src/*.c").to_str().unwrap()).unwrap().map(|p| p.unwrap()))
-        .files(glob(out_dir.join("src/postgres/*.c").to_str().unwrap()).unwrap().map(|p| p.unwrap()))
+        .files(
+            glob(out_dir.join("src/*.c").to_str().unwrap())
+                .unwrap()
+                .map(|p| p.unwrap()),
+        )
+        .files(
+            glob(out_dir.join("src/postgres/*.c").to_str().unwrap())
+                .unwrap()
+                .map(|p| p.unwrap()),
+        )
         .file(out_dir.join("vendor/protobuf-c/protobuf-c.c"))
         .file(out_dir.join("vendor/xxhash/xxhash.c"))
         .file(out_dir.join("protobuf/pg_query.pb-c.c"))
@@ -89,14 +100,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut prost_build = prost_build::Config::new();
         prost_build.type_attribute(".", "#[derive(serde::Serialize)]");
-        prost_build.compile_protos(&[&out_protobuf_path.join("pg_query").with_extension("proto")], &[&out_protobuf_path])?;
+        prost_build.compile_protos(
+            &[&out_protobuf_path.join("pg_query").with_extension("proto")],
+            &[&out_protobuf_path],
+        )?;
 
         // Only update src/protobuf.rs if the generated output actually changed,
         // to avoid invalidating Cargo's fingerprint on every build
         let new_content = std::fs::read(proto_tmp_dir.join("pg_query.rs"))?;
         let existing = std::fs::read(src_dir.join("protobuf.rs")).unwrap_or_default();
         if new_content != existing {
-            std::fs::copy(proto_tmp_dir.join("pg_query.rs"), src_dir.join("protobuf.rs"))?;
+            std::fs::copy(
+                proto_tmp_dir.join("pg_query.rs"),
+                src_dir.join("protobuf.rs"),
+            )?;
         }
 
         // Reset OUT_DIR to the original value

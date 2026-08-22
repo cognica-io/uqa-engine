@@ -280,7 +280,13 @@ impl<'a> NodeRef<'a> {
     pub fn deparse(&self) -> Result<String> {
         crate::deparse(&protobuf::ParseResult {
             version: crate::bindings::PG_VERSION_NUM as i32,
-            stmts: vec![protobuf::RawStmt { stmt: Some(Box::new(Node { node: Some(self.to_enum()) })), stmt_location: 0, stmt_len: 0 }],
+            stmts: vec![protobuf::RawStmt {
+                stmt: Some(Box::new(Node {
+                    node: Some(self.to_enum()),
+                })),
+                stmt_location: 0,
+                stmt_len: 0,
+            }],
         })
     }
 
@@ -325,7 +331,9 @@ impl<'a> NodeRef<'a> {
             NodeRef::NullTest(n) => NodeEnum::NullTest(Box::new((*n).clone())),
             NodeRef::BooleanTest(n) => NodeEnum::BooleanTest(Box::new((*n).clone())),
             NodeRef::CoerceToDomain(n) => NodeEnum::CoerceToDomain(Box::new((*n).clone())),
-            NodeRef::CoerceToDomainValue(n) => NodeEnum::CoerceToDomainValue(Box::new((*n).clone())),
+            NodeRef::CoerceToDomainValue(n) => {
+                NodeEnum::CoerceToDomainValue(Box::new((*n).clone()))
+            }
             NodeRef::SetToDefault(n) => NodeEnum::SetToDefault(Box::new((*n).clone())),
             NodeRef::CurrentOfExpr(n) => NodeEnum::CurrentOfExpr(Box::new((*n).clone())),
             NodeRef::NextValueExpr(n) => NodeEnum::NextValueExpr(Box::new((*n).clone())),
@@ -348,7 +356,9 @@ impl<'a> NodeRef<'a> {
             NodeRef::SetOperationStmt(n) => NodeEnum::SetOperationStmt(Box::new((*n).clone())),
             NodeRef::GrantStmt(n) => NodeEnum::GrantStmt((*n).clone()),
             NodeRef::GrantRoleStmt(n) => NodeEnum::GrantRoleStmt((*n).clone()),
-            NodeRef::AlterDefaultPrivilegesStmt(n) => NodeEnum::AlterDefaultPrivilegesStmt((*n).clone()),
+            NodeRef::AlterDefaultPrivilegesStmt(n) => {
+                NodeEnum::AlterDefaultPrivilegesStmt((*n).clone())
+            }
             NodeRef::ClosePortalStmt(n) => NodeEnum::ClosePortalStmt((*n).clone()),
             NodeRef::ClusterStmt(n) => NodeEnum::ClusterStmt((*n).clone()),
             NodeRef::CopyStmt(n) => NodeEnum::CopyStmt(Box::new((*n).clone())),
@@ -405,8 +415,12 @@ impl<'a> NodeRef<'a> {
             NodeRef::DeclareCursorStmt(n) => NodeEnum::DeclareCursorStmt(Box::new((*n).clone())),
             NodeRef::CreateTableSpaceStmt(n) => NodeEnum::CreateTableSpaceStmt((*n).clone()),
             NodeRef::DropTableSpaceStmt(n) => NodeEnum::DropTableSpaceStmt((*n).clone()),
-            NodeRef::AlterObjectDependsStmt(n) => NodeEnum::AlterObjectDependsStmt(Box::new((*n).clone())),
-            NodeRef::AlterObjectSchemaStmt(n) => NodeEnum::AlterObjectSchemaStmt(Box::new((*n).clone())),
+            NodeRef::AlterObjectDependsStmt(n) => {
+                NodeEnum::AlterObjectDependsStmt(Box::new((*n).clone()))
+            }
+            NodeRef::AlterObjectSchemaStmt(n) => {
+                NodeEnum::AlterObjectSchemaStmt(Box::new((*n).clone()))
+            }
             NodeRef::AlterOwnerStmt(n) => NodeEnum::AlterOwnerStmt(Box::new((*n).clone())),
             NodeRef::AlterOperatorStmt(n) => NodeEnum::AlterOperatorStmt((*n).clone()),
             NodeRef::AlterTypeStmt(n) => NodeEnum::AlterTypeStmt((*n).clone()),
@@ -418,7 +432,9 @@ impl<'a> NodeRef<'a> {
             NodeRef::CreateRangeStmt(n) => NodeEnum::CreateRangeStmt((*n).clone()),
             NodeRef::AlterEnumStmt(n) => NodeEnum::AlterEnumStmt((*n).clone()),
             NodeRef::AlterTsdictionaryStmt(n) => NodeEnum::AlterTsdictionaryStmt((*n).clone()),
-            NodeRef::AlterTsconfigurationStmt(n) => NodeEnum::AlterTsconfigurationStmt((*n).clone()),
+            NodeRef::AlterTsconfigurationStmt(n) => {
+                NodeEnum::AlterTsconfigurationStmt((*n).clone())
+            }
             NodeRef::CreateFdwStmt(n) => NodeEnum::CreateFdwStmt((*n).clone()),
             NodeRef::AlterFdwStmt(n) => NodeEnum::AlterFdwStmt((*n).clone()),
             NodeRef::CreateForeignServerStmt(n) => NodeEnum::CreateForeignServerStmt((*n).clone()),
@@ -426,14 +442,18 @@ impl<'a> NodeRef<'a> {
             NodeRef::CreateUserMappingStmt(n) => NodeEnum::CreateUserMappingStmt((*n).clone()),
             NodeRef::AlterUserMappingStmt(n) => NodeEnum::AlterUserMappingStmt((*n).clone()),
             NodeRef::DropUserMappingStmt(n) => NodeEnum::DropUserMappingStmt((*n).clone()),
-            NodeRef::AlterTableSpaceOptionsStmt(n) => NodeEnum::AlterTableSpaceOptionsStmt((*n).clone()),
+            NodeRef::AlterTableSpaceOptionsStmt(n) => {
+                NodeEnum::AlterTableSpaceOptionsStmt((*n).clone())
+            }
             NodeRef::AlterTableMoveAllStmt(n) => NodeEnum::AlterTableMoveAllStmt((*n).clone()),
             NodeRef::SecLabelStmt(n) => NodeEnum::SecLabelStmt(Box::new((*n).clone())),
             NodeRef::CreateForeignTableStmt(n) => NodeEnum::CreateForeignTableStmt((*n).clone()),
             NodeRef::ImportForeignSchemaStmt(n) => NodeEnum::ImportForeignSchemaStmt((*n).clone()),
             NodeRef::CreateExtensionStmt(n) => NodeEnum::CreateExtensionStmt((*n).clone()),
             NodeRef::AlterExtensionStmt(n) => NodeEnum::AlterExtensionStmt((*n).clone()),
-            NodeRef::AlterExtensionContentsStmt(n) => NodeEnum::AlterExtensionContentsStmt(Box::new((*n).clone())),
+            NodeRef::AlterExtensionContentsStmt(n) => {
+                NodeEnum::AlterExtensionContentsStmt(Box::new((*n).clone()))
+            }
             NodeRef::CreateEventTrigStmt(n) => NodeEnum::CreateEventTrigStmt((*n).clone()),
             NodeRef::AlterEventTrigStmt(n) => NodeEnum::AlterEventTrigStmt((*n).clone()),
             NodeRef::RefreshMatViewStmt(n) => NodeEnum::RefreshMatViewStmt((*n).clone()),
@@ -501,7 +521,9 @@ impl<'a> NodeRef<'a> {
             NodeRef::PartitionElem(n) => NodeEnum::PartitionElem(Box::new((*n).clone())),
             NodeRef::PartitionSpec(n) => NodeEnum::PartitionSpec((*n).clone()),
             NodeRef::PartitionBoundSpec(n) => NodeEnum::PartitionBoundSpec((*n).clone()),
-            NodeRef::PartitionRangeDatum(n) => NodeEnum::PartitionRangeDatum(Box::new((*n).clone())),
+            NodeRef::PartitionRangeDatum(n) => {
+                NodeEnum::PartitionRangeDatum(Box::new((*n).clone()))
+            }
             NodeRef::PartitionCmd(n) => NodeEnum::PartitionCmd((*n).clone()),
             NodeRef::VacuumRelation(n) => NodeEnum::VacuumRelation((*n).clone()),
             NodeRef::InlineCodeBlock(n) => NodeEnum::InlineCodeBlock((*n).clone()),
@@ -516,7 +538,9 @@ impl<'a> NodeRef<'a> {
             NodeRef::OidList(n) => NodeEnum::OidList((*n).clone()),
             NodeRef::MergeStmt(n) => NodeEnum::MergeStmt(Box::new((*n).clone())),
             NodeRef::MergeAction(n) => NodeEnum::MergeAction(Box::new((*n).clone())),
-            NodeRef::AlterDatabaseRefreshCollStmt(n) => NodeEnum::AlterDatabaseRefreshCollStmt((*n).clone()),
+            NodeRef::AlterDatabaseRefreshCollStmt(n) => {
+                NodeEnum::AlterDatabaseRefreshCollStmt((*n).clone())
+            }
             NodeRef::ReturnStmt(n) => NodeEnum::ReturnStmt(Box::new((*n).clone())),
             NodeRef::ReturningClause(n) => NodeEnum::ReturningClause((*n).clone()),
             NodeRef::ReturningExpr(n) => NodeEnum::ReturningExpr(Box::new((*n).clone())),
@@ -531,24 +555,32 @@ impl<'a> NodeRef<'a> {
             NodeRef::JsonFormat(n) => NodeEnum::JsonFormat((*n).clone()),
             NodeRef::JsonReturning(n) => NodeEnum::JsonReturning((*n).clone()),
             NodeRef::JsonValueExpr(n) => NodeEnum::JsonValueExpr(Box::new((*n).clone())),
-            NodeRef::JsonConstructorExpr(n) => NodeEnum::JsonConstructorExpr(Box::new((*n).clone())),
+            NodeRef::JsonConstructorExpr(n) => {
+                NodeEnum::JsonConstructorExpr(Box::new((*n).clone()))
+            }
             NodeRef::JsonIsPredicate(n) => NodeEnum::JsonIsPredicate(Box::new((*n).clone())),
             NodeRef::JsonOutput(n) => NodeEnum::JsonOutput((*n).clone()),
             NodeRef::JsonKeyValue(n) => NodeEnum::JsonKeyValue(Box::new((*n).clone())),
             NodeRef::JsonObjectConstructor(n) => NodeEnum::JsonObjectConstructor((*n).clone()),
             NodeRef::JsonArrayConstructor(n) => NodeEnum::JsonArrayConstructor((*n).clone()),
-            NodeRef::JsonArrayQueryConstructor(n) => NodeEnum::JsonArrayQueryConstructor(Box::new((*n).clone())),
+            NodeRef::JsonArrayQueryConstructor(n) => {
+                NodeEnum::JsonArrayQueryConstructor(Box::new((*n).clone()))
+            }
             NodeRef::JsonAggConstructor(n) => NodeEnum::JsonAggConstructor(Box::new((*n).clone())),
             NodeRef::JsonObjectAgg(n) => NodeEnum::JsonObjectAgg(Box::new((*n).clone())),
             NodeRef::JsonArrayAgg(n) => NodeEnum::JsonArrayAgg(Box::new((*n).clone())),
             NodeRef::RtepermissionInfo(n) => NodeEnum::RtepermissionInfo((*n).clone()),
-            NodeRef::WindowFuncRunCondition(n) => NodeEnum::WindowFuncRunCondition(Box::new((*n).clone())),
+            NodeRef::WindowFuncRunCondition(n) => {
+                NodeEnum::WindowFuncRunCondition(Box::new((*n).clone()))
+            }
             NodeRef::MergeSupportFunc(n) => NodeEnum::MergeSupportFunc(Box::new((*n).clone())),
             NodeRef::JsonBehavior(n) => NodeEnum::JsonBehavior(Box::new((*n).clone())),
             NodeRef::JsonExpr(n) => NodeEnum::JsonExpr(Box::new((*n).clone())),
             NodeRef::JsonTablePath(n) => NodeEnum::JsonTablePath((*n).clone()),
             NodeRef::JsonTablePathScan(n) => NodeEnum::JsonTablePathScan(Box::new((*n).clone())),
-            NodeRef::JsonTableSiblingJoin(n) => NodeEnum::JsonTableSiblingJoin(Box::new((*n).clone())),
+            NodeRef::JsonTableSiblingJoin(n) => {
+                NodeEnum::JsonTableSiblingJoin(Box::new((*n).clone()))
+            }
             NodeRef::JsonArgument(n) => NodeEnum::JsonArgument(Box::new((*n).clone())),
             NodeRef::JsonFuncExpr(n) => NodeEnum::JsonFuncExpr(Box::new((*n).clone())),
             NodeRef::JsonTablePathSpec(n) => NodeEnum::JsonTablePathSpec(Box::new((*n).clone())),
