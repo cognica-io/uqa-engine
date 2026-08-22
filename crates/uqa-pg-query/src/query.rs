@@ -52,12 +52,23 @@ pub fn parse_with_mode(statement: &str, mode: ParseMode) -> Result<ParseResult> 
     let input = CString::new(statement)?;
     let result = unsafe { pg_query_parse_protobuf_opts(input.as_ptr(), mode as i32) };
     let parse_result = if !result.error.is_null() {
-        let message = unsafe { CStr::from_ptr((*result.error).message) }.to_string_lossy().to_string();
+        let message = unsafe { CStr::from_ptr((*result.error).message) }
+            .to_string_lossy()
+            .to_string();
         Err(Error::Parse(message))
     } else {
-        let data = unsafe { std::slice::from_raw_parts(result.parse_tree.data as *const u8, result.parse_tree.len as usize) };
-        let stderr = unsafe { CStr::from_ptr(result.stderr_buffer) }.to_string_lossy().to_string();
-        protobuf::ParseResult::decode(data).map_err(Error::Decode).map(|result| ParseResult::new(result, stderr))
+        let data = unsafe {
+            std::slice::from_raw_parts(
+                result.parse_tree.data as *const u8,
+                result.parse_tree.len as usize,
+            )
+        };
+        let stderr = unsafe { CStr::from_ptr(result.stderr_buffer) }
+            .to_string_lossy()
+            .to_string();
+        protobuf::ParseResult::decode(data)
+            .map_err(Error::Decode)
+            .map(|result| ParseResult::new(result, stderr))
     };
     unsafe { pg_query_free_protobuf_parse_result(result) };
     parse_result
@@ -93,10 +104,14 @@ pub fn deparse(protobuf: &protobuf::ParseResult) -> Result<String> {
     let result = unsafe { pg_query_deparse_protobuf(protobuf) };
 
     let deparse_result = if !result.error.is_null() {
-        let message = unsafe { CStr::from_ptr((*result.error).message) }.to_string_lossy().to_string();
+        let message = unsafe { CStr::from_ptr((*result.error).message) }
+            .to_string_lossy()
+            .to_string();
         Err(Error::Parse(message))
     } else {
-        let query = unsafe { CStr::from_ptr(result.query) }.to_string_lossy().to_string();
+        let query = unsafe { CStr::from_ptr(result.query) }
+            .to_string_lossy()
+            .to_string();
         Ok(query)
     };
 
@@ -118,7 +133,9 @@ pub fn normalize(statement: &str) -> Result<String> {
     let input = CString::new(statement)?;
     let result = unsafe { pg_query_normalize(input.as_ptr()) };
     let normalized_query = if !result.error.is_null() {
-        let message = unsafe { CStr::from_ptr((*result.error).message) }.to_string_lossy().to_string();
+        let message = unsafe { CStr::from_ptr((*result.error).message) }
+            .to_string_lossy()
+            .to_string();
         Err(Error::Parse(message))
     } else {
         let n = unsafe { CStr::from_ptr(result.normalized_query) };
@@ -143,11 +160,16 @@ pub fn fingerprint(statement: &str) -> Result<Fingerprint> {
     let input = CString::new(statement)?;
     let result = unsafe { pg_query_fingerprint(input.as_ptr()) };
     let fingerprint = if !result.error.is_null() {
-        let message = unsafe { CStr::from_ptr((*result.error).message) }.to_string_lossy().to_string();
+        let message = unsafe { CStr::from_ptr((*result.error).message) }
+            .to_string_lossy()
+            .to_string();
         Err(Error::Parse(message))
     } else {
         let hex = unsafe { CStr::from_ptr(result.fingerprint_str) };
-        Ok(Fingerprint { value: result.fingerprint, hex: hex.to_string_lossy().to_string() })
+        Ok(Fingerprint {
+            value: result.fingerprint,
+            hex: hex.to_string_lossy().to_string(),
+        })
     };
     unsafe { pg_query_free_fingerprint_result(result) };
     fingerprint
@@ -175,7 +197,9 @@ pub fn parse_plpgsql(stmt: &str) -> Result<serde_json::Value> {
     let input = CString::new(stmt)?;
     let result = unsafe { pg_query_parse_plpgsql(input.as_ptr()) };
     let structure = if !result.error.is_null() {
-        let message = unsafe { CStr::from_ptr((*result.error).message) }.to_string_lossy().to_string();
+        let message = unsafe { CStr::from_ptr((*result.error).message) }
+            .to_string_lossy()
+            .to_string();
         Err(Error::Parse(message))
     } else {
         let raw = unsafe { CStr::from_ptr(result.plpgsql_funcs) };
@@ -207,7 +231,9 @@ pub fn split_with_parser(query: &str) -> Result<Vec<&str>> {
     let input = CString::new(query)?;
     let result = unsafe { pg_query_split_with_parser(input.as_ptr()) };
     let split_result = if !result.error.is_null() {
-        let message = unsafe { CStr::from_ptr((*result.error).message) }.to_string_lossy().to_string();
+        let message = unsafe { CStr::from_ptr((*result.error).message) }
+            .to_string_lossy()
+            .to_string();
         Err(Error::Split(message))
     } else {
         let n_stmts = result.n_stmts as usize;
@@ -252,10 +278,14 @@ pub fn scan(sql: &str) -> Result<protobuf::ScanResult> {
     let input = CString::new(sql)?;
     let result = unsafe { pg_query_scan(input.as_ptr()) };
     let scan_result = if !result.error.is_null() {
-        let message = unsafe { CStr::from_ptr((*result.error).message) }.to_string_lossy().to_string();
+        let message = unsafe { CStr::from_ptr((*result.error).message) }
+            .to_string_lossy()
+            .to_string();
         Err(Error::Scan(message))
     } else {
-        let data = unsafe { std::slice::from_raw_parts(result.pbuf.data as *const u8, result.pbuf.len as usize) };
+        let data = unsafe {
+            std::slice::from_raw_parts(result.pbuf.data as *const u8, result.pbuf.len as usize)
+        };
         protobuf::ScanResult::decode(data).map_err(Error::Decode)
     };
     unsafe { pg_query_free_scan_result(result) };
@@ -277,7 +307,9 @@ pub fn split_with_scanner(query: &str) -> Result<Vec<&str>> {
     let input = CString::new(query)?;
     let result = unsafe { pg_query_split_with_scanner(input.as_ptr()) };
     let split_result = if !result.error.is_null() {
-        let message = unsafe { CStr::from_ptr((*result.error).message) }.to_string_lossy().to_string();
+        let message = unsafe { CStr::from_ptr((*result.error).message) }
+            .to_string_lossy()
+            .to_string();
         Err(Error::Split(message))
     } else {
         // don't use result.stderr_buffer since it appears unused unless

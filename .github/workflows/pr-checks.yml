@@ -33,7 +33,7 @@ jobs:
         run: python3 scripts/sync-uqa-pg-query.py --check
       - name: Check crate legal file copies
         run: python3 scripts/sync-crate-legal-files.py --check
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.90.0
         with:
           components: rustfmt
       - name: Test analytical benchmark gate

@@ -34,7 +34,16 @@ pub struct SummaryResult {
 
 impl SummaryResult {
     pub fn new(protobuf: protobuf::SummaryResult, stderr: String) -> Self {
-        let warnings = stderr.lines().filter_map(|l| if l.starts_with("WARNING") { Some(l.trim().into()) } else { None }).collect();
+        let warnings = stderr
+            .lines()
+            .filter_map(|l| {
+                if l.starts_with("WARNING") {
+                    Some(l.trim().into())
+                } else {
+                    None
+                }
+            })
+            .collect();
         let mut tables: HashSet<Table> = HashSet::new();
         let aliases = protobuf.aliases.clone();
         let cte_names: HashSet<String> = HashSet::from_iter(protobuf.cte_names.to_owned());
@@ -183,7 +192,7 @@ impl From<&protobuf::summary_result::Function> for Function {
         Function {
             name: v.name.to_owned(),
             function_name: v.function_name.to_owned(),
-            schema_name: schema_name,
+            schema_name,
             context: Context::try_from(v.context).unwrap_or(Context::None),
         }
     }
@@ -202,6 +211,10 @@ impl From<&protobuf::summary_result::FilterColumn> for FilterColumn {
         let table_name = (!v.table_name.is_empty()).then(|| v.table_name.to_owned());
         let column = v.column.to_owned();
 
-        Self { schema_name, table_name, column }
+        Self {
+            schema_name,
+            table_name,
+            column,
+        }
     }
 }

@@ -15,4 +15,4 @@ Do not edit imported sources to change parser behavior. Review and test parser u
 python3 scripts/sync-uqa-pg-query.py --source PATH_TO_CHECKED_OUT_WRAPPER
 ```
 
-CI runs `python3 scripts/sync-uqa-pg-query.py --check` against `SHA256SUMS`. A parser update must change the recorded revisions in this file, the script constants, and the checksum list in the same change.
+The sync script normalizes imported Rust sources with the workspace-pinned rustfmt before writing `SHA256SUMS`; the checksums therefore describe the deterministic post-rustfmt snapshot rather than the upstream files byte for byte. CI verifies both the checksums and workspace-wide rustfmt. A parser update must change the recorded revisions in this file, the script constants, and the checksum list in the same change.

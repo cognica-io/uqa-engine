@@ -110,7 +110,12 @@ pub fn truncate(protobuf: &protobuf::ParseResult, max_length: usize) -> Result<S
                 NodeMut::InsertStmt(s) => {
                     let s = s.as_mut().ok_or(Error::InvalidPointer)?;
                     if !s.cols.is_empty() {
-                        truncations.push_back(PossibleTruncation { attr: TruncationAttr::Cols, node, depth, length: cols_len(s.cols.clone())? });
+                        truncations.push_back(PossibleTruncation {
+                            attr: TruncationAttr::Cols,
+                            node,
+                            depth,
+                            length: cols_len(s.cols.clone())?,
+                        });
                     }
                 }
                 NodeMut::IndexStmt(s) => {
@@ -180,10 +185,12 @@ pub fn truncate(protobuf: &protobuf::ParseResult, max_length: usize) -> Result<S
             }
         }
 
-        truncations.make_contiguous().sort_by(|a, b| match a.depth.cmp(&b.depth).reverse() {
-            Ordering::Equal => a.length.cmp(&b.length).reverse(),
-            other => other,
-        });
+        truncations
+            .make_contiguous()
+            .sort_by(|a, b| match a.depth.cmp(&b.depth).reverse() {
+                Ordering::Equal => a.length.cmp(&b.length).reverse(),
+                other => other,
+            });
 
         while let Some(truncation) = truncations.pop_front() {
             match (truncation.node, truncation.attr) {
@@ -197,7 +204,11 @@ pub fn truncate(protobuf: &protobuf::ParseResult, max_length: usize) -> Result<S
                 }
                 (NodeMut::SelectStmt(s), TruncationAttr::ValuesLists) => {
                     let s = s.as_mut().ok_or(Error::InvalidPointer)?;
-                    s.values_lists = vec![Node { node: Some(NodeEnum::List(protobuf::List { items: vec![*dummy_column()] })) }]
+                    s.values_lists = vec![Node {
+                        node: Some(NodeEnum::List(protobuf::List {
+                            items: vec![*dummy_column()],
+                        })),
+                    }]
                 }
                 (NodeMut::UpdateStmt(s), TruncationAttr::TargetList) => {
                     let s = s.as_mut().ok_or(Error::InvalidPointer)?;
@@ -229,7 +240,10 @@ pub fn truncate(protobuf: &protobuf::ParseResult, max_length: usize) -> Result<S
                 }
                 (NodeMut::CommonTableExpr(s), TruncationAttr::CTEQuery) => {
                     let s = s.as_mut().ok_or(Error::InvalidPointer)?;
-                    let old = std::mem::replace(&mut s.ctequery, Some(dummy_select(vec![], Some(dummy_column()), vec![])));
+                    let old = std::mem::replace(
+                        &mut s.ctequery,
+                        Some(dummy_select(vec![], Some(dummy_column()), vec![])),
+                    );
                     if let Some(s) = old {
                         let node = s.node.ok_or(Error::InvalidPointer)?;
                         truncations.retain(|t| t.node.to_enum().unwrap() != node);
@@ -250,7 +264,9 @@ pub fn truncate(protobuf: &protobuf::ParseResult, max_length: usize) -> Result<S
                 _ => panic!("unimplemented truncation"),
             }
             output = protobuf.deparse()?;
-            output = output.replace("SELECT WHERE \"…\"", "...").replace("\"…\"", "...");
+            output = output
+                .replace("SELECT WHERE \"…\"", "...")
+                .replace("\"…\"", "...");
             // the unwanted AS doesn't happen in the Ruby version. I'm not sure where it's coming from
             output = output.replace("SELECT ... AS ...", "SELECT ...");
             if output.len() <= max_length {
@@ -300,7 +316,11 @@ fn dummy_column() -> Box<Node> {
     Box::new(Node {
         node: Some(NodeEnum::ColumnRef(protobuf::ColumnRef {
             location: 0,
-            fields: vec![Node { node: Some(NodeEnum::String(protobuf::String { sval: "…".to_string() })) }],
+            fields: vec![Node {
+                node: Some(NodeEnum::String(protobuf::String {
+                    sval: "…".to_string(),
+                })),
+            }],
         })),
     })
 }
@@ -316,7 +336,11 @@ fn dummy_target() -> Node {
     }
 }
 
-fn dummy_select(target_list: Vec<Node>, where_clause: Option<Box<Node>>, values_lists: Vec<Node>) -> Box<Node> {
+fn dummy_select(
+    target_list: Vec<Node>,
+    where_clause: Option<Box<Node>>,
+    values_lists: Vec<Node>,
+) -> Box<Node> {
     Box::new(Node {
         node: Some(NodeEnum::SelectStmt(Box::new(protobuf::SelectStmt {
             distinct_clause: vec![],

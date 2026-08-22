@@ -65,7 +65,16 @@ pub struct ParseResult {
 
 impl ParseResult {
     pub fn new(protobuf: protobuf::ParseResult, stderr: String) -> Self {
-        let warnings = stderr.lines().filter_map(|l| if l.starts_with("WARNING") { Some(l.trim().into()) } else { None }).collect();
+        let warnings = stderr
+            .lines()
+            .filter_map(|l| {
+                if l.starts_with("WARNING") {
+                    Some(l.trim().into())
+                } else {
+                    None
+                }
+            })
+            .collect();
         let mut tables: HashSet<(String, Context)> = HashSet::new();
         let mut aliases: HashMap<String, String> = HashMap::new();
         let mut cte_names: HashSet<String> = HashSet::new();
@@ -79,15 +88,26 @@ impl ParseResult {
                 }
                 NodeRef::RangeVar(v) => {
                     // TODO: this incorrectly returns no tables: parse('with f as (select * from f limit 1) select * from f')
-                    let table = if !v.schemaname.is_empty() { format!("{}.{}", v.schemaname, v.relname) } else { v.relname.to_owned() };
+                    let table = if !v.schemaname.is_empty() {
+                        format!("{}.{}", v.schemaname, v.relname)
+                    } else {
+                        v.relname.to_owned()
+                    };
                     if cte_names.contains(&table) {
                         continue;
                     }
                     tables.insert((table.to_owned(), context));
-                    v.alias.as_ref().and_then(|alias| aliases.insert(alias.aliasname.to_owned(), table));
+                    v.alias
+                        .as_ref()
+                        .and_then(|alias| aliases.insert(alias.aliasname.to_owned(), table));
                 }
                 NodeRef::FuncCall(c) => {
-                    let funcname = join(c.funcname.iter().filter_map(|n| n.node.as_ref().map(|n| &cast!(n, NodeEnum::String).sval)), ".");
+                    let funcname = join(
+                        c.funcname.iter().filter_map(|n| {
+                            n.node.as_ref().map(|n| &cast!(n, NodeEnum::String).sval)
+                        }),
+                        ".",
+                    );
                     functions.insert((funcname, Context::Call));
                 }
                 NodeRef::DropStmt(s) => {
@@ -95,20 +115,31 @@ impl ParseResult {
                         Ok(protobuf::ObjectType::ObjectTable) => {
                             for o in &s.objects {
                                 if let Some(NodeEnum::List(list)) = &o.node {
-                                    let table =
-                                        join(list.items.iter().filter_map(|i| i.node.as_ref().map(|n| &cast!(n, NodeEnum::String).sval)), ".");
+                                    let table = join(
+                                        list.items.iter().filter_map(|i| {
+                                            i.node
+                                                .as_ref()
+                                                .map(|n| &cast!(n, NodeEnum::String).sval)
+                                        }),
+                                        ".",
+                                    );
                                     tables.insert((table, Context::DDL));
                                 };
                             }
                         }
-                        Ok(protobuf::ObjectType::ObjectRule) | Ok(protobuf::ObjectType::ObjectTrigger) => {
+                        Ok(protobuf::ObjectType::ObjectRule)
+                        | Ok(protobuf::ObjectType::ObjectTrigger) => {
                             for o in &s.objects {
                                 if let Some(NodeEnum::List(list)) = &o.node {
                                     // Unlike ObjectTable, this ignores the last string (the rule/trigger name)
                                     let table = join(
-                                        list.items[0..list.items.len() - 1]
-                                            .iter()
-                                            .filter_map(|i| i.node.as_ref().map(|n| &cast!(n, NodeEnum::String).sval)),
+                                        list.items[0..list.items.len() - 1].iter().filter_map(
+                                            |i| {
+                                                i.node
+                                                    .as_ref()
+                                                    .map(|n| &cast!(n, NodeEnum::String).sval)
+                                            },
+                                        ),
                                         ".",
                                     );
                                     tables.insert((table, Context::DDL));
@@ -132,7 +163,9 @@ impl ParseResult {
                     }
                 }
                 NodeRef::RenameStmt(s) => {
-                    if let Ok(protobuf::ObjectType::ObjectFunction) = protobuf::ObjectType::try_from(s.rename_type) {
+                    if let Ok(protobuf::ObjectType::ObjectFunction) =
+                        protobuf::ObjectType::try_from(s.rename_type)
+                    {
                         if let Some(object) = &s.object {
                             if let Some(NodeEnum::ObjectWithArgs(object)) = &object.node {
                                 if let Some(NodeEnum::String(string)) = &object.objname[0].node {
@@ -283,7 +316,9 @@ impl ParseResult {
                 Some(NodeEnum::SetOperationStmt(..)) => Some("SetOperationStmt"),
                 Some(NodeEnum::GrantStmt(..)) => Some("GrantStmt"),
                 Some(NodeEnum::GrantRoleStmt(..)) => Some("GrantRoleStmt"),
-                Some(NodeEnum::AlterDefaultPrivilegesStmt(..)) => Some("AlterDefaultPrivilegesStmt"),
+                Some(NodeEnum::AlterDefaultPrivilegesStmt(..)) => {
+                    Some("AlterDefaultPrivilegesStmt")
+                }
                 Some(NodeEnum::ClosePortalStmt(..)) => Some("ClosePortalStmt"),
                 Some(NodeEnum::ClusterStmt(..)) => Some("ClusterStmt"),
                 Some(NodeEnum::CopyStmt(..)) => Some("CopyStmt"),
@@ -363,14 +398,18 @@ impl ParseResult {
                 Some(NodeEnum::CreateUserMappingStmt(..)) => Some("CreateUserMappingStmt"),
                 Some(NodeEnum::AlterUserMappingStmt(..)) => Some("AlterUserMappingStmt"),
                 Some(NodeEnum::DropUserMappingStmt(..)) => Some("DropUserMappingStmt"),
-                Some(NodeEnum::AlterTableSpaceOptionsStmt(..)) => Some("AlterTableSpaceOptionsStmt"),
+                Some(NodeEnum::AlterTableSpaceOptionsStmt(..)) => {
+                    Some("AlterTableSpaceOptionsStmt")
+                }
                 Some(NodeEnum::AlterTableMoveAllStmt(..)) => Some("AlterTableMoveAllStmt"),
                 Some(NodeEnum::SecLabelStmt(..)) => Some("SecLabelStmt"),
                 Some(NodeEnum::CreateForeignTableStmt(..)) => Some("CreateForeignTableStmt"),
                 Some(NodeEnum::ImportForeignSchemaStmt(..)) => Some("ImportForeignSchemaStmt"),
                 Some(NodeEnum::CreateExtensionStmt(..)) => Some("CreateExtensionStmt"),
                 Some(NodeEnum::AlterExtensionStmt(..)) => Some("AlterExtensionStmt"),
-                Some(NodeEnum::AlterExtensionContentsStmt(..)) => Some("AlterExtensionContentsStmt"),
+                Some(NodeEnum::AlterExtensionContentsStmt(..)) => {
+                    Some("AlterExtensionContentsStmt")
+                }
                 Some(NodeEnum::CreateEventTrigStmt(..)) => Some("CreateEventTrigStmt"),
                 Some(NodeEnum::AlterEventTrigStmt(..)) => Some("AlterEventTrigStmt"),
                 Some(NodeEnum::RefreshMatViewStmt(..)) => Some("RefreshMatViewStmt"),

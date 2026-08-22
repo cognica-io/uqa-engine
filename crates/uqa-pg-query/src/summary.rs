@@ -34,12 +34,23 @@ pub fn summary(statement: &str, truncate_limit: i32) -> Result<SummaryResult> {
     let input = CString::new(statement)?;
     let result = unsafe { pg_query_summary(input.as_ptr(), 0, truncate_limit) };
     let parse_result = if !result.error.is_null() {
-        let message = unsafe { CStr::from_ptr((*result.error).message) }.to_string_lossy().to_string();
+        let message = unsafe { CStr::from_ptr((*result.error).message) }
+            .to_string_lossy()
+            .to_string();
         Err(Error::Parse(message))
     } else {
-        let data = unsafe { std::slice::from_raw_parts(result.summary.data as *const u8, result.summary.len as usize) };
-        let stderr = unsafe { CStr::from_ptr(result.stderr_buffer) }.to_string_lossy().to_string();
-        protobuf::SummaryResult::decode(data).map_err(Error::Decode).map(|result| SummaryResult::new(result, stderr))
+        let data = unsafe {
+            std::slice::from_raw_parts(
+                result.summary.data as *const u8,
+                result.summary.len as usize,
+            )
+        };
+        let stderr = unsafe { CStr::from_ptr(result.stderr_buffer) }
+            .to_string_lossy()
+            .to_string();
+        protobuf::SummaryResult::decode(data)
+            .map_err(Error::Decode)
+            .map(|result| SummaryResult::new(result, stderr))
     };
     unsafe { pg_query_free_summary_parse_result(result) };
     parse_result

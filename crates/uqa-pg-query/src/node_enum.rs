@@ -16,7 +16,13 @@ impl NodeEnum {
     pub fn deparse(&self) -> Result<String> {
         crate::deparse(&protobuf::ParseResult {
             version: crate::bindings::PG_VERSION_NUM as i32,
-            stmts: vec![protobuf::RawStmt { stmt: Some(Box::new(Node { node: Some(self.clone()) })), stmt_location: 0, stmt_len: 0 }],
+            stmts: vec![protobuf::RawStmt {
+                stmt: Some(Box::new(Node {
+                    node: Some(self.clone()),
+                })),
+                stmt_location: 0,
+                stmt_len: 0,
+            }],
         })
     }
 
@@ -304,7 +310,9 @@ impl NodeEnum {
                     }
                 }
                 NodeRef::GrantStmt(s) => {
-                    if let Ok(protobuf::ObjectType::ObjectTable) = protobuf::ObjectType::try_from(s.objtype) {
+                    if let Ok(protobuf::ObjectType::ObjectTable) =
+                        protobuf::ObjectType::try_from(s.objtype)
+                    {
                         s.objects.iter().for_each(|n| {
                             if let Some(n) = n.node.as_ref() {
                                 iter.push_back((n.to_ref(), depth, Context::DDL, false));
@@ -754,7 +762,9 @@ impl NodeEnum {
                 }
                 NodeMut::GrantStmt(s) => {
                     let s = s.as_mut().unwrap();
-                    if let Ok(protobuf::ObjectType::ObjectTable) = protobuf::ObjectType::try_from(s.objtype) {
+                    if let Ok(protobuf::ObjectType::ObjectTable) =
+                        protobuf::ObjectType::try_from(s.objtype)
+                    {
                         s.objects.iter_mut().for_each(|n| {
                             if let Some(n) = n.node.as_mut() {
                                 iter.push_back((n.to_mut(), depth, Context::DDL));
@@ -1292,7 +1302,9 @@ impl NodeEnum {
             NodeEnum::SetOperationStmt(n) => NodeMut::SetOperationStmt(&mut **n as *mut _),
             NodeEnum::GrantStmt(n) => NodeMut::GrantStmt(n as *mut _),
             NodeEnum::GrantRoleStmt(n) => NodeMut::GrantRoleStmt(n as *mut _),
-            NodeEnum::AlterDefaultPrivilegesStmt(n) => NodeMut::AlterDefaultPrivilegesStmt(n as *mut _),
+            NodeEnum::AlterDefaultPrivilegesStmt(n) => {
+                NodeMut::AlterDefaultPrivilegesStmt(n as *mut _)
+            }
             NodeEnum::ClosePortalStmt(n) => NodeMut::ClosePortalStmt(n as *mut _),
             NodeEnum::ClusterStmt(n) => NodeMut::ClusterStmt(n as *mut _),
             NodeEnum::CopyStmt(n) => NodeMut::CopyStmt(&mut **n as *mut _),
@@ -1349,8 +1361,12 @@ impl NodeEnum {
             NodeEnum::DeclareCursorStmt(n) => NodeMut::DeclareCursorStmt(&mut **n as *mut _),
             NodeEnum::CreateTableSpaceStmt(n) => NodeMut::CreateTableSpaceStmt(n as *mut _),
             NodeEnum::DropTableSpaceStmt(n) => NodeMut::DropTableSpaceStmt(n as *mut _),
-            NodeEnum::AlterObjectDependsStmt(n) => NodeMut::AlterObjectDependsStmt(&mut **n as *mut _),
-            NodeEnum::AlterObjectSchemaStmt(n) => NodeMut::AlterObjectSchemaStmt(&mut **n as *mut _),
+            NodeEnum::AlterObjectDependsStmt(n) => {
+                NodeMut::AlterObjectDependsStmt(&mut **n as *mut _)
+            }
+            NodeEnum::AlterObjectSchemaStmt(n) => {
+                NodeMut::AlterObjectSchemaStmt(&mut **n as *mut _)
+            }
             NodeEnum::AlterOwnerStmt(n) => NodeMut::AlterOwnerStmt(&mut **n as *mut _),
             NodeEnum::AlterOperatorStmt(n) => NodeMut::AlterOperatorStmt(n as *mut _),
             NodeEnum::AlterTypeStmt(n) => NodeMut::AlterTypeStmt(n as *mut _),
@@ -1370,14 +1386,18 @@ impl NodeEnum {
             NodeEnum::CreateUserMappingStmt(n) => NodeMut::CreateUserMappingStmt(n as *mut _),
             NodeEnum::AlterUserMappingStmt(n) => NodeMut::AlterUserMappingStmt(n as *mut _),
             NodeEnum::DropUserMappingStmt(n) => NodeMut::DropUserMappingStmt(n as *mut _),
-            NodeEnum::AlterTableSpaceOptionsStmt(n) => NodeMut::AlterTableSpaceOptionsStmt(n as *mut _),
+            NodeEnum::AlterTableSpaceOptionsStmt(n) => {
+                NodeMut::AlterTableSpaceOptionsStmt(n as *mut _)
+            }
             NodeEnum::AlterTableMoveAllStmt(n) => NodeMut::AlterTableMoveAllStmt(n as *mut _),
             NodeEnum::SecLabelStmt(n) => NodeMut::SecLabelStmt(&mut **n as *mut _),
             NodeEnum::CreateForeignTableStmt(n) => NodeMut::CreateForeignTableStmt(n as *mut _),
             NodeEnum::ImportForeignSchemaStmt(n) => NodeMut::ImportForeignSchemaStmt(n as *mut _),
             NodeEnum::CreateExtensionStmt(n) => NodeMut::CreateExtensionStmt(n as *mut _),
             NodeEnum::AlterExtensionStmt(n) => NodeMut::AlterExtensionStmt(n as *mut _),
-            NodeEnum::AlterExtensionContentsStmt(n) => NodeMut::AlterExtensionContentsStmt(&mut **n as *mut _),
+            NodeEnum::AlterExtensionContentsStmt(n) => {
+                NodeMut::AlterExtensionContentsStmt(&mut **n as *mut _)
+            }
             NodeEnum::CreateEventTrigStmt(n) => NodeMut::CreateEventTrigStmt(n as *mut _),
             NodeEnum::AlterEventTrigStmt(n) => NodeMut::AlterEventTrigStmt(n as *mut _),
             NodeEnum::RefreshMatViewStmt(n) => NodeMut::RefreshMatViewStmt(n as *mut _),
@@ -1460,7 +1480,9 @@ impl NodeEnum {
             NodeEnum::OidList(n) => NodeMut::OidList(n as *mut _),
             NodeEnum::MergeStmt(n) => NodeMut::MergeStmt(&mut **n as *mut _),
             NodeEnum::MergeAction(n) => NodeMut::MergeAction(&mut **n as *mut _),
-            NodeEnum::AlterDatabaseRefreshCollStmt(n) => NodeMut::AlterDatabaseRefreshCollStmt(n as *mut _),
+            NodeEnum::AlterDatabaseRefreshCollStmt(n) => {
+                NodeMut::AlterDatabaseRefreshCollStmt(n as *mut _)
+            }
             NodeEnum::ReturnStmt(n) => NodeMut::ReturnStmt(&mut **n as *mut _),
             NodeEnum::ReturningClause(n) => NodeMut::ReturningClause(&mut *n as *mut _),
             NodeEnum::ReturningExpr(n) => NodeMut::ReturningExpr(&mut **n as *mut _),
@@ -1481,12 +1503,16 @@ impl NodeEnum {
             NodeEnum::JsonKeyValue(n) => NodeMut::JsonKeyValue(&mut **n as *mut _),
             NodeEnum::JsonObjectConstructor(n) => NodeMut::JsonObjectConstructor(&mut *n as *mut _),
             NodeEnum::JsonArrayConstructor(n) => NodeMut::JsonArrayConstructor(&mut *n as *mut _),
-            NodeEnum::JsonArrayQueryConstructor(n) => NodeMut::JsonArrayQueryConstructor(&mut **n as *mut _),
+            NodeEnum::JsonArrayQueryConstructor(n) => {
+                NodeMut::JsonArrayQueryConstructor(&mut **n as *mut _)
+            }
             NodeEnum::JsonAggConstructor(n) => NodeMut::JsonAggConstructor(&mut **n as *mut _),
             NodeEnum::JsonObjectAgg(n) => NodeMut::JsonObjectAgg(&mut **n as *mut _),
             NodeEnum::JsonArrayAgg(n) => NodeMut::JsonArrayAgg(&mut **n as *mut _),
             NodeEnum::RtepermissionInfo(n) => NodeMut::RtepermissionInfo(&mut *n as *mut _),
-            NodeEnum::WindowFuncRunCondition(n) => NodeMut::WindowFuncRunCondition(&mut **n as *mut _),
+            NodeEnum::WindowFuncRunCondition(n) => {
+                NodeMut::WindowFuncRunCondition(&mut **n as *mut _)
+            }
             NodeEnum::MergeSupportFunc(n) => NodeMut::MergeSupportFunc(&mut **n as *mut _),
             NodeEnum::JsonBehavior(n) => NodeMut::JsonBehavior(&mut **n as *mut _),
             NodeEnum::JsonExpr(n) => NodeMut::JsonExpr(&mut **n as *mut _),
