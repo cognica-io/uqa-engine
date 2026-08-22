@@ -10,8 +10,8 @@ use icu_casemap::CaseMapper;
 
 use super::{
     compare, compile_pg_regex, division_by_zero, expect_str, float1, gcd_i64, initcap_str,
-    json_concat, like_match, out_of_range, string1, to_decimal, to_f64, to_i64, trim_chars,
-    value_to_string, values_equal, ArrayValue, DecimalValue, Result, SQLError, Value,
+    json_concat, out_of_range, string1, to_decimal, to_f64, to_i64, trim_chars, value_to_string,
+    values_equal, ArrayValue, DecimalValue, Result, SQLError, Value,
 };
 
 pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
@@ -480,30 +480,40 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
                 Ok(Value::Int(s.chars().next().map(|c| c as i64).unwrap_or(0)))
             }
             "like" => {
-                if args.len() != 2 {
-                    return Err(SQLError::TypeMismatch("LIKE takes 2 args".into()));
+                if !matches!(args.len(), 2 | 3) {
+                    return Err(SQLError::TypeMismatch("LIKE takes 2 or 3 args".into()));
                 }
-                if args.iter().any(|argument| matches!(argument, Value::Null)) {
+                if matches!(args[1], Value::Null) || matches!(args.get(2), Some(Value::Null)) {
                     return Ok(Value::Null);
                 }
-                Ok(Value::Bool(like_match(
-                    &value_to_string(&args[0]),
+                let escape = args.get(2).map(value_to_string);
+                let pattern = super::CompiledLikePattern::with_escape(
                     &value_to_string(&args[1]),
                     false,
-                )))
-            }
-            "ilike" => {
-                if args.len() != 2 {
-                    return Err(SQLError::TypeMismatch("ILIKE takes 2 args".into()));
-                }
-                if args.iter().any(|argument| matches!(argument, Value::Null)) {
+                    escape.as_deref(),
+                )?;
+                if matches!(args[0], Value::Null) {
                     return Ok(Value::Null);
                 }
-                Ok(Value::Bool(like_match(
-                    &value_to_string(&args[0]),
+                Ok(Value::Bool(pattern.try_matches_value(&args[0])?))
+            }
+            "ilike" => {
+                if !matches!(args.len(), 2 | 3) {
+                    return Err(SQLError::TypeMismatch("ILIKE takes 2 or 3 args".into()));
+                }
+                if matches!(args[1], Value::Null) || matches!(args.get(2), Some(Value::Null)) {
+                    return Ok(Value::Null);
+                }
+                let escape = args.get(2).map(value_to_string);
+                let pattern = super::CompiledLikePattern::with_escape(
                     &value_to_string(&args[1]),
                     true,
-                )))
+                    escape.as_deref(),
+                )?;
+                if matches!(args[0], Value::Null) {
+                    return Ok(Value::Null);
+                }
+                Ok(Value::Bool(pattern.try_matches_value(&args[0])?))
             }
             "chr" => {
                 let n = to_i64(&args[0])?;
@@ -728,6 +738,11 @@ mod tests {
             for arguments in [
                 vec![Value::Null, Value::Str("%".into())],
                 vec![Value::Str("text".into()), Value::Null],
+                vec![
+                    Value::Str("text".into()),
+                    Value::Str("%".into()),
+                    Value::Null,
+                ],
             ] {
                 assert_eq!(
                     eval_core_functions(name, &arguments).unwrap().unwrap(),

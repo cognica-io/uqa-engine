@@ -1482,3 +1482,6 @@ mod array_containment;
 
 #[path = "pg18_semantics/review_regressions.rs"]
 mod review_regressions;
+
+#[path = "pg18_semantics/pattern_escape.rs"]
+mod pattern_escape;

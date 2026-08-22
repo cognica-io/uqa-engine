@@ -171,10 +171,19 @@ pub(in crate::sql) fn fdw_like_predicate(
         ("ilike", true) => uqa_fdw::PredicateOp::NotILike,
         _ => return None,
     };
+    let value = fdw_const_value(&args[1], params)?;
+    let Value::Str(pattern) = &value else {
+        return None;
+    };
+    // Foreign SQL dialects do not agree on the implicit LIKE escape.
+    // Keep backslash-bearing patterns in the canonical PostgreSQL evaluator.
+    if pattern.contains('\\') {
+        return None;
+    }
     Some(uqa_fdw::FDWPredicate {
         column: fdw_column_name(&args[0])?,
         operator,
-        value: fdw_const_value(&args[1], params)?,
+        value,
     })
 }
 

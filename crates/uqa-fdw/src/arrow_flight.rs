@@ -167,8 +167,17 @@ pub fn build_where_clause(predicates: &[FDWPredicate]) -> Result<String, ArrowFl
                 )));
             }
             (_, op) => {
+                let escape = matches!(
+                    op,
+                    PredicateOp::Like
+                        | PredicateOp::NotLike
+                        | PredicateOp::ILike
+                        | PredicateOp::NotILike
+                )
+                .then_some(" ESCAPE '\\'")
+                .unwrap_or_default();
                 clauses.push(format!(
-                    "{column} {} {}",
+                    "{column} {} {}{escape}",
                     op.sql_token(),
                     quote_literal(&p.value)?
                 ));
@@ -323,7 +332,10 @@ mod tests {
             },
         ];
         let sql = build_where_clause(&preds).unwrap();
-        assert_eq!(sql, "\"year\" = 2024 AND \"name\" LIKE 'alpha%'");
+        assert_eq!(
+            sql,
+            "\"year\" = 2024 AND \"name\" LIKE 'alpha%' ESCAPE '\\'"
+        );
     }
 
     #[test]

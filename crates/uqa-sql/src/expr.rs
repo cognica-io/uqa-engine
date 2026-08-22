@@ -66,8 +66,7 @@ pub use conversion::{array_value_to_string, value_to_string};
 pub use conversion::{value_to_tensor, value_to_vector};
 use scalar_dispatch::{eval_scalar_function, eval_sequence_function};
 use scalar_helpers::{
-    compile_pg_regex, like_match, point_xy, quote_literal, similar_to_regex, trim_chars,
-    typeof_value,
+    compile_pg_regex, point_xy, quote_literal, similar_to_regex, trim_chars, typeof_value,
 };
 pub use scalar_helpers::{quote_ident, CompiledLikePattern};
 
@@ -552,12 +551,13 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         "array_length" | "array_lower" | "array_upper" | "atan2" | "date_part" | "date_trunc"
         | "decode" | "encode" | "extract" | "gcd" | "lcm" | "left" | "mod" | "power" | "pow"
         | "repeat" | "right" | "starts_with" | "position" | "strpos" | "to_char" | "to_date"
-        | "to_number" | "trim_array" | "like" | "ilike" | "similar_to" | "point"
-        | "st_distance" | "st_within"
+        | "to_number" | "trim_array" | "point" | "st_distance" | "st_within"
             if argument_count == 2 =>
         {
             Some(true)
         }
+        "like" | "ilike" | "similar_to" if argument_count == 2 => Some(true),
+        "like" | "ilike" | "similar_to" if argument_count == 3 => Some(false),
         "array_to_string" if argument_count == 2 => Some(true),
         "substring" | "substr" | "lpad" | "rpad" if matches!(argument_count, 2 | 3) => Some(true),
         "regexp_count" if matches!(argument_count, 2..=4) => Some(true),

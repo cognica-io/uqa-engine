@@ -253,7 +253,7 @@ fn evaluate_truth<F: FieldValues + ?Sized>(
             if matches!(value.as_value(), Value::Null) {
                 None
             } else {
-                Some(pattern.matches_value(value.as_value()))
+                Some(pattern.try_matches_value(value.as_value())?)
             }
         }
         _ => {
@@ -363,7 +363,7 @@ fn evaluate<'a, F: FieldValues + ?Sized>(
             ProjectedValue::Owned(if matches!(value.as_value(), Value::Null) {
                 Value::Null
             } else {
-                Value::Bool(pattern.matches_value(value.as_value()))
+                Value::Bool(pattern.try_matches_value(value.as_value())?)
             })
         }
         ProjectedExpr::Cast { expression, ty } => {

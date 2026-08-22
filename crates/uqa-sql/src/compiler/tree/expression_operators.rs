@@ -11,6 +11,41 @@ use super::{
     Value,
 };
 
+fn compile_pattern_operands(
+    rhs: &pg_query::protobuf::Node,
+    wrapper_name: &str,
+    operator_name: &str,
+) -> Result<Vec<Expr>> {
+    let Some(NodeEnum::FuncCall(function)) = rhs.node.as_ref() else {
+        return Ok(vec![compile_expr(rhs)?]);
+    };
+    let function_name = extract_strings(&function.funcname)?
+        .into_iter()
+        .next_back()
+        .ok_or_else(|| SQLError::Internal(format!("{operator_name} wrapper has no name")))?;
+    if function_name != wrapper_name {
+        return Ok(vec![compile_expr(rhs)?]);
+    }
+    if function.agg_distinct
+        || function.agg_star
+        || function.agg_within_group
+        || function.func_variadic
+        || !function.agg_order.is_empty()
+        || function.agg_filter.is_some()
+        || function.over.is_some()
+    {
+        return Err(SQLError::Internal(format!(
+            "{operator_name} wrapper contains aggregate/function modifiers"
+        )));
+    }
+    if !matches!(function.args.len(), 1 | 2) {
+        return Err(SQLError::Internal(format!(
+            "{wrapper_name} expects a pattern and optional escape"
+        )));
+    }
+    function.args.iter().map(compile_expr).collect()
+}
+
 pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
     use pg_query::protobuf::AExprKind;
     let kind = a.kind();
@@ -385,49 +420,16 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 .rexpr
                 .as_ref()
                 .ok_or_else(|| SQLError::Internal("SIMILAR TO without rhs".into()))?;
-            let pattern = match rhs.node.as_ref() {
-                Some(NodeEnum::FuncCall(f)) => {
-                    let function_name = extract_strings(&f.funcname)?
-                        .into_iter()
-                        .next_back()
-                        .ok_or_else(|| {
-                            SQLError::Internal("SIMILAR TO wrapper function has no name".into())
-                        })?;
-                    if function_name != "similar_to_escape" {
-                        return Err(SQLError::Internal(format!(
-                            "SIMILAR TO has unexpected wrapper `{function_name}`"
-                        )));
-                    }
-                    let [first] = f.args.as_slice() else {
-                        if f.args.len() > 1 {
-                            return Err(SQLError::Unsupported(
-                                "SIMILAR TO with an explicit ESCAPE is not supported".into(),
-                            ));
-                        }
-                        return Err(SQLError::Internal(
-                            "similar_to_escape without pattern".into(),
-                        ));
-                    };
-                    if f.agg_distinct
-                        || f.agg_star
-                        || f.agg_within_group
-                        || f.func_variadic
-                        || !f.agg_order.is_empty()
-                        || f.agg_filter.is_some()
-                        || f.over.is_some()
-                    {
-                        return Err(SQLError::Internal(
-                            "SIMILAR TO wrapper contains aggregate/function modifiers".into(),
-                        ));
-                    }
-                    compile_expr(first)?
-                }
-                _ => compile_expr(rhs)?,
-            };
+            let mut args = vec![compile_expr(lhs)?];
+            args.extend(compile_pattern_operands(
+                rhs,
+                "similar_to_escape",
+                "SIMILAR TO",
+            )?);
             let call = Expr::Func {
                 binding: None,
                 name: "similar_to".into(),
-                args: vec![compile_expr(lhs)?, pattern],
+                args,
                 distinct: false,
                 order_by: Vec::new(),
                 filter: None,
@@ -500,21 +502,12 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 .rexpr
                 .as_ref()
                 .ok_or_else(|| SQLError::Internal("LIKE without rhs".into()))?;
-            if let Some(NodeEnum::FuncCall(f)) = rhs.node.as_ref() {
-                let wrapper = extract_strings(&f.funcname)?
-                    .into_iter()
-                    .next_back()
-                    .ok_or_else(|| SQLError::Internal("LIKE wrapper has no name".into()))?;
-                if wrapper == "like_escape" {
-                    return Err(SQLError::Unsupported(
-                        "LIKE with an explicit ESCAPE is not supported".into(),
-                    ));
-                }
-            }
+            let mut args = vec![compile_expr(lhs)?];
+            args.extend(compile_pattern_operands(rhs, "like_escape", "LIKE")?);
             let func = Expr::Func {
                 binding: None,
                 name: "like".into(),
-                args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                args,
                 distinct: false,
                 order_by: Vec::new(),
                 filter: None,
@@ -538,21 +531,12 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 .rexpr
                 .as_ref()
                 .ok_or_else(|| SQLError::Internal("ILIKE without rhs".into()))?;
-            if let Some(NodeEnum::FuncCall(f)) = rhs.node.as_ref() {
-                let wrapper = extract_strings(&f.funcname)?
-                    .into_iter()
-                    .next_back()
-                    .ok_or_else(|| SQLError::Internal("ILIKE wrapper has no name".into()))?;
-                if wrapper == "like_escape" {
-                    return Err(SQLError::Unsupported(
-                        "ILIKE with an explicit ESCAPE is not supported".into(),
-                    ));
-                }
-            }
+            let mut args = vec![compile_expr(lhs)?];
+            args.extend(compile_pattern_operands(rhs, "like_escape", "ILIKE")?);
             let func = Expr::Func {
                 binding: None,
                 name: "ilike".into(),
-                args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                args,
                 distinct: false,
                 order_by: Vec::new(),
                 filter: None,
