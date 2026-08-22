@@ -225,10 +225,12 @@ impl UnifiedPlan {
             Statement::CreateTableAs {
                 name,
                 if_not_exists,
+                column_names,
                 body,
             } => Self::Command(Box::new(CommandPlan::CreateTableAs {
                 name,
                 if_not_exists,
+                column_names,
                 query: Box::new(QueryPlan::lower_with(*body, aggregates)),
             })),
             Statement::Prepare { name, body } => {

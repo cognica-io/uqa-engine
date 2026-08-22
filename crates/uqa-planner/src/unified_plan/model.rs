@@ -350,6 +350,7 @@ pub enum CommandPlan {
     CreateTableAs {
         name: String,
         if_not_exists: bool,
+        column_names: Vec<String>,
         query: Box<QueryPlan>,
     },
     Prepare {

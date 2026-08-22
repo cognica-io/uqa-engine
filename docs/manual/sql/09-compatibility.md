@@ -33,7 +33,7 @@ Relational operators keep static row schemas until the final consumer. Spill for
 - Materialized views
 - View column alias lists, view options, and `WITH CHECK OPTION`
 - `SELECT INTO`
-- CTAS column-name lists and `WITH NO DATA`
+- CTAS `WITH NO DATA`
 
 These forms currently fail during compilation without creating a partial object. That failure is fail-safe behavior while implementation is incomplete, not a compatibility exemption.
 

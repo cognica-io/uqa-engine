@@ -14,6 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Implemented PostgreSQL 18 table-function `WITH ORDINALITY`, including one-based `bigint` counters, positional and partial column aliases, multi-column functions, and per-invocation reset for LATERAL execution.
 - Implemented PostgreSQL 18 named `WINDOW` clauses, including reusable definitions, left-to-right partition and ordering inheritance, legal ordering and frame extension, direct framed references, and matching definition errors.
 - Implemented PostgreSQL 18 aliases on parenthesized JOIN expressions, including final-output column aliases, input-name hiding, outer JOIN and LATERAL visibility, ambiguity and alias-count errors, optimization boundaries, and row-lock targeting.
+- Implemented PostgreSQL 18 column-name lists for `CREATE TABLE AS`, including positional and partial renaming, quoted identifier preservation, exact declared output types, duplicate and system-column validation, and durable reopen behavior.
 - Made the PyPI `uqa` package install the `usql` console command backed by the same Rust CLI implementation as the standalone `uqa-cli` binary.
 - Added npm trusted publishing for the `@cognica-io/uqa` Node.js and `@cognica-io/uqa-wasm` browser packages, with six platform-constrained native addons published under the `@cognica-io` organization and selected through exact-version optional dependencies.
 

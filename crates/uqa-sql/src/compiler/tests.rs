@@ -1029,6 +1029,22 @@ fn alter_sequence_preserves_if_exists() {
 }
 
 #[test]
+fn create_table_as_preserves_positional_column_names() {
+    let Statement::CreateTableAs {
+        name,
+        if_not_exists,
+        column_names,
+        ..
+    } = first("CREATE TABLE IF NOT EXISTS app.copy (renamed, \"Mixed\") AS SELECT 1, 2, 3")
+    else {
+        panic!("expected CREATE TABLE AS");
+    };
+    assert_eq!(name, "app.copy");
+    assert!(if_not_exists);
+    assert_eq!(column_names, ["renamed", "Mixed"]);
+}
+
+#[test]
 fn unsupported_create_ddl_never_loses_lifecycle_semantics() {
     for (sql, expected) in [
         ("CREATE TEMP TABLE temp_t (id INTEGER)", "TEMPORARY"),
@@ -1072,7 +1088,6 @@ fn unsupported_create_ddl_never_loses_lifecycle_semantics() {
             "MATERIALIZED VIEW",
         ),
         ("CREATE TEMP TABLE temp_as AS SELECT 1", "TEMPORARY"),
-        ("CREATE TABLE named(value) AS SELECT 1", "column-name lists"),
         (
             "CREATE TABLE no_data AS SELECT 1 WITH NO DATA",
             "WITH NO DATA",

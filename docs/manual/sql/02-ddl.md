@@ -204,13 +204,13 @@ View queries are durable and rebound against catalog and function state. Materia
 ## CREATE TABLE AS
 
 ```sql
-CREATE TABLE pending_orders AS
+CREATE TABLE pending_orders (order_id, account_id, total) AS
 SELECT order_id, account_id, total
 FROM orders
 WHERE state = 'pending';
 ```
 
-CTAS creates and populates a table from a query. CTAS column-name lists, `WITH NO DATA`, temporary persistence, storage options, access methods, `ON COMMIT`, and tablespaces are not implemented. `SELECT INTO` is not an alias for CTAS in UQA Engine.
+CTAS creates and populates a table from a query, preserves the query's declared output types for implemented SQL types, and creates nullable columns without copying source constraints. An optional column-name list replaces output names positionally and may be shorter than the query output, in which case remaining names come from the query; quoted case is preserved. More names than output columns raise `42601`, while duplicate names and PostgreSQL system-column names raise `42701`, before the query is executed. `WITH NO DATA`, temporary persistence, storage options, access methods, `ON COMMIT`, and tablespaces are not implemented. `SELECT INTO` is not an alias for CTAS in UQA Engine.
 
 ## Sequences
 

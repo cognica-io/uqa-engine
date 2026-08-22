@@ -122,6 +122,14 @@
       "open_issue": "NOT VALID, ALTER CONSTRAINT, and complete dump/reopen coverage remain."
     },
     {
+      "id": "ddl.ctas-column-names",
+      "postgresql_reference": "PostgreSQL 18.4 live CREATE TABLE AS column-name list results, catalogs, and SQLSTATEs plus CREATE TABLE AS documentation",
+      "uqa_test": "cargo test -p uqa-sql --lib create_table_as_preserves_positional_column_names; cargo test -p uqa-engine --test integration engine_catalog::sql_ctas::",
+      "supported_version": "PostgreSQL 18.4 positional and partial CTAS column-name lists, quoted identifier case, exact declared types for implemented SQL types, nullable output columns, duplicate and system-column rejection before query execution, IF NOT EXISTS validation order, and durable reopen behavior",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "functions.identified-pg18-additions",
       "postgresql_reference": "PostgreSQL 18 functions and operators covered by the PG18 semantic suite",
       "uqa_test": "crates/uqa-engine/tests/pg18_semantics.rs; tests/parity/pg18/probes.sql",
