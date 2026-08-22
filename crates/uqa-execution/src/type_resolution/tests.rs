@@ -19,6 +19,24 @@ fn regclass_cast_preserves_postgresql_type_identity() {
 }
 
 #[test]
+fn builtin_argument_targets_resolve_fixed_and_overloaded_unknowns() {
+    assert_eq!(
+        builtin_function_argument_targets("PG_CATALOG.BTRIM", &[None]),
+        vec![Some(ColumnType::Text)]
+    );
+    assert_eq!(
+        builtin_function_argument_targets(
+            "concat_op",
+            &[None, Some(ColumnType::Array(Box::new(ColumnType::Integer)))],
+        ),
+        vec![
+            Some(ColumnType::Array(Box::new(ColumnType::Integer))),
+            Some(ColumnType::Array(Box::new(ColumnType::Integer))),
+        ]
+    );
+}
+
+#[test]
 fn common_type_matches_postgresql_numeric_and_left_character_precedence() {
     assert_eq!(
         common_type(&ColumnType::SmallInteger, &ColumnType::BigInteger).unwrap(),

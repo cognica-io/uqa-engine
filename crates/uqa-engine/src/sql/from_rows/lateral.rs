@@ -216,6 +216,7 @@ fn execute_lateral_relational_root_output(
                         compute: ComputePlan::Project,
                         group_by: Vec::new(),
                         grouping_sets: Vec::new(),
+                        group_distinct: false,
                         having: None,
                         order_by: order_by.clone(),
                         limit: limit.as_deref().cloned(),

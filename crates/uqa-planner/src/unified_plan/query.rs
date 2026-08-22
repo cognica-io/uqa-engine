@@ -217,6 +217,7 @@ impl QueryBlockPlan {
                         .collect()
                 })
                 .collect(),
+            group_distinct: statement.group_distinct,
             having: statement
                 .having
                 .map(|expr| lower_scalar_expression(expr, aggregates, &mut subqueries)),

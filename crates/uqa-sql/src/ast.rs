@@ -947,6 +947,9 @@ pub struct SelectStmt {
     /// Each inner Vec lists the grouping-key expressions for that
     /// set (an empty inner Vec means the global grand-total bucket).
     pub grouping_sets: Vec<Vec<Expr>>,
+    /// `GROUP BY DISTINCT` -- remove duplicate grouping sets after grouping expressions have been resolved against their input types.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub group_distinct: bool,
     /// `HAVING <expr>`. Evaluated against each aggregated row and
     /// filters out groups whose predicate is falsy. Mirrors PG's
     /// `havingClause`.

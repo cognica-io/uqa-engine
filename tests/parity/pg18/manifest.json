@@ -74,6 +74,14 @@
       "open_issue": null
     },
     {
+      "id": "query.group-by-distinct",
+      "postgresql_reference": "PostgreSQL 18.4 live GROUP BY DISTINCT and GROUP BY ALL results plus SELECT documentation",
+      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::group_by_distinct_is_preserved_for_post_binding_deduplication; cargo test -p uqa-engine --test integration engine_queries::sql_grouping_sets::; tests/parity/pg18/probes.sql",
+      "supported_version": "PostgreSQL 18.4 plain grouping and duplicate elimination after GROUPING SETS, ROLLUP, and CUBE expansion with unordered analyzed-expression identity, including aliases, qualified columns, no-op casts, contextually typed NULLs, structurally distinct operators, empty sets, and explicit row constructors",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "dml.returning-row-images",
       "postgresql_reference": "PostgreSQL 18 SQL DML RETURNING documentation",
       "uqa_test": "crates/uqa-engine/tests/sql_update_delete.rs",

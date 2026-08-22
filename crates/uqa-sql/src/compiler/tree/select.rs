@@ -19,11 +19,6 @@ pub(in crate::compiler) fn compile_select(
     if stmt.into_clause.is_some() {
         return Err(SQLError::Unsupported("SELECT INTO is not supported".into()));
     }
-    if stmt.group_distinct {
-        return Err(SQLError::Unsupported(
-            "GROUP BY DISTINCT is not supported".into(),
-        ));
-    }
     if !stmt.window_clause.is_empty() {
         return Err(SQLError::Unsupported(
             "named WINDOW clauses are not supported".into(),
@@ -166,6 +161,7 @@ pub(in crate::compiler) fn compile_select(
         r#where,
         group_by,
         grouping_sets,
+        group_distinct: stmt.group_distinct,
         having,
         order_by,
         limit,
@@ -509,7 +505,7 @@ pub(in crate::compiler) fn resolve_group_by_aliases(
 pub(in crate::compiler) fn compile_group_clause(
     nodes: &[pg_query::protobuf::Node],
 ) -> Result<(Vec<Expr>, Vec<Vec<Expr>>)> {
-    use pg_query::protobuf::GroupingSetKind;
+    use pg_query::protobuf::{CoercionForm, GroupingSetKind};
 
     fn simple_item(node: &pg_query::protobuf::Node) -> Result<Vec<Expr>> {
         match node.node.as_ref() {
@@ -518,12 +514,18 @@ pub(in crate::compiler) fn compile_group_clause(
                 GroupingSetKind::GroupingSetSimple => grouping
                     .content
                     .iter()
-                    .map(compile_expr)
-                    .collect::<Result<Vec<_>>>(),
+                    .map(simple_item)
+                    .collect::<Result<Vec<_>>>()
+                    .map(|items| items.into_iter().flatten().collect()),
                 other => Err(SQLError::Unsupported(format!(
                     "nested grouping item {other:?} is not a simple grouping key"
                 ))),
             },
+            Some(NodeEnum::RowExpr(row))
+                if row.row_format() == CoercionForm::CoerceImplicitCast =>
+            {
+                row.args.iter().map(compile_expr).collect()
+            }
             Some(_) => Ok(vec![compile_expr(node)?]),
             None => Err(SQLError::Internal(
                 "GROUP BY contains an empty parse node".into(),
@@ -602,7 +604,7 @@ pub(in crate::compiler) fn compile_group_clause(
                 for child in &grouping.content {
                     match child.node.as_ref() {
                         Some(NodeEnum::GroupingSet(nested)) => sets.extend(expand(nested)?),
-                        Some(_) => sets.push(vec![compile_expr(child)?]),
+                        Some(_) => sets.push(simple_item(child)?),
                         None => {
                             return Err(SQLError::Internal(
                                 "GROUPING SETS contains an empty parse node".into(),

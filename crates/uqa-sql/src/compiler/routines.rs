@@ -377,6 +377,7 @@ fn select_of_expr(expr: Expr) -> Statement {
         r#where: None,
         group_by: Vec::new(),
         grouping_sets: Vec::new(),
+        group_distinct: false,
         having: None,
         order_by: Vec::new(),
         limit: None,

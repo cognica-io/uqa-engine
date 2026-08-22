@@ -119,7 +119,8 @@ pub use set_operation::ExternalSetOperation;
 pub use spill::{IndexedSpill, SharedSpill, SharedSpillReader, SpillBuffer};
 pub use spill_scan::{SharedSpillScan, SpillScan};
 pub use type_resolution::{
-    bind_type_introspection, bind_type_introspection_with_resolver, common_context_expression_type,
-    common_type, equality_operand_type, scalar_type, scalar_type_with_resolver,
-    values_column_types, FunctionTypeResolver,
+    bind_type_introspection, bind_type_introspection_with_resolver,
+    builtin_function_argument_targets, common_context_expression_type, common_type,
+    equality_operand_type, scalar_type, scalar_type_with_resolver, values_column_types,
+    FunctionTypeResolver,
 };

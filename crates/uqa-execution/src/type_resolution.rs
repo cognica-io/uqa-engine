@@ -199,6 +199,31 @@ pub fn builtin_function_type(
     builtin_function_type_inner(name, None, args, order_by, schema, params, None)
 }
 
+/// Return the declared argument targets selected by PostgreSQL-compatible built-in resolution. Known argument types are retained for polymorphic calls, while fixed signatures and overloaded operators supply the context needed to resolve `unknown` arguments.
+#[must_use]
+pub fn builtin_function_argument_targets(
+    name: &str,
+    argument_types: &[Option<ColumnType>],
+) -> Vec<Option<ColumnType>> {
+    let lower = name.to_ascii_lowercase();
+    let name = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
+    let mut targets = argument_types.to_vec();
+    match name {
+        "upper" | "lower" | "casefold" | "initcap" | "trim" | "btrim" | "ltrim" | "rtrim" => {
+            targets.fill(Some(ColumnType::Text));
+        }
+        "concat_op" if targets.len() == 2 => {
+            for position in 0..2 {
+                if targets[position].is_none() {
+                    targets[position] = Some(concat_argument_type(targets[1 - position].as_ref()));
+                }
+            }
+        }
+        _ => {}
+    }
+    targets
+}
+
 fn builtin_function_type_inner(
     name: &str,
     binding: Option<&FunctionBinding>,
@@ -555,6 +580,14 @@ fn concat_type(
         }
         (Some(ColumnType::JsonB), Some(ColumnType::JsonB)) => Ok(Some(ColumnType::JsonB)),
         _ => Ok(Some(ColumnType::Text)),
+    }
+}
+
+fn concat_argument_type(other: Option<&ColumnType>) -> ColumnType {
+    match other {
+        Some(array @ ColumnType::Array(_)) => array.clone(),
+        Some(ColumnType::JsonB) => ColumnType::JsonB,
+        _ => ColumnType::Text,
     }
 }
 

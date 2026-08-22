@@ -1151,6 +1151,7 @@ mod tests {
             compute: ComputePlan::Project,
             group_by: Vec::new(),
             grouping_sets: Vec::new(),
+            group_distinct: false,
             having: None,
             order_by: Vec::new(),
             limit: None,

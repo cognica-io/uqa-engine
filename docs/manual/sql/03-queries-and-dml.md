@@ -147,7 +147,13 @@ GROUP BY CUBE(region, product)
 ORDER BY region, product;
 ```
 
-`GROUP BY DISTINCT` is not implemented.
+`GROUP BY DISTINCT` removes duplicate grouping sets after expanding `GROUPING SETS`, `ROLLUP`, and `CUBE`; `GROUP BY ALL` retains their multiplicity. Grouping-set identity is computed after resolving aliases, column references, and no-op casts, ignores key order and repeated keys, and keeps expressions with different analyzed types or operators distinct.
+
+```sql execute
+SELECT region, sum(amount) AS total
+FROM (VALUES ('us', 10), ('eu', 20)) AS sales(region, amount)
+GROUP BY DISTINCT GROUPING SETS ((region), (region), ());
+```
 
 ## Window functions
 

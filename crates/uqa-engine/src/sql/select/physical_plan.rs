@@ -10,9 +10,10 @@ use super::{
     build_set_projection, collect_exists_key_operator, collect_query_operator,
     column_prune_for_stmt, expression_may_return_set, final_filter_after_qualifier_pushdown,
     is_score_provenance_column, prepare_aggregate_output_projection,
-    prepare_correlated_exists_predicate, prepare_group_set_projection, prepare_window_plan,
-    projection_columns, projections_may_return_set, qualifier_filters_for_stmt,
-    resolve_fetch_limit_with_ties, resolve_limit_offset_with_ctes, should_defer_distinct_limit,
+    prepare_correlated_exists_predicate, prepare_distinct_grouping_sets,
+    prepare_group_set_projection, prepare_window_plan, projection_columns,
+    projections_may_return_set, qualifier_filters_for_stmt, resolve_fetch_limit_with_ties,
+    resolve_limit_offset_with_ctes, should_defer_distinct_limit,
     validate_query_block_expression_types, validate_query_set_contexts, Arc, ComputePlan, CteScope,
     Engine, EngineExpressionEvaluator, HashSet, OutputColumnMapping, PhysicalAggregateExecutor,
     PhysicalProjection, PhysicalWindowExecutor, ProjectionPlan, QueryBlockPlan, QueryOutput,
@@ -888,6 +889,12 @@ pub(in crate::sql) fn build_relational_operator<'a>(
     }
     let evaluator = EngineExpressionEvaluator::shared(engine, params, ctes);
     operator = attach_relational_filter(engine, operator, predicate, params, ctes, &evaluator)?;
+    let distinct_group_statement = if matches!(statement.compute, ComputePlan::Aggregate) {
+        prepare_distinct_grouping_sets(engine, statement, operator.row_schema(), params)?
+    } else {
+        None
+    };
+    let statement = distinct_group_statement.as_ref().unwrap_or(statement);
     let mut group_statement = None;
     if matches!(statement.compute, ComputePlan::Aggregate) {
         if let Some(plan) =
