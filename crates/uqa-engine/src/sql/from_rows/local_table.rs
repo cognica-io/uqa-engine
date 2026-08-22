@@ -685,7 +685,9 @@ fn build_join_operator_with_ctes_at_path<'a>(
                 ));
             }
 
-            if let Some(plan) = engine.view_plan(name)? {
+            if let Some(view) = engine.view_definition(name)? {
+                let plan = &view.query;
+                let output_columns = view.output_columns.as_deref().unwrap_or(&[]);
                 let inherited_lock = ctes.source_row_lock_for_view(&qualifier, name);
                 // During a tuple-local recheck, a view named as the lock target pins every base scan of its storage inside this subtree to the candidate's tuples.
                 let mut recheck_scope = ctes.enter_recheck_storage_pins(&qualifier);
@@ -695,7 +697,13 @@ fn build_join_operator_with_ctes_at_path<'a>(
                     .filter(|filters| !filters.is_empty())
                     .and_then(|filters| combine_filters(filters.iter().cloned()))
                     .map(|filter| {
-                        push_output_filter_into_query_plan(engine, &plan, &qualifier, &filter, None)
+                        push_output_filter_into_query_plan(
+                            engine,
+                            plan,
+                            &qualifier,
+                            &filter,
+                            (!output_columns.is_empty()).then_some(output_columns),
+                        )
                     })
                     .transpose()?
                     .flatten();
@@ -707,7 +715,7 @@ fn build_join_operator_with_ctes_at_path<'a>(
                 let execution_plan = propagated_plan
                     .as_ref()
                     .or(specialized_plan.as_ref())
-                    .unwrap_or(&plan);
+                    .unwrap_or(plan);
                 if let Some(operator) =
                     try_build_streaming_subquery_operator(engine, execution_plan, params, ctes)?
                 {
@@ -717,7 +725,7 @@ fn build_join_operator_with_ctes_at_path<'a>(
                         &source_columns,
                         &qualifier,
                         prune,
-                        &[],
+                        output_columns,
                         ctes.lock_identities.emit,
                     );
                     return Ok(attach_qualifier_filter(
@@ -753,7 +761,7 @@ fn build_join_operator_with_ctes_at_path<'a>(
                     &columns,
                     &qualifier,
                     prune,
-                    &[],
+                    output_columns,
                     ctes.lock_identities.emit,
                 );
                 return Ok(attach_qualifier_filter(

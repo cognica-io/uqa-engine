@@ -10,8 +10,100 @@ use super::{
     bind_query_plan_relations, bind_query_plan_sequence_references,
     canonical_virtual_relation_reference, query_plan_references_relation,
     query_plan_references_sequence, BTreeMap, CatalogFacade, Engine, QueryPlan, RelationIdentity,
-    SQLError, StorageBackendError, StorageBackendResult, ViewRow,
+    SQLError, StorageBackendError, StorageBackendResult, StoredView, ViewRow,
 };
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum RestoredView {
+    Current(StoredView),
+    Legacy(QueryPlan),
+}
+
+fn create_view_output_columns(
+    schema: &uqa_execution::RowSchema,
+    declared: &[String],
+) -> Result<Vec<String>, SQLError> {
+    if declared.len() > schema.len() {
+        return Err(SQLError::Routine {
+            sqlstate: "42601".into(),
+            message: "CREATE VIEW specifies more column names than columns".into(),
+        });
+    }
+    let columns = schema
+        .columns()
+        .iter()
+        .enumerate()
+        .map(|(position, column)| {
+            declared
+                .get(position)
+                .cloned()
+                .unwrap_or_else(|| schema.public_name(position).unwrap_or(column).to_string())
+        })
+        .collect::<Vec<_>>();
+    let mut seen = std::collections::BTreeSet::new();
+    for column in &columns {
+        if !seen.insert(column) {
+            return Err(SQLError::Routine {
+                sqlstate: "42701".into(),
+                message: format!("column \"{column}\" specified more than once"),
+            });
+        }
+    }
+    Ok(columns)
+}
+
+fn named_view_schema(
+    query_schema: &uqa_execution::RowSchema,
+    output_columns: &[String],
+) -> Result<uqa_execution::RowSchema, SQLError> {
+    if query_schema.len() != output_columns.len() {
+        return Err(SQLError::Internal(format!(
+            "stored view row type has {} columns but its query has {}",
+            output_columns.len(),
+            query_schema.len()
+        )));
+    }
+    Ok(uqa_execution::RowSchema::with_types(
+        output_columns.to_vec(),
+        query_schema.column_types().to_vec(),
+    ))
+}
+
+fn validate_replacement_schema(
+    old: &uqa_execution::RowSchema,
+    new: &uqa_execution::RowSchema,
+) -> Result<(), SQLError> {
+    if new.len() < old.len() {
+        return Err(SQLError::Routine {
+            sqlstate: "42P16".into(),
+            message: "cannot drop columns from view".into(),
+        });
+    }
+    for position in 0..old.len() {
+        let old_name = old
+            .public_name(position)
+            .unwrap_or(&old.columns()[position]);
+        let new_name = new
+            .public_name(position)
+            .unwrap_or(&new.columns()[position]);
+        if old_name != new_name {
+            return Err(SQLError::Routine {
+                sqlstate: "42P16".into(),
+                message: format!(
+                    "cannot change name of view column \"{old_name}\" to \"{new_name}\""
+                ),
+            });
+        }
+        if old.column_type(position) != new.column_type(position) {
+            return Err(SQLError::Routine {
+                sqlstate: "42P16".into(),
+                message: format!("cannot change data type of view column \"{old_name}\""),
+            });
+        }
+    }
+    Ok(())
+}
 
 fn bind_stored_view_relations(
     plan: &mut QueryPlan,
@@ -69,12 +161,13 @@ impl Engine {
                 SQLError::Internal(format!("resolve CREATE VIEW source `{reference}`: {error}"))
             })? {
                 Some((canonical, "table" | "view" | "foreign table")) => Ok(canonical),
-                Some((canonical, kind)) => Err(SQLError::Unsupported(format!(
-                    "CREATE VIEW source `{canonical}` is a {kind}, not a row relation"
-                ))),
-                None => Err(SQLError::Unsupported(format!(
-                    "CREATE VIEW source relation `{reference}` does not exist"
-                ))),
+                Some((canonical, kind)) => Err(SQLError::Routine {
+                    sqlstate: "42809".into(),
+                    message: format!(
+                        "CREATE VIEW source \"{canonical}\" is a {kind}, not a row relation"
+                    ),
+                }),
+                None => Err(SQLError::UnknownTable(reference.to_string())),
             }
         })?;
         bind_query_plan_sequence_references(plan, &mut |reference| {
@@ -116,22 +209,30 @@ impl Engine {
                     "view lowering produced a non-query plan".into(),
                 ));
             };
-            engine.register_view_plan_inner(name, *plan)
+            engine.register_view_plan_inner(name, &[], *plan, true, &[])
         })
     }
 
     pub(crate) fn register_view_plan(
         &self,
         name: &str,
+        column_names: &[String],
         plan: uqa_planner::QueryPlan,
+        or_replace: bool,
+        params: &[uqa_sql::SQLParam],
     ) -> Result<(), SQLError> {
-        self.with_implicit_transaction(move |engine| engine.register_view_plan_inner(name, plan))
+        self.with_implicit_transaction(move |engine| {
+            engine.register_view_plan_inner(name, column_names, plan, or_replace, params)
+        })
     }
 
     fn register_view_plan_inner(
         &self,
         name: &str,
+        column_names: &[String],
         mut plan: uqa_planner::QueryPlan,
+        or_replace: bool,
+        params: &[uqa_sql::SQLParam],
     ) -> Result<(), SQLError> {
         self.synchronize_catalog_registries()
             .map_err(|err| SQLError::Internal(format!("refresh view catalog: {err}")))?;
@@ -140,20 +241,50 @@ impl Engine {
             .map_err(SQLError::Unsupported)?;
         let relation = RelationIdentity::from_legacy_name(&name)
             .map_err(|err| SQLError::Internal(format!("invalid canonical view name: {err}")))?;
-        if let Some(kind) = self
-            .relation_kind_at(&name)
-            .map_err(|err| SQLError::Internal(format!("resolve relation `{name}`: {err}")))?
-        {
-            if kind != "view" {
-                return Err(SQLError::Unsupported(format!(
-                    "relation `{name}` already exists as {kind}"
-                )));
-            }
-        }
         self.bind_view_plan_for_create(&mut plan)?;
+        let query_schema = crate::sql::analyze_catalog_query_schema(self, &plan, params)?;
+        let output_columns = create_view_output_columns(&query_schema, column_names)?;
+        let replacement_schema = named_view_schema(&query_schema, &output_columns)?;
+        let existing_kind = self
+            .relation_kind_at(&name)
+            .map_err(|err| SQLError::Internal(format!("resolve relation `{name}`: {err}")))?;
+        match existing_kind {
+            Some(_) if !or_replace => {
+                return Err(SQLError::Routine {
+                    sqlstate: "42P07".into(),
+                    message: format!("relation \"{name}\" already exists"),
+                });
+            }
+            Some("view") => {
+                let existing = self
+                    .durable
+                    .views
+                    .read()
+                    .get(&relation)
+                    .cloned()
+                    .ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "view `{name}` exists in the catalog but has no loaded definition"
+                        ))
+                    })?;
+                let existing_schema = self.stored_view_schema(&existing)?;
+                validate_replacement_schema(&existing_schema, &replacement_schema)?;
+            }
+            Some(kind) => {
+                return Err(SQLError::Routine {
+                    sqlstate: "42809".into(),
+                    message: format!("\"{name}\" is not a view; it is a {kind}"),
+                });
+            }
+            None => {}
+        }
+        let view = StoredView {
+            query: plan,
+            output_columns: Some(output_columns),
+        };
         let mut views = self.durable.views.write();
         if let Some(catalog) = self.storage.catalog.as_ref() {
-            let definition_json = serde_json::to_string(&plan)
+            let definition_json = serde_json::to_string(&view)
                 .map_err(|err| SQLError::Internal(format!("serialize view `{name}`: {err}")))?;
             catalog
                 .save_view(&ViewRow {
@@ -162,7 +293,7 @@ impl Engine {
                 })
                 .map_err(|err| SQLError::Internal(format!("persist view `{name}`: {err}")))?;
         }
-        views.insert(relation, plan);
+        views.insert(relation, view);
         drop(views);
         self.note_catalog_registry_changed();
         Ok(())
@@ -242,7 +373,25 @@ impl Engine {
         }
     }
 
-    pub fn view(&self, name: &str) -> Result<Option<uqa_planner::QueryPlan>, SQLError> {
+    fn stored_view_schema(&self, view: &StoredView) -> Result<uqa_execution::RowSchema, SQLError> {
+        let query_schema = crate::sql::analyze_catalog_query_schema(self, &view.query, &[])?;
+        let output_columns = match &view.output_columns {
+            Some(columns) => columns.clone(),
+            None => create_view_output_columns(&query_schema, &[])?,
+        };
+        named_view_schema(&query_schema, &output_columns)
+    }
+
+    pub(crate) fn view_schema(
+        &self,
+        name: &str,
+    ) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
+        self.view_definition(name)?
+            .map(|view| self.stored_view_schema(&view))
+            .transpose()
+    }
+
+    pub(crate) fn view_definition(&self, name: &str) -> Result<Option<StoredView>, SQLError> {
         let Some(resolved) = self
             .try_resolve_view_name(name)
             .map_err(|err| SQLError::Internal(format!("refresh view catalog: {err}")))?
@@ -252,6 +401,12 @@ impl Engine {
         let relation = Self::resolved_relation_identity(&resolved)
             .map_err(|err| SQLError::Internal(format!("resolve view `{resolved}`: {err}")))?;
         Ok(self.durable.views.read().get(&relation).cloned())
+    }
+
+    pub fn view(&self, name: &str) -> Result<Option<uqa_planner::QueryPlan>, SQLError> {
+        Ok(self
+            .view_definition(name)?
+            .map(|definition| definition.query))
     }
 
     pub(crate) fn view_plan(&self, name: &str) -> Result<Option<uqa_planner::QueryPlan>, SQLError> {
@@ -292,8 +447,9 @@ impl Engine {
             .views
             .read()
             .iter()
-            .filter(|(relation, plan)| {
-                *relation != &target && query_plan_references_relation(plan, &target, &empty_ctes)
+            .filter(|(relation, view)| {
+                *relation != &target
+                    && query_plan_references_relation(&view.query, &target, &empty_ctes)
             })
             .map(|(relation, _)| relation.qualified_name())
             .collect::<Vec<_>>();
@@ -315,7 +471,7 @@ impl Engine {
             .views
             .read()
             .iter()
-            .filter(|(_, plan)| query_plan_references_sequence(plan, &target))
+            .filter(|(_, view)| query_plan_references_sequence(&view.query, &target))
             .map(|(relation, _)| relation.qualified_name())
             .collect::<Vec<_>>();
         dependents.sort_unstable();
@@ -340,17 +496,23 @@ impl Engine {
         let mut views = BTreeMap::new();
         for row in rows {
             let view_name = row.relation.qualified_name();
-            let mut plan = serde_json::from_str::<uqa_planner::QueryPlan>(&row.definition_json)?;
-            bind_stored_view_relations(&mut plan, &relations).map_err(|error| {
+            let mut view = match serde_json::from_str::<RestoredView>(&row.definition_json)? {
+                RestoredView::Current(view) => view,
+                RestoredView::Legacy(query) => StoredView {
+                    query,
+                    output_columns: None,
+                },
+            };
+            bind_stored_view_relations(&mut view.query, &relations).map_err(|error| {
                 StorageBackendError::Other(format!("restore view `{view_name}`: {error}"))
             })?;
-            bind_query_plan_sequence_references(&mut plan, &mut |reference| {
+            bind_query_plan_sequence_references(&mut view.query, &mut |reference| {
                 self.resolve_stored_sequence_reference_from_loaded_registry(reference)
             })
             .map_err(|error| {
                 StorageBackendError::Other(format!("restore view `{view_name}`: {error}"))
             })?;
-            views.insert(row.relation, plan);
+            views.insert(row.relation, view);
         }
         *self.durable.views.write() = views;
         Ok(())

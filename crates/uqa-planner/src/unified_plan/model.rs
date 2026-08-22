@@ -311,6 +311,7 @@ pub enum CommandPlan {
     AlterTable(Box<uqa_sql::ast::AlterTableStmt>),
     CreateView {
         name: String,
+        column_names: Vec<String>,
         query: Box<QueryPlan>,
         or_replace: bool,
     },

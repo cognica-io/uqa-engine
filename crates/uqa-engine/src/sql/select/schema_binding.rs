@@ -351,16 +351,22 @@ impl SchemaScope {
                     self.deferred_ctes.insert(name.clone(), plan);
                     return result;
                 }
-                if let Some(plan) = engine.view_plan(name)? {
+                if let Some(view) = engine.view_definition(name)? {
                     let key = name.to_ascii_lowercase();
                     if !self.visiting_views.insert(key.clone()) {
                         return Err(SQLError::Internal(format!(
                             "view `{name}` has a recursive schema dependency"
                         )));
                     }
-                    let result = self
-                        .bind_query(engine, &plan, params, outer)
-                        .map(|schema| rename_schema(&schema, &[], Some(qualifier)));
+                    let result =
+                        self.bind_query(engine, &view.query, params, outer)
+                            .map(|schema| {
+                                rename_schema(
+                                    &schema,
+                                    view.output_columns.as_deref().unwrap_or(&[]),
+                                    Some(qualifier),
+                                )
+                            });
                     self.visiting_views.remove(&key);
                     return result;
                 }

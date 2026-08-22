@@ -186,7 +186,7 @@ SQL `CREATE INDEX` accepts B-tree, GIN, IVF, and HNSW. Other access methods, inc
 ## Views
 
 ```sql
-CREATE VIEW open_orders AS
+CREATE VIEW open_orders (order_id, account_id, total) AS
 SELECT order_id, account_id, total
 FROM orders
 WHERE state = 'pending';
@@ -199,7 +199,7 @@ WHERE state = 'pending';
 DROP VIEW open_orders;
 ```
 
-View queries are durable and rebound against catalog and function state. Materialized views, view column alias lists, view storage options, and `WITH CHECK OPTION` are not implemented.
+An optional view column-name list renames query outputs positionally and may name only a leading subset. It cannot contain more names than the query returns, the final names must be unique, and quoted names retain their exact spelling. `CREATE OR REPLACE VIEW` must preserve the name and declared type of every existing column in order, but it may append columns at the end. Creation analyzes the query without executing it, then validates the column list and target relation; the durable definition retains the fixed public names across nested views, transactions, and reopen. Materialized views, view storage options, and `WITH CHECK OPTION` are not implemented.
 
 ## CREATE TABLE AS
 

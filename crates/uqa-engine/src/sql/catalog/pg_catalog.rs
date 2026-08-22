@@ -13,8 +13,8 @@ use super::helpers::{
     pg_type_array_oid, pg_type_by_value, pg_type_collation_oid, pg_type_element_oid, pg_type_len,
     pg_type_modifier, pg_type_oid, pg_type_routine_oids, pg_type_storage,
     pg_type_subscript_handler, relation_oid, routine_type_oid, row, schema_oid, split_index_name,
-    split_schema_name, stable_oid, str_value, table_columns_for, PgTypeRoutineOids,
-    PG18_BUILTIN_ROUTINES,
+    split_schema_name, stable_oid, str_value, table_columns_for, view_columns_for,
+    PgTypeRoutineOids, PG18_BUILTIN_ROUTINES,
 };
 use super::{
     registered_names, routine_signature_types, value_to_text, ColumnType, Engine, ResultRow,
@@ -101,7 +101,15 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
     }
     for name in engine.list_views()? {
         let (schema, view) = split_schema_name(&name)?;
-        out.push(pg_class_row(&schema, &view, "v", 0, 0.0, false));
+        let columns = view_columns_for(engine, &name)?;
+        out.push(pg_class_row(
+            &schema,
+            &view,
+            "v",
+            catalog_usize(columns.len(), "pg_class view column count")?,
+            0.0,
+            false,
+        ));
     }
     for name in engine.list_foreign_tables().map_err(SQLError::Internal)? {
         let (schema, table) = split_schema_name(&name)?;
@@ -252,6 +260,17 @@ pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
             out.push(pg_attribute_row(
                 relid,
                 catalog_ordinal(idx, "pg_attribute column")?,
+                col,
+            ));
+        }
+    }
+    for view_name in engine.list_views()? {
+        let (schema, view) = split_schema_name(&view_name)?;
+        let relid = relation_oid("v", &schema, &view);
+        for (idx, col) in view_columns_for(engine, &view_name)?.iter().enumerate() {
+            out.push(pg_attribute_row(
+                relid,
+                catalog_ordinal(idx, "pg_attribute view column")?,
                 col,
             ));
         }

@@ -101,6 +101,22 @@ fn select_into_lowers_to_the_create_table_as_contract() {
 }
 
 #[test]
+fn create_view_preserves_positional_column_names() {
+    let Statement::CreateView {
+        name,
+        column_names,
+        or_replace,
+        ..
+    } = first("CREATE OR REPLACE VIEW app.labels (renamed, \"Mixed.Name\") AS SELECT 1, 2, 3")
+    else {
+        panic!("expected CREATE VIEW");
+    };
+    assert_eq!(name, "app.labels");
+    assert_eq!(column_names, ["renamed", "Mixed.Name"]);
+    assert!(or_replace);
+}
+
+#[test]
 fn direct_unknown_literal_casts_are_validated_during_analysis() {
     let error = compile("SELECT 'bad'::integer").unwrap_err();
     assert_eq!(error.sqlstate(), Some("22P02"));
@@ -139,7 +155,6 @@ fn unsupported_create_ddl_never_loses_lifecycle_semantics() {
             "schema elements",
         ),
         ("CREATE TEMP VIEW temp_v AS SELECT 1", "TEMPORARY"),
-        ("CREATE VIEW aliased(value) AS SELECT 1", "column aliases"),
         (
             "CREATE VIEW checked AS SELECT 1 WITH LOCAL CHECK OPTION",
             "CHECK OPTION",

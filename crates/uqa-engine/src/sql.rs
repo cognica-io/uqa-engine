@@ -118,6 +118,15 @@ type RowUpdateValues = BTreeMap<String, Value>;
 type RowUpdateVectors = BTreeMap<String, Vec<Vec<f32>>>;
 type RowIndependentUpdateValues = (RowUpdateValues, RowUpdateVectors);
 
+/// Analyze a catalog-owned query without executing it or sampling rows.
+pub(crate) fn analyze_catalog_query_schema(
+    engine: &Engine,
+    query: &uqa_planner::QueryPlan,
+    params: &[SQLParam],
+) -> Result<uqa_execution::RowSchema, SQLError> {
+    select::analyze_query_plan_schema(engine, query, params, &CteScope::default(), None)
+}
+
 const SCORE_COLUMN: &str = "_score";
 pub(in crate::sql) const DOC_ID_COLUMN: &str = "_doc_id";
 const MERGE_ACTION_COLUMN: &str = "_merge_action";

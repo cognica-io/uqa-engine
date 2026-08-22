@@ -49,11 +49,19 @@ impl StorageContext {
     }
 }
 
+/// One bound view query together with the fixed public column names captured when the view was created. `None` only represents catalogs written before column metadata was persisted.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct StoredView {
+    pub(crate) query: uqa_planner::QueryPlan,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) output_columns: Option<Vec<String>>,
+}
+
 pub(super) struct DurableCatalogState {
     pub(super) graphs: RwLock<BTreeMap<String, uqa_graph::MemoryGraphStore>>,
     pub(super) models: RwLock<BTreeMap<String, DeepModel>>,
     pub(super) scoring_params: RwLock<BTreeMap<String, String>>,
-    pub(super) views: RwLock<BTreeMap<RelationIdentity, uqa_planner::QueryPlan>>,
+    pub(super) views: RwLock<BTreeMap<RelationIdentity, StoredView>>,
     pub(super) catalog_indexes: RwLock<BTreeMap<String, uqa_storage::CatalogIndexRow>>,
     pub(super) schemas: RwLock<BTreeSet<String>>,
     pub(super) path_indexes: RwLock<BTreeMap<String, uqa_graph::PathIndex>>,
@@ -71,7 +79,7 @@ pub(super) struct DurableCatalogSnapshot {
     graphs: BTreeMap<String, uqa_graph::MemoryGraphStore>,
     models: BTreeMap<String, DeepModel>,
     scoring_params: BTreeMap<String, String>,
-    views: BTreeMap<RelationIdentity, uqa_planner::QueryPlan>,
+    views: BTreeMap<RelationIdentity, StoredView>,
     catalog_indexes: BTreeMap<String, uqa_storage::CatalogIndexRow>,
     schemas: BTreeSet<String>,
     path_indexes: BTreeMap<String, uqa_graph::PathIndex>,
