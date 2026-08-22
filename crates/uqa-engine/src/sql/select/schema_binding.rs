@@ -38,6 +38,46 @@ struct SchemaScope {
     validate_references: bool,
 }
 
+/// Bind an operator join's relation argument as the input schema for its retrieval expressions.
+fn operator_join_relation_schema(
+    engine: &Engine,
+    relation: Option<&str>,
+) -> Result<RowSchema, SQLError> {
+    let relation = relation.ok_or_else(|| {
+        SQLError::TypeMismatch("operator join relation must be a table identifier".into())
+    })?;
+    let resolved = engine
+        .try_resolve_table_name(relation)
+        .map_err(|error| {
+            SQLError::Internal(format!(
+                "resolve operator join relation `{relation}` schema: {error}"
+            ))
+        })?
+        .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
+    let identity = crate::RelationIdentity::from_legacy_name(&resolved).map_err(|error| {
+        SQLError::Internal(format!(
+            "decode operator join relation `{resolved}` schema: {error}"
+        ))
+    })?;
+    let table = engine.try_table(&resolved).map_err(|error| {
+        SQLError::Internal(format!(
+            "read operator join relation `{resolved}` schema: {error}"
+        ))
+    })?;
+    let table = table.ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
+    let definitions = table.columns.read();
+    let columns = definitions
+        .iter()
+        .map(|column| column.name.clone())
+        .collect();
+    let types = definitions
+        .iter()
+        .map(|column| Some(column.ty.clone()))
+        .collect();
+    let schema = RowSchema::with_qualified_types(&identity.name, columns, types);
+    Ok(analysis::with_table_pseudo_columns(&schema, &identity.name))
+}
+
 impl SchemaScope {
     fn from_execution_scope(ctes: &CteScope) -> Self {
         Self {
@@ -442,6 +482,7 @@ impl SchemaScope {
             SourcePlan::Function {
                 name,
                 output_name,
+                relation,
                 args,
                 alias,
                 column_aliases,
@@ -449,7 +490,13 @@ impl SchemaScope {
                 column_types,
                 ..
             } => {
-                let input = outer.cloned().unwrap_or_default();
+                let lower = crate::sql::builtin_function_dispatch_name(name);
+                let input = if crate::operator_tree_bridge::is_operator_join_table_function(&lower)
+                {
+                    operator_join_relation_schema(engine, relation.as_deref())?
+                } else {
+                    outer.cloned().unwrap_or_default()
+                };
                 if self.validate_references {
                     self.validate_table_function_source(
                         engine, name, args, subqueries, &input, params,
