@@ -25,7 +25,7 @@ cargo deny --workspace check         # cargo install cargo-deny --locked
 cargo bench --workspace --no-run --locked     # benches must compile, run is opt-in
 ```
 
-PR pushes run only the fast repository-hygiene and formatting gate. Once review changes are complete and the final commit is pushed, run `bash scripts/run-premerge-ci.sh`; it dispatches the complete Rust, JavaScript/WebAssembly, and Python wheel suites for that exact remote pull-request HEAD. A red pre-merge run is a hard block, and any later push requires one new run for the new HEAD.
+PR pushes run only the fast repository-hygiene and formatting gate. Once review changes are complete and the final commit is pushed, run `bash scripts/run-premerge-ci.sh`; it binds the exact remote pull-request HEAD to a temporary tag, dispatches the complete Rust, JavaScript/WebAssembly, and Python wheel suites through that immutable ref, and removes the tag after GitHub accepts the runs. A red pre-merge run is a hard block, and any later push requires one new run for the new HEAD.
 
 If a clippy lint surfaces something legitimately user-driven, prefer fixing the root cause over adding `#[allow(clippy::...)]`. The `#[allow]` form is acceptable only with a `// reason: ...` comment and only at the smallest scope that silences it.
 

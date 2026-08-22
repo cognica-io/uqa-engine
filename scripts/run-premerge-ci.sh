@@ -59,10 +59,10 @@ fi
 
 pr_row="$(
   gh pr view "$branch" \
-    --json baseRefName,baseRefOid,headRefName,headRefOid,isCrossRepository,state,url \
-    --jq '[.state, .isCrossRepository, .baseRefName, .baseRefOid, .headRefName, .headRefOid, .url] | @tsv'
+    --json baseRefName,baseRefOid,headRefName,headRefOid,isCrossRepository,number,state,url \
+    --jq '[.state, .isCrossRepository, .number, .baseRefName, .baseRefOid, .headRefName, .headRefOid, .url] | @tsv'
 )"
-IFS=$'\t' read -r state cross_repository base_ref base_revision head_ref remote_head pr_url <<<"$pr_row"
+IFS=$'\t' read -r state cross_repository pr_number base_ref base_revision head_ref remote_head pr_url <<<"$pr_row"
 
 if [[ "$state" != "OPEN" ]]; then
   echo "pull request for $branch is not open" >&2
@@ -91,6 +91,39 @@ if [[ "$local_head" != "$remote_head" ]]; then
   exit 1
 fi
 
+temporary_tag=""
+
+cleanup_temporary_tag() {
+  local status=$?
+  trap - EXIT
+
+  if [[ -n "$temporary_tag" ]]; then
+    if git push origin ":refs/tags/$temporary_tag"; then
+      echo "removed temporary dispatch tag $temporary_tag"
+    else
+      echo "failed to remove temporary dispatch tag $temporary_tag" >&2
+      status=1
+    fi
+  fi
+
+  exit "$status"
+}
+
+trap cleanup_temporary_tag EXIT
+
+ensure_dispatch_ref() {
+  if [[ -n "$temporary_tag" ]]; then
+    return
+  fi
+
+  local candidate timestamp
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  candidate="uqa-premerge/pr-${pr_number}-${local_head:0:12}-${timestamp}-$$"
+  git push origin "${local_head}:refs/tags/${candidate}"
+  temporary_tag="$candidate"
+  echo "created temporary dispatch tag $temporary_tag at $local_head"
+}
+
 dispatch_workflow() {
   local workflow="$1"
   shift
@@ -99,7 +132,6 @@ dispatch_workflow() {
   existing_url="$(
     gh run list \
       --workflow "$workflow" \
-      --branch "$branch" \
       --commit "$local_head" \
       --limit 1 \
       --json url \
@@ -112,11 +144,12 @@ dispatch_workflow() {
   fi
 
   if [[ "$dry_run" == 1 ]]; then
-    echo "would dispatch $workflow for $branch at $local_head"
+    echo "would dispatch $workflow through a temporary tag at $local_head"
     return
   fi
 
-  gh workflow run "$workflow" --ref "$branch" "$@"
+  ensure_dispatch_ref
+  gh workflow run "$workflow" --ref "$temporary_tag" "$@"
 }
 
 echo "pre-merge CI target: $pr_url"
@@ -128,6 +161,6 @@ dispatch_workflow javascript-bindings.yml
 dispatch_workflow python-wheels.yml
 
 if [[ "$dry_run" == 0 ]]; then
-  echo "pre-merge CI dispatched; monitor with: gh run list --branch $branch"
+  echo "pre-merge CI dispatched; monitor with: gh run list --commit $local_head"
   echo "any later push changes the required HEAD and needs one new pre-merge run"
 fi
