@@ -72,6 +72,7 @@ uqa-engine = { version = "0.1.6", path = "crates/uqa-engine" }
 uqa = { version = "0.1.6", path = "crates/uqa" }
 uqa-client = { version = "0.1.6", path = "crates/uqa-client" }
 uqa-api = { version = "0.1.6", path = "crates/uqa-api" }
+uqa-cli = { version = "0.1.6", path = "crates/uqa-cli" }
 
 # Shared external dependencies (versions added when first consumer pulls them in)
 serde = { version = "1.0", features = ["derive"] }

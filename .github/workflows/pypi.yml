@@ -205,6 +205,9 @@ jobs:
     needs: [prepare, publish]
     if: ${{ always() && needs.prepare.result == 'success' && (needs.publish.result == 'success' || needs.publish.result == 'skipped') }}
     runs-on: ubuntu-24.04
+    concurrency:
+      group: registry-release-notes-${{ inputs.tag }}
+      cancel-in-progress: false
     permissions:
       contents: write
     env:

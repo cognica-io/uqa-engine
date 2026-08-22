@@ -28,6 +28,7 @@ use uqa_sql::SQLError;
 use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions};
 
 mod callbacks;
+mod cli;
 mod conversions;
 mod engine;
 mod errors;
@@ -41,6 +42,7 @@ mod result;
 mod value_conversion;
 
 use callbacks::{PyAggregateFunction, PyScalarFunction, PyTableFunction};
+use cli::usql_main;
 use conversions::{
     batch_from_py, ensure_callable, params_from_py, table_function_result_from_py,
     values_to_py_tuple,
@@ -97,6 +99,7 @@ fn uqa_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(tensor, m)?)?;
     m.add_function(wrap_pyfunction!(scalar, m)?)?;
     m.add_function(wrap_pyfunction!(migrate_python_db, m)?)?;
+    m.add_function(wrap_pyfunction!(usql_main, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

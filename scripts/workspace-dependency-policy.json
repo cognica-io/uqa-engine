@@ -123,6 +123,7 @@
       "uqa-storage"
     ],
     "uqa-python": [
+      "uqa-cli",
       "uqa-client",
       "uqa-core",
       "uqa-engine",

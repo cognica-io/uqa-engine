@@ -1,0 +1,259 @@
+name: Publish JavaScript to npm
+
+# npm only accepts a Trusted Publisher configuration after a package exists. Bootstrap each package once from the exact GitHub Release tarball, configure this workflow as its publisher, and then use this idempotent workflow for all later versions and for registry verification of the bootstrap release.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing GitHub release tag to publish, for example v0.1.6
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npmjs-uqa
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: prepare npm distributions
+    runs-on: ubuntu-24.04
+    outputs:
+      publish: ${{ steps.npm.outputs.publish }}
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Validate the release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "invalid release tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          version="${RELEASE_TAG#v}"
+          node_version="$(python3 -c 'import json; print(json.load(open("crates/uqa-node/package.json"))["version"])')"
+          wasm_version="$(python3 -c 'import json; print(json.load(open("crates/uqa-wasm/js/package.json"))["version"])')"
+          if [ "$version" != "$node_version" ] || [ "$version" != "$wasm_version" ]; then
+            echo "release tag $RELEASE_TAG does not match Node.js $node_version and WASM $wasm_version" >&2
+            exit 1
+          fi
+          gh release view "$RELEASE_TAG" --json isDraft --jq 'select(.isDraft == false) | true' | grep -qx true
+
+      - name: Download the released npm distributions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$RELEASE_TAG" --dir dist --pattern '*.tgz'
+
+      - name: Verify the npm release inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          expected=(
+            "cognica-io-uqa-linux-x64-gnu-${version}.tgz"
+            "cognica-io-uqa-linux-arm64-gnu-${version}.tgz"
+            "cognica-io-uqa-darwin-x64-${version}.tgz"
+            "cognica-io-uqa-darwin-arm64-${version}.tgz"
+            "cognica-io-uqa-win32-x64-msvc-${version}.tgz"
+            "cognica-io-uqa-win32-arm64-msvc-${version}.tgz"
+            "cognica-io-uqa-${version}.tgz"
+            "cognica-io-uqa-wasm-${version}.tgz"
+          )
+          shopt -s nullglob
+          actual=(dist/*.tgz)
+          if [ "${#actual[@]}" -ne "${#expected[@]}" ]; then
+            echo "expected ${#expected[@]} npm distributions, found ${#actual[@]}" >&2
+            printf '%s\n' "${actual[@]}" >&2
+            exit 1
+          fi
+          for filename in "${expected[@]}"; do
+            if [ ! -f "dist/$filename" ]; then
+              echo "missing npm distribution: $filename" >&2
+              exit 1
+            fi
+          done
+          digest_file="$RUNNER_TEMP/release-asset-digests.tsv"
+          gh release view "$RELEASE_TAG" \
+            --json assets \
+            --jq '.assets[] | [.name, .digest] | @tsv' > "$digest_file"
+          for filename in "${expected[@]}"; do
+            asset_digest="$(awk -F '\t' -v filename="$filename" \
+              '$1 == filename { print $2 }' "$digest_file")"
+            if [[ ! "$asset_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "missing or invalid GitHub Release digest for $filename" >&2
+              exit 1
+            fi
+            local_digest="sha256:$(sha256sum "dist/$filename" | awk '{print $1}')"
+            if [ "$local_digest" != "$asset_digest" ]; then
+              echo "GitHub Release digest mismatch for $filename" >&2
+              echo "expected: $asset_digest" >&2
+              echo "actual:   $local_digest" >&2
+              exit 1
+            fi
+          done
+          python3 scripts/check-release-licenses.py "${actual[@]}"
+          python3 scripts/npm-release.py check --version "$version" "${actual[@]}"
+
+      - name: Check whether npm already has this exact release
+        id: npm
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          pending="$RUNNER_TEMP/npm-pending.txt"
+          python3 scripts/npm-release.py check \
+            --version "$version" \
+            --check-registry \
+            --pending-file "$pending" \
+            dist/*.tgz
+          if [ -s "$pending" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "npm packages pending publication:"
+            cat "$pending"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "npm already has the verified $version release; skipping upload"
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: ${{ steps.npm.outputs.publish == 'true' }}
+        with:
+          name: npmjs-distributions
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: publish npm packages
+    needs: prepare
+    if: ${{ needs.prepare.outputs.publish == 'true' }}
+    runs-on: ubuntu-24.04
+    environment:
+      name: npmjs
+      url: https://www.npmjs.com/package/@cognica-io/uqa
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644d1e84afbd3f7d6820020 # v6.5.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Require an npm CLI with trusted publishing support
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - "$(npm --version)" <<'JS'
+          const [major, minor] = process.argv[2].split(".").map(Number);
+          const patch = Number(process.argv[2].split(".")[2] ?? 0);
+          if (major < 11 || (major === 11 && (minor < 5 || (minor === 5 && patch < 1)))) {
+            throw new Error(`npm 11.5.1 or newer is required, found ${major}.${minor}.${patch}`);
+          }
+          JS
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: npmjs-distributions
+          path: dist/
+
+      - name: Publish missing platform packages before the root package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ inputs.tag }}"
+          version="${version#v}"
+          pending="$RUNNER_TEMP/npm-pending.txt"
+          python3 scripts/npm-release.py check \
+            --version "$version" \
+            --check-registry \
+            --pending-file "$pending" \
+            dist/*.tgz
+          while IFS= read -r filename; do
+            [ -n "$filename" ] || continue
+            npm publish "dist/$filename" --access public
+          done < "$pending"
+
+      - name: Verify the published npm release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ inputs.tag }}"
+          version="${version#v}"
+          # Newly created packages can expose version metadata before the
+          # install packument. Wait up to five minutes for npm installability.
+          for attempt in {1..60}; do
+            if python3 scripts/npm-release.py check \
+              --version "$version" \
+              --require-published \
+              dist/*.tgz; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "npm registry did not expose the complete release in time" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+  record:
+    name: record npm publication
+    needs: [prepare, publish]
+    if: ${{ always() && needs.prepare.result == 'success' && (needs.publish.result == 'success' || needs.publish.result == 'skipped') }}
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: registry-release-notes-${{ inputs.tag }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Update the GitHub release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$notes_file"
+          python3 - "$notes_file" "$version" <<'PY'
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          version = sys.argv[2]
+          status = (
+              f"npm status: Published as [`@cognica-io/uqa@{version}`]"
+              f"(https://www.npmjs.com/package/@cognica-io/uqa/v/{version}) with native optional packages, and as "
+              f"[`@cognica-io/uqa-wasm@{version}`](https://www.npmjs.com/package/@cognica-io/uqa-wasm/v/{version})."
+          )
+          lines = path.read_text(encoding="utf-8").splitlines()
+          replaced = False
+          for index, line in enumerate(lines):
+              if line.startswith("npm status:"):
+                  lines[index] = status
+                  replaced = True
+          if not replaced:
+              lines.extend(["", "## npm", "", status])
+          path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+          PY
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$notes_file"

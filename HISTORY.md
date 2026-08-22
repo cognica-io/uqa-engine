@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Made the PyPI `uqa` package install the `usql` console command backed by the same Rust CLI implementation as the standalone `uqa-cli` binary.
+- Added npm trusted publishing for the `@cognica-io/uqa` Node.js and `@cognica-io/uqa-wasm` browser packages, with six platform-constrained native addons published under the `@cognica-io` organization and selected through exact-version optional dependencies.
+
+### Fixed
+
+- Made the Python source distribution include every manifest-declared benchmark source so pip can build a wheel from the sdist instead of failing during Cargo metadata validation.
+
 ## [0.1.6] - 2026-08-21
 
 ### Added

@@ -3938,6 +3938,7 @@ dependencies = [
  "pyo3",
  "serde_json",
  "tokio",
+ "uqa-cli",
  "uqa-client",
  "uqa-core",
  "uqa-engine",

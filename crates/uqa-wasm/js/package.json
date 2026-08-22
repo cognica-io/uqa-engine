@@ -1,5 +1,5 @@
 {
-  "name": "uqa-wasm",
+  "name": "@cognica-io/uqa-wasm",
   "version": "0.1.6",
   "description": "Browser bindings for embedded UQA WASM and local or Cloud HTTP SQL",
   "license": "AGPL-3.0-only",
@@ -13,6 +13,7 @@
   "main": "index.mjs",
   "types": "index.d.ts",
   "files": [
+    "README.md",
     "index.mjs",
     "index.d.ts",
     "LICENSE-NOTICE.md",
@@ -25,5 +26,9 @@
   ],
   "engines": {
     "node": ">= 18"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
   }
 }

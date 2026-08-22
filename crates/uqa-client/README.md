@@ -34,9 +34,16 @@ The manuscript consolidates and revises the published work on [unified query alg
 
 ## Try it in a terminal
 
-You need Rust 1.90 or newer and the native build tools required by Cargo dependencies.
+Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
-Start the interactive `usql` shell:
+```sh
+python -m pip install uqa
+usql
+```
+
+To build from this repository, you need Rust 1.90 or newer and the native build tools required by Cargo dependencies.
+
+Start the interactive `usql` shell from the repository:
 
 ```sh
 cargo run -p uqa-cli --bin usql
@@ -201,9 +208,11 @@ Read the [compressed VFS security contract](docs/design/compressed-vfs-security.
 | Rust facade | [`uqa`](crates/uqa) | Primary dependency re-exporting `uqa-engine` and `uqa_core::Value` |
 | Rust engine | [`uqa-engine`](crates/uqa-engine) | Direct embedded implementation API and runnable examples |
 | Rust HTTP | [`uqa-client`](crates/uqa-client) | Authenticated local and Cloud data-plane SQL, atomic batches, and NDJSON streaming |
-| Python | [`uqa-python`](crates/uqa-python) | pyo3/maturin bindings for the embedded engine plus synchronous local and Cloud HTTP SQL |
+| Python | [`uqa-python`](crates/uqa-python) | pyo3/maturin bindings, the installed `usql` command, and synchronous local and Cloud HTTP SQL |
 | Node.js | [`uqa-node`](crates/uqa-node) | Node-API bindings with asynchronous embedded and local or Cloud HTTP SQL methods |
 | Browser | [`uqa-wasm`](crates/uqa-wasm) | Emscripten embedded engine with IndexedDB persistence plus fetch-based local and Cloud HTTP SQL |
+
+Released Node.js applications install `@cognica-io/uqa` from npm; npm selects an exact-version native optional package under `@cognica-io` for the current supported platform. Browser applications install the independent `@cognica-io/uqa-wasm` package.
 
 Prebuilt Linux Python wheels target glibc 2.28 or newer because the bundled DuckDB runtime requires the modern C++11 ABI.
 

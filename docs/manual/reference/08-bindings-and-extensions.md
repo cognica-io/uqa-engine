@@ -59,7 +59,7 @@ Columnar execution helpers support Arrow and Parquet consumers where those featu
 
 ## Python
 
-The Python package is named `uqa` and is built with pyo3 and maturin. It targets the stable `abi3` interface beginning with Python 3.8.
+The Python package is named `uqa` and is built with pyo3 and maturin. It targets the stable `abi3` interface beginning with Python 3.8. Installing it also installs the `usql` console command into the same Python environment.
 
 ```python
 import uqa
@@ -83,8 +83,14 @@ Heavy engine work releases the Python interpreter lock where the method contract
 
 The Node-API package requires Node.js 16 or newer. Expensive query and search methods have asynchronous forms; selected operations also expose `Sync` variants.
 
+Install the `@cognica-io/uqa` package from npm. npm selects the matching exact-version native optional package published under `@cognica-io` for the current supported operating system and CPU.
+
+```sh
+npm install @cognica-io/uqa
+```
+
 ```typescript
-import { Engine } from "uqa";
+import { Engine } from "@cognica-io/uqa";
 
 const engine = new Engine();
 await engine.sql("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)");
@@ -116,6 +122,10 @@ Use `SQLParam.vector` or a typed numeric array for vector input. JavaScript call
 ## Browser WASM
 
 The browser binding uses an Emscripten build. Initialization is asynchronous, and persistent files are synchronized to IndexedDB.
+
+```sh
+npm install @cognica-io/uqa-wasm
+```
 
 ```javascript
 await UQA.load();

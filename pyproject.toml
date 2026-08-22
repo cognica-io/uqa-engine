@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "uqa"
 version = "0.1.6"
-description = "Python bindings for embedded UQA and local or Cloud HTTP SQL"
+description = "Python bindings and usql CLI for embedded UQA and local or Cloud HTTP SQL"
 readme = "README.md"
 requires-python = ">=3.8"
 license = "AGPL-3.0-only"
@@ -25,6 +25,9 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
+[project.scripts]
+usql = "uqa.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/cognica-io/uqa-engine"
 Repository = "https://github.com/cognica-io/uqa-engine"
@@ -35,3 +38,4 @@ manifest-path = "crates/uqa-python/Cargo.toml"
 module-name = "uqa._uqa"
 python-source = "python"
 strip = true
+include = [{ path = "crates/*/benches/**/*.rs", format = "sdist" }]

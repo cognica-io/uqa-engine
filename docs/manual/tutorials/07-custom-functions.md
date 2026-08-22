@@ -107,7 +107,7 @@ The explicit options allow constant folding and other safe rewrites because this
 ## 4. Register the Node.js scalar function
 
 ```javascript
-const { Engine } = require("uqa");
+const { Engine } = require("@cognica-io/uqa");
 
 const engine = new Engine();
 engine.registerScalarFunction(
@@ -128,7 +128,7 @@ Registration is synchronous. The callback also returns synchronously even when t
 ## 5. Register the browser WASM scalar function
 
 ```javascript
-import { Engine } from "uqa-wasm";
+import { Engine } from "@cognica-io/uqa-wasm";
 
 const engine = await Engine.inMemory();
 await engine.registerScalarFunction(

@@ -19,6 +19,7 @@ categories = ["command-line-utilities", "database"]
 [[bin]]
 name = "usql"
 path = "src/main.rs"
+test = false
 
 [dependencies]
 uqa-engine = { workspace = true }

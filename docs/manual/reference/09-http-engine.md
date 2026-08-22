@@ -4,7 +4,7 @@ The `uqa-client` crate provides `HttpEngine`, an asynchronous Rust SQL interface
 
 ## Install a released binding
 
-UQA Engine release artifacts are attached to the [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.1.6). Public Rust crates are published separately to crates.io, and the Python package is published to PyPI as `uqa`. Node.js and Browser WASM remain GitHub-release artifacts only and are not published to npm. To use the Rust source from GitHub, pin an application to the same release tag:
+UQA Engine release artifacts are attached to the [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.1.6). Public Rust crates are published separately to crates.io, the Python package is published to PyPI as `uqa`, and tagged Node.js and Browser WASM releases are published to npm as `@cognica-io/uqa` and `@cognica-io/uqa-wasm`. The GitHub release notes record the independent registry publication status for the exact version. To use the Rust source from GitHub, pin an application to the same release tag:
 
 ```toml
 [dependencies]
@@ -15,11 +15,11 @@ The same version can be taken from the registry as `uqa = "0.1.6"`, `uqa-client 
 
 ```sh
 python -m pip install uqa==0.1.6
-npm install ./uqa-0.1.6-PLATFORM.tgz
-npm install ./uqa-wasm-0.1.6.tgz
+npm install @cognica-io/uqa
+npm install @cognica-io/uqa-wasm
 ```
 
-The platform-specific Node.js archive includes the native addon; the unqualified `uqa-0.1.6.tgz` archive contains only the JavaScript package and expects a compatible addon package to be installed separately. An application runtime does not need to spawn or bundle the `uqa` CLI when trusted deployment configuration supplies `UQA_URL` and `UQA_TOKEN`.
+The small `@cognica-io/uqa` root package contains JavaScript and TypeScript declarations and selects one exact-version native package under `@cognica-io` for Linux glibc x64 or arm64, macOS x64 or arm64, or Windows MSVC x64 or arm64. The same root, platform, and WASM tarballs remain attached to the GitHub release for archive verification. An application runtime does not need to spawn or bundle the `uqa` CLI when trusted deployment configuration supplies `UQA_URL` and `UQA_TOKEN`.
 
 ## Connect by project name
 
@@ -92,7 +92,7 @@ for frame in engine.sql_stream("SELECT id FROM notes ORDER BY id"):
 The Node.js binding exposes asynchronous project constructors and reuses the native Rust HTTP client:
 
 ```javascript
-const { HttpEngine } = require("uqa");
+const { HttpEngine } = require("@cognica-io/uqa");
 
 const local = await HttpEngine.local("notes");
 const engine = await HttpEngine.cloud("analytics", { organization: "example" });
@@ -110,7 +110,7 @@ for await (const frame of stream) {
 The browser package exports a fetch-based `HttpEngine` beside the embedded WASM `Engine`:
 
 ```javascript
-import { HttpEngine } from "uqa-wasm";
+import { HttpEngine } from "@cognica-io/uqa-wasm";
 
 const engine = new HttpEngine(projectURL, projectToken);
 const result = await engine.sql(

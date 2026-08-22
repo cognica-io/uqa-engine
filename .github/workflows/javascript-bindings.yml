@@ -44,7 +44,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
       - uses: dtolnay/rust-toolchain@stable
       - name: Free Linux runner disk
         run: bash .github/scripts/free-linux-runner-disk.sh
@@ -54,7 +54,7 @@ jobs:
           cache-targets: false
       - name: Install Node build dependencies
         working-directory: crates/uqa-node
-        run: npm install --no-package-lock
+        run: npm ci --ignore-scripts
       - name: Build native addon
         working-directory: crates/uqa-node
         run: npx napi build --platform --no-js --profile release-stripped

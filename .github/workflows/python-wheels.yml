@@ -119,6 +119,12 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install pytest dist/*.whl
+          usql --copy-text -c "SELECT 1 AS n" > usql-output.txt
+          grep -qx "1" usql-output.txt
+          if usql -c "SELECT * FROM missing_table" > /dev/null; then
+            echo "usql returned success for invalid SQL" >&2
+            exit 1
+          fi
           python - <<'PY'
           import uqa
 
@@ -159,6 +165,21 @@ jobs:
       - name: Check sdist license contents
         run: python scripts/check-release-licenses.py dist/*.tar.gz
 
+      - name: Validate the sdist Cargo workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p sdist-check
+          tar -xzf dist/*.tar.gz -C sdist-check
+          sdist_root="$(find sdist-check -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          test -n "$sdist_root"
+          cargo metadata \
+            --locked \
+            --no-deps \
+            --format-version 1 \
+            --manifest-path "$sdist_root/crates/uqa-python/Cargo.toml" \
+            > /dev/null
+
       - uses: actions/upload-artifact@v4
         with:
           name: python-sdist
@@ -185,6 +206,8 @@ jobs:
           set -euo pipefail
           python --version
           pip install --quiet --no-cache-dir dist/*.whl
+          usql --copy-text -c "SELECT 1 AS n" > usql-output.txt
+          grep -qx "1" usql-output.txt
           python - <<'PY'
           import sys
 

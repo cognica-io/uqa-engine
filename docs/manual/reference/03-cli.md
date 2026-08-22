@@ -4,6 +4,15 @@
 
 ## Start the client
 
+Install the `uqa` package from PyPI to install both the Python binding and the `usql` command into the same Python environment:
+
+```sh
+python -m pip install uqa
+usql
+```
+
+When building from this repository instead, run the Rust binary directly:
+
 ```sh
 cargo run -p uqa-cli --bin usql
 ```
