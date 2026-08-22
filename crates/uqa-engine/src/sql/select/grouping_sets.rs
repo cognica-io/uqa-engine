@@ -99,7 +99,11 @@ fn normalize_expression(
             filter,
         } => {
             let name = canonical_function_name(name);
-            let targets = function_argument_targets(engine, &name, &args, schema, params)?;
+            let argument_types = args
+                .iter()
+                .map(|argument| expression_type(engine, argument, schema, params))
+                .collect::<Result<Vec<_>, _>>()?;
+            let targets = uqa_execution::builtin_function_argument_targets(&name, &argument_types);
             ScalarExpr::Func {
                 name,
                 binding,
@@ -340,48 +344,10 @@ fn expression_type(
     uqa_execution::scalar_type_with_resolver(expression, schema, params, engine)
 }
 
-fn function_argument_targets(
-    engine: &Engine,
-    name: &str,
-    arguments: &[ScalarExpr],
-    schema: &RowSchema,
-    params: &[SQLParam],
-) -> Result<Vec<Option<ColumnType>>, SQLError> {
-    let mut targets = vec![None; arguments.len()];
-    match name {
-        "upper" | "lower" | "casefold" | "initcap" => {
-            if !targets.is_empty() {
-                targets[0] = Some(ColumnType::Text);
-            }
-        }
-        "concat_op" if arguments.len() == 2 => {
-            let types = arguments
-                .iter()
-                .map(|argument| expression_type(engine, argument, schema, params))
-                .collect::<Result<Vec<_>, _>>()?;
-            for position in 0..2 {
-                if types[position].is_none() {
-                    targets[position] = Some(concat_argument_type(types[1 - position].as_ref()));
-                }
-            }
-        }
-        _ => {}
-    }
-    Ok(targets)
-}
-
-fn concat_argument_type(other: Option<&ColumnType>) -> ColumnType {
-    match other {
-        Some(array @ ColumnType::Array(_)) => array.clone(),
-        Some(ColumnType::JsonB) => ColumnType::JsonB,
-        _ => ColumnType::Text,
-    }
-}
-
 fn canonical_function_name(name: String) -> String {
     let lower = name.to_ascii_lowercase();
     match lower.strip_prefix("pg_catalog.") {
         Some(unqualified) => unqualified.to_owned(),
-        None => name,
+        None => lower,
     }
 }

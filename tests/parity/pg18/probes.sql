@@ -385,8 +385,9 @@ SELECT count(*) FROM (SELECT count(*) FROM (VALUES (1), (2)) AS v(a) GROUP BY DI
 SELECT count(*) FROM (SELECT count(*) FROM (VALUES (1::bigint), (2::bigint)) AS v(a) GROUP BY DISTINCT GROUPING SETS ((a + 1), (a + 1::bigint))) AS grouped
 SELECT count(*) FROM (SELECT count(*) FROM (VALUES (1), (2)) AS v(a) GROUP BY DISTINCT GROUPING SETS ((a), (v.a))) AS grouped
 SELECT count(*) FROM (SELECT count(*) FROM (VALUES (1), (2)) AS v(a) GROUP BY DISTINCT GROUPING SETS ((a + NULL), (a + NULL::integer))) AS grouped
-SELECT count(*) FROM (SELECT count(*) FROM (VALUES ('A'::text), ('B'::text)) AS v(a) GROUP BY DISTINCT GROUPING SETS ((lower(a)), (pg_catalog.lower(a)))) AS grouped
+SELECT count(*) FROM (SELECT count(*) FROM (VALUES ('A'::text), ('B'::text)) AS v(a) GROUP BY DISTINCT GROUPING SETS ((LOWER(a)), (lower(a)), (pg_catalog.lower(a)))) AS grouped
 SELECT count(*) FROM (SELECT count(*) GROUP BY DISTINCT GROUPING SETS ((lower(NULL)), (lower(NULL::text)))) AS grouped
+SELECT count(*) FROM (SELECT count(*) GROUP BY DISTINCT GROUPING SETS ((btrim(NULL)), (btrim(NULL::text)))) AS grouped
 SELECT count(*) FROM (SELECT count(*) FROM (VALUES ('a'::text), ('b'::text)) AS v(a) GROUP BY DISTINCT GROUPING SETS ((a || NULL), (a || NULL::text))) AS grouped
 SELECT CASE WHEN true THEN generate_series(1, 2) END
 SELECT coalesce(generate_series(1, 2), 0)

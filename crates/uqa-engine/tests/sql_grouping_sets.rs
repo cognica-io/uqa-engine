@@ -197,11 +197,21 @@ fn group_by_distinct_uses_analyzed_expression_identity() {
     let qualified_function = eng
         .sql(
             "SELECT count(*) AS n FROM sales \
-             GROUP BY DISTINCT GROUPING SETS ((lower(region)), (pg_catalog.lower(region)))",
+             GROUP BY DISTINCT GROUPING SETS \
+             ((LOWER(region)), (lower(region)), (pg_catalog.lower(region)))",
             &[],
         )
         .unwrap();
     assert_eq!(qualified_function.rows.len(), 2);
+
+    let fixed_signature_nulls = eng
+        .sql(
+            "SELECT count(*) AS n \
+             GROUP BY DISTINCT GROUPING SETS ((btrim(NULL)), (btrim(NULL::text)))",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(fixed_signature_nulls.rows.len(), 1);
 
     let typed_null = eng
         .sql(
