@@ -8,7 +8,7 @@
 
 use super::dispatch::compile_stmt;
 use super::{
-    compile_column_def, compile_expr, compile_select, range_var_name,
+    compile_column_def, compile_expr, compile_select, extract_string, range_var_name,
     validate_create_table_envelope, validate_durable_create_relation, ColumnDef, Expr, Node,
     NodeEnum, Result, SQLError, Statement,
 };
@@ -43,11 +43,11 @@ pub(super) fn compile_create_table_as(
         .as_ref()
         .ok_or_else(|| SQLError::Internal("CREATE TABLE AS target has no name".into()))?;
     validate_durable_create_relation(relation, "CREATE TABLE AS")?;
-    if !into.col_names.is_empty() {
-        return Err(SQLError::Unsupported(
-            "CREATE TABLE AS column-name lists are not supported".into(),
-        ));
-    }
+    let column_names = into
+        .col_names
+        .iter()
+        .map(extract_string)
+        .collect::<Result<Vec<_>>>()?;
     if !into.access_method.is_empty() {
         return Err(SQLError::Unsupported(
             "CREATE TABLE AS USING access methods are not supported".into(),
@@ -101,6 +101,7 @@ pub(super) fn compile_create_table_as(
     Ok(Statement::CreateTableAs {
         name,
         if_not_exists: stmt.if_not_exists,
+        column_names,
         body: Box::new(select),
     })
 }

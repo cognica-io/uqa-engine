@@ -1269,6 +1269,8 @@ pub enum Statement {
     CreateTableAs {
         name: String,
         if_not_exists: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        column_names: Vec<String>,
         body: Box<SelectStmt>,
     },
     /// `PREPARE name AS <inner>`.

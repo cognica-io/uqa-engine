@@ -392,11 +392,13 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             CommandPlan::CreateTableAs {
                 name,
                 if_not_exists,
+                column_names,
                 query,
             } => run_create_table_as(
                 self.engine,
                 name.clone(),
                 *if_not_exists,
+                column_names,
                 query,
                 self.params,
             ),

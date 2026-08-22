@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{AlterSequence, ColumnType, SequenceRestart};
+use super::{AlterSequence, ColumnType, SequenceRestart, Statement};
 
 #[test]
 fn regclass_scalar_and_array_names_preserve_type_identity() {
@@ -60,4 +60,30 @@ fn alter_sequence_restart_reads_legacy_and_current_serde_shapes() {
     let round_trip: AlterSequence =
         serde_json::from_str(&serde_json::to_string(&current).unwrap()).unwrap();
     assert_eq!(round_trip.restart, SequenceRestart::FromStart);
+}
+
+#[test]
+fn create_table_as_reads_legacy_statements_without_column_names() {
+    let mut statement = crate::compile("CREATE TABLE copy AS SELECT 1")
+        .unwrap()
+        .remove(0);
+    let Statement::CreateTableAs { column_names, .. } = &statement else {
+        panic!("expected CREATE TABLE AS");
+    };
+    assert!(column_names.is_empty());
+
+    let Statement::CreateTableAs { column_names, .. } = &mut statement else {
+        unreachable!();
+    };
+    column_names.push("renamed".into());
+    let mut encoded = serde_json::to_value(statement).unwrap();
+    encoded["CreateTableAs"]
+        .as_object_mut()
+        .unwrap()
+        .remove("column_names");
+    let legacy: Statement = serde_json::from_value(encoded).unwrap();
+    let Statement::CreateTableAs { column_names, .. } = legacy else {
+        panic!("expected CREATE TABLE AS");
+    };
+    assert!(column_names.is_empty());
 }
