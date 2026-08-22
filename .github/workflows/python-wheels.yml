@@ -2,27 +2,21 @@ name: Python Wheels
 
 on:
   workflow_dispatch:
-  # Tag builds are driven by release.yml, which calls this workflow and then
-  # attaches the artifacts it uploads to the GitHub release. Keeping the tag
-  # trigger here as well would build every wheel twice for the same tag.
+  # release.yml calls this workflow and attaches its full matrix to the release.
+  # A manual dispatch runs only the representative Python binding smoke test.
   workflow_call:
-  pull_request:
-    paths:
-      - ".github/workflows/python-wheels.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "LICENSE"
-      - "LICENSES/**"
-      - "LICENSING.md"
-      - "crates/uqa-*/**"
-      - "examples/python/**"
-      - "pyproject.toml"
-      - "python/**"
-      - "scripts/check-release-licenses.py"
-      - "tests/python/**"
+    inputs:
+      full_matrix:
+        description: Build every release wheel and the source distribution
+        required: true
+        type: boolean
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -30,8 +24,60 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  smoke:
+    name: Python bindings
+    if: ${{ !inputs.full_matrix }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Free Linux runner disk
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: true
+      - name: Create the test environment
+        run: |
+          python -m venv .venv
+          echo "VIRTUAL_ENV=$PWD/.venv" >> "$GITHUB_ENV"
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install maturin==1.11.5 pytest
+      - name: Build and install the development extension
+        run: maturin develop --locked
+      - name: Check the stable ABI contract
+        run: |
+          python - <<'PY'
+          import pathlib
+          import tomllib
+
+          manifest = tomllib.loads(
+              pathlib.Path("crates/uqa-python/Cargo.toml").read_text(encoding="utf-8")
+          )
+          features = manifest["dependencies"]["pyo3"]["features"]
+          assert "abi3-py38" in features, features
+          PY
+      - name: Exercise the CLI and Python API
+        run: |
+          set -euo pipefail
+          usql --copy-text -c "SELECT 1 AS n" > usql-output.txt
+          grep -qx "1" usql-output.txt
+          if usql -c "SELECT * FROM missing_table" > /dev/null; then
+            echo "usql returned success for invalid SQL" >&2
+            exit 1
+          fi
+          python -m pytest -q tests/python
+          for example in examples/python/*.py; do
+            python "$example"
+          done
+
   build-wheels:
     name: ${{ matrix.label }}
+    if: ${{ inputs.full_matrix }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -145,6 +191,7 @@ jobs:
 
   build-sdist:
     name: source distribution
+    if: ${{ inputs.full_matrix }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -188,6 +235,7 @@ jobs:
 
   minimum-python:
     name: minimum supported python
+    if: ${{ inputs.full_matrix }}
     needs: build-wheels
     runs-on: ubuntu-24.04
     # The declared floor is 3.8, which is past end of life and not available

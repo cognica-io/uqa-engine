@@ -25,7 +25,9 @@ cargo deny --workspace check         # cargo install cargo-deny --locked
 cargo bench --workspace --no-run --locked     # benches must compile, run is opt-in
 ```
 
-CI runs the same set on `ubuntu-24.04` and `macos-14`. A red CI is a hard block for merge.
+PR pushes run only the fast repository-hygiene and formatting gate. Once review changes are complete and the final commit is pushed, run `bash scripts/run-premerge-ci.sh`; it binds the exact remote pull-request HEAD to a temporary tag, always dispatches the change-aware pre-merge gate, dispatches JavaScript/WebAssembly or Python smoke tests only when their own surfaces changed, and removes the tag after GitHub accepts the runs. Rust-affecting changes run tests, clippy, MSRV, documentation, and dependency policy in parallel with reusable target caches; release builds, analytical benchmarks, and all-platform package matrices remain available in `full-ci.yml` or the release workflow instead of blocking every merge. A red selected check is a hard block, and any later push requires one new run for the new HEAD.
+
+`scripts/run-premerge-ci.sh` requires a clean tracked tree, a non-`main` checkout for an open pull request in the canonical repository, and a local HEAD matching the remote pull-request HEAD; use `--dry-run` to inspect selection without dispatching and `--force` to repeat a successful or in-progress run.
 
 If a clippy lint surfaces something legitimately user-driven, prefer fixing the root cause over adding `#[allow(clippy::...)]`. The `#[allow]` form is acceptable only with a `// reason: ...` comment and only at the smallest scope that silences it.
 

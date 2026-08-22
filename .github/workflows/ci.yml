@@ -1,140 +1,97 @@
-name: CI
+name: Pre-merge CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_rust:
+        description: Run the Rust validation jobs for a Rust-affecting change
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
-  # Full debuginfo for every workspace test binary exhausts the Ubuntu runner's
-  # disk during broad workspace builds. CI only needs build and test output,
-  # not local debugging sections.
   CARGO_PROFILE_TEST_DEBUG: "0"
-  CARGO_PROFILE_BENCH_DEBUG: "0"
-  # Keep CI artifacts compact; incremental state is useful locally but bloats
-  # GitHub-hosted runners during workspace-wide test / bench builds.
   CARGO_INCREMENTAL: "0"
 
 jobs:
-  fmt:
-    name: cargo fmt
+  test-linux:
+    name: test Linux
+    if: ${{ inputs.run_rust }}
     runs-on: ubuntu-24.04
+    env:
+      RUSTFLAGS: "-D warnings -C linker-features=-lld"
     steps:
       - uses: actions/checkout@v4
-      - name: Check public repository hygiene
-        run: bash scripts/check-public-repository-hygiene.sh
-      - name: Check Rust file headers
-        run: bash scripts/check-rust-file-headers.sh
-      - name: Check Rust file line limit
-        run: bash scripts/check-rust-file-lines.sh
-      - name: Check imported parser pin
-        run: python3 scripts/sync-uqa-pg-query.py --check
-      - name: Check crate legal file copies
-        run: python3 scripts/sync-crate-legal-files.py --check
-      - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
-      - name: Test analytical benchmark gate
-        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
-      - name: Check workspace dependency policy
-        run: python3 scripts/check-workspace-dependencies.py
-      - name: Check benchmark coverage
-        run: python3 scripts/check-benchmark-coverage.py
-      - name: Check integration test harness coverage
-        run: python3 scripts/check-integration-test-harnesses.py
-      - name: Check release license sources
-        run: python3 scripts/check-release-licenses.py
-      - name: Check PostgreSQL 18 compatibility manifest
-        run: python3 tests/parity/pg18/run_diff.py --validate-manifest
-      - name: Check rustfmt
-        run: bash scripts/check-rustfmt.sh
-
-  release-package-licenses:
-    name: release package licenses
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - name: Install Node package tooling
-        working-directory: crates/uqa-node
-        run: npm ci --ignore-scripts
-      - name: Audit Node package tooling
-        working-directory: crates/uqa-node
-        run: npm audit --audit-level=high
-      - name: Prepare package fixtures
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/uqa-native-fixtures" "${RUNNER_TEMP}/uqa-packages"
-          python3 - "${RUNNER_TEMP}/uqa-native-fixtures" <<'PY'
-          import sys
-          from pathlib import Path
-
-          output = Path(sys.argv[1])
-          for suffix in (
-              "linux-x64-gnu",
-              "linux-arm64-gnu",
-              "darwin-x64",
-              "darwin-arm64",
-              "win32-x64-msvc",
-              "win32-arm64-msvc",
-          ):
-              (output / f"uqa.{suffix}.node").write_bytes(b"npm metadata fixture\n")
-          Path("crates/uqa-wasm/js/uqa.js").write_text("export default {};\n", encoding="utf-8")
-          Path("crates/uqa-wasm/js/uqa.wasm").write_bytes(b"npm metadata fixture\n")
-          PY
-      - name: Pack Node.js bindings
-        run: >-
-          python3 scripts/npm-release.py build-node
-          --artifacts-dir "${RUNNER_TEMP}/uqa-native-fixtures"
-          --output-dir "${RUNNER_TEMP}/uqa-packages"
-      - name: Pack WebAssembly bindings
-        working-directory: crates/uqa-wasm/js
-        run: npm pack --ignore-scripts --pack-destination "${RUNNER_TEMP}/uqa-packages"
-      - name: Check package license contents
-        run: python3 scripts/check-release-licenses.py "${RUNNER_TEMP}"/uqa-packages/*.tgz
-      - name: Check npm package metadata
-        run: >-
-          python3 scripts/npm-release.py check
-          --version "$(node -p "require('./crates/uqa-node/package.json').version")"
-          "${RUNNER_TEMP}"/uqa-packages/*.tgz
-
-  cargo-package:
-    name: cargo package
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      - name: Package publishable crates
-        run: bash scripts/package-publishable-crates.sh
-
-  msrv:
-    name: cargo check (Rust 1.90)
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.90.0
       - name: Free Linux runner disk
         run: bash .github/scripts/free-linux-runner-disk.sh
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
-          cache-targets: false
-      - run: cargo check --workspace --locked
+          cache-targets: true
+      - name: Validate manual SQL examples
+        run: cargo test -p uqa-engine --test integration --locked engine_queries::manual_sql_examples::manual_sql_examples_compile_or_execute -- --exact
+      - name: Test workspace
+        run: cargo test --workspace --exclude uqa-fdw --locked -- --skip manual_sql_examples::manual_sql_examples_compile_or_execute
+
+  test-fdw-linux:
+    name: test FDW Linux
+    if: ${{ inputs.run_rust }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Free Linux runner disk
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: true
+      - run: cargo test -p uqa-fdw --locked
+
+  test-macos:
+    name: test macOS
+    if: ${{ inputs.run_rust }}
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: true
+      - run: cargo test --workspace --locked
 
   clippy:
-    name: cargo clippy
+    name: clippy ${{ matrix.label }}
+    if: ${{ inputs.run_rust }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14]
+        include:
+          - label: Linux
+            os: ubuntu-24.04
+          - label: macOS
+            os: macos-14
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -144,160 +101,68 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
-          cache-targets: ${{ runner.os != 'Linux' }}
+          cache-targets: true
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
-  test:
-    name: cargo test
-    runs-on: ${{ matrix.os }}
-    env:
-      # The Ubuntu runner hit an lld bus-error while linking a test binary, so
-      # use the system linker there while keeping warnings-as-errors.
-      RUSTFLAGS: ${{ matrix.os == 'ubuntu-24.04' && '-D warnings -C linker-features=-lld' || '-D warnings' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-14]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Free Linux runner disk
-        if: runner.os == 'Linux'
-        run: bash .github/scripts/free-linux-runner-disk.sh
-      - uses: Swatinem/rust-cache@v2
-        if: runner.os != 'Linux'
-        with:
-          cache-bin: false
-          cache-targets: true
-      - name: Test uqa-fdw on Linux
-        if: runner.os == 'Linux'
-        run: cargo test -p uqa-fdw --locked
-      - name: Clear FDW test artifacts on Linux
-        if: runner.os == 'Linux'
-        run: cargo clean
-      - name: Validate manual SQL examples on Linux
-        if: runner.os == 'Linux'
-        run: cargo test -p uqa-engine --test integration --locked engine_queries::manual_sql_examples::manual_sql_examples_compile_or_execute -- --exact
-      - name: Test workspace on Linux
-        if: runner.os == 'Linux'
-        run: cargo test --workspace --exclude uqa-fdw --locked -- --skip manual_sql_examples::manual_sql_examples_compile_or_execute
-      - name: Test workspace on macOS
-        if: runner.os != 'Linux'
-        run: cargo test --workspace --locked
-
-  example-build:
-    name: cargo build --examples
+  msrv:
+    name: check Rust 1.90
+    if: ${{ inputs.run_rust }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.90.0
       - name: Free Linux runner disk
         run: bash .github/scripts/free-linux-runner-disk.sh
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
-          cache-targets: false
-      - run: cargo build -p uqa-engine --examples --locked
-      # The standalone Rust crates under examples/rust are runnable programs, so
-      # CI executes them rather than only compiling them: a broken query or a
-      # changed SQL contract must fail here, not silently produce no rows.
-      - name: Run standalone examples
-        run: |
-          for package in \
-            example-unified-search \
-            example-vector-knn \
-            example-graph-cypher \
-            example-storage-transactions \
-            example-extensibility
-          do
-            echo "::group::$package"
-            cargo run -p "$package" --locked
-            echo "::endgroup::"
-          done
-
-  build-release:
-    name: cargo build --release
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-14]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Free Linux runner disk
-        if: runner.os == 'Linux'
-        run: bash .github/scripts/free-linux-runner-disk.sh
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-bin: false
-          cache-targets: ${{ runner.os != 'Linux' }}
-      - run: cargo build --workspace --release --locked
+          cache-targets: true
+      - run: cargo check --workspace --locked
 
   doc:
-    name: cargo doc
+    name: doc
+    if: ${{ inputs.run_rust }}
     runs-on: ubuntu-24.04
     env:
       RUSTDOCFLAGS: "-D warnings"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - name: Free Linux runner disk
         run: bash .github/scripts/free-linux-runner-disk.sh
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
-          cache-targets: false
+          cache-targets: true
       - run: cargo doc --workspace --no-deps --locked
 
   deny:
-    name: cargo deny
+    name: deny
+    if: ${{ inputs.run_rust }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
           arguments: --workspace
 
-  bench-build:
-    name: cargo bench --no-run
+  gate:
+    name: pre-merge CI
+    if: ${{ always() }}
+    needs: [test-linux, test-fdw-linux, test-macos, clippy, msrv, doc, deny]
     runs-on: ubuntu-24.04
+    env:
+      RESULTS: ${{ join(needs.*.result, ' ') }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Free Linux runner disk
-        run: bash .github/scripts/free-linux-runner-disk.sh
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-bin: false
-          cache-targets: false
-      - run: cargo bench --workspace --no-run --locked
-
-  analytical-benchmark:
-    name: analytical comparison gate
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Free Linux runner disk
-        run: bash .github/scripts/free-linux-runner-disk.sh
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-bin: false
-          cache-targets: false
-      - name: Run paired base/head analytical regression
-        env:
-          UQA_ANALYTICAL_BASE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-        run: python3 scripts/run-analytical-regression.py "${UQA_ANALYTICAL_BASE_REVISION}"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: analytical-comparison-${{ github.sha }}
-          path: |
-            target/benchmark-runs/analytical-comparison.json
-            target/criterion/analytical-ab/**/analytical_external_q1/*/new/estimates.json
-            target/criterion/analytical-ab/**/analytical_external_q6/*/new/estimates.json
-            target/criterion/analytical-ab/**/analytical_result_scan/*/new/estimates.json
+      - name: Require every selected job to pass
+        run: |
+          case " $RESULTS " in
+            *" failure "*|*" cancelled "*) exit 1 ;;
+          esac

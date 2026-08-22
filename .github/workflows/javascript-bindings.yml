@@ -2,34 +2,13 @@ name: JavaScript Bindings
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/javascript-bindings.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "crates/uqa-*/**"
-      - "examples/browser/**"
-      - "examples/javascript/**"
-      - "examples/node/**"
-      - "scripts/build-wasm.sh"
-      - "tests/node/**"
-      - "tests/wasm/**"
-  pull_request:
-    paths:
-      - ".github/workflows/javascript-bindings.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "crates/uqa-*/**"
-      - "examples/browser/**"
-      - "examples/javascript/**"
-      - "examples/node/**"
-      - "scripts/build-wasm.sh"
-      - "tests/node/**"
-      - "tests/wasm/**"
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_INCREMENTAL: "0"
