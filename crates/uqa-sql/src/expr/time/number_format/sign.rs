@@ -6,8 +6,8 @@
 
 //! Sign placement for `PostgreSQL` numeric format pictures.
 
-use super::{
-    default_numeric_sign, is_explicit_numeric_sign_marker, NUMERIC_BRACKET_MARKER,
+use super::picture::{
+    is_explicit_numeric_sign_marker, NumericSignFormat, NUMERIC_BRACKET_MARKER,
     NUMERIC_MINUS_MARKER, NUMERIC_PLUS_MARKER, NUMERIC_SIGN_MARKER,
 };
 
@@ -83,4 +83,152 @@ pub(super) fn apply_explicit_numeric_signs(
         output.push(if negative { '-' } else { ' ' });
     }
     output
+}
+
+pub(super) fn apply_truncated_special_sign(
+    body: String,
+    negative: bool,
+    fill_mode: bool,
+    sign_format: NumericSignFormat,
+) -> String {
+    match sign_format {
+        NumericSignFormat::Default => default_numeric_sign(body, negative, fill_mode),
+        NumericSignFormat::Leading => anchored_numeric_sign(body, negative),
+        NumericSignFormat::Explicit { implicit_sign } => {
+            apply_explicit_numeric_signs(body, negative, fill_mode, implicit_sign)
+        }
+        NumericSignFormat::Trailing | NumericSignFormat::Minus | NumericSignFormat::Sign => body,
+        NumericSignFormat::Plus if fill_mode => {
+            if negative {
+                format!("-{body}")
+            } else {
+                body
+            }
+        }
+        NumericSignFormat::Plus => default_numeric_sign(body, negative, false),
+        NumericSignFormat::Brackets if negative => {
+            let first_digit = body.find(|character: char| character != ' ').unwrap_or(0);
+            let (padding, number) = body.split_at(first_digit);
+            format!("{padding}<{number}")
+        }
+        NumericSignFormat::Brackets => default_numeric_sign(body, false, fill_mode),
+    }
+}
+
+pub(super) fn apply_float_aware_numeric_sign(
+    body: String,
+    negative: bool,
+    fill_mode: bool,
+    sign_format: NumericSignFormat,
+    truncation: FloatFractionTruncation,
+) -> String {
+    if truncation == FloatFractionTruncation::None {
+        return apply_numeric_sign(body, negative, fill_mode, sign_format);
+    }
+    let truncated_fraction_emits_sign = truncation == FloatFractionTruncation::NinePlaceholder;
+    match sign_format {
+        NumericSignFormat::Default => default_numeric_sign(body, negative, fill_mode),
+        NumericSignFormat::Leading => anchored_numeric_sign(body, negative),
+        NumericSignFormat::Explicit { implicit_sign } => {
+            apply_explicit_numeric_signs(body, negative, fill_mode, implicit_sign)
+        }
+        NumericSignFormat::Trailing => apply_positioned_numeric_sign(body, negative),
+        NumericSignFormat::Minus if fill_mode && negative && truncated_fraction_emits_sign => {
+            format!("{body}-")
+        }
+        NumericSignFormat::Minus => body,
+        NumericSignFormat::Sign if fill_mode && truncated_fraction_emits_sign => {
+            format!("{body}{}", if negative { '-' } else { '+' })
+        }
+        NumericSignFormat::Sign => body,
+        NumericSignFormat::Plus if fill_mode => {
+            if negative {
+                format!("-{body}")
+            } else if truncated_fraction_emits_sign {
+                format!("{body}+")
+            } else {
+                body
+            }
+        }
+        NumericSignFormat::Plus => default_numeric_sign(body, negative, false),
+        NumericSignFormat::Brackets => {
+            apply_numeric_sign(body, negative, fill_mode, NumericSignFormat::Brackets)
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum FloatFractionTruncation {
+    None,
+    ZeroPlaceholder,
+    NinePlaceholder,
+}
+
+impl FloatFractionTruncation {
+    pub(super) fn stops_picture_scan(self, fill_mode: bool) -> bool {
+        self != Self::None && (!fill_mode || self == Self::ZeroPlaceholder)
+    }
+}
+
+pub(super) fn apply_numeric_sign(
+    body: String,
+    negative: bool,
+    fill_mode: bool,
+    sign_format: NumericSignFormat,
+) -> String {
+    match sign_format {
+        NumericSignFormat::Default => default_numeric_sign(body, negative, fill_mode),
+        NumericSignFormat::Leading => anchored_numeric_sign(body, negative),
+        NumericSignFormat::Explicit { implicit_sign } => {
+            apply_explicit_numeric_signs(body, negative, fill_mode, implicit_sign)
+        }
+        NumericSignFormat::Trailing => apply_positioned_numeric_sign(body, negative),
+        NumericSignFormat::Sign => format!("{body}{}", if negative { '-' } else { '+' }),
+        NumericSignFormat::Minus => {
+            if negative {
+                format!("{body}-")
+            } else if fill_mode {
+                body
+            } else {
+                format!("{body} ")
+            }
+        }
+        NumericSignFormat::Plus => {
+            if fill_mode {
+                if negative {
+                    format!("-{body}")
+                } else {
+                    format!("{body}+")
+                }
+            } else {
+                format!(
+                    "{}{}",
+                    default_numeric_sign(body, negative, false),
+                    if negative { ' ' } else { '+' }
+                )
+            }
+        }
+        NumericSignFormat::Brackets => apply_numeric_brackets(body, negative, fill_mode),
+    }
+}
+
+fn default_numeric_sign(mut body: String, negative: bool, fill_mode: bool) -> String {
+    if !negative {
+        return if fill_mode { body } else { format!(" {body}") };
+    }
+    if !fill_mode {
+        let leading_spaces = body.bytes().take_while(|byte| *byte == b' ').count();
+        if leading_spaces > 0 {
+            body.replace_range(leading_spaces - 1..leading_spaces, "-");
+            return format!(" {body}");
+        }
+    }
+    format!("-{body}")
+}
+
+fn anchored_numeric_sign(mut body: String, negative: bool) -> String {
+    let sign = if negative { '-' } else { '+' };
+    let leading_spaces = body.bytes().take_while(|byte| *byte == b' ').count();
+    body.insert(leading_spaces, sign);
+    body
 }
