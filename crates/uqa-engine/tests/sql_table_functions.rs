@@ -92,6 +92,119 @@ fn generate_series_relation_alias_is_default_column_alias() {
 }
 
 #[test]
+fn table_functions_with_ordinality_append_a_typed_aliased_column() {
+    let eng = Engine::new();
+    let default_names = eng
+        .sql("SELECT * FROM generate_series(4, 6) WITH ORDINALITY", &[])
+        .unwrap();
+    assert_eq!(default_names.columns, ["generate_series", "ordinality"]);
+    assert_eq!(
+        default_names.column_types,
+        [Some(ColumnType::Integer), Some(ColumnType::BigInteger)]
+    );
+    assert_eq!(default_names.value_at(0, 0), Some(&Value::Int(4)));
+    assert_eq!(default_names.value_at(0, 1), Some(&Value::Int(1)));
+    assert_eq!(default_names.value_at(2, 1), Some(&Value::Int(3)));
+
+    let explicit_aliases = eng
+        .sql(
+            "SELECT g.value, g.sequence \
+             FROM generate_series(4, 5) WITH ORDINALITY AS g(value, sequence) \
+             ORDER BY g.sequence",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(explicit_aliases.columns, ["value", "sequence"]);
+    assert_eq!(explicit_aliases.value_at(1, 0), Some(&Value::Int(5)));
+    assert_eq!(explicit_aliases.value_at(1, 1), Some(&Value::Int(2)));
+
+    let partial_alias = eng
+        .sql(
+            "SELECT * FROM generate_series(4, 4) WITH ORDINALITY AS g(value)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(partial_alias.columns, ["value", "ordinality"]);
+
+    let empty = eng
+        .sql(
+            "SELECT * FROM generate_series(5, 1) WITH ORDINALITY AS g(value, sequence)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(empty.columns, ["value", "sequence"]);
+    assert_eq!(
+        empty.column_types,
+        [Some(ColumnType::Integer), Some(ColumnType::BigInteger)]
+    );
+    assert!(empty.rows.is_empty());
+
+    let error = eng
+        .sql(
+            "SELECT * FROM generate_series(1, 1) WITH ORDINALITY AS g(a, b, c)",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42P10"));
+}
+
+#[test]
+fn table_function_ordinality_resets_for_each_lateral_invocation() {
+    let eng = Engine::new();
+    let result = eng
+        .sql(
+            "SELECT v.n, g.value, g.ordinality \
+             FROM (VALUES (2), (0), (1)) AS v(n) \
+             CROSS JOIN LATERAL generate_series(1, v.n) \
+             WITH ORDINALITY AS g(value, ordinality) \
+             ORDER BY v.n DESC, g.ordinality",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.value_at(0, 0), Some(&Value::Int(2)));
+    assert_eq!(result.value_at(0, 1), Some(&Value::Int(1)));
+    assert_eq!(result.value_at(0, 2), Some(&Value::Int(1)));
+    assert_eq!(result.value_at(1, 1), Some(&Value::Int(2)));
+    assert_eq!(result.value_at(1, 2), Some(&Value::Int(2)));
+    assert_eq!(result.value_at(2, 0), Some(&Value::Int(1)));
+    assert_eq!(result.value_at(2, 2), Some(&Value::Int(1)));
+}
+
+#[test]
+fn multi_column_table_functions_put_ordinality_last() {
+    let eng = Engine::new();
+    let unnested = eng
+        .sql(
+            "SELECT * \
+             FROM unnest(ARRAY[1, 2], ARRAY['x']) WITH ORDINALITY AS u(a, b, n)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(unnested.columns, ["a", "b", "n"]);
+    assert_eq!(
+        unnested.column_types,
+        [
+            Some(ColumnType::Integer),
+            Some(ColumnType::Text),
+            Some(ColumnType::BigInteger),
+        ]
+    );
+    assert_eq!(unnested.value_at(1, 0), Some(&Value::Int(2)));
+    assert_eq!(unnested.value_at(1, 1), Some(&Value::Null));
+    assert_eq!(unnested.value_at(1, 2), Some(&Value::Int(2)));
+
+    let json = eng
+        .sql(
+            "SELECT * FROM json_each('{\"a\": 1}') WITH ORDINALITY AS j(k)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(json.columns, ["k", "value", "ordinality"]);
+    assert_eq!(json.value_at(0, 2), Some(&Value::Int(1)));
+}
+
+#[test]
 fn generate_series_with_step() {
     let eng = Engine::new();
     let r = eng

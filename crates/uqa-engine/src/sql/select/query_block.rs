@@ -290,27 +290,34 @@ fn add_all_source_columns_to_prune(engine: &Engine, source: &SourcePlan, prune: 
             args,
             alias,
             column_aliases,
+            ordinality,
             ..
         } => {
             let qualifier = alias.as_ref().unwrap_or(output_name);
             let Some(columns) = prune.get_mut(qualifier) else {
                 return;
             };
-            if column_aliases.is_empty() {
-                columns.extend(
-                    super::user_function_output_columns(engine, name).unwrap_or_else(|| {
+            columns.extend(
+                super::user_function_output_columns(engine, name).map_or_else(
+                    || {
                         crate::sql::from_rows::table_function_empty_schema(
                             name,
                             output_name,
                             alias.as_deref(),
                             column_aliases,
                             args.len(),
+                            *ordinality,
                         )
-                    }),
-                );
-            } else {
-                columns.extend(column_aliases.iter().cloned());
-            }
+                    },
+                    |base| {
+                        crate::sql::from_rows::apply_table_function_aliases(
+                            base,
+                            column_aliases,
+                            *ordinality,
+                        )
+                    },
+                ),
+            );
         }
         SourcePlan::Subquery {
             body,

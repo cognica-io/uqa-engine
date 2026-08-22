@@ -159,6 +159,8 @@ pub enum SourcePlan {
         args: Vec<ScalarExpr>,
         alias: Option<String>,
         column_aliases: Vec<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ordinality: bool,
         column_types: Vec<String>,
     },
     Subquery {

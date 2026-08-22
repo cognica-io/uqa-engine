@@ -678,22 +678,38 @@ fn fetch_with_ties_preserves_its_boundary_and_requires_ordering() {
 
 #[test]
 fn unsupported_from_forms_fail_instead_of_becoming_cross_joins() {
-    for (sql, expected) in [
-        (
-            "SELECT * FROM ROWS FROM (generate_series(1, 2), generate_series(3, 4)) AS f(a, b)",
-            "ROWS FROM",
-        ),
-        (
-            "SELECT * FROM generate_series(1, 2) WITH ORDINALITY",
-            "WITH ORDINALITY",
-        ),
-    ] {
-        let error = compile(sql).expect_err(sql);
-        assert!(
-            matches!(&error, SQLError::Unsupported(message) if message.contains(expected)),
-            "unexpected error for {sql}: {error}"
-        );
-    }
+    let sql = "SELECT * FROM ROWS FROM (generate_series(1, 2), generate_series(3, 4)) AS f(a, b)";
+    let error = compile(sql).expect_err(sql);
+    assert!(
+        matches!(&error, SQLError::Unsupported(message) if message.contains("ROWS FROM")),
+        "unexpected error for {sql}: {error}"
+    );
+}
+
+#[test]
+fn table_function_with_ordinality_survives_compilation() {
+    let Statement::Select(select) = first(
+        "SELECT * FROM pg_catalog.generate_series(1, 2) \
+         WITH ORDINALITY AS g(value, sequence)",
+    ) else {
+        panic!("not SELECT");
+    };
+    let Some(FromClause::Function {
+        name,
+        output_name,
+        alias,
+        column_aliases,
+        ordinality,
+        ..
+    }) = select.from
+    else {
+        panic!("not a table function");
+    };
+    assert_eq!(name, "pg_catalog.generate_series");
+    assert_eq!(output_name, "generate_series");
+    assert_eq!(alias.as_deref(), Some("g"));
+    assert_eq!(column_aliases, ["value", "sequence"]);
+    assert!(ordinality);
 }
 
 #[test]

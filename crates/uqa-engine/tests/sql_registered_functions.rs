@@ -14,7 +14,7 @@ use uqa_engine::{
     Engine, SQLAggregateState, SQLScalarFunction, SQLTableFunction, SQLTableFunctionResult,
     SQLTableFunctionStream,
 };
-use uqa_sql::SQLError;
+use uqa_sql::{ast::ColumnType, SQLError};
 
 struct Prefixer {
     prefix: String,
@@ -126,6 +126,19 @@ fn registered_table_function_runs_in_from_with_column_aliases() {
     assert_eq!(res.rows[0]["name"], Value::Str("row".into()));
     assert_eq!(res.rows[0]["n"], Value::Int(0));
     assert_eq!(res.rows[2]["n"], Value::Int(2));
+
+    let ordinal = eng
+        .sql(
+            "SELECT name, n, sequence \
+             FROM rust_repeat_rows('row', 3) WITH ORDINALITY AS r(name, n, sequence) \
+             ORDER BY sequence",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(ordinal.columns, ["name", "n", "sequence"]);
+    assert_eq!(ordinal.column_types[2], Some(ColumnType::BigInteger));
+    assert_eq!(ordinal.value_at(0, 2), Some(&Value::Int(1)));
+    assert_eq!(ordinal.value_at(2, 2), Some(&Value::Int(3)));
 }
 
 #[test]

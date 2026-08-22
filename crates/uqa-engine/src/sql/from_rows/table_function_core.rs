@@ -42,36 +42,17 @@ impl<'a> SourceEvalContext<'a> {
 
 #[derive(Clone, Copy)]
 pub(in crate::sql) struct TableFunctionCall<'a> {
-    pub(super) name: &'a str,
-    pub(super) output_name: &'a str,
-    pub(super) relation: Option<&'a str>,
-    pub(super) args: &'a [ScalarExpr],
-    pub(super) alias: Option<&'a str>,
-    pub(super) column_aliases: &'a [String],
-    pub(super) column_types: &'a [String],
+    pub(in crate::sql) name: &'a str,
+    pub(in crate::sql) output_name: &'a str,
+    pub(in crate::sql) relation: Option<&'a str>,
+    pub(in crate::sql) args: &'a [ScalarExpr],
+    pub(in crate::sql) alias: Option<&'a str>,
+    pub(in crate::sql) column_aliases: &'a [String],
+    pub(in crate::sql) ordinality: bool,
+    pub(in crate::sql) column_types: &'a [String],
 }
 
-impl<'a> TableFunctionCall<'a> {
-    pub(in crate::sql) fn new(
-        name: &'a str,
-        output_name: &'a str,
-        relation: Option<&'a str>,
-        args: &'a [ScalarExpr],
-        alias: Option<&'a str>,
-        column_aliases: &'a [String],
-        column_types: &'a [String],
-    ) -> Self {
-        Self {
-            name,
-            output_name,
-            relation,
-            args,
-            alias,
-            column_aliases,
-            column_types,
-        }
-    }
-}
+pub(in crate::sql) const TABLE_FUNCTION_ORDINALITY_COLUMN: &str = "\0uqa.table_function.ordinality";
 
 /// Build a table-function result as a fallible owned row stream. Built-in
 /// cardinality-producing functions are evaluated lazily; registered/user
@@ -90,12 +71,39 @@ pub(in crate::sql) fn build_table_function_row_stream_with_row(
     call: TableFunctionCall<'_>,
     row: Option<&uqa_execution::OwnedPhysicalRow>,
 ) -> Result<uqa_execution::ProjectRows, SQLError> {
+    let ordinality = call.ordinality;
+    let rows = build_table_function_value_row_stream_with_row(context, call, row)?;
+    if !ordinality {
+        return Ok(rows);
+    }
+    let mut next = Some(1_i64);
+    Ok(Box::new(rows.map(move |row| {
+        let mut row = row?;
+        let ordinal = next.ok_or_else(|| {
+            uqa_execution::ExecError::SQL(SQLError::Routine {
+                sqlstate: "22003".into(),
+                message: "WITH ORDINALITY counter exceeds bigint".into(),
+            })
+        })?;
+        next = ordinal.checked_add(1);
+        row.insert(TABLE_FUNCTION_ORDINALITY_COLUMN.into(), Value::Int(ordinal));
+        Ok(row)
+    })))
+}
+
+#[allow(clippy::similar_names)]
+fn build_table_function_value_row_stream_with_row(
+    context: &SourceEvalContext<'_>,
+    call: TableFunctionCall<'_>,
+    row: Option<&uqa_execution::OwnedPhysicalRow>,
+) -> Result<uqa_execution::ProjectRows, SQLError> {
     let TableFunctionCall {
         name,
         output_name,
         args,
         alias,
         column_aliases,
+        ordinality,
         ..
     } = call;
     let identity = name.to_ascii_lowercase();
@@ -133,7 +141,12 @@ pub(in crate::sql) fn build_table_function_row_stream_with_row(
         }
         let evaluated: Vec<Value> = call_args.into_iter().map(|(_, value)| value).collect();
         if lower == "unnest" {
-            return unnest_row_stream(evaluated, output_name, alias, column_aliases);
+            let aliases = if ordinality {
+                &column_aliases[..column_aliases.len().min(evaluated.len())]
+            } else {
+                column_aliases
+            };
+            return unnest_row_stream(evaluated, output_name, alias, aliases);
         }
         let default_col =
             scalar_table_function_default_column(&lower, output_name, alias, column_aliases);

@@ -166,11 +166,6 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                         .into(),
                 ));
             }
-            if rf.ordinality {
-                return Err(SQLError::Unsupported(
-                    "table functions WITH ORDINALITY are not supported".into(),
-                ));
-            }
             // A single function in `functions` carries the call. Re-use
             // compile_expr to lift it into an Expr::Func, then peel back
             // the name and arguments.
@@ -232,6 +227,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                 } else {
                     coldef_aliases
                 },
+                ordinality: rf.ordinality,
                 column_types,
             })
         }

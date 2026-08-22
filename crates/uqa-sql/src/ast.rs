@@ -1073,6 +1073,9 @@ pub enum FromClause {
         args: Vec<Expr>,
         alias: Option<String>,
         column_aliases: Vec<String>,
+        /// Append `PostgreSQL`'s one-based `bigint` ordinality column after the function's ordinary output columns.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ordinality: bool,
         /// Declared column types when the alias used a column
         /// definition list (`AS (col agtype, n int)`); empty when the
         /// alias only renamed columns. Type names are lowercased

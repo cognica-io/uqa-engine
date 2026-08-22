@@ -28,6 +28,7 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
         alias,
         column_aliases,
         column_types,
+        ..
     } = call;
     use uqa_sql::expr::unknown_function_error;
     let engine = context.engine;

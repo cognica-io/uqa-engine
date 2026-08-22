@@ -206,15 +206,16 @@ impl<'a> SetProjection<'a> {
             &hook,
             &self.ctes.scalar_subqueries,
         );
-        let table_call = crate::sql::from_rows::TableFunctionCall::new(
-            &call.name,
-            &call.name,
-            None,
-            &call.args,
-            None,
-            &[],
-            &[],
-        );
+        let table_call = crate::sql::from_rows::TableFunctionCall {
+            name: &call.name,
+            output_name: &call.name,
+            relation: None,
+            args: &call.args,
+            alias: None,
+            column_aliases: &[],
+            ordinality: false,
+            column_types: &[],
+        };
         let rows = crate::sql::from_rows::build_table_function_row_stream_with_row(
             &context,
             table_call,

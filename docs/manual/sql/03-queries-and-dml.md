@@ -79,7 +79,15 @@ LATERAL generate_series(1, t.repeat_count) AS series(value)
 ORDER BY t.id, series.value;
 ```
 
-The right side is evaluated for each left row. Multiple functions inside one `ROWS FROM` item and `WITH ORDINALITY` are not implemented.
+The right side is evaluated for each left row. A table function followed by `WITH ORDINALITY` appends a one-based `BIGINT` column after the function's ordinary output columns; its default name is `ordinality`, a positional column-alias list may rename it, and a LATERAL invocation restarts it at one for each left row.
+
+```sql execute
+SELECT value, sequence
+FROM generate_series(2, 4) WITH ORDINALITY AS series(value, sequence)
+ORDER BY sequence;
+```
+
+Multiple functions inside one `ROWS FROM` item are not implemented.
 
 ## Subqueries
 
