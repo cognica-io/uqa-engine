@@ -43,6 +43,7 @@ enum TypeClass {
     Integer,
     Numeric,
     Text,
+    Uuid,
     Bytea,
     Array,
     Json,
@@ -991,6 +992,7 @@ fn require_one(name: &str, argument: &GenerationType, expected: TypeClass) -> Re
                 TypeClass::Integer => "integer",
                 TypeClass::Numeric => "numeric",
                 TypeClass::Text => "text",
+                TypeClass::Uuid => "uuid",
                 TypeClass::Bytea => "bytea",
                 TypeClass::Array => "array",
                 TypeClass::Json => "json",
@@ -1010,6 +1012,7 @@ fn accepts_class(ty: &GenerationType, class: TypeClass) -> bool {
         TypeClass::Integer => matches!(ty, GenerationType::Integer),
         TypeClass::Numeric => is_numeric(ty),
         TypeClass::Text => matches!(ty, GenerationType::Text),
+        TypeClass::Uuid => matches!(ty, GenerationType::Uuid),
         TypeClass::Bytea => matches!(ty, GenerationType::Bytea),
         TypeClass::Array => matches!(
             ty,

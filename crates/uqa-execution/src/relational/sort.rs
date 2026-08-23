@@ -74,11 +74,7 @@ impl<'a> Sort<'a> {
     ) -> Self {
         for key in &mut keys {
             let expression = std::mem::replace(&mut key.expr, ScalarExpr::Literal(Value::Null));
-            key.expr = crate::bind_type_introspection(
-                expression,
-                child.row_schema(),
-                evaluator.parameters(),
-            );
+            key.expr = evaluator.bind_type_introspection(expression, child.row_schema());
         }
         Self {
             inner: crate::external_sort::ExternalSort::new(
@@ -99,11 +95,7 @@ impl<'a> Sort<'a> {
     ) -> Self {
         for key in &mut keys {
             let expression = std::mem::replace(&mut key.expr, ScalarExpr::Literal(Value::Null));
-            key.expr = crate::bind_type_introspection(
-                expression,
-                child.row_schema(),
-                evaluator.parameters(),
-            );
+            key.expr = evaluator.bind_type_introspection(expression, child.row_schema());
         }
         Self {
             inner: crate::external_sort::ExternalSort::new(

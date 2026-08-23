@@ -16,6 +16,7 @@ use super::{
     ScalarFrameBound, SharedExpressionEvaluator, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
     SCORE_COLUMN,
 };
+use uqa_execution::FunctionTypeResolver;
 use uqa_sql::expr::RowLookup;
 
 type RecheckStoragePin = (String, String, Arc<Vec<RecheckDoc>>);
@@ -753,7 +754,49 @@ impl ExpressionEvaluator for EngineExpressionEvaluator<'_> {
         expression: &ScalarExpr,
         schema: &uqa_execution::RowSchema,
     ) -> Result<Option<uqa_sql::ast::ColumnType>, SQLError> {
-        uqa_execution::scalar_type_with_resolver(expression, schema, self.params, self.engine)
+        uqa_execution::scalar_type_with_resolver(expression, schema, self.params, self)
+    }
+
+    fn bind_type_introspection(
+        &self,
+        expression: ScalarExpr,
+        schema: &uqa_execution::RowSchema,
+    ) -> ScalarExpr {
+        uqa_execution::bind_type_introspection_with_resolver(expression, schema, self.params, self)
+    }
+}
+
+impl FunctionTypeResolver for EngineExpressionEvaluator<'_> {
+    fn resolve_function_type(
+        &self,
+        name: &str,
+        binding: Option<&uqa_sql::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<uqa_sql::ast::ColumnType>],
+    ) -> Result<Option<uqa_sql::ast::ColumnType>, SQLError> {
+        self.engine
+            .resolve_function_type(name, binding, argument_names, argument_types)
+    }
+
+    fn resolve_scalar_subquery_type(
+        &self,
+        subquery: uqa_execution::SubqueryId,
+        outer_schema: &uqa_execution::RowSchema,
+        params: &[SQLParam],
+    ) -> Result<Option<uqa_sql::ast::ColumnType>, SQLError> {
+        let plan = self.ctes.scalar_subqueries.get(subquery).ok_or_else(|| {
+            SQLError::Internal(format!(
+                "physical scalar subquery slot {subquery} is out of bounds"
+            ))
+        })?;
+        let output = super::bind_query_plan_schema(
+            self.engine,
+            plan,
+            params,
+            &self.ctes,
+            Some(outer_schema),
+        )?;
+        Ok(output.column_type(0).cloned())
     }
 }
 

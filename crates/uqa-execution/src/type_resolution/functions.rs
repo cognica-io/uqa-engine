@@ -39,6 +39,9 @@ pub fn builtin_function_argument_targets(
         "upper" | "lower" | "casefold" | "initcap" | "trim" | "btrim" | "ltrim" | "rtrim" => {
             targets.fill(Some(ColumnType::Text));
         }
+        "uuid_extract_version" | "uuid_extract_timestamp" if targets.len() == 1 => {
+            targets.fill(Some(ColumnType::Uuid));
+        }
         "concat_op" if targets.len() == 2 => {
             for position in 0..2 {
                 if targets[position].is_none() {
@@ -257,7 +260,7 @@ pub(super) fn builtin_function_type_inner(
             Ok(Some(ColumnType::TimestampTz))
         }
         "current_date" | "make_date" | "to_date" => Ok(Some(ColumnType::Date)),
-        "to_timestamp" => Ok(Some(ColumnType::TimestampTz)),
+        "to_timestamp" | "uuid_extract_timestamp" => Ok(Some(ColumnType::TimestampTz)),
         "age" | "make_interval" | "justify_hours" => Ok(Some(ColumnType::Interval)),
         "date_trunc" => Ok(argument(1).map(|ty| match base_type(&ty) {
             ColumnType::Interval => ColumnType::Interval,
@@ -266,6 +269,7 @@ pub(super) fn builtin_function_type_inner(
         })),
         "make_timestamp" => Ok(Some(ColumnType::Timestamp)),
         "gen_random_uuid" | "uuidv4" | "uuidv7" => Ok(Some(ColumnType::Uuid)),
+        "uuid_extract_version" => Ok(Some(ColumnType::SmallInteger)),
         "current_database" | "current_catalog" | "current_schema" | "current_user"
         | "session_user" => Ok(Some(ColumnType::Name)),
         "current_schemas" => Ok(Some(ColumnType::Array(Box::new(ColumnType::Name)))),

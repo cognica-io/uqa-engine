@@ -64,6 +64,17 @@ WHERE value LIKE 'a!_b' ESCAPE '!';
 
 `to_number(text, 'RN')` reads the PostgreSQL Roman-numeral prefix after leading whitespace, accepts values from 1 through 3999, and ignores input after that prefix. Random state is session-local. Use `setseed` for deterministic test input, not for cryptographic randomness; `gen_random_uuid` and `uuidv4` produce random version 4 UUIDs, while `uuidv7([shift interval])` produces time-ordered version 7 UUIDs.
 
+## UUID functions
+
+| Function | Result |
+| --- | --- |
+| `gen_random_uuid()`, `uuidv4()` | Random RFC variant version 4 UUID |
+| `uuidv7([shift interval])` | Time-ordered RFC variant version 7 UUID |
+| `uuid_extract_version(uuid)` | RFC 9562 version nibble as `smallint`, or NULL for a non-RFC variant including the nil UUID |
+| `uuid_extract_timestamp(uuid)` | Version 1 or version 7 timestamp as `timestamp with time zone`, or NULL for every other version or variant |
+
+The extraction functions are strict and immutable. Version 1 timestamps use the UUID 100-nanosecond epoch and are floored to PostgreSQL's microsecond precision, while version 7 timestamps use the leading 48-bit Unix millisecond field; sub-millisecond random or counter bits do not affect the extracted timestamp.
+
 ## Array functions
 
 | Functions | Purpose |

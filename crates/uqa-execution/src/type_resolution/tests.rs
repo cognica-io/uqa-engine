@@ -34,6 +34,106 @@ fn builtin_argument_targets_resolve_fixed_and_overloaded_unknowns() {
             Some(ColumnType::Array(Box::new(ColumnType::Integer))),
         ]
     );
+    assert_eq!(
+        builtin_function_argument_targets("uuid_extract_version", &[None]),
+        vec![Some(ColumnType::Uuid)]
+    );
+}
+
+#[test]
+fn uuid_extraction_binding_rejects_non_uuid_declared_types() {
+    let schema = RowSchema::with_types(
+        vec!["uuid_value".into(), "text_value".into()],
+        vec![Some(ColumnType::Uuid), Some(ColumnType::Text)],
+    );
+    let call = |column: &str| ScalarExpr::Func {
+        name: "uuid_extract_version".into(),
+        binding: None,
+        args: vec![ScalarExpr::Column(column.into())],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+
+    let ScalarExpr::Func { name, .. } = bind_type_introspection(call("uuid_value"), &schema, &[])
+    else {
+        panic!("UUID extraction must remain a function call");
+    };
+    assert_eq!(name, "uuid_extract_version");
+
+    let ScalarExpr::Func { name, .. } = bind_type_introspection(call("text_value"), &schema, &[])
+    else {
+        panic!("an unresolved UUID overload must remain an error marker call");
+    };
+    assert_eq!(
+        name,
+        format!(
+            "{}uuid_extract_version(text)",
+            uqa_sql::expr::UNDEFINED_FUNCTION_MARKER
+        )
+    );
+}
+
+#[test]
+fn uuid_extraction_binding_uses_declared_scalar_subquery_types() {
+    struct SubqueryTypes;
+
+    impl FunctionTypeResolver for SubqueryTypes {
+        fn resolve_function_type(
+            &self,
+            _name: &str,
+            _binding: Option<&FunctionBinding>,
+            _argument_names: &[Option<String>],
+            _argument_types: &[Option<ColumnType>],
+        ) -> Result<Option<ColumnType>, SQLError> {
+            Ok(None)
+        }
+
+        fn resolve_scalar_subquery_type(
+            &self,
+            subquery: crate::SubqueryId,
+            _outer_schema: &RowSchema,
+            _params: &[SQLParam],
+        ) -> Result<Option<ColumnType>, SQLError> {
+            Ok(Some(if subquery == 0 {
+                ColumnType::Uuid
+            } else {
+                ColumnType::Text
+            }))
+        }
+    }
+
+    let call = |subquery| ScalarExpr::Func {
+        name: "uuid_extract_version".into(),
+        binding: None,
+        args: vec![ScalarExpr::ScalarSubquery(subquery)],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    let bind = |subquery| {
+        bind_type_introspection_with_resolver(
+            call(subquery),
+            &RowSchema::default(),
+            &[],
+            &SubqueryTypes,
+        )
+    };
+
+    let ScalarExpr::Func { name, .. } = bind(0) else {
+        panic!("UUID scalar subquery must remain a function call");
+    };
+    assert_eq!(name, "uuid_extract_version");
+    let ScalarExpr::Func { name, .. } = bind(1) else {
+        panic!("text scalar subquery must remain an error marker call");
+    };
+    assert_eq!(
+        name,
+        format!(
+            "{}uuid_extract_version(text)",
+            uqa_sql::expr::UNDEFINED_FUNCTION_MARKER
+        )
+    );
 }
 
 #[test]

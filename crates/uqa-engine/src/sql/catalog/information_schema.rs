@@ -6,12 +6,13 @@
 
 //! Virtual `information_schema` relation builders.
 
+use super::builtin_routines::PG18_BUILTIN_ROUTINES;
 use super::helpers::{
     all_schema_names, catalog_name, catalog_ordinal, catalog_type_name, constraint_catalog_rows,
     current_user_name, default_expr_text, info_character_maximum_length,
     info_character_octet_length, info_data_type, info_datetime_precision, info_numeric_precision,
     info_numeric_scale, info_udt_name, int_value, row, schema_expr_text, split_schema_name,
-    stable_oid, str_value, view_columns_for, ConstraintCatalogKind, PG18_BUILTIN_ROUTINES,
+    stable_oid, str_value, view_columns_for, ConstraintCatalogKind,
 };
 use super::{
     registered_names, routine_signature_types, value_to_text, Engine, ResultRow, SQLColumnDef,

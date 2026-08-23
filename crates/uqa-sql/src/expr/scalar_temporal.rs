@@ -7,10 +7,10 @@
 //! Temporal, formatting, identity, and UUID built-ins.
 
 use super::{
-    age_between, coerce_temporal, date_trunc_value, extract_from_value, float_to_i64_rounded,
-    format_pg_number, format_temporal, generate_random_uuid, generate_uuid_v7, make_timestamp,
-    out_of_range, pg_to_chrono_fmt, to_f64, to_i64, typeof_value, value_to_string, DecimalValue,
-    Result, SQLError, TemporalValue, Value,
+    age_between, coerce_temporal, date_trunc_value, extract_from_value, extract_uuid_timestamp,
+    extract_uuid_version, float_to_i64_rounded, format_pg_number, format_temporal,
+    generate_random_uuid, generate_uuid_v7, make_timestamp, out_of_range, pg_to_chrono_fmt, to_f64,
+    to_i64, typeof_value, value_to_string, DecimalValue, Result, SQLError, TemporalValue, Value,
 };
 
 pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
@@ -39,6 +39,8 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
         "gen_random_uuid",
         "uuidv4",
         "uuidv7",
+        "uuid_extract_version",
+        "uuid_extract_timestamp",
     ];
     if !NAMES.contains(&name) {
         return None;
@@ -303,9 +305,25 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                 )),
                 _ => Err(SQLError::TypeMismatch("uuidv7 takes 0 or 1 args".into())),
             },
+            "uuid_extract_version" => match args {
+                [uuid @ (Value::Str(_) | Value::FixedChar(_))] => extract_uuid_version(uuid),
+                _ => Err(undefined_uuid_extraction(name, args)),
+            },
+            "uuid_extract_timestamp" => match args {
+                [uuid @ (Value::Str(_) | Value::FixedChar(_))] => extract_uuid_timestamp(uuid),
+                _ => Err(undefined_uuid_extraction(name, args)),
+            },
             _ => unreachable!("function family membership was checked before dispatch"),
         }
     })())
+}
+
+fn undefined_uuid_extraction(name: &str, args: &[Value]) -> SQLError {
+    let signature = args.iter().map(typeof_value).collect::<Vec<_>>().join(", ");
+    SQLError::Routine {
+        sqlstate: "42883".into(),
+        message: format!("function {name}({signature}) does not exist"),
+    }
 }
 
 fn parse_roman_numeral(input: &str) -> Option<i64> {

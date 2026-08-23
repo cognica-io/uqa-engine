@@ -53,7 +53,7 @@ impl<'a> Limit<'a> {
         let schema = child.row_schema().clone();
         for key in &mut keys {
             let expression = std::mem::replace(&mut key.expr, ScalarExpr::Literal(Value::Null));
-            key.expr = crate::bind_type_introspection(expression, &schema, evaluator.parameters());
+            key.expr = evaluator.bind_type_introspection(expression, &schema);
         }
         Self {
             child,

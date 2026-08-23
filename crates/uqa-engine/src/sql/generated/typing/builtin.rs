@@ -163,6 +163,14 @@ pub(super) fn infer_builtin_function(
             require_arity(name, args, 0, 0)?;
             GenerationType::Real
         }
+        "uuid_extract_version" => {
+            require_uuid_extraction_signature(name, args)?;
+            GenerationType::Integer
+        }
+        "uuid_extract_timestamp" => {
+            require_uuid_extraction_signature(name, args)?;
+            GenerationType::TimestampTz
+        }
         "random"
         | "array_sample"
         | "now"
@@ -522,6 +530,21 @@ pub(super) fn infer_builtin_function(
         _ => return Ok(None),
     };
     Ok(Some(result))
+}
+
+fn require_uuid_extraction_signature(name: &str, args: &[GenerationType]) -> Result<(), SQLError> {
+    if matches!(args, [argument] if accepts_class(argument, TypeClass::Uuid)) {
+        return Ok(());
+    }
+    let signature = args
+        .iter()
+        .map(generation_type_name)
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(SQLError::Routine {
+        sqlstate: "42883".into(),
+        message: format!("function {name}({signature}) does not exist"),
+    })
 }
 
 fn require_containment_operands(name: &str, args: &[GenerationType]) -> Result<(), SQLError> {

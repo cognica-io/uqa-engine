@@ -41,6 +41,11 @@ pub trait ExpressionEvaluator: Send + Sync {
         crate::scalar_type(expression, schema, self.parameters())
     }
 
+    /// Bind overloads and common-type coercions while this evaluator's declared-type context is still available.
+    fn bind_type_introspection(&self, expression: ScalarExpr, schema: &RowSchema) -> ScalarExpr {
+        crate::bind_type_introspection(expression, schema, self.parameters())
+    }
+
     fn star_column_visible(&self, _column: &str) -> bool {
         true
     }

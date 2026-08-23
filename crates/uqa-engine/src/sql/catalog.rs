@@ -56,6 +56,7 @@ pub(super) fn build_info_schema_rows(
 }
 
 mod ag_catalog;
+mod builtin_routines;
 mod expression_text;
 mod helpers;
 mod information_schema;

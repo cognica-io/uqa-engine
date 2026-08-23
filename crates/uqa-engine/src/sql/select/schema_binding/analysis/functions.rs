@@ -6,7 +6,7 @@
 
 //! Static column and routine lookup used by query analysis.
 
-use super::super::{Engine, SQLError, SQLParam, ScalarExpr};
+use super::super::{ColumnType, Engine, SQLError, SQLParam, ScalarExpr};
 use std::collections::BTreeSet;
 use uqa_execution::type_resolution::builtin_function_type;
 use uqa_execution::{RowSchema, ScalarOrder};
@@ -118,6 +118,12 @@ pub(super) fn validate_scalar_function(
     } = validation;
     let identity = name.to_ascii_lowercase();
     let lower = crate::sql::builtin_function_dispatch_name(&identity);
+    if matches!(
+        lower.as_str(),
+        "uuid_extract_version" | "uuid_extract_timestamp"
+    ) {
+        return validate_uuid_extraction_function(engine, name, args, schema, params);
+    }
     if lower == uqa_sql::expr::NAMED_ARG_FUNCTION
         || uqa_sql::registry::is_registered(&lower)
         || crate::sql::aggregates::is_aggregate(engine, expression)
@@ -134,6 +140,37 @@ pub(super) fn validate_scalar_function(
         return Ok(());
     }
     Err(undefined_function(name, args, schema, params))
+}
+
+fn validate_uuid_extraction_function(
+    engine: &Engine,
+    name: &str,
+    args: &[ScalarExpr],
+    schema: &RowSchema,
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
+    let valid = if let [argument] = args {
+        let (argument_name, value) = named_argument(argument);
+        argument_name.is_none()
+            && uqa_execution::common_context_expression_type(value, schema, params, Some(engine))?
+                .as_ref()
+                .is_none_or(uuid_compatible_type)
+    } else {
+        false
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(undefined_function(name, args, schema, params))
+    }
+}
+
+fn uuid_compatible_type(ty: &ColumnType) -> bool {
+    match ty {
+        ColumnType::Uuid => true,
+        ColumnType::Domain { base, .. } => uuid_compatible_type(base),
+        _ => false,
+    }
 }
 
 pub(super) fn validate_window_function(
