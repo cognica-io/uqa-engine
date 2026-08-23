@@ -390,7 +390,7 @@ def build_report(
 
     return {
         "schema_version": 1,
-        "generated_at_utc": datetime.datetime.now(datetime.UTC).isoformat(),
+        "generated_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "manifest": display_path(manifest_path),
         "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         "git_commit": command_value("git", "rev-parse", "HEAD"),
