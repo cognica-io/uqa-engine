@@ -24,6 +24,8 @@ mod array_transforms;
 mod behavior;
 #[path = "sql_generated_columns/catalog_and_persistence.rs"]
 mod catalog_and_persistence;
+#[path = "sql_generated_columns/checksums.rs"]
+mod checksums;
 #[path = "sql_generated_columns/md5_overloads.rs"]
 mod md5_overloads;
 #[path = "sql_generated_columns/mutations_and_functions.rs"]

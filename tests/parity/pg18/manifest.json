@@ -202,6 +202,14 @@
       "open_issue": null
     },
     {
+      "id": "functions.crc-checksums",
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live crc32(bytea) and crc32c(bytea) results, bytea-only overload resolution, SQLSTATEs, return types, generated-column behavior, and pg_proc metadata plus binary-string function documentation",
+      "uqa_test": "cargo test -p uqa-execution --lib builtin_argument_targets_resolve_fixed_and_overloaded_unknowns; cargo test -p uqa-engine --test integration pg18_crc_checksums_; cargo test -p uqa-engine --test integration generated_crc_; cargo test -p uqa-engine --test integration generated_columns_bind_crc_checksum_signatures; cargo test -p uqa-engine --test integration postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata; tests/parity/pg18/probes.sql",
+      "supported_version": "PostgreSQL 18.4 crc32(bytea) and crc32c(bytea) raw-input checksums with unsigned 32-bit values returned as bigint, strict NULL, bytea context for unknown literals and untyped parameters, scalar-subquery binding, undefined-function and ambiguous-function SQLSTATEs, concrete user-overload ranking with pg_catalog search order, immutable generated-column binding across reopen, and exact OIDs 6364 and 6365 catalog behavior",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "functions.string-binary-lengths",
       "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live one-argument length, char_length, character_length, octet_length, and bit_length text, character, and bytea results, overload resolution, SQLSTATEs, return types, generated-column behavior, and pg_proc metadata",
       "uqa_test": "cargo test -p uqa-sql --lib length_functions_measure_declared_string_and_binary_payloads; cargo test -p uqa-execution --lib builtin_argument_targets_resolve_fixed_and_overloaded_unknowns; cargo test -p uqa-engine --test integration pg18_length_functions_; cargo test -p uqa-engine --test integration generated_columns_bind_string_and_binary_length_overloads; cargo test -p uqa-engine --test integration generated_columns_rank_length_user_overloads_by_search_path; cargo test -p uqa-engine --test integration generated_length_character_binding_survives_reopen; cargo test -p uqa-engine --test integration postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata; tests/parity/pg18/probes.sql",

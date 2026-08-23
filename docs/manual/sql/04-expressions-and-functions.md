@@ -57,6 +57,13 @@ SELECT md5('abc') AS text_hash,
        md5(decode('00ff10', 'hex')) AS bytea_hash;
 ```
 
+`crc32(bytea)` and `crc32c(bytea)` compute PostgreSQL's CRC-32 and CRC-32C checksums over the raw byte payload and return nonnegative `bigint` values in the unsigned 32-bit range. Because each function has only a `bytea` overload, an unknown literal, NULL, or untyped parameter binds as `bytea`; explicit text, character, numeric, array, named-argument, and non-one-argument calls report SQLSTATE `42883`. User-defined overloads participate in PostgreSQL's string-category, preferred-type, and search-path ranking, and an unresolved unknown call reports SQLSTATE `42725` instead of silently selecting the built-in. Both functions are strict, immutable, parallel-safe, leakproof, available through `pg_catalog` as OIDs 6364 and 6365, and generated expressions retain the selected binding across reopen.
+
+```sql execute
+SELECT crc32(decode('00ff10', 'hex')) AS crc32,
+       crc32c(decode('00ff10', 'hex')) AS crc32c;
+```
+
 The one-argument length family preserves PostgreSQL's declared string and binary overloads. `length(text)`, `char_length(text)`, and `character_length(text)` count Unicode characters; their `character` overloads ignore trailing blank padding. `length(bytea)` counts raw bytes. `octet_length(text)` and `octet_length(bytea)` count UTF-8 or raw payload bytes, while `octet_length(character)` includes declared blank padding. `bit_length(text)` and `bit_length(bytea)` return eight times the corresponding byte count; a `character` input reaches the text overload and therefore discards trailing padding. Every overload returns `integer` and is strict, immutable, parallel-safe, and not leakproof.
 
 An unknown literal, NULL, or untyped parameter selects the preferred `text` overload. `varchar`, `name`, and internal `"char"` values convert to `text`; unrelated types, named arguments, and non-one-argument calls report SQLSTATE `42883` when no separate PostgreSQL overload exists. Exact built-in and user-defined overloads follow PostgreSQL search-path precedence, and generated expressions retain the selected binding across reopen. This documented slice does not describe PostgreSQL's separate two-argument `length(bytea, name)` encoding function or length overloads for types outside the implemented carriers.

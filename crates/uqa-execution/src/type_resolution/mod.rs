@@ -21,6 +21,7 @@ use uqa_sql::expr::{
 use crate::{RowSchema, ScalarExpr};
 
 mod array_transform;
+mod checksum;
 mod common;
 mod containment;
 mod equality;
@@ -36,6 +37,8 @@ mod reverse;
 mod string_binary;
 mod uuid;
 
+#[doc(hidden)]
+pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
 pub use common::{common_context_expression_type, common_type, values_column_types};
 pub use equality::equality_operand_type;
 pub use functions::{builtin_function_argument_targets, builtin_function_type};

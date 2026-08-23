@@ -13,7 +13,7 @@ use crate::{RowSchema, ScalarExpr};
 use super::common::{base_type, common_context_expression_type, merge_optional_types};
 use super::operators::unary_minus_result_type;
 use super::{
-    array_transform, containment, integer_base, length, md5, random_range, reverse,
+    array_transform, checksum, containment, integer_base, length, md5, random_range, reverse,
     scalar_type_inner, uuid, FunctionTypeResolver,
 };
 
@@ -89,6 +89,7 @@ fn bind_type_introspection_inner(
                 array_transform::bind_call(name, &mut binding, &mut args, schema, params, resolver);
             let name = reverse::bind_call(name, &mut binding, &mut args, schema, params, resolver);
             let name = md5::bind_call(name, &mut binding, &mut args, schema, params, resolver);
+            let name = checksum::bind_call(name, &mut binding, &mut args, schema, params, resolver);
             let name = length::bind_call(name, &mut binding, &mut args, schema, params, resolver);
             let name = uuid::bind_extraction_signature(name, &args, schema, params, resolver);
             if is_pg_typeof(&name) && args.len() == 1 {
@@ -302,6 +303,7 @@ fn requires_type_introspection_binding(expression: &ScalarExpr) -> bool {
                 || array_transform::is_function(name)
                 || reverse::is_function(name)
                 || md5::is_function(name)
+                || checksum::is_function(name)
                 || length::is_function(name)
                 || uuid::is_extraction_function(name)
                 || containment::is_operator(name)

@@ -20,6 +20,8 @@ enum Function {
     BitLength,
     CharLength,
     CharacterLength,
+    Crc32,
+    Crc32c,
     Length,
     Md5,
     OctetLength,
@@ -33,6 +35,8 @@ impl Function {
             "bit_length" => Some(Self::BitLength),
             "char_length" => Some(Self::CharLength),
             "character_length" => Some(Self::CharacterLength),
+            "crc32" => Some(Self::Crc32),
+            "crc32c" => Some(Self::Crc32c),
             "length" => Some(Self::Length),
             "md5" => Some(Self::Md5),
             "octet_length" => Some(Self::OctetLength),
@@ -46,6 +50,8 @@ impl Function {
             Self::BitLength => "pg_catalog.bit_length",
             Self::CharLength => "pg_catalog.char_length",
             Self::CharacterLength => "pg_catalog.character_length",
+            Self::Crc32 => "pg_catalog.crc32",
+            Self::Crc32c => "pg_catalog.crc32c",
             Self::Length => "pg_catalog.length",
             Self::Md5 => "pg_catalog.md5",
             Self::OctetLength => "pg_catalog.octet_length",
@@ -60,6 +66,7 @@ impl Function {
             | Self::CharacterLength
             | Self::Length
             | Self::OctetLength => GenerationType::Integer,
+            Self::Crc32 | Self::Crc32c => GenerationType::BigInteger,
             Self::Md5 => GenerationType::Text,
             Self::Reverse => argument_type,
         }
@@ -68,8 +75,26 @@ impl Function {
     fn accepts_bytea(self) -> bool {
         matches!(
             self,
-            Self::BitLength | Self::Length | Self::Md5 | Self::OctetLength | Self::Reverse
+            Self::BitLength
+                | Self::Crc32
+                | Self::Crc32c
+                | Self::Length
+                | Self::Md5
+                | Self::OctetLength
+                | Self::Reverse
         )
+    }
+
+    fn accepts_text(self) -> bool {
+        !matches!(self, Self::Crc32 | Self::Crc32c)
+    }
+
+    fn unknown_argument_type(self) -> GenerationType {
+        if self.accepts_text() {
+            GenerationType::Text
+        } else {
+            GenerationType::Bytea
+        }
     }
 }
 
@@ -145,8 +170,11 @@ pub(super) fn require_signature(
         [GenerationType::Bytea] if function.accepts_bytea() => {
             Ok(function.builtin_result(GenerationType::Bytea))
         }
-        [GenerationType::Text | GenerationType::Null | GenerationType::UnknownLiteral(_)] => {
+        [GenerationType::Text] if function.accepts_text() => {
             Ok(function.builtin_result(GenerationType::Text))
+        }
+        [GenerationType::Null | GenerationType::UnknownLiteral(_)] => {
+            Ok(function.builtin_result(function.unknown_argument_type()))
         }
         _ => Err(undefined_function(name, argument_names, args)),
     }
@@ -193,6 +221,13 @@ fn resolve_overload(
             Some(call.engine),
         )?,
         Function::Md5 => uqa_execution::resolve_md5_overload(
+            call.name,
+            binding,
+            call.argument_names,
+            argument_types,
+            Some(call.engine),
+        )?,
+        Function::Crc32 | Function::Crc32c => uqa_execution::resolve_checksum_overload(
             call.name,
             binding,
             call.argument_names,

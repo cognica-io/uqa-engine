@@ -14,7 +14,7 @@ use super::common::{
     base_type, common_numeric_type, common_type, merge_optional_types, numeric_type,
 };
 use super::{
-    array_transform, containment, integer_base, length, md5, random_range, reverse,
+    array_transform, checksum, containment, integer_base, length, md5, random_range, reverse,
     scalar_type_inner, FunctionTypeResolver,
 };
 
@@ -54,13 +54,14 @@ pub fn builtin_function_argument_targets(
                 *target = Some(ColumnType::Boolean);
             });
         }
-        "reverse" | "md5" | "length" | "char_length" | "character_length" | "octet_length"
-        | "bit_length"
+        "reverse" | "md5" | "crc32" | "crc32c" | "length" | "char_length" | "character_length"
+        | "octet_length" | "bit_length"
             if targets.len() == 1 =>
         {
             let target = match name {
                 "reverse" => reverse::builtin_argument_type(argument_types),
                 "md5" => md5::builtin_argument_type(argument_types),
+                "crc32" | "crc32c" => checksum::builtin_argument_type(name, argument_types),
                 _ => length::builtin_argument_type(name, argument_types),
             };
             if let Some(target) = target {
@@ -183,12 +184,16 @@ pub(super) fn builtin_function_type_inner(
             array_transform::resolve_type(original_name, binding, args, &argument_types, resolver)
         }
         "md5" => md5::resolve_type(original_name, binding, args, &argument_types, resolver),
+        "crc32" | "crc32c" => {
+            checksum::resolve_type(original_name, binding, args, &argument_types, resolver)
+        }
         "length" | "char_length" | "character_length" | "octet_length" | "bit_length" => {
             length::resolve_type(original_name, binding, args, &argument_types, resolver)
         }
         "reverse" => reverse::resolve_type(original_name, binding, args, &argument_types, resolver),
-        "count" | "row_number" | "rank" | "dense_rank" | "crc32" | "crc32c" | "nextval"
-        | "currval" | "setval" => Ok(Some(ColumnType::BigInteger)),
+        "count" | "row_number" | "rank" | "dense_rank" | "nextval" | "currval" | "setval" => {
+            Ok(Some(ColumnType::BigInteger))
+        }
         "sum" => Ok(first().and_then(|ty| aggregate_sum_type(&ty))),
         "avg" => Ok(first().and_then(|ty| aggregate_average_type(&ty))),
         "stddev" | "stddev_samp" | "stddev_pop" | "variance" | "var_samp" | "var_pop" => {
