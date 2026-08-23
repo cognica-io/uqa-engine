@@ -398,15 +398,29 @@ struct CommandExactIndex {
 /// Lightweight SQL-session state that follows transaction/savepoint rollback
 /// for every backend. It is intentionally separate from the database-sized
 /// memory-engine snapshot so persistent sessions receive identical SET,
-/// search-path, PRNG, sequence-currval, PREPARE, and statement-cache semantics.
+/// search-path, sequence-currval, PREPARE, and statement-cache semantics.
 #[derive(Clone, Default)]
 struct SessionStateSnapshot {
     search_path: Vec<String>,
     session_vars: BTreeMap<String, String>,
-    random_state: u64,
     sequence_currvals: BTreeMap<RelationIdentity, i64>,
     prepared: BTreeMap<String, PreparedStatementPlan>,
     sql_statement_cache: SQLStatementCache,
+}
+
+#[derive(Clone, Copy)]
+struct SessionRandomState {
+    s0: u64,
+    s1: u64,
+}
+
+impl Default for SessionRandomState {
+    fn default() -> Self {
+        Self {
+            s0: 0x5851_f42d_4c95_7f2d,
+            s1: 0x1405_7b7e_f767_814f,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -647,11 +661,30 @@ fn is_mutable_runtime_parameter(name: &str) -> bool {
         || name.eq_ignore_ascii_case("work_mem")
 }
 
-fn initial_random_state() -> u64 {
+fn initial_random_state() -> SessionRandomState {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_STATE: AtomicU64 = AtomicU64::new(0x4d59_5df4_d0f3_3173);
-    NEXT_STATE.fetch_add(0x9e37_79b9_7f4a_7c15, Ordering::Relaxed)
+    random_state_from_seed(NEXT_STATE.fetch_add(0x9e37_79b9_7f4a_7c15, Ordering::Relaxed))
+}
+
+fn random_state_from_seed(mut seed: u64) -> SessionRandomState {
+    let mut splitmix64 = || {
+        seed = seed.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut value = seed;
+        value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        value ^ (value >> 31)
+    };
+    let state = SessionRandomState {
+        s0: splitmix64(),
+        s1: splitmix64(),
+    };
+    if state.s0 == 0 && state.s1 == 0 {
+        SessionRandomState::default()
+    } else {
+        state
+    }
 }
 
 impl uqa_sql::expr::EngineHook for Engine {
@@ -688,6 +721,9 @@ impl uqa_sql::expr::EngineHook for Engine {
     }
     fn random_value(&self) -> std::result::Result<Option<f64>, String> {
         Ok(Some(self.next_random_value()))
+    }
+    fn random_u64(&self) -> std::result::Result<Option<u64>, String> {
+        Ok(Some(self.next_random_u64()))
     }
     fn set_random_seed(&self, seed: f64) -> std::result::Result<bool, String> {
         Engine::set_random_seed(self, seed)?;

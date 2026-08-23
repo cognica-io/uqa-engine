@@ -38,6 +38,10 @@ fn builtin_argument_targets_resolve_fixed_and_overloaded_unknowns() {
         builtin_function_argument_targets("uuid_extract_version", &[None]),
         vec![Some(ColumnType::Uuid)]
     );
+    assert_eq!(
+        builtin_function_argument_targets("random", &[None, Some(ColumnType::BigInteger)]),
+        vec![Some(ColumnType::BigInteger), Some(ColumnType::BigInteger)]
+    );
 }
 
 #[test]
@@ -249,6 +253,46 @@ fn integer_base_functions_bind_the_declared_overload_before_width_is_erased() {
         let ScalarExpr::Func { name, .. } = bind_type_introspection(expression, &schema, &[])
         else {
             panic!("{function} must remain a scalar function");
+        };
+        assert_eq!(name, expected_name);
+    }
+}
+
+#[test]
+fn random_range_functions_bind_the_promoted_overload_before_width_is_erased() {
+    let numeric = ColumnType::Numeric {
+        precision: None,
+        scale: None,
+    };
+    let schema = RowSchema::with_types(
+        vec!["i2".into(), "i4".into(), "i8".into(), "n".into()],
+        vec![
+            Some(ColumnType::SmallInteger),
+            Some(ColumnType::Integer),
+            Some(ColumnType::BigInteger),
+            Some(numeric),
+        ],
+    );
+    for (lower, upper, expected_name) in [
+        ("i4", "i4", RANDOM_INT4_FUNCTION),
+        ("i2", "i4", RANDOM_INT4_FUNCTION),
+        ("i4", "i8", RANDOM_INT8_FUNCTION),
+        ("i8", "n", RANDOM_NUMERIC_FUNCTION),
+    ] {
+        let expression = ScalarExpr::Func {
+            name: "random".into(),
+            binding: None,
+            args: vec![
+                ScalarExpr::Column(lower.into()),
+                ScalarExpr::Column(upper.into()),
+            ],
+            distinct: false,
+            order_by: Vec::new(),
+            filter: None,
+        };
+        let ScalarExpr::Func { name, .. } = bind_type_introspection(expression, &schema, &[])
+        else {
+            panic!("random range must remain a scalar function");
         };
         assert_eq!(name, expected_name);
     }

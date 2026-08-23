@@ -845,6 +845,10 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         Ok(Some(self.engine.next_random_value()))
     }
 
+    fn random_u64(&self) -> std::result::Result<Option<u64>, String> {
+        Ok(Some(self.engine.next_random_u64()))
+    }
+
     fn set_random_seed(&self, seed: f64) -> std::result::Result<bool, String> {
         self.engine.set_random_seed(seed)?;
         Ok(true)

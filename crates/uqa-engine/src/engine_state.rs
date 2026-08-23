@@ -151,9 +151,12 @@ impl DurableCatalogState {
 
 pub(super) struct SessionContext {
     /// Transactional session values share one lock so snapshots and restores
-    /// cannot observe a mixture of old and new search-path, PRNG, sequence,
+    /// cannot observe a mixture of old and new search-path, sequence,
     /// prepared-plan, or statement-cache state.
     pub(super) state: RwLock<super::SessionStateSnapshot>,
+    /// `PostgreSQL`'s session PRNG is not transactional: failed statements and
+    /// transaction or savepoint rollback leave every consumed draw in place.
+    pub(super) random_state: Mutex<super::SessionRandomState>,
     pub(super) transactions: Mutex<Vec<TransactionFrame>>,
     /// One row-lock recheck context per in-flight SQL statement. Query-bearing commands, prepared execution, and `EXPLAIN ANALYZE` spawn nested plan executors that must share the outermost statement's context, while a host-callback statement nested inside another statement owns its own frame.
     pub(super) row_lock_statements:
@@ -162,17 +165,17 @@ pub(super) struct SessionContext {
 }
 
 impl SessionContext {
-    pub(super) fn new(random_state: u64) -> Self {
+    pub(super) fn new(random_state: super::SessionRandomState) -> Self {
         let state = super::SessionStateSnapshot {
             search_path: vec!["public".to_string()],
             session_vars: BTreeMap::new(),
-            random_state,
             sequence_currvals: BTreeMap::new(),
             prepared: BTreeMap::new(),
             sql_statement_cache: SQLStatementCache::default(),
         };
         Self {
             state: RwLock::new(state),
+            random_state: Mutex::new(random_state),
             transactions: Mutex::new(Vec::new()),
             row_lock_statements: Mutex::new(Vec::new()),
             command_mutation_overlays: Mutex::new(Vec::new()),

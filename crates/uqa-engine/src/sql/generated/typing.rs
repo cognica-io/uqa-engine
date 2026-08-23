@@ -459,7 +459,7 @@ fn infer_function(
     }
 
     let dispatch_name = builtin_function_dispatch_name(&name.to_ascii_lowercase());
-    infer_builtin_function(&dispatch_name, &argument_types)?
+    infer_builtin_function(&dispatch_name, &argument_names, &argument_types)?
         .ok_or_else(|| SQLError::UnknownFunction(name.to_string()))
 }
 

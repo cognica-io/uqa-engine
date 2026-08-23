@@ -89,7 +89,7 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     let routines = engine
         .sql(
             "SELECT oid, proname, prokind, proisstrict, proleakproof, provolatile, \
-                    pronargs, pronargdefaults, prorettype, proargtypes, proargnames, prosrc \
+                    proparallel, pronargs, pronargdefaults, prorettype, proargtypes, proargnames, prosrc \
              FROM pg_catalog.pg_proc \
              WHERE oid IN (3261, 6330, 6331, 6332, 6333, 6342, 6343, 6364, 6383, 6389, 6390, 6429, 6430) \
              ORDER BY oid",
@@ -184,7 +184,41 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     }
 
     assert_integer_base_conversion_routines(&engine);
+    assert_random_range_pg_proc(&engine);
+    assert_random_range_routines(&engine);
     assert_uuid_extraction_routines(&engine);
+}
+
+fn assert_random_range_pg_proc(engine: &Engine) {
+    let routines = engine
+        .sql(
+            "SELECT oid, proisstrict, proleakproof, provolatile, proparallel, \
+                    prorettype, proargtypes, proargnames, prosrc \
+             FROM pg_catalog.pg_proc WHERE oid IN (6339, 6340, 6341) ORDER BY oid",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(routines.rows.len(), 3);
+    for (row, (argument_type, source)) in routines.rows.iter().zip([
+        (23, "int4random"),
+        (20, "int8random"),
+        (1700, "numeric_random"),
+    ]) {
+        assert_eq!(row["prorettype"], Value::Int(argument_type));
+        assert_eq!(
+            row["proargtypes"],
+            Value::List(vec![Value::Int(argument_type), Value::Int(argument_type)])
+        );
+        assert_eq!(
+            row["proargnames"],
+            array(vec![Value::Str("min".into()), Value::Str("max".into())])
+        );
+        assert_eq!(row["proisstrict"], Value::Bool(true));
+        assert_eq!(row["provolatile"], Value::Str("v".into()));
+        assert_eq!(row["proparallel"], Value::Str("r".into()));
+        assert_eq!(row["proleakproof"], Value::Bool(false));
+        assert_eq!(row["prosrc"], Value::Str(source.into()));
+    }
 }
 
 fn assert_integer_base_conversion_routines(engine: &Engine) {
@@ -207,6 +241,33 @@ fn assert_integer_base_conversion_routines(engine: &Engine) {
         assert_eq!(
             routines.rows[index]["is_deterministic"],
             Value::Str("YES".into())
+        );
+        assert_eq!(
+            routines.rows[index]["external_language"],
+            Value::Str("INTERNAL".into())
+        );
+    }
+}
+
+fn assert_random_range_routines(engine: &Engine) {
+    let routines = engine
+        .sql(
+            "SELECT specific_name, data_type, is_deterministic, external_language \
+             FROM information_schema.routines \
+             WHERE specific_name IN ('random_6339', 'random_6340', 'random_6341') \
+             ORDER BY specific_name",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(routines.rows.len(), 3);
+    for (index, expected_type) in ["integer", "bigint", "numeric"].iter().enumerate() {
+        assert_eq!(
+            routines.rows[index]["data_type"],
+            Value::Str((*expected_type).into())
+        );
+        assert_eq!(
+            routines.rows[index]["is_deterministic"],
+            Value::Str("NO".into())
         );
         assert_eq!(
             routines.rows[index]["external_language"],

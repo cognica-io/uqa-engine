@@ -983,7 +983,7 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
                 ("proisstrict", bool_value(routine.strict)),
                 ("proretset", bool_value(false)),
                 ("provolatile", str_value(routine.volatility)),
-                ("proparallel", str_value("s")),
+                ("proparallel", str_value(routine.parallel)),
                 (
                     "pronargs",
                     int_value(catalog_usize(
