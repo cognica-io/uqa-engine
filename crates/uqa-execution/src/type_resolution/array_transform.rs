@@ -225,9 +225,13 @@ pub(super) fn bind_call(
     let lower = name.to_ascii_lowercase();
     let function = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
     if function == "array_sort"
-        && super::scalar_type_inner(&args[0], schema, params, resolver)
-            .ok()
-            .flatten()
+        && args
+            .first()
+            .and_then(|argument| {
+                super::scalar_type_inner(argument, schema, params, resolver)
+                    .ok()
+                    .flatten()
+            })
             .as_ref()
             .is_some_and(is_json_array_type)
     {

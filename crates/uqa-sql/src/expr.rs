@@ -582,7 +582,6 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         | "array_dims"
         | "array_ndims"
         | "array_reverse"
-        | ARRAY_SORT_JSON_FUNCTION
         | "ascii"
         | "asin"
         | "atan"
