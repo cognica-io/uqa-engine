@@ -20,6 +20,7 @@ use uqa_sql::expr::{
 
 use crate::{RowSchema, ScalarExpr};
 
+mod array_transform;
 mod common;
 mod containment;
 mod equality;
@@ -45,6 +46,17 @@ pub trait FunctionTypeResolver: Send + Sync {
         argument_types: &[Option<ColumnType>],
     ) -> Result<Option<ColumnType>, SQLError>;
 
+    /// Resolve a catalog-backed overload together with the stable binding needed to execute it after built-in and user-defined candidates have been ranked.
+    fn resolve_function_overload(
+        &self,
+        _name: &str,
+        _binding: Option<&FunctionBinding>,
+        _argument_names: &[Option<String>],
+        _argument_types: &[Option<ColumnType>],
+    ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
+        Ok(None)
+    }
+
     /// Resolve the declared first-column type of a physical scalar-subquery slot when the owning execution context carries its plan arena.
     fn resolve_scalar_subquery_type(
         &self,
@@ -53,6 +65,21 @@ pub trait FunctionTypeResolver: Send + Sync {
         _params: &[SQLParam],
     ) -> Result<Option<ColumnType>, SQLError> {
         Ok(None)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedFunctionOverload {
+    pub binding: FunctionBinding,
+    pub return_type: ColumnType,
+    pub exact_matches: usize,
+    pub known_arguments: usize,
+}
+
+impl ResolvedFunctionOverload {
+    #[must_use]
+    pub fn is_exact_for_known_arguments(&self) -> bool {
+        self.known_arguments > 0 && self.exact_matches == self.known_arguments
     }
 }
 

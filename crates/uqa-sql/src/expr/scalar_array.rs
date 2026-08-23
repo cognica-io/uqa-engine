@@ -8,6 +8,8 @@
 
 use super::{out_of_range, to_i64, ArrayValue, Result, SQLError, Value};
 
+mod order;
+
 pub(super) fn eval_array_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
     const NAMES: &[&str] = &[
         "array_length",
@@ -23,6 +25,7 @@ pub(super) fn eval_array_functions(name: &str, args: &[Value]) -> Option<Result<
         "array_position",
         "array_reverse",
         "array_sort",
+        super::ARRAY_SORT_JSON_FUNCTION,
         "unnest",
     ];
     if !NAMES.contains(&name) {
@@ -232,11 +235,11 @@ pub(super) fn eval_array_functions(name: &str, args: &[Value]) -> Option<Result<
                     other => Err(not_an_array("array_position", other)),
                 }
             }
-            "array_reverse" | "array_sort" => {
+            "array_reverse" | "array_sort" | super::ARRAY_SORT_JSON_FUNCTION => {
                 if name == "array_reverse" && args.len() != 1 {
                     return Err(SQLError::TypeMismatch("array_reverse takes 1 arg".into()));
                 }
-                if name == "array_sort" && !(1..=3).contains(&args.len()) {
+                if name != "array_reverse" && !(1..=3).contains(&args.len()) {
                     return Err(SQLError::TypeMismatch(
                         "array_sort takes 1 to 3 args".into(),
                     ));
@@ -247,8 +250,8 @@ pub(super) fn eval_array_functions(name: &str, args: &[Value]) -> Option<Result<
                 let Value::Array(array) = &args[0] else {
                     return Err(not_an_array(name, &args[0]));
                 };
-                let mut elements = array.elements().to_vec();
                 if name == "array_reverse" {
+                    let mut elements = array.elements().to_vec();
                     elements.reverse();
                     return rebuild_array(array, elements);
                 }
@@ -256,15 +259,12 @@ pub(super) fn eval_array_functions(name: &str, args: &[Value]) -> Option<Result<
                     boolean_option(args.get(1), "array_sort: descending")?.unwrap_or(false);
                 let nulls_first =
                     boolean_option(args.get(2), "array_sort: nulls_first")?.unwrap_or(descending);
-                elements.sort_by(|left, right| match (left, right) {
-                    (Value::Null, Value::Null) => std::cmp::Ordering::Equal,
-                    (Value::Null, _) if nulls_first => std::cmp::Ordering::Less,
-                    (Value::Null, _) => std::cmp::Ordering::Greater,
-                    (_, Value::Null) if nulls_first => std::cmp::Ordering::Greater,
-                    (_, Value::Null) => std::cmp::Ordering::Less,
-                    (left, right) if descending => right.cmp(left),
-                    (left, right) => left.cmp(right),
-                });
+                let elements = order::sorted_elements(
+                    array,
+                    descending,
+                    nulls_first,
+                    name == super::ARRAY_SORT_JSON_FUNCTION,
+                )?;
                 rebuild_array(array, elements)
             }
             "unnest" => {

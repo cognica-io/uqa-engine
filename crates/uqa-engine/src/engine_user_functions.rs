@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use uqa_execution::{FunctionTypeResolver, ScalarExpr};
+use uqa_execution::{FunctionTypeResolver, ResolvedFunctionOverload, ScalarExpr};
 use uqa_planner::UnifiedPlan;
 use uqa_sql::ast::{
     ColumnType, CreateFunction, DropFunctionItem, DropFunctionStmt, FunctionBinding, FunctionBody,
@@ -97,12 +97,37 @@ impl FunctionTypeResolver for Engine {
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
     ) -> Result<Option<ColumnType>, SQLError> {
+        self.resolve_function_overload(name, binding, argument_names, argument_types)
+            .map(|resolved| resolved.map(|resolved| resolved.return_type))
+    }
+
+    fn resolve_function_overload(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+    ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
         let Some(function) =
             self.resolve_static_sql_function(name, binding, argument_names, argument_types)?
         else {
             return Ok(None);
         };
-        static_function_return_type(name, &function.def).map(Some)
+        let matched = static_function_match(function.clone(), argument_names, argument_types)
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "resolved function `{name}` no longer matches its arguments"
+                ))
+            })?;
+        Ok(Some(ResolvedFunctionOverload {
+            binding: FunctionBinding {
+                name: function.def.name.clone(),
+                argument_types: routine_signature_types(&function.def),
+            },
+            return_type: static_function_return_type(name, &function.def)?,
+            exact_matches: matched.exact_matches,
+            known_arguments: argument_types.iter().flatten().count(),
+        }))
     }
 }
 

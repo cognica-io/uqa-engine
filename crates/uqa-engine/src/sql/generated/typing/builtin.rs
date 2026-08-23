@@ -13,6 +13,8 @@ use super::{
     GenerationType, SQLError, TypeClass,
 };
 
+mod array_transform;
+
 #[allow(clippy::too_many_lines)]
 pub(super) fn infer_builtin_function(
     name: &str,
@@ -407,19 +409,8 @@ pub(super) fn infer_builtin_function(
             require_signature(name, args, &[TypeClass::Array, TypeClass::Array])?;
             common_type(&args[0], &args[1])?
         }
-        "array_reverse" => {
-            require_arity(name, args, 1, 1)?;
-            require_one(name, &args[0], TypeClass::Array)?;
-            args[0].clone()
-        }
-        "array_sort" => {
-            require_arity(name, args, 1, 3)?;
-            require_one(name, &args[0], TypeClass::Array)?;
-            for flag in &args[1..] {
-                require_one(name, flag, TypeClass::Boolean)?;
-            }
-            args[0].clone()
-        }
+        "array_reverse" => array_transform::require_signature(name, argument_names, args)?,
+        "array_sort" => array_transform::require_signature(name, argument_names, args)?,
         "json_typeof" | "jsonb_typeof" | "jsonb_pretty" => {
             require_arity(name, args, 1, 1)?;
             GenerationType::Text

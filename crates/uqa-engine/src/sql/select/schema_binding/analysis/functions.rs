@@ -124,6 +124,10 @@ pub(super) fn validate_scalar_function(
     ) {
         return validate_uuid_extraction_function(engine, name, args, schema, params);
     }
+    if binding.is_none() && matches!(lower.as_str(), "array_sort" | "array_reverse") {
+        uqa_execution::scalar_type_with_resolver(expression, schema, params, engine)?;
+        return Ok(());
+    }
     if lower == uqa_sql::expr::NAMED_ARG_FUNCTION
         || uqa_sql::registry::is_registered(&lower)
         || crate::sql::aggregates::is_aggregate(engine, expression)

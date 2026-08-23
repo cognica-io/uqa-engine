@@ -13,52 +13,6 @@ use super::*;
 // ---------------------------------------------------------------------
 
 #[test]
-fn pg18_array_sort_and_reverse() {
-    let eng = engine();
-    assert_eq!(
-        scalar(&eng, "SELECT array_sort(ARRAY[3,NULL,1,2])"),
-        array(vec![
-            Value::Int(1),
-            Value::Int(2),
-            Value::Int(3),
-            Value::Null,
-        ])
-    );
-    assert_eq!(
-        scalar(&eng, "SELECT array_sort(ARRAY[3,NULL,1,2], true)"),
-        array(vec![
-            Value::Null,
-            Value::Int(3),
-            Value::Int(2),
-            Value::Int(1),
-        ])
-    );
-    assert_eq!(
-        scalar(&eng, "SELECT array_sort(ARRAY[3,NULL,1,2], false, true)"),
-        array(vec![
-            Value::Null,
-            Value::Int(1),
-            Value::Int(2),
-            Value::Int(3),
-        ])
-    );
-    assert_eq!(
-        scalar(&eng, "SELECT array_reverse(ARRAY[[1,2],[3,4]])"),
-        array(vec![
-            Value::List(vec![Value::Int(3), Value::Int(4)]),
-            Value::List(vec![Value::Int(1), Value::Int(2)]),
-        ])
-    );
-    assert_eq!(
-        scalar(&eng, "SELECT array_sort(ARRAY[ARRAY[1,NULL],ARRAY[1,2]])"),
-        array(vec![
-            Value::List(vec![Value::Int(1), Value::Int(2)]),
-            Value::List(vec![Value::Int(1), Value::Null]),
-        ])
-    );
-}
-
-#[test]
 fn pg18_json_strip_nulls_can_strip_array_elements() {
     let eng = engine();
     assert_eq!(

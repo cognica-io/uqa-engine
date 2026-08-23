@@ -13,7 +13,10 @@ use crate::{RowSchema, ScalarExpr};
 use super::common::{
     base_type, common_numeric_type, common_type, merge_optional_types, numeric_type,
 };
-use super::{containment, integer_base, random_range, scalar_type_inner, FunctionTypeResolver};
+use super::{
+    array_transform, containment, integer_base, random_range, scalar_type_inner,
+    FunctionTypeResolver,
+};
 
 pub fn builtin_function_type(
     name: &str,
@@ -45,6 +48,11 @@ pub fn builtin_function_argument_targets(
             if let Some(target) = random_range::selected_argument_type(argument_types) {
                 targets.fill(Some(target));
             }
+        }
+        "array_sort" if matches!(targets.len(), 2 | 3) => {
+            targets.iter_mut().skip(1).for_each(|target| {
+                *target = Some(ColumnType::Boolean);
+            });
         }
         "concat_op" if targets.len() == 2 => {
             for position in 0..2 {
@@ -152,11 +160,15 @@ pub(super) fn builtin_function_type_inner(
         name if random_range::bound_function_type(name).is_some() => {
             Ok(random_range::bound_function_type(name))
         }
+        name if array_transform::is_bound_function(name) => Ok(first()),
         "to_bin" | "to_hex" | "to_oct" => {
             integer_base::resolve_type(original_name, args, &argument_types)
         }
         "random" if !args.is_empty() => {
             random_range::resolve_type(original_name, args, &argument_types)
+        }
+        "array_sort" | "array_reverse" => {
+            array_transform::resolve_type(original_name, binding, args, &argument_types, resolver)
         }
         "count" | "row_number" | "rank" | "dense_rank" | "crc32" | "crc32c" | "nextval"
         | "currval" | "setval" => Ok(Some(ColumnType::BigInteger)),
@@ -167,8 +179,7 @@ pub(super) fn builtin_function_type_inner(
         }
         "min" | "max" | "lag" | "lead" | "first_value" | "last_value" | "nth_value" | "nullif"
         | "array_cat" | "array_remove" | "array_replace" | "trim_array" | "array_sample"
-        | "array_reverse" | "array_sort" | "__slice" | "__array_slices" | "array_append"
-        | "generate_series" => Ok(first()),
+        | "__slice" | "__array_slices" | "array_append" | "generate_series" => Ok(first()),
         "mode" | "percentile_disc" => Ok(ordered_argument()),
         "percentile_cont" => Ok(ordered_argument().map(|ty| match base_type(&ty) {
             ColumnType::Interval => ColumnType::Interval,

@@ -16,12 +16,16 @@ use crate::error::{Result, SQLError};
 use crate::params::SQLParam;
 use crate::result::ResultRow;
 
+mod array_transform;
 mod encoding;
 mod json;
 mod random;
 mod time;
 mod uuid;
 
+pub use array_transform::{
+    argument_positions as array_transform_argument_positions, ARRAY_SORT_JSON_FUNCTION,
+};
 use encoding::{base64_decode, base64_encode, md5_hex};
 pub use json::value_to_json_text;
 use json::{
@@ -578,6 +582,7 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         | "array_dims"
         | "array_ndims"
         | "array_reverse"
+        | ARRAY_SORT_JSON_FUNCTION
         | "ascii"
         | "asin"
         | "atan"
@@ -655,7 +660,7 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         {
             Some(true)
         }
-        "array_sort" if matches!(argument_count, 1..=3) => Some(true),
+        "array_sort" | ARRAY_SORT_JSON_FUNCTION if matches!(argument_count, 1..=3) => Some(true),
         "array_length" | "array_lower" | "array_upper" | "atan2" | "date_part" | "date_trunc"
         | "decode" | "encode" | "extract" | "gcd" | "lcm" | "left" | "mod" | "power" | "pow"
         | "repeat" | "right" | "starts_with" | "position" | "strpos" | "to_char" | "to_date"
@@ -859,6 +864,9 @@ pub fn eval_function_call(
 }
 
 fn builtin_named_args(function: &str, call_args: &[(Option<String>, Value)]) -> Option<Vec<Value>> {
+    if matches!(function, "array_sort" | "array_reverse") {
+        return array_transform::reorder_named_values(function, call_args);
+    }
     let names: &[&str] = match function {
         "regexp_count" => match call_args.len() {
             2 => &["string", "pattern"],
