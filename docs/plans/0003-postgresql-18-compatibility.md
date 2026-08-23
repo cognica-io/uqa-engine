@@ -1,5 +1,9 @@
 # PostgreSQL 18 compatibility plan
 
+Status: Active living plan
+
+Update rule: Update this plan, its synchronized status ledger, the manual, and `tests/parity/pg18/manifest.json` in the same compatibility PR whenever supported behavior or a remaining gate changes.
+
 ## Goal
 
 The long-term goal is complete PostgreSQL 18 compatibility at every externally observable boundary: SQL parsing and execution, data types and casts, catalogs, errors, transactions and concurrency, frontend/backend protocol 3.0 and 3.2, and behavior seen by standard PostgreSQL clients. UQA Engine may retain its own internal storage and execution architecture, but an implementation difference is not a reason to expose different PostgreSQL behavior.
@@ -22,13 +26,62 @@ The historical starting point used `pg_query` 6.1.1 with PostgreSQL 17 grammar, 
 
 The PostgreSQL 18 parser migration replaces the four DML `returning_list` fields with complete `returning_clause` handling. PostgreSQL 18's PL/pgSQL JSON producer also needs to serialize `retvarno` for datum-backed `RETURN` and `RETURN NEXT`; UQA Engine consumes those slots directly and does not rewrite routine source. The reproducible parser chain is imported as the `uqa-pg-query` workspace crate from `jaepil/pg_query.rs@516b3a03fed42e606ce01bc8b5a864a1698c210d` and `jaepil/libpg_query@898cd71c96375d6d4219916996701571dbe2b239`; the latter contains the PostgreSQL 18 parser, corrected PL/pgSQL datum serialization, structured `%TYPE` and `%ROWTYPE` identifier metadata, trigger-promise and type-cache fixes, and a process-wide pthread exit key with a `PTHREAD_KEYS_MAX + 1` regression test so one integration-test executable can safely create parser threads throughout its lifetime.
 
+The following compact ledger is the readable projection of the machine-readable compatibility manifest. Pull-request checks compare every milestone and evidence-item status, so adding or changing manifest accounting without updating this plan fails immediately.
+
+<!-- pg18-manifest-status:start -->
+
+| Milestone | Status |
+| --- | --- |
+| `M0` | `in_progress` |
+| `M1` | `complete` |
+| `M2` | `complete` |
+| `M3` | `not_started` |
+| `M4` | `not_started` |
+| `M5` | `not_started` |
+| `M6` | `not_started` |
+
+| Evidence item | Status |
+| --- | --- |
+| `baseline.pg18-differential-probes` | `verified` |
+| `baseline.tpch-derived-queries` | `verified` |
+| `parser.pg18-chain` | `partial` |
+| `query.join-using-natural` | `partial` |
+| `query.parenthesized-join-alias` | `verified` |
+| `query.fetch-with-ties` | `verified` |
+| `query.pattern-escape` | `verified` |
+| `query.group-by-distinct` | `verified` |
+| `query.table-function-with-ordinality` | `verified` |
+| `query.named-window` | `verified` |
+| `dml.returning-row-images` | `partial` |
+| `ddl.constraint-metadata` | `partial` |
+| `ddl.ctas-column-names` | `verified` |
+| `ddl.ctas-with-no-data` | `verified` |
+| `ddl.select-into` | `verified` |
+| `ddl.view-column-aliases` | `verified` |
+| `functions.identified-pg18-additions` | `partial` |
+| `execution.static-row-schema-and-spill-v1` | `partial` |
+| `types.declared-identity-casts-and-catalog` | `partial` |
+| `ddl.alter-type-and-migration` | `partial` |
+| `catalog.pg-database-locale` | `partial` |
+| `plpgsql.datum-slots-and-bound-cursors` | `partial` |
+| `protocol.frontend-backend-3.2` | `partial` |
+| `ddl.generated-columns` | `partial` |
+| `ddl.temporal-constraints` | `explicitly_rejected` |
+| `regression.core-and-isolation` | `not_audited` |
+| `clients.driver-and-operations-matrix` | `partial` |
+
+<!-- pg18-manifest-status:end -->
+
 | Area | Current status | Remaining gate |
 | --- | --- | --- |
 | Active PG18 baseline | Active paths, scripts, tests, defaults, and fixtures use `pg18`; the parser chain is imported as `uqa-pg-query` from the recorded revisions; 22/22 TPC-H-derived results match PostgreSQL 18.4 | Complete the AST coverage inventory |
 | Qualified joins | `JOIN ... USING`, `USING (...) AS alias`, and `NATURAL JOIN` preserve structural AST metadata, bind against both physical row types, resolve the implemented equality/common-type matrix before execution, coerce differently declared keys, implement merged-column ordering and outer-join value selection, preserve input qualification and duplicate non-key output slots, and report PostgreSQL column SQLSTATEs | Complete collations, domains, user-defined operators, and the full PostgreSQL equality/coercion matrix |
+| Verified SELECT slices | Parenthesized JOIN aliases, `FETCH ... WITH TIES`, pattern `ESCAPE`, `GROUP BY DISTINCT` and `ALL`, table-function `WITH ORDINALITY`, and named `WINDOW` definitions have PostgreSQL 18.4 result, metadata, and SQLSTATE coverage | Continue one independently reviewed and manifested parity slice at a time |
+| Row locking | `FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`, `FOR KEY SHARE`, `OF`, `NOWAIT`, and `SKIP LOCKED` retain row identity through supported scans, joins, subqueries, views, CTE placement, mutations, savepoints, and persistent providers | Complete the upstream row-lock, isolation, process-boundary, and unsupported-relation matrix |
+| Derived relation creation | CTAS positional column names, CTAS `WITH NO DATA`, ordinary `SELECT INTO`, and CREATE VIEW positional column names preserve static types, validation ordering, transactionality, and durable reopen behavior | Add temporary and unlogged relation forms and complete upstream DDL/catalog coverage |
 | `RETURNING WITH (OLD/NEW ...)` | Old and new images and custom aliases are preserved through SQL AST, planning, and DML execution | Expand live differential coverage to triggers, partitions, and every MERGE action as those features become available |
 | Constraint metadata | CHECK and foreign-key enforcement flags and named NOT NULL catalog rows are represented and tested | Complete `NOT VALID`, `ALTER CONSTRAINT`, and all dump/reopen cases |
-| Identified PG18 functions and casts | The discovered array, bytea, Unicode, UUID, checksum, JSON, numeric, interval, Roman-numeral, aggregate, and regex cases are implemented and tested, including the identified `pg_proc` overload metadata | Expand the PostgreSQL 18 function, type, and catalog matrix beyond the identified additions |
+| Identified PG18 functions and casts | The original array, bytea, Unicode, UUID generation, checksum, JSON, numeric, interval, Roman-numeral, aggregate, and regex inventory is implemented and tested, including its identified `pg_proc` overload metadata | Implement newly discovered gaps such as UUID version/timestamp extraction and continue expanding the PostgreSQL 18 function, type, and catalog matrix |
 | PG18 database locale catalog | `pg_database` exposes PostgreSQL 18's builtin provider, `datlocale`, `daticurules`, `datcollversion`, and `dathasloginevt` shape for the engine database, with Unicode behavior tests | Implement the complete database, collation, locale-provider, ownership, ACL, and lifecycle surface |
 | PL/pgSQL datum slots and bound cursors | `retvarno`, the `-1` cursor sentinel, bound cursor arguments, named arguments, `OPEN`, `FETCH NEXT`, and `CLOSE` are structural AST and interpreter state backed by the pinned parser revisions; scalar and cursor-argument `SelectStmt` envelopes reject unsupported structure; qualified named types and `%TYPE` references resolve against actual table metadata and every ordinary assignment/return coercion propagates SQL cast errors | Add session portal state before supporting refcursor parameters, returns, or cursors surviving routine exit |
 | Protocol 3.2 | Byte-exact tests cover minor negotiation, ordered `_pq_.` reporting, message tag `v`, variable cancellation keys, legacy 3.0 validation, FunctionCall, GSS/SSPI authentication messages, notifications, COPY format validation, and the PostgreSQL 18 reserved-3.1 edge; PostgreSQL 18.4 `psql`/libpq live tests cover 3.0, 3.2, `latest`, 3.2-to-3.0 downgrade, authentication ordering, SSL rejection and retry, both cancellation-key shapes, and extended Parse/Bind/Describe/Execute/Sync flow | Add a credentialed Kerberos environment, non-trust authentication exchanges, binary-format coverage, and the wider driver matrix |
@@ -44,13 +97,13 @@ The PostgreSQL 18 parser migration replaces the four DML `returning_list` fields
 
 Use the reviewed PostgreSQL 18 parser chain imported as `uqa-pg-query` from `jaepil/pg_query.rs@516b3a03fed42e606ce01bc8b5a864a1698c210d` and `jaepil/libpg_query@898cd71c96375d6d4219916996701571dbe2b239`. The wrapper exposes PostgreSQL's raw parser modes directly, so PL/pgSQL expressions and one-, two-, and three-part assignments are parsed structurally without rewriting input text, and PL/pgSQL `%TYPE` and `%ROWTYPE` declarations retain each normalized identifier component separately from their display spelling. The C library creates its pthread destructor key exactly once per process and associates each thread's parser memory context with that shared key, preventing key exhaustion without splitting test executables or pre-initializing unrelated libraries. Any future parser update must be reviewed, tested in both repositories, pushed first, and then adopted through `scripts/sync-uqa-pg-query.py` with a new recorded revision, checksum list, and regenerated `Cargo.lock`; native, Python, Node.js, Browser WASM, and supported-platform builds remain required because the dependency contains C code and generated protobuf types.
 
-Replace all four DML `returning_list` accesses with a compiler that consumes the complete `ReturningClause`, including its options. Audit every changed protobuf message and field between PostgreSQL 17 and 18, especially constraint enforcement, generated-column kind, temporal key flags, MERGE variants, COPY options, and utility statements. Add compiler tests proving each unsupported field fails before catalog or storage mutation.
+All four DML paths now consume the complete `ReturningClause` instead of the removed `returning_list` fields. Remaining parser-baseline work is to audit every changed protobuf message and field between PostgreSQL 17 and 18, especially constraint enforcement, generated-column kind, temporal key flags, MERGE variants, COPY options, and utility statements, with compiler tests proving each unsupported field fails before catalog or storage mutation.
 
 Add an AST coverage inventory that maps every PostgreSQL 18 top-level statement and every semantically relevant option to implemented, explicitly rejected, or not-yet-audited status. The `not-yet-audited` count must be zero for the baseline milestone, and the explicitly rejected count must be zero for complete compatibility.
 
 ### 2. Active compatibility baseline and fixture rename
 
-Rename active assets and all live references as one atomic change:
+The active compatibility assets and live references were renamed atomically:
 
 | Old | New |
 | --- | --- |
@@ -61,15 +114,15 @@ Rename active assets and all live references as one atomic change:
 | `target/benchmark-runs/tpch-pg17.json` | `target/benchmark-runs/tpch-pg18.json` |
 | `uqa-tpch-pg17` and `uqa-pg17-age` defaults | PostgreSQL 18-specific defaults |
 
-Update fixture loaders, test module names, test function names, assertion text, manifest provenance, current README and manual sections, container images, output labels, and `server_version = 18.0-uqa`. Keep version-neutral environment variable names such as `UQA_TPCH_PG_CONTAINER`. Preserve historical `HISTORY.md` entries and dated PostgreSQL 17 performance snapshots; add freshly measured PostgreSQL 18 sections rather than relabeling old numbers.
+Fixture loaders, test modules and functions, assertion text, manifest provenance, current README and manual sections, container images, output labels, and `server_version = 18.0-uqa` now use the PostgreSQL 18 baseline. Version-neutral environment variable names such as `UQA_TPCH_PG_CONTAINER` remain stable, while historical `HISTORY.md` entries and dated PostgreSQL 17 performance snapshots remain historical rather than being relabeled.
 
 Regenerate active expected data only after the script confirms a live PostgreSQL 18 server and every UQA result matches it. Commit the exact PostgreSQL 18 patch version in the fixture and manifest.
 
 ### 3. PG18 DML row images
 
-Represent `RETURNING` row-image aliases in the SQL AST and plan instead of flattening them into ordinary projections. For INSERT, expose a NULL old image and the inserted new image. For DELETE, expose the deleted old image and a NULL new image. For UPDATE, retain both the pre-update and post-update documents. For MERGE, select the appropriate images for INSERT, UPDATE, DELETE, and DO NOTHING actions and retain source-column and `merge_action()` behavior.
+`RETURNING` row-image aliases are represented in the SQL AST and plan instead of being flattened into ordinary projections. INSERT exposes a NULL old image and the inserted new image, DELETE exposes the deleted old image and a NULL new image, UPDATE retains both versions, and the implemented MERGE actions select their corresponding images while retaining source columns and `merge_action()` behavior.
 
-Implement default `old` and `new` qualification and `WITH (OLD AS ..., NEW AS ...)` renaming, including conflicts with table aliases and user columns. Test `*`, qualified stars, expressions combining both images, triggers when implemented, CTEs, partitions when implemented, and all four DML statements against PostgreSQL 18.
+Default `old` and `new` qualification and `WITH (OLD AS ..., NEW AS ...)` renaming are implemented, including conflicts with table aliases and user columns. Remaining work is live differential coverage for `*`, qualified stars, expressions combining both images, triggers, CTEs, partitions, and every action of all four DML statements as those owning features become available.
 
 ### 4. PG18 constraints and generated columns
 
@@ -83,7 +136,7 @@ Implement range and multirange types before temporal constraints. Add comparison
 
 ### 5. PG18 functions, casts, collations, and output
 
-Implement and differentially test the PostgreSQL 18 additions already identified: `array_sort`, `array_reverse`, `reverse(bytea)`, integer/`bytea` casts, Unicode 16 full case mapping, `casefold`, `json_strip_nulls` and `jsonb_strip_nulls` array-null option, `uuidv4`, `uuidv7`, `crc32`, `crc32c`, `gamma`, `lgamma`, interval `EXTRACT(WEEK)`, negative-quarter output, `to_number(..., 'RN')`, array/composite `MIN` and `MAX`, and named regex and PL/pgSQL cursor arguments.
+The original PostgreSQL 18 additions inventory is implemented and differentially covered: `array_sort`, `array_reverse`, `reverse(bytea)`, integer/`bytea` casts, Unicode 16 full case mapping, `casefold`, `json_strip_nulls` and `jsonb_strip_nulls` array-null option, `uuidv4`, `uuidv7`, `crc32`, `crc32c`, `gamma`, `lgamma`, interval `EXTRACT(WEEK)`, negative-quarter output, `to_number(..., 'RN')`, array/composite `MIN` and `MAX`, and named regex and PL/pgSQL cursor arguments. New oracle discoveries, including `uuid_extract_version(uuid)` and `uuid_extract_timestamp(uuid)`, are tracked as new parity slices rather than being hidden by the completed original inventory.
 
 For each function, add exact overload resolution, return type metadata, strictness and volatility, NULL propagation, boundary and error behavior, text and binary result encoding, and `pg_proc` visibility. Differential cases must include Unicode, empty arrays, multidimensional arrays, NaN and infinity, malformed JSON, invalid formats, and type ambiguity.
 
@@ -105,7 +158,7 @@ Complete the remaining protocol evidence with a credentialed Kerberos environmen
 
 Drive remaining work from the PostgreSQL 18 official regression schedules rather than an ad hoc feature list. Import queries and expected behavior in license-compatible differential harnesses, categorize failures by parser, binder, type system, planner, executor, catalog, transaction, protocol, or administration, and maintain a burn-down manifest with owners and evidence.
 
-Close the existing embedded-runtime gaps: PostgreSQL integer widths and overflow, numeric precision and formatting, collations, domains, enums, composite and range types, temporary and unlogged relations, views and materialized views, inheritance and partitioning, row locks, triggers and rules, sequences, COPY, complete system catalogs, roles and ACLs, MVCC snapshots, isolation and deadlock behavior, prepared statements and portals, large objects, extensions, replication-facing protocol, WAL and administration surfaces.
+Close the existing embedded-runtime gaps: PostgreSQL integer widths and overflow, numeric precision and formatting, collations, domains, enums, composite and range types, temporary and unlogged relations, materialized views, inheritance and partitioning, complete row-lock and isolation regression coverage, triggers and rules, sequences, COPY, complete system catalogs, roles and ACLs, MVCC snapshots and deadlock behavior, prepared statements and portals, large objects, extensions, replication-facing protocol, WAL, and administration surfaces.
 
 Use PostgreSQL 18 SQLSTATE, primary error text where clients depend on it, transaction-abort behavior, command tags, row descriptions, OIDs, typmods, binary formats, and catalog visibility as part of the contract. Performance optimizations may differ but must not alter these observations.
 
@@ -131,27 +184,21 @@ Add long-running concurrency, restart, crash-recovery, backup/restore, and upgra
 
 ## Required verification on every compatibility change
 
-Run focused compiler and engine tests while iterating, followed by:
+Run `cargo fmt --all --check`, focused owning-crate tests, the relevant Docker PostgreSQL 18.4 with Apache AGE oracle matrix, and manifest validation while iterating. Do not dispatch the full cross-platform suite for intermediate commits.
 
 ```sh
-cargo fmt --all -- --check
-cargo check --workspace --all-targets --locked
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --all-targets --locked
-cargo test -p uqa-engine --test integration engine_queries::manual_sql_examples::manual_sql_examples_compile_or_execute
-cargo test -p uqa-engine --test integration sql_tpch::
-UQA_PG18_DOCKER_HOST=container-reachable-host cargo test -p uqa-pg-wire --test protocol libpq_interop:: -- --ignored
+cargo fmt --all --check
 python3 tests/parity/pg18/run_diff.py --validate-manifest
-python3 tests/parity/pg18/run_diff.py
-python3 scripts/run-tpch-pg18.py --iterations 3
 ```
 
-The live wire command requires `UQA_PG18_DOCKER_HOST` to name the test server host as reachable from the client container; this is explicit because the correct address differs between Docker Desktop, native Linux Docker, and remote container runtimes. It uses a PostgreSQL 18 client container named `pg-parity` by default, and `UQA_PG18_WIRE_CONTAINER` selects another container.
+After implementation and review changes converge, push the final pull-request head and run `bash scripts/run-premerge-ci.sh` exactly once. The dispatcher selects Rust, JavaScript/WebAssembly, and Python suites from the final diff; any later push invalidates that result and requires one replacement run for the new head.
+
+Live wire verification requires `UQA_PG18_DOCKER_HOST` to name the test server host as reachable from the client container; this is explicit because the correct address differs between Docker Desktop, native Linux Docker, and remote container runtimes. It uses a PostgreSQL 18 client container named `pg-parity` by default, and `UQA_PG18_WIRE_CONTAINER` selects another container.
 
 Run repository policy scripts, binding builds and examples, and supported-platform CI whenever the parser dependency, public AST, catalog serialization, value representation, or wire types change.
 
 ## Completion accounting
 
-Maintain the machine-readable PostgreSQL 18 compatibility manifest at `tests/parity/pg18/manifest.json` alongside the differential harness. Each item records the PostgreSQL reference section or regression test, UQA Engine test, supported version, status, and any open issue. `run_diff.py` validates the manifest independently of the live oracle and refuses a complete-compatibility claim while an item or milestone remains incomplete. Milestone completion requires positive evidence for every row; absence of a failing test is not evidence.
+Maintain the machine-readable PostgreSQL 18 compatibility manifest at `tests/parity/pg18/manifest.json` alongside the differential harness. Each item records the PostgreSQL reference section or regression test, UQA Engine test, supported version, status, and any open issue. Every compatibility PR must update its manifest evidence, this plan's narrative, the synchronized ledger above, and the authoritative manual together. `run_diff.py --validate-manifest` rejects ledger drift and refuses a complete-compatibility claim while an item or milestone remains incomplete. Milestone completion requires positive evidence for every row; absence of a failing test is not evidence.
 
 The final complete-compatibility audit must inspect the current parser revision, manifest, test results, live server provenance, protocol traces, client matrix, catalog diffs, persistent reopen behavior, and manual. The project must not declare complete PostgreSQL 18 compatibility while any item is missing, explicitly rejected, silently approximated, or supported only by an indirect test.
