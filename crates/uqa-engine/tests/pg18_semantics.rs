@@ -57,6 +57,8 @@ mod arithmetic_and_casts;
 mod array_containment;
 #[path = "pg18_semantics/array_transforms.rs"]
 mod array_transforms;
+#[path = "pg18_semantics/checksums.rs"]
+mod checksums;
 #[path = "pg18_semantics/comparisons_and_arrays.rs"]
 mod comparisons_and_arrays;
 #[path = "pg18_semantics/md5_overloads.rs"]

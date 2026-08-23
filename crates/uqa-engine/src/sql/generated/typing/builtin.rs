@@ -43,8 +43,10 @@ pub(super) fn infer_builtin_function(
             require_class(name, args, TypeClass::Text)?;
             GenerationType::Text
         }
-        "bit_length" | "char_length" | "character_length" | "length" | "md5" | "octet_length"
-        | "reverse" => string_binary::require_signature(name, argument_names, args)?,
+        "bit_length" | "char_length" | "character_length" | "crc32" | "crc32c" | "length"
+        | "md5" | "octet_length" | "reverse" => {
+            string_binary::require_signature(name, argument_names, args)?
+        }
         "concat" | "concat_ws" | "format" => {
             return Err(non_immutable_function(name));
         }
@@ -197,10 +199,6 @@ pub(super) fn infer_builtin_function(
         | "to_date"
         | "to_number" => {
             return Err(non_immutable_function(name));
-        }
-        "crc32" | "crc32c" => {
-            require_signature(name, args, &[TypeClass::Bytea])?;
-            GenerationType::Integer
         }
         "width_bucket" => {
             require_arity(name, args, 4, 4)?;

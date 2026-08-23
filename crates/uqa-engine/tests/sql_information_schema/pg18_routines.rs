@@ -91,12 +91,12 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
             "SELECT oid, proname, prolang, prokind, proisstrict, proleakproof, provolatile, \
                     proparallel, pronargs, pronargdefaults, prorettype, proargtypes, proargnames, prosrc, prosqlbody \
              FROM pg_catalog.pg_proc \
-             WHERE oid IN (720, 1317, 1318, 1367, 1369, 1372, 1374, 1375, 1381, 1810, 1811, 2010, 2311, 2321, 3062, 3261, 6330, 6331, 6332, 6333, 6342, 6343, 6364, 6382, 6383, 6389, 6390, 6429, 6430) \
+             WHERE oid IN (720, 1317, 1318, 1367, 1369, 1372, 1374, 1375, 1381, 1810, 1811, 2010, 2311, 2321, 3062, 3261, 6330, 6331, 6332, 6333, 6342, 6343, 6364, 6365, 6382, 6383, 6389, 6390, 6429, 6430) \
              ORDER BY oid",
             &[],
         )
         .unwrap();
-    assert_eq!(routines.rows.len(), 29);
+    assert_eq!(routines.rows.len(), 30);
     let row = |oid: i64| {
         routines
             .rows
@@ -118,6 +118,7 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
         )
     );
     assert_string_binary_length_routines(&engine, &routines);
+    assert_checksum_routines(&engine, &routines);
     assert_md5_routines(&engine, &routines);
     assert_reverse_routines(&engine, &routines);
     for (oid, argument_type, source) in [
@@ -152,7 +153,6 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
         row(6343)["prosrc"],
         Value::Str("uuid_extract_version".into())
     );
-    assert_eq!(row(6364)["proleakproof"], Value::Bool(true));
     assert_eq!(row(6383)["prosrc"], Value::Str("dgamma".into()));
     assert_eq!(
         row(6389)["proargtypes"],
@@ -280,6 +280,55 @@ fn assert_md5_routines(engine: &Engine, routines: &SQLResult) {
             .collect::<Vec<_>>(),
         vec![Value::Str("25".into()), Value::Str("17".into())]
     );
+}
+
+fn assert_checksum_routines(engine: &Engine, routines: &SQLResult) {
+    let row = |oid: i64| {
+        routines
+            .rows
+            .iter()
+            .find(|row| row["oid"] == Value::Int(oid))
+            .unwrap_or_else(|| panic!("missing pg_proc row {oid}"))
+    };
+    for (oid, name, source) in [
+        (6364, "crc32", "crc32_bytea"),
+        (6365, "crc32c", "crc32c_bytea"),
+    ] {
+        assert_eq!(row(oid)["proname"], Value::Str(name.into()));
+        assert_eq!(row(oid)["prolang"], Value::Int(12));
+        assert_eq!(row(oid)["prokind"], Value::Str("f".into()));
+        assert_eq!(row(oid)["prorettype"], Value::Int(20));
+        assert_eq!(row(oid)["proargtypes"], Value::List(vec![Value::Int(17)]));
+        assert_eq!(row(oid)["pronargs"], Value::Int(1));
+        assert_eq!(row(oid)["pronargdefaults"], Value::Int(0));
+        assert_eq!(row(oid)["proargnames"], Value::Null);
+        assert_eq!(row(oid)["proisstrict"], Value::Bool(true));
+        assert_eq!(row(oid)["provolatile"], Value::Str("i".into()));
+        assert_eq!(row(oid)["proparallel"], Value::Str("s".into()));
+        assert_eq!(row(oid)["proleakproof"], Value::Bool(true));
+        assert_eq!(row(oid)["prosrc"], Value::Str(source.into()));
+        assert_eq!(row(oid)["prosqlbody"], Value::Null);
+    }
+    let information_schema = engine
+        .sql(
+            "SELECT specific_name, routine_name, data_type, is_deterministic, external_language \
+             FROM information_schema.routines \
+             WHERE specific_name IN ('crc32_6364', 'crc32c_6365') ORDER BY specific_name",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(information_schema.rows.len(), 2);
+    for (row, (specific_name, routine_name)) in information_schema
+        .rows
+        .iter()
+        .zip([("crc32_6364", "crc32"), ("crc32c_6365", "crc32c")])
+    {
+        assert_eq!(row["specific_name"], Value::Str(specific_name.into()));
+        assert_eq!(row["routine_name"], Value::Str(routine_name.into()));
+        assert_eq!(row["data_type"], Value::Str("bigint".into()));
+        assert_eq!(row["is_deterministic"], Value::Str("YES".into()));
+        assert_eq!(row["external_language"], Value::Str("INTERNAL".into()));
+    }
 }
 
 fn assert_reverse_routines(engine: &Engine, routines: &SQLResult) {

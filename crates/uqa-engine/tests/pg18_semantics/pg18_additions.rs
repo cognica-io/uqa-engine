@@ -75,16 +75,8 @@ fn pg18_casefold_uses_full_unicode_mapping() {
 }
 
 #[test]
-fn pg18_checksums_and_gamma_functions() {
+fn pg18_gamma_functions() {
     let eng = engine();
-    assert_eq!(
-        scalar(&eng, "SELECT crc32('123456789'::bytea)"),
-        Value::Int(3_421_780_262)
-    );
-    assert_eq!(
-        scalar(&eng, "SELECT crc32c('123456789'::bytea)"),
-        Value::Int(3_808_858_755)
-    );
     for (sql, expected) in [
         ("SELECT gamma(5)", 24.0),
         ("SELECT gamma(0.5)", 1.772_453_850_905_516),

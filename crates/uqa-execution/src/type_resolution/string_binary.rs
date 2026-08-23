@@ -26,6 +26,7 @@ pub type ResolvedTextByteaOverload = ResolvedStringBinaryOverload;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BuiltinResult {
     Argument,
+    BigInteger,
     Integer,
     Text,
 }
@@ -34,6 +35,7 @@ enum BuiltinResult {
 pub(super) struct Function {
     name: &'static str,
     result: BuiltinResult,
+    text: bool,
     bytea: bool,
     bpchar: bool,
 }
@@ -41,6 +43,7 @@ pub(super) struct Function {
 pub(super) const REVERSE: Function = Function {
     name: "reverse",
     result: BuiltinResult::Argument,
+    text: true,
     bytea: true,
     bpchar: false,
 };
@@ -48,6 +51,23 @@ pub(super) const REVERSE: Function = Function {
 pub(super) const MD5: Function = Function {
     name: "md5",
     result: BuiltinResult::Text,
+    text: true,
+    bytea: true,
+    bpchar: false,
+};
+
+pub(super) const CRC32: Function = Function {
+    name: "crc32",
+    result: BuiltinResult::BigInteger,
+    text: false,
+    bytea: true,
+    bpchar: false,
+};
+
+pub(super) const CRC32C: Function = Function {
+    name: "crc32c",
+    result: BuiltinResult::BigInteger,
+    text: false,
     bytea: true,
     bpchar: false,
 };
@@ -55,6 +75,7 @@ pub(super) const MD5: Function = Function {
 pub(super) const LENGTH: Function = Function {
     name: "length",
     result: BuiltinResult::Integer,
+    text: true,
     bytea: true,
     bpchar: true,
 };
@@ -62,6 +83,7 @@ pub(super) const LENGTH: Function = Function {
 pub(super) const CHAR_LENGTH: Function = Function {
     name: "char_length",
     result: BuiltinResult::Integer,
+    text: true,
     bytea: false,
     bpchar: true,
 };
@@ -69,6 +91,7 @@ pub(super) const CHAR_LENGTH: Function = Function {
 pub(super) const CHARACTER_LENGTH: Function = Function {
     name: "character_length",
     result: BuiltinResult::Integer,
+    text: true,
     bytea: false,
     bpchar: true,
 };
@@ -76,6 +99,7 @@ pub(super) const CHARACTER_LENGTH: Function = Function {
 pub(super) const OCTET_LENGTH: Function = Function {
     name: "octet_length",
     result: BuiltinResult::Integer,
+    text: true,
     bytea: true,
     bpchar: true,
 };
@@ -83,6 +107,7 @@ pub(super) const OCTET_LENGTH: Function = Function {
 pub(super) const BIT_LENGTH: Function = Function {
     name: "bit_length",
     result: BuiltinResult::Integer,
+    text: true,
     bytea: true,
     bpchar: false,
 };
@@ -96,6 +121,7 @@ impl Function {
     fn return_type(self, argument_type: ColumnType) -> ColumnType {
         match self.result {
             BuiltinResult::Argument => argument_type,
+            BuiltinResult::BigInteger => ColumnType::BigInteger,
             BuiltinResult::Integer => ColumnType::Integer,
             BuiltinResult::Text => ColumnType::Text,
         }
@@ -208,7 +234,14 @@ fn select_signature(
     let user = match user {
         Ok(user) => user,
         Err(error) if error.sqlstate() == Some("42883") => None,
-        Err(error) if builtin.is_ok() && error.sqlstate() == Some("42725") => None,
+        Err(error)
+            if error.sqlstate() == Some("42725")
+                && builtin.as_ref().is_ok_and(|overload| {
+                    overload.exact_matches > 0 || overload.preferred_matches > 0
+                }) =>
+        {
+            None
+        }
         Err(error) => return Err(error),
     };
     match (builtin, user) {
@@ -257,10 +290,17 @@ fn builtin_overload(
     argument_type: Option<&ColumnType>,
 ) -> Option<BuiltinOverload> {
     let Some(argument_type) = argument_type else {
+        let argument_type = if function.text {
+            ColumnType::Text
+        } else if function.bytea {
+            ColumnType::Bytea
+        } else {
+            return None;
+        };
         return Some(BuiltinOverload {
-            argument_type: ColumnType::Text,
+            preferred_matches: usize::from(argument_type == ColumnType::Text),
+            argument_type,
             exact_matches: 0,
-            preferred_matches: 1,
         });
     };
     let base = base_type(argument_type);
@@ -271,7 +311,7 @@ fn builtin_overload(
             exact_matches: exact,
             preferred_matches: 0,
         }),
-        ColumnType::Text => Some(BuiltinOverload {
+        ColumnType::Text if function.text => Some(BuiltinOverload {
             argument_type: ColumnType::Text,
             exact_matches: exact,
             preferred_matches: usize::from(exact == 0),
@@ -285,11 +325,15 @@ fn builtin_overload(
         | ColumnType::Varchar(_)
         | ColumnType::Bpchar
         | ColumnType::Character(_)
-        | ColumnType::InternalChar => Some(BuiltinOverload {
-            argument_type: ColumnType::Text,
-            exact_matches: 0,
-            preferred_matches: 1,
-        }),
+        | ColumnType::InternalChar
+            if function.text =>
+        {
+            Some(BuiltinOverload {
+                argument_type: ColumnType::Text,
+                exact_matches: 0,
+                preferred_matches: 1,
+            })
+        }
         _ => None,
     }
 }
@@ -333,6 +377,33 @@ fn rank_builtin_and_user(
             SelectedOverload::Builtin(builtin)
         });
     }
+    if argument_types == [None] {
+        let user_type = user
+            .binding
+            .argument_types
+            .first()
+            .and_then(|argument_type| ColumnType::from_sql_name(argument_type).ok());
+        if let Some(user_type) = user_type {
+            let builtin_is_string = is_string_category(&builtin.argument_type);
+            let user_is_string = is_string_category(&user_type);
+            if builtin_is_string != user_is_string {
+                return Ok(if builtin_is_string {
+                    SelectedOverload::Builtin(builtin)
+                } else {
+                    SelectedOverload::User(user)
+                });
+            }
+            if builtin_is_string {
+                match is_preferred_string_type(&user_type)
+                    .cmp(&is_preferred_string_type(&builtin.argument_type))
+                {
+                    std::cmp::Ordering::Greater => return Ok(SelectedOverload::User(user)),
+                    std::cmp::Ordering::Less => return Ok(SelectedOverload::Builtin(builtin)),
+                    std::cmp::Ordering::Equal => {}
+                }
+            }
+        }
+    }
     match user.exact_matches.cmp(&builtin.exact_matches) {
         std::cmp::Ordering::Greater => return Ok(SelectedOverload::User(user)),
         std::cmp::Ordering::Less => return Ok(SelectedOverload::Builtin(builtin)),
@@ -343,6 +414,21 @@ fn rank_builtin_and_user(
         std::cmp::Ordering::Less => Ok(SelectedOverload::Builtin(builtin)),
         std::cmp::Ordering::Equal => Err(ambiguous_function(name, argument_names, argument_types)),
     }
+}
+
+fn is_string_category(ty: &ColumnType) -> bool {
+    matches!(
+        base_type(ty),
+        ColumnType::Bpchar
+            | ColumnType::Character(_)
+            | ColumnType::Name
+            | ColumnType::Text
+            | ColumnType::Varchar(_)
+    )
+}
+
+fn is_preferred_string_type(ty: &ColumnType) -> bool {
+    matches!(base_type(ty), ColumnType::Text)
 }
 
 fn effective_argument_types(
@@ -442,7 +528,7 @@ fn named_argument_name(expression: &ScalarExpr) -> Option<&str> {
     }
 }
 
-fn undefined_function(
+pub(super) fn undefined_function(
     name: &str,
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
