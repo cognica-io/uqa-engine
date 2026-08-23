@@ -57,6 +57,18 @@ SELECT md5('abc') AS text_hash,
        md5(decode('00ff10', 'hex')) AS bytea_hash;
 ```
 
+The one-argument length family preserves PostgreSQL's declared string and binary overloads. `length(text)`, `char_length(text)`, and `character_length(text)` count Unicode characters; their `character` overloads ignore trailing blank padding. `length(bytea)` counts raw bytes. `octet_length(text)` and `octet_length(bytea)` count UTF-8 or raw payload bytes, while `octet_length(character)` includes declared blank padding. `bit_length(text)` and `bit_length(bytea)` return eight times the corresponding byte count; a `character` input reaches the text overload and therefore discards trailing padding. Every overload returns `integer` and is strict, immutable, parallel-safe, and not leakproof.
+
+An unknown literal, NULL, or untyped parameter selects the preferred `text` overload. `varchar`, `name`, and internal `"char"` values convert to `text`; unrelated types, named arguments, and non-one-argument calls report SQLSTATE `42883` when no separate PostgreSQL overload exists. Exact built-in and user-defined overloads follow PostgreSQL search-path precedence, and generated expressions retain the selected binding across reopen. This documented slice does not describe PostgreSQL's separate two-argument `length(bytea, name)` encoding function or length overloads for types outside the implemented carriers.
+
+```sql execute
+SELECT length('é') AS characters,
+       octet_length('é') AS utf8_octets,
+       octet_length('a'::char(3)) AS padded_octets,
+       length(decode('00ff10', 'hex')) AS raw_octets,
+       bit_length(decode('00ff10', 'hex')) AS raw_bits;
+```
+
 ## Numeric functions
 
 | Group | Functions |

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Shared `PostgreSQL` overload resolution for built-ins with `text` and `bytea` signatures.
+//! Shared `PostgreSQL` overload resolution for string and binary built-ins.
 
 use super::common::base_type;
 use super::functions::named_argument_value;
@@ -15,14 +15,18 @@ use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::{SQLError, SQLParam};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResolvedTextByteaOverload {
+pub enum ResolvedStringBinaryOverload {
     Builtin(ColumnType),
     User(ResolvedFunctionOverload),
 }
 
+#[doc(hidden)]
+pub type ResolvedTextByteaOverload = ResolvedStringBinaryOverload;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BuiltinResult {
     Argument,
+    Integer,
     Text,
 }
 
@@ -30,16 +34,57 @@ enum BuiltinResult {
 pub(super) struct Function {
     name: &'static str,
     result: BuiltinResult,
+    bytea: bool,
+    bpchar: bool,
 }
 
 pub(super) const REVERSE: Function = Function {
     name: "reverse",
     result: BuiltinResult::Argument,
+    bytea: true,
+    bpchar: false,
 };
 
 pub(super) const MD5: Function = Function {
     name: "md5",
     result: BuiltinResult::Text,
+    bytea: true,
+    bpchar: false,
+};
+
+pub(super) const LENGTH: Function = Function {
+    name: "length",
+    result: BuiltinResult::Integer,
+    bytea: true,
+    bpchar: true,
+};
+
+pub(super) const CHAR_LENGTH: Function = Function {
+    name: "char_length",
+    result: BuiltinResult::Integer,
+    bytea: false,
+    bpchar: true,
+};
+
+pub(super) const CHARACTER_LENGTH: Function = Function {
+    name: "character_length",
+    result: BuiltinResult::Integer,
+    bytea: false,
+    bpchar: true,
+};
+
+pub(super) const OCTET_LENGTH: Function = Function {
+    name: "octet_length",
+    result: BuiltinResult::Integer,
+    bytea: true,
+    bpchar: true,
+};
+
+pub(super) const BIT_LENGTH: Function = Function {
+    name: "bit_length",
+    result: BuiltinResult::Integer,
+    bytea: true,
+    bpchar: false,
 };
 
 impl Function {
@@ -51,6 +96,7 @@ impl Function {
     fn return_type(self, argument_type: ColumnType) -> ColumnType {
         match self.result {
             BuiltinResult::Argument => argument_type,
+            BuiltinResult::Integer => ColumnType::Integer,
             BuiltinResult::Text => ColumnType::Text,
         }
     }
@@ -102,7 +148,7 @@ pub(super) fn resolve_overload(
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
     resolver: Option<&dyn FunctionTypeResolver>,
-) -> Result<ResolvedTextByteaOverload, SQLError> {
+) -> Result<ResolvedStringBinaryOverload, SQLError> {
     select_signature(
         function,
         name,
@@ -113,17 +159,20 @@ pub(super) fn resolve_overload(
     )
     .map(|selected| match selected {
         SelectedOverload::Builtin(overload) => {
-            ResolvedTextByteaOverload::Builtin(overload.argument_type)
+            ResolvedStringBinaryOverload::Builtin(overload.argument_type)
         }
-        SelectedOverload::User(overload) => ResolvedTextByteaOverload::User(overload),
+        SelectedOverload::User(overload) => ResolvedStringBinaryOverload::User(overload),
     })
 }
 
-pub(super) fn builtin_argument_type(argument_types: &[Option<ColumnType>]) -> Option<ColumnType> {
+pub(super) fn builtin_argument_type(
+    function: Function,
+    argument_types: &[Option<ColumnType>],
+) -> Option<ColumnType> {
     let [argument_type] = argument_types else {
         return None;
     };
-    builtin_overload(argument_type.as_ref()).map(|overload| overload.argument_type)
+    builtin_overload(function, argument_type.as_ref()).map(|overload| overload.argument_type)
 }
 
 fn select_signature(
@@ -180,7 +229,7 @@ fn resolve_bound_builtin(function: Function, binding: &FunctionBinding) -> Optio
         return None;
     }
     let argument_type = ColumnType::from_sql_name(argument_type).ok()?;
-    let overload = builtin_overload(Some(&argument_type))?;
+    let overload = builtin_overload(function, Some(&argument_type))?;
     (overload.argument_type == argument_type).then_some(overload)
 }
 
@@ -199,11 +248,14 @@ fn resolve_builtin(
     if argument_name.is_some() {
         return Err(undefined_function(name, argument_names, argument_types));
     }
-    builtin_overload(argument_types.first().and_then(Option::as_ref))
+    builtin_overload(function, argument_types.first().and_then(Option::as_ref))
         .ok_or_else(|| undefined_function(name, argument_names, argument_types))
 }
 
-fn builtin_overload(argument_type: Option<&ColumnType>) -> Option<BuiltinOverload> {
+fn builtin_overload(
+    function: Function,
+    argument_type: Option<&ColumnType>,
+) -> Option<BuiltinOverload> {
     let Some(argument_type) = argument_type else {
         return Some(BuiltinOverload {
             argument_type: ColumnType::Text,
@@ -214,7 +266,7 @@ fn builtin_overload(argument_type: Option<&ColumnType>) -> Option<BuiltinOverloa
     let base = base_type(argument_type);
     let exact = usize::from(argument_type == base);
     match base {
-        ColumnType::Bytea => Some(BuiltinOverload {
+        ColumnType::Bytea if function.bytea => Some(BuiltinOverload {
             argument_type: ColumnType::Bytea,
             exact_matches: exact,
             preferred_matches: 0,
@@ -223,6 +275,11 @@ fn builtin_overload(argument_type: Option<&ColumnType>) -> Option<BuiltinOverloa
             argument_type: ColumnType::Text,
             exact_matches: exact,
             preferred_matches: usize::from(exact == 0),
+        }),
+        ColumnType::Bpchar | ColumnType::Character(_) if function.bpchar => Some(BuiltinOverload {
+            argument_type: ColumnType::Bpchar,
+            exact_matches: exact,
+            preferred_matches: 0,
         }),
         ColumnType::Name
         | ColumnType::Varchar(_)
@@ -268,7 +325,7 @@ fn rank_builtin_and_user(
     builtin: BuiltinOverload,
     user: ResolvedFunctionOverload,
 ) -> Result<SelectedOverload, SQLError> {
-    let builtin_signature = builtin.argument_type.regtype_name();
+    let builtin_signature = builtin.argument_type.sql_name();
     if user.binding.argument_types.as_slice() == [builtin_signature.as_str()] {
         return Ok(if user.precedes_pg_catalog {
             SelectedOverload::User(user)
@@ -323,6 +380,11 @@ pub(super) fn bind_call(
         .iter()
         .map(|argument| scalar_type_inner(named_argument_value(argument), schema, params, resolver))
         .collect::<Result<Vec<_>, _>>();
+    let source_type = argument_types
+        .as_ref()
+        .ok()
+        .and_then(|types| types.first())
+        .and_then(Clone::clone);
     let argument_names = argument_names(args);
     let selected = argument_types.and_then(|types| {
         let types = effective_argument_types(args, &types);
@@ -331,19 +393,34 @@ pub(super) fn bind_call(
     match selected {
         Ok(SelectedOverload::User(overload)) => *binding = Some(overload.binding),
         Ok(SelectedOverload::Builtin(overload)) => {
-            if let Some(argument) = args.first_mut() {
-                *argument = ScalarExpr::Cast {
-                    expr: Box::new(std::mem::replace(
-                        argument,
-                        ScalarExpr::Literal(Value::Null),
-                    )),
-                    ty: overload.argument_type.sql_name(),
-                };
+            if !same_runtime_signature(source_type.as_ref(), &overload.argument_type) {
+                if let Some(argument) = args.first_mut() {
+                    *argument = ScalarExpr::Cast {
+                        expr: Box::new(std::mem::replace(
+                            argument,
+                            ScalarExpr::Literal(Value::Null),
+                        )),
+                        ty: overload.argument_type.sql_name(),
+                    };
+                }
             }
         }
         Err(_) => {}
     }
     name
+}
+
+fn same_runtime_signature(source: Option<&ColumnType>, target: &ColumnType) -> bool {
+    let Some(source) = source.map(base_type) else {
+        return false;
+    };
+    match (source, target) {
+        (
+            ColumnType::Bpchar | ColumnType::Character(_),
+            ColumnType::Bpchar | ColumnType::Character(_),
+        ) => true,
+        _ => source == target,
+    }
 }
 
 fn argument_names(args: &[ScalarExpr]) -> Vec<Option<String>> {

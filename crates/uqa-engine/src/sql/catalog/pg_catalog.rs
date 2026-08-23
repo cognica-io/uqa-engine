@@ -972,7 +972,7 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
                 ("proname", str_value(routine.name)),
                 ("pronamespace", int_value(schema_oid("pg_catalog"))),
                 ("proowner", int_value(current_user_oid())),
-                ("prolang", int_value(12)),
+                ("prolang", int_value(routine.language())),
                 ("procost", Value::Float(1.0)),
                 ("prorows", Value::Float(0.0)),
                 ("provariadic", int_value(0)),
@@ -1024,7 +1024,10 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
                 ("protrftypes", Value::Null),
                 ("prosrc", str_value(routine.source)),
                 ("probin", Value::Null),
-                ("prosqlbody", Value::Null),
+                (
+                    "prosqlbody",
+                    routine.sql_body().map_or(Value::Null, str_value),
+                ),
                 ("proconfig", Value::Null),
                 ("proacl", Value::Null),
             ]))

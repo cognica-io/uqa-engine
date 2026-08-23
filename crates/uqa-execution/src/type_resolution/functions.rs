@@ -14,8 +14,8 @@ use super::common::{
     base_type, common_numeric_type, common_type, merge_optional_types, numeric_type,
 };
 use super::{
-    array_transform, containment, integer_base, md5, random_range, reverse, scalar_type_inner,
-    FunctionTypeResolver,
+    array_transform, containment, integer_base, length, md5, random_range, reverse,
+    scalar_type_inner, FunctionTypeResolver,
 };
 
 pub fn builtin_function_type(
@@ -54,11 +54,14 @@ pub fn builtin_function_argument_targets(
                 *target = Some(ColumnType::Boolean);
             });
         }
-        "reverse" | "md5" if targets.len() == 1 => {
-            let target = if name == "reverse" {
-                reverse::builtin_argument_type(argument_types)
-            } else {
-                md5::builtin_argument_type(argument_types)
+        "reverse" | "md5" | "length" | "char_length" | "character_length" | "octet_length"
+        | "bit_length"
+            if targets.len() == 1 =>
+        {
+            let target = match name {
+                "reverse" => reverse::builtin_argument_type(argument_types),
+                "md5" => md5::builtin_argument_type(argument_types),
+                _ => length::builtin_argument_type(name, argument_types),
             };
             if let Some(target) = target {
                 targets.fill(Some(target));
@@ -180,6 +183,9 @@ pub(super) fn builtin_function_type_inner(
             array_transform::resolve_type(original_name, binding, args, &argument_types, resolver)
         }
         "md5" => md5::resolve_type(original_name, binding, args, &argument_types, resolver),
+        "length" | "char_length" | "character_length" | "octet_length" | "bit_length" => {
+            length::resolve_type(original_name, binding, args, &argument_types, resolver)
+        }
         "reverse" => reverse::resolve_type(original_name, binding, args, &argument_types, resolver),
         "count" | "row_number" | "rank" | "dense_rank" | "crc32" | "crc32c" | "nextval"
         | "currval" | "setval" => Ok(Some(ColumnType::BigInteger)),
@@ -258,11 +264,10 @@ pub(super) fn builtin_function_type_inner(
         | "overlaps" => Ok(Some(ColumnType::Boolean)),
         "coalesce" | "greatest" | "least" => common_argument_type(args, &argument_types),
         "concat_op" => concat_type(argument(0), argument(1)),
-        "ntile" | "length" | "char_length" | "character_length" | "octet_length" | "position"
-        | "strpos" | "ascii" | "width_bucket" | "bit_length" | "regexp_count" | "regexp_instr"
-        | "num_nulls" | "num_nonnulls" | "array_length" | "array_upper" | "array_lower"
-        | "array_ndims" | "cardinality" | "array_position" | "json_array_length"
-        | "jsonb_array_length" => Ok(Some(ColumnType::Integer)),
+        "ntile" | "position" | "strpos" | "ascii" | "width_bucket" | "regexp_count"
+        | "regexp_instr" | "num_nulls" | "num_nonnulls" | "array_length" | "array_upper"
+        | "array_lower" | "array_ndims" | "cardinality" | "array_position"
+        | "json_array_length" | "jsonb_array_length" => Ok(Some(ColumnType::Integer)),
         "abs" => Ok(first().map(|ty| base_type(&ty).clone())),
         "round" | "trunc" | "ceil" | "ceiling" | "floor" | "sign" => {
             Ok(first().map(|ty| numeric_unary_result_type(&ty)))

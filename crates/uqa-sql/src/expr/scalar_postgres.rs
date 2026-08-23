@@ -96,14 +96,21 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
                     .ok_or_else(|| out_of_range("numeric"))
             }
             "bit_length" => {
-                if matches!(args.first(), Some(Value::Null)) {
-                    return Ok(Value::Null);
-                }
-                match args.first() {
-                    Some(Value::Bytes(b)) => Ok(Value::Int(b.len() as i64 * 8)),
-                    Some(other) => Ok(Value::Int(value_to_string(other).len() as i64 * 8)),
-                    None => Err(SQLError::TypeMismatch("bit_length takes 1 arg".into())),
-                }
+                let [value] = args else {
+                    return Err(SQLError::TypeMismatch("bit_length takes 1 arg".into()));
+                };
+                let octets = match value {
+                    Value::Null => return Ok(Value::Null),
+                    Value::Str(text) => text.len(),
+                    Value::FixedChar(text) => text.trim_end_matches(' ').len(),
+                    Value::Bytes(bytes) => bytes.len(),
+                    _ => {
+                        return Err(SQLError::TypeMismatch(
+                            "bit_length requires text or bytea".into(),
+                        ));
+                    }
+                };
+                Ok(Value::Int(octets as i64 * 8))
             }
             "to_bin" | TO_BIN_INT4_FUNCTION | TO_BIN_INT8_FUNCTION | "to_hex"
             | TO_HEX_INT4_FUNCTION | TO_HEX_INT8_FUNCTION | "to_oct" | TO_OCT_INT4_FUNCTION

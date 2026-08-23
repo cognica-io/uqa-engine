@@ -50,6 +50,37 @@ fn builtin_argument_targets_resolve_fixed_and_overloaded_unknowns() {
         builtin_function_argument_targets("pg_catalog.md5", &[Some(ColumnType::Bytea)]),
         vec![Some(ColumnType::Bytea)]
     );
+    for name in [
+        "length",
+        "char_length",
+        "character_length",
+        "octet_length",
+        "bit_length",
+    ] {
+        assert_eq!(
+            builtin_function_argument_targets(name, &[None]),
+            vec![Some(ColumnType::Text)],
+            "{name}"
+        );
+    }
+    for name in ["length", "octet_length", "bit_length"] {
+        assert_eq!(
+            builtin_function_argument_targets(name, &[Some(ColumnType::Bytea)]),
+            vec![Some(ColumnType::Bytea)],
+            "{name}"
+        );
+    }
+    for name in ["length", "char_length", "character_length", "octet_length"] {
+        assert_eq!(
+            builtin_function_argument_targets(name, &[Some(ColumnType::Character(3))]),
+            vec![Some(ColumnType::Bpchar)],
+            "{name}"
+        );
+    }
+    assert_eq!(
+        builtin_function_argument_targets("bit_length", &[Some(ColumnType::Character(3))]),
+        vec![Some(ColumnType::Text)]
+    );
 }
 
 #[test]

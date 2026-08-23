@@ -6,13 +6,13 @@
 
 //! PostgreSQL-compatible binding for `md5(text|bytea)`.
 
-use super::text_bytea::{self, ResolvedTextByteaOverload, MD5};
+use super::string_binary::{self, ResolvedStringBinaryOverload, MD5};
 use super::FunctionTypeResolver;
 use crate::{RowSchema, ScalarExpr};
 use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::{SQLError, SQLParam};
 
-pub type ResolvedMd5Overload = ResolvedTextByteaOverload;
+pub type ResolvedMd5Overload = ResolvedStringBinaryOverload;
 
 pub(super) fn resolve_type(
     name: &str,
@@ -21,7 +21,7 @@ pub(super) fn resolve_type(
     argument_types: &[Option<ColumnType>],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {
-    text_bytea::resolve_type(MD5, name, binding, args, argument_types, resolver)
+    string_binary::resolve_type(MD5, name, binding, args, argument_types, resolver)
 }
 
 #[doc(hidden)]
@@ -32,11 +32,11 @@ pub fn resolve_md5_overload(
     argument_types: &[Option<ColumnType>],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<ResolvedMd5Overload, SQLError> {
-    text_bytea::resolve_overload(MD5, name, binding, argument_names, argument_types, resolver)
+    string_binary::resolve_overload(MD5, name, binding, argument_names, argument_types, resolver)
 }
 
 pub(super) fn builtin_argument_type(argument_types: &[Option<ColumnType>]) -> Option<ColumnType> {
-    text_bytea::builtin_argument_type(argument_types)
+    string_binary::builtin_argument_type(MD5, argument_types)
 }
 
 pub(super) fn is_function(name: &str) -> bool {
@@ -51,5 +51,5 @@ pub(super) fn bind_call(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> String {
-    text_bytea::bind_call(MD5, name, binding, args, schema, params, resolver)
+    string_binary::bind_call(MD5, name, binding, args, schema, params, resolver)
 }

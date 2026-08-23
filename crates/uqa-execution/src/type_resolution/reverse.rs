@@ -6,13 +6,13 @@
 
 //! PostgreSQL-compatible binding for `reverse(text|bytea)`.
 
-use super::text_bytea::{self, ResolvedTextByteaOverload, REVERSE};
+use super::string_binary::{self, ResolvedStringBinaryOverload, REVERSE};
 use super::FunctionTypeResolver;
 use crate::{RowSchema, ScalarExpr};
 use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::{SQLError, SQLParam};
 
-pub type ResolvedReverseOverload = ResolvedTextByteaOverload;
+pub type ResolvedReverseOverload = ResolvedStringBinaryOverload;
 
 pub(super) fn resolve_type(
     name: &str,
@@ -21,7 +21,7 @@ pub(super) fn resolve_type(
     argument_types: &[Option<ColumnType>],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {
-    text_bytea::resolve_type(REVERSE, name, binding, args, argument_types, resolver)
+    string_binary::resolve_type(REVERSE, name, binding, args, argument_types, resolver)
 }
 
 #[doc(hidden)]
@@ -32,7 +32,7 @@ pub fn resolve_reverse_overload(
     argument_types: &[Option<ColumnType>],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<ResolvedReverseOverload, SQLError> {
-    text_bytea::resolve_overload(
+    string_binary::resolve_overload(
         REVERSE,
         name,
         binding,
@@ -43,7 +43,7 @@ pub fn resolve_reverse_overload(
 }
 
 pub(super) fn builtin_argument_type(argument_types: &[Option<ColumnType>]) -> Option<ColumnType> {
-    text_bytea::builtin_argument_type(argument_types)
+    string_binary::builtin_argument_type(REVERSE, argument_types)
 }
 
 pub(super) fn is_function(name: &str) -> bool {
@@ -58,5 +58,5 @@ pub(super) fn bind_call(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> String {
-    text_bytea::bind_call(REVERSE, name, binding, args, schema, params, resolver)
+    string_binary::bind_call(REVERSE, name, binding, args, schema, params, resolver)
 }

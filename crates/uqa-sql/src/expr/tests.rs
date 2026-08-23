@@ -28,6 +28,31 @@ fn md5_hashes_text_utf8_and_raw_bytea_payloads() {
 }
 
 #[test]
+fn length_functions_measure_declared_string_and_binary_payloads() {
+    for (name, value, expected) in [
+        ("length", Value::Str("é".into()), 1),
+        ("length", Value::FixedChar("a  ".into()), 1),
+        ("length", Value::Bytes(vec![0x00, 0xff, 0x10]), 3),
+        ("char_length", Value::FixedChar("a  ".into()), 1),
+        ("character_length", Value::Str("é".into()), 1),
+        ("octet_length", Value::Str("é".into()), 2),
+        ("octet_length", Value::FixedChar("a  ".into()), 3),
+        ("octet_length", Value::Bytes(vec![0x00, 0xff, 0x10]), 3),
+        ("bit_length", Value::Str("é".into()), 16),
+        ("bit_length", Value::FixedChar("a  ".into()), 8),
+        ("bit_length", Value::Bytes(vec![0x00, 0xff, 0x10]), 24),
+    ] {
+        assert_eq!(
+            eval_scalar_function(name, &[value]).unwrap(),
+            Value::Int(expected),
+            "{name}"
+        );
+    }
+    assert!(eval_scalar_function("char_length", &[Value::Bytes(vec![0])]).is_err());
+    assert!(eval_scalar_function("length", &[Value::Int(1)]).is_err());
+}
+
+#[test]
 fn param_scalar_returns_value() {
     let params = vec![SQLParam::Scalar(Value::Str("hi".into()))];
     let ctx = EvalContext::new(None, &params);
