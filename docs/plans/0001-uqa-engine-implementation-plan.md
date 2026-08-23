@@ -115,6 +115,8 @@ Each crate exposes exactly one integration-test executable. Additional integrati
 
 The 1,500-line Rust file check is a hard safety ceiling, not a design target. Split modules by ownership before they approach the ceiling when parsing, binding, planning, execution, persistence, or tests have separable responsibilities.
 
+When work starts on a confirmed gap governed by a living plan, record it there as incomplete before implementation and promote it only after its stated verification evidence passes; branch names and pull-request descriptions are not substitutes for repository planning state.
+
 During iteration, format first and run the smallest focused checks that cover the changed ownership boundary:
 
 ```sh

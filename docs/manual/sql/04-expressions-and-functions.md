@@ -50,6 +50,13 @@ WHERE value LIKE 'a!_b' ESCAPE '!';
 
 `reverse(text)` reverses Unicode scalar values and `reverse(bytea)` reverses raw bytes. An unknown literal, NULL, or untyped parameter selects the preferred `text` overload; `varchar`, `character`, `name`, and internal `"char"` inputs are implicitly converted to `text`, while unrelated types and every call other than one positional argument report PostgreSQL's undefined-function SQLSTATE `42883`. Both overloads are strict, immutable, parallel-safe, and available through `pg_catalog`; unqualified user overloads participate in PostgreSQL search-path, exact-match, and preferred-type resolution before a stable function binding is stored in generated expressions.
 
+`md5(text)` hashes the text value's UTF-8 bytes and `md5(bytea)` hashes the raw byte payload; both return a 32-character lowercase hexadecimal `text` digest without changing database state. An unknown literal, NULL, or untyped parameter selects the preferred `text` overload; character-family values are implicitly converted to `text`, while unrelated types, named arguments, and every arity other than one report SQLSTATE `42883`. Both overloads are strict, immutable, parallel-safe, leakproof, available through `pg_catalog`, and bound with the same PostgreSQL search-path and exact-match rules used by generated expressions.
+
+```sql execute
+SELECT md5('abc') AS text_hash,
+       md5(decode('00ff10', 'hex')) AS bytea_hash;
+```
+
 ## Numeric functions
 
 | Group | Functions |

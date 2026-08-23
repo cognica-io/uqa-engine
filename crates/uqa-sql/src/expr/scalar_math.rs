@@ -379,7 +379,15 @@ pub(super) fn eval_math_functions(name: &str, args: &[Value]) -> Option<Result<V
                 if args.len() != 1 {
                     return Err(SQLError::TypeMismatch("md5 takes 1 arg".into()));
                 }
-                Ok(Value::Str(md5_hex(value_to_string(&args[0]).as_bytes())))
+                let owned;
+                let bytes = match &args[0] {
+                    Value::Bytes(bytes) => bytes.as_slice(),
+                    value => {
+                        owned = value_to_string(value);
+                        owned.as_bytes()
+                    }
+                };
+                Ok(Value::Str(md5_hex(bytes)))
             }
             "encode" => {
                 if args.len() != 2 {

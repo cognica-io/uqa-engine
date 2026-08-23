@@ -4,15 +4,15 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL-compatible binding for `reverse(text|bytea)`.
+//! PostgreSQL-compatible binding for `md5(text|bytea)`.
 
-use super::text_bytea::{self, ResolvedTextByteaOverload, REVERSE};
+use super::text_bytea::{self, ResolvedTextByteaOverload, MD5};
 use super::FunctionTypeResolver;
 use crate::{RowSchema, ScalarExpr};
 use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::{SQLError, SQLParam};
 
-pub type ResolvedReverseOverload = ResolvedTextByteaOverload;
+pub type ResolvedMd5Overload = ResolvedTextByteaOverload;
 
 pub(super) fn resolve_type(
     name: &str,
@@ -21,25 +21,18 @@ pub(super) fn resolve_type(
     argument_types: &[Option<ColumnType>],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {
-    text_bytea::resolve_type(REVERSE, name, binding, args, argument_types, resolver)
+    text_bytea::resolve_type(MD5, name, binding, args, argument_types, resolver)
 }
 
 #[doc(hidden)]
-pub fn resolve_reverse_overload(
+pub fn resolve_md5_overload(
     name: &str,
     binding: Option<&FunctionBinding>,
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
     resolver: Option<&dyn FunctionTypeResolver>,
-) -> Result<ResolvedReverseOverload, SQLError> {
-    text_bytea::resolve_overload(
-        REVERSE,
-        name,
-        binding,
-        argument_names,
-        argument_types,
-        resolver,
-    )
+) -> Result<ResolvedMd5Overload, SQLError> {
+    text_bytea::resolve_overload(MD5, name, binding, argument_names, argument_types, resolver)
 }
 
 pub(super) fn builtin_argument_type(argument_types: &[Option<ColumnType>]) -> Option<ColumnType> {
@@ -47,7 +40,7 @@ pub(super) fn builtin_argument_type(argument_types: &[Option<ColumnType>]) -> Op
 }
 
 pub(super) fn is_function(name: &str) -> bool {
-    REVERSE.matches(name)
+    MD5.matches(name)
 }
 
 pub(super) fn bind_call(
@@ -58,5 +51,5 @@ pub(super) fn bind_call(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> String {
-    text_bytea::bind_call(REVERSE, name, binding, args, schema, params, resolver)
+    text_bytea::bind_call(MD5, name, binding, args, schema, params, resolver)
 }

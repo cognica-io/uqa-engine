@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Generated-column typing for `PostgreSQL` `reverse(text|bytea)`.
+//! Generated-column typing for `PostgreSQL` text/bytea overload pairs.
 
 use crate::engine_user_functions::routine_signature_types;
 use crate::sql::{ColumnType, Engine, SQLError, Value};
@@ -15,7 +15,43 @@ use super::super::{
     GenerationType,
 };
 
-pub(in super::super) struct ReverseCall<'a> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Function {
+    Reverse,
+    Md5,
+}
+
+impl Function {
+    fn from_name(name: &str) -> Option<Self> {
+        let lower = name.to_ascii_lowercase();
+        match lower.strip_prefix("pg_catalog.").unwrap_or(&lower) {
+            "reverse" => Some(Self::Reverse),
+            "md5" => Some(Self::Md5),
+            _ => None,
+        }
+    }
+
+    fn catalog_name(self) -> &'static str {
+        match self {
+            Self::Reverse => "pg_catalog.reverse",
+            Self::Md5 => "pg_catalog.md5",
+        }
+    }
+
+    fn builtin_result(self, argument_type: GenerationType) -> GenerationType {
+        match self {
+            Self::Reverse => argument_type,
+            Self::Md5 => GenerationType::Text,
+        }
+    }
+}
+
+enum SelectedOverload {
+    Builtin(ColumnType),
+    User(uqa_execution::ResolvedFunctionOverload),
+}
+
+pub(in super::super) struct TextByteaCall<'a> {
     pub(in super::super) engine: &'a Engine,
     pub(in super::super) columns: &'a [ColumnDef],
     pub(in super::super) name: &'a str,
@@ -25,13 +61,13 @@ pub(in super::super) struct ReverseCall<'a> {
 }
 
 pub(in super::super) fn bind_call(
-    call: ReverseCall<'_>,
+    call: TextByteaCall<'_>,
     binding: &mut Option<FunctionBinding>,
     dependencies: &mut Vec<GeneratedFunctionDependency>,
 ) -> Result<bool, SQLError> {
-    if !is_function(call.name) {
+    let Some(function) = Function::from_name(call.name) else {
         return Ok(false);
-    }
+    };
     let declared_argument_types = call
         .args
         .iter()
@@ -45,21 +81,15 @@ pub(in super::super) fn bind_call(
             ))
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
-    match uqa_execution::resolve_reverse_overload(
-        call.name,
-        binding.as_ref(),
-        call.argument_names,
-        &declared_argument_types,
-        Some(call.engine),
-    )? {
-        uqa_execution::ResolvedReverseOverload::Builtin(argument_type) => {
+    match resolve_overload(function, &call, binding.as_ref(), &declared_argument_types)? {
+        SelectedOverload::Builtin(argument_type) => {
             *binding = Some(FunctionBinding {
-                name: "pg_catalog.reverse".into(),
+                name: function.catalog_name().into(),
                 argument_types: vec![argument_type.regtype_name()],
                 builtin: true,
             });
         }
-        uqa_execution::ResolvedReverseOverload::User(overload) => {
+        SelectedOverload::User(overload) => {
             let selected = validate_bound_function(
                 call.engine,
                 &overload.binding,
@@ -78,13 +108,16 @@ pub(super) fn require_signature(
     argument_names: &[Option<String>],
     args: &[GenerationType],
 ) -> Result<GenerationType, SQLError> {
+    let Some(function) = Function::from_name(name) else {
+        return Err(undefined_function(name, argument_names, args));
+    };
     if argument_names != [None] {
         return Err(undefined_function(name, argument_names, args));
     }
     match args {
-        [GenerationType::Bytea] => Ok(GenerationType::Bytea),
+        [GenerationType::Bytea] => Ok(function.builtin_result(GenerationType::Bytea)),
         [GenerationType::Text | GenerationType::Null | GenerationType::UnknownLiteral(_)] => {
-            Ok(GenerationType::Text)
+            Ok(function.builtin_result(GenerationType::Text))
         }
         _ => Err(undefined_function(name, argument_names, args)),
     }
@@ -112,9 +145,36 @@ fn undefined_function(
     }
 }
 
-fn is_function(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    lower.strip_prefix("pg_catalog.").unwrap_or(&lower) == "reverse"
+fn resolve_overload(
+    function: Function,
+    call: &TextByteaCall<'_>,
+    binding: Option<&FunctionBinding>,
+    argument_types: &[Option<ColumnType>],
+) -> Result<SelectedOverload, SQLError> {
+    let selected = match function {
+        Function::Reverse => uqa_execution::resolve_reverse_overload(
+            call.name,
+            binding,
+            call.argument_names,
+            argument_types,
+            Some(call.engine),
+        )?,
+        Function::Md5 => uqa_execution::resolve_md5_overload(
+            call.name,
+            binding,
+            call.argument_names,
+            argument_types,
+            Some(call.engine),
+        )?,
+    };
+    Ok(match selected {
+        uqa_execution::ResolvedTextByteaOverload::Builtin(argument_type) => {
+            SelectedOverload::Builtin(argument_type)
+        }
+        uqa_execution::ResolvedTextByteaOverload::User(overload) => {
+            SelectedOverload::User(overload)
+        }
+    })
 }
 
 fn generation_expression_column_type(

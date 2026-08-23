@@ -16,6 +16,18 @@ fn literal_passthrough() {
 }
 
 #[test]
+fn md5_hashes_text_utf8_and_raw_bytea_payloads() {
+    assert_eq!(
+        eval_scalar_function("md5", &[Value::Str("abc".into())]).unwrap(),
+        Value::Str("900150983cd24fb0d6963f7d28e17f72".into())
+    );
+    assert_eq!(
+        eval_scalar_function("md5", &[Value::Bytes(vec![0x00, 0xff, 0x10])]).unwrap(),
+        Value::Str("481e4551ec039aada760901cf52b1917".into())
+    );
+}
+
+#[test]
 fn param_scalar_returns_value() {
     let params = vec![SQLParam::Scalar(Value::Str("hi".into()))];
     let ctx = EvalContext::new(None, &params);
