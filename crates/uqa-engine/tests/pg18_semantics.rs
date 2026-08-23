@@ -19,7 +19,9 @@ fn engine() -> Engine {
 }
 
 fn scalar(engine: &Engine, sql: &str) -> Value {
-    let result = engine.sql(sql, &[]).unwrap();
+    let result = engine
+        .sql(sql, &[])
+        .unwrap_or_else(|error| panic!("{sql}: {error}"));
     let column = result.columns.first().expect("one column").clone();
     result.rows[0].get(&column).cloned().unwrap_or(Value::Null)
 }
@@ -57,6 +59,8 @@ mod array_containment;
 mod array_transforms;
 #[path = "pg18_semantics/comparisons_and_arrays.rs"]
 mod comparisons_and_arrays;
+#[path = "pg18_semantics/md5_overloads.rs"]
+mod md5_overloads;
 #[path = "pg18_semantics/numeric_exactness.rs"]
 mod numeric_exactness;
 #[path = "pg18_semantics/numeric_power_statistics.rs"]

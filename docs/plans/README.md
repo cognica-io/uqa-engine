@@ -9,3 +9,5 @@ Files in this directory record staged implementation work. A living plan must de
 | [`0003-postgresql-18-compatibility.md`](0003-postgresql-18-compatibility.md) | Active | Update in every PostgreSQL 18 compatibility PR that changes a manifest item, milestone, supported surface, or remaining gate. |
 
 The PostgreSQL 18 plan contains a compact ledger generated from `tests/parity/pg18/manifest.json`. `python3 tests/parity/pg18/run_diff.py --validate-manifest` rejects any manifest change whose plan ledger was not updated in the same change, so the readable plan and machine-readable accounting cannot silently diverge again.
+
+Record a newly confirmed gap in its active plan and evidence manifest as incomplete when implementation begins; change it to complete or verified only after the documented exit evidence passes. Do not leave active work visible only in a branch name, issue, or conversation.

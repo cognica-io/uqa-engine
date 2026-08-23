@@ -14,7 +14,7 @@ use super::common::{
     base_type, common_numeric_type, common_type, merge_optional_types, numeric_type,
 };
 use super::{
-    array_transform, containment, integer_base, random_range, reverse, scalar_type_inner,
+    array_transform, containment, integer_base, md5, random_range, reverse, scalar_type_inner,
     FunctionTypeResolver,
 };
 
@@ -54,8 +54,13 @@ pub fn builtin_function_argument_targets(
                 *target = Some(ColumnType::Boolean);
             });
         }
-        "reverse" if targets.len() == 1 => {
-            if let Some(target) = reverse::builtin_argument_type(argument_types) {
+        "reverse" | "md5" if targets.len() == 1 => {
+            let target = if name == "reverse" {
+                reverse::builtin_argument_type(argument_types)
+            } else {
+                md5::builtin_argument_type(argument_types)
+            };
+            if let Some(target) = target {
                 targets.fill(Some(target));
             }
         }
@@ -137,7 +142,6 @@ pub(super) fn builtin_function_type_inner(
         | "translate"
         | "overlay"
         | "format"
-        | "md5"
         | "encode"
         | "split_part"
         | "quote_ident"
@@ -175,6 +179,7 @@ pub(super) fn builtin_function_type_inner(
         "array_sort" | "array_reverse" => {
             array_transform::resolve_type(original_name, binding, args, &argument_types, resolver)
         }
+        "md5" => md5::resolve_type(original_name, binding, args, &argument_types, resolver),
         "reverse" => reverse::resolve_type(original_name, binding, args, &argument_types, resolver),
         "count" | "row_number" | "rank" | "dense_rank" | "crc32" | "crc32c" | "nextval"
         | "currval" | "setval" => Ok(Some(ColumnType::BigInteger)),

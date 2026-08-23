@@ -13,8 +13,8 @@ use crate::{RowSchema, ScalarExpr};
 use super::common::{base_type, common_context_expression_type, merge_optional_types};
 use super::operators::unary_minus_result_type;
 use super::{
-    array_transform, containment, integer_base, random_range, reverse, scalar_type_inner, uuid,
-    FunctionTypeResolver,
+    array_transform, containment, integer_base, md5, random_range, reverse, scalar_type_inner,
+    uuid, FunctionTypeResolver,
 };
 
 /// Bind polymorphic type-introspection calls and common-type coercions while the input schema still carries declared SQL types. Runtime values deliberately do not encode integer widths, varchar identity, or float widths, and selector expressions must return the common SQL type rather than the storage type of the branch selected at runtime.
@@ -88,6 +88,7 @@ fn bind_type_introspection_inner(
             let name =
                 array_transform::bind_call(name, &mut binding, &mut args, schema, params, resolver);
             let name = reverse::bind_call(name, &mut binding, &mut args, schema, params, resolver);
+            let name = md5::bind_call(name, &mut binding, &mut args, schema, params, resolver);
             let name = uuid::bind_extraction_signature(name, &args, schema, params, resolver);
             if is_pg_typeof(&name) && args.len() == 1 {
                 let name = scalar_type_inner(&args[0], schema, params, resolver)
@@ -299,6 +300,7 @@ fn requires_type_introspection_binding(expression: &ScalarExpr) -> bool {
                 || random_range::is_function(name)
                 || array_transform::is_function(name)
                 || reverse::is_function(name)
+                || md5::is_function(name)
                 || uuid::is_extraction_function(name)
                 || containment::is_operator(name)
                 || args.iter().any(requires_type_introspection_binding)

@@ -14,9 +14,9 @@ use super::{
 };
 
 mod array_transform;
-mod reverse;
+mod text_bytea;
 
-pub(super) use reverse::{bind_call as bind_reverse_call, ReverseCall};
+pub(super) use text_bytea::{bind_call as bind_text_bytea_call, TextByteaCall};
 
 #[allow(clippy::too_many_lines)]
 pub(super) fn infer_builtin_function(
@@ -47,7 +47,7 @@ pub(super) fn infer_builtin_function(
             require_class(name, args, TypeClass::Text)?;
             GenerationType::Text
         }
-        "reverse" => reverse::require_signature(name, argument_names, args)?,
+        "md5" | "reverse" => text_bytea::require_signature(name, argument_names, args)?,
         "concat" | "concat_ws" | "format" => {
             return Err(non_immutable_function(name));
         }
@@ -239,15 +239,6 @@ pub(super) fn infer_builtin_function(
             require_one(name, &args[2], TypeClass::Integer)?;
             if let Some(count) = args.get(3) {
                 require_one(name, count, TypeClass::Integer)?;
-            }
-            GenerationType::Text
-        }
-        "md5" => {
-            require_arity(name, args, 1, 1)?;
-            if !accepts_class(&args[0], TypeClass::Text)
-                && !accepts_class(&args[0], TypeClass::Bytea)
-            {
-                return Err(function_type_error(name, &args[0], "text or bytea"));
             }
             GenerationType::Text
         }

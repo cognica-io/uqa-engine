@@ -42,6 +42,14 @@ fn builtin_argument_targets_resolve_fixed_and_overloaded_unknowns() {
         builtin_function_argument_targets("random", &[None, Some(ColumnType::BigInteger)]),
         vec![Some(ColumnType::BigInteger), Some(ColumnType::BigInteger)]
     );
+    assert_eq!(
+        builtin_function_argument_targets("md5", &[None]),
+        vec![Some(ColumnType::Text)]
+    );
+    assert_eq!(
+        builtin_function_argument_targets("pg_catalog.md5", &[Some(ColumnType::Bytea)]),
+        vec![Some(ColumnType::Bytea)]
+    );
 }
 
 #[test]
