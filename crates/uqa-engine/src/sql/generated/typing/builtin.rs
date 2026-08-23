@@ -566,6 +566,9 @@ fn require_random_signature(
     argument_names: &[Option<String>],
     args: &[GenerationType],
 ) -> Result<(), SQLError> {
+    uqa_sql::expr::validate_named_argument_order(
+        argument_names.iter().map(|name| name.as_deref()),
+    )?;
     if args.is_empty() && argument_names.is_empty() {
         return Ok(());
     }

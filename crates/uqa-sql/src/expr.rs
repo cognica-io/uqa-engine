@@ -511,6 +511,36 @@ fn normalized_function_name(name: &str) -> Cow<'_, str> {
 /// in (`NamedArgExpr` has no dedicated AST node).
 pub const NAMED_ARG_FUNCTION: &str = "__named_arg";
 
+/// Enforce `PostgreSQL` function-call ordering before overload resolution.
+/// Positional arguments must precede named arguments, and each explicit name
+/// may occur only once.
+pub fn validate_named_argument_order<'a>(
+    argument_names: impl IntoIterator<Item = Option<&'a str>>,
+) -> Result<()> {
+    let mut saw_named = false;
+    let mut named = Vec::new();
+    for argument_name in argument_names {
+        let Some(argument_name) = argument_name else {
+            if saw_named {
+                return Err(SQLError::Routine {
+                    sqlstate: "42601".into(),
+                    message: "positional argument cannot follow named argument".into(),
+                });
+            }
+            continue;
+        };
+        saw_named = true;
+        if named.contains(&argument_name) {
+            return Err(SQLError::Routine {
+                sqlstate: "42601".into(),
+                message: format!("argument name \"{argument_name}\" used more than once"),
+            });
+        }
+        named.push(argument_name);
+    }
+    Ok(())
+}
+
 /// Physical scalar built-ins selected after `PostgreSQL` overload resolution has preserved the declared integer width.
 pub const TO_BIN_INT4_FUNCTION: &str = "__to_bin_int4";
 pub const TO_BIN_INT8_FUNCTION: &str = "__to_bin_int8";

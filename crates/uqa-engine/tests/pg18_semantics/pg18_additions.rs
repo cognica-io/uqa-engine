@@ -356,6 +356,8 @@ fn assert_random_range_errors(eng: &Engine) {
         ("SELECT random(1)", "42883"),
         ("SELECT random(foo => 1, bar => 2)", "42883"),
         ("SELECT random(1, min => 2)", "42883"),
+        ("SELECT random(max => 2, 1)", "42601"),
+        ("SELECT random(min => 1, min => 2)", "42601"),
         ("SELECT random(9, 1)", "22023"),
         ("SELECT random(max => 1, min => 9)", "22023"),
         ("SELECT random('NaN'::numeric, 1::numeric)", "22023"),

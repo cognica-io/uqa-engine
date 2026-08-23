@@ -28,6 +28,7 @@ pub(super) fn resolve_type(
     argument_types: &[Option<ColumnType>],
 ) -> Result<Option<ColumnType>, SQLError> {
     let argument_types = effective_argument_types(args, argument_types);
+    validate_argument_order(args)?;
     if args.len() != 2 || !valid_argument_positions(args) {
         return Err(undefined_function(name, args, &argument_types));
     }
@@ -145,6 +146,9 @@ fn ambiguous_arguments(argument_types: &[Option<ColumnType>]) -> bool {
 }
 
 fn valid_argument_positions(args: &[ScalarExpr]) -> bool {
+    if validate_argument_order(args).is_err() {
+        return false;
+    }
     let mut positions = [false; 2];
     let mut positional = 0;
     for argument in args {
@@ -167,6 +171,10 @@ fn valid_argument_positions(args: &[ScalarExpr]) -> bool {
         *occupied = true;
     }
     positions.into_iter().all(|occupied| occupied)
+}
+
+fn validate_argument_order(args: &[ScalarExpr]) -> Result<(), SQLError> {
+    uqa_sql::expr::validate_named_argument_order(args.iter().map(named_argument_name))
 }
 
 fn named_argument_name(expression: &ScalarExpr) -> Option<&str> {

@@ -277,6 +277,13 @@ fn decimal_uniform_sampling_preserves_the_range_scale_and_exact_bounds() {
         .unwrap();
     assert_eq!(sampled.to_sql_string(), "-1.200");
 
+    let mut draws = [u64::MAX, 4_656_u64 << 51].into_iter();
+    let sampled = lower
+        .uniform_sample_inclusive_with(&upper, || Ok::<u64, ()>(draws.next().unwrap()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(sampled.to_sql_string(), "3.456");
+
     let lower = DecimalValue::parse("1.0").unwrap();
     let upper = DecimalValue::parse("1.000").unwrap();
     let mut draws = 0;

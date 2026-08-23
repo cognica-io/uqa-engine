@@ -14,6 +14,23 @@ fn bundled_parser_is_postgresql_18_4() {
 }
 
 #[test]
+fn function_arguments_reject_positional_after_named_and_duplicate_names() {
+    let error = compile("SELECT random(max => 2, 1)").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42601"));
+    assert_eq!(
+        error.to_string(),
+        "positional argument cannot follow named argument"
+    );
+
+    let error = compile("SELECT random(min => 1, min => 2)").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42601"));
+    assert_eq!(
+        error.to_string(),
+        "argument name \"min\" used more than once"
+    );
+}
+
+#[test]
 fn returning_row_aliases_preserve_quoted_identifier_case() {
     let Statement::Insert(insert) = first(
         "INSERT INTO items VALUES (1) RETURNING WITH (OLD AS \"Image\", NEW AS \"image\") \"Image\".*, \"image\".*",

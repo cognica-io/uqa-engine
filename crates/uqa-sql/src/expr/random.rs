@@ -6,7 +6,10 @@
 
 //! PostgreSQL-compatible stateful random-number functions.
 
-use super::{out_of_range, to_decimal, to_i64, EvalContext, Result, SQLError, Value};
+use super::{
+    out_of_range, to_decimal, to_i64, validate_named_argument_order, EvalContext, Result, SQLError,
+    Value,
+};
 
 /// Physical scalar built-ins selected after overload resolution preserves the
 /// declared SQL result type beyond the shared dynamic integer carrier.
@@ -68,6 +71,7 @@ pub(super) fn eval_random_function(
 }
 
 fn ordered_bounds(call_args: &[(Option<String>, Value)]) -> Result<[&Value; 2]> {
+    validate_named_argument_order(call_args.iter().map(|(name, _)| name.as_deref()))?;
     if call_args.len() != 2 {
         return Err(SQLError::BadArity {
             name: "random".into(),

@@ -296,6 +296,28 @@ fn random_range_functions_bind_the_promoted_overload_before_width_is_erased() {
         };
         assert_eq!(name, expected_name);
     }
+
+    let named_max = ScalarExpr::Func {
+        name: uqa_sql::expr::NAMED_ARG_FUNCTION.into(),
+        binding: None,
+        args: vec![
+            ScalarExpr::Literal(Value::Str("max".into())),
+            ScalarExpr::Column("i4".into()),
+        ],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    let invalid_order = ScalarExpr::Func {
+        name: "random".into(),
+        binding: None,
+        args: vec![named_max, ScalarExpr::Column("i4".into())],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    let error = scalar_type(&invalid_order, &schema, &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42601"));
 }
 
 #[test]
