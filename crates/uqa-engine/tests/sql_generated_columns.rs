@@ -226,6 +226,11 @@ fn generated_column_validation_is_failure_atomic_and_rejects_virtual_indexes() {
             "not immutable",
         ),
         (
+            "volatile_range_generated",
+            "CREATE TABLE volatile_range_generated (source INTEGER, derived INTEGER GENERATED ALWAYS AS (random(1, 10)))",
+            "not immutable",
+        ),
+        (
             "chained_generated",
             "CREATE TABLE chained_generated (source INTEGER, first_value INTEGER GENERATED ALWAYS AS (source + 1), second_value INTEGER GENERATED ALWAYS AS (first_value + 1))",
             "cannot use generated column",

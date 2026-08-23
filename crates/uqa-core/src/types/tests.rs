@@ -268,6 +268,37 @@ fn decimal_metadata_matches_display_and_numeric_equality() {
 }
 
 #[test]
+fn decimal_uniform_sampling_preserves_the_range_scale_and_exact_bounds() {
+    let lower = DecimalValue::parse("-1.20").unwrap();
+    let upper = DecimalValue::parse("3.456").unwrap();
+    let sampled = lower
+        .uniform_sample_inclusive_with(&upper, || Ok::<u64, ()>(0))
+        .unwrap()
+        .unwrap();
+    assert_eq!(sampled.to_sql_string(), "-1.200");
+
+    let mut draws = [u64::MAX, 4_656_u64 << 51].into_iter();
+    let sampled = lower
+        .uniform_sample_inclusive_with(&upper, || Ok::<u64, ()>(draws.next().unwrap()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(sampled.to_sql_string(), "3.456");
+
+    let lower = DecimalValue::parse("1.0").unwrap();
+    let upper = DecimalValue::parse("1.000").unwrap();
+    let mut draws = 0;
+    let sampled = lower
+        .uniform_sample_inclusive_with(&upper, || {
+            draws += 1;
+            Ok::<u64, ()>(u64::MAX)
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(sampled.to_sql_string(), "1.000");
+    assert_eq!(draws, 0, "an equal range must not consume PRNG state");
+}
+
+#[test]
 fn decimal_numeric_conversions_use_internal_parts() {
     let value = DecimalValue::parse("-1234567890.125").unwrap();
     assert_eq!(value.to_i64_trunc(), Some(-1_234_567_890));

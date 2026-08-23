@@ -92,17 +92,21 @@ impl Engine {
         Ok(out)
     }
 
+    /// Draw every bit of one word from this logical session's PRNG.
+    pub fn next_random_u64(&self) -> u64 {
+        let mut state = self.session.random_state.lock();
+        let s0 = state.s0;
+        let mixed = state.s1 ^ s0;
+        let value = s0.wrapping_mul(5).rotate_left(7).wrapping_mul(9);
+        state.s0 = s0.rotate_left(24) ^ mixed ^ (mixed << 16);
+        state.s1 = mixed.rotate_left(37);
+        value
+    }
+
     /// Draw one value in `[0, 1)` from this logical session's PRNG.
     pub fn next_random_value(&self) -> f64 {
-        let mut session = self.session.state.write();
-        let mut value = session.random_state;
-        // xorshift64*; every stored state is non-zero.
-        value ^= value >> 12;
-        value ^= value << 25;
-        value ^= value >> 27;
-        session.random_state = value;
-        let sample = value.wrapping_mul(0x2545_f491_4f6c_dd1d) >> 11;
-        sample as f64 * (1.0 / ((1_u64 << 53) as f64))
+        let sample = self.next_random_u64() >> 12;
+        sample as f64 * (1.0 / ((1_u64 << 52) as f64))
     }
 
     /// Reseed this logical session's PRNG. Equal seeds produce equal streams
@@ -113,17 +117,8 @@ impl Engine {
                 "setseed parameter {seed} is out of allowed range [-1,1]"
             ));
         }
-        let normalized = if seed == 0.0 { 0 } else { seed.to_bits() };
-        let mut state = normalized ^ 0x9e37_79b9_7f4a_7c15;
-        // SplitMix64 avalanche so nearby floating-point seeds do not create
-        // correlated xorshift states.
-        state = (state ^ (state >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        state = (state ^ (state >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-        state ^= state >> 31;
-        if state == 0 {
-            state = 0x2545_f491_4f6c_dd1d;
-        }
-        self.session.state.write().random_state = state;
+        let scaled = (((1_u64 << 52) - 1) as f64 * seed) as i64;
+        *self.session.random_state.lock() = crate::random_state_from_seed(scaled as u64);
         Ok(())
     }
 

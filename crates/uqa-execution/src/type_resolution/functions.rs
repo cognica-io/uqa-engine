@@ -13,7 +13,7 @@ use crate::{RowSchema, ScalarExpr};
 use super::common::{
     base_type, common_numeric_type, common_type, merge_optional_types, numeric_type,
 };
-use super::{containment, integer_base, scalar_type_inner, FunctionTypeResolver};
+use super::{containment, integer_base, random_range, scalar_type_inner, FunctionTypeResolver};
 
 pub fn builtin_function_type(
     name: &str,
@@ -40,6 +40,11 @@ pub fn builtin_function_argument_targets(
         }
         "uuid_extract_version" | "uuid_extract_timestamp" if targets.len() == 1 => {
             targets.fill(Some(ColumnType::Uuid));
+        }
+        "random" if targets.len() == 2 => {
+            if let Some(target) = random_range::selected_argument_type(argument_types) {
+                targets.fill(Some(target));
+            }
         }
         "concat_op" if targets.len() == 2 => {
             for position in 0..2 {
@@ -144,8 +149,14 @@ pub(super) fn builtin_function_type_inner(
         | "json_extract_path_text"
         | "jsonb_extract_path_text" => Ok(Some(ColumnType::Text)),
         name if integer_base::is_bound_function(name) => Ok(Some(ColumnType::Text)),
+        name if random_range::bound_function_type(name).is_some() => {
+            Ok(random_range::bound_function_type(name))
+        }
         "to_bin" | "to_hex" | "to_oct" => {
             integer_base::resolve_type(original_name, args, &argument_types)
+        }
+        "random" if !args.is_empty() => {
+            random_range::resolve_type(original_name, args, &argument_types)
         }
         "count" | "row_number" | "rank" | "dense_rank" | "crc32" | "crc32c" | "nextval"
         | "currval" | "setval" => Ok(Some(ColumnType::BigInteger)),

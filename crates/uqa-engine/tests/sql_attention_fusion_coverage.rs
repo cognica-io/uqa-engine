@@ -188,7 +188,7 @@ fn attention_options_reject_unknown_duplicate_and_invalid_values() {
         ),
         (
             "normalized => true, normalized => false",
-            "duplicate option `normalized` for fuse_attention",
+            "argument name \"normalized\" used more than once",
         ),
         ("base_rate => 0.0", "base_rate must be finite and in (0, 1)"),
         ("normalized => 1", "normalized must be a constant boolean"),
@@ -211,7 +211,7 @@ fn attention_options_reject_unknown_duplicate_and_invalid_values() {
         ),
         (
             "n_heads => 2, n_heads => 3",
-            "duplicate option `n_heads` for fuse_multihead",
+            "argument name \"n_heads\" used more than once",
         ),
     ];
     for (options, expected) in cases {

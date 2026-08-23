@@ -195,14 +195,34 @@ fn side_effecting_selects_use_statement_rollback_in_memory() {
         .unwrap();
     assert!(cypher_rows.rows.is_empty());
 
-    // random() mutates the per-session RNG. A failed outer expression must
-    // restore the stream to the exact pre-statement position.
+    // PostgreSQL's per-session RNG is nontransactional. A failed outer
+    // expression leaves each draw consumed even though SQL mutations roll back.
+    assert_failed_random_draws_remain_consumed(&eng);
+}
+
+fn assert_failed_random_draws_remain_consumed(eng: &Engine) {
     let baseline = Engine::new();
     baseline.sql("SELECT setseed(0.25)", &[]).unwrap();
+    baseline.sql("SELECT random()", &[]).unwrap();
     let expected = baseline.sql("SELECT random() AS value", &[]).unwrap();
     eng.sql("SELECT setseed(0.25)", &[]).unwrap();
     eng.sql("SELECT CASE WHEN random() >= 0 THEN 1 / 0 ELSE 0 END", &[])
         .unwrap_err();
+    let actual = eng.sql("SELECT random() AS value", &[]).unwrap();
+    assert_eq!(actual.rows[0]["value"], expected.rows[0]["value"]);
+
+    let baseline = Engine::new();
+    baseline.sql("SELECT setseed(0.25)", &[]).unwrap();
+    baseline
+        .sql("SELECT random(-10::bigint, 10::bigint)", &[])
+        .unwrap();
+    let expected = baseline.sql("SELECT random() AS value", &[]).unwrap();
+    eng.sql("SELECT setseed(0.25)", &[]).unwrap();
+    eng.sql(
+        "SELECT CASE WHEN random(-10::bigint, 10::bigint) >= -10 THEN 1 / 0 ELSE 0 END",
+        &[],
+    )
+    .unwrap_err();
     let actual = eng.sql("SELECT random() AS value", &[]).unwrap();
     assert_eq!(actual.rows[0]["value"], expected.rows[0]["value"]);
 }
@@ -339,7 +359,7 @@ fn memory_savepoint_restores_registry_state_without_losing_earlier_changes() {
 }
 
 #[test]
-fn persistent_rollback_and_savepoint_restore_lightweight_session_state() {
+fn persistent_rollback_restores_transactional_session_state_but_not_random_state() {
     let directory = tempfile::tempdir().unwrap();
     let engine = Engine::open(&directory.path().join("session-state.db")).unwrap();
     engine.sql("CREATE SCHEMA base", &[]).unwrap();
@@ -348,7 +368,7 @@ fn persistent_rollback_and_savepoint_restore_lightweight_session_state() {
     engine.sql("SELECT setseed(0.25)", &[]).unwrap();
 
     let baseline = Engine::new();
-    baseline.sql("SELECT setseed(0.25)", &[]).unwrap();
+    baseline.sql("SELECT setseed(-0.5)", &[]).unwrap();
     let expected_outer = baseline.sql("SELECT random() AS value", &[]).unwrap();
 
     engine.sql("BEGIN", &[]).unwrap();
@@ -377,7 +397,9 @@ fn persistent_rollback_and_savepoint_restore_lightweight_session_state() {
     engine.sql("SAVEPOINT session_point", &[]).unwrap();
 
     let savepoint_baseline = Engine::new();
-    savepoint_baseline.sql("SELECT setseed(0.5)", &[]).unwrap();
+    savepoint_baseline
+        .sql("SELECT setseed(-0.75)", &[])
+        .unwrap();
     let expected_savepoint = savepoint_baseline
         .sql("SELECT random() AS value", &[])
         .unwrap();

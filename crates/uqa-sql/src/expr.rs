@@ -18,6 +18,7 @@ use crate::result::ResultRow;
 
 mod encoding;
 mod json;
+mod random;
 mod time;
 mod uuid;
 
@@ -29,6 +30,7 @@ use json::{
     json_has_key, json_has_keys, json_typeof, jsonb_insert, jsonb_set, jsonpath_candidate,
     jsonpath_exists, jsonpath_match, parse_json, strip_nulls, typed_json_value, value_to_json,
 };
+pub use random::{RANDOM_INT4_FUNCTION, RANDOM_INT8_FUNCTION, RANDOM_NUMERIC_FUNCTION};
 use time::{
     age_between, coerce_temporal, date_trunc_value, extract_from_value, format_pg_number,
     format_temporal, hex_encode, make_timestamp, parse_timestamp, pg_to_chrono_fmt,
@@ -106,6 +108,13 @@ pub trait EngineHook {
     /// Draw from an engine-owned logical-session PRNG. `None` keeps pure,
     /// engine-free expression evaluation available for library callers.
     fn random_value(&self) -> std::result::Result<Option<f64>, String> {
+        Ok(None)
+    }
+
+    /// Draw every bit of one engine-owned logical-session PRNG word. Range
+    /// functions use this instead of a floating-point sample so `bigint` and
+    /// arbitrary-precision `numeric` bounds remain uniform.
+    fn random_u64(&self) -> std::result::Result<Option<u64>, String> {
         Ok(None)
     }
 
@@ -502,6 +511,36 @@ fn normalized_function_name(name: &str) -> Cow<'_, str> {
 /// in (`NamedArgExpr` has no dedicated AST node).
 pub const NAMED_ARG_FUNCTION: &str = "__named_arg";
 
+/// Enforce `PostgreSQL` function-call ordering before overload resolution.
+/// Positional arguments must precede named arguments, and each explicit name
+/// may occur only once.
+pub fn validate_named_argument_order<'a>(
+    argument_names: impl IntoIterator<Item = Option<&'a str>>,
+) -> Result<()> {
+    let mut saw_named = false;
+    let mut named = Vec::new();
+    for argument_name in argument_names {
+        let Some(argument_name) = argument_name else {
+            if saw_named {
+                return Err(SQLError::Routine {
+                    sqlstate: "42601".into(),
+                    message: "positional argument cannot follow named argument".into(),
+                });
+            }
+            continue;
+        };
+        saw_named = true;
+        if named.contains(&argument_name) {
+            return Err(SQLError::Routine {
+                sqlstate: "42601".into(),
+                message: format!("argument name \"{argument_name}\" used more than once"),
+            });
+        }
+        named.push(argument_name);
+    }
+    Ok(())
+}
+
 /// Physical scalar built-ins selected after `PostgreSQL` overload resolution has preserved the declared integer width.
 pub const TO_BIN_INT4_FUNCTION: &str = "__to_bin_int4";
 pub const TO_BIN_INT8_FUNCTION: &str = "__to_bin_int8";
@@ -605,6 +644,11 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         {
             Some(true)
         }
+        "random" | RANDOM_INT4_FUNCTION | RANDOM_INT8_FUNCTION | RANDOM_NUMERIC_FUNCTION
+            if argument_count == 2 =>
+        {
+            Some(true)
+        }
         "age" | "btrim" | "ltrim" | "rtrim" | "trim" | "log" | "round" | "trunc"
         | "json_strip_nulls" | "jsonb_strip_nulls"
             if matches!(argument_count, 1 | 2) =>
@@ -697,15 +741,11 @@ pub fn eval_function_call(
     let lower = lower.as_ref();
     let evaluated: Vec<Value> = call_args.iter().map(|(_, value)| value.clone()).collect();
 
-    if lower == "random" {
-        if !evaluated.is_empty() {
-            return Err(SQLError::TypeMismatch("random takes no arguments".into()));
-        }
-        if let Some(engine) = ctx.engine {
-            if let Some(value) = engine.random_value().map_err(SQLError::Internal)? {
-                return Ok(Value::Float(value));
-            }
-        }
+    if let Some(result) = random::eval_random_function(lower, &call_args, ctx) {
+        return result;
+    }
+    if lower == "random" && !evaluated.is_empty() {
+        return Err(SQLError::TypeMismatch("random takes no arguments".into()));
     }
     if lower == "setseed" {
         let [value] = evaluated.as_slice() else {

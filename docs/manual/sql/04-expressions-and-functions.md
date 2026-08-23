@@ -62,7 +62,9 @@ WHERE value LIKE 'a!_b' ESCAPE '!';
 | Random | `random`, `setseed` |
 | Formatting | `to_bin`, `to_oct`, `to_hex`, `to_number` |
 
-`to_bin`, `to_oct`, and `to_hex` accept PostgreSQL's exact `integer` and `bigint` overloads and return lowercase, unprefixed text; negative values use the argument type's 32-bit or 64-bit two's-complement representation. `to_number(text, 'RN')` reads the PostgreSQL Roman-numeral prefix after leading whitespace, accepts values from 1 through 3999, and ignores input after that prefix. Random state is session-local. Use `setseed` for deterministic test input, not for cryptographic randomness; `gen_random_uuid` and `uuidv4` produce random version 4 UUIDs, while `uuidv7([shift interval])` produces time-ordered version 7 UUIDs.
+`to_bin`, `to_oct`, and `to_hex` accept PostgreSQL's exact `integer` and `bigint` overloads and return lowercase, unprefixed text; negative values use the argument type's 32-bit or 64-bit two's-complement representation. `to_number(text, 'RN')` reads the PostgreSQL Roman-numeral prefix after leading whitespace, accepts values from 1 through 3999, and ignores input after that prefix.
+
+`random()` returns a `double precision` value from 0.0 inclusive to 1.0 exclusive. `random(min, max)` has exact `integer`, `bigint`, and `numeric` overloads and samples both bounds inclusively; mixed integer arguments select PostgreSQL's promoted overload, and a numeric result uses the greater fractional scale of its bounds. NULL bounds produce NULL, a lower bound greater than the upper bound and non-finite numeric bounds report SQLSTATE `22023`, and equal bounds do not advance the random stream. Random state is session-local and nontransactional, so failed statements and transaction or savepoint rollback leave consumed draws and `setseed` changes in place; `setseed` reproduces PostgreSQL's sequence across the unit and range forms. Use these functions for deterministic tests and non-cryptographic sampling only; `gen_random_uuid` and `uuidv4` produce random version 4 UUIDs, while `uuidv7([shift interval])` produces time-ordered version 7 UUIDs.
 
 ## UUID functions
 

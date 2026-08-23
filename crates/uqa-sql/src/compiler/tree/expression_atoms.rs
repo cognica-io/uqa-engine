@@ -121,6 +121,12 @@ pub(in crate::compiler) fn compile_func_call(f: &pg_query::protobuf::FuncCall) -
             "VARIADIC invocation of `{raw_name}` is not represented by Expr::Func"
         )));
     }
+    crate::expr::validate_named_argument_order(f.args.iter().map(|argument| {
+        match argument.node.as_ref() {
+            Some(NodeEnum::NamedArgExpr(argument)) => Some(argument.name.as_str()),
+            _ => None,
+        }
+    }))?;
     let mut args = f
         .args
         .iter()

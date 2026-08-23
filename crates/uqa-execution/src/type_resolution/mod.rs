@@ -13,8 +13,9 @@ use uqa_sql::{SQLError, SQLParam};
 use uqa_core::Value;
 #[cfg(test)]
 use uqa_sql::expr::{
-    TO_BIN_INT4_FUNCTION, TO_BIN_INT8_FUNCTION, TO_HEX_INT4_FUNCTION, TO_HEX_INT8_FUNCTION,
-    TO_OCT_INT4_FUNCTION, TO_OCT_INT8_FUNCTION,
+    RANDOM_INT4_FUNCTION, RANDOM_INT8_FUNCTION, RANDOM_NUMERIC_FUNCTION, TO_BIN_INT4_FUNCTION,
+    TO_BIN_INT8_FUNCTION, TO_HEX_INT4_FUNCTION, TO_HEX_INT8_FUNCTION, TO_OCT_INT4_FUNCTION,
+    TO_OCT_INT8_FUNCTION,
 };
 
 use crate::{RowSchema, ScalarExpr};
@@ -27,6 +28,7 @@ mod integer_base;
 mod introspection;
 mod operators;
 mod qualified_column;
+mod random_range;
 mod uuid;
 
 pub use common::{common_context_expression_type, common_type, values_column_types};

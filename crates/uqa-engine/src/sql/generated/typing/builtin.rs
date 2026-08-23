@@ -16,6 +16,7 @@ use super::{
 #[allow(clippy::too_many_lines)]
 pub(super) fn infer_builtin_function(
     name: &str,
+    argument_names: &[Option<String>],
     args: &[GenerationType],
 ) -> Result<Option<GenerationType>, SQLError> {
     let result = match name {
@@ -171,8 +172,11 @@ pub(super) fn infer_builtin_function(
             require_uuid_extraction_signature(name, args)?;
             GenerationType::TimestampTz
         }
-        "random"
-        | "array_sample"
+        "random" => {
+            require_random_signature(name, argument_names, args)?;
+            return Err(non_immutable_function(name));
+        }
+        "array_sample"
         | "now"
         | "current_timestamp"
         | "current_date"
@@ -547,6 +551,89 @@ fn infer_integer_base_conversion(
         args,
         [GenerationType::Null | GenerationType::UnknownLiteral(_) | GenerationType::SmallInteger]
     );
+    Err(SQLError::Routine {
+        sqlstate: if ambiguous { "42725" } else { "42883" }.into(),
+        message: if ambiguous {
+            format!("function {name}({signature}) is not unique")
+        } else {
+            format!("function {name}({signature}) does not exist")
+        },
+    })
+}
+
+fn require_random_signature(
+    name: &str,
+    argument_names: &[Option<String>],
+    args: &[GenerationType],
+) -> Result<(), SQLError> {
+    uqa_sql::expr::validate_named_argument_order(
+        argument_names.iter().map(|name| name.as_deref()),
+    )?;
+    if args.is_empty() && argument_names.is_empty() {
+        return Ok(());
+    }
+    let valid_names = if args.len() == 2 && argument_names.len() == 2 {
+        let mut positions = [false; 2];
+        let mut positional = 0;
+        argument_names.iter().all(|argument_name| {
+            let position = match argument_name.as_deref() {
+                Some("min") => 0,
+                Some("max") => 1,
+                Some(_) => return false,
+                None => {
+                    let position = positional;
+                    positional += 1;
+                    position
+                }
+            };
+            positions.get_mut(position).is_some_and(|occupied| {
+                let available = !*occupied;
+                *occupied = true;
+                available
+            })
+        }) && positions.into_iter().all(|occupied| occupied)
+    } else {
+        false
+    };
+    let strongest = args
+        .iter()
+        .try_fold(None, |strongest, argument| {
+            let rank = match argument {
+                GenerationType::Null | GenerationType::UnknownLiteral(_) => return Some(strongest),
+                GenerationType::SmallInteger => 0,
+                GenerationType::Integer => 1,
+                GenerationType::BigInteger => 2,
+                GenerationType::Numeric => 3,
+                _ => return None,
+            };
+            Some(Some(
+                strongest.map_or(rank, |current: u8| current.max(rank)),
+            ))
+        })
+        .flatten();
+    if valid_names && matches!(strongest, Some(1..=3)) {
+        return Ok(());
+    }
+    let signature = args
+        .iter()
+        .zip(argument_names)
+        .map(|(argument, argument_name)| {
+            let argument = generation_type_name(argument);
+            argument_name
+                .as_ref()
+                .map_or(argument.clone(), |name| format!("{name} => {argument}"))
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let ambiguous = valid_names
+        && args.iter().all(|argument| {
+            matches!(
+                argument,
+                GenerationType::Null
+                    | GenerationType::UnknownLiteral(_)
+                    | GenerationType::SmallInteger
+            )
+        });
     Err(SQLError::Routine {
         sqlstate: if ambiguous { "42725" } else { "42883" }.into(),
         message: if ambiguous {

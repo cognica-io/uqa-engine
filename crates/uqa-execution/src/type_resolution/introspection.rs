@@ -12,7 +12,9 @@ use crate::{RowSchema, ScalarExpr};
 
 use super::common::{base_type, common_context_expression_type, merge_optional_types};
 use super::operators::unary_minus_result_type;
-use super::{containment, integer_base, scalar_type_inner, uuid, FunctionTypeResolver};
+use super::{
+    containment, integer_base, random_range, scalar_type_inner, uuid, FunctionTypeResolver,
+};
 
 /// Bind polymorphic type-introspection calls and common-type coercions while the input schema still carries declared SQL types. Runtime values deliberately do not encode integer widths, varchar identity, or float widths, and selector expressions must return the common SQL type rather than the storage type of the branch selected at runtime.
 pub fn bind_type_introspection(
@@ -67,6 +69,14 @@ fn bind_type_introspection_inner(
                 bind_common_type_expressions(&mut args, schema, params, resolver);
             }
             let name = integer_base::bind_overload(
+                name,
+                binding.as_ref(),
+                &args,
+                schema,
+                params,
+                resolver,
+            );
+            let name = random_range::bind_overload(
                 name,
                 binding.as_ref(),
                 &args,
@@ -281,6 +291,7 @@ fn requires_type_introspection_binding(expression: &ScalarExpr) -> bool {
             is_pg_typeof(name)
                 || is_common_type_function(name)
                 || integer_base::is_function(name)
+                || random_range::is_function(name)
                 || uuid::is_extraction_function(name)
                 || containment::is_operator(name)
                 || args.iter().any(requires_type_introspection_binding)

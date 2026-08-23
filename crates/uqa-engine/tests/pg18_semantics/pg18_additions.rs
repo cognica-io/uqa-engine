@@ -212,6 +212,168 @@ fn pg18_to_number_parses_the_postgresql_roman_prefix() {
 }
 
 #[test]
+fn pg18_random_ranges_preserve_overloads_bounds_and_session_state() {
+    let eng = engine();
+    assert_random_range_exact_values_and_types(&eng);
+    assert_random_seeded_sequence_matches_postgres(&eng);
+    assert_random_state_remains_advanced_across_rollbacks(&eng);
+    assert_random_range_samples_stay_within_bounds(&eng);
+    assert_random_range_equal_bounds_do_not_advance_state(&eng);
+    assert_random_range_errors(&eng);
+}
+
+fn assert_random_seeded_sequence_matches_postgres(eng: &Engine) {
+    let result = eng
+        .sql(
+            "SELECT setseed(0.25), random() AS unit, random(1, 10) AS i4, \
+                    random(1::bigint, 10::bigint) AS i8, \
+                    random('-12345678901234567890.12345'::numeric, \
+                           '98765432109876543210.9'::numeric) AS numeric_value, \
+                    random() AS after",
+            &[],
+        )
+        .unwrap();
+    let row = &result.rows[0];
+    assert_eq!(row["unit"], Value::Float(0.197_263_584_984_389_78));
+    assert_eq!(row["i4"], Value::Int(4));
+    assert_eq!(row["i8"], Value::Int(3));
+    assert_eq!(row["numeric_value"], dec("63259412484336593280.17767"));
+    assert_eq!(row["after"], Value::Float(0.493_139_219_146_814));
+}
+
+fn assert_random_state_remains_advanced_across_rollbacks(eng: &Engine) {
+    eng.sql("SELECT setseed(0.25)", &[]).unwrap();
+    assert_eq!(
+        scalar(eng, "SELECT random()"),
+        Value::Float(0.197_263_584_984_389_78)
+    );
+    eng.sql("BEGIN", &[]).unwrap();
+    assert_eq!(
+        scalar(eng, "SELECT random()"),
+        Value::Float(0.210_532_193_953_654_86)
+    );
+    eng.sql("SAVEPOINT random_state", &[]).unwrap();
+    assert_eq!(
+        scalar(eng, "SELECT random()"),
+        Value::Float(0.153_654_262_459_138_38)
+    );
+    eng.sql("ROLLBACK TO SAVEPOINT random_state", &[]).unwrap();
+    assert_eq!(
+        scalar(eng, "SELECT random()"),
+        Value::Float(0.343_812_150_210_953_46)
+    );
+    eng.sql("ROLLBACK", &[]).unwrap();
+    assert_eq!(
+        scalar(eng, "SELECT random()"),
+        Value::Float(0.434_352_839_990_104_9)
+    );
+}
+
+fn assert_random_range_exact_values_and_types(eng: &Engine) {
+    assert_eq!(scalar(eng, "SELECT random(5, 5)"), Value::Int(5));
+    assert_eq!(
+        scalar(eng, "SELECT pg_catalog.random(5::bigint, 5::bigint)"),
+        Value::Int(5)
+    );
+    assert_eq!(
+        text(eng, "SELECT random(5.00::numeric, 5.000::numeric)"),
+        "5.000"
+    );
+    assert_eq!(
+        scalar(eng, "SELECT random(max => 7, min => 7)"),
+        Value::Int(7)
+    );
+    assert_eq!(scalar(eng, "SELECT random(8, max => 8)"), Value::Int(8));
+    assert_eq!(scalar(eng, "SELECT random(NULL, 2)"), Value::Null);
+    assert_eq!(scalar(eng, "SELECT random(1::bigint, NULL)"), Value::Null);
+    for (sql, expected) in [
+        ("SELECT pg_typeof(random(1, 2))", "integer"),
+        (
+            "SELECT pg_typeof(random(1::smallint, 2::integer))",
+            "integer",
+        ),
+        ("SELECT pg_typeof(random(1::integer, 2::bigint))", "bigint"),
+        ("SELECT pg_typeof(random(1::bigint, 2::numeric))", "numeric"),
+        (
+            "SELECT pg_typeof(random((SELECT 1::integer), (SELECT 2::bigint)))",
+            "bigint",
+        ),
+    ] {
+        assert_eq!(text(eng, sql), expected, "{sql}");
+    }
+}
+
+fn assert_random_range_samples_stay_within_bounds(eng: &Engine) {
+    eng.sql("SELECT setseed(0.25)", &[]).unwrap();
+    let numeric_lower = DecimalValue::parse("-0.499").unwrap();
+    let numeric_upper = DecimalValue::parse("0.499").unwrap();
+    for _ in 0..64 {
+        let Value::Int(int4) = scalar(eng, "SELECT random(-2147483648, 2147483647)") else {
+            panic!("integer random range must return an integer");
+        };
+        assert!(i32::try_from(int4).is_ok());
+        let Value::Int(int8) = scalar(
+            eng,
+            "SELECT random('-9223372036854775808'::bigint, '9223372036854775807'::bigint)",
+        ) else {
+            panic!("bigint random range must return a bigint carrier");
+        };
+        assert!((i64::MIN..=i64::MAX).contains(&int8));
+        let Value::Decimal(numeric) =
+            scalar(eng, "SELECT random('-0.499'::numeric, '0.499'::numeric)")
+        else {
+            panic!("numeric random range must return numeric");
+        };
+        assert!(numeric >= numeric_lower && numeric <= numeric_upper);
+        assert_eq!(numeric.display_scale(), Some(3));
+    }
+}
+
+fn assert_random_range_equal_bounds_do_not_advance_state(eng: &Engine) {
+    let baseline = engine();
+    baseline.sql("SELECT setseed(0.25)", &[]).unwrap();
+    let expected = scalar(&baseline, "SELECT random()");
+
+    eng.sql("SELECT setseed(0.25)", &[]).unwrap();
+    assert_eq!(scalar(eng, "SELECT random(5, 5)"), Value::Int(5));
+    assert_eq!(
+        scalar(eng, "SELECT random(5::bigint, 5::bigint)"),
+        Value::Int(5)
+    );
+    assert_eq!(
+        text(eng, "SELECT random(5.0::numeric, 5.00::numeric)"),
+        "5.00"
+    );
+    assert_eq!(scalar(eng, "SELECT random()"), expected);
+}
+
+fn assert_random_range_errors(eng: &Engine) {
+    for (sql, expected_state) in [
+        ("SELECT random(1::smallint, 2::smallint)", "42725"),
+        ("SELECT random('1', '2')", "42725"),
+        ("SELECT random(1::real, 2::real)", "42883"),
+        ("SELECT random(1::text, 2::text)", "42883"),
+        ("SELECT random(1)", "42883"),
+        ("SELECT random(foo => 1, bar => 2)", "42883"),
+        ("SELECT random(1, min => 2)", "42883"),
+        ("SELECT random(max => 2, 1)", "42601"),
+        ("SELECT random(min => 1, min => 2)", "42601"),
+        ("SELECT random(9, 1)", "22023"),
+        ("SELECT random(max => 1, min => 9)", "22023"),
+        ("SELECT random('NaN'::numeric, 1::numeric)", "22023"),
+        ("SELECT random(0::numeric, 'Infinity'::numeric)", "22023"),
+        ("SELECT random('-Infinity'::numeric, 0::numeric)", "22023"),
+    ] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some(expected_state), "{sql}: {error}");
+    }
+    assert_eq!(
+        eng.sql("SELECT random(9, 1)", &[]).unwrap_err().to_string(),
+        "lower bound must be less than or equal to upper bound"
+    );
+}
+
+#[test]
 fn pg18_uuid_generators_set_rfc_bits_and_monotonic_submillisecond_time() {
     let eng = engine();
     for (sql, version) in [("SELECT uuidv4()", '4'), ("SELECT uuidv7()", '7')] {
