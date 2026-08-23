@@ -6,7 +6,6 @@
 
 use uqa_core::Value;
 use uqa_sql::ast::{ColumnType, FunctionBinding};
-use uqa_sql::expr::{TO_HEX_INT4_FUNCTION, TO_HEX_INT8_FUNCTION};
 use uqa_sql::{SQLError, SQLParam};
 
 use crate::{RowSchema, ScalarExpr};
@@ -14,7 +13,7 @@ use crate::{RowSchema, ScalarExpr};
 use super::common::{
     base_type, common_numeric_type, common_type, merge_optional_types, numeric_type,
 };
-use super::{containment, scalar_type_inner, to_hex, FunctionTypeResolver};
+use super::{containment, integer_base, scalar_type_inner, FunctionTypeResolver};
 
 pub fn builtin_function_type(
     name: &str,
@@ -123,8 +122,6 @@ pub(super) fn builtin_function_type_inner(
         | "md5"
         | "encode"
         | "split_part"
-        | TO_HEX_INT4_FUNCTION
-        | TO_HEX_INT8_FUNCTION
         | "quote_ident"
         | "quote_literal"
         | "quote_nullable"
@@ -146,7 +143,10 @@ pub(super) fn builtin_function_type_inner(
         | "jsonb_array_elements_text"
         | "json_extract_path_text"
         | "jsonb_extract_path_text" => Ok(Some(ColumnType::Text)),
-        "to_hex" => to_hex::resolve_type(original_name, args, &argument_types),
+        name if integer_base::is_bound_function(name) => Ok(Some(ColumnType::Text)),
+        "to_bin" | "to_hex" | "to_oct" => {
+            integer_base::resolve_type(original_name, args, &argument_types)
+        }
         "count" | "row_number" | "rank" | "dense_rank" | "crc32" | "crc32c" | "nextval"
         | "currval" | "setval" => Ok(Some(ColumnType::BigInteger)),
         "sum" => Ok(first().and_then(|ty| aggregate_sum_type(&ty))),

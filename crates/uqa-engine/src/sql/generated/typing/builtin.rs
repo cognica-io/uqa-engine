@@ -274,9 +274,8 @@ pub(super) fn infer_builtin_function(
             require_arity(name, args, 1, 1)?;
             GenerationType::Integer
         }
-        "to_hex" => {
-            require_signature(name, args, &[TypeClass::Integer])?;
-            GenerationType::Text
+        "to_bin" | "to_hex" | "to_oct" => {
+            return infer_integer_base_conversion(name, args).map(Some);
         }
         "string_to_array" => {
             require_arity(name, args, 2, 3)?;
@@ -530,6 +529,32 @@ pub(super) fn infer_builtin_function(
         _ => return Ok(None),
     };
     Ok(Some(result))
+}
+
+fn infer_integer_base_conversion(
+    name: &str,
+    args: &[GenerationType],
+) -> Result<GenerationType, SQLError> {
+    if let [GenerationType::Integer | GenerationType::BigInteger] = args {
+        return Ok(GenerationType::Text);
+    }
+    let signature = args
+        .iter()
+        .map(generation_type_name)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let ambiguous = matches!(
+        args,
+        [GenerationType::Null | GenerationType::UnknownLiteral(_) | GenerationType::SmallInteger]
+    );
+    Err(SQLError::Routine {
+        sqlstate: if ambiguous { "42725" } else { "42883" }.into(),
+        message: if ambiguous {
+            format!("function {name}({signature}) is not unique")
+        } else {
+            format!("function {name}({signature}) does not exist")
+        },
+    })
 }
 
 fn require_uuid_extraction_signature(name: &str, args: &[GenerationType]) -> Result<(), SQLError> {

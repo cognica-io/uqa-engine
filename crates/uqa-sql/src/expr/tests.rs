@@ -392,6 +392,8 @@ fn builtin_strictness_matches_null_call_semantics() {
         builtin_scalar_function_strictness("application_fn", 1),
         None
     );
+    assert_eq!(builtin_scalar_function_strictness("to_bin", 1), Some(true));
+    assert_eq!(builtin_scalar_function_strictness("to_oct", 1), Some(true));
     assert_eq!(
         eval_scalar_function("abs", &[Value::Null]).unwrap(),
         Value::Null

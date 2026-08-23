@@ -503,8 +503,12 @@ fn normalized_function_name(name: &str) -> Cow<'_, str> {
 pub const NAMED_ARG_FUNCTION: &str = "__named_arg";
 
 /// Physical scalar built-ins selected after `PostgreSQL` overload resolution has preserved the declared integer width.
+pub const TO_BIN_INT4_FUNCTION: &str = "__to_bin_int4";
+pub const TO_BIN_INT8_FUNCTION: &str = "__to_bin_int8";
 pub const TO_HEX_INT4_FUNCTION: &str = "__to_hex_int4";
 pub const TO_HEX_INT8_FUNCTION: &str = "__to_hex_int8";
+pub const TO_OCT_INT4_FUNCTION: &str = "__to_oct_int4";
+pub const TO_OCT_INT8_FUNCTION: &str = "__to_oct_int8";
 /// Physical marker emitted when declared argument types cannot resolve a built-in overload.
 pub const UNDEFINED_FUNCTION_MARKER: &str = "\0uqa.undefined_function:";
 
@@ -582,9 +586,15 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         | "sqrt"
         | "tan"
         | "tanh"
+        | "to_bin"
+        | TO_BIN_INT4_FUNCTION
+        | TO_BIN_INT8_FUNCTION
         | "to_hex"
         | TO_HEX_INT4_FUNCTION
         | TO_HEX_INT8_FUNCTION
+        | "to_oct"
+        | TO_OCT_INT4_FUNCTION
+        | TO_OCT_INT8_FUNCTION
         | "to_json"
         | "to_jsonb"
         | "to_timestamp"

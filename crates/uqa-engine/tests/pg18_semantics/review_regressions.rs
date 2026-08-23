@@ -280,3 +280,159 @@ fn to_hex_uses_the_declared_integer_overload_at_every_expression_boundary() {
         "42725",
     );
 }
+
+#[test]
+fn to_bin_and_to_oct_match_postgresql_integer_widths_and_binding() {
+    let eng = engine();
+    assert_integer_base_binding_errors(&eng);
+    assert_integer_base_results(&eng);
+    assert_integer_base_ddl_boundaries(&eng);
+}
+
+fn assert_integer_base_binding_errors(eng: &Engine) {
+    for function in ["to_bin", "to_oct"] {
+        for (argument, sqlstate) in [
+            ("'42'", "42725"),
+            ("NULL", "42725"),
+            ("1::smallint", "42725"),
+            ("'42'::text", "42883"),
+            ("1::numeric", "42883"),
+        ] {
+            let sql = format!("SELECT {function}({argument})");
+            assert_sqlstate(eng, &sql, sqlstate);
+        }
+        assert_sqlstate(eng, &format!("SELECT {function}()"), "42883");
+        assert_sqlstate(eng, &format!("SELECT {function}(1, 2)"), "42883");
+        let named_sql = format!("SELECT {function}(value => 1)");
+        let named_error = eng.sql(&named_sql, &[]).expect_err(&named_sql);
+        assert_eq!(named_error.sqlstate(), Some("42883"));
+        assert!(named_error
+            .to_string()
+            .contains(&format!("function {function}(")));
+        assert!(!named_error.to_string().contains("__to_"));
+        assert_sqlstate(
+            eng,
+            &format!("SELECT {function}((SELECT 1::smallint))"),
+            "42725",
+        );
+        assert_sqlstate(eng, &format!("SELECT {function}((SELECT '42'))"), "42883");
+        assert_eq!(
+            scalar(eng, &format!("SELECT {function}(NULL::integer)")),
+            Value::Null
+        );
+        assert_eq!(
+            scalar(eng, &format!("SELECT {function}(NULL::bigint)")),
+            Value::Null
+        );
+    }
+}
+
+fn assert_integer_base_results(eng: &Engine) {
+    for (sql, expected) in [
+        ("SELECT to_bin(0)", "0"),
+        ("SELECT to_bin(42)", "101010"),
+        ("SELECT to_bin(-42)", "11111111111111111111111111010110"),
+        (
+            "SELECT to_bin((-42)::bigint)",
+            "1111111111111111111111111111111111111111111111111111111111010110",
+        ),
+        (
+            "SELECT to_bin((-2147483648)::integer)",
+            "10000000000000000000000000000000",
+        ),
+        (
+            "SELECT to_bin((-9223372036854775807 - 1)::bigint)",
+            "1000000000000000000000000000000000000000000000000000000000000000",
+        ),
+        (
+            "SELECT to_bin((SELECT (-1)::bigint))",
+            "1111111111111111111111111111111111111111111111111111111111111111",
+        ),
+        ("SELECT to_oct(0)", "0"),
+        ("SELECT to_oct(42)", "52"),
+        ("SELECT to_oct(-42)", "37777777726"),
+        ("SELECT to_oct((-42)::bigint)", "1777777777777777777726"),
+        ("SELECT to_oct((-2147483648)::integer)", "20000000000"),
+        (
+            "SELECT to_oct((-9223372036854775807 - 1)::bigint)",
+            "1000000000000000000000",
+        ),
+        (
+            "SELECT to_oct((SELECT (-1)::bigint))",
+            "1777777777777777777777",
+        ),
+        ("SELECT pg_catalog.to_bin(42)", "101010"),
+        ("SELECT pg_catalog.to_oct(42)", "52"),
+    ] {
+        assert_eq!(text(eng, sql), expected, "{sql}");
+    }
+    for sql in [
+        "SELECT pg_typeof(to_bin(42))",
+        "SELECT pg_typeof(to_oct(42::bigint))",
+    ] {
+        assert_eq!(text(eng, sql), "text", "{sql}");
+    }
+}
+
+fn assert_integer_base_ddl_boundaries(eng: &Engine) {
+    eng.sql(
+        "CREATE TABLE integer_base_widths (
+            i4 INTEGER,
+            i8 BIGINT,
+            bin4 TEXT GENERATED ALWAYS AS (to_bin(i4)) STORED,
+            oct8 TEXT GENERATED ALWAYS AS (to_oct(i8)) STORED,
+            default_bin TEXT DEFAULT to_bin((-1)::bigint),
+            CHECK (to_oct(i4) = '37777777777')
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO integer_base_widths (i4, i8) VALUES (-1, -1)",
+        &[],
+    )
+    .unwrap();
+    for (column, expected) in [
+        ("bin4", "11111111111111111111111111111111"),
+        ("oct8", "1777777777777777777777"),
+        (
+            "default_bin",
+            "1111111111111111111111111111111111111111111111111111111111111111",
+        ),
+    ] {
+        assert_eq!(
+            text(eng, &format!("SELECT {column} FROM integer_base_widths")),
+            expected
+        );
+    }
+    assert_sqlstate(
+        eng,
+        "INSERT INTO integer_base_widths (i4, i8) VALUES (0, 0)",
+        "23514",
+    );
+    assert_sqlstate(
+        eng,
+        "CREATE TABLE ambiguous_generated_base (i2 SMALLINT, encoded TEXT GENERATED ALWAYS AS (to_bin(i2)) STORED)",
+        "42725",
+    );
+    eng.sql(
+        "CREATE VIEW integer_base_subquery_view AS
+         SELECT to_bin((SELECT (-1)::bigint)) AS encoded",
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        text(eng, "SELECT encoded FROM integer_base_subquery_view"),
+        "1111111111111111111111111111111111111111111111111111111111111111"
+    );
+    assert_sqlstate(
+        eng,
+        "CREATE VIEW invalid_integer_base_subquery_view AS SELECT to_oct((SELECT '42')) AS encoded",
+        "42883",
+    );
+    assert_sqlstate(
+        eng,
+        "CREATE VIEW invalid_integer_base_named_view AS SELECT to_bin(value => 1) AS encoded",
+        "42883",
+    );
+}

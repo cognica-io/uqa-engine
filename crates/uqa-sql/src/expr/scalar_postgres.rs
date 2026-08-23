@@ -10,16 +10,23 @@ use super::{
     allocation_error, compile_pg_regex, eval_between, eval_comparison_op, expect_str,
     json_contained_by, json_contains, nonnegative_usize, out_of_range, quote_ident, quote_literal,
     similar_to_regex, to_i64, value_to_string, values_equal, ArrayValue, BinaryOp, DecimalValue,
-    Result, SQLError, Value, TO_HEX_INT4_FUNCTION, TO_HEX_INT8_FUNCTION,
+    Result, SQLError, Value, TO_BIN_INT4_FUNCTION, TO_BIN_INT8_FUNCTION, TO_HEX_INT4_FUNCTION,
+    TO_HEX_INT8_FUNCTION, TO_OCT_INT4_FUNCTION, TO_OCT_INT8_FUNCTION,
 };
 
 pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
     const NAMES: &[&str] = &[
         "factorial",
         "bit_length",
+        "to_bin",
+        TO_BIN_INT4_FUNCTION,
+        TO_BIN_INT8_FUNCTION,
         "to_hex",
         TO_HEX_INT4_FUNCTION,
         TO_HEX_INT8_FUNCTION,
+        "to_oct",
+        TO_OCT_INT4_FUNCTION,
+        TO_OCT_INT8_FUNCTION,
         "string_to_array",
         "string_to_table",
         "quote_ident",
@@ -98,23 +105,35 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
                     None => Err(SQLError::TypeMismatch("bit_length takes 1 arg".into())),
                 }
             }
-            "to_hex" | TO_HEX_INT4_FUNCTION | TO_HEX_INT8_FUNCTION => {
+            "to_bin" | TO_BIN_INT4_FUNCTION | TO_BIN_INT8_FUNCTION | "to_hex"
+            | TO_HEX_INT4_FUNCTION | TO_HEX_INT8_FUNCTION | "to_oct" | TO_OCT_INT4_FUNCTION
+            | TO_OCT_INT8_FUNCTION => {
                 let [argument] = args else {
-                    return Err(SQLError::TypeMismatch("to_hex takes 1 arg".into()));
+                    return Err(SQLError::TypeMismatch(format!("{name} takes 1 arg")));
                 };
                 if matches!(argument, Value::Null) {
                     return Ok(Value::Null);
                 }
                 let value = to_i64(argument)?;
                 match name {
+                    TO_BIN_INT4_FUNCTION => {
+                        let value = i32::try_from(value).map_err(|_| out_of_range("integer"))?;
+                        Ok(Value::Str(format!("{:b}", value as u32)))
+                    }
+                    TO_BIN_INT8_FUNCTION => Ok(Value::Str(format!("{:b}", value as u64))),
                     TO_HEX_INT4_FUNCTION => {
                         let value = i32::try_from(value).map_err(|_| out_of_range("integer"))?;
                         Ok(Value::Str(format!("{:x}", value as u32)))
                     }
                     TO_HEX_INT8_FUNCTION => Ok(Value::Str(format!("{:x}", value as u64))),
-                    _ => Err(SQLError::Internal(
-                        "to_hex reached runtime before its integer overload was bound".into(),
-                    )),
+                    TO_OCT_INT4_FUNCTION => {
+                        let value = i32::try_from(value).map_err(|_| out_of_range("integer"))?;
+                        Ok(Value::Str(format!("{:o}", value as u32)))
+                    }
+                    TO_OCT_INT8_FUNCTION => Ok(Value::Str(format!("{:o}", value as u64))),
+                    _ => Err(SQLError::Internal(format!(
+                        "{name} reached runtime before its integer overload was bound"
+                    ))),
                 }
             }
             "string_to_array" | "string_to_table" => {

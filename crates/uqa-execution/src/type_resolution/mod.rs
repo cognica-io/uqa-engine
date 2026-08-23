@@ -12,7 +12,10 @@ use uqa_sql::{SQLError, SQLParam};
 #[cfg(test)]
 use uqa_core::Value;
 #[cfg(test)]
-use uqa_sql::expr::{TO_HEX_INT4_FUNCTION, TO_HEX_INT8_FUNCTION};
+use uqa_sql::expr::{
+    TO_BIN_INT4_FUNCTION, TO_BIN_INT8_FUNCTION, TO_HEX_INT4_FUNCTION, TO_HEX_INT8_FUNCTION,
+    TO_OCT_INT4_FUNCTION, TO_OCT_INT8_FUNCTION,
+};
 
 use crate::{RowSchema, ScalarExpr};
 
@@ -20,10 +23,10 @@ mod common;
 mod containment;
 mod equality;
 mod functions;
+mod integer_base;
 mod introspection;
 mod operators;
 mod qualified_column;
-mod to_hex;
 mod uuid;
 
 pub use common::{common_context_expression_type, common_type, values_column_types};

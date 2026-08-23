@@ -91,12 +91,12 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
             "SELECT oid, proname, prokind, proisstrict, proleakproof, provolatile, \
                     pronargs, pronargdefaults, prorettype, proargtypes, proargnames, prosrc \
              FROM pg_catalog.pg_proc \
-             WHERE oid IN (3261, 6342, 6343, 6364, 6383, 6389, 6390, 6429, 6430) \
+             WHERE oid IN (3261, 6330, 6331, 6332, 6333, 6342, 6343, 6364, 6383, 6389, 6390, 6429, 6430) \
              ORDER BY oid",
             &[],
         )
         .unwrap();
-    assert_eq!(routines.rows.len(), 9);
+    assert_eq!(routines.rows.len(), 13);
     let row = |oid: i64| {
         routines
             .rows
@@ -117,6 +117,22 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
             .expect("flat pg_proc argument-name array")
         )
     );
+    for (oid, argument_type, source) in [
+        (6330, 23, "to_bin32"),
+        (6331, 20, "to_bin64"),
+        (6332, 23, "to_oct32"),
+        (6333, 20, "to_oct64"),
+    ] {
+        assert_eq!(row(oid)["prorettype"], Value::Int(25));
+        assert_eq!(
+            row(oid)["proargtypes"],
+            Value::List(vec![Value::Int(argument_type)])
+        );
+        assert_eq!(row(oid)["proisstrict"], Value::Bool(true));
+        assert_eq!(row(oid)["provolatile"], Value::Str("i".into()));
+        assert_eq!(row(oid)["proleakproof"], Value::Bool(false));
+        assert_eq!(row(oid)["prosrc"], Value::Str(source.into()));
+    }
     assert_eq!(row(6342)["prorettype"], Value::Int(1184));
     assert_eq!(
         row(6342)["proargtypes"],
@@ -167,7 +183,36 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
         assert_eq!(row["external_language"], Value::Str("INTERNAL".into()));
     }
 
+    assert_integer_base_conversion_routines(&engine);
     assert_uuid_extraction_routines(&engine);
+}
+
+fn assert_integer_base_conversion_routines(engine: &Engine) {
+    let routines = engine
+        .sql(
+            "SELECT routine_name, data_type, is_deterministic, external_language \
+             FROM information_schema.routines \
+             WHERE routine_name IN ('to_bin', 'to_oct') \
+             ORDER BY routine_name, specific_name",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(routines.rows.len(), 4);
+    for (index, expected_name) in ["to_bin", "to_bin", "to_oct", "to_oct"].iter().enumerate() {
+        assert_eq!(
+            routines.rows[index]["routine_name"],
+            Value::Str((*expected_name).into())
+        );
+        assert_eq!(routines.rows[index]["data_type"], Value::Str("text".into()));
+        assert_eq!(
+            routines.rows[index]["is_deterministic"],
+            Value::Str("YES".into())
+        );
+        assert_eq!(
+            routines.rows[index]["external_language"],
+            Value::Str("INTERNAL".into())
+        );
+    }
 }
 
 fn assert_uuid_extraction_routines(engine: &Engine) {
