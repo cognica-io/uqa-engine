@@ -1,6 +1,8 @@
 # Plan 0001: UQA Engine Implementation Plan
 
-Status: Living implementation plan Target repo: `uqa-engine`
+Status: Living implementation plan
+
+Update rule: Reconcile this plan whenever workspace ownership, public surfaces, engineering policy, verification, or release gates change.
 
 ## 1. Goal and non-goals
 
@@ -45,7 +47,9 @@ UQA Engine is a Cargo workspace with narrow crate boundaries:
 | --- | --- |
 | `uqa-core` | Document sets, semiring relations, posting storage, ranked views, predicates, cancellation |
 | `uqa-analysis` | Tokenizers, analyzers, highlighting, token filters |
-| `uqa-storage` | Catalog, document store, inverted index, SQLite persistence, index metadata |
+| `uqa-storage` | Storage contracts, catalog, document store, inverted and vector indexes, index metadata |
+| `uqa-storage-redb` | Durable redb Key/Value storage provider |
+| `uqa-storage-sqlite` | Durable SQLite and SQLCipher Key/Value storage provider |
 | `uqa-scoring` | BM25, Bayesian BM25, calibration, external priors, WAND/BMW |
 | `uqa-fusion` | Log-odds, adaptive, attention, learned, and boolean fusion |
 | `uqa-operators` | Operator traits, primitive operators, hybrid operators, execution trees |
@@ -53,12 +57,19 @@ UQA Engine is a Cargo workspace with narrow crate boundaries:
 | `uqa-joins` | Row-oriented joins and cross-paradigm join helpers |
 | `uqa-planner` | Costing, cardinality, join enumeration, optimizer rewrites |
 | `uqa-execution` | Batch execution, physical execution, spill helpers |
+| `uqa-pg-query` | Reproducible PostgreSQL 18 parser and PL/pgSQL parser import |
 | `uqa-sql` | SQL AST, expression evaluation, compiler helpers |
+| `uqa-pg-wire` | PostgreSQL frontend/backend protocol compatibility |
+| `uqa-fdw` | PostgreSQL foreign-data wrapper extension boundary |
 | `uqa-engine` | User-facing engine, SQL execution, persistence wiring, migrations |
+| `uqa` | Umbrella Rust package for the supported embedded surface |
+| `uqa-client` | Local and HTTP engine connection abstraction |
+| `uqa-api` | Fluent query builder and public API helpers |
 | `uqa-ml` | Deep model specs, CPU inference, analytical training, optional MLX backend |
 | `uqa-cli` | `usql` CLI and admin commands |
-| `uqa-api` | Fluent query builder and public API helpers |
-| `uqa-pg-wire` | PostgreSQL wire-protocol compatibility |
+| `uqa-python` | Python extension and packaged `usql` executable |
+| `uqa-node` | Native Node.js extension and platform package boundary |
+| `uqa-wasm` | Browser WebAssembly binding |
 
 ## 4. Persistence contract
 
@@ -98,26 +109,33 @@ The public SQL and API surface includes:
 - Completion uses engine metadata for schemas, tables, columns, commands, and command arguments.
 - CLI help must describe UQA storage and engine behavior without naming a single backend as the whole database.
 
-## 8. Verification gates
+## 8. Engineering and verification gates
 
-Before landing functional changes, run the smallest focused checks that cover the touched surface, then the shared gates when the change is broad:
+Each crate exposes exactly one integration-test executable. Additional integration domains live as submodules of that target so test-process startup, linking, and CI scheduling do not grow with every feature.
+
+The 1,500-line Rust file check is a hard safety ceiling, not a design target. Split modules by ownership before they approach the ceiling when parsing, binding, planning, execution, persistence, or tests have separable responsibilities.
+
+During iteration, format first and run the smallest focused checks that cover the changed ownership boundary:
 
 ```sh
 cargo fmt --all --check
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo doc --workspace --no-deps
-cargo deny --workspace check
+cargo test -p <affected-crate> <focused-module-or-test>
 git diff --check
 ```
 
-Changes that touch ranking, search, persistence, ML, CLI interaction, or SQL lowering need focused regression tests in the owning crate.
+Fast repository-policy and formatting checks run on each pull-request head. Once code and review changes have converged, dispatch the change-aware full suite exactly once for the final remote head:
+
+```sh
+bash scripts/run-premerge-ci.sh
+```
+
+Any later push creates a new final head and invalidates that pre-merge result. Changes that touch ranking, search, persistence, ML, CLI interaction, SQL lowering, bindings, or release packaging need focused regression tests in the owning crate before dispatch.
 
 ## 9. Release criteria
 
 A release is ready when:
 
 - Workspace tests and CI gates pass.
-- New behavior is documented in `README.md` or focused design docs.
+- New behavior is documented in the manual and the relevant focused design or living plan document.
 - `HISTORY.md` describes user-visible changes.
 - Persistent database compatibility and migration behavior are covered by tests when storage schema changes.

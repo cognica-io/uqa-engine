@@ -6,6 +6,8 @@ container uqa-pg18 via psql) and against usql (uqa-engine release
 binary), normalizes both outputs, and reports mismatches by category.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -17,6 +19,9 @@ from pathlib import Path
 HERE = Path(__file__).parent
 REPO_ROOT = HERE.parent.parent.parent
 MANIFEST = HERE / "manifest.json"
+PLAN = REPO_ROOT / "docs" / "plans" / "0003-postgresql-18-compatibility.md"
+PLAN_STATUS_START = "<!-- pg18-manifest-status:start -->"
+PLAN_STATUS_END = "<!-- pg18-manifest-status:end -->"
 USQL = os.environ.get("UQA_USQL", str(REPO_ROOT / "target" / "release" / "usql"))
 PG_CONTAINER = os.environ.get("UQA_PG_CONTAINER", "uqa-pg18")
 PG_DATABASE = os.environ.get("UQA_PG_DATABASE", "uqa")
@@ -27,6 +32,46 @@ PSQL = [
 ]
 
 SQLSTATE_ERROR = re.compile(r"^ERROR:\s+([0-9A-Z]{5}):")
+
+
+def render_plan_status(manifest: dict) -> str:
+    """Render the machine-checked status ledger embedded in the living plan."""
+    lines = [
+        PLAN_STATUS_START,
+        "",
+        "| Milestone | Status |",
+        "| --- | --- |",
+    ]
+    lines.extend(
+        f"| `{milestone}` | `{status}` |"
+        for milestone, status in manifest["milestones"].items()
+    )
+    lines.extend(
+        [
+            "",
+            "| Evidence item | Status |",
+            "| --- | --- |",
+        ]
+    )
+    lines.extend(
+        f"| `{item['id']}` | `{item['status']}` |" for item in manifest["items"]
+    )
+    lines.extend(["", PLAN_STATUS_END])
+    return "\n".join(lines)
+
+
+def validate_plan_status(manifest: dict, source: str | None = None) -> None:
+    """Require the readable PG18 plan to account for current manifest states."""
+    if source is None:
+        source = PLAN.read_text()
+    if source.count(PLAN_STATUS_START) != 1 or source.count(PLAN_STATUS_END) != 1:
+        raise RuntimeError("PG18 compatibility plan must contain one manifest status ledger")
+    start = source.index(PLAN_STATUS_START)
+    end = source.index(PLAN_STATUS_END, start) + len(PLAN_STATUS_END)
+    if source[start:end] != render_plan_status(manifest):
+        raise RuntimeError(
+            "PG18 compatibility plan status ledger does not match manifest.json"
+        )
 
 
 def validate_manifest() -> dict:
@@ -100,6 +145,7 @@ def validate_manifest() -> dict:
             raise RuntimeError("complete PG18 compatibility cannot be claimed before M0-M6 complete")
     elif manifest.get("complete_compatibility_claim") is not False:
         raise RuntimeError("complete_compatibility_claim must be a boolean")
+    validate_plan_status(manifest)
     return manifest
 
 
