@@ -225,14 +225,21 @@ fn type_introspection_binds_before_integer_width_is_erased() {
 }
 
 #[test]
-fn to_hex_binds_the_declared_integer_overload_before_width_is_erased() {
+fn integer_base_functions_bind_the_declared_overload_before_width_is_erased() {
     let schema = RowSchema::with_types(
         vec!["i4".into(), "i8".into()],
         vec![Some(ColumnType::Integer), Some(ColumnType::BigInteger)],
     );
-    for (column, expected_name) in [("i4", TO_HEX_INT4_FUNCTION), ("i8", TO_HEX_INT8_FUNCTION)] {
+    for (function, column, expected_name) in [
+        ("to_bin", "i4", TO_BIN_INT4_FUNCTION),
+        ("to_bin", "i8", TO_BIN_INT8_FUNCTION),
+        ("to_hex", "i4", TO_HEX_INT4_FUNCTION),
+        ("to_hex", "i8", TO_HEX_INT8_FUNCTION),
+        ("to_oct", "i4", TO_OCT_INT4_FUNCTION),
+        ("to_oct", "i8", TO_OCT_INT8_FUNCTION),
+    ] {
         let expression = ScalarExpr::Func {
-            name: "to_hex".into(),
+            name: function.into(),
             binding: None,
             args: vec![ScalarExpr::Column(column.into())],
             distinct: false,
@@ -241,7 +248,7 @@ fn to_hex_binds_the_declared_integer_overload_before_width_is_erased() {
         };
         let ScalarExpr::Func { name, .. } = bind_type_introspection(expression, &schema, &[])
         else {
-            panic!("to_hex must remain a scalar function");
+            panic!("{function} must remain a scalar function");
         };
         assert_eq!(name, expected_name);
     }

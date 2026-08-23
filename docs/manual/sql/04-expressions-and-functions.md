@@ -60,9 +60,9 @@ WHERE value LIKE 'a!_b' ESCAPE '!';
 | Angles and constants | `pi`, `degrees`, `radians` |
 | Bucketing | `width_bucket` |
 | Random | `random`, `setseed` |
-| Formatting | `to_hex`, `to_number` |
+| Formatting | `to_bin`, `to_oct`, `to_hex`, `to_number` |
 
-`to_number(text, 'RN')` reads the PostgreSQL Roman-numeral prefix after leading whitespace, accepts values from 1 through 3999, and ignores input after that prefix. Random state is session-local. Use `setseed` for deterministic test input, not for cryptographic randomness; `gen_random_uuid` and `uuidv4` produce random version 4 UUIDs, while `uuidv7([shift interval])` produces time-ordered version 7 UUIDs.
+`to_bin`, `to_oct`, and `to_hex` accept PostgreSQL's exact `integer` and `bigint` overloads and return lowercase, unprefixed text; negative values use the argument type's 32-bit or 64-bit two's-complement representation. `to_number(text, 'RN')` reads the PostgreSQL Roman-numeral prefix after leading whitespace, accepts values from 1 through 3999, and ignores input after that prefix. Random state is session-local. Use `setseed` for deterministic test input, not for cryptographic randomness; `gen_random_uuid` and `uuidv4` produce random version 4 UUIDs, while `uuidv7([shift interval])` produces time-ordered version 7 UUIDs.
 
 ## UUID functions
 

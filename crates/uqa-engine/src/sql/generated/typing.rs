@@ -17,7 +17,11 @@ pub(super) enum GenerationType {
     Null,
     UnknownLiteral(String),
     Boolean,
+    SmallInteger,
     Integer,
+    BigInteger,
+    Oid,
+    Xid,
     Real,
     Numeric,
     Text,
@@ -171,11 +175,11 @@ fn bind_function_calls(
 
 pub(super) fn column_generation_type(ty: &ColumnType) -> GenerationType {
     match ty {
-        ColumnType::SmallInteger
-        | ColumnType::Integer
-        | ColumnType::BigInteger
-        | ColumnType::Oid
-        | ColumnType::Xid => GenerationType::Integer,
+        ColumnType::SmallInteger => GenerationType::SmallInteger,
+        ColumnType::Integer => GenerationType::Integer,
+        ColumnType::BigInteger => GenerationType::BigInteger,
+        ColumnType::Oid => GenerationType::Oid,
+        ColumnType::Xid => GenerationType::Xid,
         ColumnType::Boolean => GenerationType::Boolean,
         ColumnType::Text
         | ColumnType::Name
@@ -225,7 +229,11 @@ pub(super) fn generation_type_name(ty: &GenerationType) -> String {
     match ty {
         GenerationType::Null | GenerationType::UnknownLiteral(_) => "unknown".into(),
         GenerationType::Boolean => "boolean".into(),
+        GenerationType::SmallInteger => "smallint".into(),
         GenerationType::Integer => "integer".into(),
+        GenerationType::BigInteger => "bigint".into(),
+        GenerationType::Oid => "oid".into(),
+        GenerationType::Xid => "xid".into(),
         GenerationType::Real => "double precision".into(),
         GenerationType::Numeric => "numeric".into(),
         GenerationType::Text => "text".into(),
@@ -288,10 +296,13 @@ fn infer_expression(
         Expr::UnaryMinus(inner) => {
             let ty = infer_expression(engine, columns, inner, dependencies)?;
             match ty {
-                GenerationType::Integer
+                GenerationType::SmallInteger
+                | GenerationType::Integer
+                | GenerationType::BigInteger
                 | GenerationType::Real
                 | GenerationType::Numeric
                 | GenerationType::Interval => Ok(ty),
+                GenerationType::Oid | GenerationType::Xid => Ok(GenerationType::Integer),
                 _ => Err(SQLError::TypeMismatch(format!(
                     "operator does not exist: - {}",
                     generation_type_name(&ty)
@@ -648,7 +659,11 @@ fn generation_type_identity(ty: &GenerationType) -> Option<String> {
     Some(match ty {
         GenerationType::Null | GenerationType::UnknownLiteral(_) => return None,
         GenerationType::Boolean => "bool".into(),
+        GenerationType::SmallInteger => "int2".into(),
         GenerationType::Integer => "int4".into(),
+        GenerationType::BigInteger => "int8".into(),
+        GenerationType::Oid => "oid".into(),
+        GenerationType::Xid => "xid".into(),
         GenerationType::Real => "float8".into(),
         GenerationType::Numeric => "numeric".into(),
         GenerationType::Text => "text".into(),
@@ -774,7 +789,8 @@ fn value_generation_type(value: &Value) -> GenerationType {
     match value {
         Value::Null => GenerationType::Null,
         Value::Bool(_) => GenerationType::Boolean,
-        Value::Int(_) => GenerationType::Integer,
+        Value::Int(value) if i32::try_from(*value).is_ok() => GenerationType::Integer,
+        Value::Int(_) => GenerationType::BigInteger,
         Value::Float(_) => GenerationType::Real,
         Value::Decimal(_) => GenerationType::Numeric,
         Value::Str(value) => GenerationType::UnknownLiteral(value.clone()),
@@ -822,7 +838,11 @@ fn generation_type_from_name(name: &str) -> Option<GenerationType> {
     }
     Some(match canonical.as_str() {
         "bool" => GenerationType::Boolean,
-        "int2" | "int4" | "int8" => GenerationType::Integer,
+        "int2" => GenerationType::SmallInteger,
+        "int4" => GenerationType::Integer,
+        "int8" => GenerationType::BigInteger,
+        "oid" => GenerationType::Oid,
+        "xid" => GenerationType::Xid,
         "float4" | "float8" => GenerationType::Real,
         "numeric" => GenerationType::Numeric,
         "text" | "varchar" | "bpchar" => GenerationType::Text,
@@ -848,7 +868,10 @@ fn assignment_compatible(source: &GenerationType, target: &GenerationType) -> bo
     match (source, target) {
         (T::Null | T::UnknownLiteral(_), _) => true,
         (source, target) if source == target => true,
-        (T::Integer | T::Real | T::Numeric, T::Integer | T::Real | T::Numeric) => true,
+        (
+            T::SmallInteger | T::Integer | T::BigInteger | T::Oid | T::Xid | T::Real | T::Numeric,
+            T::SmallInteger | T::Integer | T::BigInteger | T::Oid | T::Xid | T::Real | T::Numeric,
+        ) => true,
         (_, T::Text) => true,
         (T::Date, T::Timestamp | T::TimestampTz)
         | (T::Timestamp, T::Date | T::Time | T::TimestampTz)
@@ -909,8 +932,23 @@ fn common_numeric_type(types: &[GenerationType]) -> Result<GenerationType, SQLEr
         Ok(GenerationType::Real)
     } else if types.iter().any(|ty| matches!(ty, GenerationType::Numeric)) {
         Ok(GenerationType::Numeric)
-    } else if types.iter().any(|ty| matches!(ty, GenerationType::Integer)) {
+    } else if types
+        .iter()
+        .any(|ty| matches!(ty, GenerationType::BigInteger))
+    {
+        Ok(GenerationType::BigInteger)
+    } else if types.iter().any(|ty| {
+        matches!(
+            ty,
+            GenerationType::Integer | GenerationType::Oid | GenerationType::Xid
+        )
+    }) {
         Ok(GenerationType::Integer)
+    } else if types
+        .iter()
+        .any(|ty| matches!(ty, GenerationType::SmallInteger))
+    {
+        Ok(GenerationType::SmallInteger)
     } else {
         Ok(GenerationType::Real)
     }
@@ -920,7 +958,10 @@ fn numeric_input_type(ty: &GenerationType) -> GenerationType {
     match ty {
         GenerationType::Real => GenerationType::Real,
         GenerationType::Numeric => GenerationType::Numeric,
+        GenerationType::SmallInteger => GenerationType::SmallInteger,
         GenerationType::Integer => GenerationType::Integer,
+        GenerationType::BigInteger => GenerationType::BigInteger,
+        GenerationType::Oid | GenerationType::Xid => GenerationType::Integer,
         _ => GenerationType::Real,
     }
 }
@@ -1009,7 +1050,14 @@ fn accepts_class(ty: &GenerationType, class: TypeClass) -> bool {
     }
     match class {
         TypeClass::Boolean => matches!(ty, GenerationType::Boolean),
-        TypeClass::Integer => matches!(ty, GenerationType::Integer),
+        TypeClass::Integer => matches!(
+            ty,
+            GenerationType::SmallInteger
+                | GenerationType::Integer
+                | GenerationType::BigInteger
+                | GenerationType::Oid
+                | GenerationType::Xid
+        ),
         TypeClass::Numeric => is_numeric(ty),
         TypeClass::Text => matches!(ty, GenerationType::Text),
         TypeClass::Uuid => matches!(ty, GenerationType::Uuid),
@@ -1027,7 +1075,13 @@ fn accepts_class(ty: &GenerationType, class: TypeClass) -> bool {
 fn is_numeric(ty: &GenerationType) -> bool {
     matches!(
         ty,
-        GenerationType::Integer | GenerationType::Real | GenerationType::Numeric
+        GenerationType::SmallInteger
+            | GenerationType::Integer
+            | GenerationType::BigInteger
+            | GenerationType::Oid
+            | GenerationType::Xid
+            | GenerationType::Real
+            | GenerationType::Numeric
     )
 }
 

@@ -363,6 +363,7 @@ fn execute_lateral_query_block_output(
         stmt,
         operator.row_schema(),
         params,
+        &scoped_ctes,
     )?;
     crate::sql::select::validate_query_set_contexts(engine, stmt, operator.row_schema(), params)?;
     crate::sql::select::execute_query_block_operator_output(

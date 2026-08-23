@@ -14,9 +14,9 @@
 mod analysis;
 
 use super::{
-    cte_references_own_name, is_score_provenance_column, ordered_plan_ctes, projection_columns,
-    user_function_output_columns, CteScope, Engine, QueryBlockPlan, QueryPlan, RelationalPlan,
-    SQLError, SQLParam, ScalarExpr, SourcePlan, Value,
+    cte_references_own_name, expr_contains_subquery, is_score_provenance_column, ordered_plan_ctes,
+    projection_columns, user_function_output_columns, CteScope, Engine, QueryBlockPlan, QueryPlan,
+    RelationalPlan, SQLError, SQLParam, ScalarExpr, SourcePlan, Value,
 };
 use crate::sql::from_rows::{
     alias_join_schema, apply_table_function_aliases, join_using_output_schema, resolve_join_using,
@@ -25,7 +25,7 @@ use crate::sql::from_rows::{
 };
 use crate::sql::virtual_relation_schema;
 use std::collections::{BTreeMap, BTreeSet};
-use uqa_execution::RowSchema;
+use uqa_execution::{FunctionTypeResolver, RowSchema};
 use uqa_sql::ast::ColumnType;
 
 type ProjectionStarColumn = (String, Option<ColumnType>);
@@ -36,6 +36,38 @@ struct SchemaScope {
     deferred_ctes: BTreeMap<String, uqa_planner::CtePlan>,
     visiting_views: BTreeSet<String>,
     validate_references: bool,
+}
+
+struct QueryFunctionTypeResolver<'a> {
+    engine: &'a Engine,
+    scalar_subquery_types: Vec<Option<ColumnType>>,
+}
+
+impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
+    fn resolve_function_type(
+        &self,
+        name: &str,
+        binding: Option<&uqa_sql::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+    ) -> Result<Option<ColumnType>, SQLError> {
+        self.engine
+            .resolve_function_type(name, binding, argument_names, argument_types)
+    }
+
+    fn resolve_scalar_subquery_type(
+        &self,
+        subquery: uqa_execution::SubqueryId,
+        _outer_schema: &RowSchema,
+        _params: &[SQLParam],
+    ) -> Result<Option<ColumnType>, SQLError> {
+        self.scalar_subquery_types
+            .get(subquery)
+            .cloned()
+            .ok_or_else(|| {
+                SQLError::Internal(format!("scalar subquery slot {subquery} is out of bounds"))
+            })
+    }
 }
 
 /// Bind an operator join's relation argument as the input schema for its retrieval expressions.
@@ -326,7 +358,22 @@ impl SchemaScope {
             let output = self.bind_query(engine, plan, params, subquery_outer)?;
             return Ok(output.column_type(0).cloned());
         }
-        uqa_execution::scalar_type_with_resolver(expression, schema, params, engine)
+        if subqueries.is_empty() || !expr_contains_subquery(expression) {
+            return uqa_execution::scalar_type_with_resolver(expression, schema, params, engine);
+        }
+        let subquery_outer = self.validate_references.then_some(schema).or(outer);
+        let scalar_subquery_types = subqueries
+            .iter()
+            .map(|plan| {
+                self.bind_query(engine, plan, params, subquery_outer)
+                    .map(|output| output.column_type(0).cloned())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let resolver = QueryFunctionTypeResolver {
+            engine,
+            scalar_subquery_types,
+        };
+        uqa_execution::scalar_type_with_resolver(expression, schema, params, &resolver)
     }
 
     fn bind_values_types(
@@ -684,7 +731,20 @@ pub(in crate::sql) fn validate_query_block_expression_types(
     statement: &QueryBlockPlan,
     schema: &RowSchema,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<(), SQLError> {
+    let scalar_subquery_types = statement
+        .subqueries
+        .iter()
+        .map(|plan| {
+            bind_query_plan_schema(engine, plan, params, ctes, Some(schema))
+                .map(|output| output.column_type(0).cloned())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let resolver = QueryFunctionTypeResolver {
+        engine,
+        scalar_subquery_types,
+    };
     for expression in statement
         .projections
         .iter()
@@ -698,7 +758,7 @@ pub(in crate::sql) fn validate_query_block_expression_types(
         .chain(statement.limit.iter())
         .chain(statement.offset.iter())
     {
-        uqa_execution::scalar_type_with_resolver(expression, schema, params, engine)?;
+        uqa_execution::scalar_type_with_resolver(expression, schema, params, &resolver)?;
     }
     Ok(())
 }

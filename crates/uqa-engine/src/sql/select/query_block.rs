@@ -31,7 +31,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         |source| bind_source_plan_schema(engine, source, params, ctes, outer),
     )?;
     let expression_schema = overlay_outer_schema(&source_schema, outer);
-    validate_query_block_expression_types(engine, stmt, &expression_schema, params)?;
+    validate_query_block_expression_types(engine, stmt, &expression_schema, params, ctes)?;
     validate_query_set_contexts(engine, stmt, &expression_schema, params)?;
 
     let Some(from) = stmt.from.as_ref() else {
