@@ -387,7 +387,7 @@ def build_report(
     passed = all(check["passed"] for check in all_checks)
     return {
         "schema_version": 2,
-        "generated_at_utc": datetime.datetime.now(datetime.UTC).isoformat(),
+        "generated_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "manifest": display_path(manifest_path),
         "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         "git_commit": git_value("rev-parse", "HEAD"),

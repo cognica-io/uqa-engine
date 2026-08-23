@@ -239,7 +239,7 @@ def main() -> int:
     status = command("git", "status", "--porcelain")
     report = {
         "schema_version": 3,
-        "generated_at_utc": datetime.datetime.now(datetime.UTC).isoformat(),
+        "generated_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "manifest": str(MANIFEST_PATH.relative_to(ROOT)),
         "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
         "workload_identity_sha256": object_hash(head_identity),
