@@ -10,12 +10,13 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import tarfile
-import tomllib
 import zipfile
 
 
@@ -36,6 +37,109 @@ NPM_PACKAGES = (
     ROOT / "crates" / "uqa-wasm" / "js",
 )
 MIT_PARSER_CRATE = "uqa-pg-query"
+PROJECT_TABLE = re.compile(
+    r"^\[project\][ \t]*(?:#.*)?$(.*?)(?=^\[[^\n]+\][ \t]*(?:#.*)?$|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def toml_structure(source: str) -> str:
+    structure = list(source)
+    position = 0
+    state = "normal"
+    while position < len(source):
+        character = source[position]
+        if state == "normal":
+            if character == "#":
+                state = "comment"
+            elif source.startswith('"""', position):
+                state = "multiline_basic"
+                structure[position : position + 3] = "   "
+                position += 3
+                continue
+            elif source.startswith("'''", position):
+                state = "multiline_literal"
+                structure[position : position + 3] = "   "
+                position += 3
+                continue
+            elif character == '"':
+                state = "basic"
+                structure[position] = " "
+                position += 1
+                continue
+            elif character == "'":
+                state = "literal"
+                structure[position] = " "
+                position += 1
+                continue
+            else:
+                position += 1
+                continue
+        if state == "comment":
+            if character == "\n":
+                state = "normal"
+                position += 1
+                continue
+            structure[position] = " "
+            position += 1
+            continue
+        delimiter = '"""' if state == "multiline_basic" else "'''"
+        if state in {"multiline_basic", "multiline_literal"} and source.startswith(
+            delimiter, position
+        ):
+            structure[position : position + 3] = "   "
+            position += 3
+            state = "normal"
+            continue
+        if state == "basic" and character == '"':
+            structure[position] = " "
+            position += 1
+            state = "normal"
+            continue
+        if state == "literal" and character == "'":
+            structure[position] = " "
+            position += 1
+            state = "normal"
+            continue
+        if state in {"basic", "multiline_basic"} and character == "\\":
+            structure[position] = " "
+            position += 1
+            if position < len(source):
+                if source[position] != "\n":
+                    structure[position] = " "
+                position += 1
+            continue
+        if character != "\n":
+            structure[position] = " "
+        position += 1
+    if state not in {"normal", "comment"}:
+        raise RuntimeError("Python package has an unterminated TOML string")
+    return "".join(structure)
+
+
+def project_assignment(table: str, key: str) -> object:
+    structure = toml_structure(table)
+    match = re.search(
+        rf"^[ \t]*{re.escape(key)}[ \t]*=",
+        structure,
+        re.MULTILINE,
+    )
+    if match is None:
+        raise RuntimeError(f"Python package must declare project.{key}")
+    value_start = match.end()
+    while value_start < len(table) and table[value_start] in " \t":
+        value_start += 1
+    remaining = table[value_start:]
+    parse_error: SyntaxError | ValueError | None = None
+    lines = remaining.splitlines()
+    for line_count in range(1, len(lines) + 1):
+        try:
+            return ast.literal_eval("\n".join(lines[:line_count]))
+        except (SyntaxError, ValueError) as error:
+            parse_error = error
+    raise RuntimeError(
+        f"Python package has an invalid project.{key} declaration"
+    ) from parse_error
 
 
 def canonical_payloads() -> dict[str, bytes]:
@@ -134,13 +238,16 @@ def check_cargo_sources(payloads: dict[str, bytes]) -> None:
 def check_maturin_sources() -> None:
     pyproject_path = ROOT / "pyproject.toml"
     try:
-        pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError) as error:
+        source = pyproject_path.read_text(encoding="utf-8")
+    except OSError as error:
         raise RuntimeError(f"cannot read {pyproject_path}: {error}") from error
-    project = pyproject.get("project", {})
-    if project.get("license") != "AGPL-3.0-only":
+    match = PROJECT_TABLE.search(toml_structure(source))
+    if match is None:
+        raise RuntimeError("Python package must declare a [project] table")
+    project = source[match.start(1) : match.end(1)]
+    if project_assignment(project, "license") != "AGPL-3.0-only":
         raise RuntimeError("Python package must declare the AGPL-3.0-only SPDX license")
-    declared = project.get("license-files", [])
+    declared = project_assignment(project, "license-files")
     required = {"LICENSE", "LICENSING.md", "LICENSES/*.txt"}
     declared_paths = (
         {value for value in declared if isinstance(value, str)}
