@@ -61,6 +61,8 @@ mod array_transforms;
 mod checksums;
 #[path = "pg18_semantics/comparisons_and_arrays.rs"]
 mod comparisons_and_arrays;
+#[path = "pg18_semantics/gamma_functions.rs"]
+mod gamma_functions;
 #[path = "pg18_semantics/md5_overloads.rs"]
 mod md5_overloads;
 #[path = "pg18_semantics/numeric_exactness.rs"]

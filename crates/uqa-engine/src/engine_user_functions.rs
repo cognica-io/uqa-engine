@@ -9,9 +9,13 @@
 //! metadata like views and sequences; the compiled body is rebuilt
 //! from the definition at registration and restore time.
 
+mod combined_overloads;
+
 use std::collections::BTreeMap;
 
-use uqa_execution::{FunctionTypeResolver, ResolvedFunctionOverload, ScalarExpr};
+use uqa_execution::{
+    BuiltinFunctionOverload, FunctionTypeResolver, ResolvedFunctionOverload, ScalarExpr,
+};
 use uqa_planner::UnifiedPlan;
 use uqa_sql::ast::{
     ColumnType, CreateFunction, DropFunctionItem, DropFunctionStmt, FunctionBinding, FunctionBody,
@@ -131,6 +135,25 @@ impl FunctionTypeResolver for Engine {
             preferred_matches: matched.preferred_matches,
             precedes_pg_catalog: self.user_function_precedes_pg_catalog(&function.def.name),
         }))
+    }
+
+    fn resolve_function_overload_with_builtins(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+        builtins: &[BuiltinFunctionOverload],
+    ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
+        combined_overloads::resolve(
+            self,
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            builtins,
+        )
+        .map(Some)
     }
 }
 

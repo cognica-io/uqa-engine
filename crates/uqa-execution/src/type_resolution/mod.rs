@@ -26,6 +26,7 @@ mod common;
 mod containment;
 mod equality;
 mod functions;
+mod gamma;
 mod integer_base;
 mod introspection;
 mod length;
@@ -42,6 +43,8 @@ pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
 pub use common::{common_context_expression_type, common_type, values_column_types};
 pub use equality::equality_operand_type;
 pub use functions::{builtin_function_argument_targets, builtin_function_type};
+#[doc(hidden)]
+pub use gamma::{resolve_gamma_overload, ResolvedGammaOverload};
 pub use introspection::{bind_type_introspection, bind_type_introspection_with_resolver};
 #[doc(hidden)]
 pub use length::{resolve_length_overload, ResolvedLengthOverload};
@@ -72,6 +75,21 @@ pub trait FunctionTypeResolver: Send + Sync {
         Ok(None)
     }
 
+    /// Resolve catalog-backed routines and the supplied built-in overloads as
+    /// one `PostgreSQL` candidate set. Implementations with catalog visibility
+    /// should override this so search-path shadowing and unknown-category
+    /// selection happen before a winner is chosen.
+    fn resolve_function_overload_with_builtins(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+        _builtins: &[BuiltinFunctionOverload],
+    ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
+        self.resolve_function_overload(name, binding, argument_names, argument_types)
+    }
+
     /// Resolve the declared first-column type of a physical scalar-subquery slot when the owning execution context carries its plan arena.
     fn resolve_scalar_subquery_type(
         &self,
@@ -81,6 +99,14 @@ pub trait FunctionTypeResolver: Send + Sync {
     ) -> Result<Option<ColumnType>, SQLError> {
         Ok(None)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuiltinFunctionOverload {
+    pub name: String,
+    pub argument_names: Vec<Option<String>>,
+    pub argument_types: Vec<ColumnType>,
+    pub return_type: ColumnType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

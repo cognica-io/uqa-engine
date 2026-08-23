@@ -91,6 +91,31 @@ fn builtin_argument_targets_resolve_fixed_and_overloaded_unknowns() {
 }
 
 #[test]
+fn gamma_binding_preserves_the_float8_signature_and_function_identity() {
+    let resolved =
+        resolve_gamma_overload("gamma", None, &[None], &[Some(ColumnType::Integer)], None).unwrap();
+    assert_eq!(resolved.return_type, ColumnType::DoublePrecision);
+    assert_eq!(resolved.binding.name, "pg_catalog.gamma");
+    assert_eq!(resolved.binding.argument_types, ["double precision"]);
+    assert!(resolved.binding.builtin);
+
+    let wrong_function = FunctionBinding {
+        name: "pg_catalog.lgamma".into(),
+        argument_types: vec!["double precision".into()],
+        builtin: true,
+    };
+    let error = resolve_gamma_overload(
+        "gamma",
+        Some(&wrong_function),
+        &[None],
+        &[Some(ColumnType::DoublePrecision)],
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42883"));
+}
+
+#[test]
 fn uuid_extraction_binding_rejects_non_uuid_declared_types() {
     let schema = RowSchema::with_types(
         vec!["uuid_value".into(), "text_value".into()],

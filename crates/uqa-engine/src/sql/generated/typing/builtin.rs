@@ -14,8 +14,10 @@ use super::{
 };
 
 mod array_transform;
+mod gamma;
 mod string_binary;
 
+pub(super) use gamma::{bind_call as bind_gamma_call, GammaCall};
 pub(super) use string_binary::{bind_call as bind_string_binary_call, StringBinaryCall};
 
 #[allow(clippy::too_many_lines)]

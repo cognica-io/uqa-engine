@@ -120,6 +120,20 @@ fn bind_function_calls(
             )? {
                 return Ok(());
             }
+            if builtin::bind_gamma_call(
+                builtin::GammaCall {
+                    engine,
+                    columns,
+                    name,
+                    args,
+                    argument_names: &argument_names,
+                    argument_types: &argument_types,
+                },
+                binding,
+                dependencies,
+            )? {
+                return Ok(());
+            }
             if engine.lookup_sql_functions(name).is_some() {
                 let selected =
                     resolve_user_function_binding(engine, name, &argument_names, &argument_types)?;

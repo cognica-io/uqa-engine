@@ -513,8 +513,8 @@ fn gamma(args: &[Value]) -> Result<Value> {
     if input == f64::NEG_INFINITY {
         return Err(out_of_range("double precision"));
     }
-    let result = libm::tgamma(input);
-    if !result.is_finite() || result == 0.0 {
+    let (result, errno) = platform_gamma::tgamma(input);
+    if errno != 0 || !result.is_finite() || result == 0.0 {
         return Err(out_of_range("double precision"));
     }
     Ok(Value::Float(result))
@@ -528,8 +528,8 @@ fn lgamma(args: &[Value]) -> Result<Value> {
         return Ok(Value::Null);
     }
     let input = to_f64(&args[0])?;
-    let result = libm::lgamma(input);
-    if input.is_finite() && !result.is_finite() {
+    let (result, range_error) = platform_gamma::lgamma(input);
+    if range_error || (input.is_finite() && !result.is_finite()) {
         return Err(out_of_range("double precision"));
     }
     Ok(Value::Float(result))
@@ -546,4 +546,78 @@ fn crc32c(bytes: &[u8]) -> u32 {
         }
     }
     !crc
+}
+
+// PostgreSQL delegates gamma functions to the host C math library. Keeping
+// this FFI boundary isolated makes native UQA builds use the same platform
+// contract, while targets without a native C ABI retain the portable libm
+// implementation.
+#[cfg(unix)]
+#[allow(unsafe_code)]
+mod platform_gamma {
+    #[link(name = "m")]
+    unsafe extern "C" {
+        #[link_name = "tgamma"]
+        fn c_tgamma(value: f64) -> f64;
+        #[link_name = "lgamma"]
+        fn c_lgamma(value: f64) -> f64;
+    }
+
+    pub(super) fn tgamma(value: f64) -> (f64, i32) {
+        errno::set_errno(errno::Errno(0));
+        // SAFETY: both C functions accept and return one binary64 value and
+        // have no pointer, ownership, or lifetime preconditions.
+        let result = unsafe { c_tgamma(value) };
+        (result, errno::errno().0)
+    }
+
+    pub(super) fn lgamma(value: f64) -> (f64, bool) {
+        errno::set_errno(errno::Errno(0));
+        // SAFETY: see `tgamma`; PostgreSQL does not consume `signgam` either.
+        let result = unsafe { c_lgamma(value) };
+        (result, errno::errno().0 == libc::ERANGE)
+    }
+}
+
+#[cfg(not(unix))]
+mod platform_gamma {
+    pub(super) fn tgamma(value: f64) -> (f64, i32) {
+        (libm::tgamma(value), 0)
+    }
+
+    pub(super) fn lgamma(value: f64) -> (f64, bool) {
+        (libm::lgamma(value), false)
+    }
+}
+
+#[cfg(test)]
+mod gamma_tests {
+    use super::{gamma, lgamma};
+    use uqa_core::Value;
+
+    #[test]
+    fn gamma_functions_clear_stale_errno_before_native_calls() {
+        #[cfg(unix)]
+        errno::set_errno(errno::Errno(libc::ERANGE));
+        assert_eq!(gamma(&[Value::Float(5.0)]).unwrap(), Value::Float(24.0));
+
+        #[cfg(unix)]
+        errno::set_errno(errno::Errno(libc::ERANGE));
+        assert!(matches!(
+            lgamma(&[Value::Float(-0.5)]).unwrap(),
+            Value::Float(value) if value.to_bits() == 0x3ff4_3f89_a3f0_edd6
+        ));
+    }
+
+    #[test]
+    fn gamma_functions_preserve_postgresql_range_errors() {
+        for result in [
+            gamma(&[Value::Float(0.0)]),
+            gamma(&[Value::Float(172.0)]),
+            lgamma(&[Value::Float(0.0)]),
+        ] {
+            let error = result.unwrap_err();
+            assert_eq!(error.sqlstate(), Some("22003"));
+        }
+    }
 }

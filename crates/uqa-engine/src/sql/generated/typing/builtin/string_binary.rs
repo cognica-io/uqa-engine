@@ -252,7 +252,7 @@ fn resolve_overload(
     })
 }
 
-fn generation_expression_column_type(
+pub(super) fn generation_expression_column_type(
     columns: &[ColumnDef],
     expression: &Expr,
     inferred: &GenerationType,
@@ -268,7 +268,7 @@ fn generation_expression_column_type(
     }
 }
 
-fn validate_bound_function(
+pub(super) fn validate_bound_function(
     engine: &Engine,
     binding: &FunctionBinding,
     argument_names: &[Option<String>],

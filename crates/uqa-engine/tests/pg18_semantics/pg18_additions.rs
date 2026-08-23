@@ -75,42 +75,6 @@ fn pg18_casefold_uses_full_unicode_mapping() {
 }
 
 #[test]
-fn pg18_gamma_functions() {
-    let eng = engine();
-    for (sql, expected) in [
-        ("SELECT gamma(5)", 24.0),
-        ("SELECT gamma(0.5)", 1.772_453_850_905_516),
-        ("SELECT lgamma(5)", 3.178_053_830_347_945_8),
-        ("SELECT lgamma(-0.5)", 1.265_512_123_484_645_4),
-    ] {
-        let Value::Float(actual) = scalar(&eng, sql) else {
-            panic!("expected float from {sql}");
-        };
-        assert!((actual - expected).abs() < 1e-14, "{sql}: {actual}");
-    }
-    assert_eq!(
-        scalar(&eng, "SELECT gamma('Infinity'::float8)"),
-        Value::Float(f64::INFINITY)
-    );
-    assert_eq!(
-        scalar(&eng, "SELECT lgamma('-Infinity'::float8)"),
-        Value::Float(f64::INFINITY)
-    );
-    assert!(matches!(
-        scalar(&eng, "SELECT gamma('NaN'::float8)"),
-        Value::Float(value) if value.is_nan()
-    ));
-    for sql in [
-        "SELECT gamma('-Infinity'::float8)",
-        "SELECT gamma(0::float8)",
-        "SELECT gamma(-200.5::float8)",
-        "SELECT lgamma(0::float8)",
-    ] {
-        assert!(scalar_err(&eng, sql).contains("out of range"), "{sql}");
-    }
-}
-
-#[test]
 fn pg18_interval_extract_week_and_negative_quarter() {
     let eng = engine();
     assert_eq!(

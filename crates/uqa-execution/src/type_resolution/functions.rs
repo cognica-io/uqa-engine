@@ -14,8 +14,8 @@ use super::common::{
     base_type, common_numeric_type, common_type, merge_optional_types, numeric_type,
 };
 use super::{
-    array_transform, checksum, containment, integer_base, length, md5, random_range, reverse,
-    scalar_type_inner, FunctionTypeResolver,
+    array_transform, checksum, containment, gamma, integer_base, length, md5, random_range,
+    reverse, scalar_type_inner, FunctionTypeResolver,
 };
 
 pub fn builtin_function_type(
@@ -191,6 +191,9 @@ pub(super) fn builtin_function_type_inner(
             length::resolve_type(original_name, binding, args, &argument_types, resolver)
         }
         "reverse" => reverse::resolve_type(original_name, binding, args, &argument_types, resolver),
+        "gamma" | "lgamma" => {
+            gamma::resolve_type(original_name, binding, args, &argument_types, resolver)
+        }
         "count" | "row_number" | "rank" | "dense_rank" | "nextval" | "currval" | "setval" => {
             Ok(Some(ColumnType::BigInteger))
         }
@@ -282,8 +285,8 @@ pub(super) fn builtin_function_type_inner(
         "power" | "pow" => numeric_power_type(args, &argument_types),
         "sqrt" | "ln" | "log" | "log10" => numeric_transcendental_type(args, &argument_types),
         "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "atan2" | "sinh" | "cosh" | "tanh"
-        | "exp" | "log2" | "cbrt" | "gamma" | "lgamma" | "degrees" | "radians" | "pi"
-        | "random" | "st_distance" | "date_part" => Ok(Some(ColumnType::DoublePrecision)),
+        | "exp" | "log2" | "cbrt" | "degrees" | "radians" | "pi" | "random" | "st_distance"
+        | "date_part" => Ok(Some(ColumnType::DoublePrecision)),
         "regexp_match" | "regexp_matches" | "string_to_array" => {
             Ok(Some(ColumnType::Array(Box::new(ColumnType::Text))))
         }
