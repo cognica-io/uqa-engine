@@ -10,12 +10,13 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import tarfile
-import tomllib
 import zipfile
 
 
@@ -36,6 +37,27 @@ NPM_PACKAGES = (
     ROOT / "crates" / "uqa-wasm" / "js",
 )
 MIT_PARSER_CRATE = "uqa-pg-query"
+PROJECT_TABLE = re.compile(
+    r"^\[project\][ \t]*(?:#.*)?$(.*?)(?=^\[[^\n]+\][ \t]*(?:#.*)?$|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def project_assignment(table: str, key: str) -> object:
+    match = re.search(rf"^[ \t]*{re.escape(key)}[ \t]*=[ \t]*(.+)$", table, re.MULTILINE)
+    if match is None:
+        raise RuntimeError(f"Python package must declare project.{key}")
+    remaining = table[match.start(1) :]
+    parse_error: SyntaxError | ValueError | None = None
+    lines = remaining.splitlines()
+    for line_count in range(1, len(lines) + 1):
+        try:
+            return ast.literal_eval("\n".join(lines[:line_count]))
+        except (SyntaxError, ValueError) as error:
+            parse_error = error
+    raise RuntimeError(
+        f"Python package has an invalid project.{key} declaration"
+    ) from parse_error
 
 
 def canonical_payloads() -> dict[str, bytes]:
@@ -134,13 +156,16 @@ def check_cargo_sources(payloads: dict[str, bytes]) -> None:
 def check_maturin_sources() -> None:
     pyproject_path = ROOT / "pyproject.toml"
     try:
-        pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError) as error:
+        source = pyproject_path.read_text(encoding="utf-8")
+    except OSError as error:
         raise RuntimeError(f"cannot read {pyproject_path}: {error}") from error
-    project = pyproject.get("project", {})
-    if project.get("license") != "AGPL-3.0-only":
+    match = PROJECT_TABLE.search(source)
+    if match is None:
+        raise RuntimeError("Python package must declare a [project] table")
+    project = match.group(1)
+    if project_assignment(project, "license") != "AGPL-3.0-only":
         raise RuntimeError("Python package must declare the AGPL-3.0-only SPDX license")
-    declared = project.get("license-files", [])
+    declared = project_assignment(project, "license-files")
     required = {"LICENSE", "LICENSING.md", "LICENSES/*.txt"}
     declared_paths = (
         {value for value in declared if isinstance(value, str)}

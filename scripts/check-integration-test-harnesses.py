@@ -9,10 +9,11 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
+import subprocess
 import sys
-import tomllib
 from collections import Counter
 
 
@@ -25,16 +26,20 @@ CARGO_TEST_TARGET = re.compile(
 COMMAND_SUFFIXES = {".md", ".py", ".sh", ".toml", ".yaml", ".yml"}
 
 
-def test_roots(manifest: dict[str, object], crate_dir: pathlib.Path) -> list[pathlib.Path]:
-    roots: list[pathlib.Path] = []
-    for target in manifest.get("test", []):
-        if not isinstance(target, dict) or not isinstance(target.get("name"), str):
-            raise RuntimeError(f"invalid [[test]] entry in {crate_dir / 'Cargo.toml'}")
-        relative = target.get("path", f"tests/{target['name']}.rs")
-        if not isinstance(relative, str):
-            raise RuntimeError(f"invalid test path in {crate_dir / 'Cargo.toml'}")
-        roots.append((crate_dir / relative).resolve())
-    return roots
+def workspace_packages() -> list[dict[str, object]]:
+    try:
+        result = subprocess.run(
+            ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        metadata = json.loads(result.stdout)
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"cannot read Cargo workspace metadata: {error}") from error
+    members = set(metadata["workspace_members"])
+    return [package for package in metadata["packages"] if package["id"] in members]
 
 
 def included_sources(roots: list[pathlib.Path]) -> Counter[pathlib.Path]:
@@ -57,45 +62,41 @@ def included_sources(roots: list[pathlib.Path]) -> Counter[pathlib.Path]:
     return included
 
 
-def verify_crate(crate_dir: pathlib.Path) -> tuple[str | None, set[str], int, int]:
-    manifest_path = crate_dir / "Cargo.toml"
-    manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
-    package = manifest.get("package")
-    if not isinstance(package, dict):
-        return (None, set(), 0, 0)
+def verify_crate(package: dict[str, object]) -> tuple[str, set[str], int, int]:
+    manifest_path = pathlib.Path(str(package["manifest_path"])).resolve()
+    crate_dir = manifest_path.parent
     package_name = package.get("name")
     if not isinstance(package_name, str):
         raise RuntimeError(f"package name is missing in {manifest_path}")
 
     tests_dir = crate_dir / "tests"
     direct_sources = {path.resolve() for path in tests_dir.glob("*.rs")}
-    explicit_roots = test_roots(manifest, crate_dir)
-    if package.get("autotests") is False:
-        if not explicit_roots:
-            raise RuntimeError(
-                f"{manifest_path} disables autotests but declares no [[test]] targets"
-            )
-        if len(explicit_roots) != 1:
-            raise RuntimeError(
-                f"{manifest_path} must declare exactly one [[test]] target, "
-                f"found {len(explicit_roots)}"
-            )
-        roots = explicit_roots
-        target_names = {target["name"] for target in manifest["test"]}
-    else:
-        if explicit_roots:
-            raise RuntimeError(
-                f"{manifest_path} declares [[test]] without disabling automatic test discovery"
-            )
-        if not direct_sources:
-            return (package_name, set(), 0, 0)
-        if len(direct_sources) != 1:
-            raise RuntimeError(
-                f"{manifest_path} must expose exactly one automatically discovered integration "
-                f"test target, found {len(direct_sources)}"
-            )
-        roots = sorted(direct_sources)
-        target_names = {root.stem for root in roots}
+    targets = package.get("targets")
+    if not isinstance(targets, list):
+        raise RuntimeError(f"Cargo metadata omits targets for {manifest_path}")
+    test_targets = [
+        target
+        for target in targets
+        if isinstance(target, dict)
+        and isinstance(target.get("kind"), list)
+        and "test" in target["kind"]
+    ]
+    if not test_targets:
+        if direct_sources:
+            raise RuntimeError(f"{manifest_path} has integration sources but no test target")
+        return (package_name, set(), 0, 0)
+    if len(test_targets) != 1:
+        raise RuntimeError(
+            f"{manifest_path} must expose exactly one integration test target, "
+            f"found {len(test_targets)}"
+        )
+    target = test_targets[0]
+    target_name = target.get("name")
+    source_path = target.get("src_path")
+    if not isinstance(target_name, str) or not isinstance(source_path, str):
+        raise RuntimeError(f"Cargo metadata has an invalid test target for {manifest_path}")
+    roots = [pathlib.Path(source_path).resolve()]
+    target_names = {target_name}
 
     included = included_sources(roots)
     missing = sorted(direct_sources - set(included))
@@ -141,11 +142,17 @@ def main() -> int:
     crate_count = 0
     target_count = 0
     source_count = 0
-    targets_by_package = {}
+    targets_by_package: dict[str, set[str]] = {}
+    packages_by_manifest = {
+        pathlib.Path(str(package["manifest_path"])).resolve(): package
+        for package in workspace_packages()
+    }
     for manifest_path in sorted(ROOT.glob("crates/*/Cargo.toml")):
-        package, target_names, targets, sources = verify_crate(manifest_path.parent)
-        if package is not None:
-            targets_by_package[package] = target_names
+        package_metadata = packages_by_manifest.get(manifest_path.resolve())
+        if package_metadata is None:
+            raise RuntimeError(f"{manifest_path} is not a Cargo workspace member")
+        package, target_names, targets, sources = verify_crate(package_metadata)
+        targets_by_package[package] = target_names
         if targets:
             crate_count += 1
             target_count += targets
@@ -161,6 +168,6 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (OSError, RuntimeError, tomllib.TOMLDecodeError) as error:
+    except (OSError, RuntimeError) as error:
         print(error, file=sys.stderr)
         raise SystemExit(1) from error
