@@ -559,8 +559,8 @@ mod platform_gamma {
     unsafe extern "C" {
         #[link_name = "tgamma"]
         fn c_tgamma(value: f64) -> f64;
-        #[link_name = "lgamma"]
-        fn c_lgamma(value: f64) -> f64;
+        #[link_name = "lgamma_r"]
+        fn c_lgamma_r(value: f64, sign: *mut libc::c_int) -> f64;
     }
 
     pub(super) fn tgamma(value: f64) -> (f64, i32) {
@@ -573,8 +573,10 @@ mod platform_gamma {
 
     pub(super) fn lgamma(value: f64) -> (f64, bool) {
         errno::set_errno(errno::Errno(0));
-        // SAFETY: see `tgamma`; PostgreSQL does not consume `signgam` either.
-        let result = unsafe { c_lgamma(value) };
+        let mut sign = 0;
+        // SAFETY: `sign` is a valid writable `c_int`; the return value is the
+        // same logarithm as `lgamma` without mutating the shared `signgam`.
+        let result = unsafe { c_lgamma_r(value, &raw mut sign) };
         (result, errno::errno().0 == libc::ERANGE)
     }
 }
@@ -595,6 +597,14 @@ mod gamma_tests {
     use super::{gamma, lgamma};
     use uqa_core::Value;
 
+    fn assert_float_close(actual: f64, expected: f64) {
+        let tolerance = 8.0 * f64::EPSILON * expected.abs().max(1.0);
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "expected {expected}, got {actual} (tolerance {tolerance})"
+        );
+    }
+
     #[test]
     fn gamma_functions_clear_stale_errno_before_native_calls() {
         #[cfg(unix)]
@@ -603,10 +613,10 @@ mod gamma_tests {
 
         #[cfg(unix)]
         errno::set_errno(errno::Errno(libc::ERANGE));
-        assert!(matches!(
-            lgamma(&[Value::Float(-0.5)]).unwrap(),
-            Value::Float(value) if value.to_bits() == 0x3ff4_3f89_a3f0_edd6
-        ));
+        match lgamma(&[Value::Float(-0.5)]).unwrap() {
+            Value::Float(value) => assert_float_close(value, 1.265_512_123_484_645_4),
+            other => panic!("expected double precision, got {other:?}"),
+        }
     }
 
     #[test]

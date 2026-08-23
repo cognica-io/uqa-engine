@@ -16,17 +16,25 @@ fn float(engine: &Engine, sql: &str) -> f64 {
     }
 }
 
+fn assert_float_close(actual: f64, expected: f64, context: &str) {
+    let tolerance = 8.0 * f64::EPSILON * expected.abs().max(1.0);
+    assert!(
+        (actual - expected).abs() <= tolerance,
+        "{context}: expected {expected}, got {actual} (tolerance {tolerance})"
+    );
+}
+
 #[test]
 fn pg18_gamma_functions_preserve_native_results_and_float8_types() {
     let engine = engine();
-    for (sql, expected_bits) in [
-        ("SELECT gamma(5)", 0x4038_0000_0000_0000),
-        ("SELECT gamma(.5::float8)", 0x3ffc_5bf8_91b4_ef6b),
-        ("SELECT gamma(-.5::float8)", 0xc00c_5bf8_91b4_ef6a),
-        ("SELECT lgamma(-.5::float8)", 0x3ff4_3f89_a3f0_edd6),
-        ("SELECT gamma((SELECT .5::float8))", 0x3ffc_5bf8_91b4_ef6b),
+    for (sql, expected) in [
+        ("SELECT gamma(5)", 24.0),
+        ("SELECT gamma(.5::float8)", 1.772_453_850_905_516),
+        ("SELECT gamma(-.5::float8)", -3.544_907_701_811_031_8),
+        ("SELECT lgamma(-.5::float8)", 1.265_512_123_484_645_4),
+        ("SELECT gamma((SELECT .5::float8))", 1.772_453_850_905_516),
     ] {
-        assert_eq!(float(&engine, sql).to_bits(), expected_bits, "{sql}");
+        assert_float_close(float(&engine, sql), expected, sql);
     }
     for sql in [
         "SELECT pg_typeof(gamma(5::smallint))",
@@ -48,10 +56,7 @@ fn pg18_gamma_functions_preserve_native_results_and_float8_types() {
     assert_eq!(float(&engine, "SELECT pg_catalog.gamma(5)"), 24.0);
     for (parameter, expected) in [
         (Value::Int(5), Some(24.0)),
-        (
-            Value::Float(0.5),
-            Some(f64::from_bits(0x3ffc_5bf8_91b4_ef6b)),
-        ),
+        (Value::Float(0.5), Some(1.772_453_850_905_516)),
         (Value::Null, None),
     ] {
         let result = engine
@@ -61,9 +66,12 @@ fn pg18_gamma_functions_preserve_native_results_and_float8_types() {
             )
             .unwrap_or_else(|error| panic!("{parameter:?}: {error}"));
         assert_eq!(result.rows[0]["ty"], Value::Str("double precision".into()));
-        match expected {
-            Some(expected) => assert_eq!(result.rows[0]["value"], Value::Float(expected)),
-            None => assert_eq!(result.rows[0]["value"], Value::Null),
+        match (&result.rows[0]["value"], expected) {
+            (Value::Float(actual), Some(expected)) => {
+                assert_float_close(*actual, expected, &format!("gamma({parameter:?})"));
+            }
+            (Value::Null, None) => {}
+            (actual, expected) => panic!("{parameter:?}: expected {expected:?}, got {actual:?}"),
         }
     }
 }

@@ -13,9 +13,10 @@ use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::SQLError;
 
 use super::{
-    canonical_column_type_name, canonical_routine_type_name, routine_signature_types,
-    routine_type_accepts_implicit_cast, routine_type_category, routine_type_is_preferred,
-    static_function_match, static_function_return_type, Engine, SQLUserFunction,
+    canonical_column_type_name, canonical_routine_type_name, rank_function_matches,
+    routine_signature_types, routine_type_accepts_implicit_cast, routine_type_is_preferred,
+    static_function_match, static_function_return_type, Engine, RankedFunctionMatch,
+    SQLUserFunction,
 };
 
 enum FunctionTarget {
@@ -28,6 +29,20 @@ struct FunctionMatch {
     argument_types: Vec<String>,
     exact_matches: usize,
     preferred_matches: usize,
+}
+
+impl RankedFunctionMatch for FunctionMatch {
+    fn argument_types(&self) -> &[String] {
+        &self.argument_types
+    }
+
+    fn exact_matches(&self) -> usize {
+        self.exact_matches
+    }
+
+    fn preferred_matches(&self) -> usize {
+        self.preferred_matches
+    }
 }
 
 pub(super) fn resolve(
@@ -163,9 +178,7 @@ fn resolve_candidates(
         ));
     }
 
-    retain_best_matches(&mut candidates);
-    narrow_unknown_arguments(&mut candidates, argument_types);
-    narrow_assumed_known_type(&mut candidates, argument_types);
+    rank_function_matches(&mut candidates, argument_types);
     if candidates.len() != 1 {
         return Err(resolution_error(
             "42725",
@@ -200,44 +213,6 @@ fn resolve_candidates(
             Ok(resolved)
         }
     }
-}
-
-fn retain_best_matches(candidates: &mut Vec<FunctionMatch>) {
-    let most_exact = candidates
-        .iter()
-        .map(|candidate| candidate.exact_matches)
-        .max()
-        .unwrap_or(0);
-    candidates.retain(|candidate| candidate.exact_matches == most_exact);
-    let most_preferred = candidates
-        .iter()
-        .map(|candidate| candidate.preferred_matches)
-        .max()
-        .unwrap_or(0);
-    candidates.retain(|candidate| candidate.preferred_matches == most_preferred);
-}
-
-fn narrow_assumed_known_type(
-    candidates: &mut Vec<FunctionMatch>,
-    argument_types: &[Option<ColumnType>],
-) {
-    if candidates.len() <= 1 {
-        return;
-    }
-    let mut known = argument_types.iter().flatten();
-    let Some(first) = known.next() else {
-        return;
-    };
-    let identity = canonical_column_type_name(first);
-    if !known.all(|ty| canonical_column_type_name(ty) == identity) {
-        return;
-    }
-    candidates.retain(|candidate| {
-        argument_types.iter().enumerate().all(|(index, actual)| {
-            actual.is_some()
-                || routine_type_accepts_implicit_cast(&identity, &candidate.argument_types[index])
-        })
-    });
 }
 
 fn builtin_function_match(
@@ -307,43 +282,6 @@ fn builtin_function_match(
         exact_matches,
         preferred_matches,
     })
-}
-
-fn narrow_unknown_arguments(
-    candidates: &mut Vec<FunctionMatch>,
-    argument_types: &[Option<ColumnType>],
-) {
-    for (index, actual) in argument_types.iter().enumerate() {
-        if actual.is_some() || candidates.len() <= 1 {
-            continue;
-        }
-        let mut categories = candidates
-            .iter()
-            .map(|candidate| routine_type_category(&candidate.argument_types[index]))
-            .collect::<Vec<_>>();
-        categories.sort_unstable();
-        categories.dedup();
-        let selected = if categories.contains(&'S') {
-            Some('S')
-        } else if categories.len() == 1 {
-            categories.first().copied()
-        } else {
-            None
-        };
-        if let Some(selected) = selected {
-            candidates.retain(|candidate| {
-                routine_type_category(&candidate.argument_types[index]) == selected
-            });
-            if candidates
-                .iter()
-                .any(|candidate| routine_type_is_preferred(&candidate.argument_types[index]))
-            {
-                candidates.retain(|candidate| {
-                    routine_type_is_preferred(&candidate.argument_types[index])
-                });
-            }
-        }
-    }
 }
 
 fn builtin_name_matches(name: &str, builtin_name: &str) -> bool {

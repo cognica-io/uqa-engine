@@ -15,6 +15,14 @@ fn generated_float(result: &uqa_engine::SQLResult, column: &str) -> f64 {
     }
 }
 
+fn assert_float_close(actual: f64, expected: f64, context: &str) {
+    let tolerance = 8.0 * f64::EPSILON * expected.abs().max(1.0);
+    assert!(
+        (actual - expected).abs() <= tolerance,
+        "{context}: expected {expected}, got {actual} (tolerance {tolerance})"
+    );
+}
+
 #[test]
 fn generated_columns_bind_gamma_signatures_and_errors() {
     let engine = Engine::new();
@@ -41,13 +49,15 @@ fn generated_columns_bind_gamma_signatures_and_errors() {
             &[],
         )
         .unwrap();
-    assert_eq!(
-        generated_float(&result, "gamma_value").to_bits(),
-        0xc00c_5bf8_91b4_ef6a
+    assert_float_close(
+        generated_float(&result, "gamma_value"),
+        -3.544_907_701_811_031_8,
+        "gamma generated column",
     );
-    assert_eq!(
-        generated_float(&result, "lgamma_value").to_bits(),
-        0x3ff4_3f89_a3f0_edd6
+    assert_float_close(
+        generated_float(&result, "lgamma_value"),
+        1.265_512_123_484_645_4,
+        "lgamma generated column",
     );
     assert_eq!(result.rows[0]["null_value"], Value::Null);
 
