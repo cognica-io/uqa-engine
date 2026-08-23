@@ -6,6 +6,7 @@
 
 //! Virtual `pg_catalog` relation builders.
 
+use super::builtin_routines::PG18_BUILTIN_ROUTINES;
 use super::helpers::{
     all_schema_names, array_dimension_count, bool_value, catalog_array, catalog_name,
     catalog_ordinal, catalog_usize, constraint_catalog_rows, current_user_name, current_user_oid,
@@ -14,7 +15,7 @@ use super::helpers::{
     pg_type_modifier, pg_type_oid, pg_type_routine_oids, pg_type_storage,
     pg_type_subscript_handler, relation_oid, routine_type_oid, row, schema_oid, split_index_name,
     split_schema_name, stable_oid, str_value, table_columns_for, view_columns_for,
-    PgTypeRoutineOids, PG18_BUILTIN_ROUTINES,
+    PgTypeRoutineOids,
 };
 use super::{
     registered_names, routine_signature_types, value_to_text, ColumnType, Engine, ResultRow,

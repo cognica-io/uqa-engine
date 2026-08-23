@@ -91,12 +91,12 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
             "SELECT oid, proname, prokind, proisstrict, proleakproof, provolatile, \
                     pronargs, pronargdefaults, prorettype, proargtypes, proargnames, prosrc \
              FROM pg_catalog.pg_proc \
-             WHERE oid IN (3261, 6364, 6383, 6389, 6390, 6429, 6430) \
+             WHERE oid IN (3261, 6342, 6343, 6364, 6383, 6389, 6390, 6429, 6430) \
              ORDER BY oid",
             &[],
         )
         .unwrap();
-    assert_eq!(routines.rows.len(), 7);
+    assert_eq!(routines.rows.len(), 9);
     let row = |oid: i64| {
         routines
             .rows
@@ -116,6 +116,22 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
             ])
             .expect("flat pg_proc argument-name array")
         )
+    );
+    assert_eq!(row(6342)["prorettype"], Value::Int(1184));
+    assert_eq!(
+        row(6342)["proargtypes"],
+        Value::List(vec![Value::Int(2950)])
+    );
+    assert_eq!(row(6342)["proisstrict"], Value::Bool(true));
+    assert_eq!(row(6342)["provolatile"], Value::Str("i".into()));
+    assert_eq!(
+        row(6342)["prosrc"],
+        Value::Str("uuid_extract_timestamp".into())
+    );
+    assert_eq!(row(6343)["prorettype"], Value::Int(21));
+    assert_eq!(
+        row(6343)["prosrc"],
+        Value::Str("uuid_extract_version".into())
     );
     assert_eq!(row(6364)["proleakproof"], Value::Bool(true));
     assert_eq!(row(6383)["prosrc"], Value::Str("dgamma".into()));
@@ -148,6 +164,41 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     for row in information_schema.rows {
         assert_eq!(row["data_type"], Value::Str("uuid".into()));
         assert_eq!(row["is_deterministic"], Value::Str("NO".into()));
+        assert_eq!(row["external_language"], Value::Str("INTERNAL".into()));
+    }
+
+    assert_uuid_extraction_routines(&engine);
+}
+
+fn assert_uuid_extraction_routines(engine: &Engine) {
+    let extraction_routines = engine
+        .sql(
+            "SELECT routine_name, data_type, is_deterministic, external_language \
+             FROM information_schema.routines \
+             WHERE routine_name IN ('uuid_extract_timestamp', 'uuid_extract_version') \
+             ORDER BY routine_name",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(extraction_routines.rows.len(), 2);
+    assert_eq!(
+        extraction_routines.rows[0]["routine_name"],
+        Value::Str("uuid_extract_timestamp".into())
+    );
+    assert_eq!(
+        extraction_routines.rows[0]["data_type"],
+        Value::Str("timestamp with time zone".into())
+    );
+    assert_eq!(
+        extraction_routines.rows[1]["routine_name"],
+        Value::Str("uuid_extract_version".into())
+    );
+    assert_eq!(
+        extraction_routines.rows[1]["data_type"],
+        Value::Str("smallint".into())
+    );
+    for row in extraction_routines.rows {
+        assert_eq!(row["is_deterministic"], Value::Str("YES".into()));
         assert_eq!(row["external_language"], Value::Str("INTERNAL".into()));
     }
 }

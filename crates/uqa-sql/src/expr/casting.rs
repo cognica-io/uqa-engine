@@ -490,47 +490,7 @@ fn cast_uuid(value: &Value) -> Result<Value> {
             )))
         }
     };
-    let digits = text
-        .strip_prefix('{')
-        .and_then(|text| text.strip_suffix('}'))
-        .unwrap_or(text);
-    if digits.starts_with('{') || digits.ends_with('}') {
-        return Err(invalid_uuid(text));
-    }
-    let mut normalized = String::with_capacity(32);
-    let mut group_digits = 0_usize;
-    for character in digits.chars() {
-        if character == '-' {
-            if group_digits == 0 || !group_digits.is_multiple_of(4) {
-                return Err(invalid_uuid(text));
-            }
-            group_digits = 0;
-            continue;
-        }
-        if !character.is_ascii_hexdigit() {
-            return Err(invalid_uuid(text));
-        }
-        normalized.push(character.to_ascii_lowercase());
-        group_digits += 1;
-    }
-    if normalized.len() != 32 || group_digits == 0 {
-        return Err(invalid_uuid(text));
-    }
-    Ok(Value::Str(format!(
-        "{}-{}-{}-{}-{}",
-        &normalized[0..8],
-        &normalized[8..12],
-        &normalized[12..16],
-        &normalized[16..20],
-        &normalized[20..32]
-    )))
-}
-
-fn invalid_uuid(text: &str) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "22P02".into(),
-        message: format!("invalid input syntax for type uuid: \"{text}\""),
-    }
+    super::uuid::canonicalize_uuid(text).map(Value::Str)
 }
 
 /// Split `varchar(10)` / `numeric(10,2)` into `("varchar", Some("10"))`.

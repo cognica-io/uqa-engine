@@ -246,6 +246,148 @@ fn pg18_uuid_generators_set_rfc_bits_and_monotonic_submillisecond_time() {
 }
 
 #[test]
+fn pg18_uuid_extraction_matches_rfc_variants_versions_and_timestamps() {
+    let eng = engine();
+    assert_uuid_versions(&eng);
+    assert_uuid_timestamps(&eng);
+    assert_uuid_extraction_types_and_nulls(&eng);
+    assert_uuid_extraction_errors(&eng);
+}
+
+fn assert_uuid_versions(eng: &Engine) {
+    assert_eq!(
+        scalar(
+            eng,
+            "SELECT uuid_extract_version('00000000-0000-0000-0000-000000000000')"
+        ),
+        Value::Null
+    );
+    for version in 1..=15 {
+        assert_eq!(
+            scalar(
+                eng,
+                &format!(
+                    "SELECT uuid_extract_version('00000000-0000-{version:x}000-8000-000000000000')"
+                )
+            ),
+            Value::Int(version)
+        );
+    }
+    for variant in ["0000", "c000", "e000"] {
+        assert_eq!(
+            scalar(
+                eng,
+                &format!(
+                    "SELECT uuid_extract_version('00000000-0000-7000-{variant}-000000000000')"
+                )
+            ),
+            Value::Null
+        );
+    }
+}
+
+fn assert_uuid_timestamps(eng: &Engine) {
+    assert_eq!(
+        scalar(
+            eng,
+            "SELECT uuid_extract_timestamp('a8098c1a-f86e-11da-bd1a-00112444be1e')"
+        ),
+        Value::Temporal(TemporalValue::TimestampTz {
+            micros: 1_149_936_511_013_993,
+        })
+    );
+    assert_eq!(
+        scalar(
+            eng,
+            "SELECT uuid_extract_timestamp('13813fff-1dd2-11b2-8000-000000000000')"
+        ),
+        Value::Temporal(TemporalValue::TimestampTz { micros: -1 })
+    );
+    assert_eq!(
+        scalar(
+            eng,
+            "SELECT uuid_extract_timestamp('13814009-1dd2-11b2-8000-000000000000')"
+        ),
+        Value::Temporal(TemporalValue::TimestampTz { micros: 0 })
+    );
+    assert_eq!(
+        scalar(
+            eng,
+            "SELECT uuid_extract_timestamp('00000000-0001-7fff-8000-000000000000')"
+        ),
+        Value::Temporal(TemporalValue::TimestampTz { micros: 1_000 })
+    );
+    assert_eq!(
+        scalar(
+            eng,
+            "SELECT uuid_extract_timestamp('ffffffff-ffff-7fff-8000-000000000000')"
+        ),
+        Value::Temporal(TemporalValue::TimestampTz {
+            micros: 281_474_976_710_655_000,
+        })
+    );
+    assert_eq!(
+        scalar(
+            eng,
+            "SELECT uuid_extract_timestamp('00000000-0000-4000-8000-000000000000')"
+        ),
+        Value::Null
+    );
+}
+
+fn assert_uuid_extraction_types_and_nulls(eng: &Engine) {
+    assert_eq!(
+        scalar(
+            eng,
+            "SELECT pg_catalog.uuid_extract_version('00000000-0000-7000-8000-000000000000')"
+        ),
+        Value::Int(7)
+    );
+    assert_eq!(
+        text(
+            eng,
+            "SELECT pg_typeof(uuid_extract_version('00000000-0000-7000-8000-000000000000'))"
+        ),
+        "smallint"
+    );
+    assert_eq!(
+        text(
+            eng,
+            "SELECT pg_typeof(uuid_extract_timestamp('00000000-0000-7000-8000-000000000000'))"
+        ),
+        "timestamp with time zone"
+    );
+    assert_eq!(
+        scalar(eng, "SELECT uuid_extract_version(NULL::uuid)"),
+        Value::Null
+    );
+}
+
+fn assert_uuid_extraction_errors(eng: &Engine) {
+    for sql in [
+        "SELECT uuid_extract_version()",
+        "SELECT uuid_extract_version(1)",
+        "SELECT uuid_extract_version('00000000-0000-7000-8000-000000000000'::text)",
+        "SELECT uuid_extract_timestamp()",
+        "SELECT uuid_extract_timestamp(1)",
+        "SELECT uuid_extract_timestamp('00000000-0000-7000-8000-000000000000'::text)",
+    ] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42883"), "{sql}: {error}");
+    }
+    let error = eng.sql("SELECT uuid_extract_version(1)", &[]).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "function uuid_extract_version(integer) does not exist"
+    );
+    for function in ["uuid_extract_version", "uuid_extract_timestamp"] {
+        let sql = format!("SELECT {function}('not-a-uuid')");
+        let error = eng.sql(&sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("22P02"), "{sql}: {error}");
+    }
+}
+
+#[test]
 fn pg18_min_and_max_accept_arrays() {
     let eng = engine();
     assert_eq!(

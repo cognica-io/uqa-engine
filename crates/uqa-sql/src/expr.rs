@@ -19,6 +19,7 @@ use crate::result::ResultRow;
 mod encoding;
 mod json;
 mod time;
+mod uuid;
 
 use encoding::{base64_decode, base64_encode, md5_hex};
 pub use json::value_to_json_text;
@@ -30,9 +31,9 @@ use json::{
 };
 use time::{
     age_between, coerce_temporal, date_trunc_value, extract_from_value, format_pg_number,
-    format_temporal, generate_random_uuid, generate_uuid_v7, hex_encode, make_timestamp,
-    parse_timestamp, pg_to_chrono_fmt,
+    format_temporal, hex_encode, make_timestamp, parse_timestamp, pg_to_chrono_fmt,
 };
+use uuid::{extract_uuid_timestamp, extract_uuid_version, generate_random_uuid, generate_uuid_v7};
 mod binary;
 mod casting;
 mod conversion;
@@ -504,6 +505,8 @@ pub const NAMED_ARG_FUNCTION: &str = "__named_arg";
 /// Physical scalar built-ins selected after `PostgreSQL` overload resolution has preserved the declared integer width.
 pub const TO_HEX_INT4_FUNCTION: &str = "__to_hex_int4";
 pub const TO_HEX_INT8_FUNCTION: &str = "__to_hex_int8";
+/// Physical marker emitted when declared argument types cannot resolve a built-in overload.
+pub const UNDEFINED_FUNCTION_MARKER: &str = "\0uqa.undefined_function:";
 
 /// Return the `PostgreSQL` 18 strictness contract for a built-in scalar call when its implemented overload is known.
 #[must_use]
@@ -527,16 +530,67 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         "array_to_string" if argument_count == 3 => Some(false),
         "string_to_array" | "string_to_table" if matches!(argument_count, 2 | 3) => Some(false),
         "overlaps" if argument_count == 4 => Some(false),
-        "abs" | "acos" | "array_dims" | "array_ndims" | "array_reverse" | "ascii" | "asin"
-        | "atan" | "bit_length" | "cardinality" | "casefold" | "cbrt" | "ceil" | "ceiling"
-        | "char_length" | "character_length" | "chr" | "cos" | "cosh" | "current_schemas"
-        | "degrees" | "exp" | "factorial" | "floor" | "gamma" | "initcap" | "isfinite"
-        | "json_array_length" | "jsonb_array_length" | "json_typeof" | "jsonb_typeof"
-        | "jsonb_pretty" | "justify_hours" | "length" | "lgamma" | "ln" | "log10" | "log2"
-        | "lower" | "md5" | "octet_length" | "quote_ident" | "quote_literal" | "radians"
-        | "reverse" | "row_to_json" | "sign" | "sin" | "sinh" | "sqrt" | "tan" | "tanh"
-        | "to_hex" | TO_HEX_INT4_FUNCTION | TO_HEX_INT8_FUNCTION | "to_json" | "to_jsonb"
-        | "to_timestamp" | "upper"
+        "abs"
+        | "acos"
+        | "array_dims"
+        | "array_ndims"
+        | "array_reverse"
+        | "ascii"
+        | "asin"
+        | "atan"
+        | "bit_length"
+        | "cardinality"
+        | "casefold"
+        | "cbrt"
+        | "ceil"
+        | "ceiling"
+        | "char_length"
+        | "character_length"
+        | "chr"
+        | "cos"
+        | "cosh"
+        | "current_schemas"
+        | "degrees"
+        | "exp"
+        | "factorial"
+        | "floor"
+        | "gamma"
+        | "initcap"
+        | "isfinite"
+        | "json_array_length"
+        | "jsonb_array_length"
+        | "json_typeof"
+        | "jsonb_typeof"
+        | "jsonb_pretty"
+        | "justify_hours"
+        | "length"
+        | "lgamma"
+        | "ln"
+        | "log10"
+        | "log2"
+        | "lower"
+        | "md5"
+        | "octet_length"
+        | "quote_ident"
+        | "quote_literal"
+        | "radians"
+        | "reverse"
+        | "row_to_json"
+        | "sign"
+        | "sin"
+        | "sinh"
+        | "sqrt"
+        | "tan"
+        | "tanh"
+        | "to_hex"
+        | TO_HEX_INT4_FUNCTION
+        | TO_HEX_INT8_FUNCTION
+        | "to_json"
+        | "to_jsonb"
+        | "to_timestamp"
+        | "upper"
+        | "uuid_extract_timestamp"
+        | "uuid_extract_version"
             if argument_count == 1 =>
         {
             Some(true)

@@ -24,6 +24,7 @@ mod introspection;
 mod operators;
 mod qualified_column;
 mod to_hex;
+mod uuid;
 
 pub use common::{common_context_expression_type, common_type, values_column_types};
 pub use equality::equality_operand_type;

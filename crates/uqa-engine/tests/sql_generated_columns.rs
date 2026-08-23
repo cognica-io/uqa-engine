@@ -1299,6 +1299,56 @@ fn generated_columns_apply_postgresql_assignment_casts() {
 }
 
 #[test]
+fn generated_columns_accept_immutable_uuid_extraction_functions() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE generated_uuid_extraction (
+                 source UUID,
+                 version SMALLINT GENERATED ALWAYS AS (uuid_extract_version(source)) STORED,
+                 extracted_at TIMESTAMPTZ GENERATED ALWAYS AS (uuid_extract_timestamp(source)) STORED
+             )",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO generated_uuid_extraction (source) VALUES ('00000000-0001-7000-8000-000000000000')",
+            &[],
+        )
+        .unwrap();
+    let row = engine
+        .sql(
+            "SELECT version, extracted_at FROM generated_uuid_extraction",
+            &[],
+        )
+        .unwrap()
+        .rows
+        .pop()
+        .unwrap();
+    assert_eq!(row["version"], Value::Int(7));
+    assert_eq!(
+        row["extracted_at"],
+        Value::Temporal(uqa_core::TemporalValue::TimestampTz { micros: 1_000 })
+    );
+
+    let error = engine
+        .sql(
+            "CREATE TABLE generated_bad_uuid_extraction (
+                 source TEXT,
+                 version SMALLINT GENERATED ALWAYS AS (uuid_extract_version(source)) STORED
+             )",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42883"));
+    assert_eq!(
+        error.to_string(),
+        "function uuid_extract_version(text) does not exist"
+    );
+}
+
+#[test]
 fn generated_columns_reject_nonexistent_builtin_signatures() {
     let engine = Engine::new();
     for expression in [

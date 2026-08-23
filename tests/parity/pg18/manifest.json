@@ -162,6 +162,14 @@
       "open_issue": "The complete PostgreSQL 18 function, type, overload, and catalog matrix remains."
     },
     {
+      "id": "functions.uuid-extraction",
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live UUID extraction results, return types, errors, SQLSTATEs, and pg_proc metadata plus UUID function documentation",
+      "uqa_test": "cargo test -p uqa-engine --test integration pg18_uuid_extraction_matches_rfc_variants_versions_and_timestamps; cargo test -p uqa-engine --test integration generated_columns_accept_immutable_uuid_extraction_functions; cargo test -p uqa-engine --test integration postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata; cargo test -p uqa-execution --lib uuid_extraction_binding_rejects_non_uuid_declared_types; tests/parity/pg18/probes.sql",
+      "supported_version": "PostgreSQL 18.4 uuid_extract_version(uuid) and uuid_extract_timestamp(uuid) RFC-variant, nil, version 1 and 7 timestamp, strict NULL, declared-overload, qualified-name, error, return-type, immutable generated-column, and catalog behavior",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "execution.static-row-schema-and-spill-v1",
       "postgresql_reference": "PostgreSQL 18 declared row descriptions and name-resolution behavior across relational operators",
       "uqa_test": "cargo test -p uqa-execution --lib; cargo test -p uqa-engine --test integration engine_queries::sql_joins::; cargo test -p uqa-engine --test integration engine_queries::sql_prepared::",
