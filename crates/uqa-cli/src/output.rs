@@ -6,7 +6,7 @@
 
 //! Tabular and expanded query-result rendering.
 
-use super::{PathBuf, SQLResult, Value, Write, HISTORY_FILE};
+use super::{ColumnType, PathBuf, SQLResult, Value, Write, HISTORY_FILE};
 
 /// Render the result one column per line per row -- mirrors
 /// `PostgreSQL` `psql`'s `\x` expanded display mode.
@@ -32,7 +32,10 @@ pub(super) fn print_result_expanded(result: &SQLResult, out: &mut (impl Write + 
     for (idx, _) in result.rows.iter().enumerate() {
         let _ = writeln!(out, "-[ RECORD {} ]-", idx + 1);
         for (column, col) in columns.iter().enumerate() {
-            let value = value_to_display(result.value_at(idx, column));
+            let value = value_to_display_typed(
+                result.value_at(idx, column),
+                result.column_types.get(column).and_then(Option::as_ref),
+            );
             let _ = writeln!(out, "{col:<label_width$} | {value}");
         }
     }
@@ -68,7 +71,15 @@ pub(super) fn print_result(result: &SQLResult, out: &mut (impl Write + ?Sized)) 
             columns
                 .iter()
                 .enumerate()
-                .map(|(column_index, _)| value_to_display(result.value_at(row_index, column_index)))
+                .map(|(column_index, _)| {
+                    value_to_display_typed(
+                        result.value_at(row_index, column_index),
+                        result
+                            .column_types
+                            .get(column_index)
+                            .and_then(Option::as_ref),
+                    )
+                })
                 .collect()
         })
         .collect();
@@ -109,20 +120,33 @@ pub(super) fn print_result_copy_text(result: &SQLResult, out: &mut (impl Write +
         let cells = columns
             .iter()
             .enumerate()
-            .map(|(column_index, _)| copy_text_cell(result.value_at(row_index, column_index)))
+            .map(|(column_index, _)| {
+                copy_text_cell_typed(
+                    result.value_at(row_index, column_index),
+                    result
+                        .column_types
+                        .get(column_index)
+                        .and_then(Option::as_ref),
+                )
+            })
             .collect::<Vec<_>>();
         let _ = writeln!(out, "{}", cells.join("\t"));
     }
 }
 
+#[cfg(test)]
 fn copy_text_cell(value: Option<&Value>) -> String {
+    copy_text_cell_typed(value, None)
+}
+
+fn copy_text_cell_typed(value: Option<&Value>, ty: Option<&ColumnType>) -> String {
     let Some(value) = value.filter(|value| !matches!(value, Value::Null)) else {
         return "\\N".to_string();
     };
     let text = match value {
         Value::Bool(true) => "t".to_string(),
         Value::Bool(false) => "f".to_string(),
-        other => value_to_display(Some(other)),
+        other => value_to_display_typed(Some(other), ty),
     };
     let mut escaped = String::new();
     for character in text.chars() {
@@ -138,6 +162,15 @@ fn copy_text_cell(value: Option<&Value>) -> String {
         }
     }
     escaped
+}
+
+fn value_to_display_typed(value: Option<&Value>, ty: Option<&ColumnType>) -> String {
+    if matches!(ty, Some(ColumnType::Int2Vector | ColumnType::OidVector)) {
+        if let Some(value) = value.and_then(uqa_sql::expr::vector_value_to_string) {
+            return value;
+        }
+    }
+    value_to_display(value)
 }
 
 pub(super) fn write_row(out: &mut (impl Write + ?Sized), cells: &[String], widths: &[usize]) {
@@ -280,8 +313,9 @@ pub(super) fn json_value_display(v: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_text_cell, value_to_display};
+    use super::{copy_text_cell, print_result_copy_text, value_to_display};
     use uqa_core::Value;
+    use uqa_sql::{ColumnType, SQLResult};
 
     #[test]
     fn float_output_matches_postgresql_special_and_scientific_spelling() {
@@ -309,5 +343,21 @@ mod tests {
             copy_text_cell(Some(&Value::Str("a\tb\nc\\d".into()))),
             "a\\tb\\nc\\\\d"
         );
+    }
+
+    #[test]
+    fn copy_text_uses_postgresql_legacy_vector_output() {
+        let result = SQLResult::from_typed_rows_with_positions(
+            vec!["proargtypes".into(), "indkey".into()],
+            vec![Some(ColumnType::OidVector), Some(ColumnType::Int2Vector)],
+            vec![std::collections::BTreeMap::new()],
+            Some(vec![vec![
+                Value::List(vec![Value::Int(23), Value::Int(25)]),
+                Value::List(vec![Value::Int(1), Value::Int(3)]),
+            ]]),
+        );
+        let mut output = Vec::new();
+        print_result_copy_text(&result, &mut output);
+        assert_eq!(String::from_utf8(output).unwrap(), "23 25\t1 3\n");
     }
 }

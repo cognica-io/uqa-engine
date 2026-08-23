@@ -6,9 +6,11 @@
 
 //! SQL casts and `PostgreSQL` array-literal parsing.
 
+mod legacy_vector;
+
 use super::{
     out_of_range, parse_json, to_decimal, to_f64, typed_json_value, value_to_json, value_to_string,
-    ArrayValue, Result, SQLError, TemporalValue, Value,
+    vector_value_to_string, ArrayValue, Result, SQLError, TemporalValue, Value,
 };
 
 /// Cast a value to the named SQL type, mirroring `CAST(expr AS ty)`.
@@ -79,8 +81,18 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
             Ok(Value::Decimal(value))
         }
         "text" | "name" | "regproc" | "regtype" | "pg_node_tree" | "aclitem" => {
-            Ok(Value::Str(value_to_string(v)))
+            let source = source_ty
+                .map(str::trim)
+                .map(|source| source.strip_prefix("pg_catalog.").unwrap_or(source));
+            let text = if matches!(source, Some("int2vector" | "oidvector")) {
+                vector_value_to_string(v).unwrap_or_else(|| value_to_string(v))
+            } else {
+                value_to_string(v)
+            };
+            Ok(Value::Str(text))
         }
+        "int2vector" | "pg_catalog.int2vector" => legacy_vector::cast_int2vector(v, source_ty),
+        "oidvector" | "pg_catalog.oidvector" => legacy_vector::cast_oidvector(v, source_ty),
         "oid" | "pg_catalog.oid" => cast_oid(v, source_ty),
         "regclass" | "pg_catalog.regclass" => cast_regclass(v, source_ty),
         "regnamespace" | "pg_catalog.regnamespace" => cast_regnamespace(v, source_ty),
@@ -1200,6 +1212,29 @@ mod tests {
             let error = cast_value_from(&Value::Int(1), "xid", Some(source)).unwrap_err();
             assert_eq!(error.sqlstate(), Some("42846"));
         }
+    }
+
+    #[test]
+    fn legacy_vector_text_casts_use_postgresql_space_separation() {
+        let vector = Value::List(vec![Value::Int(23), Value::Int(25)]);
+        assert_eq!(
+            cast_value_from(&vector, "text", Some("oidvector")).unwrap(),
+            Value::Str("23 25".into())
+        );
+        let stored = Value::Array(ArrayValue::try_new(vec![Value::Int(1), Value::Int(3)]).unwrap());
+        assert_eq!(
+            cast_value_from(&stored, "text", Some("int2vector")).unwrap(),
+            Value::Str("1 3".into())
+        );
+        assert_eq!(
+            cast_value_from(
+                &Value::List(Vec::new()),
+                "text",
+                Some("pg_catalog.int2vector")
+            )
+            .unwrap(),
+            Value::Str(String::new())
+        );
     }
 
     #[test]

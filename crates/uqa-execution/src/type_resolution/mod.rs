@@ -30,12 +30,15 @@ mod introspection;
 mod operators;
 mod qualified_column;
 mod random_range;
+mod reverse;
 mod uuid;
 
 pub use common::{common_context_expression_type, common_type, values_column_types};
 pub use equality::equality_operand_type;
 pub use functions::{builtin_function_argument_targets, builtin_function_type};
 pub use introspection::{bind_type_introspection, bind_type_introspection_with_resolver};
+#[doc(hidden)]
+pub use reverse::{resolve_reverse_overload, ResolvedReverseOverload};
 
 pub trait FunctionTypeResolver: Send + Sync {
     fn resolve_function_type(
@@ -74,6 +77,8 @@ pub struct ResolvedFunctionOverload {
     pub return_type: ColumnType,
     pub exact_matches: usize,
     pub known_arguments: usize,
+    pub preferred_matches: usize,
+    pub precedes_pg_catalog: bool,
 }
 
 impl ResolvedFunctionOverload {

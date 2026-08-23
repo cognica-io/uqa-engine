@@ -30,6 +30,22 @@ pub fn value_to_string(v: &Value) -> String {
     }
 }
 
+/// `PostgreSQL`'s legacy `int2vector` and `oidvector` text format is a space-separated vector, not the brace-delimited array format used by their array-like runtime carrier.
+pub fn vector_value_to_string(value: &Value) -> Option<String> {
+    let elements = match value {
+        Value::List(elements) => elements.as_slice(),
+        Value::Array(array) if array.dimensions().len() <= 1 => array.elements(),
+        _ => return None,
+    };
+    Some(
+        elements
+            .iter()
+            .map(value_to_string)
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
 pub fn array_value_to_string(array: &ArrayValue) -> String {
     let dimensions = if array
         .lower_bounds()

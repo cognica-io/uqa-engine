@@ -14,6 +14,9 @@ use super::{
 };
 
 mod array_transform;
+mod reverse;
+
+pub(super) use reverse::{bind_call as bind_reverse_call, ReverseCall};
 
 #[allow(clippy::too_many_lines)]
 pub(super) fn infer_builtin_function(
@@ -44,15 +47,7 @@ pub(super) fn infer_builtin_function(
             require_class(name, args, TypeClass::Text)?;
             GenerationType::Text
         }
-        "reverse" => {
-            require_arity(name, args, 1, 1)?;
-            if accepts_class(&args[0], TypeClass::Bytea) {
-                GenerationType::Bytea
-            } else {
-                require_class(name, args, TypeClass::Text)?;
-                GenerationType::Text
-            }
-        }
+        "reverse" => reverse::require_signature(name, argument_names, args)?,
         "concat" | "concat_ws" | "format" => {
             return Err(non_immutable_function(name));
         }

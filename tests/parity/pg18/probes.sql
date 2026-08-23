@@ -528,6 +528,21 @@ SELECT pg_typeof('x'::text)
 SELECT pg_typeof(now())
 SELECT width_bucket(5.35, 0, 10, 5)
 SELECT setseed(0.5)
+-- reverse(text|bytea) overloads
+SELECT reverse('abc'), pg_typeof(reverse('abc'))
+SELECT encode(reverse(decode('00ff10', 'hex')), 'hex'), pg_typeof(reverse(decode('00ff10', 'hex')))
+SELECT pg_typeof(reverse(NULL)), reverse(NULL) IS NULL
+SELECT pg_typeof(reverse(NULL::bytea)), reverse(NULL::bytea) IS NULL
+SELECT reverse('abc'::varchar), pg_typeof(reverse('abc'::varchar))
+SELECT reverse('abc'::name), pg_typeof(reverse('abc'::name))
+SELECT reverse('a'::"char"), pg_typeof(reverse('a'::"char"))
+SELECT pg_catalog.reverse('abc')
+SELECT reverse((SELECT decode('00ff10', 'hex')))
+SELECT reverse()
+SELECT reverse(1)
+SELECT reverse('abc', 'def')
+SELECT reverse(string => 'abc')
+SELECT oid, prorettype, proargtypes, proargnames, pronargs, pronargdefaults, proisstrict, provolatile, proparallel, proleakproof, prosrc FROM pg_catalog.pg_proc WHERE oid IN (3062, 6382) ORDER BY oid
 -- qualified joins
 SELECT * FROM (VALUES (1, 'left-value')) AS l(id, shared) JOIN (VALUES (1, 'right-value')) AS r(id, shared) USING (id)
 SELECT * FROM (VALUES (1, 'l1'), (2, 'l2')) AS l(id, lval) FULL JOIN (VALUES (1, 'r1'), (3, 'r3')) AS r(id, rval) USING (id) ORDER BY id

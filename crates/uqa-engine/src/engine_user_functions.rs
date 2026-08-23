@@ -123,15 +123,32 @@ impl FunctionTypeResolver for Engine {
             binding: FunctionBinding {
                 name: function.def.name.clone(),
                 argument_types: routine_signature_types(&function.def),
+                builtin: false,
             },
             return_type: static_function_return_type(name, &function.def)?,
             exact_matches: matched.exact_matches,
             known_arguments: argument_types.iter().flatten().count(),
+            preferred_matches: matched.preferred_matches,
+            precedes_pg_catalog: self.user_function_precedes_pg_catalog(&function.def.name),
         }))
     }
 }
 
 impl Engine {
+    fn user_function_precedes_pg_catalog(&self, name: &str) -> bool {
+        let Ok((Some(schema), _)) = RelationIdentity::parse_reference(name) else {
+            return false;
+        };
+        let search_path = &self.session.state.read().search_path;
+        let Some(user_position) = search_path.iter().position(|entry| entry == &schema) else {
+            return false;
+        };
+        search_path
+            .iter()
+            .position(|entry| entry == "pg_catalog")
+            .is_some_and(|catalog_position| user_position < catalog_position)
+    }
+
     pub(crate) fn resolve_static_sql_function(
         &self,
         name: &str,
@@ -381,7 +398,7 @@ fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool {
             | ("bpchar", "varchar" | "name" | "text")
             | ("varchar", "bpchar" | "name" | "text")
             | ("text", "bpchar" | "varchar" | "name")
-            | ("name", "text")
+            | ("name" | "\"char\"", "text")
             | ("date", "timestamp" | "timestamptz")
             | ("timestamp", "timestamptz")
             | ("time", "timetz" | "interval")

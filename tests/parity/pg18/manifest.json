@@ -186,6 +186,14 @@
       "open_issue": null
     },
     {
+      "id": "functions.reverse-overloads",
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live reverse(text) and reverse(bytea) results, preferred-type and search-path overload resolution, SQLSTATEs, return types, generated-column behavior, and pg_proc metadata plus string and binary function documentation",
+      "uqa_test": "cargo test -p uqa-engine --test integration pg18_reverse_; cargo test -p uqa-engine --test integration generated_columns_bind_reverse_text_and_bytea_overloads; cargo test -p uqa-engine --test integration generated_columns_rank_reverse_user_overloads_by_search_path; cargo test -p uqa-engine --test integration generated_reverse_builtin_binding_survives_reopen; cargo test -p uqa-engine --test integration postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata; tests/parity/pg18/probes.sql",
+      "supported_version": "PostgreSQL 18.4 reverse(text) and reverse(bytea) exact Unicode-scalar and raw-byte reversal, strict NULL, preferred text context for unknown literals and untyped parameters, character-family implicit casts, scalar-subquery binding, undefined-function SQLSTATEs for unsupported types, names, and arities, concrete user-overload ranking with pg_catalog search order, immutable generated-column binding, and OIDs 3062 and 6382 catalog behavior",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "functions.uuid-extraction",
       "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live UUID extraction results, return types, errors, SQLSTATEs, and pg_proc metadata plus UUID function documentation",
       "uqa_test": "cargo test -p uqa-engine --test integration pg18_uuid_extraction_matches_rfc_variants_versions_and_timestamps; cargo test -p uqa-engine --test integration generated_columns_accept_immutable_uuid_extraction_functions; cargo test -p uqa-engine --test integration postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata; cargo test -p uqa-execution --lib uuid_extraction_binding_rejects_non_uuid_declared_types; tests/parity/pg18/probes.sql",
@@ -205,7 +213,7 @@
       "id": "types.declared-identity-casts-and-catalog",
       "postgresql_reference": "PostgreSQL 18.4 pg_cast, pg_type, pg_class, pg_attribute, scalar cast results, errors, and SQLSTATEs",
       "uqa_test": "cargo test -p uqa-sql expr::casting::tests; cargo test -p uqa-engine --test integration engine_functions::pg18_semantics::; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::",
-      "supported_version": "Implemented scalar width identities, source-sensitive OID/XID/bytea casts, built-in/domain/pseudo/composite pg_type metadata, and information_schema_catalog_name identity",
+      "supported_version": "Implemented scalar width identities, source-sensitive OID/XID/bytea casts, PostgreSQL space-separated int2vector/oidvector text and COPY output, built-in/domain/pseudo/composite pg_type metadata, and information_schema_catalog_name identity",
       "status": "partial",
       "open_issue": "The full assignment-cast matrix, pg_proc rows for every type I/O routine, collations, user composites, enums, ranges, typmods, domain constraints, and binary formats remain."
     },

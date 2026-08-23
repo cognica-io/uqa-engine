@@ -69,7 +69,7 @@ use conversion::{
     allocation_error, coerce_i64, expect_str, float1, float_to_i64_rounded, float_to_i64_trunc,
     gcd_i64, initcap_str, nonnegative_usize, string1, to_decimal, to_i64,
 };
-pub use conversion::{array_value_to_string, value_to_string};
+pub use conversion::{array_value_to_string, value_to_string, vector_value_to_string};
 pub use conversion::{value_to_tensor, value_to_vector};
 use scalar_dispatch::{eval_scalar_function, eval_sequence_function};
 use scalar_helpers::{
@@ -349,6 +349,9 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         } => {
             let call_args = evaluate_call_args(args, ctx)?;
             if let Some(binding) = binding {
+                if binding.builtin {
+                    return eval_function_call(&binding.name, call_args, ctx);
+                }
                 let engine = ctx.engine.ok_or_else(|| {
                     SQLError::Unsupported(
                         "bound user function requires a logical engine session".into(),

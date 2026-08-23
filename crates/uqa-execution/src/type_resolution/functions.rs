@@ -14,7 +14,7 @@ use super::common::{
     base_type, common_numeric_type, common_type, merge_optional_types, numeric_type,
 };
 use super::{
-    array_transform, containment, integer_base, random_range, scalar_type_inner,
+    array_transform, containment, integer_base, random_range, reverse, scalar_type_inner,
     FunctionTypeResolver,
 };
 
@@ -53,6 +53,11 @@ pub fn builtin_function_argument_targets(
             targets.iter_mut().skip(1).for_each(|target| {
                 *target = Some(ColumnType::Boolean);
             });
+        }
+        "reverse" if targets.len() == 1 => {
+            if let Some(target) = reverse::builtin_argument_type(argument_types) {
+                targets.fill(Some(target));
+            }
         }
         "concat_op" if targets.len() == 2 => {
             for position in 0..2 {
@@ -170,6 +175,7 @@ pub(super) fn builtin_function_type_inner(
         "array_sort" | "array_reverse" => {
             array_transform::resolve_type(original_name, binding, args, &argument_types, resolver)
         }
+        "reverse" => reverse::resolve_type(original_name, binding, args, &argument_types, resolver),
         "count" | "row_number" | "rank" | "dense_rank" | "crc32" | "crc32c" | "nextval"
         | "currval" | "setval" => Ok(Some(ColumnType::BigInteger)),
         "sum" => Ok(first().and_then(|ty| aggregate_sum_type(&ty))),
@@ -246,13 +252,6 @@ pub(super) fn builtin_function_type_inner(
         | "st_dwithin"
         | "overlaps" => Ok(Some(ColumnType::Boolean)),
         "coalesce" | "greatest" | "least" => common_argument_type(args, &argument_types),
-        "reverse" => Ok(first().map(|ty| {
-            if matches!(base_type(&ty), ColumnType::Bytea) {
-                ColumnType::Bytea
-            } else {
-                ColumnType::Text
-            }
-        })),
         "concat_op" => concat_type(argument(0), argument(1)),
         "ntile" | "length" | "char_length" | "character_length" | "octet_length" | "position"
         | "strpos" | "ascii" | "width_bucket" | "bit_length" | "regexp_count" | "regexp_instr"

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{AlterSequence, ColumnType, SequenceRestart, Statement};
+use super::{AlterSequence, ColumnType, FunctionBinding, SequenceRestart, Statement};
 
 #[test]
 fn regclass_scalar_and_array_names_preserve_type_identity() {
@@ -60,6 +60,25 @@ fn alter_sequence_restart_reads_legacy_and_current_serde_shapes() {
     let round_trip: AlterSequence =
         serde_json::from_str(&serde_json::to_string(&current).unwrap()).unwrap();
     assert_eq!(round_trip.restart, SequenceRestart::FromStart);
+}
+
+#[test]
+fn function_binding_builtin_identity_is_backward_compatible() {
+    let legacy: FunctionBinding =
+        serde_json::from_str(r#"{"name":"app.f","argument_types":["text"]}"#).unwrap();
+    assert!(!legacy.builtin);
+
+    let builtin = FunctionBinding {
+        name: "pg_catalog.reverse".into(),
+        argument_types: vec!["text".into()],
+        builtin: true,
+    };
+    let encoded = serde_json::to_string(&builtin).unwrap();
+    assert!(encoded.contains(r#""builtin":true"#));
+    assert_eq!(
+        serde_json::from_str::<FunctionBinding>(&encoded).unwrap(),
+        builtin
+    );
 }
 
 #[test]

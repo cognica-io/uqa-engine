@@ -13,7 +13,7 @@ use crate::{RowSchema, ScalarExpr};
 use super::common::{base_type, common_context_expression_type, merge_optional_types};
 use super::operators::unary_minus_result_type;
 use super::{
-    array_transform, containment, integer_base, random_range, scalar_type_inner, uuid,
+    array_transform, containment, integer_base, random_range, reverse, scalar_type_inner, uuid,
     FunctionTypeResolver,
 };
 
@@ -87,6 +87,7 @@ fn bind_type_introspection_inner(
             );
             let name =
                 array_transform::bind_call(name, &mut binding, &mut args, schema, params, resolver);
+            let name = reverse::bind_call(name, &mut binding, &mut args, schema, params, resolver);
             let name = uuid::bind_extraction_signature(name, &args, schema, params, resolver);
             if is_pg_typeof(&name) && args.len() == 1 {
                 let name = scalar_type_inner(&args[0], schema, params, resolver)
@@ -259,7 +260,8 @@ fn bind_type_introspection_inner(
                         .ok()
                         .flatten()
                 })
-                .flatten();
+                .flatten()
+                .and_then(|source_type| declared_source_wrapper(&ty, source_type));
             bind_type_introspection_in_place(expr.as_mut(), schema, params, resolver);
             if let Some(source_type) = source_type {
                 wrap_in_declared_cast(expr.as_mut(), &source_type);
@@ -296,6 +298,7 @@ fn requires_type_introspection_binding(expression: &ScalarExpr) -> bool {
                 || integer_base::is_function(name)
                 || random_range::is_function(name)
                 || array_transform::is_function(name)
+                || reverse::is_function(name)
                 || uuid::is_extraction_function(name)
                 || containment::is_operator(name)
                 || args.iter().any(requires_type_introspection_binding)
@@ -475,8 +478,30 @@ fn cast_requires_declared_source(target: &str) -> bool {
     }
     matches!(
         target.as_str(),
-        "bytea" | "pg_catalog.bytea" | "oid" | "pg_catalog.oid" | "xid" | "pg_catalog.xid"
+        "bytea"
+            | "pg_catalog.bytea"
+            | "oid"
+            | "pg_catalog.oid"
+            | "xid"
+            | "pg_catalog.xid"
+            | "text"
+            | "pg_catalog.text"
+            | "int2vector"
+            | "pg_catalog.int2vector"
+            | "oidvector"
+            | "pg_catalog.oidvector"
     )
+}
+
+fn declared_source_wrapper(target: &str, source_type: ColumnType) -> Option<ColumnType> {
+    let target = target.trim().to_ascii_lowercase();
+    if matches!(target.as_str(), "text" | "pg_catalog.text") {
+        return match base_type(&source_type) {
+            source @ (ColumnType::Int2Vector | ColumnType::OidVector) => Some(source.clone()),
+            _ => None,
+        };
+    }
+    Some(source_type)
 }
 
 fn bind_frame_bound(

@@ -514,6 +514,40 @@ fn array_cast_binding_preserves_the_declared_source_element_type() {
 }
 
 #[test]
+fn text_cast_binding_preserves_only_legacy_vector_identity() {
+    let schema = RowSchema::with_types(
+        vec!["domain_value".into(), "arguments".into()],
+        vec![
+            Some(ColumnType::Domain {
+                schema: "public".into(),
+                name: "text_domain".into(),
+                oid: 99_998,
+                base: Box::new(ColumnType::Text),
+            }),
+            Some(ColumnType::OidVector),
+        ],
+    );
+    let text_cast = |column: &str| ScalarExpr::Cast {
+        expr: Box::new(ScalarExpr::Column(column.into())),
+        ty: "text".into(),
+    };
+    assert_eq!(
+        bind_type_introspection(text_cast("domain_value"), &schema, &[]),
+        text_cast("domain_value")
+    );
+    assert_eq!(
+        bind_type_introspection(text_cast("arguments"), &schema, &[]),
+        ScalarExpr::Cast {
+            expr: Box::new(ScalarExpr::Cast {
+                expr: Box::new(ScalarExpr::Column("arguments".into())),
+                ty: "oidvector".into(),
+            }),
+            ty: "text".into(),
+        }
+    );
+}
+
+#[test]
 fn common_type_binding_coerces_selector_results_before_runtime_evaluation() {
     let schema = RowSchema::with_types(
         vec!["floating".into(), "exact".into()],
