@@ -132,6 +132,26 @@ license-files = ["LICENSE", "LICENSING.md"]
             ):
                 LICENSES.check_maturin_sources()
 
+    def test_release_checker_ignores_declarations_inside_multiline_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            (root / "pyproject.toml").write_text(
+                '''
+[project]
+description = """
+license = "AGPL-3.0-only"
+license-files = ["LICENSE", "LICENSING.md", "LICENSES/*.txt"]
+"""
+name = "uqa"
+'''.lstrip(),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(LICENSES, "ROOT", root),
+                self.assertRaisesRegex(RuntimeError, "must declare project.license"),
+            ):
+                LICENSES.check_maturin_sources()
+
 
 if __name__ == "__main__":
     unittest.main()
