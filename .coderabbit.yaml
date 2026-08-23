@@ -2,4 +2,5 @@
 
 reviews:
   path_filters:
-    - "crates/uqa-engine/src/sql/generated/**"
+    - "**/*"
+    - "**/generated/**"
