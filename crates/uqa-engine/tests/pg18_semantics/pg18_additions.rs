@@ -361,6 +361,27 @@ fn assert_uuid_extraction_types_and_nulls(eng: &Engine) {
         scalar(eng, "SELECT uuid_extract_version(NULL::uuid)"),
         Value::Null
     );
+    assert_eq!(
+        scalar(
+            eng,
+            "SELECT uuid_extract_version((SELECT '00000000-0000-7000-8000-000000000000'::uuid))"
+        ),
+        Value::Int(7)
+    );
+    assert_eq!(
+        scalar(
+            eng,
+            "SELECT 1 WHERE uuid_extract_version((SELECT '00000000-0000-7000-8000-000000000000'::uuid)) = 7"
+        ),
+        Value::Int(1)
+    );
+    assert_eq!(
+        scalar(
+            eng,
+            "SELECT uuid_extract_timestamp((SELECT '00000000-0001-7000-8000-000000000000'::uuid))"
+        ),
+        Value::Temporal(TemporalValue::TimestampTz { micros: 1_000 })
+    );
 }
 
 fn assert_uuid_extraction_errors(eng: &Engine) {
@@ -371,6 +392,8 @@ fn assert_uuid_extraction_errors(eng: &Engine) {
         "SELECT uuid_extract_timestamp()",
         "SELECT uuid_extract_timestamp(1)",
         "SELECT uuid_extract_timestamp('00000000-0000-7000-8000-000000000000'::text)",
+        "SELECT uuid_extract_version((SELECT '00000000-0000-7000-8000-000000000000'))",
+        "SELECT uuid_extract_timestamp((SELECT '00000000-0001-7000-8000-000000000000'))",
     ] {
         let error = eng.sql(sql, &[]).unwrap_err();
         assert_eq!(error.sqlstate(), Some("42883"), "{sql}: {error}");

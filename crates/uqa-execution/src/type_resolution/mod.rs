@@ -39,6 +39,16 @@ pub trait FunctionTypeResolver: Send + Sync {
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
     ) -> Result<Option<ColumnType>, SQLError>;
+
+    /// Resolve the declared first-column type of a physical scalar-subquery slot when the owning execution context carries its plan arena.
+    fn resolve_scalar_subquery_type(
+        &self,
+        _subquery: crate::SubqueryId,
+        _outer_schema: &RowSchema,
+        _params: &[SQLParam],
+    ) -> Result<Option<ColumnType>, SQLError> {
+        Ok(None)
+    }
 }
 
 pub fn scalar_type(
@@ -199,10 +209,10 @@ pub(super) fn scalar_type_inner(
             }
             functions::builtin_function_type_inner(name, None, args, &[], schema, params, resolver)
         }
-        ScalarExpr::ScalarSubquery(_)
-        | ScalarExpr::Star
-        | ScalarExpr::QualifiedStar(_)
-        | ScalarExpr::Default => Ok(None),
+        ScalarExpr::ScalarSubquery(subquery) => resolver.map_or(Ok(None), |resolver| {
+            resolver.resolve_scalar_subquery_type(*subquery, schema, params)
+        }),
+        ScalarExpr::Star | ScalarExpr::QualifiedStar(_) | ScalarExpr::Default => Ok(None),
     }
 }
 

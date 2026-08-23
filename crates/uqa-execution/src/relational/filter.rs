@@ -44,7 +44,7 @@ impl<'a> Filter<'a> {
         evaluator: SharedExpressionEvaluator<'a>,
     ) -> Self {
         let schema = child.row_schema().clone();
-        let predicate = crate::bind_type_introspection(predicate, &schema, evaluator.parameters());
+        let predicate = evaluator.bind_type_introspection(predicate, &schema);
         Self {
             child,
             condition: FilterCondition::Expression {

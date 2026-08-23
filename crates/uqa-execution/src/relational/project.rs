@@ -118,13 +118,12 @@ impl<'a> Project<'a> {
         projections: Vec<(String, ScalarExpr)>,
         evaluator: SharedExpressionEvaluator<'a>,
     ) -> Self {
-        let params = evaluator.parameters();
         let projections = projections
             .into_iter()
             .map(|(name, expression)| {
                 (
                     name,
-                    crate::bind_type_introspection(expression, child.row_schema(), params),
+                    evaluator.bind_type_introspection(expression, child.row_schema()),
                 )
             })
             .collect::<Vec<_>>();
@@ -144,13 +143,12 @@ impl<'a> Project<'a> {
         projections: Vec<(String, ScalarExpr)>,
         evaluator: SharedExpressionEvaluator<'a>,
     ) -> Self {
-        let params = evaluator.parameters();
         let projections = projections
             .into_iter()
             .map(|(name, expression)| {
                 (
                     name,
-                    crate::bind_type_introspection(expression, child.row_schema(), params),
+                    evaluator.bind_type_introspection(expression, child.row_schema()),
                 )
             })
             .collect::<Vec<_>>();
