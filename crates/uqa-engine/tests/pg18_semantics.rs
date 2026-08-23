@@ -65,6 +65,8 @@ mod numeric_power_statistics;
 mod pattern_escape;
 #[path = "pg18_semantics/pg18_additions.rs"]
 mod pg18_additions;
+#[path = "pg18_semantics/reverse_overloads.rs"]
+mod reverse_overloads;
 #[path = "pg18_semantics/review_regressions.rs"]
 mod review_regressions;
 #[path = "pg18_semantics/strings_and_bytea.rs"]

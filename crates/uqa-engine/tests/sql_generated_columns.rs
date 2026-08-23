@@ -28,6 +28,8 @@ mod catalog_and_persistence;
 mod mutations_and_functions;
 #[path = "sql_generated_columns/operators.rs"]
 mod operators;
+#[path = "sql_generated_columns/reverse_overloads.rs"]
+mod reverse_overloads;
 #[path = "sql_generated_columns/typing.rs"]
 mod typing;
 #[path = "sql_generated_columns/validation.rs"]

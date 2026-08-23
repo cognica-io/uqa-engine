@@ -366,6 +366,8 @@ pub struct GeneratedColumn {
 pub struct FunctionBinding {
     pub name: String,
     pub argument_types: Vec<String>,
+    #[serde(default)]
+    pub builtin: bool,
 }
 
 pub type GeneratedFunctionDependency = FunctionBinding;

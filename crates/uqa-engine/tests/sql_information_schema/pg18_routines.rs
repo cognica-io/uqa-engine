@@ -7,7 +7,7 @@
 //! `PostgreSQL` 18 built-in routine and database catalog regressions.
 
 use uqa_core::{ArrayValue, Value};
-use uqa_engine::Engine;
+use uqa_engine::{Engine, SQLResult};
 
 fn array(values: Vec<Value>) -> Value {
     Value::Array(ArrayValue::try_new(values).expect("rectangular catalog array"))
@@ -91,12 +91,12 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
             "SELECT oid, proname, prokind, proisstrict, proleakproof, provolatile, \
                     proparallel, pronargs, pronargdefaults, prorettype, proargtypes, proargnames, prosrc \
              FROM pg_catalog.pg_proc \
-             WHERE oid IN (3261, 6330, 6331, 6332, 6333, 6342, 6343, 6364, 6383, 6389, 6390, 6429, 6430) \
+             WHERE oid IN (3062, 3261, 6330, 6331, 6332, 6333, 6342, 6343, 6364, 6382, 6383, 6389, 6390, 6429, 6430) \
              ORDER BY oid",
             &[],
         )
         .unwrap();
-    assert_eq!(routines.rows.len(), 13);
+    assert_eq!(routines.rows.len(), 15);
     let row = |oid: i64| {
         routines
             .rows
@@ -117,6 +117,7 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
             .expect("flat pg_proc argument-name array")
         )
     );
+    assert_reverse_routines(&engine, &routines);
     for (oid, argument_type, source) in [
         (6330, 23, "to_bin32"),
         (6331, 20, "to_bin64"),
@@ -165,6 +166,55 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     assert_random_range_pg_proc(&engine);
     assert_random_range_routines(&engine);
     assert_uuid_extraction_routines(&engine);
+}
+
+fn assert_reverse_routines(engine: &Engine, routines: &SQLResult) {
+    let proargtypes = routines
+        .columns
+        .iter()
+        .position(|column| column == "proargtypes")
+        .expect("proargtypes projection");
+    assert_eq!(
+        routines.column_types[proargtypes],
+        Some(uqa_sql::ColumnType::OidVector)
+    );
+    let row = |oid: i64| {
+        routines
+            .rows
+            .iter()
+            .find(|row| row["oid"] == Value::Int(oid))
+            .unwrap_or_else(|| panic!("missing pg_proc row {oid}"))
+    };
+    for (oid, argument_type, source) in [(3062, 25, "text_reverse"), (6382, 17, "bytea_reverse")] {
+        assert_eq!(row(oid)["prorettype"], Value::Int(argument_type));
+        assert_eq!(
+            row(oid)["proargtypes"],
+            Value::List(vec![Value::Int(argument_type)])
+        );
+        assert_eq!(row(oid)["pronargs"], Value::Int(1));
+        assert_eq!(row(oid)["pronargdefaults"], Value::Int(0));
+        assert_eq!(row(oid)["proargnames"], Value::Null);
+        assert_eq!(row(oid)["proisstrict"], Value::Bool(true));
+        assert_eq!(row(oid)["provolatile"], Value::Str("i".into()));
+        assert_eq!(row(oid)["proparallel"], Value::Str("s".into()));
+        assert_eq!(row(oid)["proleakproof"], Value::Bool(false));
+        assert_eq!(row(oid)["prosrc"], Value::Str(source.into()));
+    }
+    let vector_text = engine
+        .sql(
+            "SELECT proargtypes::text AS args FROM pg_catalog.pg_proc \
+             WHERE oid IN (3062, 6382) ORDER BY oid",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        vector_text
+            .rows
+            .iter()
+            .map(|row| row["args"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Str("25".into()), Value::Str("17".into())]
+    );
 }
 
 fn assert_uuidv7_information_schema(engine: &Engine) {

@@ -101,10 +101,24 @@ fn bind_function_calls(
             }
             let mut argument_names = Vec::with_capacity(args.len());
             let mut argument_types = Vec::with_capacity(args.len());
-            for argument in args {
+            for argument in args.iter() {
                 let (argument_name, value) = named_argument(argument)?;
                 argument_names.push(argument_name);
                 argument_types.push(infer_expression(engine, columns, value, dependencies)?);
+            }
+            if builtin::bind_reverse_call(
+                builtin::ReverseCall {
+                    engine,
+                    columns,
+                    name,
+                    args,
+                    argument_names: &argument_names,
+                    argument_types: &argument_types,
+                },
+                binding,
+                dependencies,
+            )? {
+                return Ok(());
             }
             if engine.lookup_sql_functions(name).is_some() {
                 let selected =
@@ -411,6 +425,11 @@ fn infer_function(
     }
 
     if let Some(binding) = binding {
+        if binding.builtin {
+            let dispatch_name = builtin_function_dispatch_name(&binding.name);
+            return infer_builtin_function(&dispatch_name, &argument_names, &argument_types)?
+                .ok_or_else(|| SQLError::UnknownFunction(binding.name.clone()));
+        }
         let function = engine
             .lookup_sql_functions(&binding.name)
             .and_then(|overloads| {
@@ -567,6 +586,7 @@ fn resolve_user_function_binding(
     Ok(FunctionBinding {
         name: function.def.name.clone(),
         argument_types: routine_signature_types(&function.def),
+        builtin: false,
     })
 }
 

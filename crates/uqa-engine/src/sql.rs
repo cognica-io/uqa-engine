@@ -177,6 +177,7 @@ pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
                         | "jsonb_each_text"
                         | "json_object_keys"
                         | "jsonb_object_keys"
+                        | "reverse"
                         | "random"
                         | "setseed"
                         | "nextval"
@@ -406,6 +407,10 @@ mod mutability_classifier_tests {
         assert_eq!(
             builtin_function_dispatch_name("pg_catalog.generate_series"),
             "generate_series"
+        );
+        assert_eq!(
+            builtin_function_dispatch_name("pg_catalog.reverse"),
+            "reverse"
         );
         assert_eq!(
             builtin_function_dispatch_name("ag_catalog.generate_series"),

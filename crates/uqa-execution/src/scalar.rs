@@ -724,6 +724,9 @@ pub fn eval_scalar(
         } => {
             let arguments = eval_call_arguments(args, context)?;
             if let Some(binding) = binding {
+                if binding.builtin {
+                    return eval_function_call(&binding.name, arguments, &context.sql_context());
+                }
                 let sql_context = context.sql_context();
                 let engine = sql_context.engine.ok_or_else(|| {
                     SQLError::Unsupported(
