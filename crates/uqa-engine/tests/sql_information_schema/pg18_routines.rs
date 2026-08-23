@@ -159,7 +159,16 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     assert_eq!(row(6429)["provolatile"], Value::Str("v".into()));
     assert_eq!(row(6430)["prorettype"], Value::Int(2950));
 
-    let information_schema = engine
+    assert_uuidv7_information_schema(&engine);
+    assert_integer_base_conversion_routines(&engine);
+    assert_array_transform_routines(&engine);
+    assert_random_range_pg_proc(&engine);
+    assert_random_range_routines(&engine);
+    assert_uuid_extraction_routines(&engine);
+}
+
+fn assert_uuidv7_information_schema(engine: &Engine) {
+    let routines = engine
         .sql(
             "SELECT specific_name, data_type, is_deterministic, external_language \
              FROM information_schema.routines \
@@ -168,25 +177,81 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
             &[],
         )
         .unwrap();
-    assert_eq!(information_schema.rows.len(), 2);
+    assert_eq!(routines.rows.len(), 2);
     assert_eq!(
-        information_schema.rows[0]["specific_name"],
+        routines.rows[0]["specific_name"],
         Value::Str("uuidv7_6429".into())
     );
     assert_eq!(
-        information_schema.rows[1]["specific_name"],
+        routines.rows[1]["specific_name"],
         Value::Str("uuidv7_6430".into())
     );
-    for row in information_schema.rows {
+    for row in routines.rows {
         assert_eq!(row["data_type"], Value::Str("uuid".into()));
         assert_eq!(row["is_deterministic"], Value::Str("NO".into()));
         assert_eq!(row["external_language"], Value::Str("INTERNAL".into()));
     }
+}
 
-    assert_integer_base_conversion_routines(&engine);
-    assert_random_range_pg_proc(&engine);
-    assert_random_range_routines(&engine);
-    assert_uuid_extraction_routines(&engine);
+fn assert_array_transform_routines(engine: &Engine) {
+    let routines = engine
+        .sql(
+            "SELECT oid, proisstrict, proleakproof, provolatile, proparallel, \
+                    prorettype, proargtypes, proargnames, prosrc \
+             FROM pg_catalog.pg_proc WHERE oid IN (6381, 6388, 6389, 6390) ORDER BY oid",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(routines.rows.len(), 4);
+    for (row, (argument_types, argument_names, source)) in routines.rows.iter().zip([
+        (vec![2277], Value::Null, "array_reverse"),
+        (vec![2277], Value::Null, "array_sort"),
+        (
+            vec![2277, 16],
+            array(vec![
+                Value::Str("array".into()),
+                Value::Str("descending".into()),
+            ]),
+            "array_sort_order",
+        ),
+        (
+            vec![2277, 16, 16],
+            array(vec![
+                Value::Str("array".into()),
+                Value::Str("descending".into()),
+                Value::Str("nulls_first".into()),
+            ]),
+            "array_sort_order_nulls_first",
+        ),
+    ]) {
+        assert_eq!(row["prorettype"], Value::Int(2277));
+        assert_eq!(
+            row["proargtypes"],
+            Value::List(argument_types.into_iter().map(Value::Int).collect())
+        );
+        assert_eq!(row["proargnames"], argument_names);
+        assert_eq!(row["proisstrict"], Value::Bool(true));
+        assert_eq!(row["provolatile"], Value::Str("i".into()));
+        assert_eq!(row["proparallel"], Value::Str("s".into()));
+        assert_eq!(row["proleakproof"], Value::Bool(false));
+        assert_eq!(row["prosrc"], Value::Str(source.into()));
+    }
+
+    let information_schema = engine
+        .sql(
+            "SELECT routine_name, data_type, is_deterministic, external_language \
+             FROM information_schema.routines \
+             WHERE routine_name IN ('array_reverse', 'array_sort') \
+             ORDER BY specific_name",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(information_schema.rows.len(), 4);
+    for row in information_schema.rows {
+        assert_eq!(row["data_type"], Value::Str("anyarray".into()));
+        assert_eq!(row["is_deterministic"], Value::Str("YES".into()));
+        assert_eq!(row["external_language"], Value::Str("INTERNAL".into()));
+    }
 }
 
 fn assert_random_range_pg_proc(engine: &Engine) {

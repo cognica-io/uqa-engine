@@ -156,9 +156,19 @@ fn function_may_return_set(
             Some(engine),
         )?);
     }
-    Ok(engine
-        .resolve_static_sql_function(name, binding, &argument_names, &argument_types)?
-        .is_some_and(|function| function.def.returns_set()))
+    match engine.resolve_static_sql_function(name, binding, &argument_names, &argument_types) {
+        Ok(function) => Ok(function.is_some_and(|function| function.def.returns_set())),
+        Err(error)
+            if error.sqlstate() == Some("42883")
+                && matches!(
+                    crate::sql::builtin_function_dispatch_name(name).as_str(),
+                    "array_sort" | "array_reverse"
+                ) =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn set_function_argument(expression: &ScalarExpr) -> (Option<String>, &ScalarExpr) {

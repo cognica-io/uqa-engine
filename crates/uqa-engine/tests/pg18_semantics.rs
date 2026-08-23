@@ -53,6 +53,8 @@ fn bounded_array(elements: Vec<Value>, lower_bounds: Vec<i32>) -> Value {
 mod arithmetic_and_casts;
 #[path = "pg18_semantics/array_containment.rs"]
 mod array_containment;
+#[path = "pg18_semantics/array_transforms.rs"]
+mod array_transforms;
 #[path = "pg18_semantics/comparisons_and_arrays.rs"]
 mod comparisons_and_arrays;
 #[path = "pg18_semantics/numeric_exactness.rs"]

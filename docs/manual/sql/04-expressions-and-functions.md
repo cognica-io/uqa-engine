@@ -88,6 +88,8 @@ The extraction functions are strict and immutable. Version 1 timestamps use the 
 | `array_to_string`, `array_fill` | Conversion and construction |
 | `unnest` | Expand values as a table function |
 
+`array_reverse(anyarray)` reverses the first dimension, and `array_sort(anyarray [, descending boolean [, nulls_first boolean]])` orders first-dimension elements while preserving dimensions and lower bounds. The result retains its concrete base-array type, including PostgreSQL's flattening of an array domain to that base type. The two- and three-argument sort overloads accept PostgreSQL's `"array"`, `descending`, and `nulls_first` named notation in declaration-independent order; unknown string literals and bare parameters in Boolean slots receive Boolean context, explicit non-Boolean arguments are rejected, NULL arguments are strict, and an unknown array argument cannot determine the polymorphic type. Unqualified calls participate in normal overload resolution: an exact concrete user-function overload can outrank the polymorphic built-in, an implicit-only user candidate conflicts with a viable built-in, and `pg_catalog` qualification selects the built-in directly. Sorting uses PostgreSQL element, nested-array, and record ordering for the implemented types, including the same `json` comparison-function errors, while reversing does not require an element comparator.
+
 ## JSON and JSONB functions
 
 | Group | Functions |

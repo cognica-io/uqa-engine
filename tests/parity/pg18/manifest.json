@@ -162,6 +162,14 @@
       "open_issue": "The complete PostgreSQL 18 function, type, overload, and catalog matrix remains."
     },
     {
+      "id": "functions.array-transforms",
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live array_sort and array_reverse results, polymorphic, user-overload, parameter-context, and named-argument errors, SQLSTATEs, return types, generated-column behavior, comparison-function errors, and pg_proc metadata plus array function documentation",
+      "uqa_test": "cargo test -p uqa-engine --test integration pg18_array_; cargo test -p uqa-engine --test integration generated_columns_preserve_array_transform_binding_and_comparison_errors; cargo test -p uqa-engine --test integration postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata; cargo test -p uqa-execution --lib array_transforms_bind_polymorphic_types_named_slots_and_boolean_unknowns; tests/parity/pg18/probes.sql",
+      "supported_version": "PostgreSQL 18.4 array_sort(anyarray [, boolean [, boolean]]) and array_reverse(anyarray) exact first-dimension transformation for implemented array element types, multidimensional slices and lower bounds, concrete base-array return types with array-domain flattening, strict NULL, unknown-literal and bare-parameter Boolean coercion, explicit non-Boolean rejection, concrete user-overload ranking and ambiguity, polymorphic and named-argument binding, scalar-subquery and generated-column typing, json and nested-composite comparison errors, and catalog behavior",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "functions.integer-base-conversion",
       "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live to_bin and to_oct results, overload errors, SQLSTATEs, return types, generated-column behavior, and pg_proc metadata plus numeric function documentation",
       "uqa_test": "cargo test -p uqa-engine --test integration to_bin_and_to_oct_match_postgresql_integer_widths_and_binding; cargo test -p uqa-engine --test integration generated; cargo test -p uqa-engine --test integration postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata; cargo test -p uqa-execution --lib integer_base_functions_bind_the_declared_overload_before_width_is_erased; tests/parity/pg18/probes.sql",

@@ -25,7 +25,7 @@ use crate::sql::from_rows::{
 };
 use crate::sql::virtual_relation_schema;
 use std::collections::{BTreeMap, BTreeSet};
-use uqa_execution::{FunctionTypeResolver, RowSchema};
+use uqa_execution::{FunctionTypeResolver, ResolvedFunctionOverload, RowSchema};
 use uqa_sql::ast::ColumnType;
 
 type ProjectionStarColumn = (String, Option<ColumnType>);
@@ -53,6 +53,17 @@ impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
     ) -> Result<Option<ColumnType>, SQLError> {
         self.engine
             .resolve_function_type(name, binding, argument_names, argument_types)
+    }
+
+    fn resolve_function_overload(
+        &self,
+        name: &str,
+        binding: Option<&uqa_sql::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+    ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
+        self.engine
+            .resolve_function_overload(name, binding, argument_names, argument_types)
     }
 
     fn resolve_scalar_subquery_type(
