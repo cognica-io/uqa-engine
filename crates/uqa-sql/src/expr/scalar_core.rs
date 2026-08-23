@@ -9,9 +9,9 @@
 use icu_casemap::CaseMapper;
 
 use super::{
-    compare, compile_pg_regex, division_by_zero, expect_str, float1, gcd_i64, initcap_str,
-    json_concat, out_of_range, string1, to_decimal, to_f64, to_i64, trim_chars, value_to_string,
-    values_equal, ArrayValue, DecimalValue, Result, SQLError, Value,
+    compare, compile_pg_regex, division_by_zero, float1, gcd_i64, initcap_str, json_concat,
+    out_of_range, string1, to_decimal, to_f64, to_i64, trim_chars, value_to_string, values_equal,
+    ArrayValue, DecimalValue, Result, SQLError, Value,
 };
 
 pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
@@ -128,20 +128,9 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
             "upper" => string1(args, |s| s.to_uppercase()),
             "lower" => string1(args, |s| s.to_lowercase()),
             "casefold" => string1(args, |s| CaseMapper::new().fold_string(s).into_owned()),
-            "length" | "char_length" | "character_length" => {
-                if matches!(args.first(), Some(Value::Null)) {
-                    return Ok(Value::Null);
-                }
-                let s = expect_str(args, 0)?;
-                Ok(Value::Int(s.chars().count() as i64))
-            }
-            "octet_length" => {
-                if matches!(args.first(), Some(Value::Null)) {
-                    return Ok(Value::Null);
-                }
-                let s = expect_str(args, 0)?;
-                Ok(Value::Int(s.len() as i64))
-            }
+            "length" => length(args, true),
+            "char_length" | "character_length" => length(args, false),
+            "octet_length" => octet_length(args),
             // trim family: the optional second argument is a SET of
             // characters to strip (PostgreSQL semantics), not a substring.
             "trim" | "btrim" => trim_chars(args, true, true),
@@ -608,6 +597,41 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
             _ => unreachable!("function family membership was checked before dispatch"),
         }
     })())
+}
+
+fn length(args: &[Value], accepts_bytea: bool) -> Result<Value> {
+    let [value] = args else {
+        return Err(SQLError::TypeMismatch("length takes 1 arg".into()));
+    };
+    let length = match value {
+        Value::Null => return Ok(Value::Null),
+        Value::Str(text) => text.chars().count(),
+        Value::FixedChar(text) => text.trim_end_matches(' ').chars().count(),
+        Value::Bytes(bytes) if accepts_bytea => bytes.len(),
+        _ => {
+            return Err(SQLError::TypeMismatch(
+                "length requires text, character, or bytea".into(),
+            ));
+        }
+    };
+    Ok(Value::Int(length as i64))
+}
+
+fn octet_length(args: &[Value]) -> Result<Value> {
+    let [value] = args else {
+        return Err(SQLError::TypeMismatch("octet_length takes 1 arg".into()));
+    };
+    let length = match value {
+        Value::Null => return Ok(Value::Null),
+        Value::Str(text) | Value::FixedChar(text) => text.len(),
+        Value::Bytes(bytes) => bytes.len(),
+        _ => {
+            return Err(SQLError::TypeMismatch(
+                "octet_length requires text, character, or bytea".into(),
+            ));
+        }
+    };
+    Ok(Value::Int(length as i64))
 }
 
 fn numeric_power(base: &DecimalValue, exponent: &DecimalValue) -> Result<DecimalValue> {

@@ -106,8 +106,8 @@ fn bind_function_calls(
                 argument_names.push(argument_name);
                 argument_types.push(infer_expression(engine, columns, value, dependencies)?);
             }
-            if builtin::bind_text_bytea_call(
-                builtin::TextByteaCall {
+            if builtin::bind_string_binary_call(
+                builtin::StringBinaryCall {
                     engine,
                     columns,
                     name,

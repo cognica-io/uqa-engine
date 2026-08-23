@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Generated-column typing for `PostgreSQL` text/bytea overload pairs.
+//! Generated-column typing for `PostgreSQL` string and binary overloads.
 
 use crate::engine_user_functions::routine_signature_types;
 use crate::sql::{ColumnType, Engine, SQLError, Value};
@@ -17,32 +17,59 @@ use super::super::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Function {
-    Reverse,
+    BitLength,
+    CharLength,
+    CharacterLength,
+    Length,
     Md5,
+    OctetLength,
+    Reverse,
 }
 
 impl Function {
     fn from_name(name: &str) -> Option<Self> {
         let lower = name.to_ascii_lowercase();
         match lower.strip_prefix("pg_catalog.").unwrap_or(&lower) {
-            "reverse" => Some(Self::Reverse),
+            "bit_length" => Some(Self::BitLength),
+            "char_length" => Some(Self::CharLength),
+            "character_length" => Some(Self::CharacterLength),
+            "length" => Some(Self::Length),
             "md5" => Some(Self::Md5),
+            "octet_length" => Some(Self::OctetLength),
+            "reverse" => Some(Self::Reverse),
             _ => None,
         }
     }
 
     fn catalog_name(self) -> &'static str {
         match self {
-            Self::Reverse => "pg_catalog.reverse",
+            Self::BitLength => "pg_catalog.bit_length",
+            Self::CharLength => "pg_catalog.char_length",
+            Self::CharacterLength => "pg_catalog.character_length",
+            Self::Length => "pg_catalog.length",
             Self::Md5 => "pg_catalog.md5",
+            Self::OctetLength => "pg_catalog.octet_length",
+            Self::Reverse => "pg_catalog.reverse",
         }
     }
 
     fn builtin_result(self, argument_type: GenerationType) -> GenerationType {
         match self {
-            Self::Reverse => argument_type,
+            Self::BitLength
+            | Self::CharLength
+            | Self::CharacterLength
+            | Self::Length
+            | Self::OctetLength => GenerationType::Integer,
             Self::Md5 => GenerationType::Text,
+            Self::Reverse => argument_type,
         }
+    }
+
+    fn accepts_bytea(self) -> bool {
+        matches!(
+            self,
+            Self::BitLength | Self::Length | Self::Md5 | Self::OctetLength | Self::Reverse
+        )
     }
 }
 
@@ -51,7 +78,7 @@ enum SelectedOverload {
     User(uqa_execution::ResolvedFunctionOverload),
 }
 
-pub(in super::super) struct TextByteaCall<'a> {
+pub(in super::super) struct StringBinaryCall<'a> {
     pub(in super::super) engine: &'a Engine,
     pub(in super::super) columns: &'a [ColumnDef],
     pub(in super::super) name: &'a str,
@@ -61,7 +88,7 @@ pub(in super::super) struct TextByteaCall<'a> {
 }
 
 pub(in super::super) fn bind_call(
-    call: TextByteaCall<'_>,
+    call: StringBinaryCall<'_>,
     binding: &mut Option<FunctionBinding>,
     dependencies: &mut Vec<GeneratedFunctionDependency>,
 ) -> Result<bool, SQLError> {
@@ -85,7 +112,7 @@ pub(in super::super) fn bind_call(
         SelectedOverload::Builtin(argument_type) => {
             *binding = Some(FunctionBinding {
                 name: function.catalog_name().into(),
-                argument_types: vec![argument_type.regtype_name()],
+                argument_types: vec![argument_type.sql_name()],
                 builtin: true,
             });
         }
@@ -115,7 +142,9 @@ pub(super) fn require_signature(
         return Err(undefined_function(name, argument_names, args));
     }
     match args {
-        [GenerationType::Bytea] => Ok(function.builtin_result(GenerationType::Bytea)),
+        [GenerationType::Bytea] if function.accepts_bytea() => {
+            Ok(function.builtin_result(GenerationType::Bytea))
+        }
         [GenerationType::Text | GenerationType::Null | GenerationType::UnknownLiteral(_)] => {
             Ok(function.builtin_result(GenerationType::Text))
         }
@@ -147,12 +176,16 @@ fn undefined_function(
 
 fn resolve_overload(
     function: Function,
-    call: &TextByteaCall<'_>,
+    call: &StringBinaryCall<'_>,
     binding: Option<&FunctionBinding>,
     argument_types: &[Option<ColumnType>],
 ) -> Result<SelectedOverload, SQLError> {
     let selected = match function {
-        Function::Reverse => uqa_execution::resolve_reverse_overload(
+        Function::BitLength
+        | Function::CharLength
+        | Function::CharacterLength
+        | Function::Length
+        | Function::OctetLength => uqa_execution::resolve_length_overload(
             call.name,
             binding,
             call.argument_names,
@@ -166,12 +199,19 @@ fn resolve_overload(
             argument_types,
             Some(call.engine),
         )?,
+        Function::Reverse => uqa_execution::resolve_reverse_overload(
+            call.name,
+            binding,
+            call.argument_names,
+            argument_types,
+            Some(call.engine),
+        )?,
     };
     Ok(match selected {
-        uqa_execution::ResolvedTextByteaOverload::Builtin(argument_type) => {
+        uqa_execution::ResolvedStringBinaryOverload::Builtin(argument_type) => {
             SelectedOverload::Builtin(argument_type)
         }
-        uqa_execution::ResolvedTextByteaOverload::User(overload) => {
+        uqa_execution::ResolvedStringBinaryOverload::User(overload) => {
             SelectedOverload::User(overload)
         }
     })

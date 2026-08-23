@@ -177,7 +177,12 @@ pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
                         | "jsonb_each_text"
                         | "json_object_keys"
                         | "jsonb_object_keys"
+                        | "bit_length"
+                        | "char_length"
+                        | "character_length"
+                        | "length"
                         | "md5"
+                        | "octet_length"
                         | "reverse"
                         | "random"
                         | "setseed"
@@ -414,6 +419,18 @@ mod mutability_classifier_tests {
             "reverse"
         );
         assert_eq!(builtin_function_dispatch_name("pg_catalog.md5"), "md5");
+        for function in [
+            "bit_length",
+            "char_length",
+            "character_length",
+            "length",
+            "octet_length",
+        ] {
+            assert_eq!(
+                builtin_function_dispatch_name(&format!("pg_catalog.{function}")),
+                function
+            );
+        }
         assert_eq!(
             builtin_function_dispatch_name("ag_catalog.generate_series"),
             "ag_catalog.generate_series"

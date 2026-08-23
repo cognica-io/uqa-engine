@@ -73,6 +73,8 @@ mod pg18_additions;
 mod reverse_overloads;
 #[path = "pg18_semantics/review_regressions.rs"]
 mod review_regressions;
+#[path = "pg18_semantics/string_binary_lengths.rs"]
+mod string_binary_lengths;
 #[path = "pg18_semantics/strings_and_bytea.rs"]
 mod strings_and_bytea;
 #[path = "pg18_semantics/temporal.rs"]

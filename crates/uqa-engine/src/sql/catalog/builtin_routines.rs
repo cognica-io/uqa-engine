@@ -23,6 +23,62 @@ pub(super) struct BuiltinRoutineCatalogEntry {
     pub(super) source: &'static str,
 }
 
+impl BuiltinRoutineCatalogEntry {
+    pub(super) const fn language(self) -> i64 {
+        match self.oid {
+            1810 | 1811 => 14,
+            _ => 12,
+        }
+    }
+
+    pub(super) fn sql_body(self) -> Option<String> {
+        let (function_oid, parameter_type, collation_oid) = match self.oid {
+            1810 => (720, 17, 0),
+            1811 => (1374, 25, 100),
+            _ => return None,
+        };
+        let mut body = String::from(BIT_LENGTH_SQL_BODY_PREFIX);
+        body.push_str(&function_oid.to_string());
+        body.push_str(BIT_LENGTH_SQL_BODY_AFTER_FUNCTION);
+        body.push_str(&collation_oid.to_string());
+        body.push_str(BIT_LENGTH_SQL_BODY_AFTER_INPUT_COLLATION);
+        body.push_str(&parameter_type.to_string());
+        body.push_str(BIT_LENGTH_SQL_BODY_AFTER_PARAMETER_TYPE);
+        body.push_str(&collation_oid.to_string());
+        body.push_str(BIT_LENGTH_SQL_BODY_SUFFIX);
+        Some(body)
+    }
+}
+
+const BIT_LENGTH_SQL_BODY_PREFIX: &str = concat!(
+    "{QUERY :commandType 1 :querySource 0 :canSetTag true :utilityStmt <> ",
+    ":resultRelation 0 :hasAggs false :hasWindowFuncs false :hasTargetSRFs false ",
+    ":hasSubLinks false :hasDistinctOn false :hasRecursive false :hasModifyingCTE false ",
+    ":hasForUpdate false :hasRowSecurity false :hasGroupRTE false :isReturn true :cteList <> ",
+    ":rtable <> :rteperminfos <> :jointree {FROMEXPR :fromlist <> :quals <>} ",
+    ":mergeActionList <> :mergeTargetRelation 0 :mergeJoinCondition <> ",
+    ":targetList ({TARGETENTRY :expr {OPEXPR :opno 514 :opfuncid 141 :opresulttype 23 ",
+    ":opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid "
+);
+const BIT_LENGTH_SQL_BODY_AFTER_FUNCTION: &str = concat!(
+    " :funcresulttype 23 :funcretset false :funcvariadic false :funcformat 0 ",
+    ":funccollid 0 :inputcollid "
+);
+const BIT_LENGTH_SQL_BODY_AFTER_INPUT_COLLATION: &str =
+    " :args ({PARAM :paramkind 0 :paramid 1 :paramtype ";
+const BIT_LENGTH_SQL_BODY_AFTER_PARAMETER_TYPE: &str = " :paramtypmod -1 :paramcollid ";
+const BIT_LENGTH_SQL_BODY_SUFFIX: &str = concat!(
+    " :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 ",
+    ":constlen 4 :constbyval true :constisnull false :location -1 ",
+    ":constvalue 4 [ 8 0 0 0 0 0 0 0 ]}) :location -1} :resno 1 :resname <> ",
+    ":ressortgroupref 0 :resorigtbl 0 :resorigcol 0 :resjunk false}) :override 0 ",
+    ":onConflict <> :returningOldAlias <> :returningNewAlias <> :returningList <> ",
+    ":groupClause <> :groupDistinct false :groupingSets <> :havingQual <> :windowClause <> ",
+    ":distinctClause <> :sortClause <> :limitOffset <> :limitCount <> :limitOption 0 ",
+    ":rowMarks <> :setOperations <> :constraintDeps <> :withCheckOptions <> ",
+    ":stmt_location -1 :stmt_len -1}"
+);
+
 const FALSE_NODE: &str = "({CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]})";
 
 pub(super) const PG18_BUILTIN_ROUTINES: &[BuiltinRoutineCatalogEntry] = &[
@@ -87,6 +143,36 @@ pub(super) const PG18_BUILTIN_ROUTINES: &[BuiltinRoutineCatalogEntry] = &[
         source: "array_sort_order_nulls_first",
     },
     BuiltinRoutineCatalogEntry {
+        oid: 1810,
+        name: "bit_length",
+        kind: "f",
+        strict: true,
+        volatility: "i",
+        parallel: "s",
+        leakproof: false,
+        return_type: 23,
+        argument_types: &[17],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "",
+    },
+    BuiltinRoutineCatalogEntry {
+        oid: 1811,
+        name: "bit_length",
+        kind: "f",
+        strict: true,
+        volatility: "i",
+        parallel: "s",
+        leakproof: false,
+        return_type: 23,
+        argument_types: &[25],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "",
+    },
+    BuiltinRoutineCatalogEntry {
         oid: 6412,
         name: "casefold",
         kind: "f",
@@ -100,6 +186,66 @@ pub(super) const PG18_BUILTIN_ROUTINES: &[BuiltinRoutineCatalogEntry] = &[
         default_arguments: 0,
         argument_defaults: None,
         source: "casefold",
+    },
+    BuiltinRoutineCatalogEntry {
+        oid: 1372,
+        name: "char_length",
+        kind: "f",
+        strict: true,
+        volatility: "i",
+        parallel: "s",
+        leakproof: false,
+        return_type: 23,
+        argument_types: &[1042],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "bpcharlen",
+    },
+    BuiltinRoutineCatalogEntry {
+        oid: 1381,
+        name: "char_length",
+        kind: "f",
+        strict: true,
+        volatility: "i",
+        parallel: "s",
+        leakproof: false,
+        return_type: 23,
+        argument_types: &[25],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "textlen",
+    },
+    BuiltinRoutineCatalogEntry {
+        oid: 1367,
+        name: "character_length",
+        kind: "f",
+        strict: true,
+        volatility: "i",
+        parallel: "s",
+        leakproof: false,
+        return_type: 23,
+        argument_types: &[1042],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "bpcharlen",
+    },
+    BuiltinRoutineCatalogEntry {
+        oid: 1369,
+        name: "character_length",
+        kind: "f",
+        strict: true,
+        volatility: "i",
+        parallel: "s",
+        leakproof: false,
+        return_type: 23,
+        argument_types: &[25],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "textlen",
     },
     BuiltinRoutineCatalogEntry {
         oid: 6364,
@@ -160,6 +306,51 @@ pub(super) const PG18_BUILTIN_ROUTINES: &[BuiltinRoutineCatalogEntry] = &[
         default_arguments: 0,
         argument_defaults: None,
         source: "dlgamma",
+    },
+    BuiltinRoutineCatalogEntry {
+        oid: 1317,
+        name: "length",
+        kind: "f",
+        strict: true,
+        volatility: "i",
+        parallel: "s",
+        leakproof: false,
+        return_type: 23,
+        argument_types: &[25],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "textlen",
+    },
+    BuiltinRoutineCatalogEntry {
+        oid: 1318,
+        name: "length",
+        kind: "f",
+        strict: true,
+        volatility: "i",
+        parallel: "s",
+        leakproof: false,
+        return_type: 23,
+        argument_types: &[1042],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "bpcharlen",
+    },
+    BuiltinRoutineCatalogEntry {
+        oid: 2010,
+        name: "length",
+        kind: "f",
+        strict: true,
+        volatility: "i",
+        parallel: "s",
+        leakproof: false,
+        return_type: 23,
+        argument_types: &[17],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "byteaoctetlen",
     },
     BuiltinRoutineCatalogEntry {
         oid: 3261,
@@ -310,6 +501,51 @@ pub(super) const PG18_BUILTIN_ROUTINES: &[BuiltinRoutineCatalogEntry] = &[
         default_arguments: 0,
         argument_defaults: None,
         source: "aggregate_dummy",
+    },
+    BuiltinRoutineCatalogEntry {
+        oid: 720,
+        name: "octet_length",
+        kind: "f",
+        strict: true,
+        volatility: "i",
+        parallel: "s",
+        leakproof: false,
+        return_type: 23,
+        argument_types: &[17],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "byteaoctetlen",
+    },
+    BuiltinRoutineCatalogEntry {
+        oid: 1374,
+        name: "octet_length",
+        kind: "f",
+        strict: true,
+        volatility: "i",
+        parallel: "s",
+        leakproof: false,
+        return_type: 23,
+        argument_types: &[25],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "textoctetlen",
+    },
+    BuiltinRoutineCatalogEntry {
+        oid: 1375,
+        name: "octet_length",
+        kind: "f",
+        strict: true,
+        volatility: "i",
+        parallel: "s",
+        leakproof: false,
+        return_type: 23,
+        argument_types: &[1042],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "bpcharoctetlen",
     },
     BuiltinRoutineCatalogEntry {
         oid: 6339,

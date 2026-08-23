@@ -88,15 +88,15 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     let engine = Engine::new();
     let routines = engine
         .sql(
-            "SELECT oid, proname, prokind, proisstrict, proleakproof, provolatile, \
-                    proparallel, pronargs, pronargdefaults, prorettype, proargtypes, proargnames, prosrc \
+            "SELECT oid, proname, prolang, prokind, proisstrict, proleakproof, provolatile, \
+                    proparallel, pronargs, pronargdefaults, prorettype, proargtypes, proargnames, prosrc, prosqlbody \
              FROM pg_catalog.pg_proc \
-             WHERE oid IN (2311, 2321, 3062, 3261, 6330, 6331, 6332, 6333, 6342, 6343, 6364, 6382, 6383, 6389, 6390, 6429, 6430) \
+             WHERE oid IN (720, 1317, 1318, 1367, 1369, 1372, 1374, 1375, 1381, 1810, 1811, 2010, 2311, 2321, 3062, 3261, 6330, 6331, 6332, 6333, 6342, 6343, 6364, 6382, 6383, 6389, 6390, 6429, 6430) \
              ORDER BY oid",
             &[],
         )
         .unwrap();
-    assert_eq!(routines.rows.len(), 17);
+    assert_eq!(routines.rows.len(), 29);
     let row = |oid: i64| {
         routines
             .rows
@@ -117,6 +117,7 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
             .expect("flat pg_proc argument-name array")
         )
     );
+    assert_string_binary_length_routines(&engine, &routines);
     assert_md5_routines(&engine, &routines);
     assert_reverse_routines(&engine, &routines);
     for (oid, argument_type, source) in [
@@ -167,6 +168,77 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     assert_random_range_pg_proc(&engine);
     assert_random_range_routines(&engine);
     assert_uuid_extraction_routines(&engine);
+}
+
+fn assert_string_binary_length_routines(engine: &Engine, routines: &SQLResult) {
+    let row = |oid: i64| {
+        routines
+            .rows
+            .iter()
+            .find(|row| row["oid"] == Value::Int(oid))
+            .unwrap_or_else(|| panic!("missing pg_proc row {oid}"))
+    };
+    for (oid, argument_type, source) in [
+        (720, 17, "byteaoctetlen"),
+        (1317, 25, "textlen"),
+        (1318, 1042, "bpcharlen"),
+        (1367, 1042, "bpcharlen"),
+        (1369, 25, "textlen"),
+        (1372, 1042, "bpcharlen"),
+        (1374, 25, "textoctetlen"),
+        (1375, 1042, "bpcharoctetlen"),
+        (1381, 25, "textlen"),
+        (1810, 17, ""),
+        (1811, 25, ""),
+        (2010, 17, "byteaoctetlen"),
+    ] {
+        assert_eq!(row(oid)["prokind"], Value::Str("f".into()));
+        assert_eq!(
+            row(oid)["prolang"],
+            Value::Int(if matches!(oid, 1810 | 1811) { 14 } else { 12 })
+        );
+        assert_eq!(row(oid)["prorettype"], Value::Int(23));
+        assert_eq!(
+            row(oid)["proargtypes"],
+            Value::List(vec![Value::Int(argument_type)])
+        );
+        assert_eq!(row(oid)["pronargs"], Value::Int(1));
+        assert_eq!(row(oid)["pronargdefaults"], Value::Int(0));
+        assert_eq!(row(oid)["proargnames"], Value::Null);
+        assert_eq!(row(oid)["proisstrict"], Value::Bool(true));
+        assert_eq!(row(oid)["provolatile"], Value::Str("i".into()));
+        assert_eq!(row(oid)["proparallel"], Value::Str("s".into()));
+        assert_eq!(row(oid)["proleakproof"], Value::Bool(false));
+        assert_eq!(row(oid)["prosrc"], Value::Str(source.into()));
+        if matches!(oid, 1810 | 1811) {
+            let Value::Str(body) = &row(oid)["prosqlbody"] else {
+                panic!("bit_length OID {oid} must retain its SQL body")
+            };
+            let function_oid = if oid == 1810 { 720 } else { 1374 };
+            assert!(body.contains(&format!(":funcid {function_oid} ")));
+            assert!(body.contains(":opno 514 :opfuncid 141 :opresulttype 23 "));
+        } else {
+            assert_eq!(row(oid)["prosqlbody"], Value::Null);
+        }
+    }
+    let vector_text = engine
+        .sql(
+            "SELECT proargtypes::text AS args FROM pg_catalog.pg_proc \
+             WHERE oid IN (720, 1317, 1318, 1367, 1369, 1372, 1374, 1375, 1381, 1810, 1811, 2010) ORDER BY oid",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        vector_text
+            .rows
+            .iter()
+            .map(|row| row["args"].clone())
+            .collect::<Vec<_>>(),
+        [17, 25, 1042, 1042, 25, 1042, 25, 1042, 25, 17, 25, 17]
+            .into_iter()
+            .map(|oid| Value::Str(oid.to_string()))
+            .collect::<Vec<_>>()
+    );
 }
 
 fn assert_md5_routines(engine: &Engine, routines: &SQLResult) {

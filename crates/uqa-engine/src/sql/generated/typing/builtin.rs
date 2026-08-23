@@ -14,9 +14,9 @@ use super::{
 };
 
 mod array_transform;
-mod text_bytea;
+mod string_binary;
 
-pub(super) use text_bytea::{bind_call as bind_text_bytea_call, TextByteaCall};
+pub(super) use string_binary::{bind_call as bind_string_binary_call, StringBinaryCall};
 
 #[allow(clippy::too_many_lines)]
 pub(super) fn infer_builtin_function(
@@ -38,16 +38,13 @@ pub(super) fn infer_builtin_function(
             require_signature(name, args, &[TypeClass::Text])?;
             GenerationType::Text
         }
-        "length" | "char_length" | "character_length" | "octet_length" => {
-            require_signature(name, args, &[TypeClass::Text])?;
-            GenerationType::Integer
-        }
         "trim" | "btrim" | "ltrim" | "rtrim" => {
             require_arity(name, args, 1, 2)?;
             require_class(name, args, TypeClass::Text)?;
             GenerationType::Text
         }
-        "md5" | "reverse" => text_bytea::require_signature(name, argument_names, args)?,
+        "bit_length" | "char_length" | "character_length" | "length" | "md5" | "octet_length"
+        | "reverse" => string_binary::require_signature(name, argument_names, args)?,
         "concat" | "concat_ws" | "format" => {
             return Err(non_immutable_function(name));
         }
@@ -261,10 +258,6 @@ pub(super) fn infer_builtin_function(
         "factorial" => {
             require_signature(name, args, &[TypeClass::Integer])?;
             GenerationType::Numeric
-        }
-        "bit_length" => {
-            require_arity(name, args, 1, 1)?;
-            GenerationType::Integer
         }
         "to_bin" | "to_hex" | "to_oct" => {
             return infer_integer_base_conversion(name, args).map(Some);

@@ -27,12 +27,13 @@ mod equality;
 mod functions;
 mod integer_base;
 mod introspection;
+mod length;
 mod md5;
 mod operators;
 mod qualified_column;
 mod random_range;
 mod reverse;
-mod text_bytea;
+mod string_binary;
 mod uuid;
 
 pub use common::{common_context_expression_type, common_type, values_column_types};
@@ -40,11 +41,13 @@ pub use equality::equality_operand_type;
 pub use functions::{builtin_function_argument_targets, builtin_function_type};
 pub use introspection::{bind_type_introspection, bind_type_introspection_with_resolver};
 #[doc(hidden)]
+pub use length::{resolve_length_overload, ResolvedLengthOverload};
+#[doc(hidden)]
 pub use md5::{resolve_md5_overload, ResolvedMd5Overload};
 #[doc(hidden)]
 pub use reverse::{resolve_reverse_overload, ResolvedReverseOverload};
 #[doc(hidden)]
-pub use text_bytea::ResolvedTextByteaOverload;
+pub use string_binary::{ResolvedStringBinaryOverload, ResolvedTextByteaOverload};
 
 pub trait FunctionTypeResolver: Send + Sync {
     fn resolve_function_type(
