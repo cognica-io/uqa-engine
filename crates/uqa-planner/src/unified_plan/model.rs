@@ -156,6 +156,8 @@ pub enum SourcePlan {
     },
     Function {
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<uqa_sql::ast::FunctionBinding>,
         #[serde(default)]
         output_name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]

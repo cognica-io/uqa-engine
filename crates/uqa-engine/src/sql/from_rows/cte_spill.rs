@@ -23,7 +23,11 @@ pub(in crate::sql) fn build_join_spill_with_ctes(
     params: &[SQLParam],
     ctes: &mut CteScope,
 ) -> Result<uqa_execution::SharedSpill, SQLError> {
-    let operator = build_join_operator_with_ctes(engine, from, params, ctes, None, None)?;
+    let mut bound = from.clone();
+    crate::sql::select::bind_source_plan_schema_for_execution(
+        engine, &mut bound, params, ctes, None,
+    )?;
+    let operator = build_join_operator_with_ctes(engine, &bound, params, ctes, None, None)?;
     let columns = operator.schema().to_vec();
     let output = crate::sql::select::collect_query_operator(
         engine,

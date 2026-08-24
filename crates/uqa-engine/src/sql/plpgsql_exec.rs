@@ -48,7 +48,8 @@ mod state;
 mod statements;
 
 pub(crate) use handlers::{
-    call_bound_user_scalar_function, call_user_scalar_function, call_user_table_function,
+    call_bound_user_scalar_function, call_bound_user_table_function, call_user_scalar_function,
+    call_user_table_function, resolved_bound_user_function_returns_set,
     resolved_user_function_returns_set,
 };
 pub(super) use handlers::{run_call, run_create_function, run_do_block, run_drop_function};

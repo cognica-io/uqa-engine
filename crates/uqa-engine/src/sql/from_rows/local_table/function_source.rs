@@ -6,12 +6,12 @@
 //! Physical assembly for table-function sources.
 
 use super::{
-    apply_table_function_aliases, attach_qualifier_filter, build_table_function_row_stream,
-    multi_unnest_internal_columns, qualify_source_operator_with_columns,
-    table_function_column_types, table_function_empty_schema, validate_table_function_alias_count,
-    ColumnPrune, CteScope, Engine, QualifierFilters, SQLError, SQLParam, ScopedEngineHook,
-    SourceEvalContext, SourcePlan, TableFunctionCall, TableFunctionTypeRequest,
-    TABLE_FUNCTION_ORDINALITY_COLUMN,
+    apply_table_function_aliases, attach_qualifier_filter,
+    build_table_function_row_stream_with_row, multi_unnest_internal_columns,
+    qualify_source_operator_with_columns, resolve_user_table_function, table_function_column_types,
+    table_function_empty_schema, validate_table_function_alias_count, ColumnPrune, CteScope,
+    Engine, QualifierFilters, SQLError, SQLParam, ScopedEngineHook, SourceEvalContext, SourcePlan,
+    TableFunctionCall, TableFunctionTypeRequest, TABLE_FUNCTION_ORDINALITY_COLUMN,
 };
 use uqa_execution::PhysicalOperator;
 
@@ -27,6 +27,7 @@ pub(super) fn build_function_source_operator<'a>(
     match from {
         SourcePlan::Function {
             name,
+            binding,
             output_name,
             relation,
             args,
@@ -35,7 +36,25 @@ pub(super) fn build_function_source_operator<'a>(
             ordinality,
             column_types,
         } => {
-            let bound_columns = crate::sql::select::user_function_output_columns(engine, name)
+            let outer_row = ctes.row_lock_outer_row().cloned();
+            let hook = ScopedEngineHook::new(engine, ctes);
+            let input_schema = outer_row
+                .as_ref()
+                .map_or_else(uqa_execution::RowSchema::default, |row| row.schema.clone());
+            let resolved = resolve_user_table_function(
+                engine,
+                name,
+                binding.as_ref(),
+                args,
+                &input_schema,
+                params,
+                &hook,
+            )?;
+            let bound_columns = resolved
+                .as_ref()
+                .and_then(|resolved| {
+                    crate::sql::from_rows::user_function_output_columns_for(&resolved.function)
+                })
                 .map_or_else(
                     || {
                         table_function_empty_schema(
@@ -54,11 +73,14 @@ pub(super) fn build_function_source_operator<'a>(
                 bound_columns.len(),
                 column_aliases.len(),
             )?;
-            let hook = ScopedEngineHook::new(engine, ctes);
             let context =
                 SourceEvalContext::new(engine, params, &hook, &hook, &ctes.scalar_subqueries);
             let call = TableFunctionCall {
                 name,
+                binding: resolved
+                    .as_ref()
+                    .map(|resolved| &resolved.binding)
+                    .or(binding.as_ref()),
                 output_name,
                 relation: relation.as_deref(),
                 args,
@@ -67,9 +89,12 @@ pub(super) fn build_function_source_operator<'a>(
                 ordinality: *ordinality,
                 column_types,
             };
-            let rows = build_table_function_row_stream(&context, call)?;
-            let multi_unnest =
-                crate::sql::builtin_function_dispatch_name(name) == "unnest" && args.len() > 1;
+            let rows =
+                build_table_function_row_stream_with_row(&context, call, outer_row.as_ref())?;
+            let multi_unnest = crate::sql::builtin_function_dispatch_name(name) == "unnest"
+                && args.len() > 1
+                && resolved.is_none()
+                && binding.as_ref().is_none_or(|binding| binding.builtin);
             let (operator, source_columns): (
                 Box<dyn uqa_execution::PhysicalOperator + 'a>,
                 Vec<String>,
@@ -84,12 +109,14 @@ pub(super) fn build_function_source_operator<'a>(
                     TableFunctionTypeRequest {
                         name,
                         args,
+                        user_function: resolved.as_ref().map(|resolved| resolved.function.as_ref()),
                         declared_types: column_types,
                         columns: &public_columns,
                         ordinality: *ordinality,
                     },
-                    &uqa_execution::RowSchema::default(),
+                    &input_schema,
                     params,
+                    &hook,
                 );
                 let identities = public_columns
                     .into_iter()
@@ -160,12 +187,14 @@ pub(super) fn build_function_source_operator<'a>(
                     TableFunctionTypeRequest {
                         name,
                         args,
+                        user_function: resolved.as_ref().map(|resolved| resolved.function.as_ref()),
                         declared_types: column_types,
                         columns: &columns,
                         ordinality: *ordinality,
                     },
-                    &uqa_execution::RowSchema::default(),
+                    &input_schema,
                     params,
+                    &hook,
                 );
                 if *ordinality {
                     let mut internal_columns = columns.clone();

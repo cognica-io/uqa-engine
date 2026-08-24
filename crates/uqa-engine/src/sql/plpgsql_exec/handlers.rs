@@ -223,6 +223,26 @@ pub(crate) fn resolved_user_function_returns_set(
     Some(Ok(function.def.returns_set()))
 }
 
+pub(crate) fn resolved_bound_user_function_returns_set(
+    engine: &Engine,
+    binding: &FunctionBinding,
+    args: &[(Option<String>, Value)],
+) -> Option<Result<bool, SQLError>> {
+    let resolved = match resolve_bound_routine(engine, binding, args) {
+        Ok(Some(resolved)) => resolved,
+        Ok(None) => return None,
+        Err(error) => return Some(Err(error)),
+    };
+    let (function, _) = resolved;
+    if function.def.is_procedure {
+        return Some(Err(SQLError::Routine {
+            sqlstate: "42809".into(),
+            message: format!("{} is a procedure", call_signature(&binding.name, args)),
+        }));
+    }
+    Some(Ok(function.def.returns_set()))
+}
+
 /// FROM-clause invocation: any user routine is callable as a table
 /// source (`SELECT * FROM f(...)`); scalar functions produce a single
 /// row. `None` means no routine with this name exists.
@@ -236,19 +256,48 @@ pub(crate) fn call_user_table_function(
         Ok(None) => return None,
         Err(e) => return Some(Err(e)),
     };
+    Some(execute_resolved_table_function(
+        engine, name, args, resolved,
+    ))
+}
+
+pub(crate) fn call_bound_user_table_function(
+    engine: &Engine,
+    binding: &FunctionBinding,
+    args: &[(Option<String>, Value)],
+) -> Option<Result<SQLTableFunctionResult, SQLError>> {
+    let resolved = match resolve_bound_routine(engine, binding, args) {
+        Ok(Some(resolved)) => resolved,
+        Ok(None) => return None,
+        Err(error) => return Some(Err(error)),
+    };
+    Some(execute_resolved_table_function(
+        engine,
+        &binding.name,
+        args,
+        resolved,
+    ))
+}
+
+fn execute_resolved_table_function(
+    engine: &Engine,
+    name: &str,
+    args: &[(Option<String>, Value)],
+    resolved: (
+        std::sync::Arc<crate::engine_user_functions::SQLUserFunction>,
+        Vec<Value>,
+    ),
+) -> Result<SQLTableFunctionResult, SQLError> {
     let (function, bound) = resolved;
     if function.def.is_procedure {
-        return Some(Err(SQLError::Routine {
+        return Err(SQLError::Routine {
             sqlstate: "42809".into(),
             message: format!("{} is a procedure", call_signature(name, args)),
-        }));
+        });
     }
     let out_params = function.def.output_params();
     let columns = if out_params.is_empty() {
-        match routine_local_name(&function.def.name) {
-            Ok(name) => vec![name],
-            Err(error) => return Some(Err(error)),
-        }
+        vec![routine_local_name(&function.def.name)?]
     } else {
         output_column_names(&function.def)
     };
@@ -258,12 +307,9 @@ pub(crate) fn call_user_table_function(
         } else {
             vec![vec![Value::Null; columns.len()]]
         };
-        return Some(Ok(SQLTableFunctionResult::new(columns, rows)));
+        return Ok(SQLTableFunctionResult::new(columns, rows));
     }
-    let outcome = match execute_routine(engine, &function, bound) {
-        Ok(outcome) => outcome,
-        Err(e) => return Some(Err(e)),
-    };
+    let outcome = execute_routine(engine, &function, bound)?;
     let rows = if function.def.returns_set() {
         outcome.set_rows
     } else if out_params.is_empty() {
@@ -271,5 +317,5 @@ pub(crate) fn call_user_table_function(
     } else {
         vec![outcome.out_values]
     };
-    Some(Ok(SQLTableFunctionResult::new(columns, rows)))
+    Ok(SQLTableFunctionResult::new(columns, rows))
 }

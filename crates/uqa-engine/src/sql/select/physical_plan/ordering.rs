@@ -13,7 +13,7 @@ use super::{
     attach_order_limit, build_set_projection, identity_order_columns, projection_columns,
     projection_set_batch_size, projections_may_return_set, resolve_order_expression, CteScope,
     Engine, OutputColumnMapping, PhysicalProjection, QueryBlockPlan, RowAtATime, SQLError,
-    SQLParam, ScalarExpr, SharedExpressionEvaluator, Value,
+    SQLParam, ScalarExpr, ScopedEngineHook, SharedExpressionEvaluator, Value,
 };
 
 const DEFERRED_ORDER_COLUMN_PREFIX: &str = "\0uqa.deferred_order_value.";
@@ -255,8 +255,14 @@ pub(super) fn attach_final_projection_order<'a>(
     evaluator: SharedExpressionEvaluator<'a>,
 ) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
     let (statement, output) = ordering;
-    let returns_set =
-        projections_may_return_set(engine, &projections, operator.row_schema(), params)?;
+    let type_resolver = ScopedEngineHook::new(engine, ctes);
+    let returns_set = projections_may_return_set(
+        engine,
+        &type_resolver,
+        &projections,
+        operator.row_schema(),
+        params,
+    )?;
     if ctes.streams_command_progress() && !statement.order_by.is_empty() && !returns_set {
         return attach_deferred_order_projection(
             operator,

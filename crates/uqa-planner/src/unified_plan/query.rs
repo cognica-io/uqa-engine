@@ -359,6 +359,7 @@ impl SourcePlan {
                 column_types,
             } => Self::Function {
                 name,
+                binding: None,
                 output_name,
                 relation,
                 args: args

@@ -50,6 +50,19 @@ fn pg_catalog_qualified_generate_series_uses_the_builtin() {
 }
 
 #[test]
+fn table_function_scalar_subqueries_preserve_declared_argument_types() {
+    let eng = Engine::new();
+    let result = eng
+        .sql(
+            "SELECT value FROM generate_series((SELECT 1::BIGINT), (SELECT 2::BIGINT)) AS g(value)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.column_types, [Some(ColumnType::BigInteger)]);
+    assert_eq!(values(&result, "value"), vec![Value::Int(1), Value::Int(2)]);
+}
+
+#[test]
 fn table_function_default_column_keeps_the_local_identifier_structured() {
     let eng = Engine::new();
     let builtin = eng

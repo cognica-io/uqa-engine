@@ -14,7 +14,7 @@ use super::{
     run_single_table_select_output, validate_query_block_expression_types,
     validate_query_set_contexts, validate_source_set_contexts_before_build, BTreeSet, ColumnPrune,
     CteScope, Engine, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr,
-    SingleRelation, SourcePlan,
+    ScopedEngineHook, SingleRelation, SourcePlan,
 };
 
 pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
@@ -32,12 +32,13 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
     )?;
     let expression_schema = overlay_outer_schema(&source_schema, outer);
     validate_query_block_expression_types(engine, stmt, &expression_schema, params, ctes)?;
-    validate_query_set_contexts(engine, stmt, &expression_schema, params)?;
+    let type_resolver = ScopedEngineHook::new(engine, ctes);
+    validate_query_set_contexts(engine, &type_resolver, stmt, &expression_schema, params)?;
 
     let Some(from) = stmt.from.as_ref() else {
         return run_select_without_from_output(engine, block, stmt, params, ctes, output_mode);
     };
-    validate_source_set_contexts_before_build(engine, from, params, ctes, outer)?;
+    validate_source_set_contexts_before_build(engine, &type_resolver, from, params, ctes, outer)?;
 
     // Set-op branches, CTEs, and derived-table bodies still need the same
     // search-aware single-table physical access path as top-level queries;

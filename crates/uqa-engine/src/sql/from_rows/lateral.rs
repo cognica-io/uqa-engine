@@ -8,10 +8,11 @@
 
 use super::{
     build_join_operator_with_ctes, build_table_function_row_stream_with_row, eval_scalar,
-    multi_unnest_internal_columns, projection_columns, query_output_shared, AccessPathPlan,
-    ComputePlan, CteScope, Engine, PlanSubqueryArena, QueryBlockPlan, QueryOutput, QueryOutputMode,
-    QueryPlan, RelationalPlan, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, ScopedEngineHook,
-    SourceEvalContext, SourcePlan, TableFunctionCall, TABLE_FUNCTION_ORDINALITY_COLUMN,
+    multi_unnest_internal_columns, projection_columns, query_output_shared,
+    resolve_user_table_function, AccessPathPlan, ComputePlan, CteScope, Engine, PlanSubqueryArena,
+    QueryBlockPlan, QueryOutput, QueryOutputMode, QueryPlan, RelationalPlan, SQLError, SQLParam,
+    ScalarEvalContext, ScalarExpr, ScopedEngineHook, SourceEvalContext, SourcePlan,
+    TableFunctionCall, TABLE_FUNCTION_ORDINALITY_COLUMN,
 };
 use crate::sql::select::{expand_from_star_columns, resolve_row_locks};
 
@@ -35,6 +36,7 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
         }
         if let SourcePlan::Function {
             name,
+            binding,
             output_name,
             relation,
             args,
@@ -45,6 +47,15 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
         } = &self.right
         {
             let hook = ScopedEngineHook::new(self.engine, &self.ctes);
+            let resolved = resolve_user_table_function(
+                self.engine,
+                name,
+                binding.as_ref(),
+                args,
+                &left_row.schema,
+                self.params,
+                &hook,
+            )?;
             let context = SourceEvalContext::new(
                 self.engine,
                 self.params,
@@ -54,6 +65,10 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
             );
             let call = TableFunctionCall {
                 name,
+                binding: resolved
+                    .as_ref()
+                    .map(|resolved| &resolved.binding)
+                    .or(binding.as_ref()),
                 output_name,
                 relation: relation.as_deref(),
                 args,
@@ -64,8 +79,10 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
             };
             let rows = build_table_function_row_stream_with_row(&context, call, Some(left_row))?;
             let schema = self.right_schema.clone();
-            let multi_unnest =
-                crate::sql::builtin_function_dispatch_name(name) == "unnest" && args.len() > 1;
+            let multi_unnest = crate::sql::builtin_function_dispatch_name(name) == "unnest"
+                && args.len() > 1
+                && resolved.is_none()
+                && binding.as_ref().is_none_or(|binding| binding.builtin);
             let input_schema = if multi_unnest || *ordinality {
                 let mut columns = if multi_unnest {
                     multi_unnest_internal_columns(args.len())
@@ -311,6 +328,7 @@ fn execute_lateral_query_block_output(
     params: &[SQLParam],
     scoped_ctes: &mut CteScope,
 ) -> Result<QueryOutput, SQLError> {
+    let mut stmt = stmt.clone();
     let inherited_lock_identities = scoped_ctes.lock_identities.emit;
     let mut scoped_ctes = scoped_ctes.enter_scalar_subqueries(&stmt.subqueries);
     scoped_ctes.set_row_lock_outer_row(outer_row.clone());
@@ -321,9 +339,20 @@ fn execute_lateral_query_block_output(
         !stmt.locking.is_empty() || (inherited_lock_identities && !row_identity_barrier);
     scoped_ctes.lock_identities.retain_after_lock =
         inherited_lock_identities && !row_identity_barrier;
+    if let Some(from) = stmt.from.as_mut() {
+        crate::sql::select::bind_source_plan_schema_for_execution(
+            engine,
+            from,
+            params,
+            &scoped_ctes,
+            Some(&outer_row.schema),
+        )?;
+    }
+    let stmt = &stmt;
     if let Some(from) = stmt.from.as_ref() {
         crate::sql::select::validate_source_set_contexts_before_build(
             engine,
+            &crate::sql::select::ScopedEngineHook::new(engine, &scoped_ctes),
             from,
             params,
             &scoped_ctes,
@@ -365,7 +394,13 @@ fn execute_lateral_query_block_output(
         params,
         &scoped_ctes,
     )?;
-    crate::sql::select::validate_query_set_contexts(engine, stmt, operator.row_schema(), params)?;
+    crate::sql::select::validate_query_set_contexts(
+        engine,
+        &crate::sql::select::ScopedEngineHook::new(engine, &scoped_ctes),
+        stmt,
+        operator.row_schema(),
+        params,
+    )?;
     crate::sql::select::execute_query_block_operator_output(
         engine,
         operator,

@@ -216,6 +216,25 @@ impl Engine {
         )
     }
 
+    pub(crate) fn resolve_table_function_overload_with_builtins(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+        builtins: &[BuiltinFunctionOverload],
+    ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
+        combined_overloads::resolve_table(
+            self,
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            builtins,
+        )
+        .map(Some)
+    }
+
     /// Resolve a function-expression or `CALL` candidate with shared `PostgreSQL` visibility and overload-ranking rules.
     pub(crate) fn resolve_static_sql_routine(
         &self,

@@ -128,6 +128,21 @@ pub(crate) fn analyze_catalog_query_schema(
     select::analyze_query_plan_schema(engine, query, params, &CteScope::default(), None)
 }
 
+/// Bind catalog-owned table-function calls to exact routine identities before the query plan is serialized.
+pub(crate) fn bind_catalog_query_table_functions(
+    engine: &Engine,
+    query: &mut uqa_planner::QueryPlan,
+    params: &[SQLParam],
+) -> Result<uqa_execution::RowSchema, SQLError> {
+    select::bind_query_plan_table_functions_for_storage(
+        engine,
+        query,
+        params,
+        &CteScope::default(),
+        None,
+    )
+}
+
 const SCORE_COLUMN: &str = "_score";
 pub(in crate::sql) const DOC_ID_COLUMN: &str = "_doc_id";
 const MERGE_ACTION_COLUMN: &str = "_merge_action";

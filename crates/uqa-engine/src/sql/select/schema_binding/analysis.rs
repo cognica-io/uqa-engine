@@ -11,7 +11,7 @@ mod references;
 
 use super::{Engine, QueryBlockPlan, QueryPlan, SQLError, SQLParam, ScalarExpr, SchemaScope};
 use uqa_execution::{ColumnIdentity, FunctionTypeResolver, RowSchema};
-use uqa_sql::ast::ColumnType;
+use uqa_sql::ast::{ColumnType, FunctionBinding};
 
 pub(super) struct SetOperationClauses<'a> {
     pub(super) order_by: &'a [uqa_planner::OrderPlan],
@@ -19,6 +19,15 @@ pub(super) struct SetOperationClauses<'a> {
     pub(super) offset: Option<&'a ScalarExpr>,
     pub(super) subqueries: &'a [QueryPlan],
     pub(super) output: &'a RowSchema,
+}
+
+pub(super) struct TableFunctionSourceValidation<'a> {
+    pub(super) name: &'a str,
+    pub(super) binding: Option<&'a FunctionBinding>,
+    pub(super) args: &'a [ScalarExpr],
+    pub(super) subqueries: &'a [QueryPlan],
+    pub(super) input: &'a RowSchema,
+    pub(super) params: &'a [SQLParam],
 }
 
 struct AliasReferenceScope<'a> {
@@ -189,7 +198,7 @@ impl SchemaScope {
             params,
             Some(schema),
         )?;
-        references::validate_expression(
+        Self::validate_expression_references_with_resolver(
             engine,
             expression,
             schema,
@@ -201,19 +210,47 @@ impl SchemaScope {
         )
     }
 
+    pub(super) fn validate_expression_references_with_resolver(
+        engine: &Engine,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        fallback: Option<&RowSchema>,
+        params: &[SQLParam],
+        resolver: &dyn FunctionTypeResolver,
+    ) -> Result<(), SQLError> {
+        references::validate_expression(engine, expression, schema, fallback, params, resolver)
+    }
+
     pub(super) fn validate_table_function_source(
         &mut self,
         engine: &Engine,
-        name: &str,
-        args: &[ScalarExpr],
-        subqueries: &[QueryPlan],
-        input: &RowSchema,
-        params: &[SQLParam],
-    ) -> Result<(), SQLError> {
+        request: TableFunctionSourceValidation<'_>,
+    ) -> Result<Option<crate::sql::from_rows::ResolvedUserTableFunction>, SQLError> {
+        let TableFunctionSourceValidation {
+            name,
+            binding,
+            args,
+            subqueries,
+            input,
+            params,
+        } = request;
+        let resolver = self.query_function_type_resolver_for_subqueries(
+            engine,
+            args.iter().any(super::expr_contains_subquery),
+            input,
+            subqueries,
+            params,
+            Some(input),
+        )?;
+        let resolver = resolver
+            .as_ref()
+            .map_or(engine as &dyn FunctionTypeResolver, |resolver| resolver);
         for argument in args {
-            self.validate_expression_references(engine, argument, input, None, subqueries, params)?;
+            Self::validate_expression_references_with_resolver(
+                engine, argument, input, None, params, resolver,
+            )?;
         }
-        functions::validate_table_function(engine, name, args, input, params)
+        functions::validate_table_function(engine, name, binding, args, input, params, resolver)
     }
 }
 

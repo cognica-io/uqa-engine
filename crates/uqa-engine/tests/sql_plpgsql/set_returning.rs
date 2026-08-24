@@ -137,11 +137,37 @@ fn select_list_set_functions_allow_postgresql_expression_contexts_and_preserve_t
         "SELECT generate_series(1::bigint, 2::bigint) AS value",
     );
     assert_eq!(typed.column_types, [Some(ColumnType::BigInteger)]);
+    let typed_subqueries = exec(
+        &eng,
+        "SELECT generate_series((SELECT 1::bigint), (SELECT 2::bigint)) AS value",
+    );
+    assert_eq!(
+        typed_subqueries.column_types,
+        [Some(ColumnType::BigInteger)]
+    );
+    assert_eq!(typed_subqueries.rows.len(), 2);
     let unnested = exec(&eng, "SELECT unnest(ARRAY[1::bigint, 2::bigint]) AS value");
     assert_eq!(unnested.column_types, [Some(ColumnType::BigInteger)]);
 
     let null_step = exec(&eng, "SELECT generate_series(1, 3, NULL) AS value");
     assert!(null_step.rows.is_empty());
+}
+
+#[test]
+fn polymorphic_builtin_syntax_is_not_shadowed_by_a_user_set_function() {
+    let eng = engine();
+    exec(&eng, "CREATE SCHEMA syntax_shadow");
+    exec(
+        &eng,
+        "CREATE FUNCTION syntax_shadow.coalesce(first_value TEXT, second_value TEXT) RETURNS SETOF TEXT AS $$
+         BEGIN RETURN NEXT 'shadow'; RETURN NEXT 'shadow-2'; END;
+         $$ LANGUAGE plpgsql",
+    );
+    exec(&eng, "SET search_path = syntax_shadow, pg_catalog, public");
+
+    let result = exec(&eng, "SELECT coalesce(NULL::TEXT, 'builtin') AS value");
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["value"], Value::Str("builtin".into()));
 }
 
 #[test]
@@ -205,6 +231,35 @@ fn set_projection_resolves_scalar_and_set_overloads_independently() {
             .collect::<Vec<_>>(),
         vec![Value::Str("one".into()), Value::Str("two".into())]
     );
+}
+
+#[test]
+fn set_projection_preserves_scalar_subquery_overload_binding() {
+    let eng = engine();
+    exec(
+        &eng,
+        "CREATE FUNCTION overloaded_set_projection(value int) RETURNS SETOF text AS $$
+         BEGIN RETURN NEXT 'int4'; END;
+         $$ LANGUAGE plpgsql",
+    );
+    exec(
+        &eng,
+        "CREATE FUNCTION overloaded_set_projection(value bigint) RETURNS SETOF text AS $$
+         BEGIN RETURN NEXT 'int8'; END;
+         $$ LANGUAGE plpgsql",
+    );
+
+    let selected = exec(
+        &eng,
+        "SELECT overloaded_set_projection((SELECT 7::BIGINT)) AS value",
+    );
+    assert_eq!(selected.rows[0]["value"], Value::Str("int8".into()));
+
+    let ambiguous = exec_err(
+        &eng,
+        "SELECT overloaded_set_projection(1::SMALLINT) AS value",
+    );
+    assert_eq!(ambiguous.sqlstate(), Some("42725"), "{ambiguous}");
 }
 
 #[test]
