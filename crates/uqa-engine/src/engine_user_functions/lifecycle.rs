@@ -147,7 +147,7 @@ fn append_routine_cascade_notice(
 ) {
     let mut cascaded = cascaded_routines
         .iter()
-        .map(|target| format!("function {}", target.label()))
+        .map(|target| format!("{} {}", target.kind(), target.label()))
         .collect::<Vec<_>>();
     cascaded.extend(
         dependents
@@ -429,7 +429,12 @@ impl Engine {
                     dependent_columns.extend(columns);
                     dependent_views.extend(views);
                 } else {
-                    self.ensure_no_function_dependencies(&target.name, &target.argument_types)?;
+                    Self::ensure_no_function_dependencies(
+                        &target.name,
+                        &target.argument_types,
+                        &columns,
+                        &views,
+                    )?;
                 }
             }
         }
@@ -579,16 +584,11 @@ impl Engine {
     }
 
     fn ensure_no_function_dependencies(
-        &self,
         name: &str,
         argument_types: &[String],
+        generated: &[(String, String)],
+        views: &[String],
     ) -> Result<(), SQLError> {
-        let generated = self.generated_function_dependents(name, argument_types)?;
-        let views = self
-            .views_depending_on_function(name, argument_types)
-            .map_err(|error| {
-                SQLError::Internal(format!("read view function dependencies: {error}"))
-            })?;
         if generated.is_empty() && views.is_empty() {
             return Ok(());
         }

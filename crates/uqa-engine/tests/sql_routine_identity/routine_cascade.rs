@@ -191,7 +191,7 @@ fn dependent_sql_procedure_and_durable_reopen_follow_the_same_graph() {
         reopened.take_sql_notices(),
         vec![(
             "NOTICE".into(),
-            "drop cascades to function public.durable_proc(integer)".into(),
+            "drop cascades to procedure public.durable_proc(integer)".into(),
         )]
     );
     assert_eq!(sqlstate(&reopened, "CALL durable_proc(1)"), "42883");
