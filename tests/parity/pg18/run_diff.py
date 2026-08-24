@@ -20,8 +20,11 @@ HERE = Path(__file__).parent
 REPO_ROOT = HERE.parent.parent.parent
 MANIFEST = HERE / "manifest.json"
 PLAN = REPO_ROOT / "docs" / "plans" / "0003-postgresql-18-compatibility.md"
+MANUAL = REPO_ROOT / "docs" / "manual" / "sql" / "09-compatibility.md"
 PLAN_STATUS_START = "<!-- pg18-manifest-status:start -->"
 PLAN_STATUS_END = "<!-- pg18-manifest-status:end -->"
+MANUAL_MILESTONE_START = "<!-- pg18-milestone-snapshot:start -->"
+MANUAL_MILESTONE_END = "<!-- pg18-milestone-snapshot:end -->"
 USQL = os.environ.get("UQA_USQL", str(REPO_ROOT / "target" / "release" / "usql"))
 PG_CONTAINER = os.environ.get("UQA_PG_CONTAINER", "uqa-pg18")
 PG_DATABASE = os.environ.get("UQA_PG_DATABASE", "uqa")
@@ -34,27 +37,56 @@ PSQL = [
 SQLSTATE_ERROR = re.compile(r"^ERROR:\s+([0-9A-Z]{5}):")
 
 
+def derive_milestone_statuses(manifest: dict) -> dict[str, str]:
+    """Derive milestone progress from each milestone's owned evidence items."""
+    items = {item["id"]: item for item in manifest["items"]}
+    statuses = {}
+    for milestone, item_ids in manifest["milestone_items"].items():
+        item_statuses = [items[item_id]["status"] for item_id in item_ids]
+        if all(status == "verified" for status in item_statuses):
+            statuses[milestone] = "complete"
+        elif all(status == "not_audited" for status in item_statuses):
+            statuses[milestone] = "not_started"
+        else:
+            statuses[milestone] = "in_progress"
+
+    if statuses["M6"] == "complete" and (
+        any(statuses[f"M{index}"] != "complete" for index in range(6))
+        or any(item["status"] != "verified" for item in manifest["items"])
+    ):
+        statuses["M6"] = "in_progress"
+    return statuses
+
+
 def render_plan_status(manifest: dict) -> str:
     """Render the machine-checked status ledger embedded in the living plan."""
+    statuses = derive_milestone_statuses(manifest)
+    item_milestones = {
+        item_id: milestone
+        for milestone, item_ids in manifest["milestone_items"].items()
+        for item_id in item_ids
+    }
     lines = [
         PLAN_STATUS_START,
         "",
-        "| Milestone | Status |",
-        "| --- | --- |",
+        "| Milestone | Name | Status | Exit gate |",
+        "| --- | --- | --- | --- |",
     ]
     lines.extend(
-        f"| `{milestone}` | `{status}` |"
-        for milestone, status in manifest["milestones"].items()
+        f"| `{milestone}` | {details['title']} | `{statuses[milestone]}` | "
+        f"{details['exit_gate']} |"
+        for milestone, details in manifest["milestones"].items()
     )
     lines.extend(
         [
             "",
-            "| Evidence item | Status |",
-            "| --- | --- |",
+            "| Evidence item | Milestone | Status |",
+            "| --- | --- | --- |",
         ]
     )
     lines.extend(
-        f"| `{item['id']}` | `{item['status']}` |" for item in manifest["items"]
+        f"| `{item['id']}` | `{item_milestones[item['id']]}` | `{item['status']}` |"
+        for item in manifest["items"]
     )
     lines.extend(["", PLAN_STATUS_END])
     return "\n".join(lines)
@@ -74,11 +106,103 @@ def validate_plan_status(manifest: dict, source: str | None = None) -> None:
         )
 
 
+def render_manual_milestone_snapshot(manifest: dict) -> str:
+    """Render the authoritative manual's milestone snapshot."""
+    statuses = derive_milestone_statuses(manifest)
+
+    def members(status: str) -> str:
+        rendered = ", ".join(
+            f"`{milestone}` ({manifest['milestones'][milestone]['title']})"
+            for milestone, current in statuses.items()
+            if current == status
+        )
+        return rendered or "none"
+
+    paragraph = (
+        f"Current milestone snapshot: complete — {members('complete')}; "
+        f"in progress — {members('in_progress')}; "
+        f"not started — {members('not_started')}. "
+        "Each milestone status is derived from its owned evidence items and remains "
+        "bounded by its exit gate."
+    )
+    return "\n".join(
+        [MANUAL_MILESTONE_START, "", paragraph, "", MANUAL_MILESTONE_END]
+    )
+
+
+def validate_manual_milestone_snapshot(
+    manifest: dict, source: str | None = None
+) -> None:
+    """Require the manual to expose the manifest-derived milestone state."""
+    if source is None:
+        source = MANUAL.read_text()
+    if (
+        source.count(MANUAL_MILESTONE_START) != 1
+        or source.count(MANUAL_MILESTONE_END) != 1
+    ):
+        raise RuntimeError("PG18 compatibility manual must contain one milestone snapshot")
+    start = source.index(MANUAL_MILESTONE_START)
+    end = source.index(MANUAL_MILESTONE_END, start) + len(MANUAL_MILESTONE_END)
+    if source[start:end] != render_manual_milestone_snapshot(manifest):
+        raise RuntimeError(
+            "PG18 compatibility manual milestone snapshot does not match manifest.json"
+        )
+
+
+def validate_milestone_accounting(manifest: dict, item_ids: set[str]) -> None:
+    """Validate milestone definitions and exact single ownership of all items."""
+    milestones = manifest.get("milestones")
+    expected_milestones = {f"M{index}" for index in range(7)}
+    if not isinstance(milestones, dict) or set(milestones) != expected_milestones:
+        raise RuntimeError("PG18 manifest must define milestones M0 through M6")
+    for milestone, details in milestones.items():
+        if not isinstance(details, dict) or set(details) != {"title", "exit_gate"}:
+            raise RuntimeError(f"PG18 manifest milestone {milestone} has an invalid shape")
+        if any(
+            not isinstance(details[field], str) or not details[field].strip()
+            for field in ("title", "exit_gate")
+        ):
+            raise RuntimeError(f"PG18 manifest milestone {milestone} has empty metadata")
+
+    ownership = manifest.get("milestone_items")
+    if not isinstance(ownership, dict) or set(ownership) != expected_milestones:
+        raise RuntimeError("PG18 manifest milestone_items must cover M0 through M6")
+    owned = []
+    for milestone, members in ownership.items():
+        if not isinstance(members, list) or not members:
+            raise RuntimeError(f"PG18 manifest milestone {milestone} has no evidence items")
+        if any(not isinstance(item_id, str) or not item_id for item_id in members):
+            raise RuntimeError(f"PG18 manifest milestone {milestone} has an invalid item id")
+        owned.extend(members)
+    if len(owned) != len(set(owned)):
+        raise RuntimeError("PG18 manifest evidence items must have one owning milestone")
+    unknown = set(owned) - item_ids
+    if unknown:
+        raise RuntimeError(
+            f"PG18 manifest milestone ownership names unknown items: {sorted(unknown)}"
+        )
+    orphaned = item_ids - set(owned)
+    if orphaned:
+        raise RuntimeError(f"PG18 manifest has orphan evidence items: {sorted(orphaned)}")
+
+
+def validate_complete_compatibility_claim(
+    manifest: dict, milestone_statuses: dict[str, str]
+) -> None:
+    """Require the public complete claim to equal the derived M6 state."""
+    expected_claim = milestone_statuses["M6"] == "complete"
+    claim = manifest.get("complete_compatibility_claim")
+    if not isinstance(claim, bool) or claim != expected_claim:
+        raise RuntimeError(
+            "complete_compatibility_claim must match the derived M6 milestone status"
+        )
+
+
 def validate_manifest() -> dict:
     """Validate compatibility accounting before using its evidence."""
     manifest = json.loads(MANIFEST.read_text())
-    if manifest.get("schema_version") != 1:
-        raise RuntimeError("PG18 manifest schema_version must be 1")
+    if manifest.get("schema_version") != 2:
+        raise RuntimeError("PG18 manifest schema_version must be 2")
     if manifest.get("oracle", {}).get("major") != 18:
         raise RuntimeError("PG18 manifest oracle major must be 18")
 
@@ -95,17 +219,6 @@ def validate_manifest() -> dict:
         raise RuntimeError("PG18 manifest wrapper revision does not match uqa-pg-query")
     if parser_chain["library_revision"] not in upstream:
         raise RuntimeError("PG18 manifest library revision does not match uqa-pg-query")
-
-    milestones = manifest.get("milestones")
-    expected_milestones = {f"M{index}" for index in range(7)}
-    if not isinstance(milestones, dict) or set(milestones) != expected_milestones:
-        raise RuntimeError("PG18 manifest must account for milestones M0 through M6")
-    milestone_states = {"not_started", "in_progress", "complete"}
-    invalid_milestones = {
-        name: state for name, state in milestones.items() if state not in milestone_states
-    }
-    if invalid_milestones:
-        raise RuntimeError(f"PG18 manifest has invalid milestone states: {invalid_milestones}")
 
     items = manifest.get("items")
     if not isinstance(items, list) or not items:
@@ -138,14 +251,11 @@ def validate_manifest() -> dict:
         elif not isinstance(item["open_issue"], str) or not item["open_issue"].strip():
             raise RuntimeError(f"incomplete PG18 manifest item {item_id} lacks an open issue")
 
-    if manifest.get("complete_compatibility_claim") is True:
-        if any(item["status"] != "verified" for item in items):
-            raise RuntimeError("complete PG18 compatibility cannot be claimed with incomplete items")
-        if any(state != "complete" for state in milestones.values()):
-            raise RuntimeError("complete PG18 compatibility cannot be claimed before M0-M6 complete")
-    elif manifest.get("complete_compatibility_claim") is not False:
-        raise RuntimeError("complete_compatibility_claim must be a boolean")
+    validate_milestone_accounting(manifest, seen)
+    milestone_statuses = derive_milestone_statuses(manifest)
+    validate_complete_compatibility_claim(manifest, milestone_statuses)
     validate_plan_status(manifest)
+    validate_manual_milestone_snapshot(manifest)
     return manifest
 
 

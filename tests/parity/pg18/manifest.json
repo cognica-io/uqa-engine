@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "scope": "PostgreSQL 18 compatibility evidence and remaining gates",
   "complete_compatibility_claim": false,
   "oracle": {
@@ -16,13 +16,105 @@
     "library_revision": "898cd71c96375d6d4219916996701571dbe2b239"
   },
   "milestones": {
-    "M0": "in_progress",
-    "M1": "complete",
-    "M2": "complete",
-    "M3": "not_started",
-    "M4": "not_started",
-    "M5": "not_started",
-    "M6": "not_started"
+    "M0": {
+      "title": "PG18 baseline",
+      "exit_gate": "PG18 parser pinned; all AST deltas audited; unsupported shapes fail explicitly; active names and fixtures use pg18; 22/22 TPC-H-derived results match PostgreSQL 18"
+    },
+    "M1": {
+      "title": "Discovered semantic fixes",
+      "exit_gate": "Bounded DML row-image, constraint-metadata, identified-function, and independently verified semantic slices pass their PostgreSQL 18.4 evidence"
+    },
+    "M2": {
+      "title": "Protocol 3.2",
+      "exit_gate": "Byte-exact codec tests and live PostgreSQL 18 libpq 3.0/3.2/latest negotiation and cancellation tests pass"
+    },
+    "M3": {
+      "title": "PG18 DDL and types",
+      "exit_gate": "Generated columns, range/multirange, temporal constraints, catalogs, dump/restore, and reopen tests pass"
+    },
+    "M4": {
+      "title": "Core regression parity",
+      "exit_gate": "PostgreSQL 18 core regression and isolation suites pass with every remaining failure recorded and reduced to zero"
+    },
+    "M5": {
+      "title": "Client parity",
+      "exit_gate": "The supported driver, migration, introspection, dump/restore, COPY, and pooling matrix passes"
+    },
+    "M6": {
+      "title": "Complete compatibility",
+      "exit_gate": "M0 through M5 and every manifest item are verified, the final zero-exemption audit passes, and the manual removes the implemented-subset qualification"
+    }
+  },
+  "milestone_items": {
+    "M0": [
+      "baseline.pg18-differential-probes",
+      "baseline.tpch-derived-queries",
+      "parser.pg18-chain"
+    ],
+    "M1": [
+      "query.parenthesized-join-alias",
+      "query.fetch-with-ties",
+      "query.pattern-escape",
+      "query.group-by-distinct",
+      "query.table-function-with-ordinality",
+      "query.rows-from-and-multi-array-unnest",
+      "query.named-window",
+      "dml.returning-row-images",
+      "ddl.constraint-metadata",
+      "ddl.ctas-column-names",
+      "ddl.ctas-with-no-data",
+      "ddl.select-into",
+      "ddl.view-column-aliases",
+      "functions.identified-pg18-additions",
+      "functions.fixed-builtin-overload-resolution",
+      "routines.scalar-domain-overload-resolution",
+      "routines.procedure-call-overload-resolution",
+      "routines.table-setof-overload-resolution",
+      "routines.stored-view-function-drop-restrict",
+      "functions.json-null-stripping",
+      "functions.array-transforms",
+      "functions.integer-base-conversion",
+      "functions.random-range",
+      "functions.reverse-overloads",
+      "functions.md5-overloads",
+      "functions.crc-checksums",
+      "functions.gamma-functions",
+      "functions.string-binary-lengths",
+      "functions.uuid-extraction"
+    ],
+    "M2": [
+      "protocol.frontend-backend-3.2"
+    ],
+    "M3": [
+      "query.join-using-natural",
+      "ddl.constraint-lifecycle",
+      "ddl.relation-forms-and-options",
+      "execution.static-row-schema-and-spill-v1",
+      "types.declared-identity-casts-and-catalog",
+      "ddl.alter-type-and-migration",
+      "catalog.pg-database-locale",
+      "ddl.generated-columns",
+      "ddl.temporal-constraints",
+      "routines.function-procedure-drop-cascade"
+    ],
+    "M4": [
+      "dml.returning-row-images-extended",
+      "dml.merge-not-matched-by-source",
+      "query.row-locking-complete-matrix",
+      "query.cte-search-cycle-and-materialization",
+      "functions.full-pg18-matrix",
+      "routines.polymorphic-variadic-pseudotype-overloads",
+      "plpgsql.datum-slots-and-bound-cursors",
+      "graph.age-default-label-drop",
+      "regression.core-and-isolation"
+    ],
+    "M5": [
+      "protocol.frontend-backend-3.2-extended",
+      "clients.driver-and-operations-matrix"
+    ],
+    "M6": [
+      "compatibility.complete-zero-exemption-audit"
+    ]
   },
   "items": [
     {
@@ -114,20 +206,68 @@
       "open_issue": null
     },
     {
+      "id": "query.row-locking-complete-matrix",
+      "postgresql_reference": "PostgreSQL 18.4 SELECT locking clauses, tuple recheck semantics, official row-lock regression cases, and isolation schedules",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_queries::sql_row_locks::; cargo test -p uqa-engine --test integration engine_queries::sql_row_locks_recheck::",
+      "supported_version": "Implemented FOR UPDATE, FOR NO KEY UPDATE, FOR SHARE, FOR KEY SHARE, OF, NOWAIT, SKIP LOCKED, tuple recheck, process-boundary, join, subquery, view, CTE, mutation, savepoint, and persistent-provider slices",
+      "status": "partial",
+      "open_issue": "The complete PostgreSQL 18 row-lock regression, isolation, unsupported-relation, deadlock, and process-boundary matrix remains."
+    },
+    {
+      "id": "query.cte-search-cycle-and-materialization",
+      "postgresql_reference": "PostgreSQL 18.4 WITH documentation and official recursive CTE SEARCH, CYCLE, and materialization regression cases",
+      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::relations::unsupported_cte_control_clauses_fail_explicitly",
+      "supported_version": "Implemented ordinary and recursive CTE surface excluding SEARCH, CYCLE, and NOT MATERIALIZED",
+      "status": "explicitly_rejected",
+      "open_issue": "Recursive CTE SEARCH and CYCLE clauses and CTE NOT MATERIALIZED are rejected and must be implemented with PostgreSQL 18 planning, result, and error semantics."
+    },
+    {
       "id": "dml.returning-row-images",
-      "postgresql_reference": "PostgreSQL 18 SQL DML RETURNING documentation",
-      "uqa_test": "crates/uqa-engine/tests/sql_update_delete.rs",
-      "supported_version": "PostgreSQL 18",
+      "postgresql_reference": "PostgreSQL 18.4 DML RETURNING row-image syntax, results, row descriptions, errors, and SQLSTATEs",
+      "uqa_test": "cargo test -p uqa-sql --lib returning; cargo test -p uqa-engine --test integration engine_catalog::sql_update_delete::postgresql_18_returning_exposes_old_and_new_row_images; cargo test -p uqa-engine --test integration engine_catalog::sql_update_delete::returning_old_and_new_stars_preserve_duplicate_output_positions; cargo test -p uqa-engine --test integration engine_catalog::sql_merge::merge_returning_exposes_postgresql_18_row_images",
+      "supported_version": "PostgreSQL 18.4 old and new row images, default and explicit aliases, duplicate output positions, declared result types, alias conflicts, and implemented INSERT, UPDATE, DELETE, ON CONFLICT, and MERGE actions",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "dml.returning-row-images-extended",
+      "postgresql_reference": "PostgreSQL 18.4 DML RETURNING documentation and official trigger, partition, and MERGE regression cases",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_update_delete::; cargo test -p uqa-engine --test integration engine_catalog::sql_merge::",
+      "supported_version": "The bounded PostgreSQL 18.4 row-image behavior recorded by dml.returning-row-images",
       "status": "partial",
       "open_issue": "Trigger, partition, and complete MERGE-action differential coverage remains."
     },
     {
+      "id": "dml.merge-not-matched-by-source",
+      "postgresql_reference": "PostgreSQL 18.4 MERGE documentation and official regression cases for WHEN NOT MATCHED BY SOURCE",
+      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::data_commands::merge_not_matched_by_source_fails_explicitly",
+      "supported_version": "Implemented PostgreSQL 18 MERGE actions excluding WHEN NOT MATCHED BY SOURCE",
+      "status": "explicitly_rejected",
+      "open_issue": "MERGE WHEN NOT MATCHED BY SOURCE is rejected and must be implemented with PostgreSQL 18 action ordering, visibility, result, and error semantics."
+    },
+    {
       "id": "ddl.constraint-metadata",
-      "postgresql_reference": "PostgreSQL 18 CREATE TABLE constraint grammar and catalogs",
-      "uqa_test": "crates/uqa-engine/tests/sql_check_fk_default.rs; crates/uqa-engine/tests/sql_information_schema.rs",
-      "supported_version": "PostgreSQL 18",
+      "postgresql_reference": "PostgreSQL 18.4 CREATE TABLE constraint enforcement grammar, pg_constraint, pg_attribute, and information_schema results",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_check_fk_default::postgresql_18_not_enforced_constraints_are_metadata_only; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::postgresql_18_constraint_catalog_reports_names_and_enforcement; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::postgresql_18_constraint_catalog_preserves_table_and_composite_structure",
+      "supported_version": "PostgreSQL 18.4 enforced and NOT ENFORCED CHECK and foreign-key metadata, named NOT NULL pg_constraint rows, pg_attribute consistency, generated names, table rename, and durable reopen behavior",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "ddl.constraint-lifecycle",
+      "postgresql_reference": "PostgreSQL 18.4 constraint validation, ALTER CONSTRAINT, dependency, dump, restore, and reopen behavior",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_check_fk_default::; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::",
+      "supported_version": "The bounded PostgreSQL 18.4 constraint metadata recorded by ddl.constraint-metadata",
       "status": "partial",
-      "open_issue": "NOT VALID, ALTER CONSTRAINT, and complete dump/reopen coverage remain."
+      "open_issue": "NOT VALID, ALTER CONSTRAINT, complete dependency behavior, and complete dump, restore, and reopen coverage remain."
+    },
+    {
+      "id": "ddl.relation-forms-and-options",
+      "postgresql_reference": "PostgreSQL 18.4 CREATE TABLE, CREATE VIEW, CREATE MATERIALIZED VIEW, CREATE SEQUENCE, inheritance, persistence, storage, and ON COMMIT documentation",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_rejected_ddl_lifecycle::rejected_create_syntax_has_no_current_or_reopened_catalog_side_effects",
+      "supported_version": "Ordinary durable tables, views, and sequences on the implemented option surface; unsupported forms fail before catalog mutation",
+      "status": "explicitly_rejected",
+      "open_issue": "Temporary and unlogged relations, inheritance and partitioning, typed tables, storage parameters, tablespaces, table access methods, ON COMMIT behavior, materialized views, view options, and temporary sequences remain unimplemented."
     },
     {
       "id": "ddl.ctas-column-names",
@@ -163,11 +303,19 @@
     },
     {
       "id": "functions.identified-pg18-additions",
-      "postgresql_reference": "PostgreSQL 18 functions and operators covered by the PG18 semantic suite",
-      "uqa_test": "crates/uqa-engine/tests/pg18_semantics.rs; tests/parity/pg18/probes.sql",
-      "supported_version": "PostgreSQL 18.4",
+      "postgresql_reference": "PostgreSQL 18.4 live results, declared types, errors, SQLSTATEs, and pg_proc identities for the bounded additions inventory recorded in the compatibility plan",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::pg18_semantics::; python3 tests/parity/pg18/run_diff.py",
+      "supported_version": "PostgreSQL 18.4 bounded additions inventory covering array_sort, array_reverse, reverse(bytea), identified integer and bytea casts, Unicode 16 full case mapping and casefold, JSON null stripping, UUID generation, CRC and gamma functions, interval week and negative-quarter extraction, Roman-numeral parsing, array and composite aggregates, and named regular-expression arguments",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "functions.full-pg18-matrix",
+      "postgresql_reference": "PostgreSQL 18.4 function and operator documentation, pg_proc, pg_operator, pg_cast, and official regression schedules",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::pg18_semantics::; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::; python3 tests/parity/pg18/run_diff.py",
+      "supported_version": "Implemented PostgreSQL 18.4 function, operator, cast, overload, and catalog slices represented by dedicated verified manifest items",
       "status": "partial",
-      "open_issue": "The complete PostgreSQL 18 function, type, overload, and catalog matrix remains."
+      "open_issue": "The complete PostgreSQL 18 function, operator, cast, extension, and catalog matrix beyond the independently tracked routine-overload matrix has not been inventoried and differentially verified."
     },
     {
       "id": "functions.fixed-builtin-overload-resolution",
@@ -208,6 +356,22 @@
       "supported_version": "PostgreSQL 18.4 DROP FUNCTION RESTRICT for exact user-function signatures referenced by durable scalar expressions, table-function sources, ROWS FROM members, CTEs, subqueries, joins, set operations, and scalar subqueries, including unrelated-overload removal, atomic multi-target preflight, CREATE OR REPLACE VIEW dependency replacement, combined generated-column and view diagnostics, durable reopen behavior, and dependent-objects-still-exist SQLSTATE 2BP01",
       "status": "verified",
       "open_issue": null
+    },
+    {
+      "id": "routines.polymorphic-variadic-pseudotype-overloads",
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE function type-resolution, polymorphic type, variadic function, pseudo-type, CREATE FUNCTION, CREATE PROCEDURE, CALL, and table-function behavior",
+      "uqa_test": "cargo test -p uqa-execution --lib type_resolution::; cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::; cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::; cargo test -p uqa-engine --test integration engine_functions::sql_table_functions::",
+      "supported_version": "Fixed-signature and implemented concrete scalar SQL, scalar PL/pgSQL, procedure, CALL, TABLE, SETOF, builtin-user, search-path, and stored-binding overload slices recorded by adjacent verified items",
+      "status": "partial",
+      "open_issue": "Polymorphic substitution, variadic expansion and array preference, pseudo-type eligibility, cross-kind ambiguity, extension-language and privilege interactions, durable binding, and pg_proc identity must be completed across every routine execution context."
+    },
+    {
+      "id": "routines.function-procedure-drop-cascade",
+      "postgresql_reference": "PostgreSQL 18.4 DROP FUNCTION, DROP PROCEDURE, and dependency-tracking documentation and live CASCADE behavior",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::wrong_kind_and_cascade_drops_are_atomic_and_schema_ownership_persists",
+      "supported_version": "Exact-signature DROP FUNCTION RESTRICT dependency checks and ordinary DROP PROCEDURE without dependent-object removal",
+      "status": "explicitly_rejected",
+      "open_issue": "DROP FUNCTION CASCADE and DROP PROCEDURE CASCADE are rejected and must remove the exact routine and every dependent object atomically with PostgreSQL 18 dependency ordering, diagnostics, and durable catalog behavior."
     },
     {
       "id": "functions.json-null-stripping",
@@ -331,11 +495,19 @@
     },
     {
       "id": "protocol.frontend-backend-3.2",
-      "postgresql_reference": "PostgreSQL 18 frontend/backend protocol 3.2 message formats and flow",
-      "uqa_test": "crates/uqa-pg-wire/tests/protocol.rs",
+      "postgresql_reference": "PostgreSQL 18.4 frontend/backend protocol 3.0 and 3.2 message formats, negotiation, startup, cancellation, and live libpq flow",
+      "uqa_test": "cargo test -p uqa-pg-wire --test protocol; UQA_PG18_DOCKER_HOST=container-reachable-host cargo test -p uqa-pg-wire --test protocol libpq_interop:: -- --ignored",
       "supported_version": "PostgreSQL 18.4 byte-exact messages, negotiation, cancellation, COPY validation, FunctionCall, GSS/SSPI message shapes, notifications, and live extended-query flow",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "protocol.frontend-backend-3.2-extended",
+      "postgresql_reference": "PostgreSQL 18.4 frontend/backend protocol authentication, binary-format, middleware-key, malformed-peer, and operational behavior",
+      "uqa_test": "cargo test -p uqa-pg-wire --test protocol; UQA_PG18_DOCKER_HOST=container-reachable-host cargo test -p uqa-pg-wire --test protocol libpq_interop:: -- --ignored",
+      "supported_version": "The bounded byte-exact and live libpq PostgreSQL 18.4 protocol gate recorded by protocol.frontend-backend-3.2",
       "status": "partial",
-      "open_issue": "Credentialed GSS, non-trust authentication, extended-query binary formats, and broader live-driver coverage remain."
+      "open_issue": "Credentialed GSS, non-trust authentication, extended-query binary parameters and results, layered middleware keys, malformed live peers, and broader live-driver coverage remain."
     },
     {
       "id": "ddl.generated-columns",
@@ -354,6 +526,14 @@
       "open_issue": "Range and multirange carriers, operators, indexes, and temporal constraint enforcement are not implemented."
     },
     {
+      "id": "graph.age-default-label-drop",
+      "postgresql_reference": "Apache AGE on PostgreSQL 18.4 drop_label and DROP TABLE RESTRICT behavior for empty default label relations",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_graph::sql_age_catalog::label_functions_follow_age_semantics_and_errors",
+      "supported_version": "Apache AGE-shaped user-label removal; default-label removal remains incompatible",
+      "status": "explicitly_rejected",
+      "open_issue": "Apache AGE permits an empty _ag_label_vertex or _ag_label_edge relation to be removed through drop_label, while UQA Engine always returns 2BP01; exact AGE behavior and the resulting graph lifecycle must be implemented."
+    },
+    {
       "id": "regression.core-and-isolation",
       "postgresql_reference": "PostgreSQL 18 core regression and isolation schedules",
       "uqa_test": "No complete harness yet",
@@ -368,6 +548,14 @@
       "supported_version": "PostgreSQL 18.4 libpq subset",
       "status": "partial",
       "open_issue": "JDBC, Npgsql, psycopg, pgx, node-postgres, migration, introspection, dump/restore, pooling, recovery, and administration coverage remain."
+    },
+    {
+      "id": "compatibility.complete-zero-exemption-audit",
+      "postgresql_reference": "PostgreSQL 18.4 SQL, catalog, regression, isolation, protocol, client, concurrency, recovery, and administration behavior",
+      "uqa_test": "No complete zero-exemption audit yet",
+      "supported_version": "No complete PostgreSQL 18 compatibility claim",
+      "status": "not_audited",
+      "open_issue": "The final current-state audit must verify every manifest item, M0 through M5 exit gate, PostgreSQL 18.4 oracle result, client and protocol matrix, persistent reopen behavior, and manual claim with zero semantic exemptions."
     }
   ]
 }

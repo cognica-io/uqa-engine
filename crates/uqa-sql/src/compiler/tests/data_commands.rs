@@ -117,3 +117,17 @@ fn insert_set_operation_is_compiled_as_one_select_source() {
     assert!(set_op.combined_limit.is_some());
     assert!(set_op.combined_offset.is_some());
 }
+
+#[test]
+fn merge_not_matched_by_source_fails_explicitly() {
+    let error = compile(
+        "MERGE INTO target USING source ON target.id = source.id \
+         WHEN NOT MATCHED BY SOURCE THEN DELETE",
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        SQLError::Unsupported(message) if message.contains("MERGE WHEN NOT MATCHED BY SOURCE")
+    ));
+}
