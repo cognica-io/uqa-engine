@@ -151,8 +151,13 @@ fn execute_uncached_or_snapshot_scoped(
             uqa_planner::UnifiedPlan::Query(query) => !query_may_mutate_engine(engine, query)?,
             uqa_planner::UnifiedPlan::Command(_) => false,
         };
+        let is_discard = matches!(
+            initial_plan.as_ref(),
+            uqa_planner::UnifiedPlan::Command(command)
+                if matches!(command.as_ref(), uqa_planner::CommandPlan::Discard { .. })
+        );
         let needs_implicit_transaction =
-            engine.storage.backend.is_some() || !is_read_query || has_row_locks;
+            !is_discard && (engine.storage.backend.is_some() || !is_read_query || has_row_locks);
         if needs_implicit_transaction {
             if has_row_locks {
                 engine.statement_row_lock_cache()?;

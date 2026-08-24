@@ -128,6 +128,8 @@ impl Engine {
             value_indexes: RwLock::new(BTreeMap::new()),
             doc_count_cache: std::sync::atomic::AtomicU64::new(0),
             doc_count_dirty: AtomicBool::new(true),
+            persistence: constraints.persistence,
+            on_commit: constraints.on_commit,
         }))
     }
 }

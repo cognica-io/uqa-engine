@@ -368,6 +368,8 @@ impl Engine {
             col.not_null_name = None;
         }
         let mut constraints = uqa_sql::ast::TableConstraintSet {
+            persistence: t.persistence,
+            on_commit: t.on_commit,
             checks: t.table_checks.read().clone(),
             foreign_keys: t.foreign_keys.read().clone(),
             key_constraints: t.key_constraints.read().clone(),
@@ -459,6 +461,8 @@ impl Engine {
             foreign_key.ref_table = self.canonical_foreign_key_target(&foreign_key.ref_table)?;
         }
         let mut constraints = uqa_sql::ast::TableConstraintSet {
+            persistence: t.persistence,
+            on_commit: t.on_commit,
             checks,
             foreign_keys,
             key_constraints,
@@ -514,6 +518,8 @@ impl Engine {
             }
         }
         let mut constraints = uqa_sql::ast::TableConstraintSet {
+            persistence: t.persistence,
+            on_commit: t.on_commit,
             checks: t.table_checks.read().clone(),
             foreign_keys: t.foreign_keys.read().clone(),
             key_constraints,
@@ -596,6 +602,8 @@ impl Engine {
         let foreign_keys = t.foreign_keys.read().clone();
         let key_constraints = t.key_constraints.read().clone();
         Ok(uqa_sql::ast::TableConstraintSet {
+            persistence: t.persistence,
+            on_commit: t.on_commit,
             checks,
             foreign_keys,
             key_constraints,

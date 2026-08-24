@@ -19,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Implemented PostgreSQL 18 `CREATE TABLE AS ... WITH NO DATA`, including static query analysis without execution, exact output schemas, vector and tensor field metadata, `IF NOT EXISTS` validation order, and durable reopen behavior.
 - Implemented PostgreSQL 18 `SELECT ... INTO` for ordinary durable tables with CTAS-equivalent type identity, validation order, transactionality, and persistence.
 - Implemented PostgreSQL 18 `CREATE VIEW` column-name lists with positional and partial aliases, quoted identifier preservation, static creation-time analysis, durable fixed output names, duplicate and width errors, and `CREATE OR REPLACE VIEW` row-type compatibility checks.
+- Implemented PostgreSQL 18 temporary and unlogged table, view, sequence, CTAS, and `SELECT INTO` persistence; temporary `pg_temp` lookup, backend-isolated storage, dependency-safe `ON COMMIT` and `DISCARD TEMP` lifecycle; materialized-view snapshots and refresh; view reloptions; durable catalog metadata; and relation-kind SQLSTATEs.
 - Implemented PostgreSQL 18 polymorphic and `VARIADIC` routine resolution for represented scalar and array types across SQL, PL/pgSQL, `CALL`, `TABLE`, `SETOF`, generated columns, stored views, user `pg_proc` metadata, volatility/null-input ALTER lifecycle, and bounded routine CASCADE dependencies.
 - Extended PostgreSQL 18 routine dependency handling to exact SQL-standard query-body bindings, dependent functions and procedures, transitive and multi-target CASCADE graphs, durable reopen, dynamic string-body behavior, and cascade notices.
 - Implemented PostgreSQL 18 MERGE full-join candidate semantics, including `WHEN NOT MATCHED BY SOURCE` UPDATE, DELETE, and `DO NOTHING`, written-order action selection, candidate-specific name visibility, repeated-target cardinality errors, and complete INSERT, UPDATE, DELETE, and `DO NOTHING` RETURNING behavior with source columns, old/new row images, `merge_action()`, and source-before-target star expansion.
@@ -28,6 +29,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - Matched Apache AGE on PostgreSQL 18 for dependency-based `drop_label`: removable default and user label relations now disappear durably, vertex-label drops preserve incident edge rows and dangling endpoint ids, same-kind inherited labels and stored views retain `DROP ... RESTRICT`, graph rename and cascading drop preserve their view semantics, direct `DROP TABLE` remains protected, label relations are selectable, and missing-default graph accesses fail safely instead of crashing.
+- Prevented recursive catalog synchronization from deadlocking persistent-engine reopen while vector indexes are rebound, including unlogged vector tables.
 - Made the Python source distribution include every manifest-declared benchmark source so pip can build a wheel from the sdist instead of failing during Cargo metadata validation.
 - Made `usql` preserve SQL-standard `BEGIN ATOMIC ... END` routine bodies as one statement by using the pinned PostgreSQL 18 scanner for lexical boundaries.
 

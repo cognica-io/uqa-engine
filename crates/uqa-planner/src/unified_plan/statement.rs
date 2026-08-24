@@ -169,11 +169,16 @@ impl UnifiedPlan {
             Statement::AlterTable(value) => {
                 Self::Command(Box::new(CommandPlan::AlterTable(Box::new(value))))
             }
+            Statement::AlterViewOptions(value) => {
+                Self::Command(Box::new(CommandPlan::AlterViewOptions(value)))
+            }
             Statement::CreateView {
                 name,
                 column_names,
                 body,
                 or_replace,
+                persistence,
+                options,
             } => {
                 let query = Box::new(QueryPlan::lower_with(*body, aggregates));
                 Self::Command(Box::new(CommandPlan::CreateView {
@@ -181,8 +186,34 @@ impl UnifiedPlan {
                     column_names,
                     query,
                     or_replace,
+                    persistence,
+                    options,
                 }))
             }
+            Statement::CreateMaterializedView {
+                name,
+                column_names,
+                if_not_exists,
+                with_no_data,
+                options,
+                body,
+            } => Self::Command(Box::new(CommandPlan::CreateMaterializedView {
+                name,
+                column_names,
+                if_not_exists,
+                with_no_data,
+                options,
+                query: Box::new(QueryPlan::lower_with(*body, aggregates)),
+            })),
+            Statement::RefreshMaterializedView {
+                name,
+                concurrently,
+                with_no_data,
+            } => Self::Command(Box::new(CommandPlan::RefreshMaterializedView {
+                name,
+                concurrently,
+                with_no_data,
+            })),
             Statement::CreateSchema {
                 name,
                 if_not_exists,
@@ -229,12 +260,16 @@ impl UnifiedPlan {
                 if_not_exists,
                 column_names,
                 with_no_data,
+                persistence,
+                on_commit,
                 body,
             } => Self::Command(Box::new(CommandPlan::CreateTableAs {
                 name,
                 if_not_exists,
                 column_names,
                 with_no_data,
+                persistence,
+                on_commit,
                 query: Box::new(QueryPlan::lower_with(*body, aggregates)),
             })),
             Statement::Prepare { name, body } => {
@@ -340,7 +375,10 @@ impl CommandPlan {
             Self::Delete(_) => "Delete",
             Self::Drop(_) => "Drop",
             Self::AlterTable(_) => "AlterTable",
+            Self::AlterViewOptions(_) => "AlterViewOptions",
             Self::CreateView { .. } => "CreateView",
+            Self::CreateMaterializedView { .. } => "CreateMaterializedView",
+            Self::RefreshMaterializedView { .. } => "RefreshMaterializedView",
             Self::CreateSchema { .. } => "CreateSchema",
             Self::SetVariable { .. } => "SetVariable",
             Self::ShowVariable { .. } => "ShowVariable",

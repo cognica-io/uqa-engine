@@ -367,11 +367,27 @@ pub enum CommandPlan {
     Delete(Box<DeletePlan>),
     Drop(uqa_sql::ast::DropStmt),
     AlterTable(Box<uqa_sql::ast::AlterTableStmt>),
+    AlterViewOptions(uqa_sql::ast::AlterViewOptionsStmt),
     CreateView {
         name: String,
         column_names: Vec<String>,
         query: Box<QueryPlan>,
         or_replace: bool,
+        persistence: uqa_sql::ast::RelationPersistence,
+        options: Vec<(String, String)>,
+    },
+    CreateMaterializedView {
+        name: String,
+        column_names: Vec<String>,
+        if_not_exists: bool,
+        with_no_data: bool,
+        options: Vec<(String, String)>,
+        query: Box<QueryPlan>,
+    },
+    RefreshMaterializedView {
+        name: String,
+        concurrently: bool,
+        with_no_data: bool,
     },
     CreateSchema {
         name: String,
@@ -411,6 +427,8 @@ pub enum CommandPlan {
         if_not_exists: bool,
         column_names: Vec<String>,
         with_no_data: bool,
+        persistence: uqa_sql::ast::RelationPersistence,
+        on_commit: uqa_sql::ast::OnCommitAction,
         query: Box<QueryPlan>,
     },
     Prepare {

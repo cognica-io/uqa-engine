@@ -9,6 +9,8 @@ use super::{
     StorageBackendError, StorageBackendResult, SEQUENCES_METADATA_KEY,
 };
 
+const SEQUENCE_PERSISTENCE_METADATA_PREFIX: &str = "sequence-persistence:";
+
 impl Engine {
     /// Resolve a sequence reference at DDL binding time using the current
     /// `search_path`. Persisted expressions must store the returned canonical
@@ -79,7 +81,26 @@ impl Engine {
         if_not_exists: bool,
     ) -> Result<bool, String> {
         self.with_implicit_string_transaction(|engine| {
-            engine.create_sequence_inner(name, start, increment, if_not_exists)
+            engine.create_sequence_inner(
+                name,
+                start,
+                increment,
+                if_not_exists,
+                uqa_sql::ast::RelationPersistence::Permanent,
+            )
+        })
+    }
+
+    pub(crate) fn create_sequence_with_persistence(
+        &self,
+        name: &str,
+        start: i64,
+        increment: i64,
+        if_not_exists: bool,
+        persistence: uqa_sql::ast::RelationPersistence,
+    ) -> Result<bool, String> {
+        self.with_implicit_string_transaction(|engine| {
+            engine.create_sequence_inner(name, start, increment, if_not_exists, persistence)
         })
     }
 
@@ -89,9 +110,14 @@ impl Engine {
         start: i64,
         increment: i64,
         if_not_exists: bool,
+        persistence: uqa_sql::ast::RelationPersistence,
     ) -> Result<bool, String> {
         Self::validate_sequence_increment(name, increment)?;
-        let name = self.try_relation_name_for_create(name)?;
+        let name = if persistence == uqa_sql::ast::RelationPersistence::Temporary {
+            self.try_temporary_relation_name_for_create(name)?
+        } else {
+            self.try_relation_name_for_create(name)?
+        };
         let relation = Self::resolved_relation_identity(&name)
             .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
         self.refresh_sequences_from_catalog()
@@ -110,7 +136,16 @@ impl Engine {
             current: start,
             called: false,
         };
-        if let Some(catalog) = self.storage.catalog.as_ref() {
+        if persistence == uqa_sql::ast::RelationPersistence::Temporary {
+            let seqs = self.durable.sequences.read();
+            if seqs.contains_key(&relation) {
+                return if if_not_exists {
+                    Ok(false)
+                } else {
+                    Err(format!("Sequence `{name}` already exists"))
+                };
+            }
+        } else if let Some(catalog) = self.storage.catalog.as_ref() {
             let created = catalog
                 .create_sequence_row(
                     &Self::sequence_row(&name, state)
@@ -124,6 +159,12 @@ impl Engine {
                     Err(format!("Sequence `{name}` already exists"))
                 };
             }
+            catalog
+                .set_metadata(
+                    &format!("{SEQUENCE_PERSISTENCE_METADATA_PREFIX}{name}"),
+                    persistence.catalog_code(),
+                )
+                .map_err(|err| format!("persist sequence lifecycle: {err}"))?;
         } else {
             let seqs = self.durable.sequences.read();
             if seqs.contains_key(&relation) {
@@ -134,7 +175,14 @@ impl Engine {
                 };
             }
         }
-        self.durable.sequences.write().insert(relation, state);
+        self.durable
+            .sequences
+            .write()
+            .insert(relation.clone(), state);
+        self.durable
+            .sequence_persistence
+            .write()
+            .insert(relation, persistence);
         self.note_catalog_registry_changed();
         Ok(true)
     }
@@ -197,6 +245,14 @@ impl Engine {
         }
         let relation = Self::resolved_relation_identity(&name)
             .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
+        let temporary = self
+            .durable
+            .sequence_persistence
+            .read()
+            .get(&relation)
+            .is_some_and(|persistence| {
+                *persistence == uqa_sql::ast::RelationPersistence::Temporary
+            });
         let mut state = self
             .durable
             .sequences
@@ -219,15 +275,17 @@ impl Engine {
             state.current = restart_val;
             state.called = false;
         }
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            if !catalog
-                .replace_sequence_row(
-                    &Self::sequence_row(&name, state)
-                        .map_err(|err| format!("build sequence catalog row: {err}"))?,
-                )
-                .map_err(|err| format!("persist sequence catalog: {err}"))?
-            {
-                return Err(format!("Sequence `{name}` does not exist"));
+        if !temporary {
+            if let Some(catalog) = self.storage.catalog.as_ref() {
+                if !catalog
+                    .replace_sequence_row(
+                        &Self::sequence_row(&name, state)
+                            .map_err(|err| format!("build sequence catalog row: {err}"))?,
+                    )
+                    .map_err(|err| format!("persist sequence catalog: {err}"))?
+                {
+                    return Err(format!("Sequence `{name}` does not exist"));
+                }
             }
         }
         self.durable.sequences.write().insert(relation, state);
@@ -256,6 +314,14 @@ impl Engine {
         };
         let relation = Self::resolved_relation_identity(&name)
             .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
+        let temporary = self
+            .durable
+            .sequence_persistence
+            .read()
+            .get(&relation)
+            .is_some_and(|persistence| {
+                *persistence == uqa_sql::ast::RelationPersistence::Temporary
+            });
         self.ensure_no_sequence_default_dependencies(&name)
             .map_err(|err| format!("DROP SEQUENCE `{name}` rejected: {err}"))?;
         let dependent_views = self
@@ -267,7 +333,9 @@ impl Engine {
                 dependent_views.join("`, `")
             ));
         }
-        let removed = if let Some(catalog) = self.storage.catalog.as_ref() {
+        let removed = if temporary {
+            self.durable.sequences.read().contains_key(&relation)
+        } else if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .drop_sequence_row(&name)
                 .map_err(|err| format!("persist sequence catalog: {err}"))?
@@ -276,6 +344,7 @@ impl Engine {
         };
         if removed {
             self.durable.sequences.write().remove(&relation);
+            self.durable.sequence_persistence.write().remove(&relation);
             self.session
                 .state
                 .write()
@@ -293,17 +362,32 @@ impl Engine {
             .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         let relation = Self::resolved_relation_identity(&name)
             .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
-        let sequence_session = self
-            .open_nontransactional_sequence_session()
-            .map_err(|error| format!("open sequence session: {error}"))?;
-        if sequence_session.is_none() {
+        let temporary = self
+            .durable
+            .sequence_persistence
+            .read()
+            .get(&relation)
+            .is_some_and(|persistence| {
+                *persistence == uqa_sql::ast::RelationPersistence::Temporary
+            });
+        let sequence_session = if temporary {
+            None
+        } else {
+            self.open_nontransactional_sequence_session()
+                .map_err(|error| format!("open sequence session: {error}"))?
+        };
+        if !temporary && sequence_session.is_none() {
             self.prepare_explicit_transaction_writer()
                 .map_err(|error| format!("prepare sequence writer: {error}"))?;
         }
-        let catalog = sequence_session
-            .as_ref()
-            .map(|session| session.catalog.as_ref())
-            .or(self.storage.catalog.as_deref());
+        let catalog = (!temporary)
+            .then(|| {
+                sequence_session
+                    .as_ref()
+                    .map(|session| session.catalog.as_ref())
+                    .or(self.storage.catalog.as_deref())
+            })
+            .flatten();
         let current = if let Some(catalog) = catalog {
             catalog
                 .next_sequence_value(&name)
@@ -361,17 +445,32 @@ impl Engine {
             .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         let relation = Self::resolved_relation_identity(&name)
             .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
-        let sequence_session = self
-            .open_nontransactional_sequence_session()
-            .map_err(|error| format!("open sequence session: {error}"))?;
-        if sequence_session.is_none() {
+        let temporary = self
+            .durable
+            .sequence_persistence
+            .read()
+            .get(&relation)
+            .is_some_and(|persistence| {
+                *persistence == uqa_sql::ast::RelationPersistence::Temporary
+            });
+        let sequence_session = if temporary {
+            None
+        } else {
+            self.open_nontransactional_sequence_session()
+                .map_err(|error| format!("open sequence session: {error}"))?
+        };
+        if !temporary && sequence_session.is_none() {
             self.prepare_explicit_transaction_writer()
                 .map_err(|error| format!("prepare sequence writer: {error}"))?;
         }
-        let catalog = sequence_session
-            .as_ref()
-            .map(|session| session.catalog.as_ref())
-            .or(self.storage.catalog.as_deref());
+        let catalog = if temporary {
+            None
+        } else {
+            sequence_session
+                .as_ref()
+                .map(|session| session.catalog.as_ref())
+                .or(self.storage.catalog.as_deref())
+        };
         if let Some(catalog) = catalog {
             catalog
                 .set_sequence_value(&name, value)
@@ -444,10 +543,7 @@ impl Engine {
             return Ok(());
         };
         let rows = catalog.load_sequence_rows()?;
-        *self.durable.sequences.write() = rows
-            .into_iter()
-            .map(Self::sequence_state_from_row)
-            .collect::<StorageBackendResult<_>>()?;
+        self.install_durable_sequence_rows(catalog, rows)?;
         Ok(())
     }
 
@@ -497,10 +593,55 @@ impl Engine {
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
         let rows = catalog.load_sequence_rows()?;
-        *self.durable.sequences.write() = rows
-            .into_iter()
-            .map(Self::sequence_state_from_row)
-            .collect::<StorageBackendResult<_>>()?;
+        self.install_durable_sequence_rows(catalog, rows)?;
+        Ok(())
+    }
+
+    fn install_durable_sequence_rows(
+        &self,
+        catalog: &dyn CatalogFacade,
+        rows: Vec<SequenceRow>,
+    ) -> StorageBackendResult<()> {
+        let temporary_persistence = self
+            .durable
+            .sequence_persistence
+            .read()
+            .iter()
+            .filter(|(_, persistence)| {
+                **persistence == uqa_sql::ast::RelationPersistence::Temporary
+            })
+            .map(|(relation, persistence)| (relation.clone(), *persistence))
+            .collect::<BTreeMap<_, _>>();
+        let mut sequences = self
+            .durable
+            .sequences
+            .read()
+            .iter()
+            .filter(|(relation, _)| temporary_persistence.contains_key(*relation))
+            .map(|(relation, state)| (relation.clone(), *state))
+            .collect::<BTreeMap<_, _>>();
+        let mut persistence = temporary_persistence;
+        for row in rows {
+            let name = row.relation.qualified_name();
+            let (relation, state) = Self::sequence_state_from_row(row)?;
+            let stored = catalog
+                .get_metadata(&format!("{SEQUENCE_PERSISTENCE_METADATA_PREFIX}{name}"))?
+                .as_deref()
+                .map_or(
+                    Ok(uqa_sql::ast::RelationPersistence::Permanent),
+                    |code| match code {
+                        "p" | "" => Ok(uqa_sql::ast::RelationPersistence::Permanent),
+                        "u" => Ok(uqa_sql::ast::RelationPersistence::Unlogged),
+                        other => Err(StorageBackendError::Other(format!(
+                            "corrupt sequence `{name}` persistence `{other}`"
+                        ))),
+                    },
+                )?;
+            persistence.insert(relation.clone(), stored);
+            sequences.insert(relation, state);
+        }
+        *self.durable.sequences.write() = sequences;
+        *self.durable.sequence_persistence.write() = persistence;
         Ok(())
     }
 

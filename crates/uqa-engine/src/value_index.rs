@@ -412,11 +412,10 @@ impl crate::Engine {
         }
 
         let store = t.document_store.read();
-        let persistent_backend = self
-            .storage
-            .backend
-            .as_ref()
-            .filter(|backend| backend.persists_btree_indexes());
+        let persistent_backend = self.storage.backend.as_ref().filter(|backend| {
+            t.persistence != uqa_sql::ast::RelationPersistence::Temporary
+                && backend.persists_btree_indexes()
+        });
         let persisted = persistent_backend
             .map(|backend| backend.load_btree_index(&table_name, field))
             .transpose()?
@@ -511,11 +510,10 @@ impl crate::Engine {
             .filter(|field| !desired.contains(field))
             .cloned()
             .collect();
-        let persistent_backend = self
-            .storage
-            .backend
-            .as_ref()
-            .filter(|backend| backend.persists_btree_indexes());
+        let persistent_backend = self.storage.backend.as_ref().filter(|backend| {
+            t.persistence != uqa_sql::ast::RelationPersistence::Temporary
+                && backend.persists_btree_indexes()
+        });
         let mut persisted_fields = BTreeSet::new();
         if let Some(backend) = persistent_backend {
             for field in backend.btree_index_fields(&table_name)? {
@@ -748,6 +746,13 @@ impl crate::Engine {
             .try_resolve_table_name(table)
             .map_err(|err| SQLError::Internal(format!("resolve value-index table: {err}")))?
             .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        if self
+            .try_table(&table_name)
+            .map_err(|err| SQLError::Internal(format!("resolve value-index table: {err}")))?
+            .is_some_and(|table| table.persistence == uqa_sql::ast::RelationPersistence::Temporary)
+        {
+            return Ok(None);
+        }
         let fields = self
             .value_indexable_fields(&table_name)
             .map_err(|err| SQLError::Internal(format!("read value-index policy: {err}")))?;
@@ -780,6 +785,13 @@ impl crate::Engine {
             .try_resolve_table_name(table)
             .map_err(|err| SQLError::Internal(format!("resolve value-index table: {err}")))?
             .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        if self
+            .try_table(&table_name)
+            .map_err(|err| SQLError::Internal(format!("resolve value-index table: {err}")))?
+            .is_some_and(|table| table.persistence == uqa_sql::ast::RelationPersistence::Temporary)
+        {
+            return Ok(());
+        }
         backend
             .apply_btree_index_write(&table_name, doc_id, new)
             .map_err(|err| SQLError::Internal(format!("btree index write failed: {err}")))
@@ -795,12 +807,10 @@ impl crate::Engine {
             .try_resolve_table_name(table)
             .map_err(|err| SQLError::Internal(format!("resolve value-index table: {err}")))?
             .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-        if let Some(backend) = self
-            .storage
-            .backend
-            .as_ref()
-            .filter(|backend| backend.persists_btree_indexes())
-        {
+        if let Some(backend) = self.storage.backend.as_ref().filter(|backend| {
+            t.persistence != uqa_sql::ast::RelationPersistence::Temporary
+                && backend.persists_btree_indexes()
+        }) {
             backend
                 .clear_btree_indexes(&table_name)
                 .map_err(|err| SQLError::Internal(format!("btree truncate failed: {err}")))?;

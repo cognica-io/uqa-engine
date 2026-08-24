@@ -144,8 +144,19 @@ fn discard_plans_drops_prepared_only() {
 }
 
 #[test]
-fn discard_temp_is_not_reported_as_success_without_temp_table_support() {
+fn discard_temp_drops_temporary_relations_and_rejects_transaction_blocks() {
     let eng = Engine::new();
-    let err = eng.sql("DISCARD TEMP", &[]).unwrap_err();
-    assert!(err.to_string().contains("temporary-table support"));
+    eng.sql("CREATE TEMP TABLE scratch (id INTEGER)", &[])
+        .unwrap();
+    eng.sql("DISCARD TEMP", &[]).unwrap();
+    assert_eq!(
+        eng.sql("SELECT * FROM scratch", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("42P01")
+    );
+    eng.sql("BEGIN", &[]).unwrap();
+    let error = eng.sql("DISCARD TEMP", &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("25001"));
+    eng.sql("ROLLBACK", &[]).unwrap();
 }

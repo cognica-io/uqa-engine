@@ -136,7 +136,7 @@ pub use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions, SQLiteError}
 
 use engine_state::{
     DurableCatalogSnapshot, DurableCatalogState, EpochCoordinator, QueryRuntime, RuntimeExtensions,
-    SessionContext, StorageContext, StoredView,
+    SessionContext, StorageContext, StoredView, StoredViewKind,
 };
 use functions::RegisteredSQLFunction;
 pub use functions::{
@@ -492,6 +492,9 @@ pub(crate) struct TableState {
     /// by every write and recomputed on demand.
     doc_count_cache: std::sync::atomic::AtomicU64,
     doc_count_dirty: AtomicBool,
+    /// Immutable relation lifecycle attributes captured at creation.
+    persistence: uqa_sql::ast::RelationPersistence,
+    on_commit: uqa_sql::ast::OnCommitAction,
 }
 
 impl TableState {

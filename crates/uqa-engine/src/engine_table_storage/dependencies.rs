@@ -318,6 +318,8 @@ impl Engine {
         key_constraints: &[uqa_sql::ast::TableKeyConstraint],
     ) -> StorageBackendResult<()> {
         let constraints = uqa_sql::ast::TableConstraintSet {
+            persistence: table.persistence,
+            on_commit: table.on_commit,
             checks: checks.to_vec(),
             foreign_keys: foreign_keys.to_vec(),
             key_constraints: key_constraints.to_vec(),

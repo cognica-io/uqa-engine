@@ -206,7 +206,9 @@ pub(super) fn rewrite_command_scalars(
             rewrite_projections(&mut plan.returning, rewrite);
             rewrite_subqueries(&mut plan.subqueries, rewrite);
         }
-        CommandPlan::CreateView { query, .. } | CommandPlan::CreateTableAs { query, .. } => {
+        CommandPlan::CreateView { query, .. }
+        | CommandPlan::CreateMaterializedView { query, .. }
+        | CommandPlan::CreateTableAs { query, .. } => {
             rewrite_query_scalars(query, rewrite);
         }
         CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
@@ -222,6 +224,8 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::CreateIndex(_)
         | CommandPlan::Drop(_)
         | CommandPlan::AlterTable(_)
+        | CommandPlan::AlterViewOptions(_)
+        | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::CreateSchema { .. }
         | CommandPlan::SetVariable { .. }
         | CommandPlan::ShowVariable { .. }

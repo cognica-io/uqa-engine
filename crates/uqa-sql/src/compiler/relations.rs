@@ -8,25 +8,28 @@
 
 use super::dispatch::compile_stmt;
 use super::{
-    compile_column_def, compile_expr, compile_select, extract_string, range_var_name,
-    validate_create_table_envelope, validate_durable_create_relation, ColumnDef, Expr, Node,
+    compile_column_def, compile_expr, compile_on_commit, compile_select, extract_string,
+    range_var_name, relation_persistence, validate_create_table_envelope, ColumnDef, Expr, Node,
     NodeEnum, Result, SQLError, Statement,
 };
+use crate::ast::{OnCommitAction, RelationPersistence};
 
 struct IntoTarget {
     name: String,
     column_names: Vec<String>,
     skip_data: bool,
+    persistence: RelationPersistence,
+    on_commit: OnCommitAction,
+    options: Vec<(String, String)>,
 }
 
 fn compile_into_target(into: &pg_query::protobuf::IntoClause, command: &str) -> Result<IntoTarget> {
-    use pg_query::protobuf::OnCommitAction;
-
     let relation = into
         .rel
         .as_ref()
         .ok_or_else(|| SQLError::Internal(format!("{command} target has no name")))?;
-    validate_durable_create_relation(relation, command)?;
+    let persistence = relation_persistence(relation, command)?;
+    let on_commit = compile_on_commit(into.on_commit(), persistence, command)?;
     let column_names = into
         .col_names
         .iter()
@@ -37,19 +40,7 @@ fn compile_into_target(into: &pg_query::protobuf::IntoClause, command: &str) -> 
             "{command} USING access methods are not supported"
         )));
     }
-    if !into.options.is_empty() {
-        return Err(SQLError::Unsupported(format!(
-            "{command} storage options are not supported"
-        )));
-    }
-    if !matches!(
-        into.on_commit(),
-        OnCommitAction::Undefined | OnCommitAction::OncommitNoop
-    ) {
-        return Err(SQLError::Unsupported(format!(
-            "{command} ON COMMIT is not supported"
-        )));
-    }
+    let options = collect_def_elem_options(&into.options)?;
     if !into.table_space_name.is_empty() {
         return Err(SQLError::Unsupported(format!(
             "{command} TABLESPACE is not supported"
@@ -64,6 +55,9 @@ fn compile_into_target(into: &pg_query::protobuf::IntoClause, command: &str) -> 
         name: range_var_name(relation),
         column_names,
         skip_data: into.skip_data,
+        persistence,
+        on_commit,
+        options,
     })
 }
 
@@ -97,6 +91,8 @@ pub(super) fn compile_top_level_select(stmt: &pg_query::protobuf::SelectStmt) ->
         if_not_exists: false,
         column_names: target.column_names,
         with_no_data: false,
+        persistence: target.persistence,
+        on_commit: target.on_commit,
         body: Box::new(compile_select(&body)?),
     })
 }
@@ -106,29 +102,41 @@ pub(super) fn compile_create_table_as(
 ) -> Result<Statement> {
     use pg_query::protobuf::ObjectType;
 
-    match stmt.objtype() {
-        ObjectType::ObjectTable => {}
-        ObjectType::ObjectMatview => {
-            return Err(SQLError::Unsupported(
-                "CREATE MATERIALIZED VIEW is not supported".into(),
-            ));
-        }
+    let materialized = match stmt.objtype() {
+        ObjectType::ObjectTable => false,
+        ObjectType::ObjectMatview => true,
         other => {
             return Err(SQLError::Unsupported(format!(
                 "CREATE TABLE AS object type {other:?} is not supported"
             )));
         }
-    }
+    };
     let into = stmt
         .into
         .as_ref()
         .ok_or_else(|| SQLError::Internal("CREATE TABLE AS without target".into()))?;
-    let command = if stmt.is_select_into {
+    let command = if materialized {
+        "CREATE MATERIALIZED VIEW"
+    } else if stmt.is_select_into {
         "SELECT INTO"
     } else {
         "CREATE TABLE AS"
     };
     let target = compile_into_target(into, command)?;
+    if materialized {
+        if target.persistence != RelationPersistence::Permanent {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "materialized views cannot be temporary or unlogged".into(),
+            });
+        }
+        if target.on_commit != OnCommitAction::PreserveRows {
+            return Err(SQLError::Routine {
+                sqlstate: "42P16".into(),
+                message: "ON COMMIT cannot be used on materialized views".into(),
+            });
+        }
+    }
     let body = stmt
         .query
         .as_deref()
@@ -145,13 +153,31 @@ pub(super) fn compile_create_table_as(
             )));
         }
     };
-    Ok(Statement::CreateTableAs {
-        name: target.name,
-        if_not_exists: stmt.if_not_exists,
-        column_names: target.column_names,
-        with_no_data: target.skip_data,
-        body: Box::new(select),
-    })
+    if materialized {
+        Ok(Statement::CreateMaterializedView {
+            name: target.name,
+            if_not_exists: stmt.if_not_exists,
+            column_names: target.column_names,
+            with_no_data: target.skip_data,
+            options: validate_materialized_view_options(target.options)?,
+            body: Box::new(select),
+        })
+    } else {
+        if !target.options.is_empty() {
+            return Err(SQLError::Unsupported(
+                "CREATE TABLE AS storage options are not supported".into(),
+            ));
+        }
+        Ok(Statement::CreateTableAs {
+            name: target.name,
+            if_not_exists: stmt.if_not_exists,
+            column_names: target.column_names,
+            with_no_data: target.skip_data,
+            persistence: target.persistence,
+            on_commit: target.on_commit,
+            body: Box::new(select),
+        })
+    }
 }
 
 pub(super) fn compile_prepare(stmt: &pg_query::protobuf::PrepareStmt) -> Result<Statement> {
@@ -244,6 +270,13 @@ pub(super) fn collect_def_elem_options(nodes: &[Node]) -> Result<Vec<(String, St
             Some(NodeEnum::Integer(value)) => value.ival.to_string(),
             Some(NodeEnum::Float(value)) => value.fval.clone(),
             Some(NodeEnum::Boolean(value)) => value.boolval.to_string(),
+            Some(NodeEnum::TypeName(value)) => value
+                .names
+                .iter()
+                .map(extract_string)
+                .collect::<Result<Vec<_>>>()?
+                .join("."),
+            None => "true".into(),
             other => {
                 return Err(SQLError::TypeMismatch(format!(
                     "option `{}` expects a scalar value, got {other:?}",
@@ -256,32 +289,133 @@ pub(super) fn collect_def_elem_options(nodes: &[Node]) -> Result<Vec<(String, St
     Ok(out)
 }
 
-pub(super) fn compile_create_view(stmt: &pg_query::protobuf::ViewStmt) -> Result<Statement> {
-    use pg_query::protobuf::ViewCheckOption;
+fn invalid_reloption(message: impl Into<String>) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22023".into(),
+        message: message.into(),
+    }
+}
 
+fn validate_boolean_reloption(name: &str, value: &str) -> Result<()> {
+    if matches!(
+        value.to_ascii_lowercase().as_str(),
+        "true" | "false" | "on" | "off" | "yes" | "no" | "1" | "0"
+    ) {
+        Ok(())
+    } else {
+        Err(invalid_reloption(format!(
+            "invalid value for boolean option \"{name}\": {value}"
+        )))
+    }
+}
+
+pub(super) fn validate_view_options(
+    options: Vec<(String, String)>,
+    check_option: pg_query::protobuf::ViewCheckOption,
+) -> Result<Vec<(String, String)>> {
+    use pg_query::protobuf::ViewCheckOption;
+    use std::collections::BTreeSet;
+
+    let mut out = Vec::with_capacity(options.len() + 1);
+    let mut seen = BTreeSet::new();
+    for (name, value) in options {
+        let name = name.to_ascii_lowercase();
+        let value = value.to_ascii_lowercase();
+        if !seen.insert(name.clone()) {
+            return Err(invalid_reloption(format!(
+                "parameter \"{name}\" specified more than once"
+            )));
+        }
+        match name.as_str() {
+            "security_barrier" | "security_invoker" => {
+                validate_boolean_reloption(&name, &value)?;
+            }
+            "check_option" if matches!(value.as_str(), "local" | "cascaded") => {}
+            "check_option" => {
+                return Err(invalid_reloption(format!(
+                    "invalid value for enum option \"check_option\": {value}"
+                )));
+            }
+            _ => {
+                return Err(invalid_reloption(format!(
+                    "unrecognized parameter \"{name}\""
+                )));
+            }
+        }
+        out.push((name, value));
+    }
+    let clause_value = match check_option {
+        ViewCheckOption::Undefined | ViewCheckOption::NoCheckOption => None,
+        ViewCheckOption::LocalCheckOption => Some("local"),
+        ViewCheckOption::CascadedCheckOption => Some("cascaded"),
+    };
+    if let Some(value) = clause_value {
+        if !seen.insert("check_option".into()) {
+            return Err(invalid_reloption(
+                "parameter \"check_option\" specified more than once",
+            ));
+        }
+        out.push(("check_option".into(), value.into()));
+    }
+    Ok(out)
+}
+
+pub(super) fn validate_materialized_view_options(
+    options: Vec<(String, String)>,
+) -> Result<Vec<(String, String)>> {
+    use std::collections::BTreeSet;
+
+    let mut seen = BTreeSet::new();
+    for (name, value) in &options {
+        let name = name.to_ascii_lowercase();
+        if !seen.insert(name.clone()) {
+            return Err(invalid_reloption(format!(
+                "parameter \"{name}\" specified more than once"
+            )));
+        }
+        if name != "fillfactor" {
+            return Err(invalid_reloption(format!(
+                "unrecognized parameter \"{name}\""
+            )));
+        }
+        let fillfactor = value.parse::<u8>().map_err(|_| {
+            invalid_reloption(format!(
+                "invalid value for integer option \"fillfactor\": {value}"
+            ))
+        })?;
+        if !(10..=100).contains(&fillfactor) {
+            return Err(invalid_reloption(format!(
+                "value {fillfactor} out of bounds for option \"fillfactor\""
+            )));
+        }
+    }
+    Ok(options
+        .into_iter()
+        .map(|(name, value)| (name.to_ascii_lowercase(), value.to_ascii_lowercase()))
+        .collect())
+}
+
+pub(super) fn compile_create_view(stmt: &pg_query::protobuf::ViewStmt) -> Result<Statement> {
     let relation = stmt
         .view
         .as_ref()
         .ok_or_else(|| SQLError::Internal("CREATE VIEW without name".into()))?;
-    validate_durable_create_relation(relation, "CREATE VIEW")?;
+    let persistence = relation_persistence(relation, "CREATE VIEW")?;
+    if persistence == RelationPersistence::Unlogged {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "views cannot be unlogged because they do not have storage".into(),
+        });
+    }
     let column_names = stmt
         .aliases
         .iter()
         .map(extract_string)
         .collect::<Result<Vec<_>>>()?;
-    if !stmt.options.is_empty() {
-        return Err(SQLError::Unsupported(
-            "CREATE VIEW options are not supported".into(),
-        ));
-    }
-    if !matches!(
+    let options = validate_view_options(
+        collect_def_elem_options(&stmt.options)?,
         stmt.with_check_option(),
-        ViewCheckOption::Undefined | ViewCheckOption::NoCheckOption
-    ) {
-        return Err(SQLError::Unsupported(
-            "CREATE VIEW WITH CHECK OPTION is not supported".into(),
-        ));
-    }
+    )?;
     let name = range_var_name(relation);
     let body = stmt
         .query
@@ -304,6 +438,27 @@ pub(super) fn compile_create_view(stmt: &pg_query::protobuf::ViewStmt) -> Result
         column_names,
         body: Box::new(select),
         or_replace: stmt.replace,
+        persistence,
+        options,
+    })
+}
+
+pub(super) fn compile_refresh_materialized_view(
+    stmt: &pg_query::protobuf::RefreshMatViewStmt,
+) -> Result<Statement> {
+    let relation = stmt
+        .relation
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("REFRESH MATERIALIZED VIEW without name".into()))?;
+    if !relation.catalogname.is_empty() {
+        return Err(SQLError::Unsupported(
+            "REFRESH MATERIALIZED VIEW: cross-database names are not supported".into(),
+        ));
+    }
+    Ok(Statement::RefreshMaterializedView {
+        name: range_var_name(relation),
+        concurrently: stmt.concurrent,
+        with_no_data: stmt.skip_data,
     })
 }
 

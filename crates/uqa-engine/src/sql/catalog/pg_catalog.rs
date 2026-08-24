@@ -87,7 +87,7 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
     {
         let (schema, table) = split_schema_name(&name)?;
         let columns = table_columns_for(engine, &name)?;
-        out.push(pg_class_row(
+        out.push(pg_class_row_with_lifecycle(
             &schema,
             &table,
             "r",
@@ -98,18 +98,50 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
                 .map_err(|err| SQLError::Internal(format!("read index catalog: {err}")))?
                 .iter()
                 .any(|idx| idx.table_name == name),
+            engine
+                .table_persistence(&name)
+                .map_err(|error| SQLError::Internal(format!("read table persistence: {error}")))?
+                .unwrap_or_default(),
+            true,
+            &[],
         ));
     }
     for name in engine.list_views()? {
         let (schema, view) = split_schema_name(&name)?;
         let columns = view_columns_for(engine, &name)?;
-        out.push(pg_class_row(
+        let definition = engine.view_definition(&name)?.ok_or_else(|| {
+            SQLError::Internal(format!("view `{name}` disappeared during catalog scan"))
+        })?;
+        out.push(pg_class_row_with_lifecycle(
             &schema,
             &view,
             "v",
             catalog_usize(columns.len(), "pg_class view column count")?,
             0.0,
             false,
+            definition.persistence,
+            true,
+            &definition.options,
+        ));
+    }
+    for name in engine.list_materialized_views()? {
+        let (schema, view) = split_schema_name(&name)?;
+        let definition = engine.view_definition(&name)?.ok_or_else(|| {
+            SQLError::Internal(format!(
+                "materialized view `{name}` disappeared during catalog scan"
+            ))
+        })?;
+        let columns = view_columns_for(engine, &name)?;
+        out.push(pg_class_row_with_lifecycle(
+            &schema,
+            &view,
+            "m",
+            catalog_usize(columns.len(), "pg_class materialized-view column count")?,
+            definition.materialized_rows.len() as f64,
+            false,
+            definition.persistence,
+            definition.populated,
+            &definition.options,
         ));
     }
     for name in engine.list_foreign_tables().map_err(SQLError::Internal)? {
@@ -134,7 +166,20 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
         .map_err(|err| SQLError::Internal(format!("read sequence catalog: {err}")))?
     {
         let (schema, name) = split_schema_name(&sequence)?;
-        out.push(pg_class_row(&schema, &name, "S", 0, 0.0, false));
+        out.push(pg_class_row_with_lifecycle(
+            &schema,
+            &name,
+            "S",
+            0,
+            0.0,
+            false,
+            engine
+                .sequence_persistence(&sequence)
+                .map_err(|error| SQLError::Internal(format!("read sequence persistence: {error}")))?
+                .unwrap_or_default(),
+            true,
+            &[],
+        ));
     }
     for idx in engine
         .list_catalog_indexes()
@@ -156,15 +201,56 @@ pub(super) fn pg_class_row(
     tuples: f64,
     has_index: bool,
 ) -> ResultRow {
+    pg_class_row_with_lifecycle(
+        schema,
+        name,
+        relkind,
+        natts,
+        tuples,
+        has_index,
+        uqa_sql::ast::RelationPersistence::Permanent,
+        true,
+        &[],
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pg_class_row_with_lifecycle(
+    schema: &str,
+    name: &str,
+    relkind: &str,
+    natts: i64,
+    tuples: f64,
+    has_index: bool,
+    persistence: uqa_sql::ast::RelationPersistence,
+    populated: bool,
+    options: &[(String, String)],
+) -> ResultRow {
     let oid = relation_oid(relkind, schema, name);
     let reltype = if matches!(relkind, "r" | "v" | "m" | "c" | "f" | "p") {
         stable_oid("rowtype", &format!("{schema}.{name}"))
     } else {
         0
     };
-    pg_class_catalog_row(
+    let mut row = pg_class_catalog_row(
         oid, reltype, schema, name, relkind, natts, tuples, has_index,
-    )
+    );
+    row.insert(
+        "relpersistence".into(),
+        str_value(persistence.catalog_code()),
+    );
+    row.insert("relispopulated".into(), bool_value(populated));
+    if !options.is_empty() {
+        let values = options
+            .iter()
+            .map(|(name, value)| str_value(format!("{name}={value}")))
+            .collect();
+        row.insert(
+            "reloptions".into(),
+            catalog_array(values, "pg_class.reloptions").unwrap_or(Value::Null),
+        );
+    }
+    row
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -272,6 +358,17 @@ pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
             out.push(pg_attribute_row(
                 relid,
                 catalog_ordinal(idx, "pg_attribute view column")?,
+                col,
+            ));
+        }
+    }
+    for view_name in engine.list_materialized_views()? {
+        let (schema, view) = split_schema_name(&view_name)?;
+        let relid = relation_oid("m", &schema, &view);
+        for (idx, col) in view_columns_for(engine, &view_name)?.iter().enumerate() {
+            out.push(pg_attribute_row(
+                relid,
+                catalog_ordinal(idx, "pg_attribute materialized-view column")?,
                 col,
             ));
         }
@@ -570,6 +667,28 @@ pub(super) fn build_pg_views(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
             ("viewname", str_value(view)),
             ("viewowner", str_value(current_user_name())),
             ("definition", str_value(definition)),
+        ]));
+    }
+    Ok(rows)
+}
+
+pub(super) fn build_pg_matviews(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+    let mut rows = Vec::new();
+    for name in engine.list_materialized_views()? {
+        let (schema, matview) = split_schema_name(&name)?;
+        let stored = engine.view_definition(&name)?.ok_or_else(|| {
+            SQLError::Internal(format!(
+                "materialized view `{name}` disappeared during pg_matviews scan"
+            ))
+        })?;
+        rows.push(row([
+            ("schemaname", str_value(schema)),
+            ("matviewname", str_value(matview)),
+            ("matviewowner", str_value(current_user_name())),
+            ("tablespace", Value::Null),
+            ("hasindexes", bool_value(false)),
+            ("ispopulated", bool_value(stored.populated)),
+            ("definition", str_value(format!("{:?}", stored.query))),
         ]));
     }
     Ok(rows)

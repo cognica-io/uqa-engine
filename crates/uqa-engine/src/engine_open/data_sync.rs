@@ -211,7 +211,8 @@ impl Engine {
             .collect::<Vec<_>>();
         for (name, table) in tables {
             let name = name.qualified_name();
-            if self.storage.backend.is_some() {
+            let temporary = table.persistence == uqa_sql::ast::RelationPersistence::Temporary;
+            if self.storage.backend.is_some() && !temporary {
                 self.rebind_persistent_table_stores(&name, &table)?;
                 let next_id = u128::from(table.document_store.read().max_doc_id()?) + 1;
                 let mut current = table.next_id.lock();
@@ -222,7 +223,11 @@ impl Engine {
             table
                 .doc_count_dirty
                 .store(true, std::sync::atomic::Ordering::Release);
-            if let Some(catalog) = self.storage.catalog.as_ref() {
+            if temporary {
+                table
+                    .column_stats_dirty
+                    .store(true, std::sync::atomic::Ordering::Release);
+            } else if let Some(catalog) = self.storage.catalog.as_ref() {
                 let stats = Self::load_column_stats_from_catalog(catalog.as_ref(), &name)?;
                 let stats_dirty = stats.is_empty() && !table.columns.read().is_empty();
                 *table.column_stats.write() = stats;

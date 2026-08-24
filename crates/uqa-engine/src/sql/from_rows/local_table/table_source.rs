@@ -107,6 +107,32 @@ pub(super) fn build_table_source_operator<'a>(
             }
 
             if let Some(view) = engine.view_definition(name)? {
+                if view.kind == crate::StoredViewKind::Materialized {
+                    if !view.populated {
+                        return Err(SQLError::Routine {
+                            sqlstate: "55000".into(),
+                            message: format!("materialized view \"{name}\" has not been populated"),
+                        });
+                    }
+                    let columns = view.output_columns.clone().unwrap_or_default();
+                    let scan: Box<dyn PhysicalOperator + 'a> =
+                        Box::new(uqa_execution::TableScan::from_typed_rows(
+                            columns.clone(),
+                            view.materialized_column_types.clone(),
+                            view.materialized_rows.clone(),
+                        ));
+                    let operator = qualify_source_operator_with_columns(
+                        scan,
+                        &columns,
+                        &qualifier,
+                        prune,
+                        &[],
+                        false,
+                    );
+                    return Ok(attach_qualifier_filter(
+                        operator, &qualifier, filters, engine, params, ctes,
+                    ));
+                }
                 let plan = &view.query;
                 let output_columns = view.output_columns.as_deref().unwrap_or(&[]);
                 let inherited_lock = ctes.source_row_lock_for_view(&qualifier, name);

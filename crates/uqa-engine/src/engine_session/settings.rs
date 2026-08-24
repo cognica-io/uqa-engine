@@ -253,10 +253,14 @@ impl Engine {
     /// variants are scoped accordingly.
     pub fn discard(&self, target: uqa_sql::ast::DiscardTarget) -> Result<(), SQLError> {
         use uqa_sql::ast::DiscardTarget;
-        if target == DiscardTarget::Temp {
-            return Err(SQLError::Unsupported(
-                "DISCARD TEMP requires temporary-table support".to_string(),
-            ));
+        if self.transaction_depth() != 0 {
+            return Err(SQLError::Routine {
+                sqlstate: "25001".into(),
+                message: "DISCARD cannot run inside a transaction block".into(),
+            });
+        }
+        if matches!(target, DiscardTarget::All | DiscardTarget::Temp) {
+            self.discard_temporary_relations();
         }
         let mut session = self.session.state.write();
         match target {
@@ -274,8 +278,68 @@ impl Engine {
             DiscardTarget::Sequences => {
                 session.sequence_currvals.clear();
             }
-            DiscardTarget::Temp => unreachable!("DISCARD TEMP returned before locking state"),
+            DiscardTarget::Temp => {}
         }
         Ok(())
+    }
+
+    fn discard_temporary_relations(&self) {
+        let schema = self.temporary_schema_name();
+        let temporary_tables = self
+            .storage
+            .tables
+            .read()
+            .keys()
+            .filter(|relation| relation.schema == schema)
+            .cloned()
+            .collect::<Vec<_>>();
+        let temporary_table_names = temporary_tables
+            .iter()
+            .map(super::RelationIdentity::qualified_name)
+            .collect::<std::collections::BTreeSet<_>>();
+        self.storage
+            .tables
+            .write()
+            .retain(|relation, _| relation.schema != schema);
+        self.durable
+            .table_field_analyzers
+            .write()
+            .retain(|(table, _), _| !temporary_table_names.contains(table));
+        self.durable
+            .catalog_indexes
+            .write()
+            .retain(|_, index| !temporary_table_names.contains(&index.table_name));
+        self.durable
+            .views
+            .write()
+            .retain(|relation, _| relation.schema != schema);
+        let temporary_sequences = self
+            .durable
+            .sequence_persistence
+            .read()
+            .iter()
+            .filter(|(relation, persistence)| {
+                relation.schema == schema
+                    && **persistence == uqa_sql::ast::RelationPersistence::Temporary
+            })
+            .map(|(relation, _)| relation.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        self.durable
+            .sequences
+            .write()
+            .retain(|relation, _| !temporary_sequences.contains(relation));
+        self.durable
+            .sequence_persistence
+            .write()
+            .retain(|relation, _| !temporary_sequences.contains(relation));
+        self.session
+            .state
+            .write()
+            .sequence_currvals
+            .retain(|relation, _| !temporary_sequences.contains(relation));
+        if !temporary_tables.is_empty() {
+            self.note_table_catalog_changed();
+        }
+        self.note_catalog_registry_changed();
     }
 }

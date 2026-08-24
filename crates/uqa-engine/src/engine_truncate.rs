@@ -60,7 +60,7 @@ impl Engine {
         Ok(())
     }
 
-    fn truncate_locked_table(&self, table_name: &str) -> Result<(), SQLError> {
+    pub(crate) fn truncate_locked_table(&self, table_name: &str) -> Result<(), SQLError> {
         let t = self.require_table(table_name)?;
         // Snapshot the doc id set before grabbing any write locks so
         // we do not deadlock against the read guard inside the loop.

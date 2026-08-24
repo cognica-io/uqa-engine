@@ -42,6 +42,8 @@ mod sql_point_update;
 mod sql_referential_actions;
 #[path = "sql_rejected_ddl_lifecycle.rs"]
 mod sql_rejected_ddl_lifecycle;
+#[path = "engine_catalog/sql_relation_forms.rs"]
+mod sql_relation_forms;
 #[path = "sql_sequences.rs"]
 mod sql_sequences;
 #[path = "sql_set_search_path.rs"]

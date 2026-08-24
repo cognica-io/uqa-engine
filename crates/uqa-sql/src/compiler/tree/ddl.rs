@@ -24,6 +24,9 @@ pub(in crate::compiler) fn compile_create_table(
         .relation
         .as_ref()
         .ok_or_else(|| SQLError::Internal("CREATE TABLE without relation".into()))?;
+    let persistence = crate::compiler::relation_persistence(relation, "CREATE TABLE")?;
+    let on_commit =
+        crate::compiler::compile_on_commit(stmt.oncommit(), persistence, "CREATE TABLE")?;
     let name = range_var_name(relation);
     if name.is_empty() {
         return Err(SQLError::Internal("CREATE TABLE without name".into()));
@@ -252,6 +255,8 @@ pub(in crate::compiler) fn compile_create_table(
         checks,
         foreign_keys,
         key_constraints,
+        persistence,
+        on_commit,
     })
 }
 

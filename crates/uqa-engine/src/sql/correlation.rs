@@ -498,6 +498,16 @@ fn relation_columns(
     if let Some(view) = engine.view_plan(name)? {
         return Ok(query_output_columns(&view));
     }
+    if let Some(view) = engine.view_definition(name)? {
+        return Ok(RelationColumns {
+            names: view
+                .output_columns
+                .unwrap_or_default()
+                .into_iter()
+                .collect(),
+            complete: true,
+        });
+    }
     if let Ok(columns) = engine.foreign_table_columns(name) {
         return Ok(RelationColumns {
             names: columns.into_iter().collect(),

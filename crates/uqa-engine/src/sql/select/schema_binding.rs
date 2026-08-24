@@ -628,6 +628,15 @@ impl SchemaScope {
                     return result;
                 }
                 if let Some(view) = engine.view_definition(name)? {
+                    if view.kind == crate::StoredViewKind::Materialized {
+                        let columns = view.output_columns.clone().unwrap_or_default();
+                        let schema = RowSchema::with_qualified_types(
+                            qualifier,
+                            columns,
+                            view.materialized_column_types.clone(),
+                        );
+                        return Ok(schema);
+                    }
                     let key = name.to_ascii_lowercase();
                     if !self.visiting_views.insert(key.clone()) {
                         return Err(SQLError::Internal(format!(
