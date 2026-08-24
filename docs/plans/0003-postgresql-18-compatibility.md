@@ -227,7 +227,7 @@ Represent cancellation secrets as validated opaque bytes. Protocol 3.0 requires 
 
 Byte-exact unit tests cover PostgreSQL 18 message formats, downgrade responses, unsupported `_pq_.` options, malformed lengths, SSL/GSS pre-startup requests, and cancellation-key boundaries. Ignored live interoperability tests use PostgreSQL 18.4 `psql` as a thin libpq driver and a server assembled directly from `uqa-pg-wire` codecs; they verify `max_protocol_version=3.0`, `3.2`, and `latest`, an explicit 3.2-to-3.0 server downgrade, authentication sequencing, SSL rejection and startup retry, legacy cancellation, and a 256-byte protocol 3.2 cancellation key.
 
-Complete the remaining protocol evidence with a credentialed Kerberos environment that actually emits `GSSEncRequest`, non-trust authentication exchanges, extended-query binary parameter/result formats, layered middleware keys near the 256-byte limit, malformed live peers, and the client matrix in workstream 8.
+The extended protocol slice now resolves Bind and FunctionCall format vectors through one zero, one, or per-value implementation, preserves binary parameters and result selection, decodes the context-dependent frontend `p` message under an explicit cleartext, MD5, Kerberos, GSS, SSPI, or SASL state, composes and removes layered middleware cancellation-key prefixes up to 256 bytes, and rejects malformed fragmented live peers through the bounded decoder. Complete the remaining protocol evidence with credentialed Kerberos, SSPI, and OAuth environments, TLS channel binding, replication and pipeline modes, and the complete malformed-peer corpus; credential verification and secret storage remain the embedding server's responsibility rather than being approximated in the codec.
 
 ### 7. Complete SQL, catalog, and transaction compatibility
 
@@ -241,7 +241,9 @@ Keep row schemas as static plan metadata from the first scan through the last co
 
 ### 8. Client and operational compatibility
 
-Run a versioned client matrix covering PostgreSQL 18 `psql`, libpq, JDBC, Npgsql, psycopg, pgx, node-postgres, SQLAlchemy, common migration tools, `pg_dump`, `pg_restore`, and schema introspection. Exercise simple and extended query protocols, binary parameters and results, prepared statement reuse, COPY, cancellation, notices, errors, transactions, and connection-pool reset behavior.
+The checked-in Docker matrix pins psycopg 3.3.4 with psycopg-pool 3.3.1, pgx 5.10.0, node-postgres 8.23.0 with pg-copy-streams 7.0.0, and PostgreSQL 18.4 psql/libpq. It runs prepared-statement reuse, each driver's supported binary Bind/result choices, COPY in and out, transaction failure through `25P02` and rollback recovery, and single-connection pool reuse first against PostgreSQL 18.4 and then against the same scripted server assembled from `uqa-pg-wire`; expected driver versions and operations are checked in instead of inferred from a successful exit.
+
+Complete the client gate with JDBC, Npgsql, SQLAlchemy, common migration tools, full schema introspection, `pg_dump`, `pg_restore`, and a real UQA SQL server that can exercise connection reset, restart and crash recovery, backup/restore, upgrade, cancellation, notices, administration, and long-running concurrency beyond the network-independent codec boundary.
 
 Add long-running concurrency, restart, crash-recovery, backup/restore, and upgrade tests. A full PostgreSQL compatibility claim requires operationally observable behavior, not only an in-memory SQL test suite.
 

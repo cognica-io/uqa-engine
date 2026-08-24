@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 
 - Implemented PostgreSQL 18 recursive CTE `SEARCH` and `CYCLE`, including depth- and breadth-first sequence values, cycle marks and paths, generated-column scope, path-aware `UNION` distinctness, iteration-wide recursive-term semantics, validation ordering, and durable stored plans; implemented `MATERIALIZED` and `NOT MATERIALIZED` folding policy and completed the related CTE/catalog row-lock validation matrix.
+- Added context-aware PostgreSQL authentication sequencing, exact extended-query binary format resolution, bounded layered cancellation keys, malformed-peer coverage, and a pinned psycopg, pgx, and node-postgres PostgreSQL 18.4 client matrix covering prepared reuse, COPY, transaction recovery, and pooling.
 - Implemented PostgreSQL 18 `FETCH FIRST ... WITH TIES` across query blocks, set operations, CTEs, aggregation, windows, distinct processing, row locking, and ranked retrieval, including complete multi-key and NULL peer boundaries.
 - Implemented PostgreSQL 18 `ESCAPE` semantics for `LIKE`, `ILIKE`, and `SIMILAR TO`, including the default backslash, disabled and NULL escapes, runtime escape expressions, Unicode escape characters, and matching SQLSTATEs.
 - Implemented PostgreSQL 18 `GROUP BY DISTINCT`, including duplicate elimination after `GROUPING SETS`, `ROLLUP`, and `CUBE` expansion using analyzed column, cast, type, and operator identity while preserving structurally distinct expressions and `GROUP BY ALL` multiplicity.
