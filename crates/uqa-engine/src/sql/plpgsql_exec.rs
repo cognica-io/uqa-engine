@@ -21,13 +21,12 @@ use uqa_sql::expr::{cast_value, truthy, value_type_name};
 use uqa_sql::plpgsql::{
     bind_expr, bind_statement, condition_sqlstate, condition_sqlstates, IntoTarget, PLpgSQLBlock,
     PLpgSQLCursorArgument, PLpgSQLDatum, PLpgSQLFunction, PLpgSQLReturnValue, PLpgSQLRowField,
-    PLpgSQLStmt, RaiseLevel, VariableResolver,
+    PLpgSQLStmt, RaiseLevel, ResolvedVariable, VariableResolver,
 };
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 
 use crate::engine_user_functions::{
-    canonical_routine_type_name, routine_local_name, routine_signature_types, CompiledFunctionBody,
-    SQLUserFunction,
+    canonical_routine_type_name, routine_local_name, CompiledFunctionBody, SQLUserFunction,
 };
 use crate::{Engine, SQLTableFunctionResult};
 
@@ -113,6 +112,7 @@ struct Interpreter<'a> {
 
 /// Maps variable names and positional parameters onto an activation record.
 struct DatumResolver<'a> {
+    engine: &'a Engine,
     datums: &'a [PLpgSQLDatum],
     values: &'a [Value],
     bindings: &'a HashMap<String, Vec<usize>>,

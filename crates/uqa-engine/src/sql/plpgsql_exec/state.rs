@@ -192,6 +192,7 @@ impl<'a> Interpreter<'a> {
 
     pub(super) fn resolver(&self) -> DatumResolver<'_> {
         DatumResolver {
+            engine: self.engine,
             datums: self.datums,
             values: &self.values,
             bindings: &self.bindings,

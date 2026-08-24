@@ -16,8 +16,8 @@ use std::collections::BTreeMap;
 pub(crate) use uqa_execution::canonical_routine_type_name;
 use uqa_execution::{
     match_function_signature, rank_function_matches, BuiltinFunctionOverload,
-    FunctionParameterDescriptor, FunctionTypeResolver, RankedFunctionMatch,
-    ResolvedFunctionOverload, ScalarExpr,
+    FunctionParameterDescriptor, FunctionTypeResolver, MatchedFunctionSignature,
+    RankedFunctionMatch, ResolvedFunctionOverload, ScalarExpr,
 };
 use uqa_planner::UnifiedPlan;
 use uqa_sql::ast::{
@@ -106,8 +106,13 @@ impl FunctionTypeResolver for Engine {
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
     ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
-        let Some(matched) =
-            self.resolve_static_sql_function_match(name, binding, argument_names, argument_types)?
+        let Some(matched) = self.resolve_static_sql_routine_match(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            RoutineCallKind::Function,
+        )?
         else {
             return Ok(None);
         };
@@ -134,11 +139,11 @@ impl FunctionTypeResolver for Engine {
             .lookup_sql_functions(&binding.name)
             .and_then(|overloads| {
                 overloads.into_iter().find(|function| {
-                    routine_signature_types(&function.def) == binding.argument_types
+                    !function.def.is_procedure
+                        && routine_signature_types(&function.def) == binding.argument_types
                 })
             });
-        Ok(function
-            .is_some_and(|function| !function.def.is_procedure && !function.def.returns_set()))
+        Ok(function.is_some_and(|function| !function.def.returns_set()))
     }
 
     fn resolve_function_overload_with_builtins(
@@ -158,6 +163,25 @@ impl FunctionTypeResolver for Engine {
             builtins,
         )
         .map(Some)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RoutineCallKind {
+    Function,
+    Procedure,
+}
+
+impl RoutineCallKind {
+    fn is_procedure(self) -> bool {
+        self == Self::Procedure
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Function => "function",
+            Self::Procedure => "procedure",
+        }
     }
 }
 
@@ -183,104 +207,109 @@ impl Engine {
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
     ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
-        self.resolve_static_sql_function_match(name, binding, argument_names, argument_types)
-            .map(|matched| matched.map(|matched| matched.function))
+        self.resolve_static_sql_routine(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            RoutineCallKind::Function,
+        )
     }
 
-    fn resolve_static_sql_function_match(
+    /// Resolve a function-expression or `CALL` candidate with shared `PostgreSQL` visibility and overload-ranking rules.
+    pub(crate) fn resolve_static_sql_routine(
         &self,
         name: &str,
         binding: Option<&FunctionBinding>,
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
+        kind: RoutineCallKind,
+    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+        self.resolve_static_sql_routine_match(name, binding, argument_names, argument_types, kind)
+            .map(|matched| matched.map(|matched| matched.function))
+    }
+
+    fn resolve_static_sql_routine_match(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+        kind: RoutineCallKind,
     ) -> Result<Option<StaticFunctionMatch>, SQLError> {
         if let Some(binding) = binding {
             if binding.builtin {
                 return Ok(None);
             }
             let function = self
-                .lookup_sql_functions(&binding.name)
+                .lookup_sql_routine_candidates(&binding.name)
                 .and_then(|overloads| {
                     overloads.into_iter().find(|function| {
-                        routine_signature_types(&function.def) == binding.argument_types
+                        function.def.is_procedure == kind.is_procedure()
+                            && routine_signature_types(&function.def) == binding.argument_types
                     })
                 })
                 .ok_or_else(|| SQLError::Routine {
                     sqlstate: "42883".into(),
                     message: format!(
-                        "bound function {}({}) does not exist",
+                        "bound {} {}({}) does not exist",
+                        kind.name(),
                         binding.name,
                         binding.argument_types.join(", ")
                     ),
                 })?;
-            if function.def.is_procedure {
-                return Err(static_function_resolution_error(
-                    "42809",
-                    name,
-                    argument_types,
-                    "is a procedure",
-                ));
-            }
             // The binding already fixes identity; re-match only named/default structure. Unknown structural types yield zero ranking scores, which are unused on this return path.
-            let structural_types = vec![None; argument_types.len()];
-            return static_function_match(function, argument_names, &structural_types)
-                .map(Some)
-                .ok_or_else(|| SQLError::Routine {
-                    sqlstate: "42883".into(),
-                    message: format!(
-                        "bound function {}({}) does not exist",
-                        binding.name,
-                        binding.argument_types.join(", ")
-                    ),
-                });
+            let bound_argument_types = vec![None; argument_types.len()];
+            let matched =
+                static_routine_match(function, argument_names, &bound_argument_types, kind)
+                    .ok_or_else(|| static_bound_routine_error(kind, binding))?;
+            ensure_routine_kind(name, argument_types, kind, &matched.function.def)?;
+            return Ok(Some(matched));
         }
         let Some(overloads) = self.lookup_sql_routine_candidates(name) else {
             return Ok(None);
         };
-        resolve_static_function_overload(name, overloads, argument_names, argument_types).map(Some)
+        resolve_static_routine_overload(name, overloads, argument_names, argument_types, kind)
+            .map(Some)
     }
 }
 
-fn resolve_static_function_overload(
+fn resolve_static_routine_overload(
     name: &str,
     overloads: Vec<Arc<SQLUserFunction>>,
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
+    kind: RoutineCallKind,
 ) -> Result<StaticFunctionMatch, SQLError> {
-    let procedure_matches = overloads.iter().any(|function| {
-        function.def.is_procedure
-            && static_function_match(function.clone(), argument_names, argument_types).is_some()
-    });
     let mut candidates = overloads
         .into_iter()
-        .filter(|function| !function.def.is_procedure)
-        .filter_map(|function| static_function_match(function, argument_names, argument_types))
+        .filter_map(|function| static_routine_match(function, argument_names, argument_types, kind))
         .collect::<Vec<_>>();
     retain_earliest_effective_signatures(&mut candidates);
     if candidates.is_empty() {
-        return Err(static_function_resolution_error(
-            if procedure_matches { "42809" } else { "42883" },
+        return Err(static_routine_resolution_error(
+            kind,
+            "42883",
             name,
             argument_types,
-            if procedure_matches {
-                "is a procedure"
-            } else {
-                "does not exist"
-            },
+            "does not exist",
         ));
     }
 
     if !rank_function_matches(&mut candidates, argument_types) || candidates.len() != 1 {
-        return Err(static_function_resolution_error(
+        return Err(static_routine_resolution_error(
+            kind,
             "42725",
             name,
             argument_types,
             "is not unique",
         ));
     }
-    candidates
+    let matched = candidates
         .pop()
-        .ok_or_else(|| SQLError::Internal("resolved function candidate disappeared".into()))
+        .ok_or_else(|| SQLError::Internal("resolved routine candidate disappeared".into()))?;
+    ensure_routine_kind(name, argument_types, kind, &matched.function.def)?;
+    Ok(matched)
 }
 
 fn retain_earliest_effective_signatures(candidates: &mut Vec<StaticFunctionMatch>) {
@@ -301,12 +330,48 @@ fn retain_earliest_effective_signatures(candidates: &mut Vec<StaticFunctionMatch
     });
 }
 
+fn static_routine_match(
+    function: Arc<SQLUserFunction>,
+    argument_names: &[Option<String>],
+    argument_types: &[Option<ColumnType>],
+    kind: RoutineCallKind,
+) -> Option<StaticFunctionMatch> {
+    let parameters = if kind == RoutineCallKind::Procedure && !function.def.is_procedure {
+        function.def.params.iter().collect()
+    } else {
+        function.def.signature_params()
+    };
+    let matched = match_static_function_signature(&parameters, argument_names, argument_types)?;
+    Some(StaticFunctionMatch {
+        function,
+        argument_types: matched.argument_types,
+        raw_exact_matches: matched.raw_exact_matches,
+        exact_matches: matched.exact_matches,
+        preferred_matches: matched.preferred_matches,
+    })
+}
+
 fn static_function_match(
     function: Arc<SQLUserFunction>,
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
 ) -> Option<StaticFunctionMatch> {
     let signature = function.def.signature_params();
+    let matched = match_static_function_signature(&signature, argument_names, argument_types)?;
+    Some(StaticFunctionMatch {
+        function,
+        argument_types: matched.argument_types,
+        raw_exact_matches: matched.raw_exact_matches,
+        exact_matches: matched.exact_matches,
+        preferred_matches: matched.preferred_matches,
+    })
+}
+
+fn match_static_function_signature(
+    signature: &[&uqa_sql::ast::FunctionParam],
+    argument_names: &[Option<String>],
+    argument_types: &[Option<ColumnType>],
+) -> Option<MatchedFunctionSignature> {
     let parameters = signature
         .iter()
         .map(|parameter| FunctionParameterDescriptor {
@@ -315,14 +380,7 @@ fn static_function_match(
             has_default: parameter.default.is_some(),
         })
         .collect::<Vec<_>>();
-    let matched = match_function_signature(&parameters, argument_names, argument_types)?;
-    Some(StaticFunctionMatch {
-        function,
-        argument_types: matched.argument_types,
-        raw_exact_matches: matched.raw_exact_matches,
-        exact_matches: matched.exact_matches,
-        preferred_matches: matched.preferred_matches,
-    })
+    match_function_signature(&parameters, argument_names, argument_types)
 }
 
 fn static_function_return_type(name: &str, def: &CreateFunction) -> Result<ColumnType, SQLError> {
@@ -349,24 +407,62 @@ fn static_function_return_type(name: &str, def: &CreateFunction) -> Result<Colum
     ColumnType::from_sql_name(type_name)
 }
 
-fn static_function_resolution_error(
+fn ensure_routine_kind(
+    name: &str,
+    argument_types: &[Option<ColumnType>],
+    expected: RoutineCallKind,
+    definition: &CreateFunction,
+) -> Result<(), SQLError> {
+    if definition.is_procedure == expected.is_procedure() {
+        return Ok(());
+    }
+    let arguments = static_routine_argument_types(argument_types);
+    let suffix = if definition.is_procedure {
+        "is a procedure"
+    } else {
+        "is not a procedure"
+    };
+    Err(SQLError::Routine {
+        sqlstate: "42809".into(),
+        message: format!("{name}({arguments}) {suffix}"),
+    })
+}
+
+fn static_bound_routine_error(kind: RoutineCallKind, binding: &FunctionBinding) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42883".into(),
+        message: format!(
+            "bound {} {}({}) does not exist",
+            kind.name(),
+            binding.name,
+            binding.argument_types.join(", ")
+        ),
+    }
+}
+
+fn static_routine_resolution_error(
+    kind: RoutineCallKind,
     sqlstate: &str,
     name: &str,
     argument_types: &[Option<ColumnType>],
     suffix: &str,
 ) -> SQLError {
-    let arguments = argument_types
+    let arguments = static_routine_argument_types(argument_types);
+    SQLError::Routine {
+        sqlstate: sqlstate.into(),
+        message: format!("{} {name}({arguments}) {suffix}", kind.name()),
+    }
+}
+
+fn static_routine_argument_types(argument_types: &[Option<ColumnType>]) -> String {
+    argument_types
         .iter()
         .map(|ty| {
             ty.as_ref()
                 .map_or_else(|| "unknown".into(), ColumnType::sql_name)
         })
         .collect::<Vec<_>>()
-        .join(", ");
-    SQLError::Routine {
-        sqlstate: sqlstate.into(),
-        message: format!("function {name}({arguments}) {suffix}"),
-    }
+        .join(", ")
 }
 
 fn routine_kind(def: &CreateFunction) -> &'static str {

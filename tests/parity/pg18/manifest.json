@@ -178,6 +178,14 @@
       "open_issue": null
     },
     {
+      "id": "routines.procedure-call-overload-resolution",
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live procedure, CALL, and scalar PL/pgSQL candidate-selection results plus PostgreSQL function type-resolution, CREATE FUNCTION, CREATE PROCEDURE, and CALL documentation",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::procedures::procedure_with_inout_via_call; cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::procedures::call_overload_resolution_; cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::procedures::procedure_overload_preserves_percent_type_null_variable; cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::scalar_and_resolution::runtime_overload_resolution_prefers_float8_for_integer_input",
+      "supported_version": "PostgreSQL 18.4 candidate selection for implemented procedures, CALL, and scalar PL/pgSQL functions, including scalar-function declared types from direct casts and scalar subqueries, procedure declared types from direct casts, concrete PL/pgSQL datums and typed NULL variables, named and default arguments, exact implemented information-schema domain signatures, CALL subquery rejection, and CALL-visible required OUT/TABLE placeholders used for undefined-procedure and wrong-kind detection without claiming table-routine or SETOF execution parity",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "functions.json-null-stripping",
       "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live json_strip_nulls and jsonb_strip_nulls textual and binary results, default and named arguments, strictness, overload errors, SQLSTATEs, return types, user-overload search-path ranking, generated-column behavior, and pg_proc metadata plus JSON-function documentation",
       "uqa_test": "cargo test -p uqa-sql --lib textual_json_null; cargo test -p uqa-execution --lib json_strip_binding; cargo test -p uqa-engine --test integration json_strip; cargo test -p uqa-engine --test integration postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata; tests/parity/pg18/probes.sql",
