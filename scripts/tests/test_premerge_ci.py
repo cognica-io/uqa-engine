@@ -16,8 +16,57 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "run-premerge-ci.sh"
+WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 HEAD = "a" * 40
 BASE = "b" * 40
+
+
+class PremergeCIWorkflowContractTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    def test_main_push_seeds_only_cache_identity_changes(self) -> None:
+        expected_trigger = (
+            "  push:\n"
+            "    branches: [main]\n"
+            "    paths:\n"
+            "      - Cargo.toml\n"
+            "      - Cargo.lock\n"
+            '      - "crates/*/Cargo.toml"\n'
+            '      - "examples/rust/*/Cargo.toml"\n'
+            "      - rust-toolchain.toml\n"
+            '      - ".cargo/**"\n'
+            "      - .github/workflows/ci.yml\n"
+        )
+        push_trigger = self.workflow.split("on:\n", 1)[1].split(
+            "  workflow_dispatch:\n", 1
+        )[0]
+
+        self.assertEqual(push_trigger, expected_trigger)
+
+    def test_rust_jobs_run_for_main_seed_or_selected_dispatch(self) -> None:
+        condition = (
+            "if: ${{ github.event_name == 'push' || "
+            "(github.event_name == 'workflow_dispatch' && inputs.run_rust) }}"
+        )
+
+        self.assertEqual(self.workflow.count(condition), 7)
+        self.assertNotIn("if: ${{ inputs.run_rust }}", self.workflow)
+
+    def test_temporary_tag_caches_are_restore_only(self) -> None:
+        cache_step = (
+            "      - uses: Swatinem/rust-cache@v2\n"
+            "        with:\n"
+            "          cache-bin: false\n"
+            "          cache-targets: true\n"
+            "          save-if: ${{ github.ref == 'refs/heads/main' }}\n"
+        )
+
+        self.assertEqual(
+            self.workflow.count("      - uses: Swatinem/rust-cache@v2\n"), 6
+        )
+        self.assertEqual(self.workflow.count(cache_step), 6)
 
 
 class PremergeCITest(unittest.TestCase):

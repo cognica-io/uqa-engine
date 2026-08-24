@@ -1,6 +1,16 @@
 name: Pre-merge CI
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - "crates/*/Cargo.toml"
+      - "examples/rust/*/Cargo.toml"
+      - rust-toolchain.toml
+      - ".cargo/**"
+      - .github/workflows/ci.yml
   workflow_dispatch:
     inputs:
       run_rust:
@@ -24,7 +34,7 @@ env:
 jobs:
   test-linux:
     name: test Linux
-    if: ${{ inputs.run_rust }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     env:
       RUSTFLAGS: "-D warnings -C linker-features=-lld"
@@ -39,6 +49,7 @@ jobs:
         with:
           cache-bin: false
           cache-targets: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Validate manual SQL examples
         run: cargo test -p uqa-engine --test integration --locked engine_queries::manual_sql_examples::manual_sql_examples_compile_or_execute -- --exact
       - name: Test workspace
@@ -46,7 +57,7 @@ jobs:
 
   test-fdw-linux:
     name: test FDW Linux
-    if: ${{ inputs.run_rust }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -59,11 +70,12 @@ jobs:
         with:
           cache-bin: false
           cache-targets: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo test -p uqa-fdw --locked
 
   test-macos:
     name: test macOS
-    if: ${{ inputs.run_rust }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -74,11 +86,12 @@ jobs:
         with:
           cache-bin: false
           cache-targets: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo test --workspace --locked
 
   clippy:
     name: clippy ${{ matrix.label }}
-    if: ${{ inputs.run_rust }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -102,11 +115,12 @@ jobs:
         with:
           cache-bin: false
           cache-targets: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   msrv:
     name: check Rust 1.90
-    if: ${{ inputs.run_rust }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -119,11 +133,12 @@ jobs:
         with:
           cache-bin: false
           cache-targets: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo check --workspace --locked
 
   doc:
     name: doc
-    if: ${{ inputs.run_rust }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     env:
       RUSTDOCFLAGS: "-D warnings"
@@ -138,11 +153,12 @@ jobs:
         with:
           cache-bin: false
           cache-targets: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo doc --workspace --no-deps --locked
 
   deny:
     name: deny
-    if: ${{ inputs.run_rust }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
