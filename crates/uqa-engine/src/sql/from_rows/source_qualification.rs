@@ -12,19 +12,19 @@ use super::{
     QualifierFilters, QueryOutput, QueryOutputMode, QueryPlan, QueryRows, ResultRow, SQLError,
     SQLParam, ScalarExpr, Value,
 };
-use crate::engine_user_functions::{
-    routine_returns_anonymous_record, routine_signature_types, SQLUserFunction,
-};
+use crate::engine_user_functions::{routine_returns_anonymous_record, SQLUserFunction};
 use std::sync::Arc;
 use uqa_execution::{BuiltinFunctionOverload, FunctionTypeResolver, RowSchema};
-use uqa_sql::ast::{ColumnType, FunctionBinding, FunctionReturns};
+use uqa_sql::ast::{
+    ColumnType, FunctionBinding, FunctionParamMode, FunctionReturns, RoutineInvocationBinding,
+};
 
 pub(in crate::sql) struct ResolvedUserTableFunction {
     pub(in crate::sql) function: Arc<SQLUserFunction>,
     pub(in crate::sql) binding: FunctionBinding,
 }
 
-type TableFunctionArgumentSignature = (Vec<Option<String>>, Vec<Option<ColumnType>>);
+type TableFunctionArgumentSignature = (Vec<Option<String>>, Vec<Option<ColumnType>>, bool);
 
 pub(in crate::sql) fn user_function_output_columns_for(
     function: &SQLUserFunction,
@@ -129,18 +129,22 @@ pub(in crate::sql) fn resolve_user_table_function(
     if binding.builtin {
         return Ok(None);
     }
-    let (argument_names, argument_types) =
+    let (argument_names, argument_types, explicit_variadic) =
         table_function_argument_signature(args, input_schema, params, resolver)?;
-    let Some(function) = engine.resolve_static_sql_function(
+    let Some(matched) = engine.resolve_static_sql_function_match(
         name,
         Some(&binding),
         &argument_names,
         &argument_types,
+        explicit_variadic,
     )?
     else {
         return Ok(None);
     };
-    Ok(Some(ResolvedUserTableFunction { function, binding }))
+    Ok(Some(ResolvedUserTableFunction {
+        binding: matched.binding(),
+        function: matched.function,
+    }))
 }
 
 pub(in crate::sql) fn resolve_table_function_binding(
@@ -157,7 +161,7 @@ pub(in crate::sql) fn resolve_table_function_binding(
     }
     let identity = name.to_ascii_lowercase();
     let builtin = crate::sql::builtin_function_dispatch_name(&identity);
-    let (argument_names, argument_types) =
+    let (argument_names, argument_types, explicit_variadic) =
         table_function_argument_signature(args, input_schema, params, resolver)?;
     let builtins = builtin_table_function_overloads(&builtin, &argument_types);
     if !builtins.is_empty() || has_builtin_table_function_overloads(&builtin) {
@@ -167,6 +171,7 @@ pub(in crate::sql) fn resolve_table_function_binding(
                 None,
                 &argument_names,
                 &argument_types,
+                explicit_variadic,
                 &builtins,
             )
             .map(|resolved| resolved.map(|resolved| resolved.binding));
@@ -177,12 +182,14 @@ pub(in crate::sql) fn resolve_table_function_binding(
     if engine.lookup_sql_functions(name).is_none() {
         return Ok(None);
     }
-    match engine.resolve_static_sql_function(name, None, &argument_names, &argument_types) {
-        Ok(Some(function)) => Ok(Some(FunctionBinding {
-            name: function.def.name.clone(),
-            argument_types: routine_signature_types(&function.def),
-            builtin: false,
-        })),
+    match engine.resolve_static_sql_function_match(
+        name,
+        None,
+        &argument_names,
+        &argument_types,
+        explicit_variadic,
+    ) {
+        Ok(Some(function)) => Ok(Some(function.binding())),
         Ok(None) => Ok(None),
         Err(error) if builtin_surface && error.sqlstate() == Some("42883") => Ok(None),
         Err(error) => Err(error),
@@ -215,23 +222,27 @@ fn table_function_argument_signature(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<TableFunctionArgumentSignature, SQLError> {
-    let mut argument_names = Vec::with_capacity(args.len());
-    let mut argument_types = Vec::with_capacity(args.len());
-    for argument in args {
-        let (argument_name, value) = table_function_argument(argument);
-        argument_names.push(argument_name);
+    let call_arguments = uqa_execution::scalar_call_arguments(args)?;
+    let explicit_variadic = call_arguments
+        .iter()
+        .any(|argument| argument.explicit_variadic);
+    let mut argument_names = Vec::with_capacity(call_arguments.len());
+    let mut argument_types = Vec::with_capacity(call_arguments.len());
+    for argument in call_arguments {
+        argument_names.push(argument.name.map(str::to_string));
         let argument_type = uqa_execution::common_context_expression_type(
-            value,
+            argument.value,
             input_schema,
             params,
             Some(resolver),
         )?;
-        argument_types.push(uqa_execution::effective_overload_argument_type(
-            value,
+        argument_types.push(uqa_execution::effective_overload_argument_type_with_params(
+            argument.value,
             argument_type,
+            params,
         ));
     }
-    Ok((argument_names, argument_types))
+    Ok((argument_names, argument_types, explicit_variadic))
 }
 
 fn builtin_table_function_overloads(
@@ -330,20 +341,6 @@ pub(in crate::sql) fn is_builtin_table_function(name: &str) -> bool {
             | "rpq"
             | "cypher"
     )
-}
-
-fn table_function_argument(expression: &ScalarExpr) -> (Option<String>, &ScalarExpr) {
-    let ScalarExpr::Func { name, args, .. } = expression else {
-        return (None, expression);
-    };
-    if name != uqa_sql::expr::NAMED_ARG_FUNCTION {
-        return (None, expression);
-    }
-    let argument_name = args.first().and_then(|name| match name {
-        ScalarExpr::Literal(Value::Str(name)) => Some(name.clone()),
-        _ => None,
-    });
-    (argument_name, args.get(1).unwrap_or(expression))
 }
 
 pub(in crate::sql) fn query_output_shared(
@@ -638,6 +635,7 @@ pub(in crate::sql) struct TableFunctionTypeRequest<'a> {
     pub(in crate::sql) name: &'a str,
     pub(in crate::sql) args: &'a [ScalarExpr],
     pub(in crate::sql) user_function: Option<&'a SQLUserFunction>,
+    pub(in crate::sql) user_invocation: Option<&'a RoutineInvocationBinding>,
     pub(in crate::sql) declared_types: &'a [String],
     pub(in crate::sql) columns: &'a [String],
     pub(in crate::sql) ordinality: bool,
@@ -654,6 +652,7 @@ pub(in crate::sql) fn table_function_column_types(
         name,
         args,
         user_function,
+        user_invocation,
         declared_types,
         columns,
         ordinality,
@@ -682,7 +681,11 @@ pub(in crate::sql) fn table_function_column_types(
                 .collect(),
         )
     } else if let Some(function) = user_function {
-        align(user_function_column_types(function))
+        align(user_function_column_types(
+            engine,
+            function,
+            user_invocation,
+        ))
     } else {
         let normalized = crate::sql::builtin_function_dispatch_name(&name.to_ascii_lowercase());
         let argument_type = |position: usize| {
@@ -765,47 +768,65 @@ fn user_table_function_column_types(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Vec<Option<ColumnType>> {
-    let Some(overloads) = engine.lookup_sql_functions(name) else {
+    let Ok((argument_names, argument_types, explicit_variadic)) =
+        table_function_argument_signature(args, input_schema, params, resolver)
+    else {
         return Vec::new();
     };
-    let argument_types = args
-        .iter()
-        .map(|argument| {
-            uqa_execution::scalar_type_with_resolver(argument, input_schema, params, resolver)
-                .ok()
-                .flatten()
-                .map(|ty| crate::engine_user_functions::canonical_routine_type_name(&ty.sql_name()))
-        })
-        .collect::<Option<Vec<_>>>();
-    let candidates = overloads
-        .iter()
-        .filter(|function| !function.def.is_procedure)
-        .filter(|function| {
-            argument_types.as_ref().is_none_or(|types| {
-                crate::engine_user_functions::routine_signature_types(&function.def) == *types
-            })
-        })
-        .collect::<Vec<_>>();
-    let [function] = candidates.as_slice() else {
+    let Ok(Some(matched)) = engine.resolve_static_sql_function_match(
+        name,
+        None,
+        &argument_names,
+        &argument_types,
+        explicit_variadic,
+    ) else {
         return Vec::new();
     };
-    user_function_column_types(function)
+    user_function_column_types(engine, &matched.function, Some(&matched.invocation))
 }
 
-fn user_function_column_types(function: &SQLUserFunction) -> Vec<Option<ColumnType>> {
-    let outputs = function.def.output_params();
+fn user_function_column_types(
+    engine: &Engine,
+    function: &SQLUserFunction,
+    invocation: Option<&RoutineInvocationBinding>,
+) -> Vec<Option<ColumnType>> {
+    let outputs = function
+        .def
+        .params
+        .iter()
+        .enumerate()
+        .filter(|(_, parameter)| {
+            matches!(
+                parameter.mode,
+                FunctionParamMode::Out | FunctionParamMode::InOut | FunctionParamMode::Table
+            )
+        })
+        .collect::<Vec<_>>();
     if !outputs.is_empty() {
         return outputs
-            .iter()
-            .map(|parameter| ColumnType::from_sql_name(&parameter.type_name).ok())
+            .into_iter()
+            .map(|(index, parameter)| {
+                let type_name = invocation
+                    .and_then(|binding| binding.parameter_types.get(index))
+                    .unwrap_or(&parameter.type_name);
+                resolve_table_function_column_type(engine, type_name)
+            })
             .collect();
     }
     match &function.def.returns {
         FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
-            vec![ColumnType::from_sql_name(type_name).ok()]
+            let type_name = invocation
+                .and_then(|binding| binding.return_type.as_ref())
+                .unwrap_or(type_name);
+            vec![resolve_table_function_column_type(engine, type_name)]
         }
         FunctionReturns::None | FunctionReturns::Table => Vec::new(),
     }
+}
+
+fn resolve_table_function_column_type(engine: &Engine, type_name: &str) -> Option<ColumnType> {
+    crate::sql::resolve_catalog_column_type(engine, type_name)
+        .or_else(|| ColumnType::from_sql_name(type_name).ok())
 }
 
 pub(in crate::sql) fn is_json_array_table_function(name: &str) -> bool {

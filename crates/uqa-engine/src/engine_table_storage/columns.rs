@@ -90,7 +90,7 @@ impl Engine {
         self.with_implicit_storage_transaction(|engine| engine.try_drop_column_inner(table, column))
     }
 
-    pub(super) fn try_drop_column_inner(
+    pub(crate) fn try_drop_column_inner(
         &self,
         table: &str,
         column: &str,

@@ -333,7 +333,12 @@ fn bind_catalog_function(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) {
-    if binding.is_some() || name == uqa_sql::expr::NAMED_ARG_FUNCTION {
+    if binding.is_some()
+        || matches!(
+            name,
+            uqa_sql::expr::NAMED_ARG_FUNCTION | uqa_sql::expr::VARIADIC_ARG_FUNCTION
+        )
+    {
         return;
     }
     if uqa_sql::ast::is_builtin_aggregate_function(&local_routine_name(name)) {
@@ -349,22 +354,33 @@ fn bind_catalog_function(
     let Some(resolver) = resolver else {
         return;
     };
-    let mut argument_names = Vec::with_capacity(args.len());
-    let mut argument_types = Vec::with_capacity(args.len());
-    for argument in args {
-        let (argument_name, value) = super::functions::named_argument(argument);
-        let Ok(argument_type) = scalar_type_inner(value, schema, params, Some(resolver)) else {
+    let Ok(call_arguments) = crate::scalar_call_arguments(args) else {
+        return;
+    };
+    let explicit_variadic = call_arguments
+        .iter()
+        .any(|argument| argument.explicit_variadic);
+    let mut argument_names = Vec::with_capacity(call_arguments.len());
+    let mut argument_types = Vec::with_capacity(call_arguments.len());
+    for argument in call_arguments {
+        let Ok(argument_type) = scalar_type_inner(argument.value, schema, params, Some(resolver))
+        else {
             return;
         };
-        argument_names.push(argument_name);
-        argument_types.push(super::effective_overload_argument_type(
-            value,
+        argument_names.push(argument.name.map(str::to_string));
+        argument_types.push(super::effective_overload_argument_type_with_params(
+            argument.value,
             argument_type,
+            params,
         ));
     }
-    if let Ok(Some(selected)) =
-        resolver.resolve_function_overload(name, None, &argument_names, &argument_types)
-    {
+    if let Ok(Some(selected)) = resolver.resolve_function_overload(
+        name,
+        None,
+        &argument_names,
+        &argument_types,
+        explicit_variadic,
+    ) {
         if resolver
             .is_scalar_function_binding(&selected.binding)
             .is_ok_and(|is_scalar| is_scalar)

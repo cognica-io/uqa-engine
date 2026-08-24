@@ -272,12 +272,101 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
 
 pub(super) fn routine_type_oid(type_name: &str) -> i64 {
     let canonical = canonical_routine_type_name(type_name);
+    let pseudo_type_oid = match canonical.as_str() {
+        "record" => Some(2249),
+        "cstring" => Some(2275),
+        "any" => Some(2276),
+        "anyarray" => Some(2277),
+        "void" => Some(2278),
+        "trigger" => Some(2279),
+        "internal" => Some(2281),
+        "anyelement" => Some(2283),
+        "anynonarray" => Some(2776),
+        "anyenum" => Some(3500),
+        "anyrange" => Some(3831),
+        "event_trigger" => Some(3838),
+        "anymultirange" => Some(4537),
+        "anycompatiblemultirange" => Some(4538),
+        "anycompatible" => Some(5077),
+        "anycompatiblearray" => Some(5078),
+        "anycompatiblenonarray" => Some(5079),
+        "anycompatiblerange" => Some(5080),
+        _ => None,
+    };
+    if let Some(oid) = pseudo_type_oid {
+        return oid;
+    }
     if let Ok(column_type) = ColumnType::from_sql_name(&canonical) {
         return pg_type_oid(&column_type);
     }
+    stable_oid("type", &canonical)
+}
+
+pub(super) fn routine_variadic_element_oid(type_name: &str) -> Result<i64, SQLError> {
+    let canonical = canonical_routine_type_name(type_name);
     match canonical.as_str() {
-        "void" => 2278,
-        other => stable_oid("type", other),
+        "anyarray" => return Ok(2283),
+        "anycompatiblearray" => return Ok(5077),
+        _ => {}
+    }
+    let mut element = canonical.as_str();
+    let Some(stripped) = element.strip_suffix("[]") else {
+        return Err(SQLError::Internal(format!(
+            "VARIADIC routine parameter `{type_name}` is not an array"
+        )));
+    };
+    element = stripped;
+    while let Some(stripped) = element.strip_suffix("[]") {
+        element = stripped;
+    }
+    Ok(routine_type_oid(element))
+}
+
+#[cfg(test)]
+mod routine_type_oid_tests {
+    use super::{routine_type_oid, routine_variadic_element_oid};
+
+    #[test]
+    fn postgresql_18_routine_pseudo_type_oids_are_exact() {
+        for (type_name, oid) in [
+            ("record", 2249),
+            ("cstring", 2275),
+            ("any", 2276),
+            ("anyarray", 2277),
+            ("void", 2278),
+            ("trigger", 2279),
+            ("internal", 2281),
+            ("anyelement", 2283),
+            ("anynonarray", 2776),
+            ("anyenum", 3500),
+            ("anyrange", 3831),
+            ("event_trigger", 3838),
+            ("anymultirange", 4537),
+            ("anycompatiblemultirange", 4538),
+            ("anycompatible", 5077),
+            ("anycompatiblearray", 5078),
+            ("anycompatiblenonarray", 5079),
+            ("anycompatiblerange", 5080),
+        ] {
+            assert_eq!(routine_type_oid(type_name), oid, "{type_name}");
+        }
+    }
+
+    #[test]
+    fn postgresql_18_variadic_element_oids_are_exact() {
+        for (type_name, oid) in [
+            ("integer[]", 23),
+            ("integer[][]", 23),
+            ("anyarray", 2283),
+            ("anycompatiblearray", 5077),
+        ] {
+            assert_eq!(
+                routine_variadic_element_oid(type_name).unwrap(),
+                oid,
+                "{type_name}"
+            );
+        }
+        assert!(routine_variadic_element_oid("integer").is_err());
     }
 }
 

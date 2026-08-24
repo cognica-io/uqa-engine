@@ -204,7 +204,9 @@ pub(super) fn eval_operand_borrowed<'a>(
     match expr {
         Expr::Literal(value) => Ok(Some(EvalOperand::Owned(value.clone()))),
         Expr::Param(i) => match i.checked_sub(1).and_then(|index| ctx.params.get(index)) {
-            Some(SQLParam::Scalar(value)) => Ok(Some(EvalOperand::Borrowed(value))),
+            Some(SQLParam::Scalar(value) | SQLParam::TypedScalar { value, .. }) => {
+                Ok(Some(EvalOperand::Borrowed(value)))
+            }
             Some(SQLParam::Vector(_)) | Some(SQLParam::Tensor(_)) => Ok(None),
             None => Err(SQLError::MissingParam(*i)),
         },

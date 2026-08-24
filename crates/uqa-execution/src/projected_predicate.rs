@@ -132,6 +132,7 @@ impl ProjectedPredicate {
 mod tests {
     use super::*;
     use crate::{eval_scalar, ScalarEvalContext};
+    use uqa_sql::ast::ColumnType;
     use uqa_sql::expr::truthy;
 
     #[test]
@@ -179,7 +180,10 @@ mod tests {
                 rhs: Box::new(ScalarExpr::Column("quantity".into())),
             },
         ]);
-        let params = vec![SQLParam::Scalar(Value::Int(365))];
+        let params = vec![SQLParam::typed_scalar(
+            Value::Int(365),
+            ColumnType::SmallInteger,
+        )];
         let predicate = ProjectedPredicate::compile(&q6, &fields, &params)
             .unwrap()
             .unwrap();

@@ -322,7 +322,7 @@ impl Engine {
         self.with_implicit_transaction(|engine| engine.drop_views_inner(names))
     }
 
-    fn drop_views_inner(&self, names: &[String]) -> Result<(), SQLError> {
+    pub(crate) fn drop_views_inner(&self, names: &[String]) -> Result<(), SQLError> {
         let drop_set = names
             .iter()
             .cloned()
@@ -492,6 +492,7 @@ impl Engine {
             name: canonical_name.to_string(),
             argument_types: argument_types.to_vec(),
             builtin: false,
+            invocation: None,
         };
         let mut dependents = self
             .durable

@@ -6,102 +6,127 @@
 
 //! SQL statement boundary detection and splitting.
 
-/// Byte offsets of statement-terminating semicolons: top-level `;`
-/// outside single-quoted strings, double-quoted identifiers,
-/// `$tag$ ... $tag$` dollar quoting, `--` line comments, and
-/// (nested) `/* ... */` block comments - the same lexical rules psql
-/// applies when splitting input into statements.
-pub(super) fn statement_terminator_offsets(text: &str) -> Vec<usize> {
-    let chars: Vec<(usize, char)> = text.char_indices().collect();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < chars.len() {
-        let (offset, ch) = chars[i];
-        match ch {
-            '\'' => {
-                i += 1;
-                while i < chars.len() {
-                    if chars[i].1 == '\'' {
-                        // '' is an escaped quote inside the string.
-                        if i + 1 < chars.len() && chars[i + 1].1 == '\'' {
-                            i += 2;
-                            continue;
-                        }
-                        break;
-                    }
-                    i += 1;
-                }
+use pg_query::protobuf::Token;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StatementHead {
+    Start,
+    Create,
+    CreateOr,
+    CreateOrReplace,
+    RoutineDeclaration,
+    Other,
+}
+
+impl StatementHead {
+    fn observe(self, token: Token) -> Self {
+        match (self, token) {
+            (Self::Start, Token::Create) => Self::Create,
+            (Self::Create, Token::Or) => Self::CreateOr,
+            (Self::CreateOr, Token::Replace) => Self::CreateOrReplace,
+            (Self::Create | Self::CreateOrReplace, Token::Function | Token::Procedure) => {
+                Self::RoutineDeclaration
             }
-            '"' => {
-                i += 1;
-                while i < chars.len() && chars[i].1 != '"' {
-                    i += 1;
-                }
+            (Self::RoutineDeclaration, _) => Self::RoutineDeclaration,
+            _ => Self::Other,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EndDelimitedConstruct {
+    AtomicBody,
+    CaseExpression,
+}
+
+#[derive(Debug)]
+struct StatementBoundaryScanner {
+    offsets: Vec<usize>,
+    parenthesis_depth: usize,
+    end_delimited: Vec<EndDelimitedConstruct>,
+    statement_head: StatementHead,
+    previous_token: Option<Token>,
+}
+
+impl StatementBoundaryScanner {
+    fn new() -> Self {
+        Self {
+            offsets: Vec::new(),
+            parenthesis_depth: 0,
+            end_delimited: Vec::new(),
+            statement_head: StatementHead::Start,
+            previous_token: None,
+        }
+    }
+
+    fn observe(&mut self, token: Token, offset: usize) {
+        if matches!(token, Token::SqlComment | Token::CComment) {
+            return;
+        }
+        if self.starts_atomic_body(token) {
+            self.end_delimited.push(EndDelimitedConstruct::AtomicBody);
+            self.statement_head = StatementHead::Start;
+            self.previous_token = Some(token);
+            return;
+        }
+        if !self.end_delimited.is_empty() && token == Token::Case {
+            self.end_delimited
+                .push(EndDelimitedConstruct::CaseExpression);
+        } else if !self.end_delimited.is_empty()
+            && token == Token::EndP
+            && self.end_delimited.pop() == Some(EndDelimitedConstruct::AtomicBody)
+        {
+            self.statement_head = StatementHead::Other;
+        }
+
+        match token {
+            Token::Ascii40 => self.parenthesis_depth += 1,
+            Token::Ascii41 => {
+                self.parenthesis_depth = self.parenthesis_depth.saturating_sub(1);
             }
-            '-' if i + 1 < chars.len() && chars[i + 1].1 == '-' => {
-                while i < chars.len() && chars[i].1 != '\n' {
-                    i += 1;
-                }
-                continue;
+            Token::Ascii59 if self.parenthesis_depth == 0 => {
+                self.observe_semicolon(offset);
+                return;
             }
-            '/' if i + 1 < chars.len() && chars[i + 1].1 == '*' => {
-                let mut depth = 1u32;
-                i += 2;
-                while i < chars.len() && depth > 0 {
-                    if chars[i].1 == '/' && i + 1 < chars.len() && chars[i + 1].1 == '*' {
-                        depth += 1;
-                        i += 2;
-                    } else if chars[i].1 == '*' && i + 1 < chars.len() && chars[i + 1].1 == '/' {
-                        depth -= 1;
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
-                continue;
-            }
-            '$' => {
-                // Dollar quoting: `$tag$` where tag is empty or an
-                // identifier. `$1` (a parameter) has a digit after the
-                // dollar and is not a quote delimiter.
-                let mut j = i + 1;
-                while j < chars.len()
-                    && (chars[j].1 == '_'
-                        || chars[j].1.is_ascii_alphabetic()
-                        || (j > i + 1 && chars[j].1.is_ascii_digit()))
-                {
-                    j += 1;
-                }
-                if j < chars.len() && chars[j].1 == '$' {
-                    let tag: String = chars[i..=j].iter().map(|(_, c)| *c).collect();
-                    // Scan forward for the identical closing tag; an
-                    // unterminated dollar quote consumes the rest.
-                    let mut k = j + 1;
-                    let tag_chars: Vec<char> = tag.chars().collect();
-                    let mut close = chars.len();
-                    'scan: while k < chars.len() {
-                        if chars[k].1 == '$' && k + tag_chars.len() <= chars.len() {
-                            for (t, tag_ch) in tag_chars.iter().enumerate() {
-                                if chars[k + t].1 != *tag_ch {
-                                    k += 1;
-                                    continue 'scan;
-                                }
-                            }
-                            close = k + tag_chars.len();
-                            break;
-                        }
-                        k += 1;
-                    }
-                    i = close;
-                    continue;
-                }
-            }
-            ';' => out.push(offset),
             _ => {}
         }
-        i += 1;
+        self.statement_head = self.statement_head.observe(token);
+        self.previous_token = Some(token);
     }
-    out
+
+    fn starts_atomic_body(&self, token: Token) -> bool {
+        token == Token::Atomic
+            && self.previous_token == Some(Token::BeginP)
+            && self.statement_head == StatementHead::RoutineDeclaration
+            && self.parenthesis_depth == 0
+    }
+
+    fn observe_semicolon(&mut self, offset: usize) {
+        if self.end_delimited.is_empty() {
+            self.offsets.push(offset);
+        }
+        self.statement_head = StatementHead::Start;
+        self.previous_token = None;
+    }
+}
+
+/// Byte offsets of statement-terminating semicolons according to the `PostgreSQL` 18 lexer, extended with the grammar-level nesting of SQL-standard `BEGIN ATOMIC ... END` routine bodies.
+pub(super) fn statement_terminator_offsets(text: &str) -> Vec<usize> {
+    let Ok(scanned) = pg_query::scan(text) else {
+        // A lexical error (for example, an unterminated quote) consumes the remaining input. Keeping it as one statement prevents an apparent semicolon inside that token from executing a truncated prefix.
+        return Vec::new();
+    };
+    let mut boundaries = StatementBoundaryScanner::new();
+    for scanned_token in scanned.tokens {
+        let Ok(token) = Token::try_from(scanned_token.token) else {
+            continue;
+        };
+        let Ok(offset) = usize::try_from(scanned_token.start) else {
+            continue;
+        };
+        boundaries.observe(token, offset);
+    }
+    boundaries.offsets
 }
 
 pub(super) fn split_statements(text: &str) -> Vec<String> {

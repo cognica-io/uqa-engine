@@ -59,7 +59,7 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
             };
             Ok(Expr::Func {
                 binding: None,
-                name: "__named_arg".into(),
+                name: crate::expr::NAMED_ARG_FUNCTION.into(),
                 args: vec![
                     Expr::Literal(Value::Str(arg.name.clone())),
                     compile_expr(value_node)?,

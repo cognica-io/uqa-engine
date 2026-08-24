@@ -6,12 +6,11 @@
 
 //! Set-returning expression detection and SQL context validation.
 
-use uqa_core::Value;
 use uqa_execution::{FunctionTypeResolver, RowSchema, ScalarExpr, ScalarFrameBound};
 use uqa_planner::{ProjectionPlan, QueryBlockPlan, SourcePlan};
 use uqa_sql::ast::{ColumnType, FunctionBinding};
 
-type SetFunctionArgumentSignature = (Vec<Option<String>>, Vec<Option<ColumnType>>);
+type SetFunctionArgumentSignature = (Vec<Option<String>>, Vec<Option<ColumnType>>, bool);
 use uqa_sql::{SQLError, SQLParam};
 
 use super::{CteScope, Engine, PhysicalProjection};
@@ -46,14 +45,25 @@ pub(super) fn function_may_return_set(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<bool, SQLError> {
+    if matches!(
+        name,
+        uqa_sql::expr::NAMED_ARG_FUNCTION | uqa_sql::expr::VARIADIC_ARG_FUNCTION
+    ) {
+        return Ok(false);
+    }
     if binding.is_some_and(FunctionBinding::is_polymorphic_builtin_syntax) {
         return Ok(false);
     }
     if binding.is_some_and(|binding| !binding.builtin) {
-        let (argument_names, argument_types) =
+        let (argument_names, argument_types, explicit_variadic) =
             set_function_argument_types(resolver, args, schema, params)?;
-        let function =
-            engine.resolve_static_sql_function(name, binding, &argument_names, &argument_types)?;
+        let function = engine.resolve_static_sql_function(
+            name,
+            binding,
+            &argument_names,
+            &argument_types,
+            explicit_variadic,
+        )?;
         return Ok(function.is_some_and(|function| function.def.returns_set()));
     }
     let identity = name.to_ascii_lowercase();
@@ -75,13 +85,14 @@ pub(super) fn function_may_return_set(
             }
         }
     }
-    let (argument_names, argument_types) =
+    let (argument_names, argument_types, explicit_variadic) =
         set_function_argument_types(resolver, args, schema, params)?;
     if let Some(resolved) = uqa_execution::resolve_fixed_builtin_call(
         name,
         binding,
         &argument_names,
         &argument_types,
+        explicit_variadic,
         Some(resolver),
     )? {
         if resolved.selected.binding.builtin {
@@ -92,10 +103,17 @@ pub(super) fn function_may_return_set(
             Some(&resolved.selected.binding),
             &argument_names,
             &argument_types,
+            explicit_variadic,
         )?;
         return Ok(function.is_some_and(|function| function.def.returns_set()));
     }
-    match engine.resolve_static_sql_function(name, binding, &argument_names, &argument_types) {
+    match engine.resolve_static_sql_function(
+        name,
+        binding,
+        &argument_names,
+        &argument_types,
+        explicit_variadic,
+    ) {
         Ok(function) => Ok(function.is_some_and(|function| function.def.returns_set())),
         Err(error) if binding.is_none() && error.sqlstate() == Some("42883") => {
             match uqa_execution::type_resolution::builtin_function_type(
@@ -125,41 +143,29 @@ pub(super) fn resolve_set_function_binding(
     if engine.lookup_sql_functions(name).is_none() {
         return Ok(binding.cloned());
     }
-    let (argument_names, argument_types) =
+    let (argument_names, argument_types, explicit_variadic) =
         set_function_argument_types(resolver, args, schema, params)?;
     if let Some(resolved) = uqa_execution::resolve_fixed_builtin_call(
         name,
         binding,
         &argument_names,
         &argument_types,
+        explicit_variadic,
         Some(resolver),
     )? {
         return Ok((!resolved.selected.binding.builtin).then_some(resolved.selected.binding));
     }
-    let Some(function) =
-        engine.resolve_static_sql_function(name, binding, &argument_names, &argument_types)?
+    let Some(function) = engine.resolve_static_sql_function_match(
+        name,
+        binding,
+        &argument_names,
+        &argument_types,
+        explicit_variadic,
+    )?
     else {
         return Ok(binding.cloned());
     };
-    Ok(Some(FunctionBinding {
-        name: function.def.name.clone(),
-        argument_types: crate::engine_user_functions::routine_signature_types(&function.def),
-        builtin: false,
-    }))
-}
-
-fn set_function_argument(expression: &ScalarExpr) -> (Option<String>, &ScalarExpr) {
-    let ScalarExpr::Func { name, args, .. } = expression else {
-        return (None, expression);
-    };
-    if name != uqa_sql::expr::NAMED_ARG_FUNCTION {
-        return (None, expression);
-    }
-    let argument_name = args.first().and_then(|name| match name {
-        ScalarExpr::Literal(Value::Str(name)) => Some(name.clone()),
-        _ => None,
-    });
-    (argument_name, args.get(1).unwrap_or(expression))
+    Ok(Some(function.binding()))
 }
 
 fn set_function_argument_types(
@@ -168,19 +174,27 @@ fn set_function_argument_types(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<SetFunctionArgumentSignature, SQLError> {
-    let mut argument_names = Vec::with_capacity(args.len());
-    let mut argument_types = Vec::with_capacity(args.len());
-    for argument in args {
-        let (argument_name, value) = set_function_argument(argument);
-        argument_names.push(argument_name);
-        let argument_type =
-            uqa_execution::common_context_expression_type(value, schema, params, Some(resolver))?;
-        argument_types.push(uqa_execution::effective_overload_argument_type(
-            value,
+    let call_arguments = uqa_execution::scalar_call_arguments(args)?;
+    let explicit_variadic = call_arguments
+        .iter()
+        .any(|argument| argument.explicit_variadic);
+    let mut argument_names = Vec::with_capacity(call_arguments.len());
+    let mut argument_types = Vec::with_capacity(call_arguments.len());
+    for argument in call_arguments {
+        argument_names.push(argument.name.map(str::to_string));
+        let argument_type = uqa_execution::common_context_expression_type(
+            argument.value,
+            schema,
+            params,
+            Some(resolver),
+        )?;
+        argument_types.push(uqa_execution::effective_overload_argument_type_with_params(
+            argument.value,
             argument_type,
+            params,
         ));
     }
-    Ok((argument_names, argument_types))
+    Ok((argument_names, argument_types, explicit_variadic))
 }
 
 pub(in crate::sql) fn projections_may_return_set(

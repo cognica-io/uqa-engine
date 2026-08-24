@@ -27,8 +27,14 @@ pub(super) fn resolve_overload(
     argument_types: &[Option<ColumnType>],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<ResolvedStringBinaryOverload, SQLError> {
-    let selected =
-        fixed_builtin::resolve_overload(name, binding, argument_names, argument_types, resolver)?;
+    let selected = fixed_builtin::resolve_overload(
+        name,
+        binding,
+        argument_names,
+        argument_types,
+        false,
+        resolver,
+    )?;
     if !selected.binding.builtin {
         return Ok(ResolvedStringBinaryOverload::User(selected));
     }

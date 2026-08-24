@@ -9,6 +9,39 @@ use super::*;
 mod fixed_overloads;
 
 #[test]
+fn typed_scalar_parameters_preserve_declared_width_domain_and_text_identity() {
+    let domain = ColumnType::Domain {
+        schema: "public".into(),
+        name: "positive_int".into(),
+        oid: 90_001,
+        base: Box::new(ColumnType::Integer),
+    };
+    for (ty, value) in [
+        (ColumnType::SmallInteger, Value::Int(7)),
+        (domain.clone(), Value::Int(7)),
+        (ColumnType::Text, Value::Str("seven".into())),
+    ] {
+        let parameters = [SQLParam::typed_scalar(value, ty.clone())];
+        let expression = ScalarExpr::Param(1);
+        let resolved = scalar_type(&expression, &RowSchema::default(), &parameters).unwrap();
+        assert_eq!(resolved, Some(ty.clone()));
+        assert_eq!(
+            effective_overload_argument_type_with_params(&expression, resolved, &parameters),
+            Some(ty)
+        );
+    }
+
+    let scalar = [SQLParam::scalar(Value::Str("seven".into()))];
+    let expression = ScalarExpr::Param(1);
+    let resolved = scalar_type(&expression, &RowSchema::default(), &scalar).unwrap();
+    assert_eq!(resolved, Some(ColumnType::Text));
+    assert_eq!(
+        effective_overload_argument_type_with_params(&expression, resolved, &scalar),
+        None
+    );
+}
+
+#[test]
 fn regclass_cast_preserves_postgresql_type_identity() {
     let expression = ScalarExpr::Cast {
         expr: Box::new(ScalarExpr::Literal(Value::Str("items".into()))),
@@ -113,6 +146,7 @@ fn gamma_binding_preserves_the_float8_signature_and_function_identity() {
         name: "pg_catalog.lgamma".into(),
         argument_types: vec!["double precision".into()],
         builtin: true,
+        invocation: None,
     };
     let error = resolve_gamma_overload(
         "gamma",
@@ -292,6 +326,7 @@ fn uuid_extraction_binding_uses_declared_scalar_subquery_types() {
             _binding: Option<&FunctionBinding>,
             _argument_names: &[Option<String>],
             _argument_types: &[Option<ColumnType>],
+            _explicit_variadic: bool,
         ) -> Result<Option<ColumnType>, SQLError> {
             Ok(None)
         }
@@ -804,6 +839,7 @@ fn nested_builtin_type_resolution_visits_each_argument_once() {
             _binding: Option<&FunctionBinding>,
             _argument_names: &[Option<String>],
             _argument_types: &[Option<ColumnType>],
+            _explicit_variadic: bool,
         ) -> Result<Option<ColumnType>, SQLError> {
             self.0.fetch_add(1, Ordering::Relaxed);
             Ok(Some(ColumnType::Integer))
@@ -835,6 +871,97 @@ fn nested_builtin_type_resolution_visits_each_argument_once() {
         Some(ColumnType::DoublePrecision)
     );
     assert_eq!(resolver.0.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn explicit_variadic_marker_reaches_catalog_type_resolver() {
+    struct VariadicResolver;
+
+    impl FunctionTypeResolver for VariadicResolver {
+        fn resolve_function_type(
+            &self,
+            name: &str,
+            binding: Option<&FunctionBinding>,
+            argument_names: &[Option<String>],
+            argument_types: &[Option<ColumnType>],
+            explicit_variadic: bool,
+        ) -> Result<Option<ColumnType>, SQLError> {
+            assert_eq!(name, "application.collect");
+            assert_eq!(binding, None);
+            assert_eq!(argument_names, [Some("items".into())]);
+            assert_eq!(
+                argument_types,
+                [Some(ColumnType::Array(Box::new(ColumnType::Integer)))]
+            );
+            assert!(explicit_variadic);
+            Ok(Some(ColumnType::Text))
+        }
+    }
+
+    let array = ScalarExpr::Array(vec![ScalarExpr::Literal(Value::Int(1))]);
+    let variadic = ScalarExpr::Func {
+        name: uqa_sql::expr::VARIADIC_ARG_FUNCTION.into(),
+        binding: None,
+        args: vec![array],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    let named = ScalarExpr::Func {
+        name: uqa_sql::expr::NAMED_ARG_FUNCTION.into(),
+        binding: None,
+        args: vec![ScalarExpr::Literal(Value::Str("items".into())), variadic],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    let expression = ScalarExpr::Func {
+        name: "application.collect".into(),
+        binding: None,
+        args: vec![named],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+
+    assert_eq!(
+        scalar_type_with_resolver(&expression, &RowSchema::default(), &[], &VariadicResolver,)
+            .unwrap(),
+        Some(ColumnType::Text)
+    );
+}
+
+#[test]
+fn explicit_variadic_marker_is_transparent_and_validates_call_position() {
+    let marker = |value| ScalarExpr::Func {
+        name: uqa_sql::expr::VARIADIC_ARG_FUNCTION.into(),
+        binding: None,
+        args: vec![value],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    let array = ScalarExpr::Array(vec![ScalarExpr::Literal(Value::Int(1))]);
+    assert_eq!(
+        scalar_type(&marker(array.clone()), &RowSchema::default(), &[]).unwrap(),
+        Some(ColumnType::Array(Box::new(ColumnType::Integer)))
+    );
+
+    let call = ScalarExpr::Func {
+        name: "concat".into(),
+        binding: None,
+        args: vec![
+            marker(array),
+            ScalarExpr::Literal(Value::Str("tail".into())),
+        ],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    assert!(matches!(
+        scalar_type(&call, &RowSchema::default(), &[]),
+        Err(SQLError::Internal(message)) if message.contains("final call argument")
+    ));
 }
 
 #[test]

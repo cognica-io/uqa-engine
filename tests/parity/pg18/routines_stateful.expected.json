@@ -1,0 +1,763 @@
+{
+  "schema_version": 1,
+  "fixture_sha256": "24d199e8bac8a4ade03acd470f580a402c997ba043cf011921dee3312f398454",
+  "oracle": {
+    "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
+    "server_version_num": "180004",
+    "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "age_version": "1.8.0"
+  },
+  "cases": [
+    {
+      "name": "create_schema",
+      "kind": "ok"
+    },
+    {
+      "name": "create_identity",
+      "kind": "ok"
+    },
+    {
+      "name": "create_pair",
+      "kind": "ok"
+    },
+    {
+      "name": "create_compatible",
+      "kind": "ok"
+    },
+    {
+      "name": "create_shape_element",
+      "kind": "ok"
+    },
+    {
+      "name": "create_shape_array",
+      "kind": "ok"
+    },
+    {
+      "name": "identity_bigint",
+      "kind": "rows",
+      "rows": [
+        [
+          "7",
+          "bigint"
+        ]
+      ]
+    },
+    {
+      "name": "compatible_promotes_to_bigint",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "bigint"
+        ]
+      ]
+    },
+    {
+      "name": "named_polymorphic_overloads",
+      "kind": "rows",
+      "rows": [
+        [
+          "element",
+          "array"
+        ]
+      ]
+    },
+    {
+      "name": "unresolved_polymorphic_null",
+      "kind": "error",
+      "sqlstate": "42804"
+    },
+    {
+      "name": "inconsistent_simple_family",
+      "kind": "error",
+      "sqlstate": "42883"
+    },
+    {
+      "name": "ambiguous_polymorphic_overload",
+      "kind": "error",
+      "sqlstate": "42725"
+    },
+    {
+      "name": "create_identity_view",
+      "kind": "ok"
+    },
+    {
+      "name": "identity_view_after_reopen",
+      "kind": "rows",
+      "rows": [
+        [
+          "7",
+          "bigint"
+        ]
+      ]
+    },
+    {
+      "name": "create_pack",
+      "kind": "ok"
+    },
+    {
+      "name": "create_variadic_default",
+      "kind": "ok"
+    },
+    {
+      "name": "create_choose_fixed",
+      "kind": "ok"
+    },
+    {
+      "name": "create_choose_variadic",
+      "kind": "ok"
+    },
+    {
+      "name": "pack_implicit",
+      "kind": "rows",
+      "rows": [
+        [
+          "{1,2}",
+          "integer[]"
+        ]
+      ]
+    },
+    {
+      "name": "pack_explicit",
+      "kind": "rows",
+      "rows": [
+        [
+          "{3,4}",
+          "integer[]"
+        ]
+      ]
+    },
+    {
+      "name": "pack_named_explicit",
+      "kind": "rows",
+      "rows": [
+        [
+          "{5,6}"
+        ]
+      ]
+    },
+    {
+      "name": "variadic_default_zero",
+      "kind": "rows",
+      "rows": [
+        [
+          "{9}"
+        ]
+      ]
+    },
+    {
+      "name": "variadic_default_named_explicit",
+      "kind": "rows",
+      "rows": [
+        [
+          "{7,8}"
+        ]
+      ]
+    },
+    {
+      "name": "fixed_precedes_expanded_variadic",
+      "kind": "rows",
+      "rows": [
+        [
+          "fixed",
+          "variadic"
+        ]
+      ]
+    },
+    {
+      "name": "pack_empty_without_default",
+      "kind": "error",
+      "sqlstate": "42883"
+    },
+    {
+      "name": "pack_normal_array_is_not_explicit",
+      "kind": "error",
+      "sqlstate": "42883"
+    },
+    {
+      "name": "named_variadic_requires_explicit_keyword",
+      "kind": "error",
+      "sqlstate": "42883"
+    },
+    {
+      "name": "create_zero_fixed",
+      "kind": "ok"
+    },
+    {
+      "name": "create_zero_default_variadic",
+      "kind": "ok"
+    },
+    {
+      "name": "fixed_zero_and_defaulted_variadic_are_ambiguous",
+      "kind": "error",
+      "sqlstate": "42725"
+    },
+    {
+      "name": "create_rank_fixed_array_candidate",
+      "kind": "ok"
+    },
+    {
+      "name": "create_rank_expanded_polymorphic_candidate",
+      "kind": "ok"
+    },
+    {
+      "name": "explicit_variadic_keeps_fixed_array_candidate",
+      "kind": "rows",
+      "rows": [
+        [
+          "fixed-array"
+        ]
+      ]
+    },
+    {
+      "name": "nonexplicit_named_notation_excludes_variadic",
+      "kind": "error",
+      "sqlstate": "42883"
+    },
+    {
+      "name": "create_poly_table",
+      "kind": "ok"
+    },
+    {
+      "name": "create_poly_set",
+      "kind": "ok"
+    },
+    {
+      "name": "create_plpgsql_poly_set",
+      "kind": "ok"
+    },
+    {
+      "name": "poly_table_implicit",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "bigint"
+        ],
+        [
+          "2",
+          "bigint"
+        ]
+      ]
+    },
+    {
+      "name": "poly_table_named_explicit",
+      "kind": "rows",
+      "rows": [
+        [
+          "3",
+          "bigint"
+        ],
+        [
+          "4",
+          "bigint"
+        ]
+      ]
+    },
+    {
+      "name": "poly_set_explicit",
+      "kind": "rows",
+      "rows": [
+        [
+          "9",
+          "bigint"
+        ],
+        [
+          "10",
+          "bigint"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_poly_set_implicit",
+      "kind": "rows",
+      "rows": [
+        [
+          "11",
+          "bigint"
+        ],
+        [
+          "12",
+          "bigint"
+        ]
+      ]
+    },
+    {
+      "name": "create_variadic_call_log",
+      "kind": "ok"
+    },
+    {
+      "name": "create_variadic_procedure",
+      "kind": "ok"
+    },
+    {
+      "name": "call_variadic_implicit",
+      "kind": "ok"
+    },
+    {
+      "name": "call_variadic_explicit",
+      "kind": "ok"
+    },
+    {
+      "name": "call_variadic_named_explicit",
+      "kind": "ok"
+    },
+    {
+      "name": "variadic_call_rows_and_types",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "{1,2}",
+          "integer[]"
+        ],
+        [
+          "2",
+          "{3,4}",
+          "integer[]"
+        ],
+        [
+          "3",
+          "{5,6}",
+          "integer[]"
+        ]
+      ]
+    },
+    {
+      "name": "create_generated_kind_integer",
+      "kind": "ok"
+    },
+    {
+      "name": "create_generated_kind_bigint",
+      "kind": "ok"
+    },
+    {
+      "name": "create_generated_poly_table",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_generated_poly",
+      "kind": "ok"
+    },
+    {
+      "name": "generated_poly_rows_and_types",
+      "kind": "rows",
+      "rows": [
+        [
+          "42",
+          "42",
+          "bigint",
+          "bigint"
+        ]
+      ]
+    },
+    {
+      "name": "reject_sql_record_input",
+      "kind": "error",
+      "sqlstate": "42P13"
+    },
+    {
+      "name": "allow_plpgsql_record_input",
+      "kind": "ok"
+    },
+    {
+      "name": "reject_sql_void_input",
+      "kind": "error",
+      "sqlstate": "42P13"
+    },
+    {
+      "name": "reject_sql_internal_input",
+      "kind": "error",
+      "sqlstate": "42P13"
+    },
+    {
+      "name": "reject_unbound_polymorphic_output",
+      "kind": "error",
+      "sqlstate": "42P13"
+    },
+    {
+      "name": "reject_nonarray_variadic",
+      "kind": "error",
+      "sqlstate": "42P13"
+    },
+    {
+      "name": "reject_sql_standard_polymorphic_body",
+      "kind": "error",
+      "sqlstate": "42P13"
+    },
+    {
+      "name": "plpgsql_record_catalog_identity",
+      "kind": "rows",
+      "rows": [
+        [
+          "2249",
+          "23",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_catalog_variadic_out",
+      "kind": "ok"
+    },
+    {
+      "name": "create_catalog_procedure",
+      "kind": "ok"
+    },
+    {
+      "name": "user_pg_proc_identity",
+      "kind": "rows",
+      "rows": [
+        [
+          "sf_catalog",
+          "f",
+          "23",
+          "2",
+          "1",
+          "20",
+          "f",
+          "23 1007",
+          "{23,1007,20}",
+          "{i,v,o}",
+          "{prefix,items,total}"
+        ],
+        [
+          "sf_catalog_proc",
+          "p",
+          "0",
+          "1",
+          "1",
+          "2249",
+          "f",
+          "23",
+          "{25,23}",
+          "{o,i}",
+          "{y,a}"
+        ],
+        [
+          "sf_pack",
+          "f",
+          "23",
+          "1",
+          "0",
+          "1007",
+          "f",
+          "1007",
+          "{1007}",
+          "{v}",
+          "{items}"
+        ],
+        [
+          "sf_poly_set",
+          "f",
+          "2283",
+          "1",
+          "0",
+          "2283",
+          "t",
+          "2277",
+          "{2277}",
+          "{v}",
+          "{items}"
+        ],
+        [
+          "sf_poly_table",
+          "f",
+          "5077",
+          "1",
+          "0",
+          "5077",
+          "t",
+          "5078",
+          "{5078,5077}",
+          "{v,t}",
+          "{items,item}"
+        ]
+      ]
+    },
+    {
+      "name": "create_alter_exact_integer",
+      "kind": "ok"
+    },
+    {
+      "name": "create_alter_exact_bigint",
+      "kind": "ok"
+    },
+    {
+      "name": "alter_exact_integer",
+      "kind": "ok"
+    },
+    {
+      "name": "alter_exact_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "20",
+          "v",
+          "f"
+        ],
+        [
+          "23",
+          "i",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "altered_bodies_preserved",
+      "kind": "rows",
+      "rows": [
+        [
+          "integer-body",
+          "bigint-body"
+        ]
+      ]
+    },
+    {
+      "name": "create_alter_unique",
+      "kind": "ok"
+    },
+    {
+      "name": "alter_unique_without_signature",
+      "kind": "ok"
+    },
+    {
+      "name": "alter_unique_after_reopen",
+      "kind": "rows",
+      "rows": [
+        [
+          "12",
+          "s",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "create_alter_zero",
+      "kind": "ok"
+    },
+    {
+      "name": "create_alter_zero_integer",
+      "kind": "ok"
+    },
+    {
+      "name": "alter_omitted_signature_ambiguous",
+      "kind": "error",
+      "sqlstate": "42725"
+    },
+    {
+      "name": "alter_explicit_empty_signature",
+      "kind": "ok"
+    },
+    {
+      "name": "alter_zero_bodies_and_attributes",
+      "kind": "rows",
+      "rows": [
+        [
+          "",
+          "i",
+          "t",
+          "zero-body",
+          "integer-body"
+        ],
+        [
+          "23",
+          "v",
+          "f",
+          "zero-body",
+          "integer-body"
+        ]
+      ]
+    },
+    {
+      "name": "create_alter_only_procedure",
+      "kind": "ok"
+    },
+    {
+      "name": "create_alter_only_function",
+      "kind": "ok"
+    },
+    {
+      "name": "alter_function_wrong_kind",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "alter_procedure_wrong_kind",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "alter_missing_function",
+      "kind": "error",
+      "sqlstate": "42883"
+    },
+    {
+      "name": "alter_procedure_function_attribute_error",
+      "kind": "error",
+      "sqlstate": "42P13"
+    },
+    {
+      "name": "create_alter_routine_function",
+      "kind": "ok"
+    },
+    {
+      "name": "create_alter_routine_procedure",
+      "kind": "ok"
+    },
+    {
+      "name": "alter_routine_omitted_ambiguous",
+      "kind": "error",
+      "sqlstate": "42725"
+    },
+    {
+      "name": "alter_routine_exact_function",
+      "kind": "ok"
+    },
+    {
+      "name": "alter_routine_procedure_attribute_error",
+      "kind": "error",
+      "sqlstate": "42P13"
+    },
+    {
+      "name": "alter_routine_catalog_and_body",
+      "kind": "rows",
+      "rows": [
+        [
+          "sf_alter_neutral",
+          "23",
+          "f",
+          "i",
+          "t"
+        ],
+        [
+          "sf_alter_neutral",
+          "25",
+          "p",
+          "v",
+          "f"
+        ],
+        [
+          "sf_alter_only_function",
+          "23",
+          "f",
+          "v",
+          "f"
+        ],
+        [
+          "sf_alter_only_procedure",
+          "23",
+          "p",
+          "v",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "create_cascade_polymorphic",
+      "kind": "ok"
+    },
+    {
+      "name": "create_cascade_bigint_overload",
+      "kind": "ok"
+    },
+    {
+      "name": "create_cascade_source",
+      "kind": "ok"
+    },
+    {
+      "name": "create_cascade_direct_view",
+      "kind": "ok"
+    },
+    {
+      "name": "create_cascade_nested_view",
+      "kind": "ok"
+    },
+    {
+      "name": "create_unrelated_function",
+      "kind": "ok"
+    },
+    {
+      "name": "create_unrelated_view",
+      "kind": "ok"
+    },
+    {
+      "name": "drop_polymorphic_restrict_has_dependents",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "drop_polymorphic_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "cascade_removed_generated_column",
+      "kind": "rows",
+      "rows": [
+        [
+          "x"
+        ]
+      ]
+    },
+    {
+      "name": "cascade_preserved_exact_overload_and_unrelated_view",
+      "kind": "rows",
+      "rows": [
+        [
+          "7",
+          "99"
+        ]
+      ]
+    },
+    {
+      "name": "cascade_catalog_is_bounded",
+      "kind": "rows",
+      "rows": [
+        [
+          "20"
+        ]
+      ]
+    },
+    {
+      "name": "cascade_removed_direct_view",
+      "kind": "error",
+      "sqlstate": "42P01"
+    },
+    {
+      "name": "cascade_removed_nested_view",
+      "kind": "error",
+      "sqlstate": "42P01"
+    },
+    {
+      "name": "cascade_removed_polymorphic_text_call",
+      "kind": "error",
+      "sqlstate": "42883"
+    },
+    {
+      "name": "cascade_source_remains_writable",
+      "kind": "ok"
+    },
+    {
+      "name": "cascade_source_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "eight"
+        ]
+      ]
+    },
+    {
+      "name": "create_cascade_procedure",
+      "kind": "ok"
+    },
+    {
+      "name": "drop_procedure_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "dropped_procedure_call",
+      "kind": "error",
+      "sqlstate": "42883"
+    }
+  ]
+}

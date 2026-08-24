@@ -9,8 +9,8 @@
 use super::{
     call_signature, execute_routine, output_column_names, resolve_bound_routine, resolve_routine,
     routine_local_name, routine_resolution_error, CreateFunction, DepthGuard, DropFunctionStmt,
-    Engine, FunctionBinding, FunctionReturns, Interpreter, ResultRow, SQLError, SQLResult,
-    SQLTableFunctionResult, Value,
+    Engine, FunctionBinding, FunctionReturns, Interpreter, ResolvedRoutine, ResultRow, SQLError,
+    SQLResult, SQLTableFunctionResult, Value,
 };
 
 pub(in crate::sql) fn run_create_function(
@@ -66,35 +66,71 @@ pub(in crate::sql) fn run_call(
     name: &str,
     call_args: &[(Option<String>, Value)],
     argument_types: &[Option<uqa_sql::ast::ColumnType>],
+    explicit_variadic: bool,
 ) -> Result<SQLResult, SQLError> {
-    let function =
-        match resolve_routine(engine, name, call_args, Some(argument_types), "procedure")? {
-            Some(resolved) => resolved,
-            None => {
-                return Err(routine_resolution_error(
-                    "procedure",
-                    name,
-                    call_args,
-                    "does not exist",
-                ));
-            }
-        };
-    let (function, bound) = function;
+    let function = match resolve_routine(
+        engine,
+        name,
+        call_args,
+        Some(argument_types),
+        "procedure",
+        explicit_variadic,
+    )? {
+        Some(resolved) => resolved,
+        None => {
+            return Err(routine_resolution_error(
+                "procedure",
+                name,
+                call_args,
+                "does not exist",
+            ));
+        }
+    };
+    let ResolvedRoutine {
+        function,
+        bound,
+        invocation,
+    } = function;
     if !function.def.is_procedure {
         return Err(SQLError::Routine {
             sqlstate: "42809".into(),
             message: format!("{} is not a procedure", call_signature(name, call_args)),
         });
     }
-    let outcome = execute_routine(engine, &function, bound)?;
+    let outcome = execute_routine(engine, &function, bound, &invocation)?;
     let out_params = function.def.output_params();
     if out_params.is_empty() {
         return Ok(SQLResult::empty());
     }
     let columns = output_column_names(&function.def);
-    let column_types = out_params
+    let output_indices = function
+        .def
+        .params
         .iter()
-        .map(|parameter| uqa_sql::ast::ColumnType::from_sql_name(&parameter.type_name).map(Some))
+        .enumerate()
+        .filter_map(|(index, parameter)| {
+            matches!(
+                parameter.mode,
+                uqa_sql::ast::FunctionParamMode::Out
+                    | uqa_sql::ast::FunctionParamMode::InOut
+                    | uqa_sql::ast::FunctionParamMode::Table
+            )
+            .then_some(index)
+        });
+    let column_types = output_indices
+        .map(|index| {
+            crate::sql::resolve_catalog_column_type(engine, &invocation.parameter_types[index])
+                .or_else(|| {
+                    uqa_sql::ast::ColumnType::from_sql_name(&invocation.parameter_types[index]).ok()
+                })
+                .map(Some)
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(format!(
+                        "unknown type `{}`",
+                        invocation.parameter_types[index]
+                    ))
+                })
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let mut row = ResultRow::new();
     for (column, value) in columns.iter().zip(outcome.out_values.iter()) {
@@ -116,7 +152,7 @@ pub(crate) fn call_user_scalar_function(
     name: &str,
     args: &[(Option<String>, Value)],
 ) -> Option<Result<Value, SQLError>> {
-    let resolved = match resolve_routine(engine, name, args, None, "function") {
+    let resolved = match resolve_routine(engine, name, args, None, "function", false) {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(e) => return Some(Err(e)),
@@ -148,12 +184,13 @@ fn execute_resolved_scalar_function(
     engine: &Engine,
     name: &str,
     args: &[(Option<String>, Value)],
-    resolved: (
-        std::sync::Arc<crate::engine_user_functions::SQLUserFunction>,
-        Vec<Value>,
-    ),
+    resolved: ResolvedRoutine,
 ) -> Result<Value, SQLError> {
-    let (function, bound) = resolved;
+    let ResolvedRoutine {
+        function,
+        bound,
+        invocation,
+    } = resolved;
     if function.def.is_procedure {
         return Err(SQLError::Routine {
             sqlstate: "42809".into(),
@@ -169,7 +206,7 @@ fn execute_resolved_scalar_function(
     if function.def.strict && bound.iter().any(|v| matches!(v, Value::Null)) {
         return Ok(Value::Null);
     }
-    let outcome = execute_routine(engine, &function, bound)?;
+    let outcome = execute_routine(engine, &function, bound, &invocation)?;
     let out_params = function.def.output_params();
     if outcome.out_values.len() != out_params.len() {
         return Err(SQLError::Internal(format!(
@@ -208,12 +245,12 @@ pub(crate) fn resolved_user_function_returns_set(
     name: &str,
     args: &[(Option<String>, Value)],
 ) -> Option<Result<bool, SQLError>> {
-    let resolved = match resolve_routine(engine, name, args, None, "function") {
+    let resolved = match resolve_routine(engine, name, args, None, "function", false) {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(error) => return Some(Err(error)),
     };
-    let (function, _) = resolved;
+    let function = resolved.function;
     if function.def.is_procedure {
         return Some(Err(SQLError::Routine {
             sqlstate: "42809".into(),
@@ -233,7 +270,7 @@ pub(crate) fn resolved_bound_user_function_returns_set(
         Ok(None) => return None,
         Err(error) => return Some(Err(error)),
     };
-    let (function, _) = resolved;
+    let function = resolved.function;
     if function.def.is_procedure {
         return Some(Err(SQLError::Routine {
             sqlstate: "42809".into(),
@@ -252,7 +289,7 @@ pub(crate) fn call_user_table_function(
     args: &[(Option<String>, Value)],
     record_definition: Option<AnonymousRecordDefinition<'_>>,
 ) -> Option<Result<SQLTableFunctionResult, SQLError>> {
-    let resolved = match resolve_routine(engine, name, args, None, "function") {
+    let resolved = match resolve_routine(engine, name, args, None, "function", false) {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(e) => return Some(Err(e)),
@@ -292,13 +329,14 @@ fn execute_resolved_table_function(
     engine: &Engine,
     name: &str,
     args: &[(Option<String>, Value)],
-    resolved: (
-        std::sync::Arc<crate::engine_user_functions::SQLUserFunction>,
-        Vec<Value>,
-    ),
+    resolved: ResolvedRoutine,
     record_definition: Option<AnonymousRecordDefinition<'_>>,
 ) -> Result<SQLTableFunctionResult, SQLError> {
-    let (function, bound) = resolved;
+    let ResolvedRoutine {
+        function,
+        bound,
+        invocation,
+    } = resolved;
     if function.def.is_procedure {
         return Err(SQLError::Routine {
             sqlstate: "42809".into(),
@@ -321,7 +359,7 @@ fn execute_resolved_table_function(
         };
         return Ok(SQLTableFunctionResult::new(columns, rows));
     }
-    let outcome = execute_routine(engine, &function, bound)?;
+    let outcome = execute_routine(engine, &function, bound, &invocation)?;
     if let Some((columns, types)) = record_definition {
         if !crate::engine_user_functions::routine_returns_anonymous_record(&function.def) {
             return Err(SQLError::Internal(format!(

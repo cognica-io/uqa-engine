@@ -367,21 +367,10 @@ fn expression_is_null_with_side(
             binding: _,
         } if crate::expr::builtin_scalar_function_strictness(name, args.len()) == Some(true) => {
             args.iter()
-                .map(function_argument_value)
+                .map(crate::expr::call_argument_value)
                 .any(|argument| expression_is_null_with_side(argument, qualifiers))
         }
         _ => false,
-    }
-}
-
-fn function_argument_value(expression: &Expr) -> &Expr {
-    let Expr::Func { name, args, .. } = expression else {
-        return expression;
-    };
-    if name == crate::expr::NAMED_ARG_FUNCTION {
-        args.get(1).unwrap_or(expression)
-    } else {
-        expression
     }
 }
 

@@ -144,11 +144,48 @@ An anonymous block executes without creating a durable routine identity.
 
 ## Overloads, defaults, and replacement
 
-Routine identity includes schema, name, kind, and input argument types. The engine resolves overloaded calls with implemented coercion rules and supports default and named arguments.
+Routine identity includes schema, name, and input identity argument types. Function or procedure kind is not a separate identity component, so a function and a procedure cannot coexist with the same schema, name, and input identity signature. `IN`, `INOUT`, and `VARIADIC` parameters participate in identity, pure `OUT` and `TABLE` parameters do not, and a `VARIADIC` parameter contributes its declared array type rather than its expanded element calls.
 
 Ordinary scalar SQL and PL/pgSQL, table-returning, and `SETOF` function overloads retain declared argument types from direct casts and scalar subqueries, while procedures retain direct-cast and concrete PL/pgSQL datum declarations, including typed NULL variables, until candidate selection. Named and default arguments are matched before effective-signature search-path shadowing, typed routine identities survive catalog reopen, and exact implemented information-schema domain overloads outrank their base-type overloads, including when a nested cast restores the domain at the call boundary. PostgreSQL's unqualified `COALESCE`, `GREATEST`, `LEAST`, and `NULLIF` syntax keeps built-in identity, while quoted or schema-qualified calls and ordinary function names such as `upper` and `concat` remain catalog routines selected through the search path. `SETOF` calls in a select list keep the selected scalar or set-returning signature stable through projection expansion, including when a visible user overload shadows a built-in. Table-function sources and every member of a `ROWS FROM` group keep their exact binding through UPDATE, DELETE, MERGE, correlated LATERAL execution, and stored-view serialization and reopen. A stored view owns an exact dependency on each bound user-function signature, so the default `DROP FUNCTION` RESTRICT behavior rejects removal with dependent-objects-still-exist (`2BP01`) instead of leaving the view to fall through to another overload or same-named built-in. `CALL` uses PostgreSQL's visible signature for OUT and TABLE parameters: omitting a required output placeholder reports undefined procedure (`42883`), while supplying the placeholder to a structurally matching function reports wrong object type (`42809`); PostgreSQL also rejects subqueries in `CALL` arguments.
 
+### Polymorphic and VARIADIC routines
+
+The implemented simple polymorphic family resolves `anyelement`, `anyarray`, and `anynonarray`, and the implemented compatible family resolves `anycompatible`, `anycompatiblearray`, and `anycompatiblenonarray`, for scalar and array value carriers represented by the engine. One call derives a concrete substitution shared by its input, return, `OUT`, and `TABLE` positions; compatible-family arguments first select their PostgreSQL common type. That concrete type is retained through SQL and PL/pgSQL scalar execution, `TABLE` and `SETOF` rows, `RETURN NEXT`, `CALL`, nested overloads, generated columns, stored views, and catalog reopen.
+
+A `VARIADIC` parameter must be the final input parameter and must have an array declaration. Ordinary positional calls pack trailing element arguments, while `VARIADIC array_expression` passes one array through without packing; named notation for the variadic slot likewise requires the explicit `VARIADIC` keyword. A defaulted variadic array can serve a zero-argument call, but PostgreSQL candidate ranking can still make that call ambiguous with a fixed zero-argument overload. Fixed candidates, expanded variadic candidates, explicit array calls, defaults, and search-path visibility participate in the same overload selection before execution.
+
+An unresolved polymorphic NULL reports datatype mismatch (`42804`), incompatible substitutions or an ineligible call shape report undefined function or procedure (`42883`), and equally ranked candidates report ambiguous function (`42725`). Invalid pseudo-type or variadic declarations fail before registry mutation, commonly as invalid function definition (`42P13`). User enum, range, and multirange value carriers are not yet implemented, so actual substitutions for `anyenum`, `anyrange`, `anymultirange`, `anycompatiblerange`, and `anycompatiblemultirange` remain type-system compatibility bugs rather than being treated as supported routine cases.
+
+```sql execute
+CREATE FUNCTION manual_pack(VARIADIC items INTEGER[])
+RETURNS INTEGER[]
+LANGUAGE sql
+IMMUTABLE
+AS 'SELECT $1';
+
+SELECT manual_pack(1, 2);
+SELECT manual_pack(VARIADIC ARRAY[3, 4]);
+```
+
 `CREATE OR REPLACE` replaces a compatible routine identity. It does not permit an incompatible return contract to masquerade as the same routine. Use qualified names when `search_path` could make an overload ambiguous.
+
+### Altering routine attributes
+
+`ALTER FUNCTION` and kind-neutral `ALTER ROUTINE` can change `IMMUTABLE`, `STABLE`, `VOLATILE`, `STRICT`, and `CALLED ON NULL INPUT` for an existing function without changing its identity or replacing its compiled body. An explicit signature selects one exact input identity, `()` selects only the zero-input identity, and an omitted signature succeeds only when one visible routine of the requested kind remains unambiguous. Signature types can use implemented `%TYPE` references, and resolution follows `search_path` before checking whether the selected object has the requested kind.
+
+The changed attributes are visible in `pg_proc` and survive catalog reopen. Missing, ambiguous, and wrong-kind targets fail without mutation; function-only attributes applied through `ALTER PROCEDURE` or to a procedure selected by `ALTER ROUTINE` report invalid function definition (`42P13`). Other PostgreSQL `ALTER FUNCTION`, `ALTER PROCEDURE`, and `ALTER ROUTINE` actions remain unsupported and fail explicitly.
+
+```sql execute
+CREATE FUNCTION manual_identity(value INTEGER)
+RETURNS INTEGER
+LANGUAGE sql
+VOLATILE
+CALLED ON NULL INPUT
+AS 'SELECT $1';
+
+ALTER FUNCTION manual_identity(INTEGER) STABLE STRICT;
+SELECT manual_identity(7);
+```
 
 ## Volatility and mutation
 
@@ -161,7 +198,9 @@ DROP FUNCTION add_tax(NUMERIC, NUMERIC);
 DROP PROCEDURE record_message(TEXT);
 ```
 
-Signatures disambiguate overloads. `DROP FUNCTION` uses RESTRICT behavior: an unrelated overload may be dropped, but an exact user-function signature referenced by a stored scalar expression, table-function source, `ROWS FROM` member, nested query, or generated column is retained and reports `2BP01` with its dependents. Multi-target function drops preflight every exact dependency before changing the registry, and `CREATE OR REPLACE VIEW` replaces the old view dependency set atomically. `DROP FUNCTION ... CASCADE` and `DROP PROCEDURE ... CASCADE` are not implemented and are rejected rather than removing dependents.
+Signatures disambiguate overloads. `DROP FUNCTION` uses RESTRICT behavior: an unrelated overload may be dropped, but an exact user-function signature referenced by a stored scalar expression, table-function source, `ROWS FROM` member, nested query, or generated column is retained and reports `2BP01` with its dependents. Multi-target function drops preflight every exact dependency before changing the registry, and `CREATE OR REPLACE VIEW` replaces the old view dependency set atomically.
+
+For the implemented bounded CASCADE graph, `DROP FUNCTION signature CASCADE` removes the exact routine, generated columns bound to it, directly dependent stored views, and the transitive stored views above them while retaining the base table, unrelated overloads, routines, and views. `DROP PROCEDURE signature CASCADE` removes a procedure that has no modeled dependents. Wrong-kind, missing, and RESTRICT failures are atomic, and committed removals survive reopen. PostgreSQL dependency kinds beyond generated columns and stored views, dependent-procedure graphs, multi-target CASCADE graphs, complete deletion ordering, notices, and diagnostics remain compatibility bugs tracked separately from this verified bounded slice.
 
 Durable SQL and PL/pgSQL routine definitions are restored with the catalog. Rust, Python, Node.js, and browser WASM runtime callbacks are not durable and must be registered after process start.
 

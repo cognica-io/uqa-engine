@@ -46,6 +46,48 @@ fn literal_passthrough() {
 }
 
 #[test]
+fn variadic_argument_helpers_preserve_names_and_evaluate_marker_values() {
+    let named = Expr::Func {
+        binding: None,
+        name: NAMED_ARG_FUNCTION.into(),
+        args: vec![
+            Expr::Literal(Value::Str("items".into())),
+            Expr::Literal(Value::Int(42)),
+        ],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    let named_variadic = wrap_variadic_argument(named);
+    let Expr::Func { name, args, .. } = &named_variadic else {
+        panic!("expected named argument marker");
+    };
+    assert_eq!(name, NAMED_ARG_FUNCTION);
+    assert!(matches!(
+        &args[1],
+        Expr::Func { name, .. } if name == VARIADIC_ARG_FUNCTION
+    ));
+    assert!(matches!(
+        variadic_argument_value(&named_variadic),
+        Some(Expr::Literal(Value::Int(42)))
+    ));
+    assert!(matches!(
+        call_argument_value(&named_variadic),
+        Expr::Literal(Value::Int(42))
+    ));
+
+    let positional_variadic = wrap_variadic_argument(Expr::Literal(Value::Int(7)));
+    let ctx = EvalContext::new(None, &[]);
+    assert_eq!(
+        evaluate_call_args(&[named_variadic, positional_variadic], &ctx).unwrap(),
+        vec![
+            (Some("items".into()), Value::Int(42)),
+            (None, Value::Int(7))
+        ]
+    );
+}
+
+#[test]
 fn catalog_domain_cast_resolution_flattens_source_and_target_types() {
     assert_eq!(
         cast_value_with_type_resolution(
@@ -102,6 +144,28 @@ fn param_scalar_returns_value() {
     let ctx = EvalContext::new(None, &params);
     let got = eval(&Expr::Param(1), &ctx).unwrap();
     assert_eq!(got, Value::Str("hi".into()));
+}
+
+#[test]
+fn typed_param_scalar_evaluates_the_same_value_carrier() {
+    let params = vec![SQLParam::typed_scalar(
+        Value::Int(7),
+        ColumnType::SmallInteger,
+    )];
+    let ctx = EvalContext::new(None, &params);
+    assert_eq!(eval(&Expr::Param(1), &ctx).unwrap(), Value::Int(7));
+    assert_eq!(
+        eval(
+            &Expr::Binary {
+                op: BinaryOp::Equal,
+                lhs: Box::new(Expr::Param(1)),
+                rhs: Box::new(Expr::Literal(Value::Int(7))),
+            },
+            &ctx,
+        )
+        .unwrap(),
+        Value::Bool(true)
+    );
 }
 
 #[test]

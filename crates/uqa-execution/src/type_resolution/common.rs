@@ -89,9 +89,29 @@ pub fn effective_overload_argument_type(
     }
 }
 
+/// Preserve an explicitly typed scalar parameter while retaining the legacy `unknown` treatment of untyped text-valued [`SQLParam::Scalar`] parameters.
+#[doc(hidden)]
+pub fn effective_overload_argument_type_with_params(
+    expression: &ScalarExpr,
+    resolved: Option<ColumnType>,
+    params: &[SQLParam],
+) -> Option<ColumnType> {
+    if let ScalarExpr::Param(index) = expression {
+        if index
+            .checked_sub(1)
+            .and_then(|index| params.get(index))
+            .is_some_and(|parameter| parameter.declared_scalar_type().is_some())
+        {
+            return resolved;
+        }
+    }
+    effective_overload_argument_type(expression, resolved)
+}
+
 pub(super) fn parameter_type(parameter: &SQLParam) -> Option<ColumnType> {
     match parameter {
         SQLParam::Scalar(value) => value_type(value),
+        SQLParam::TypedScalar { ty, .. } => Some(ty.clone()),
         SQLParam::Vector(values) => u32::try_from(values.len()).ok().map(ColumnType::Vector),
         SQLParam::Tensor(values) => values
             .first()

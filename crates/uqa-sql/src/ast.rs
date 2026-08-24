@@ -370,6 +370,42 @@ pub struct FunctionBinding {
     pub argument_types: Vec<String>,
     #[serde(default)]
     pub builtin: bool,
+    /// Concrete invocation contract selected during routine overload resolution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocation: Option<Box<RoutineInvocationBinding>>,
+}
+
+/// Concrete parameter and result types selected for one routine invocation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoutineInvocationBinding {
+    /// Zero-based declared parameter index for each call argument, aligned with the call argument list.
+    pub argument_positions: Vec<usize>,
+    /// Concrete coercion target for each call argument, aligned with the call argument list.
+    pub argument_targets: Vec<String>,
+    /// Concrete type for each declared parameter, aligned with [`CreateFunction::params`].
+    pub parameter_types: Vec<String>,
+    /// Concrete invocation result type after polymorphic substitution.
+    pub return_type: Option<String>,
+    /// Whether and where the declared variadic parameter participates in this invocation.
+    pub variadic_mode: RoutineVariadicMode,
+}
+
+/// Call syntax selected for a routine's variadic parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum RoutineVariadicMode {
+    /// The invocation does not use a variadic parameter.
+    #[default]
+    None,
+    /// Trailing call arguments are expanded into the declared variadic array parameter.
+    Expanded {
+        /// Zero-based index in [`CreateFunction::params`].
+        parameter_index: usize,
+    },
+    /// An explicit `VARIADIC` array argument supplies the declared variadic parameter.
+    Explicit {
+        /// Zero-based index in [`CreateFunction::params`].
+        parameter_index: usize,
+    },
 }
 
 impl FunctionBinding {
@@ -381,6 +417,7 @@ impl FunctionBinding {
             name: name.into(),
             argument_types: Vec::new(),
             builtin: true,
+            invocation: None,
         }
     }
 
@@ -619,6 +656,8 @@ pub enum FunctionParamMode {
     Out,
     /// `INOUT` - accepted as input and returned in the result row.
     InOut,
+    /// `VARIADIC` - a trailing array parameter that accepts either expanded element arguments or one explicit `VARIADIC` array argument.
+    Variadic,
     /// `RETURNS TABLE (col type, ...)` column. Behaves like an `OUT`
     /// parameter of a set-returning function.
     Table,
@@ -752,39 +791,78 @@ pub struct CreateFunction {
 }
 
 impl CreateFunction {
-    /// Number of call-signature parameters: `IN` + `INOUT` for
-    /// functions; every non-TABLE parameter for procedures (callers
-    /// pass placeholder arguments for procedure `OUT` parameters,
-    /// matching `PostgreSQL` 14+).
-    pub fn signature_arity(&self) -> usize {
+    /// Parameters that define routine identity: `IN` + `INOUT` + `VARIADIC`, in declaration order.
+    pub fn identity_params(&self) -> Vec<&FunctionParam> {
         self.params
             .iter()
-            .filter(|p| self.is_signature_param(p))
+            .filter(|param| Self::is_identity_param(param))
+            .collect()
+    }
+
+    /// Number of parameters that define routine identity.
+    pub fn identity_arity(&self) -> usize {
+        self.params
+            .iter()
+            .filter(|param| Self::is_identity_param(param))
             .count()
     }
 
-    /// Number of signature parameters without a `DEFAULT`.
-    pub fn required_arity(&self) -> usize {
+    fn is_identity_param(param: &FunctionParam) -> bool {
+        matches!(
+            param.mode,
+            FunctionParamMode::In | FunctionParamMode::InOut | FunctionParamMode::Variadic
+        )
+    }
+
+    /// Parameters supplied by a call: identity parameters for functions and every non-`TABLE` parameter for procedures.
+    pub fn call_params(&self) -> Vec<&FunctionParam> {
         self.params
             .iter()
-            .filter(|p| self.is_signature_param(p) && p.default.is_none())
+            .filter(|param| self.is_call_param(param))
+            .collect()
+    }
+
+    /// Number of declared call parameters; a variadic parameter can consume multiple actual arguments.
+    pub fn call_arity(&self) -> usize {
+        self.params
+            .iter()
+            .filter(|param| self.is_call_param(param))
             .count()
     }
 
-    fn is_signature_param(&self, p: &FunctionParam) -> bool {
-        match p.mode {
-            FunctionParamMode::In | FunctionParamMode::InOut => true,
+    /// Minimum number of actual arguments for ordinary expanded notation; a variadic parameter accepts zero elements.
+    pub fn required_call_arity(&self) -> usize {
+        self.params
+            .iter()
+            .filter(|param| {
+                self.is_call_param(param)
+                    && param.default.is_none()
+                    && param.mode != FunctionParamMode::Variadic
+            })
+            .count()
+    }
+
+    fn is_call_param(&self, param: &FunctionParam) -> bool {
+        match param.mode {
+            FunctionParamMode::In | FunctionParamMode::InOut | FunctionParamMode::Variadic => true,
             FunctionParamMode::Out => self.is_procedure,
             FunctionParamMode::Table => false,
         }
     }
 
-    /// Signature parameters in declaration order.
+    /// Backward-compatible alias for [`Self::call_arity`].
+    pub fn signature_arity(&self) -> usize {
+        self.call_arity()
+    }
+
+    /// Backward-compatible alias for [`Self::required_call_arity`].
+    pub fn required_arity(&self) -> usize {
+        self.required_call_arity()
+    }
+
+    /// Backward-compatible alias for [`Self::call_params`].
     pub fn signature_params(&self) -> Vec<&FunctionParam> {
-        self.params
-            .iter()
-            .filter(|p| self.is_signature_param(p))
-            .collect()
+        self.call_params()
     }
 
     /// Parameters that shape the result row: `OUT` + `INOUT` +
@@ -831,6 +909,33 @@ pub struct DropFunctionStmt {
     #[serde(default)]
     pub cascade: bool,
     pub items: Vec<DropFunctionItem>,
+}
+
+/// Routine namespace selected by `ALTER FUNCTION`, `ALTER PROCEDURE`, or `ALTER ROUTINE`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AlterRoutineKind {
+    Function,
+    Procedure,
+    Routine,
+}
+
+/// `ALTER FUNCTION | PROCEDURE | ROUTINE name[(input_types)] ...` with an optional exact declared input identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AlterRoutineStmt {
+    pub kind: AlterRoutineKind,
+    pub name: String,
+    /// Canonical declared input types. `PostgreSQL` excludes pure `OUT` parameters from this identity; `None` means the signature was omitted and must resolve to one visible routine of the selected kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arg_types: Option<Vec<String>>,
+    /// `%TYPE` references aligned with a specified `arg_types` vector when any identity type requires catalog resolution; an empty vector means the signature was omitted or every type is already concrete.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub arg_type_references: Vec<Option<RoutineColumnTypeReference>>,
+    /// Replacement volatility when the statement contains `IMMUTABLE`, `STABLE`, or `VOLATILE`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volatility: Option<FunctionVolatility>,
+    /// `Some(true)` for `STRICT`/`RETURNS NULL ON NULL INPUT`, `Some(false)` for `CALLED ON NULL INPUT`, and `None` when unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strict: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1211,6 +1316,8 @@ pub enum Statement {
     CreateFunction(Box<CreateFunction>),
     /// `DROP FUNCTION | PROCEDURE [IF EXISTS] name[(args)] [, ...]`.
     DropFunction(DropFunctionStmt),
+    /// `ALTER FUNCTION | PROCEDURE | ROUTINE name[(input_types)]` volatility and null-input attributes.
+    AlterRoutine(AlterRoutineStmt),
     /// `DO [LANGUAGE lang] $$ ... $$` - anonymous code block.
     DoBlock {
         language: String,

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Routine identity is `(schema, name, input types, kind)`, not name/arity.
+//! Routine identity is `(schema, name, input types)`, while call shape and expected kind are validated separately.
 
 use tempfile::TempDir;
 use uqa_core::Value;
@@ -12,6 +12,10 @@ use uqa_engine::{Engine, SQLParam};
 use uqa_sql::ast::{Expr, FunctionBinding};
 use uqa_sql::Statement;
 
+#[path = "sql_routine_identity/alter_routine.rs"]
+mod alter_routine;
+#[path = "sql_routine_identity/polymorphic_variadic.rs"]
+mod polymorphic_variadic;
 #[path = "sql_routine_identity/scalar_overloads.rs"]
 mod scalar_overloads;
 
@@ -579,6 +583,7 @@ fn builtin_set_projection_binding_survives_same_named_user_routine_family() {
         name: "pg_catalog.generate_series".into(),
         argument_types: vec!["integer".into(), "integer".into()],
         builtin: true,
+        invocation: None,
     });
     engine
         .register_view("projection_api.builtin_series", *body)
@@ -833,15 +838,11 @@ fn wrong_kind_and_cascade_drops_are_atomic_and_schema_ownership_persists() {
         assert!(collision.to_string().contains("cannot change routine kind"));
         assert_procedure_exists(&engine);
 
-        let cascade = engine
+        engine
             .sql("DROP PROCEDURE owned.keep(int) CASCADE", &[])
-            .unwrap_err();
-        assert!(
-            cascade.to_string().contains("CASCADE")
-                && cascade.to_string().contains("not supported"),
-            "unexpected DROP CASCADE error: {cascade}"
-        );
-        assert_procedure_exists(&engine);
+            .unwrap();
+        let missing = engine.sql("CALL owned.keep(1)", &[]).unwrap_err();
+        assert_eq!(missing.sqlstate(), Some("42883"), "{missing}");
 
         let nonempty_schema = engine.sql("DROP SCHEMA owned", &[]).unwrap_err();
         assert!(nonempty_schema.to_string().contains("not empty"));
@@ -850,14 +851,12 @@ fn wrong_kind_and_cascade_drops_are_atomic_and_schema_ownership_persists() {
 
     {
         let engine = Engine::open(&db).unwrap();
-        assert_procedure_exists(&engine);
+        let missing = engine.sql("CALL owned.keep(1)", &[]).unwrap_err();
+        assert_eq!(missing.sqlstate(), Some("42883"), "{missing}");
         assert_function_exists(&engine);
         let nonempty_schema = engine.sql("DROP SCHEMA owned", &[]).unwrap_err();
         assert!(nonempty_schema.to_string().contains("not empty"));
 
-        engine
-            .sql("DROP PROCEDURE owned.keep(integer)", &[])
-            .unwrap();
         engine
             .sql("DROP FUNCTION owned.keep_fn(integer)", &[])
             .unwrap();

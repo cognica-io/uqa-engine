@@ -81,6 +81,7 @@ fn non_fixed_udf_introspection_retains_the_resolver_binding() {
             _binding: Option<&FunctionBinding>,
             _argument_names: &[Option<String>],
             _argument_types: &[Option<ColumnType>],
+            _explicit_variadic: bool,
         ) -> Result<Option<ColumnType>, SQLError> {
             Ok(None)
         }
@@ -91,11 +92,13 @@ fn non_fixed_udf_introspection_retains_the_resolver_binding() {
             binding: Option<&FunctionBinding>,
             argument_names: &[Option<String>],
             argument_types: &[Option<ColumnType>],
+            explicit_variadic: bool,
         ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
             assert_eq!(name, "stable_udf");
             assert_eq!(binding, None);
             assert_eq!(argument_names, [None]);
             assert_eq!(argument_types, [Some(ColumnType::Integer)]);
+            assert!(!explicit_variadic);
             Ok(Some(ResolvedFunctionOverload {
                 binding: self.binding.clone(),
                 return_type: ColumnType::Text,
@@ -117,6 +120,7 @@ fn non_fixed_udf_introspection_retains_the_resolver_binding() {
             name: "application.stable_udf".into(),
             argument_types: vec!["integer".into()],
             builtin: false,
+            invocation: None,
         },
     };
     let parameters = [SQLParam::Scalar(Value::Int(7))];
@@ -145,6 +149,77 @@ fn non_fixed_udf_introspection_retains_the_resolver_binding() {
 }
 
 #[test]
+fn non_fixed_udf_introspection_keeps_typed_text_distinct_from_unknown() {
+    struct TypedTextResolver;
+
+    impl FunctionTypeResolver for TypedTextResolver {
+        fn resolve_function_type(
+            &self,
+            _name: &str,
+            _binding: Option<&FunctionBinding>,
+            _argument_names: &[Option<String>],
+            _argument_types: &[Option<ColumnType>],
+            _explicit_variadic: bool,
+        ) -> Result<Option<ColumnType>, SQLError> {
+            Ok(None)
+        }
+
+        fn resolve_function_overload(
+            &self,
+            _name: &str,
+            _binding: Option<&FunctionBinding>,
+            _argument_names: &[Option<String>],
+            argument_types: &[Option<ColumnType>],
+            _explicit_variadic: bool,
+        ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
+            assert_eq!(argument_types, [Some(ColumnType::Text)]);
+            Ok(Some(ResolvedFunctionOverload {
+                binding: FunctionBinding {
+                    name: "application.typed_text".into(),
+                    argument_types: vec!["text".into()],
+                    builtin: false,
+                    invocation: None,
+                },
+                return_type: ColumnType::Text,
+                exact_matches: 1,
+                known_arguments: 1,
+                preferred_matches: 0,
+                precedes_pg_catalog: true,
+            }))
+        }
+
+        fn is_scalar_function_binding(&self, _binding: &FunctionBinding) -> Result<bool, SQLError> {
+            Ok(true)
+        }
+    }
+
+    let expression = ScalarExpr::Func {
+        name: "typed_text".into(),
+        binding: None,
+        args: vec![ScalarExpr::Param(1)],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    let parameters = [SQLParam::typed_scalar(
+        Value::Str("value".into()),
+        ColumnType::Text,
+    )];
+    assert!(matches!(
+        bind_type_introspection_with_resolver(
+            expression,
+            &RowSchema::default(),
+            &parameters,
+            &TypedTextResolver,
+        ),
+        ScalarExpr::Func {
+            binding: Some(_),
+            ..
+        }
+    ));
+}
+
+#[test]
 fn scalar_introspection_rejects_non_scalar_catalog_bindings() {
     struct NonScalarResolver {
         binding: FunctionBinding,
@@ -157,6 +232,7 @@ fn scalar_introspection_rejects_non_scalar_catalog_bindings() {
             _binding: Option<&FunctionBinding>,
             _argument_names: &[Option<String>],
             _argument_types: &[Option<ColumnType>],
+            _explicit_variadic: bool,
         ) -> Result<Option<ColumnType>, SQLError> {
             Ok(None)
         }
@@ -167,6 +243,7 @@ fn scalar_introspection_rejects_non_scalar_catalog_bindings() {
             _binding: Option<&FunctionBinding>,
             _argument_names: &[Option<String>],
             _argument_types: &[Option<ColumnType>],
+            _explicit_variadic: bool,
         ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
             Ok(Some(ResolvedFunctionOverload {
                 binding: self.binding.clone(),
@@ -190,6 +267,7 @@ fn scalar_introspection_rejects_non_scalar_catalog_bindings() {
                 name: format!("application.{routine_name}"),
                 argument_types: vec!["integer".into()],
                 builtin: false,
+                invocation: None,
             },
         };
         let expression = ScalarExpr::Func {
@@ -224,6 +302,7 @@ fn scalar_introspection_does_not_resolve_builtin_aggregates_as_catalog_functions
             _binding: Option<&FunctionBinding>,
             _argument_names: &[Option<String>],
             _argument_types: &[Option<ColumnType>],
+            _explicit_variadic: bool,
         ) -> Result<Option<ColumnType>, SQLError> {
             panic!("aggregate introspection must not query scalar function types")
         }
@@ -234,6 +313,7 @@ fn scalar_introspection_does_not_resolve_builtin_aggregates_as_catalog_functions
             _binding: Option<&FunctionBinding>,
             _argument_names: &[Option<String>],
             _argument_types: &[Option<ColumnType>],
+            _explicit_variadic: bool,
         ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
             panic!("aggregate introspection must not bind a scalar catalog function")
         }

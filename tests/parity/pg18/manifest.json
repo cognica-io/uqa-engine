@@ -6,6 +6,7 @@
     "major": 18,
     "verified_patch": "18.4",
     "differential_probes": "tests/parity/pg18/probes.sql",
+    "stateful_routines": "tests/parity/pg18/routines_stateful.expected.json",
     "tpch_fixture": "benchmarks/tpch/expected/pg18.json"
   },
   "parser_chain": {
@@ -93,9 +94,12 @@
       "types.declared-identity-casts-and-catalog",
       "ddl.alter-type-and-migration",
       "catalog.pg-database-locale",
+      "catalog.user-routine-pseudotype-variadic-identity",
       "ddl.generated-columns",
       "ddl.temporal-constraints",
-      "routines.function-procedure-drop-cascade"
+      "routines.alter-volatility-null-input-lifecycle",
+      "routines.function-procedure-drop-cascade",
+      "routines.function-procedure-drop-cascade-extended"
     ],
     "M4": [
       "dml.returning-row-images-extended",
@@ -104,6 +108,7 @@
       "query.cte-search-cycle-and-materialization",
       "functions.full-pg18-matrix",
       "routines.polymorphic-variadic-pseudotype-overloads",
+      "routines.extension-language-privilege-security",
       "plpgsql.datum-slots-and-bound-cursors",
       "graph.age-default-label-drop",
       "regression.core-and-isolation"
@@ -359,19 +364,51 @@
     },
     {
       "id": "routines.polymorphic-variadic-pseudotype-overloads",
-      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE function type-resolution, polymorphic type, variadic function, pseudo-type, CREATE FUNCTION, CREATE PROCEDURE, CALL, and table-function behavior",
-      "uqa_test": "cargo test -p uqa-execution --lib type_resolution::; cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::; cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::; cargo test -p uqa-engine --test integration engine_functions::sql_table_functions::",
-      "supported_version": "Fixed-signature and implemented concrete scalar SQL, scalar PL/pgSQL, procedure, CALL, TABLE, SETOF, builtin-user, search-path, and stored-binding overload slices recorded by adjacent verified items",
-      "status": "partial",
-      "open_issue": "Polymorphic substitution, variadic expansion and array preference, pseudo-type eligibility, cross-kind ambiguity, extension-language and privilege interactions, durable binding, and pg_proc identity must be completed across every routine execution context."
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live stateful routine results, declared types, rows, errors, and SQLSTATEs plus function type-resolution, polymorphic type, variadic function, pseudo-type, CREATE FUNCTION, CREATE PROCEDURE, CALL, and table-function documentation",
+      "uqa_test": "python3 tests/parity/pg18/run_routines_stateful.py; cargo test -p uqa-sql --lib compiler::tests::routines::; cargo test -p uqa-execution --lib type_resolution::routine_signature::tests::; cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::polymorphic_variadic::; cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::; cargo test -p uqa-engine --test integration engine_functions::sql_table_functions::",
+      "supported_version": "PostgreSQL 18.4 simple and compatible polymorphic substitution for implemented scalar and array carriers; concrete and polymorphic VARIADIC expansion, explicit array pass-through, defaults, named notation, fixed-candidate ranking, and declared-array identity; SQL and PL/pgSQL scalar, TABLE, SETOF, CALL, nested-call, generated-column, stored-view, and reopen execution with concrete result types; pseudo-type declaration validation and exact 42804, 42883, 42725, and 42P13 boundaries",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "catalog.user-routine-pseudotype-variadic-identity",
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live pg_proc rows for user SQL functions and PL/pgSQL procedures with input, OUT, TABLE, defaults, VARIADIC, and polymorphic pseudo-types",
+      "uqa_test": "python3 tests/parity/pg18/run_routines_stateful.py; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::pg18_routines::postgresql_18_user_routine_catalog_preserves_argument_modes_and_type_oids",
+      "supported_version": "PostgreSQL 18.4 user-routine pg_proc identity for functions and procedures, including input-only proargtypes identity, proallargtypes, proargmodes, proargnames, pronargs, pronargdefaults, proargdefaults, provariadic element OIDs, prorettype, proretset, and implemented pseudo-type OIDs",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "routines.alter-volatility-null-input-lifecycle",
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live ALTER FUNCTION, ALTER PROCEDURE, and ALTER ROUTINE identity, catalog, body-preservation, error, and SQLSTATE behavior",
+      "uqa_test": "python3 tests/parity/pg18/run_routines_stateful.py; cargo test -p uqa-sql --lib compiler::tests::routines::; cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::alter_routine::",
+      "supported_version": "PostgreSQL 18.4 ALTER FUNCTION and ALTER ROUTINE changes to IMMUTABLE, STABLE, VOLATILE, STRICT, and CALLED ON NULL INPUT with exact, explicit-empty, and omitted identity resolution, %TYPE references, search-path and kind errors, unchanged compiled bodies, pg_proc updates, atomic failures, and durable reopen behavior; procedure-only attempts to change function attributes report 42P13",
+      "status": "verified",
+      "open_issue": null
     },
     {
       "id": "routines.function-procedure-drop-cascade",
-      "postgresql_reference": "PostgreSQL 18.4 DROP FUNCTION, DROP PROCEDURE, and dependency-tracking documentation and live CASCADE behavior",
-      "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::wrong_kind_and_cascade_drops_are_atomic_and_schema_ownership_persists",
-      "supported_version": "Exact-signature DROP FUNCTION RESTRICT dependency checks and ordinary DROP PROCEDURE without dependent-object removal",
-      "status": "explicitly_rejected",
-      "open_issue": "DROP FUNCTION CASCADE and DROP PROCEDURE CASCADE are rejected and must remove the exact routine and every dependent object atomically with PostgreSQL 18 dependency ordering, diagnostics, and durable catalog behavior."
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live DROP FUNCTION, DROP PROCEDURE, and dependency-tracking behavior for generated columns, direct and transitive views, unrelated overloads, and durable catalogs",
+      "uqa_test": "python3 tests/parity/pg18/run_routines_stateful.py; cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::polymorphic_variadic::drop_function_cascade_removes_exact_polymorphic_views_and_generated_columns; cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::wrong_kind_and_cascade_drops_are_atomic_and_schema_ownership_persists",
+      "supported_version": "PostgreSQL 18.4 bounded exact-signature DROP FUNCTION CASCADE removal of dependent generated columns and direct or transitive stored views while retaining the table, unrelated routines, overloads, and views; no-dependent DROP PROCEDURE CASCADE; wrong-kind and RESTRICT failures are atomic and committed removals survive reopen",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "routines.function-procedure-drop-cascade-extended",
+      "postgresql_reference": "PostgreSQL 18.4 dependency catalogs, DROP FUNCTION and DROP PROCEDURE documentation, and live CASCADE ordering and diagnostics for every routine-dependent object kind",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::; python3 tests/parity/pg18/run_routines_stateful.py",
+      "supported_version": "The bounded generated-column, direct-view, transitive-view, unrelated-object, no-dependent-procedure, failure-atomicity, and durable-reopen slice recorded by routines.function-procedure-drop-cascade",
+      "status": "partial",
+      "open_issue": "Routine dependencies through every remaining PostgreSQL object kind, dependent procedures, multi-target CASCADE graphs, catalog deletion ordering, notices, and complete diagnostics remain to be implemented and differentially verified."
+    },
+    {
+      "id": "routines.extension-language-privilege-security",
+      "postgresql_reference": "PostgreSQL 18.4 CREATE, ALTER, execution, and catalog behavior for procedural and extension languages, ownership, roles, ACLs, SECURITY DEFINER and INVOKER, SET clauses, support functions, leakproofness, parallel safety, and routine configuration",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::; cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::",
+      "supported_version": "Implemented SQL and PL/pgSQL routines execute without a PostgreSQL server role or extension-language privilege model; unsupported declaration and ALTER actions fail explicitly",
+      "status": "partial",
+      "open_issue": "Extension languages, ownership changes, roles, ACLs, SECURITY DEFINER and INVOKER semantics, routine SET configuration, support functions, leakproofness, parallel safety, and their catalog and execution consequences remain."
     },
     {
       "id": "functions.json-null-stripping",
@@ -467,7 +504,7 @@
       "uqa_test": "cargo test -p uqa-sql expr::casting::tests; cargo test -p uqa-engine --test integration engine_functions::pg18_semantics::; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::",
       "supported_version": "Implemented scalar width identities, source-sensitive OID/XID/bytea casts, PostgreSQL space-separated int2vector/oidvector text and COPY output, built-in/domain/pseudo/composite pg_type metadata, and information_schema_catalog_name identity",
       "status": "partial",
-      "open_issue": "The full assignment-cast matrix, pg_proc rows for every type I/O routine, collations, user composites, enums, ranges, typmods, domain constraints, and binary formats remain."
+      "open_issue": "The full assignment-cast matrix, pg_proc rows for every type I/O routine, collations, user composites, enums, ranges, multiranges, typmods, domain constraints, binary formats, and the concrete carriers needed to execute anyenum, anyrange, anymultirange, anycompatiblerange, and anycompatiblemultirange substitutions remain."
     },
     {
       "id": "ddl.alter-type-and-migration",

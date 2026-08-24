@@ -40,6 +40,10 @@ fn pg18_reverse_preserves_text_and_bytea_overloads() {
         scalar(&eng, "SELECT pg_catalog.reverse('abc')"),
         Value::Str("cba".into())
     );
+    assert_eq!(
+        scalar(&eng, "SELECT pg_catalog.reverse(VARIADIC 'abc'::text)"),
+        Value::Str("cba".into())
+    );
 
     let text_param = eng
         .sql(

@@ -395,6 +395,7 @@ pub enum CommandPlan {
     Merge(Box<MergePlan>),
     CreateFunction(Box<uqa_sql::ast::CreateFunction>),
     DropFunction(uqa_sql::ast::DropFunctionStmt),
+    AlterRoutine(uqa_sql::ast::AlterRoutineStmt),
     DoBlock {
         language: String,
         body: String,

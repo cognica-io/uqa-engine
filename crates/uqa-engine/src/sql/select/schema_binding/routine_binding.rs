@@ -14,20 +14,6 @@ use super::{
 use uqa_execution::FunctionTypeResolver;
 use uqa_sql::ast::FunctionBinding;
 
-fn named_argument(expression: &ScalarExpr) -> (Option<String>, &ScalarExpr) {
-    let ScalarExpr::Func { name, args, .. } = expression else {
-        return (None, expression);
-    };
-    if name != uqa_sql::expr::NAMED_ARG_FUNCTION {
-        return (None, expression);
-    }
-    let name = args.first().and_then(|name| match name {
-        ScalarExpr::Literal(uqa_core::Value::Str(name)) => Some(name.clone()),
-        _ => None,
-    });
-    (name, args.get(1).unwrap_or(expression))
-}
-
 impl SchemaScope {
     fn bind_query_routines_for_storage(
         &mut self,
@@ -415,7 +401,10 @@ impl SchemaScope {
             else {
                 return;
             };
-            if name == uqa_sql::expr::NAMED_ARG_FUNCTION {
+            if matches!(
+                name.as_str(),
+                uqa_sql::expr::NAMED_ARG_FUNCTION | uqa_sql::expr::VARIADIC_ARG_FUNCTION
+            ) {
                 return;
             }
             if let Err(error) = self.bind_scalar_function_for_storage(
@@ -450,20 +439,24 @@ impl SchemaScope {
         let resolver = resolver
             .as_ref()
             .map_or(engine as &dyn FunctionTypeResolver, |resolver| resolver);
-        let mut argument_names = Vec::with_capacity(args.len());
-        let mut argument_types = Vec::with_capacity(args.len());
-        for argument in args {
-            let (argument_name, value) = named_argument(argument);
+        let call_arguments = uqa_execution::scalar_call_arguments(args)?;
+        let explicit_variadic = call_arguments
+            .iter()
+            .any(|argument| argument.explicit_variadic);
+        let mut argument_names = Vec::with_capacity(call_arguments.len());
+        let mut argument_types = Vec::with_capacity(call_arguments.len());
+        for argument in call_arguments {
             let argument_type = uqa_execution::common_context_expression_type(
-                value,
+                argument.value,
                 schema,
                 params,
                 Some(resolver),
             )?;
-            argument_names.push(argument_name);
-            argument_types.push(uqa_execution::effective_overload_argument_type(
-                value,
+            argument_names.push(argument.name.map(str::to_string));
+            argument_types.push(uqa_execution::effective_overload_argument_type_with_params(
+                argument.value,
                 argument_type,
+                params,
             ));
         }
         let selected = if uqa_execution::is_fixed_builtin(name) {
@@ -472,6 +465,7 @@ impl SchemaScope {
                 binding.as_ref(),
                 &argument_names,
                 &argument_types,
+                explicit_variadic,
                 Some(resolver),
             )?
             .map(|resolved| resolved.selected)
@@ -481,6 +475,7 @@ impl SchemaScope {
                 binding.as_ref(),
                 &argument_names,
                 &argument_types,
+                explicit_variadic,
             )?
         };
         if let Some(selected) = selected {

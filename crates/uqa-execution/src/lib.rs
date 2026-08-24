@@ -110,8 +110,10 @@ pub use relational::{
     Sort, SortKey, Window, WindowExecutor, WindowKind,
 };
 pub use scalar::{
-    eval_call_arguments, eval_scalar, ScalarEvalContext, ScalarExpr, ScalarFrameBound, ScalarOrder,
-    ScalarSubqueryRunner, ScalarWindowFrame, ScalarWindowSpec, SubqueryId, SubqueryResult,
+    eval_call_arguments, eval_scalar, scalar_call_argument, scalar_call_arguments,
+    validate_scalar_call_arguments, ScalarCallArgument, ScalarEvalContext, ScalarExpr,
+    ScalarFrameBound, ScalarOrder, ScalarSubqueryRunner, ScalarWindowFrame, ScalarWindowSpec,
+    SubqueryId, SubqueryResult,
 };
 pub use scan::{RowIteratorScan, RowSource, TableScan};
 pub use scope_overlay::ScopeOverlay;
@@ -132,10 +134,15 @@ pub use type_resolution::{
 #[doc(hidden)]
 pub use type_resolution::{
     builtin_binding_matches, builtin_name_matches, canonical_column_type_name,
-    canonical_routine_type_name, effective_overload_argument_type, fixed_builtin_return_type,
+    canonical_routine_type_name, effective_overload_argument_type,
+    effective_overload_argument_type_with_params, fixed_builtin_return_type,
     function_resolution_error, is_fixed_builtin, match_builtin_function_overload,
-    match_function_signature, rank_function_matches, resolve_fixed_builtin_call,
-    resolve_local_builtin_overload, routine_type_accepts_implicit_cast, routine_type_category,
-    routine_type_is_preferred, FunctionParameterDescriptor, MatchedBuiltinFunction,
-    MatchedFunctionSignature, RankedFunctionMatch, ResolvedFixedBuiltinCall,
+    match_function_signature, match_routine_signature, rank_function_matches,
+    resolve_fixed_builtin_call, resolve_local_builtin_overload, routine_polymorphic_type,
+    routine_type_accepts_implicit_cast, routine_type_category, routine_type_is_preferred,
+    FunctionParameterDescriptor, MatchedBuiltinFunction, MatchedFunctionSignature,
+    MatchedRoutineSignature, RankedFunctionMatch, ResolvedFixedBuiltinCall, RoutineCallDescriptor,
+    RoutineCoercionTarget, RoutineParameterDescriptor, RoutinePolymorphicFamily,
+    RoutinePolymorphicType, RoutineSignatureMatchError, RoutineTypeSubstitutions,
+    RoutineVariadicMode, RoutineVariadicPlan,
 };

@@ -15,7 +15,7 @@ use uqa_sql::expr::{
 };
 use uqa_sql::{SQLError, SQLParam};
 
-use crate::{RowSchema, ScalarExpr};
+use crate::{scalar_call_arguments, RowSchema, ScalarExpr};
 
 use super::common::base_type;
 use super::functions::{named_argument, named_argument_value};
@@ -47,12 +47,20 @@ pub fn resolve_fixed_builtin_call(
     binding: Option<&FunctionBinding>,
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
+    explicit_variadic: bool,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ResolvedFixedBuiltinCall>, SQLError> {
     let Some(builtins) = overloads(name) else {
         return Ok(None);
     };
-    let selected = resolve_overload(name, binding, argument_names, argument_types, resolver)?;
+    let selected = resolve_overload(
+        name,
+        binding,
+        argument_names,
+        argument_types,
+        explicit_variadic,
+        resolver,
+    )?;
     let (builtin_argument_positions, builtin_volatile) = if selected.binding.builtin {
         let matched = builtins
             .iter()
@@ -97,12 +105,21 @@ pub(super) fn resolve_type(
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
     argument_types: &[Option<ColumnType>],
+    explicit_variadic: bool,
+    params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {
     let argument_names = argument_names(args);
-    let argument_types = effective_argument_types(args, argument_types);
-    resolve_overload(name, binding, &argument_names, &argument_types, resolver)
-        .map(|overload| Some(overload.return_type))
+    let argument_types = effective_argument_types(args, argument_types, params);
+    resolve_overload(
+        name,
+        binding,
+        &argument_names,
+        &argument_types,
+        explicit_variadic,
+        resolver,
+    )
+    .map(|overload| Some(overload.return_type))
 }
 
 pub(super) fn resolve_overload(
@@ -110,6 +127,7 @@ pub(super) fn resolve_overload(
     binding: Option<&FunctionBinding>,
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
+    explicit_variadic: bool,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<ResolvedFunctionOverload, SQLError> {
     uqa_sql::expr::validate_named_argument_order(argument_names.iter().map(Option::as_deref))?;
@@ -128,10 +146,20 @@ pub(super) fn resolve_overload(
             binding,
             argument_names,
             argument_types,
+            explicit_variadic,
             &builtins,
         )? {
             return Ok(selected);
         }
+    }
+    if explicit_variadic && argument_names.iter().any(Option::is_some) {
+        return Err(super::function_resolution_error(
+            "42883",
+            name,
+            argument_names,
+            argument_types,
+            "does not exist",
+        ));
     }
     resolve_local_builtin_overload(name, binding, argument_names, argument_types, &builtins)
 }
@@ -141,7 +169,8 @@ pub(super) fn selected_argument_targets(
     argument_types: &[Option<ColumnType>],
 ) -> Option<Vec<Option<ColumnType>>> {
     let argument_names = vec![None; argument_types.len()];
-    let selected = resolve_overload(name, None, &argument_names, argument_types, None).ok()?;
+    let selected =
+        resolve_overload(name, None, &argument_names, argument_types, false, None).ok()?;
     let declared = selected
         .binding
         .argument_types
@@ -166,16 +195,29 @@ pub(super) fn bind_call(
     let Some(builtins) = overloads(&name) else {
         return name;
     };
-    let Ok(argument_types) = args
+    let Ok(call_arguments) = scalar_call_arguments(args) else {
+        return name;
+    };
+    let explicit_variadic = call_arguments
         .iter()
-        .map(|argument| scalar_type_inner(named_argument_value(argument), schema, params, resolver))
+        .any(|argument| argument.explicit_variadic);
+    let Ok(argument_types) = call_arguments
+        .iter()
+        .map(|argument| scalar_type_inner(argument.value, schema, params, resolver))
         .collect::<Result<Vec<_>, _>>()
     else {
         return name;
     };
     let names = argument_names(args);
-    let argument_types = effective_argument_types(args, &argument_types);
-    let selected = resolve_overload(&name, binding.as_ref(), &names, &argument_types, resolver);
+    let argument_types = effective_argument_types(args, &argument_types, params);
+    let selected = resolve_overload(
+        &name,
+        binding.as_ref(),
+        &names,
+        &argument_types,
+        explicit_variadic,
+        resolver,
+    );
     let selected = match selected {
         Ok(selected) => selected,
         Err(error) if error.sqlstate() == Some("42883") => {
@@ -328,12 +370,17 @@ fn argument_names(args: &[ScalarExpr]) -> Vec<Option<String>> {
 fn effective_argument_types(
     args: &[ScalarExpr],
     argument_types: &[Option<ColumnType>],
+    params: &[SQLParam],
 ) -> Vec<Option<ColumnType>> {
     args.iter()
         .zip(argument_types)
         .map(|(argument, argument_type)| {
             let argument = named_argument_value(argument);
-            super::effective_overload_argument_type(argument, argument_type.clone())
+            super::effective_overload_argument_type_with_params(
+                argument,
+                argument_type.clone(),
+                params,
+            )
         })
         .collect()
 }

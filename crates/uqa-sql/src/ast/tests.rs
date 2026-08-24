@@ -4,7 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{AlterSequence, ColumnType, FunctionBinding, SequenceRestart, Statement};
+use super::{
+    AlterSequence, ColumnType, CreateFunction, FunctionBinding, FunctionBody, FunctionParam,
+    FunctionParamMode, FunctionReturns, FunctionVolatility, RoutineInvocationBinding,
+    RoutineVariadicMode, SequenceRestart, Statement,
+};
 
 #[test]
 fn regclass_scalar_and_array_names_preserve_type_identity() {
@@ -72,6 +76,7 @@ fn function_binding_builtin_identity_is_backward_compatible() {
         name: "pg_catalog.reverse".into(),
         argument_types: vec!["text".into()],
         builtin: true,
+        invocation: None,
     };
     let encoded = serde_json::to_string(&builtin).unwrap();
     assert!(encoded.contains(r#""builtin":true"#));
@@ -104,8 +109,96 @@ fn polymorphic_builtin_syntax_binding_has_stable_serde_shape() {
         name: "coalesce".into(),
         argument_types: vec!["text".into(), "text".into()],
         builtin: true,
+        invocation: None,
     };
     assert!(!fixed.is_polymorphic_builtin_syntax());
+}
+
+#[test]
+fn routine_invocation_binding_round_trips_and_legacy_bindings_default_to_none() {
+    let legacy: FunctionBinding =
+        serde_json::from_str(r#"{"name":"app.f","argument_types":["anyelement"]}"#).unwrap();
+    assert!(legacy.invocation.is_none());
+
+    let binding = FunctionBinding {
+        name: "app.f".into(),
+        argument_types: vec!["anyelement".into(), "anyarray".into()],
+        builtin: false,
+        invocation: Some(Box::new(RoutineInvocationBinding {
+            argument_positions: vec![0, 1],
+            argument_targets: vec!["integer".into(), "integer[]".into()],
+            parameter_types: vec!["integer".into(), "integer[]".into()],
+            return_type: Some("integer".into()),
+            variadic_mode: RoutineVariadicMode::Explicit { parameter_index: 1 },
+        })),
+    };
+    let encoded = serde_json::to_value(&binding).unwrap();
+    assert_eq!(
+        encoded["invocation"]["variadic_mode"],
+        serde_json::json!({ "Explicit": { "parameter_index": 1 } })
+    );
+    assert_eq!(
+        serde_json::from_value::<FunctionBinding>(encoded).unwrap(),
+        binding
+    );
+}
+
+#[test]
+fn routine_identity_and_call_parameters_are_distinct() {
+    let param = |name: &str, mode| FunctionParam {
+        name: name.into(),
+        type_name: "integer".into(),
+        type_reference: None,
+        mode,
+        default: None,
+    };
+    let function = CreateFunction {
+        name: "f".into(),
+        or_replace: false,
+        is_procedure: false,
+        params: vec![
+            param("input", FunctionParamMode::In),
+            param("output", FunctionParamMode::Out),
+            param("inout", FunctionParamMode::InOut),
+            param("rest", FunctionParamMode::Variadic),
+            param("table_column", FunctionParamMode::Table),
+        ],
+        returns: FunctionReturns::None,
+        return_type_reference: None,
+        language: "sql".into(),
+        body: FunctionBody::Statements(Vec::new()),
+        volatility: FunctionVolatility::Volatile,
+        strict: false,
+    };
+
+    let identity_names = function
+        .identity_params()
+        .into_iter()
+        .map(|param| param.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(identity_names, ["input", "inout", "rest"]);
+    assert_eq!(function.identity_arity(), 3);
+    let function_call_names = function
+        .call_params()
+        .into_iter()
+        .map(|param| param.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(function_call_names, identity_names);
+    assert_eq!(function.call_arity(), 3);
+    assert_eq!(function.required_call_arity(), 2);
+    assert_eq!(function.signature_arity(), function.call_arity());
+
+    let mut procedure = function.clone();
+    procedure.is_procedure = true;
+    let procedure_call_names = procedure
+        .call_params()
+        .into_iter()
+        .map(|param| param.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(procedure_call_names, ["input", "output", "inout", "rest"]);
+    assert_eq!(procedure.identity_arity(), 3);
+    assert_eq!(procedure.call_arity(), 4);
+    assert_eq!(procedure.required_call_arity(), 3);
 }
 
 #[test]

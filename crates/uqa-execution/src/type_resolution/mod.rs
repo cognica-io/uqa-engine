@@ -38,13 +38,14 @@ mod overload_resolution;
 mod qualified_column;
 mod random_range;
 mod reverse;
+mod routine_signature;
 mod string_binary;
 
 #[doc(hidden)]
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
 pub use common::{
     common_context_expression_type, common_type, effective_overload_argument_type,
-    values_column_types,
+    effective_overload_argument_type_with_params, values_column_types,
 };
 pub use equality::equality_operand_type;
 pub(crate) use fixed_builtin::runtime_dispatch_name;
@@ -75,6 +76,13 @@ pub use overload_resolution::{
 #[doc(hidden)]
 pub use reverse::{resolve_reverse_overload, ResolvedReverseOverload};
 #[doc(hidden)]
+pub use routine_signature::{
+    match_routine_signature, routine_polymorphic_type, MatchedRoutineSignature,
+    RoutineCallDescriptor, RoutineCoercionTarget, RoutineParameterDescriptor,
+    RoutinePolymorphicFamily, RoutinePolymorphicType, RoutineSignatureMatchError,
+    RoutineTypeSubstitutions, RoutineVariadicMode, RoutineVariadicPlan,
+};
+#[doc(hidden)]
 pub use string_binary::{ResolvedStringBinaryOverload, ResolvedTextByteaOverload};
 
 pub trait FunctionTypeResolver: Send + Sync {
@@ -98,6 +106,7 @@ pub trait FunctionTypeResolver: Send + Sync {
         binding: Option<&FunctionBinding>,
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
+        explicit_variadic: bool,
     ) -> Result<Option<ColumnType>, SQLError>;
 
     /// Resolve a catalog-backed overload together with the stable binding needed to execute it after built-in and user-defined candidates have been ranked.
@@ -107,6 +116,7 @@ pub trait FunctionTypeResolver: Send + Sync {
         _binding: Option<&FunctionBinding>,
         _argument_names: &[Option<String>],
         _argument_types: &[Option<ColumnType>],
+        _explicit_variadic: bool,
     ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
         Ok(None)
     }
@@ -126,9 +136,16 @@ pub trait FunctionTypeResolver: Send + Sync {
         binding: Option<&FunctionBinding>,
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
+        explicit_variadic: bool,
         _builtins: &[BuiltinFunctionOverload],
     ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
-        self.resolve_function_overload(name, binding, argument_names, argument_types)
+        self.resolve_function_overload(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+        )
     }
 
     /// Resolve the declared first-column type of a physical scalar-subquery slot when the owning execution context carries its plan arena.

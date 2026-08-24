@@ -80,9 +80,9 @@ impl<'a> Interpreter<'a> {
         let mut bound = bound.into_iter();
         for (idx, param) in def.params.iter().enumerate() {
             let takes_argument = match param.mode {
-                uqa_sql::ast::FunctionParamMode::In | uqa_sql::ast::FunctionParamMode::InOut => {
-                    true
-                }
+                uqa_sql::ast::FunctionParamMode::In
+                | uqa_sql::ast::FunctionParamMode::InOut
+                | uqa_sql::ast::FunctionParamMode::Variadic => true,
                 uqa_sql::ast::FunctionParamMode::Out => def.is_procedure,
                 uqa_sql::ast::FunctionParamMode::Table => false,
             };

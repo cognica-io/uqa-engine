@@ -3704,6 +3704,7 @@ dependencies = [
  "uqa-engine",
  "uqa-fdw",
  "uqa-graph",
+ "uqa-pg-query",
  "uqa-sql",
 ]
 

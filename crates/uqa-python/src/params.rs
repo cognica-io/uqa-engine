@@ -42,7 +42,9 @@ impl PySQLParam {
 
     fn __repr__(&self) -> String {
         match &self.inner {
-            SQLParam::Scalar(value) => format!("SQLParam.scalar({value:?})"),
+            SQLParam::Scalar(value) | SQLParam::TypedScalar { value, .. } => {
+                format!("SQLParam.scalar({value:?})")
+            }
             SQLParam::Vector(values) => format!("SQLParam.vector(len={})", values.len()),
             SQLParam::Tensor(values) => format!("SQLParam.tensor(rows={})", values.len()),
         }
