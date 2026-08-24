@@ -9,6 +9,7 @@
 use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::SQLError;
 
+use super::common::local_routine_name;
 use super::{
     fixed_builtin, function_resolution_error, FunctionTypeResolver, ResolvedFunctionOverload,
 };
@@ -23,7 +24,7 @@ pub fn resolve_gamma_overload(
     argument_types: &[Option<ColumnType>],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<ResolvedGammaOverload, SQLError> {
-    if !matches!(local_name(name).as_str(), "gamma" | "lgamma") {
+    if !matches!(local_routine_name(name).as_str(), "gamma" | "lgamma") {
         return Err(function_resolution_error(
             "42883",
             name,
@@ -33,12 +34,4 @@ pub fn resolve_gamma_overload(
         ));
     }
     fixed_builtin::resolve_overload(name, binding, argument_names, argument_types, resolver)
-}
-
-fn local_name(name: &str) -> String {
-    let lower = name.to_ascii_lowercase();
-    lower
-        .strip_prefix("pg_catalog.")
-        .unwrap_or(&lower)
-        .to_string()
 }

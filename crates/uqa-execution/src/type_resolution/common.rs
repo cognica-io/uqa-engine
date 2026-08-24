@@ -12,6 +12,14 @@ use crate::{RowSchema, ScalarExpr};
 
 use super::{scalar_type_inner, FunctionTypeResolver};
 
+pub(super) fn local_routine_name(name: &str) -> String {
+    let lower = name.to_ascii_lowercase();
+    lower
+        .strip_prefix("pg_catalog.")
+        .unwrap_or(&lower)
+        .to_string()
+}
+
 pub(super) fn numeric_type() -> ColumnType {
     ColumnType::Numeric {
         precision: None,

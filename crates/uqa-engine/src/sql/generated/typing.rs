@@ -105,6 +105,13 @@ fn bind_function_calls(
                 argument_names.push(argument_name);
                 argument_types.push(infer_expression(engine, columns, value, dependencies)?);
             }
+            if binding.is_none()
+                && engine
+                    .registered_runtime_function_volatility(name)
+                    .is_some()
+            {
+                return Ok(());
+            }
             if builtin::bind_fixed_builtin_call(
                 builtin::FixedBuiltinCall {
                     engine,

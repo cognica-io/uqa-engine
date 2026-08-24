@@ -353,7 +353,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             let call_args = evaluate_call_args(args, ctx)?;
             if let Some(binding) = binding {
                 if binding.builtin {
-                    return eval_function_call(&binding.name, call_args, ctx);
+                    return eval_builtin_function_call(&binding.name, call_args, ctx);
                 }
                 let engine = ctx.engine.ok_or_else(|| {
                     SQLError::Unsupported(
@@ -747,6 +747,25 @@ pub fn eval_function_call(
     call_args: Vec<(Option<String>, Value)>,
     ctx: &EvalContext<'_>,
 ) -> Result<Value> {
+    eval_function_call_inner(name, call_args, ctx, true)
+}
+
+/// Execute a call whose stored binding selects a built-in routine. Dynamic
+/// runtime callbacks and SQL routines must not override this stable binding.
+pub fn eval_builtin_function_call(
+    name: &str,
+    call_args: Vec<(Option<String>, Value)>,
+    ctx: &EvalContext<'_>,
+) -> Result<Value> {
+    eval_function_call_inner(name, call_args, ctx, false)
+}
+
+fn eval_function_call_inner(
+    name: &str,
+    call_args: Vec<(Option<String>, Value)>,
+    ctx: &EvalContext<'_>,
+    allow_dynamic_dispatch: bool,
+) -> Result<Value> {
     let lower = normalized_function_name(name);
     let lower = lower.as_ref();
     let evaluated: Vec<Value> = call_args.iter().map(|(_, value)| value.clone()).collect();
@@ -835,7 +854,7 @@ pub fn eval_function_call(
         if let Some(positional) = builtin_named_args(lower, &call_args) {
             return eval_scalar_function(lower, &positional);
         }
-        if let Some(engine) = ctx.engine {
+        if let Some(engine) = ctx.engine.filter(|_| allow_dynamic_dispatch) {
             if let Some(result) = engine.call_user_function(lower, &call_args) {
                 return result;
             }
@@ -848,7 +867,10 @@ pub fn eval_function_call(
     if matches!(lower, "nextval" | "currval" | "setval") {
         return eval_sequence_function(lower, &evaluated, ctx);
     }
-    if let Some(engine) = ctx.engine.filter(|engine| engine.has_scalar_functions()) {
+    if let Some(engine) = ctx
+        .engine
+        .filter(|engine| allow_dynamic_dispatch && engine.has_scalar_functions())
+    {
         if let Some(result) = engine.call_scalar_function(lower, &evaluated) {
             return result;
         }
@@ -857,7 +879,7 @@ pub fn eval_function_call(
         // Unknown built-in: fall through to user-defined functions,
         // mirroring PostgreSQL's search-path order.
         Err(SQLError::UnknownFunction(_)) => {
-            if let Some(engine) = ctx.engine {
+            if let Some(engine) = ctx.engine.filter(|_| allow_dynamic_dispatch) {
                 if let Some(result) = engine.call_user_function(lower, &call_args) {
                     return result;
                 }

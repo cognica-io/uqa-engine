@@ -44,6 +44,10 @@ struct QueryFunctionTypeResolver<'a> {
 }
 
 impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
+    fn has_untyped_function(&self, name: &str) -> bool {
+        self.engine.has_untyped_function(name)
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,
@@ -414,22 +418,14 @@ impl SchemaScope {
             let output = self.bind_query(engine, plan, params, subquery_outer)?;
             return Ok(output.column_type(0).cloned());
         }
-        if subqueries.is_empty() || !expr_contains_subquery(expression) {
-            return uqa_execution::scalar_type_with_resolver(expression, schema, params, engine);
+        match self
+            .query_function_type_resolver(engine, expression, schema, subqueries, params, outer)?
+        {
+            Some(resolver) => {
+                uqa_execution::scalar_type_with_resolver(expression, schema, params, &resolver)
+            }
+            None => uqa_execution::scalar_type_with_resolver(expression, schema, params, engine),
         }
-        let subquery_outer = self.validate_references.then_some(schema).or(outer);
-        let scalar_subquery_types = subqueries
-            .iter()
-            .map(|plan| {
-                self.bind_query(engine, plan, params, subquery_outer)
-                    .map(|output| output.column_type(0).cloned())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let resolver = QueryFunctionTypeResolver {
-            engine,
-            scalar_subquery_types,
-        };
-        uqa_execution::scalar_type_with_resolver(expression, schema, params, &resolver)
     }
 
     fn bind_values_types(

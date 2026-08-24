@@ -50,7 +50,8 @@ pub use equality::equality_operand_type;
 pub(crate) use fixed_builtin::runtime_dispatch_name;
 #[doc(hidden)]
 pub use fixed_builtin::{
-    fixed_builtin_return_type, resolve_fixed_builtin_call, ResolvedFixedBuiltinCall,
+    fixed_builtin_return_type, is_function as is_fixed_builtin, resolve_fixed_builtin_call,
+    ResolvedFixedBuiltinCall,
 };
 pub use functions::{builtin_function_argument_targets, builtin_function_type};
 #[doc(hidden)]
@@ -77,6 +78,14 @@ pub use reverse::{resolve_reverse_overload, ResolvedReverseOverload};
 pub use string_binary::{ResolvedStringBinaryOverload, ResolvedTextByteaOverload};
 
 pub trait FunctionTypeResolver: Send + Sync {
+    /// Return whether an external runtime callback claims this unbound function
+    /// name without exposing a declared SQL return type. Such callbacks must
+    /// retain dispatch precedence instead of being rebound to a same-named
+    /// built-in overload.
+    fn has_untyped_function(&self, _name: &str) -> bool {
+        false
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,

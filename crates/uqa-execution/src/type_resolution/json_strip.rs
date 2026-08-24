@@ -9,6 +9,7 @@
 use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::SQLError;
 
+use super::common::local_routine_name;
 use super::{
     fixed_builtin, function_resolution_error, FunctionTypeResolver, ResolvedFunctionOverload,
 };
@@ -24,7 +25,7 @@ pub fn resolve_json_strip_overload(
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<ResolvedJsonStripOverload, SQLError> {
     if !matches!(
-        local_name(name).as_str(),
+        local_routine_name(name).as_str(),
         "json_strip_nulls" | "jsonb_strip_nulls"
     ) {
         return Err(function_resolution_error(
@@ -36,12 +37,4 @@ pub fn resolve_json_strip_overload(
         ));
     }
     fixed_builtin::resolve_overload(name, binding, argument_names, argument_types, resolver)
-}
-
-fn local_name(name: &str) -> String {
-    let lower = name.to_ascii_lowercase();
-    lower
-        .strip_prefix("pg_catalog.")
-        .unwrap_or(&lower)
-        .to_string()
 }

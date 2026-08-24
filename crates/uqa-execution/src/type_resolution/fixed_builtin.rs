@@ -25,7 +25,9 @@ use super::{
     BuiltinFunctionOverload, FunctionTypeResolver, ResolvedFunctionOverload,
 };
 
-pub(super) fn is_function(name: &str) -> bool {
+#[doc(hidden)]
+#[must_use]
+pub fn is_function(name: &str) -> bool {
     overloads(name).is_some()
 }
 
@@ -158,6 +160,9 @@ pub(super) fn bind_call(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> String {
+    if binding.is_none() && resolver.is_some_and(|resolver| resolver.has_untyped_function(&name)) {
+        return name;
+    }
     let Some(builtins) = overloads(&name) else {
         return name;
     };
@@ -191,22 +196,14 @@ pub(super) fn bind_call(
         return name;
     };
     let overload = matched.overload;
-    let mut reordered = vec![None; overload.argument_types.len()];
-    for (argument, position) in std::mem::take(args)
-        .into_iter()
-        .zip(matched.argument_positions)
-    {
-        reordered[position] = Some(named_argument_value_owned(argument));
-    }
-    for (position, argument) in reordered.iter_mut().enumerate() {
-        if argument.is_none() {
-            *argument = default_argument(&selected.binding.name, position);
-        }
-    }
-    let Some(reordered) = reordered.into_iter().collect::<Option<Vec<_>>>() else {
+    if !reorder_arguments(
+        args,
+        &matched.argument_positions,
+        overload.argument_types.len(),
+        &selected.binding.name,
+    ) {
         return name;
-    };
-    *args = reordered;
+    }
     for (argument, declared) in args.iter_mut().zip(&overload.argument_types) {
         let actual = scalar_type_inner(argument, schema, params, resolver)
             .ok()
@@ -282,6 +279,44 @@ fn default_argument(name: &str, position: usize) -> Option<ScalarExpr> {
         (Some("json_strip_nulls" | "jsonb_strip_nulls"), 1)
     )
     .then_some(ScalarExpr::Literal(Value::Bool(false)))
+}
+
+fn reorder_arguments(
+    args: &mut Vec<ScalarExpr>,
+    argument_positions: &[usize],
+    parameter_count: usize,
+    binding_name: &str,
+) -> bool {
+    if args.len() != argument_positions.len() {
+        return false;
+    }
+    let mut supplied = vec![false; parameter_count];
+    for &position in argument_positions {
+        let Some(slot) = supplied.get_mut(position) else {
+            return false;
+        };
+        if std::mem::replace(slot, true) {
+            return false;
+        }
+    }
+    let mut reordered = (0..parameter_count)
+        .map(|position| default_argument(binding_name, position))
+        .collect::<Vec<_>>();
+    if supplied
+        .iter()
+        .zip(&reordered)
+        .any(|(supplied, default)| !supplied && default.is_none())
+    {
+        return false;
+    }
+    for (argument, &position) in std::mem::take(args).into_iter().zip(argument_positions) {
+        reordered[position] = Some(named_argument_value_owned(argument));
+    }
+    *args = reordered
+        .into_iter()
+        .map(|argument| argument.expect("every fixed built-in argument was prevalidated"))
+        .collect();
+    true
 }
 
 fn argument_names(args: &[ScalarExpr]) -> Vec<Option<String>> {
@@ -522,5 +557,26 @@ fn numeric_type() -> ColumnType {
     ColumnType::Numeric {
         precision: None,
         scale: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registry_gate_accepts_only_supported_builtin_names() {
+        assert!(is_function("PG_CATALOG.MD5"));
+        assert!(!is_function("public.md5"));
+        assert!(!is_function("not_a_builtin"));
+    }
+
+    #[test]
+    fn failed_argument_reordering_preserves_original_arguments() {
+        let original = vec![ScalarExpr::Literal(Value::Int(7))];
+        let mut args = original.clone();
+
+        assert!(!reorder_arguments(&mut args, &[1], 2, "pg_catalog.random"));
+        assert_eq!(args, original);
     }
 }

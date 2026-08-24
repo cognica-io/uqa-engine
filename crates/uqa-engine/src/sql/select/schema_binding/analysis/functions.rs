@@ -120,6 +120,9 @@ pub(super) fn validate_scalar_function(
     } = validation;
     let identity = name.to_ascii_lowercase();
     let lower = crate::sql::builtin_function_dispatch_name(&identity);
+    if engine.has_registered_scalar_function(&identity) {
+        return Ok(());
+    }
     if validate_fixed_builtin(engine, name, binding, args, schema, params, resolver)? {
         return Ok(());
     }
@@ -136,7 +139,6 @@ pub(super) fn validate_scalar_function(
     if lower == uqa_sql::expr::NAMED_ARG_FUNCTION
         || uqa_sql::registry::is_registered(&lower)
         || crate::sql::aggregates::is_aggregate(engine, expression)
-        || engine.has_registered_scalar_function(&identity)
         || engine.has_registered_aggregate_function(&identity)
         || builtin_scalar_function(&lower, args.len())
     {
@@ -160,6 +162,9 @@ fn validate_fixed_builtin(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<bool, SQLError> {
+    if !uqa_execution::is_fixed_builtin(name) {
+        return Ok(false);
+    }
     let mut argument_names = Vec::with_capacity(args.len());
     let mut argument_types = Vec::with_capacity(args.len());
     for argument in args {

@@ -78,6 +78,11 @@ pub(super) fn builtin_function_type_inner(
             scalar_type_inner(expression, schema, params, resolver)
         });
     }
+    if binding.is_none()
+        && resolver.is_some_and(|resolver| resolver.has_untyped_function(original_name))
+    {
+        return Ok(None);
+    }
     if name.contains('.') && resolver.is_none() {
         return Ok(None);
     }

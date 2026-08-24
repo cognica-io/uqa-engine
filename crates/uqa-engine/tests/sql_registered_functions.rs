@@ -11,8 +11,8 @@ use std::sync::{
 
 use uqa_core::Value;
 use uqa_engine::{
-    Engine, SQLAggregateState, SQLScalarFunction, SQLTableFunction, SQLTableFunctionResult,
-    SQLTableFunctionStream,
+    Engine, SQLAggregateState, SQLFunctionOptions, SQLFunctionVolatility, SQLScalarFunction,
+    SQLTableFunction, SQLTableFunctionResult, SQLTableFunctionStream,
 };
 use uqa_sql::{ast::ColumnType, SQLError};
 
@@ -68,6 +68,65 @@ fn registered_scalar_function_runs_from_projection_and_filter() {
         .unwrap();
     assert_eq!(cte_res.rows.len(), 1);
     assert_eq!(cte_res.rows[0]["tagged"], Value::Str("tag:alpha".into()));
+}
+
+#[test]
+fn registered_scalar_function_shadows_fixed_builtin_validation() {
+    let eng = Engine::new();
+    for (name, result) in [
+        ("md5", "runtime-md5"),
+        ("reverse", "runtime-reverse"),
+        ("length", "runtime-length"),
+        ("casefold", "runtime-casefold"),
+    ] {
+        eng.register_scalar_function(name, move |_args: &[Value]| Ok(Value::Str(result.into())))
+            .unwrap();
+    }
+
+    for (name, expected) in [
+        ("md5", "runtime-md5"),
+        ("reverse", "runtime-reverse"),
+        ("length", "runtime-length"),
+        ("casefold", "runtime-casefold"),
+    ] {
+        let result = eng.sql(&format!("SELECT {name}(1) AS value"), &[]).unwrap();
+        assert_eq!(result.rows[0]["value"], Value::Str(expected.into()));
+    }
+
+    let qualified = eng
+        .sql("SELECT pg_catalog.md5('abc') AS value", &[])
+        .unwrap();
+    assert_eq!(
+        qualified.rows[0]["value"],
+        Value::Str("900150983cd24fb0d6963f7d28e17f72".into())
+    );
+}
+
+#[test]
+fn generated_column_does_not_rebind_registered_callback_as_fixed_builtin() {
+    let eng = Engine::new();
+    eng.register_scalar_function_with_options(
+        "md5",
+        SQLFunctionOptions::read_only(SQLFunctionVolatility::Immutable),
+        |_args: &[Value]| Ok(Value::Str("runtime-md5".into())),
+    )
+    .unwrap();
+
+    let error = eng
+        .sql(
+            "CREATE TABLE generated_runtime_md5 (
+                 source INTEGER,
+                 value TEXT GENERATED ALWAYS AS (md5(source)) STORED
+             )",
+            &[],
+        )
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("registered function `md5` has no declared SQL return type"),
+        "{error}"
+    );
 }
 
 struct RepeatRows;
