@@ -149,6 +149,68 @@ fn bind_stored_view_relations(
 }
 
 impl Engine {
+    pub(crate) fn rewrite_view_relation_references(
+        &self,
+        replacements: &std::collections::BTreeMap<RelationIdentity, RelationIdentity>,
+    ) -> StorageBackendResult<()> {
+        if replacements.is_empty() {
+            return Ok(());
+        }
+        let mut updates = Vec::new();
+        for (view_relation, stored) in self.durable.views.read().iter() {
+            let mut candidate = stored.clone();
+            let mut changed = false;
+            bind_query_plan_relations(
+                &mut candidate.query,
+                &std::collections::BTreeSet::new(),
+                &mut |reference| -> StorageBackendResult<String> {
+                    let identity = RelationIdentity::from_legacy_name(reference)
+                        .map_err(StorageBackendError::Other)?;
+                    if let Some(replacement) = replacements.get(&identity) {
+                        changed = true;
+                        Ok(replacement.qualified_name())
+                    } else {
+                        Ok(reference.to_string())
+                    }
+                },
+            )?;
+            if changed {
+                updates.push((view_relation.clone(), candidate));
+            }
+        }
+        if let Some(catalog) = self.storage.catalog.as_ref() {
+            for (relation, view) in &updates {
+                catalog.save_view(&ViewRow {
+                    relation: relation.clone(),
+                    definition_json: serde_json::to_string(view)?,
+                })?;
+            }
+        }
+        let mut views = self.durable.views.write();
+        for (relation, view) in updates {
+            views.insert(relation, view);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn drop_views_depending_on_relations(
+        &self,
+        relations: &[String],
+    ) -> StorageBackendResult<()> {
+        let mut pending = relations.to_vec();
+        let mut views = std::collections::BTreeSet::new();
+        while let Some(relation) = pending.pop() {
+            for dependent in self.views_depending_on_relation(&relation)? {
+                if views.insert(dependent.clone()) {
+                    pending.push(dependent);
+                }
+            }
+        }
+        let views = views.into_iter().collect::<Vec<_>>();
+        self.drop_views_inner(&views)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))
+    }
+
     fn bind_view_plan_for_create(&self, plan: &mut QueryPlan) -> Result<(), SQLError> {
         bind_query_plan_relations(plan, &std::collections::BTreeSet::new(), &mut |reference| {
             // Catalog relations win for their supported spellings just
@@ -156,6 +218,9 @@ impl Engine {
             // `pg_class`). Explicit user schemas remain ordinary catalog
             // identities.
             if let Some(canonical) = canonical_virtual_relation_reference(reference) {
+                return Ok(canonical);
+            }
+            if let Some(canonical) = crate::sql::resolve_age_label_relation_name(self, reference)? {
                 return Ok(canonical);
             }
             match self.try_resolve_relation_kind(reference).map_err(|error| {
@@ -522,6 +587,18 @@ impl Engine {
             .collect::<std::collections::BTreeSet<_>>();
         relations.extend(self.durable.foreign_tables.read().keys().cloned());
         relations.extend(rows.iter().map(|row| row.relation.clone()));
+        for (graph, store) in self.durable.graphs.read().iter() {
+            let labels = store.graph_labels(graph).map_err(|error| {
+                StorageBackendError::Other(format!(
+                    "restore graph-label view dependencies for `{graph}`: {error}"
+                ))
+            })?;
+            relations.extend(
+                labels
+                    .into_iter()
+                    .map(|label| RelationIdentity::new(graph, label.name)),
+            );
+        }
 
         let mut views = BTreeMap::new();
         let mut legacy_views = Vec::new();

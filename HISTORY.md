@@ -24,6 +24,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Matched Apache AGE on PostgreSQL 18 for dependency-based `drop_label`: removable default and user label relations now disappear durably, vertex-label drops preserve incident edge rows and dangling endpoint ids, same-kind inherited labels and stored views retain `DROP ... RESTRICT`, graph rename and cascading drop preserve their view semantics, direct `DROP TABLE` remains protected, label relations are selectable, and missing-default graph accesses fail safely instead of crashing.
 - Made the Python source distribution include every manifest-declared benchmark source so pip can build a wheel from the sdist instead of failing during Cargo metadata validation.
 - Made `usql` preserve SQL-standard `BEGIN ATOMIC ... END` routine bodies as one statement by using the pinned PostgreSQL 18 scanner for lexical boundaries.
 

@@ -5,11 +5,209 @@
 //
 
 use super::{
-    BTreeMap, EdgeRow, Engine, GraphSnapshot, GraphVertexRow, StorageBackendResult, Value,
+    BTreeMap, EdgeRow, Engine, GraphSnapshot, GraphVertexRow, RelationIdentity,
+    StorageBackendResult, Value,
 };
 
 fn graph_store_error(error: impl std::fmt::Display) -> super::StorageBackendError {
     super::StorageBackendError::Other(error.to_string())
+}
+
+fn mark_cypher_path_requirements(
+    path: &uqa_graph::cypher::PathPattern,
+    required: &mut (bool, bool),
+) {
+    use uqa_graph::cypher::PathElement;
+
+    for element in &path.elements {
+        match element {
+            PathElement::Node(node) => {
+                required.0 = true;
+                if let Some(properties) = &node.properties {
+                    for expression in properties.values() {
+                        mark_cypher_expr_requirements(expression, required);
+                    }
+                }
+            }
+            PathElement::Rel(relation) => {
+                required.1 = true;
+                if let Some(properties) = &relation.properties {
+                    for expression in properties.values() {
+                        mark_cypher_expr_requirements(expression, required);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn mark_cypher_expr_requirements(
+    expression: &uqa_graph::cypher::CypherExpr,
+    required: &mut (bool, bool),
+) {
+    use uqa_graph::cypher::CypherExpr;
+
+    match expression {
+        CypherExpr::FunctionCall(call) => {
+            for argument in &call.args {
+                mark_cypher_expr_requirements(argument, required);
+            }
+        }
+        CypherExpr::BinaryOp(binary) => {
+            mark_cypher_expr_requirements(&binary.left, required);
+            mark_cypher_expr_requirements(&binary.right, required);
+        }
+        CypherExpr::UnaryOp(unary) => {
+            mark_cypher_expr_requirements(&unary.operand, required);
+        }
+        CypherExpr::ListIndex(index) => {
+            mark_cypher_expr_requirements(&index.expr, required);
+            mark_cypher_expr_requirements(&index.index, required);
+        }
+        CypherExpr::ListSlice(slice) => {
+            mark_cypher_expr_requirements(&slice.expr, required);
+            if let Some(start) = &slice.start {
+                mark_cypher_expr_requirements(start, required);
+            }
+            if let Some(end) = &slice.end {
+                mark_cypher_expr_requirements(end, required);
+            }
+        }
+        CypherExpr::ListComprehension(comprehension) => {
+            mark_cypher_expr_requirements(&comprehension.list_expr, required);
+            if let Some(filter) = &comprehension.filter {
+                mark_cypher_expr_requirements(filter, required);
+            }
+            if let Some(map) = &comprehension.map_expr {
+                mark_cypher_expr_requirements(map, required);
+            }
+        }
+        CypherExpr::InList(list) => {
+            mark_cypher_expr_requirements(&list.expr, required);
+            mark_cypher_expr_requirements(&list.list_expr, required);
+        }
+        CypherExpr::IsNull(null) => mark_cypher_expr_requirements(&null.expr, required),
+        CypherExpr::IsNotNull(not_null) => {
+            mark_cypher_expr_requirements(&not_null.expr, required);
+        }
+        CypherExpr::CaseExpr(case) => {
+            if let Some(operand) = &case.operand {
+                mark_cypher_expr_requirements(operand, required);
+            }
+            for (condition, result) in &case.whens {
+                mark_cypher_expr_requirements(condition, required);
+                mark_cypher_expr_requirements(result, required);
+            }
+            if let Some(else_expression) = &case.else_expr {
+                mark_cypher_expr_requirements(else_expression, required);
+            }
+        }
+        CypherExpr::ListLiteral(list) => {
+            for element in &list.elements {
+                mark_cypher_expr_requirements(element, required);
+            }
+        }
+        CypherExpr::MapLiteral(map) => {
+            for (_, value) in &map.pairs {
+                mark_cypher_expr_requirements(value, required);
+            }
+        }
+        CypherExpr::ExistsPattern(path) => mark_cypher_path_requirements(path, required),
+        CypherExpr::PropertyAccess(_)
+        | CypherExpr::Parameter(_)
+        | CypherExpr::Literal(_)
+        | CypherExpr::Variable(_) => {}
+    }
+}
+
+fn mark_cypher_return_requirements(
+    items: &[uqa_graph::cypher::ReturnItem],
+    order_by: Option<&[uqa_graph::cypher::OrderByItem]>,
+    skip: Option<&uqa_graph::cypher::CypherExpr>,
+    limit: Option<&uqa_graph::cypher::CypherExpr>,
+    required: &mut (bool, bool),
+) {
+    for item in items {
+        mark_cypher_expr_requirements(&item.expr, required);
+    }
+    for item in order_by.into_iter().flatten() {
+        mark_cypher_expr_requirements(&item.expr, required);
+    }
+    if let Some(skip) = skip {
+        mark_cypher_expr_requirements(skip, required);
+    }
+    if let Some(limit) = limit {
+        mark_cypher_expr_requirements(limit, required);
+    }
+}
+
+fn cypher_label_requirements(query: &uqa_graph::cypher::CypherQuery) -> (bool, bool) {
+    use uqa_graph::cypher::CypherClause;
+
+    let mut required = (false, false);
+    for clause in &query.clauses {
+        match clause {
+            CypherClause::Match(clause) => {
+                for path in &clause.patterns {
+                    mark_cypher_path_requirements(path, &mut required);
+                }
+                if let Some(filter) = &clause.r#where {
+                    mark_cypher_expr_requirements(filter, &mut required);
+                }
+            }
+            CypherClause::Create(clause) => {
+                for path in &clause.patterns {
+                    mark_cypher_path_requirements(path, &mut required);
+                }
+            }
+            CypherClause::Merge(clause) => {
+                mark_cypher_path_requirements(&clause.pattern, &mut required);
+                for item in clause
+                    .on_create_set
+                    .iter()
+                    .chain(&clause.on_match_set)
+                    .flatten()
+                {
+                    mark_cypher_expr_requirements(&item.target, &mut required);
+                    mark_cypher_expr_requirements(&item.value, &mut required);
+                }
+            }
+            CypherClause::Set(clause) => {
+                for item in &clause.items {
+                    mark_cypher_expr_requirements(&item.target, &mut required);
+                    mark_cypher_expr_requirements(&item.value, &mut required);
+                }
+            }
+            CypherClause::Delete(clause) => {
+                for expression in &clause.expressions {
+                    mark_cypher_expr_requirements(expression, &mut required);
+                }
+            }
+            CypherClause::Return(clause) => mark_cypher_return_requirements(
+                &clause.items,
+                clause.order_by.as_deref(),
+                clause.skip.as_ref(),
+                clause.limit.as_ref(),
+                &mut required,
+            ),
+            CypherClause::With(clause) => {
+                mark_cypher_return_requirements(
+                    &clause.items,
+                    clause.order_by.as_deref(),
+                    clause.skip.as_ref(),
+                    clause.limit.as_ref(),
+                    &mut required,
+                );
+                if let Some(filter) = &clause.r#where {
+                    mark_cypher_expr_requirements(filter, &mut required);
+                }
+            }
+            CypherClause::Unwind(clause) => {
+                mark_cypher_expr_requirements(&clause.expr, &mut required);
+            }
+        }
+    }
+    required
 }
 
 impl Engine {
@@ -41,6 +239,18 @@ impl Engine {
 
     fn drop_graph_inner(&self, name: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
+        let labels = {
+            let graphs = self.durable.graphs.read();
+            let Some(store) = graphs.get(name) else {
+                return Ok(false);
+            };
+            store.graph_labels(name).map_err(graph_store_error)?
+        };
+        let label_relations = labels
+            .iter()
+            .map(|label| RelationIdentity::new(name, &label.name).qualified_name())
+            .collect::<Vec<_>>();
+        self.drop_views_depending_on_relations(&label_relations)?;
         let mut graphs = self.durable.graphs.write();
         if !graphs.contains_key(name) {
             return Ok(false);
@@ -88,9 +298,8 @@ impl Engine {
             .collect()
     }
 
-    /// The `ag_label` entries of a named graph: the two AGE default labels
-    /// followed by the user labels in label-id order. `None` when the graph
-    /// does not exist.
+    /// The surviving `ag_label` entries of a named graph in label-id order.
+    /// `None` when the graph does not exist.
     pub fn list_graph_labels(
         &self,
         graph: &str,
@@ -149,17 +358,41 @@ impl Engine {
         Ok(true)
     }
 
-    /// Drop a user label and every entity carrying it from a named graph
-    /// (`drop_label`). Returns `false` when the label is not registered and
-    /// fails when the graph does not exist.
+    /// Drop a label and every entity carrying it from a named graph
+    /// (`drop_label`). Incident edge rows survive vertex-label removal like
+    /// AGE's `DROP TABLE`. Returns `false` when the label is not registered
+    /// and fails when the graph does not exist.
     pub fn drop_graph_label(&self, graph: &str, label: &str) -> StorageBackendResult<bool> {
         self.with_implicit_storage_transaction(move |engine| {
             engine.drop_graph_label_inner(graph, label)
         })
     }
 
-    fn drop_graph_label_inner(&self, graph: &str, label: &str) -> StorageBackendResult<bool> {
+    /// Stored views whose exact relation binding prevents a label relation from being dropped.
+    pub(crate) fn graph_label_relation_dependents(
+        &self,
+        graph: &str,
+        label: &str,
+    ) -> StorageBackendResult<Vec<String>> {
         self.synchronize_catalog_registries()?;
+        let relation_name = format!(
+            "{}.{}",
+            uqa_sql::expr::quote_ident(graph),
+            uqa_sql::expr::quote_ident(label)
+        );
+        self.views_depending_on_relation(&relation_name)
+    }
+
+    fn drop_graph_label_inner(&self, graph: &str, label: &str) -> StorageBackendResult<bool> {
+        let dependent_views = self.graph_label_relation_dependents(graph, label)?;
+        if !dependent_views.is_empty() {
+            return Err(super::StorageBackendError::Other(format!(
+                "cannot drop label `{}.{}`: dependent view(s) `{}` still reference it",
+                uqa_sql::expr::quote_ident(graph),
+                uqa_sql::expr::quote_ident(label),
+                dependent_views.join("`, `")
+            )));
+        }
         let mut graphs = self.durable.graphs.write();
         let Some(store) = graphs.get(graph) else {
             return Err(super::StorageBackendError::Other(format!(
@@ -204,9 +437,20 @@ impl Engine {
             )));
         }
         let mut candidate = store.clone();
+        let labels = candidate.graph_labels(from).map_err(graph_store_error)?;
         candidate
             .rename_graph(from, to)
             .map_err(graph_store_error)?;
+        let replacements = labels
+            .into_iter()
+            .map(|label| {
+                (
+                    RelationIdentity::new(from, &label.name),
+                    RelationIdentity::new(to, label.name),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        self.rewrite_view_relation_references(&replacements)?;
         self.persist_graph_candidate(to, &candidate)?;
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog.drop_named_graph_data(from)?;
@@ -477,6 +721,24 @@ impl Engine {
         if !candidate.has_graph(graph) {
             candidate.create_graph(graph);
         }
+        let labels = candidate
+            .graph_labels(graph)
+            .map_err(|error| uqa_graph::cypher::CypherError::Storage(error.to_string()))?;
+        let (requires_vertex, requires_edge) = cypher_label_requirements(&q);
+        for (required, kind) in [
+            (requires_vertex, uqa_graph::LabelKind::Vertex),
+            (requires_edge, uqa_graph::LabelKind::Edge),
+        ] {
+            if required
+                && !labels
+                    .iter()
+                    .any(|label| label.id == kind.default_label_id())
+            {
+                return Err(uqa_graph::cypher::CypherError::MissingLabelRelation(
+                    format!("{graph}.{}", kind.default_label_name()),
+                ));
+            }
+        }
         let mutates = q.clauses.iter().any(|clause| {
             matches!(
                 clause,
@@ -514,8 +776,17 @@ impl Engine {
         let vertex_ids = store
             .vertex_ids_in_graph(graph)
             .map_err(graph_store_error)?;
+        let registry = store.label_registry(graph);
         for edge in store.edges_in_graph(graph).map_err(graph_store_error)? {
-            if !vertex_ids.contains(&edge.source_id) || !vertex_ids.contains(&edge.target_id) {
+            let source_dropped = registry
+                .dropped_label_ids
+                .contains(&uqa_graph::graphid_label_id(edge.source_id));
+            let target_dropped = registry
+                .dropped_label_ids
+                .contains(&uqa_graph::graphid_label_id(edge.target_id));
+            if (!vertex_ids.contains(&edge.source_id) && !source_dropped)
+                || (!vertex_ids.contains(&edge.target_id) && !target_dropped)
+            {
                 return Err(super::StorageBackendError::Other(format!(
                     "graph `{graph}` edge {} references missing endpoint {} -> {}",
                     edge.edge_id, edge.source_id, edge.target_id

@@ -9,6 +9,25 @@
 use super::{CatalogIndexRow, ColumnType, DropKind, DropStmt, Engine, SQLError, SQLResult};
 
 pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError> {
+    if stmt.kind == DropKind::Table {
+        for name in &stmt.names {
+            if let Some(canonical) = crate::sql::resolve_age_label_relation_name(engine, name)? {
+                let relation =
+                    crate::RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
+                        SQLError::Internal(format!(
+                            "resolve AGE label relation `{canonical}` for DROP TABLE: {error}"
+                        ))
+                    })?;
+                return Err(SQLError::Routine {
+                    sqlstate: "2BP01".into(),
+                    message: format!(
+                        "table \"{}\" is for label \"{}\"",
+                        relation.name, relation.name
+                    ),
+                });
+            }
+        }
+    }
     if stmt.cascade
         && matches!(stmt.kind, DropKind::View | DropKind::Schema)
         && !(stmt.kind == DropKind::Schema

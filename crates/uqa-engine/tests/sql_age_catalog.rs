@@ -15,6 +15,9 @@ use uqa_engine::Engine;
 use uqa_graph::LabelKind;
 use uqa_sql::SQLResult;
 
+#[path = "sql_age_catalog/default_label_drop.rs"]
+mod age_default_label_drop;
+
 fn exec(engine: &Engine, sql: &str) -> SQLResult {
     engine
         .sql(sql, &[])
@@ -446,7 +449,10 @@ fn label_functions_follow_age_semantics_and_errors() {
     create_label_errors_follow_age(&engine);
     created_labels_keep_ids_and_kinds(&engine);
     drop_label_follows_age(&engine);
-    drop_label_removes_entities_and_keeps_default_labels(&engine);
+    age_default_label_drop::drop_label_removes_entities_and_preserves_incident_edge_rows(&engine);
+    age_default_label_drop::default_label_drop_follows_age_restrict_and_broken_graph_lifecycle(
+        &engine,
+    );
     alter_graph_follows_age(&engine);
 }
 
@@ -586,6 +592,22 @@ fn created_labels_keep_ids_and_kinds(engine: &Engine) {
         ),
         vec!["_ag_label_vertex", "_ag_label_edge", "Person", "KNOWS"]
     );
+    assert_eq!(
+        scalar(engine, "SELECT count(*) FROM labels._ag_label_vertex"),
+        Value::Int(3)
+    );
+    assert_eq!(
+        scalar(engine, "SELECT count(*) FROM labels.\"Person\""),
+        Value::Int(2)
+    );
+    assert_eq!(
+        scalar(engine, "SELECT count(*) FROM labels._ag_label_edge"),
+        Value::Int(2)
+    );
+    assert_eq!(
+        scalar(engine, "SELECT count(*) FROM labels.\"KNOWS\""),
+        Value::Int(1)
+    );
     let reserved_kind = engine
         .sql(
             "SELECT * FROM cypher('labels', $$ CREATE (:_ag_label_edge {n: 2}) $$) AS (ignored agtype)",
@@ -602,6 +624,18 @@ fn created_labels_keep_ids_and_kinds(engine: &Engine) {
 
 fn drop_label_follows_age(engine: &Engine) {
     // drop_label
+    assert_age_error(
+        engine,
+        "DROP TABLE labels.\"Person\"",
+        "2BP01",
+        "table \"Person\" is for label \"Person\"",
+    );
+    assert_age_error(
+        engine,
+        "DROP TABLE IF EXISTS labels._ag_label_vertex CASCADE",
+        "2BP01",
+        "table \"_ag_label_vertex\" is for label \"_ag_label_vertex\"",
+    );
     assert_age_error(
         engine,
         "SELECT drop_label(NULL, 'Person')",
@@ -653,66 +687,6 @@ fn drop_label_follows_age(engine: &Engine) {
             "SELECT * FROM cypher('labels', $$ MATCH (n) RETURN count(n) $$) AS (c bigint)"
         ),
         Value::Int(3)
-    );
-}
-
-fn drop_label_removes_entities_and_keeps_default_labels(engine: &Engine) {
-    // Dropping a vertex label removes the vertices with their incident
-    // edges, and dropping an edge label removes just the edges; the
-    // default-label edge between ada and bob is untouched by either.
-    assert_eq!(
-        scalar(engine, "SELECT drop_label('labels', 'KNOWS')"),
-        Value::Null
-    );
-    assert_eq!(
-        scalar(
-            engine,
-            "SELECT * FROM cypher('labels', $$ MATCH ()-[r]->() RETURN count(r) $$) AS (c bigint)"
-        ),
-        Value::Int(1)
-    );
-    exec(engine, "SELECT create_elabel('labels', 'KNOWS')");
-    exec(
-        engine,
-        "SELECT * FROM cypher('labels', $$
-             MATCH (a:Person {name: 'ada'}), (b:Person {name: 'bob'})
-             CREATE (a)-[:KNOWS]->(b)
-         $$) AS (ignored agtype)",
-    );
-    assert_eq!(
-        scalar(engine, "SELECT drop_label('labels', 'Person')"),
-        Value::Null
-    );
-    // Only the unlabeled vertex survives; both edges left with ada and bob.
-    assert_eq!(
-        scalar(
-            engine,
-            "SELECT * FROM cypher('labels', $$ MATCH (n) RETURN count(n) $$) AS (c bigint)"
-        ),
-        Value::Int(1)
-    );
-    assert_eq!(
-        scalar(
-            engine,
-            "SELECT * FROM cypher('labels', $$ MATCH ()-[r]->() RETURN count(r) $$) AS (c bigint)"
-        ),
-        Value::Int(0)
-    );
-    // The default labels stay even when empty: AGE's RESTRICT drop would
-    // remove the empty relation, the engine keeps the graph usable.
-    assert_age_error(
-        engine,
-        "SELECT drop_label('labels', '_ag_label_edge')",
-        "2BP01",
-        "cannot drop table labels._ag_label_edge because other objects depend on it",
-    );
-    assert_eq!(
-        strings(
-            engine,
-            "SELECT name FROM ag_catalog.ag_label ORDER BY id",
-            "name"
-        ),
-        vec!["_ag_label_vertex", "_ag_label_edge", "KNOWS"]
     );
 }
 
@@ -1114,6 +1088,11 @@ fn labels_and_renames_persist_across_reopen() {
         ),
         Value::Int(2)
     );
+}
+
+#[test]
+fn dropped_vertex_label_and_dangling_edges_persist_across_reopen() {
+    age_default_label_drop::dropped_vertex_label_and_dangling_edges_persist_across_reopen();
 }
 
 #[test]

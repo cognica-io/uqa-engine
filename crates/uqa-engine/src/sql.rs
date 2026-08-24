@@ -78,6 +78,7 @@ use aggregates::{
     PhysicalAggregateExecutor,
 };
 use catalog::build_info_schema_rows;
+pub(crate) use catalog::resolve_age_label_relation_name;
 pub(crate) use catalog::resolve_catalog_column_type;
 pub(in crate::sql) use catalog::virtual_relation_schema;
 use ddl::{

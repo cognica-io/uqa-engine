@@ -111,6 +111,7 @@
       "routines.extension-language-privilege-security",
       "plpgsql.datum-slots-and-bound-cursors",
       "graph.age-default-label-drop",
+      "graph.age-cypher-complete-matrix",
       "regression.core-and-isolation"
     ],
     "M5": [
@@ -564,11 +565,19 @@
     },
     {
       "id": "graph.age-default-label-drop",
-      "postgresql_reference": "Apache AGE on PostgreSQL 18.4 drop_label and DROP TABLE RESTRICT behavior for empty default label relations",
-      "uqa_test": "cargo test -p uqa-engine --test integration engine_graph::sql_age_catalog::label_functions_follow_age_semantics_and_errors",
-      "supported_version": "Apache AGE-shaped user-label removal; default-label removal remains incompatible",
-      "status": "explicitly_rejected",
-      "open_issue": "Apache AGE permits an empty _ag_label_vertex or _ag_label_edge relation to be removed through drop_label, while UQA Engine always returns 2BP01; exact AGE behavior and the resulting graph lifecycle must be implemented."
+      "postgresql_reference": "Apache AGE 1.8.0 on PostgreSQL 18.4 live drop_label and DROP TABLE RESTRICT results for empty and nonempty default and user labels, inherited-label and stored-view dependencies, dangling incident edge rows, catalog and sequence removal, broken-default access, transactions, rename, restrictive and cascading graph drop, and durable recreation lifecycle",
+      "uqa_test": "cargo test -p uqa-graph --lib memory_store::tests::default_label_drop; cargo test -p uqa-graph --lib memory_store::tests::drop_label_removes_entities_and_releases_the_label; cargo test -p uqa-engine --test integration engine_graph::sql_age_catalog::label_functions_follow_age_semantics_and_errors; cargo test -p uqa-engine --test integration engine_graph::sql_age_catalog::dropped_vertex_label_and_dangling_edges_persist_across_reopen",
+      "supported_version": "Apache AGE 1.8.0 dependency-based label-relation DROP RESTRICT semantics, including removable default labels, protected direct DROP TABLE, nonempty vertex-label row removal without incident-edge cleanup, durable label-id tombstones and dangling endpoints, selectable inherited label relations, exact catalog and sequence visibility, same-kind inheritance and view dependencies, durable view binding through graph rename and cascading graph drop, broken-default graph lifecycle, safe 42P01 handling instead of AGE backend crashes, and graph recreation",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "graph.age-cypher-complete-matrix",
+      "postgresql_reference": "Apache AGE 1.8.0 on PostgreSQL 18.4 extension catalogs, Cypher grammar and regression schedules, graph DDL, execution, transactions, errors, and client-visible behavior",
+      "uqa_test": "cargo test -p uqa-graph --all-targets; cargo test -p uqa-engine --test integration engine_graph::",
+      "supported_version": "The relational graph catalog, label lifecycle, and documented Cypher CREATE, MATCH, MERGE, DELETE, SET, REMOVE, UNWIND, WITH, RETURN, expression, aggregation, ordering, pagination, path, and parameter subset covered by the graph crates and manual",
+      "status": "partial",
+      "open_issue": "The complete Apache AGE extension catalog, Cypher grammar, expression, pattern, mutation, path, aggregation, planning, transaction, error, regression, protocol, and client matrix remains to be imported and differentially verified."
     },
     {
       "id": "regression.core-and-isolation",

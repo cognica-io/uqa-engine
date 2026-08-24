@@ -102,6 +102,8 @@ pub enum CypherError {
     TypeError(String),
     #[error("parse error: {0}")]
     Parse(String),
+    #[error("relation \"{0}\" does not exist")]
+    MissingLabelRelation(String),
     #[error("storage error: {0}")]
     Storage(String),
 }

@@ -128,8 +128,11 @@ fn resolve_ag_catalog_relation(local: &str) -> Option<VirtualRelation> {
 pub(in crate::sql) fn virtual_relation_schema(
     engine: &Engine,
     name: &str,
-) -> Option<Vec<(String, ColumnType)>> {
-    resolve_virtual_relation(engine, name).map(VirtualRelation::schema)
+) -> Result<Option<Vec<(String, ColumnType)>>, uqa_sql::SQLError> {
+    if let Some(relation) = resolve_virtual_relation(engine, name) {
+        return Ok(Some(relation.schema()));
+    }
+    super::ag_catalog::age_label_relation_schema(engine, name)
 }
 
 impl VirtualRelation {
@@ -617,6 +620,16 @@ pub(super) fn ag_label_kind() -> ColumnType {
     ag_catalog_domain("label_kind", ColumnType::InternalChar)
 }
 
+/// Internal type carrier for AGE's fixed-width `graphid` base type.
+pub(super) fn age_graphid() -> ColumnType {
+    ag_catalog_domain("graphid", ColumnType::BigInteger)
+}
+
+/// Internal type carrier for AGE's JSONB-shaped `agtype` base type.
+pub(super) fn age_agtype() -> ColumnType {
+    ag_catalog_domain("agtype", ColumnType::JsonB)
+}
+
 pub(super) fn ag_catalog_domains() -> Vec<ColumnType> {
     vec![ag_label_id(), ag_label_kind()]
 }
@@ -764,11 +777,15 @@ mod tests {
     #[test]
     fn pg18_catalog_shapes_include_empty_relations_and_removed_columns() {
         let engine = Engine::new();
-        let description = virtual_relation_schema(&engine, "pg_catalog.pg_description").unwrap();
+        let description = virtual_relation_schema(&engine, "pg_catalog.pg_description")
+            .unwrap()
+            .unwrap();
         assert_eq!(description.len(), 4);
         assert_eq!(description[0], ("objoid".into(), ColumnType::Oid));
 
-        let attrdef = virtual_relation_schema(&engine, "pg_attrdef").unwrap();
+        let attrdef = virtual_relation_schema(&engine, "pg_attrdef")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             attrdef
                 .iter()
@@ -781,7 +798,9 @@ mod tests {
     #[test]
     fn pg18_information_schema_domains_retain_their_oid_identity() {
         let engine = Engine::new();
-        let routines = virtual_relation_schema(&engine, "information_schema.routines").unwrap();
+        let routines = virtual_relation_schema(&engine, "information_schema.routines")
+            .unwrap()
+            .unwrap();
         assert_eq!(routines.len(), 82);
         assert!(matches!(
             routines[0].1,
@@ -818,7 +837,9 @@ mod tests {
         );
         assert_eq!(resolve_virtual_relation(&engine, "public.ag_graph"), None);
 
-        let graph = virtual_relation_schema(&engine, "ag_catalog.ag_graph").unwrap();
+        let graph = virtual_relation_schema(&engine, "ag_catalog.ag_graph")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             graph
                 .iter()
@@ -827,7 +848,9 @@ mod tests {
             vec!["graphid", "name", "namespace"]
         );
         assert_eq!(graph[2].1, ColumnType::Regnamespace);
-        let label = virtual_relation_schema(&engine, "ag_catalog.ag_label").unwrap();
+        let label = virtual_relation_schema(&engine, "ag_catalog.ag_label")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             label
                 .iter()

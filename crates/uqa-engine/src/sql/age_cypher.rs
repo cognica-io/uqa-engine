@@ -77,9 +77,15 @@ pub(super) fn build_rows(
         Some(value) => parameter_map(value)?,
         None => BTreeMap::new(),
     };
-    let (cypher_columns, cypher_rows) = engine
-        .run_cypher(&graph, &query, params)
-        .map_err(|e| SQLError::Unsupported(format!("cypher: {e}")))?;
+    let (cypher_columns, cypher_rows) =
+        engine
+            .run_cypher(&graph, &query, params)
+            .map_err(|error| match error {
+                uqa_graph::cypher::CypherError::MissingLabelRelation(relation) => {
+                    SQLError::UnknownTable(relation)
+                }
+                other => SQLError::Unsupported(format!("cypher: {other}")),
+            })?;
     if !cypher_columns.is_empty() && cypher_columns.len() != column_aliases.len() {
         return Err(SQLError::TypeMismatch(
             "return row and column definition list do not match".into(),

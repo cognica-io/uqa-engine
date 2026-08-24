@@ -20,7 +20,7 @@ Graph names share durable catalog state. `drop_graph` removes a graph and its co
 
 ## Apache AGE catalog and labels
 
-AGE clients bootstrap with `LOAD 'age'` and `SET search_path = ag_catalog, "$user", public`, probe graphs through `ag_catalog.ag_graph` or `graph_exists`, and read labels from `ag_catalog.ag_label`; all of these work against the embedded engine, and `create_vlabel`, `create_elabel`, `drop_label`, and `alter_graph` manage labels and graph names with AGE's rules and errors. The exact contracts are in [Graph SQL and Cypher](../sql/07-graph.md).
+AGE clients bootstrap with `LOAD 'age'` and `SET search_path = ag_catalog, "$user", public`, probe graphs through `ag_catalog.ag_graph` or `graph_exists`, and read surviving labels from `ag_catalog.ag_label`; all of these work against the embedded engine, and `create_vlabel`, `create_elabel`, `drop_label`, and `alter_graph` manage labels and graph names with AGE's dependency, dangling-edge, and broken-default lifecycle. The exact contracts are in [Graph SQL and Cypher](../sql/07-graph.md).
 
 ```sql
 LOAD 'age';

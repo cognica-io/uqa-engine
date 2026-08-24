@@ -289,10 +289,9 @@ pub(in crate::sql) fn run_age_create_graph_with_evaluator(
     Ok(Value::Null)
 }
 
-/// `SELECT drop_graph('name'[, cascade])` with AGE semantics: without
-/// `cascade => true` the drop always fails because AGE issues
-/// `DROP SCHEMA ... RESTRICT` on a namespace that still holds its label
-/// tables; success returns void.
+/// `SELECT drop_graph('name'[, cascade])` with AGE semantics: false uses
+/// `DROP SCHEMA ... RESTRICT` and succeeds only after every label relation is
+/// gone, while true removes surviving labels; success returns void.
 pub(in crate::sql) fn run_age_drop_graph_with_evaluator(
     engine: &Engine,
     args: &[ScalarExpr],
@@ -311,10 +310,16 @@ pub(in crate::sql) fn run_age_drop_graph_with_evaluator(
         None => false,
     };
     if !cascade {
-        return Err(age_error(
-            AGE_DEPENDENT_OBJECTS_STILL_EXIST,
-            format!("cannot drop schema {name} because other objects depend on it"),
-        ));
+        let labels = engine
+            .list_graph_labels(&name)
+            .map_err(age_graph_catalog_error)?
+            .unwrap_or_default();
+        if !labels.is_empty() {
+            return Err(age_error(
+                AGE_DEPENDENT_OBJECTS_STILL_EXIST,
+                format!("cannot drop schema {name} because other objects depend on it"),
+            ));
+        }
     }
     engine
         .drop_graph(&name)
@@ -364,6 +369,22 @@ fn run_age_create_label_with_evaluator(
             format!("graph \"{graph}\" does not exist."),
         ));
     }
+    let labels = engine
+        .list_graph_labels(&graph)
+        .map_err(age_graph_catalog_error)?
+        .unwrap_or_default();
+    if !labels
+        .iter()
+        .any(|entry| entry.name == kind.default_label_name())
+    {
+        return Err(age_error(
+            AGE_UNDEFINED_TABLE,
+            format!(
+                "relation \"{graph}.{}\" does not exist",
+                kind.default_label_name()
+            ),
+        ));
+    }
     let created = engine
         .create_graph_label(&graph, &label, kind)
         .map_err(|err| SQLError::Internal(format!("create label: {err}")))?;
@@ -408,8 +429,8 @@ pub(in crate::sql) fn run_age_create_elabel_with_evaluator(
 
 /// `SELECT drop_label('graph', 'label'[, force])` with AGE semantics: the
 /// label relation is dropped together with every entity that carries the
-/// label, `force => true` is rejected exactly like AGE, and the default
-/// labels stay because the graph depends on them.
+/// label, `force => true` is rejected exactly like AGE, and a default label
+/// is restricted only while user labels of the same kind inherit from it.
 pub(in crate::sql) fn run_age_drop_label_with_evaluator(
     engine: &Engine,
     args: &[ScalarExpr],
@@ -444,13 +465,23 @@ pub(in crate::sql) fn run_age_drop_label_with_evaluator(
             "force option is not supported yet",
         ));
     }
-    // AGE issues `DROP TABLE ... RESTRICT`, which fails while user label
-    // relations inherit from the default label and otherwise removes the
-    // default relation and leaves the graph unusable. The engine keeps the
-    // dependency error in both cases because every graph depends on its
-    // default labels; the manual documents this as a deliberate difference.
-    if entry.id == uqa_graph::VERTEX_DEFAULT_LABEL_ID
-        || entry.id == uqa_graph::EDGE_DEFAULT_LABEL_ID
+    let dependent_views = engine
+        .graph_label_relation_dependents(&graph, &label)
+        .map_err(|error| SQLError::Internal(format!("inspect label dependencies: {error}")))?;
+    if !dependent_views.is_empty() {
+        return Err(age_error(
+            AGE_DEPENDENT_OBJECTS_STILL_EXIST,
+            format!("cannot drop table {graph}.{label} because other objects depend on it"),
+        ));
+    }
+    // AGE issues `DROP TABLE ... RESTRICT`: user label relations inherit from
+    // the default relation of their kind, while the graph catalog itself does
+    // not depend on either default relation.
+    if (entry.id == uqa_graph::VERTEX_DEFAULT_LABEL_ID
+        || entry.id == uqa_graph::EDGE_DEFAULT_LABEL_ID)
+        && labels.iter().any(|candidate| {
+            candidate.id >= uqa_graph::FIRST_USER_LABEL_ID && candidate.kind == entry.kind
+        })
     {
         return Err(age_error(
             AGE_DEPENDENT_OBJECTS_STILL_EXIST,
