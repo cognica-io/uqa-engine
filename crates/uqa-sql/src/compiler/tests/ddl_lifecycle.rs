@@ -16,12 +16,89 @@ fn alter_table_add_key_constraint_preserves_tuple_shape() {
         panic!("expected ALTER TABLE");
     };
     assert!(matches!(
-        alter.action,
-        AlterTableAction::AddKeyConstraint { constraint }
+        alter.actions.as_slice(),
+        [AlterTableAction::AddKeyConstraint { constraint }]
             if constraint.name.as_deref() == Some("labels_tenant_slug_key")
                 && constraint.kind == TableKeyConstraintKind::Unique
                 && constraint.columns == ["tenant", "slug"]
     ));
+}
+
+#[test]
+fn alter_table_constraint_lifecycle_preserves_every_ordered_action() {
+    let Statement::AlterTable(alter) = first(
+        "ALTER TABLE child \
+         ADD CONSTRAINT score_ck CHECK (score > 0) NOT VALID, \
+         ADD CONSTRAINT parent_fk FOREIGN KEY (parent_id) REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED NOT VALID, \
+         ADD CONSTRAINT label_nn NOT NULL label NOT VALID NO INHERIT, \
+         VALIDATE CONSTRAINT score_ck, \
+         ALTER CONSTRAINT parent_fk NOT ENFORCED, \
+         ALTER CONSTRAINT parent_fk DEFERRABLE INITIALLY DEFERRED, \
+         ALTER CONSTRAINT label_nn NO INHERIT, \
+         DROP CONSTRAINT score_ck CASCADE",
+    ) else {
+        panic!("expected ALTER TABLE");
+    };
+    assert_eq!(alter.actions.len(), 8);
+    assert!(matches!(
+        &alter.actions[0],
+        AlterTableAction::AddCheckConstraint { constraint }
+            if constraint.name.as_deref() == Some("score_ck")
+                && constraint.enforced
+                && !constraint.validated
+    ));
+    assert!(matches!(
+        &alter.actions[1],
+        AlterTableAction::AddForeignKeyConstraint { constraint }
+            if constraint.name.as_deref() == Some("parent_fk")
+                && constraint.enforced
+                && !constraint.validated
+                && constraint.deferrable
+                && constraint.initially_deferred
+    ));
+    assert!(matches!(
+        &alter.actions[2],
+        AlterTableAction::AddNotNullConstraint { name, column, validated, no_inherit }
+            if name.as_deref() == Some("label_nn")
+                && column == "label"
+                && !validated
+                && *no_inherit
+    ));
+    assert!(matches!(
+        &alter.actions[3],
+        AlterTableAction::ValidateConstraint { name } if name == "score_ck"
+    ));
+    assert!(matches!(
+        &alter.actions[4],
+        AlterTableAction::AlterConstraint { name, enforceability: Some(false), .. }
+            if name == "parent_fk"
+    ));
+    assert!(matches!(
+        &alter.actions[5],
+        AlterTableAction::AlterConstraint {
+            name,
+            deferrability: Some((true, true)),
+            ..
+        } if name == "parent_fk"
+    ));
+    assert!(matches!(
+        &alter.actions[6],
+        AlterTableAction::AlterConstraint { name, no_inherit: Some(true), .. }
+            if name == "label_nn"
+    ));
+    assert!(matches!(
+        &alter.actions[7],
+        AlterTableAction::DropConstraint { name, cascade: true, .. } if name == "score_ck"
+    ));
+}
+
+#[test]
+fn alter_constraint_not_valid_reports_postgresql_feature_state() {
+    let error = compile("ALTER TABLE child ALTER CONSTRAINT parent_fk NOT VALID").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("0A000"));
+    assert!(error
+        .to_string()
+        .contains("constraints cannot be altered to be NOT VALID"));
 }
 
 #[test]

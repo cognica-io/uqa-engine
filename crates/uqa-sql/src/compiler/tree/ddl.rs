@@ -32,6 +32,7 @@ pub(in crate::compiler) fn compile_create_table(
     let mut checks: Vec<TableCheck> = Vec::new();
     let mut foreign_keys: Vec<ForeignKey> = Vec::new();
     let mut key_constraints: Vec<TableKeyConstraint> = Vec::new();
+    let mut table_not_nulls: Vec<(Option<String>, String, bool, bool)> = Vec::new();
     let mut named_constraints = BTreeSet::new();
     let mut primary_key_seen = false;
     for elt in &stmt.table_elts {
@@ -105,6 +106,8 @@ pub(in crate::compiler) fn compile_create_table(
                             name: cname,
                             expr,
                             enforced: cstr.is_enforced,
+                            validated: cstr.initially_valid,
+                            no_inherit: cstr.is_no_inherit,
                         });
                     }
                     pg_query::protobuf::ConstrType::ConstrForeign => {
@@ -153,6 +156,9 @@ pub(in crate::compiler) fn compile_create_table(
                             on_delete_set_columns,
                             match_type: compile_foreign_key_match(&cstr.fk_matchtype)?,
                             enforced: cstr.is_enforced,
+                            validated: cstr.initially_valid,
+                            deferrable: cstr.deferrable,
+                            initially_deferred: cstr.initdeferred,
                         });
                     }
                     pg_query::protobuf::ConstrType::ConstrPrimary
@@ -183,6 +189,20 @@ pub(in crate::compiler) fn compile_create_table(
                             nulls_not_distinct: cstr.nulls_not_distinct,
                         });
                     }
+                    pg_query::protobuf::ConstrType::ConstrNotnull => {
+                        let key_columns = extract_strings(&cstr.keys)?;
+                        let [column] = key_columns.as_slice() else {
+                            return Err(SQLError::TypeMismatch(
+                                "NOT NULL constraint must name exactly one column".into(),
+                            ));
+                        };
+                        table_not_nulls.push((
+                            constraint_name(&cstr.conname),
+                            column.clone(),
+                            cstr.initially_valid,
+                            cstr.is_no_inherit,
+                        ));
+                    }
                     other => {
                         return Err(SQLError::Unsupported(format!(
                             "table constraint {other:?} is not supported"
@@ -196,6 +216,29 @@ pub(in crate::compiler) fn compile_create_table(
                 )));
             }
         }
+    }
+    for (name, column_name, validated, no_inherit) in table_not_nulls {
+        let column = columns
+            .iter_mut()
+            .find(|column| column.name == column_name)
+            .ok_or_else(|| {
+                SQLError::TypeMismatch(format!(
+                    "NOT NULL constraint references unknown column `{column_name}`"
+                ))
+            })?;
+        if column.not_null {
+            return Err(SQLError::Routine {
+                sqlstate: "55000".into(),
+                message: format!(
+                    "cannot create not-null constraint on column \"{column_name}\": a not-null constraint already exists"
+                ),
+            });
+        }
+        column.not_null = true;
+        column.not_null_explicit = true;
+        column.not_null_name = name;
+        column.not_null_validated = validated;
+        column.not_null_no_inherit = no_inherit;
     }
     let column_names: BTreeSet<&str> = columns.iter().map(|column| column.name.as_str()).collect();
     for constraint in &key_constraints {
@@ -292,12 +335,16 @@ pub(in crate::compiler) fn compile_column_def(
     let mut not_null = false;
     let mut not_null_explicit = false;
     let mut not_null_name = None;
+    let mut not_null_validated = true;
+    let mut not_null_no_inherit = false;
     let mut unique = false;
     let mut default: Option<Expr> = None;
     let mut generated: Option<GeneratedColumn> = None;
     let mut check: Option<Expr> = None;
     let mut check_name = None;
     let mut check_enforced = true;
+    let mut check_validated = true;
+    let mut check_no_inherit = false;
     let mut references: Option<crate::ast::ForeignKeyRef> = None;
     #[derive(Clone, Copy)]
     enum EnforceableConstraint {
@@ -321,6 +368,8 @@ pub(in crate::compiler) fn compile_column_def(
                     not_null = true;
                     not_null_explicit = true;
                     not_null_name = constraint_name(&cstr.conname);
+                    not_null_validated = cstr.initially_valid;
+                    not_null_no_inherit = cstr.is_no_inherit;
                     last_enforceable = None;
                 }
                 pg_query::protobuf::ConstrType::ConstrUnique => {
@@ -366,6 +415,8 @@ pub(in crate::compiler) fn compile_column_def(
                     check = Some(compile_expr(raw)?);
                     check_name = constraint_name(&cstr.conname);
                     check_enforced = cstr.is_enforced;
+                    check_validated = cstr.initially_valid;
+                    check_no_inherit = cstr.is_no_inherit;
                     last_enforceable = Some(EnforceableConstraint::Check);
                 }
                 pg_query::protobuf::ConstrType::ConstrForeign => {
@@ -392,6 +443,9 @@ pub(in crate::compiler) fn compile_column_def(
                         on_delete: compile_foreign_key_action(&cstr.fk_del_action)?,
                         match_type: compile_foreign_key_match(&cstr.fk_matchtype)?,
                         enforced: cstr.is_enforced,
+                        validated: cstr.initially_valid,
+                        deferrable: cstr.deferrable,
+                        initially_deferred: cstr.initdeferred,
                     });
                     last_enforceable = Some(EnforceableConstraint::ForeignKey);
                 }
@@ -445,6 +499,8 @@ pub(in crate::compiler) fn compile_column_def(
         not_null,
         not_null_explicit,
         not_null_name,
+        not_null_validated,
+        not_null_no_inherit,
         auto_increment,
         unique,
         default,
@@ -452,6 +508,8 @@ pub(in crate::compiler) fn compile_column_def(
         check,
         check_name,
         check_enforced,
+        check_validated,
+        check_no_inherit,
         references,
     })
 }

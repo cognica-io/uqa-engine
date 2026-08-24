@@ -117,10 +117,13 @@ fn validate_document_non_key_constraints_with_old(
         }
         match document.get(&col_def.name) {
             Some(Value::Null) | None => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "NOT NULL constraint violated: column `{}` in table `{table}`",
-                    col_def.name
-                )));
+                return Err(SQLError::Routine {
+                    sqlstate: "23502".into(),
+                    message: format!(
+                        "null value in column \"{}\" of relation \"{table}\" violates not-null constraint",
+                        col_def.name
+                    ),
+                });
             }
             _ => {}
         }
@@ -137,7 +140,7 @@ fn validate_document_non_key_constraints_with_old(
             &schema,
             params,
         )?;
-        if !uqa_sql::expr::truthy(&result) {
+        if !matches!(result, Value::Null) && !uqa_sql::expr::truthy(&result) {
             let label = constraint.name.unwrap_or_else(|| "<unnamed>".into());
             return Err(SQLError::Routine {
                 sqlstate: "23514".into(),
@@ -183,6 +186,9 @@ fn lock_document_foreign_key_dependencies(
         if !fk.enforced {
             continue;
         }
+        if !allow_missing && fk.deferrable && fk.initially_deferred {
+            continue;
+        }
         if old_document.is_some_and(|old_document| {
             fk.local_columns.iter().all(|column| {
                 old_document.get(column).cloned().unwrap_or(Value::Null)
@@ -194,13 +200,12 @@ fn lock_document_foreign_key_dependencies(
         let Some(local_values) = foreign_key_lookup_values(&fk, document)? else {
             continue;
         };
-        let violation = || {
-            let cols = fk.local_columns.join(", ");
-            SQLError::TypeMismatch(format!(
-                "FOREIGN KEY constraint violated: ({cols}) -> {}({}) has no matching row",
-                fk.ref_table,
-                fk.ref_columns.join(", ")
-            ))
+        let violation = || SQLError::Routine {
+            sqlstate: "23503".into(),
+            message: format!(
+                "insert or update on table \"{table}\" violates foreign key constraint \"{}\"",
+                fk.name.as_deref().unwrap_or("<unnamed>")
+            ),
         };
         let mut hops = 0usize;
         loop {
@@ -249,6 +254,41 @@ fn lock_document_foreign_key_dependencies(
                         )));
                     }
                 }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_deferred_foreign_key_rows(
+    engine: &Engine,
+    rows: &std::collections::BTreeSet<(String, DocId)>,
+) -> Result<(), SQLError> {
+    for (table, doc_id) in rows {
+        let Some(document) = engine.get_document(table, *doc_id)? else {
+            continue;
+        };
+        for foreign_key in engine
+            .try_foreign_keys(table)
+            .map_err(|error| dml_storage_error("deferred constraint validation", error))?
+        {
+            if !foreign_key.enforced || !foreign_key.deferrable || !foreign_key.initially_deferred {
+                continue;
+            }
+            let Some(values) = foreign_key_lookup_values(&foreign_key, &document)? else {
+                continue;
+            };
+            if engine
+                .find_conflict(&foreign_key.ref_table, &foreign_key.ref_columns, &values)?
+                .is_none()
+            {
+                return Err(SQLError::Routine {
+                    sqlstate: "23503".into(),
+                    message: format!(
+                        "insert or update on table \"{table}\" violates foreign key constraint \"{}\"",
+                        foreign_key.name.as_deref().unwrap_or("<unnamed>")
+                    ),
+                });
             }
         }
     }
@@ -409,10 +449,13 @@ pub(in crate::sql) fn foreign_key_lookup_values(
         ForeignKeyMatch::Simple => Ok(None),
         ForeignKeyMatch::Full if null_count == local_values.len() => Ok(None),
         ForeignKeyMatch::Full => {
-            let cols = fk.local_columns.join(", ");
-            Err(SQLError::TypeMismatch(format!(
-                "FOREIGN KEY MATCH FULL constraint violated: ({cols}) must be all NULL or all non-NULL"
-            )))
+            Err(SQLError::Routine {
+                sqlstate: "23503".into(),
+                message: format!(
+                    "insert or update on table violates foreign key constraint \"{}\": MATCH FULL does not allow mixing of null and nonnull key values",
+                    fk.name.as_deref().unwrap_or("<unnamed>")
+                ),
+            })
         }
     }
 }
@@ -589,12 +632,17 @@ fn prepare_referenced_key_update_actions(
         let referencing = referencing_rows(engine, &ref_table, &fk.local_columns, &old_values)?;
         for (child_id, _child_doc) in referencing {
             match fk.on_update {
+                ForeignKeyAction::NoAction if fk.deferrable && fk.initially_deferred => {
+                    engine.defer_foreign_key_row(&ref_table, child_id)?;
+                }
                 ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "FOREIGN KEY constraint violated: UPDATE on `{table}` is referenced by `{ref_table}` ({} -> {})",
-                        fk.local_columns.join(", "),
-                        fk.ref_columns.join(", "),
-                    )));
+                    return Err(SQLError::Routine {
+                        sqlstate: "23503".into(),
+                        message: format!(
+                            "update or delete on table \"{table}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                            fk.name.as_deref().unwrap_or("<unnamed>")
+                        ),
+                    });
                 }
                 ForeignKeyAction::Cascade => {
                     let Some((child_id, child_doc)) = lock_referencing_child(

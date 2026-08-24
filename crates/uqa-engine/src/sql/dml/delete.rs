@@ -403,12 +403,17 @@ fn prepare_referenced_key_delete_actions(
                 continue;
             }
             match fk.on_delete {
+                ForeignKeyAction::NoAction if fk.deferrable && fk.initially_deferred => {
+                    engine.defer_foreign_key_row(&ref_table, child_id)?;
+                }
                 ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "FOREIGN KEY constraint violated: DELETE on `{table}` is referenced by `{ref_table}` ({} -> {})",
-                        fk.local_columns.join(", "),
-                        fk.ref_columns.join(", "),
-                    )));
+                    return Err(SQLError::Routine {
+                        sqlstate: "23503".into(),
+                        message: format!(
+                            "update or delete on table \"{table}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                            fk.name.as_deref().unwrap_or("<unnamed>")
+                        ),
+                    });
                 }
                 ForeignKeyAction::Cascade => {
                     if let Some(prepared) = prepare_document_delete(

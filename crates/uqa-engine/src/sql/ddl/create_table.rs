@@ -74,6 +74,12 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
             c.key_constraints.clone(),
         )
         .map_err(|err| ddl_storage_error("CREATE TABLE constraints", err))?;
+    for mut foreign_key in engine
+        .try_foreign_keys(&c.name)
+        .map_err(|err| ddl_storage_error("CREATE TABLE foreign keys", err))?
+    {
+        super::alter_table::validate_foreign_key_definition(engine, &c.name, &mut foreign_key)?;
+    }
     engine
         .try_persist_table_schema(&c.name)
         .map_err(|e| ddl_storage_error("CREATE TABLE", e))?;

@@ -197,6 +197,7 @@ impl Engine {
         let change = crate::row_locks::PendingRowChange { key, kind };
         if let Some(frame) = stack.last_mut() {
             frame.row_changes.push(change);
+            frame.deferred_foreign_key_rows.insert((canonical, doc_id));
             Ok(())
         } else {
             drop(stack);
@@ -247,6 +248,20 @@ impl Engine {
         )
     }
 
+    pub(crate) fn defer_foreign_key_row(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+    ) -> Result<(), SQLError> {
+        let canonical = self.row_lock_table_name(table)?;
+        let mut stack = self.session.transactions.lock();
+        let frame = stack.last_mut().ok_or_else(|| {
+            SQLError::Internal("deferred foreign-key row outside a transaction".into())
+        })?;
+        frame.deferred_foreign_key_rows.insert((canonical, doc_id));
+        Ok(())
+    }
+
     pub(crate) fn note_row_rewritten(
         &self,
         table: &str,
@@ -270,6 +285,12 @@ impl Engine {
         };
         if let Some(frame) = stack.last_mut() {
             frame.row_changes.push(change);
+            frame
+                .deferred_foreign_key_rows
+                .insert((canonical.clone(), old_doc_id));
+            frame
+                .deferred_foreign_key_rows
+                .insert((canonical, new_doc_id));
             Ok(())
         } else {
             drop(stack);

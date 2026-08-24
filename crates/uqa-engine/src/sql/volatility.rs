@@ -120,6 +120,7 @@ pub(super) fn function_volatility(
             lower.as_str(),
             "current_schema"
                 | "current_schemas"
+                | "to_regclass"
                 | "current_database"
                 | "current_catalog"
                 | "current_user"

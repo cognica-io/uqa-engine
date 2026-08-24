@@ -7,6 +7,7 @@
     "verified_patch": "18.4",
     "differential_probes": "tests/parity/pg18/probes.sql",
     "stateful_routines": "tests/parity/pg18/routines_stateful.expected.json",
+    "stateful_constraints": "tests/parity/pg18/constraints_stateful.expected.json",
     "tpch_fixture": "benchmarks/tpch/expected/pg18.json"
   },
   "parser_chain": {
@@ -262,10 +263,10 @@
     {
       "id": "ddl.constraint-lifecycle",
       "postgresql_reference": "PostgreSQL 18.4 constraint validation, ALTER CONSTRAINT, dependency, dump, restore, and reopen behavior",
-      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_check_fk_default::; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::",
-      "supported_version": "The bounded PostgreSQL 18.4 constraint metadata recorded by ddl.constraint-metadata",
+      "uqa_test": "python3 tests/parity/pg18/run_routines_stateful.py --suite constraints; cargo test -p uqa-sql --lib compiler::tests::ddl_lifecycle::; cargo test -p uqa-engine --test integration engine_catalog::pg18_constraint_lifecycle::",
+      "supported_version": "PostgreSQL 18.4 named CHECK, foreign-key, and NOT NULL NOT VALID and validation lifecycle; supported ALTER CONSTRAINT enforcement, deferrability, and inheritance transitions; initially-deferred foreign-key outer-commit and savepoint behavior; multi-action ALTER atomicity; bounded dependency-aware drop; catalog flags; and durable reopen",
       "status": "partial",
-      "open_issue": "NOT VALID, ALTER CONSTRAINT, complete dependency behavior, and complete dump, restore, and reopen coverage remain."
+      "open_issue": "Per-transaction SET CONSTRAINTS, inheritance and partition propagation, the complete dependency graph, pg_dump/pg_restore, and the upstream constraint regression matrix remain."
     },
     {
       "id": "ddl.relation-forms-and-options",
