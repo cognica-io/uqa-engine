@@ -15,9 +15,11 @@ use super::{
 
 mod array_transform;
 mod gamma;
+mod json_strip;
 mod string_binary;
 
 pub(super) use gamma::{bind_call as bind_gamma_call, GammaCall};
+pub(super) use json_strip::{bind_call as bind_json_strip_call, JsonStripCall};
 pub(super) use string_binary::{bind_call as bind_string_binary_call, StringBinaryCall};
 
 #[allow(clippy::too_many_lines)]
@@ -425,15 +427,8 @@ pub(super) fn infer_builtin_function(
             require_one(name, &args[0], TypeClass::JsonB)?;
             GenerationType::JsonB
         }
-        "json_strip_nulls" => {
-            require_arity(name, args, 1, 2)?;
-            require_one(name, &args[0], TypeClass::Json)?;
-            GenerationType::Json
-        }
-        "jsonb_strip_nulls" => {
-            require_arity(name, args, 1, 2)?;
-            require_one(name, &args[0], TypeClass::JsonB)?;
-            GenerationType::JsonB
+        "json_strip_nulls" | "jsonb_strip_nulls" => {
+            json_strip::require_signature(name, argument_names, args)?
         }
         "to_timestamp" => {
             require_signature(name, args, &[TypeClass::Numeric])?;

@@ -28,6 +28,8 @@ mod catalog_and_persistence;
 mod checksums;
 #[path = "sql_generated_columns/gamma_functions.rs"]
 mod gamma_functions;
+#[path = "sql_generated_columns/json_strip_nulls.rs"]
+mod json_strip_nulls;
 #[path = "sql_generated_columns/md5_overloads.rs"]
 mod md5_overloads;
 #[path = "sql_generated_columns/mutations_and_functions.rs"]

@@ -183,6 +183,8 @@ pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
                         | "crc32"
                         | "crc32c"
                         | "gamma"
+                        | "json_strip_nulls"
+                        | "jsonb_strip_nulls"
                         | "length"
                         | "lgamma"
                         | "md5"

@@ -13,25 +13,6 @@ use super::*;
 // ---------------------------------------------------------------------
 
 #[test]
-fn pg18_json_strip_nulls_can_strip_array_elements() {
-    let eng = engine();
-    assert_eq!(
-        scalar(
-            &eng,
-            "SELECT jsonb_strip_nulls('{\"a\":null,\"b\":[1,null,{\"c\":null}]}'::jsonb) = '{\"b\":[1,null,{}]}'::jsonb"
-        ),
-        Value::Bool(true)
-    );
-    assert_eq!(
-        scalar(
-            &eng,
-            "SELECT jsonb_strip_nulls('{\"a\":null,\"b\":[1,null,{\"c\":null}]}'::jsonb, true) = '{\"b\":[1,{}]}'::jsonb"
-        ),
-        Value::Bool(true)
-    );
-}
-
-#[test]
 fn pg18_jsonb_numbers_use_postgresql_numeric_range() {
     let eng = engine();
     for sql in [

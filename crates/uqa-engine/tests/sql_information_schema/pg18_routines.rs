@@ -94,12 +94,12 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
                     proargmodes, proargnames, proargdefaults, protrftypes, prosrc, probin, prosqlbody, \
                     proconfig, proacl \
              FROM pg_catalog.pg_proc \
-             WHERE oid IN (720, 1317, 1318, 1367, 1369, 1372, 1374, 1375, 1381, 1810, 1811, 2010, 2311, 2321, 3062, 3261, 6330, 6331, 6332, 6333, 6342, 6343, 6364, 6365, 6382, 6383, 6384, 6389, 6390, 6429, 6430) \
+             WHERE oid IN (720, 1317, 1318, 1367, 1369, 1372, 1374, 1375, 1381, 1810, 1811, 2010, 2311, 2321, 3062, 3261, 3262, 6330, 6331, 6332, 6333, 6342, 6343, 6364, 6365, 6382, 6383, 6384, 6389, 6390, 6429, 6430) \
              ORDER BY oid",
             &[],
         )
         .unwrap();
-    assert_eq!(routines.rows.len(), 31);
+    assert_eq!(routines.rows.len(), 32);
     let row = |oid: i64| {
         routines
             .rows
@@ -107,19 +107,7 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
             .find(|row| row["oid"] == Value::Int(oid))
             .unwrap_or_else(|| panic!("missing pg_proc row {oid}"))
     };
-    assert_eq!(row(3261)["pronargs"], Value::Int(2));
-    assert_eq!(row(3261)["pronargdefaults"], Value::Int(1));
-    assert_eq!(row(3261)["prorettype"], Value::Int(114));
-    assert_eq!(
-        row(3261)["proargnames"],
-        Value::Array(
-            uqa_core::ArrayValue::try_new(vec![
-                Value::Str("target".into()),
-                Value::Str("strip_in_arrays".into()),
-            ])
-            .expect("flat pg_proc argument-name array")
-        )
-    );
+    assert_json_strip_routines(&engine, &routines);
     assert_string_binary_length_routines(&engine, &routines);
     assert_checksum_routines(&engine, &routines);
     assert_gamma_routines(&engine, &routines);
@@ -171,6 +159,83 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     assert_random_range_pg_proc(&engine);
     assert_random_range_routines(&engine);
     assert_uuid_extraction_routines(&engine);
+}
+
+fn assert_json_strip_routines(engine: &Engine, routines: &SQLResult) {
+    const FALSE_NODE: &str = "({CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]})";
+    let row = |oid: i64| {
+        routines
+            .rows
+            .iter()
+            .find(|row| row["oid"] == Value::Int(oid))
+            .unwrap_or_else(|| panic!("missing pg_proc row {oid}"))
+    };
+    for (oid, name, target_type) in [
+        (3261, "json_strip_nulls", 114),
+        (3262, "jsonb_strip_nulls", 3802),
+    ] {
+        assert_eq!(row(oid)["proname"], Value::Str(name.into()));
+        assert_eq!(row(oid)["pronamespace"], Value::Int(11));
+        assert_eq!(row(oid)["proowner"], Value::Int(10));
+        assert_eq!(row(oid)["prolang"], Value::Int(12));
+        assert_eq!(row(oid)["procost"], Value::Float(1.0));
+        assert_eq!(row(oid)["prorows"], Value::Float(0.0));
+        assert_eq!(row(oid)["provariadic"], Value::Int(0));
+        assert_eq!(row(oid)["prosupport"], Value::Str("-".into()));
+        assert_eq!(row(oid)["prokind"], Value::Str("f".into()));
+        assert_eq!(row(oid)["prosecdef"], Value::Bool(false));
+        assert_eq!(row(oid)["proleakproof"], Value::Bool(false));
+        assert_eq!(row(oid)["proisstrict"], Value::Bool(true));
+        assert_eq!(row(oid)["proretset"], Value::Bool(false));
+        assert_eq!(row(oid)["provolatile"], Value::Str("i".into()));
+        assert_eq!(row(oid)["proparallel"], Value::Str("s".into()));
+        assert_eq!(row(oid)["pronargs"], Value::Int(2));
+        assert_eq!(row(oid)["pronargdefaults"], Value::Int(1));
+        assert_eq!(row(oid)["prorettype"], Value::Int(target_type));
+        assert_eq!(
+            row(oid)["proargtypes"],
+            Value::List(vec![Value::Int(target_type), Value::Int(16)])
+        );
+        assert_eq!(row(oid)["proallargtypes"], Value::Null);
+        assert_eq!(row(oid)["proargmodes"], Value::Null);
+        assert_eq!(
+            row(oid)["proargnames"],
+            Value::Array(
+                uqa_core::ArrayValue::try_new(vec![
+                    Value::Str("target".into()),
+                    Value::Str("strip_in_arrays".into()),
+                ])
+                .expect("flat pg_proc argument-name array")
+            )
+        );
+        assert_eq!(row(oid)["proargdefaults"], Value::Str(FALSE_NODE.into()));
+        assert_eq!(row(oid)["protrftypes"], Value::Null);
+        assert_eq!(row(oid)["prosrc"], Value::Str(name.into()));
+        assert_eq!(row(oid)["probin"], Value::Null);
+        assert_eq!(row(oid)["prosqlbody"], Value::Null);
+        assert_eq!(row(oid)["proconfig"], Value::Null);
+        assert_eq!(row(oid)["proacl"], Value::Null);
+    }
+    let information_schema = engine
+        .sql(
+            "SELECT specific_name, routine_name, data_type, is_deterministic, external_language \
+             FROM information_schema.routines \
+             WHERE specific_name IN ('json_strip_nulls_3261', 'jsonb_strip_nulls_3262') \
+             ORDER BY specific_name",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(information_schema.rows.len(), 2);
+    for (row, (specific_name, routine_name, data_type)) in information_schema.rows.iter().zip([
+        ("json_strip_nulls_3261", "json_strip_nulls", "json"),
+        ("jsonb_strip_nulls_3262", "jsonb_strip_nulls", "jsonb"),
+    ]) {
+        assert_eq!(row["specific_name"], Value::Str(specific_name.into()));
+        assert_eq!(row["routine_name"], Value::Str(routine_name.into()));
+        assert_eq!(row["data_type"], Value::Str(data_type.into()));
+        assert_eq!(row["is_deterministic"], Value::Str("YES".into()));
+        assert_eq!(row["external_language"], Value::Str("INTERNAL".into()));
+    }
 }
 
 fn assert_gamma_routines(engine: &Engine, routines: &SQLResult) {

@@ -135,7 +135,11 @@ The extraction functions are strict and immutable. Version 1 timestamps use the 
 
 JSON expansion functions are table functions when used in `FROM`.
 
-`json_strip_nulls` and `jsonb_strip_nulls` accept PostgreSQL 18's optional `strip_in_arrays` Boolean argument. The default removes object fields whose value is JSON null while retaining null array elements; `true` removes both.
+`json_strip_nulls(target json [, strip_in_arrays boolean DEFAULT false]) -> json` and `jsonb_strip_nulls(target jsonb [, strip_in_arrays boolean DEFAULT false]) -> jsonb` recursively remove object fields whose value is JSON null. The optional flag retains null array elements when omitted or `false` and removes them when `true`; `target` and `strip_in_arrays` support named notation in declaration-independent order. Both functions are strict, immutable, and parallel safe, do not change database state, preserve the input base return type, and accept domains over their declared argument types. Textual `json` results compact insignificant whitespace while preserving object order, duplicate keys, and numeric lexemes and decoding string escapes; `jsonb` results use normal binary-JSON key and numeric canonicalization. Calls with explicit `text`, the other JSON storage type, a non-Boolean flag, an unknown argument name, or an unsupported arity fail during overload resolution, while malformed unknown JSON input reports invalid JSON syntax.
+
+```sql execute
+SELECT json_strip_nulls(strip_in_arrays => true, target => '{"keep":1,"drop":null,"items":[null,{"drop":null}]}'::json);
+```
 
 ## Temporal functions
 

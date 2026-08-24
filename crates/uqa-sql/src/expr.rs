@@ -19,6 +19,7 @@ use crate::result::ResultRow;
 mod array_transform;
 mod encoding;
 mod json;
+mod json_strip;
 mod random;
 mod time;
 mod uuid;
@@ -34,6 +35,8 @@ use json::{
     json_has_key, json_has_keys, json_typeof, jsonb_insert, jsonb_set, jsonpath_candidate,
     jsonpath_exists, jsonpath_match, parse_json, strip_nulls, typed_json_value, value_to_json,
 };
+pub use json_strip::argument_positions as json_strip_nulls_argument_positions;
+use json_strip::strip_json_nulls_text;
 pub use random::{RANDOM_INT4_FUNCTION, RANDOM_INT8_FUNCTION, RANDOM_NUMERIC_FUNCTION};
 use time::{
     age_between, coerce_temporal, date_trunc_value, extract_from_value, format_pg_number,
@@ -868,6 +871,9 @@ pub fn eval_function_call(
 fn builtin_named_args(function: &str, call_args: &[(Option<String>, Value)]) -> Option<Vec<Value>> {
     if matches!(function, "array_sort" | "array_reverse") {
         return array_transform::reorder_named_values(function, call_args);
+    }
+    if matches!(function, "json_strip_nulls" | "jsonb_strip_nulls") {
+        return json_strip::reorder_named_values(function, call_args);
     }
     let names: &[&str] = match function {
         "regexp_count" => match call_args.len() {

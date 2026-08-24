@@ -29,6 +29,7 @@ mod functions;
 mod gamma;
 mod integer_base;
 mod introspection;
+mod json_strip;
 mod length;
 mod md5;
 mod operators;
@@ -46,6 +47,8 @@ pub use functions::{builtin_function_argument_targets, builtin_function_type};
 #[doc(hidden)]
 pub use gamma::{resolve_gamma_overload, ResolvedGammaOverload};
 pub use introspection::{bind_type_introspection, bind_type_introspection_with_resolver};
+#[doc(hidden)]
+pub use json_strip::{resolve_json_strip_overload, ResolvedJsonStripOverload};
 #[doc(hidden)]
 pub use length::{resolve_length_overload, ResolvedLengthOverload};
 #[doc(hidden)]
@@ -106,6 +109,7 @@ pub struct BuiltinFunctionOverload {
     pub name: String,
     pub argument_names: Vec<Option<String>>,
     pub argument_types: Vec<ColumnType>,
+    pub default_arguments: usize,
     pub return_type: ColumnType,
 }
 
