@@ -275,6 +275,21 @@ fn recursive_control_validation_matches_postgresql_18_ordering() {
             "types",
         ),
         (
+            "WITH RECURSIVE t(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM t WHERE n<2 ORDER BY n) SEARCH DEPTH FIRST BY n SET ord SELECT * FROM t",
+            "0A000",
+            "ORDER BY in a recursive query is not implemented",
+        ),
+        (
+            "WITH RECURSIVE t(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM t WHERE n<2 OFFSET 1) SELECT * FROM t",
+            "0A000",
+            "OFFSET in a recursive query is not implemented",
+        ),
+        (
+            "WITH RECURSIVE t(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM t WHERE n<2 FETCH FIRST 1 ROW ONLY) CYCLE n SET c USING p SELECT * FROM t",
+            "0A000",
+            "LIMIT in a recursive query is not implemented",
+        ),
+        (
             "WITH RECURSIVE t(n,j) AS (VALUES(1,json '{}') UNION ALL SELECT n+1,j FROM t WHERE n<2) CYCLE j SET c USING p SELECT * FROM t",
             "42883",
             "json",
@@ -404,6 +419,19 @@ fn row_lock_errors_follow_shape_clause_and_cte_ordering() {
         )
         .unwrap();
     assert_eq!(catalog.rows.len(), 1);
+
+    let nullable_catalog = engine
+        .sql(
+            "SELECT edges.src, pg_type.typname
+             FROM edges LEFT JOIN pg_catalog.pg_type AS pg_type ON false
+             FOR UPDATE OF pg_type",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(nullable_catalog.sqlstate(), Some("0A000"));
+    assert!(nullable_catalog
+        .to_string()
+        .contains("nullable side of an outer join"));
 
     engine
         .sql("SELECT * FROM ag_catalog.ag_graph FOR UPDATE", &[])

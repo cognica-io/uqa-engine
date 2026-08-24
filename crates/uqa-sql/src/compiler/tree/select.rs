@@ -871,9 +871,11 @@ pub(in crate::compiler) fn compile_with_clause(
             })
             .transpose()?;
         let query = compile_select(select)?;
-        if (search.is_some() || cycle.is_some())
-            && (!wc.recursive || !select_references_relation(&query, &cte.ctename))
-        {
+        let recursive = wc.recursive && select_references_relation(&query, &cte.ctename);
+        if recursive {
+            reject_recursive_query_ordering(&query)?;
+        }
+        if (search.is_some() || cycle.is_some()) && !recursive {
             return Err(SQLError::Routine {
                 sqlstate: "42601".into(),
                 message: "WITH query is not recursive".into(),
@@ -940,6 +942,28 @@ fn select_references_relation(statement: &SelectStmt, name: &str) -> bool {
                 .is_some_and(|left| select_references_relation(left, name))
                 || select_references_relation(&set.right, name)
         })
+}
+
+fn reject_recursive_query_ordering(statement: &SelectStmt) -> Result<()> {
+    let Some(set_op) = statement.set_op.as_ref() else {
+        return Ok(());
+    };
+    if !set_op.combined_order_by.is_empty() {
+        return Err(SQLError::Unsupported(
+            "ORDER BY in a recursive query is not implemented".into(),
+        ));
+    }
+    if set_op.combined_offset.is_some() {
+        return Err(SQLError::Unsupported(
+            "OFFSET in a recursive query is not implemented".into(),
+        ));
+    }
+    if set_op.combined_limit.is_some() {
+        return Err(SQLError::Unsupported(
+            "LIMIT in a recursive query is not implemented".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Compile a `LIMIT` / `OFFSET` operand into an [`Expr`]. The expression is coerced to bigint at execute time, so parameter-bearing forms work end-to-end. Ordinary `LIMIT NULL` is absent, while `FETCH ... WITH TIES` preserves NULL to raise `PostgreSQL`'s clause-specific error.

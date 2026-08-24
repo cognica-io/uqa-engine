@@ -7,13 +7,11 @@
 //! Recursive CTE materialization and spill deduplication.
 
 use super::{
-    analyze_recursive_control_step, attach_order_limit, collect_query_operator, eval_scalar,
-    execute_query_plan_output, identity_order_columns, is_score_provenance_column,
-    materialize_plan_ctes, physical_exec_error, physical_work_mem_bytes,
-    push_output_filter_into_query_plan, query_plan_output_columns, AccessPathPlan, ComputePlan,
-    CtePlan, CteScope, Engine, EngineExpressionEvaluator, ProjectionPlan, QueryBlockPlan,
-    QueryOutput, QueryOutputMode, QueryRows, RelationalPlan, SQLError, SQLParam, ScalarExpr,
-    SetOpKind, SourcePlan, Value,
+    analyze_recursive_control_step, collect_query_operator, eval_scalar, execute_query_plan_output,
+    is_score_provenance_column, materialize_plan_ctes, physical_exec_error,
+    physical_work_mem_bytes, push_output_filter_into_query_plan, query_plan_output_columns,
+    CtePlan, CteScope, Engine, ProjectionPlan, QueryOutput, QueryOutputMode, QueryRows,
+    RelationalPlan, SQLError, SQLParam, ScalarExpr, SetOpKind, SourcePlan, Value,
 };
 use uqa_core::ArrayValue;
 
@@ -40,9 +38,8 @@ pub(in crate::sql) fn materialize_recursive_cte(
         right,
         order_by,
         limit,
-        with_ties,
         offset,
-        subqueries,
+        ..
     } = &cte.query.root
     else {
         return Err(SQLError::Unsupported(
@@ -54,6 +51,7 @@ pub(in crate::sql) fn materialize_recursive_cte(
             "recursive CTE only supports UNION".into(),
         ));
     }
+    reject_recursive_set_ordering(order_by, limit.as_deref(), offset.as_deref())?;
 
     let declared_columns = (!cte.columns.is_empty()).then_some(cte.columns.as_slice());
     let controls_recursion = cte.search.is_some() || cte.cycle.is_some();
@@ -155,58 +153,32 @@ pub(in crate::sql) fn materialize_recursive_cte(
         }
     }
 
-    let rows = accumulated
+    accumulated
         .into_shared(anchor_schema)
-        .map_err(physical_exec_error)?;
+        .map_err(physical_exec_error)
+}
 
-    if order_by.is_empty() && limit.is_none() && offset.is_none() {
-        return Ok(rows);
-    }
-    let synthetic = QueryBlockPlan {
-        projections: Vec::new(),
-        from: None,
-        r#where: None,
-        compute: ComputePlan::Project,
-        group_by: Vec::new(),
-        grouping_sets: Vec::new(),
-        group_distinct: false,
-        having: None,
-        order_by: order_by.clone(),
-        limit: limit.as_deref().cloned(),
-        with_ties: *with_ties,
-        offset: offset.as_deref().cloned(),
-        distinct: false,
-        distinct_on: Vec::new(),
-        subqueries: subqueries.clone(),
-        access: AccessPathPlan::Row,
-        locking: Vec::new(),
-    };
-    let ordering_scope = ctes.enter_scalar_subqueries(subqueries);
-    let operation: Box<dyn uqa_execution::PhysicalOperator + '_> =
-        Box::new(uqa_execution::SharedSpillScan::new(rows));
-    let output = identity_order_columns(&anchor_columns);
-    let operation = attach_order_limit(
-        operation,
-        &synthetic,
-        &output,
-        engine,
-        params,
-        &ordering_scope,
-        EngineExpressionEvaluator::shared(engine, params, &ordering_scope),
-        None,
-    )?;
-    let output = collect_query_operator(
-        engine,
-        anchor_columns,
-        operation,
-        QueryOutputMode::SharedSpill,
-    )?;
-    let QueryRows::SharedSpill(rows) = output.rows else {
-        return Err(SQLError::Internal(
-            "recursive CTE collector returned in-memory rows".into(),
+fn reject_recursive_set_ordering(
+    order_by: &[uqa_planner::OrderPlan],
+    limit: Option<&ScalarExpr>,
+    offset: Option<&ScalarExpr>,
+) -> Result<(), SQLError> {
+    if !order_by.is_empty() {
+        return Err(SQLError::Unsupported(
+            "ORDER BY in a recursive query is not implemented".into(),
         ));
-    };
-    Ok(rows)
+    }
+    if offset.is_some() {
+        return Err(SQLError::Unsupported(
+            "OFFSET in a recursive query is not implemented".into(),
+        ));
+    }
+    if limit.is_some() {
+        return Err(SQLError::Unsupported(
+            "LIMIT in a recursive query is not implemented".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn materialize_controlled_recursive_cte(
@@ -460,6 +432,9 @@ fn annotate_recursive_rows(
     let mut expandable = uqa_execution::SpillBuffer::new(1);
     for batch in base_rows.reader().map_err(physical_exec_error)? {
         let batch = batch.map_err(physical_exec_error)?;
+        let capacity = batch.rows.len().min(uqa_execution::DEFAULT_BATCH_SIZE);
+        let mut emitted_rows = Vec::with_capacity(capacity);
+        let mut expandable_rows = Vec::with_capacity(capacity);
         for row in batch.rows {
             let base = uqa_execution::OwnedPhysicalRow::new(batch.schema.clone(), row);
             let (row, is_cycle) = annotate_recursive_row(
@@ -471,15 +446,22 @@ fn annotate_recursive_rows(
                 parent,
                 depth,
             )?;
-            push_annotated_recursive_row(
+            collect_annotated_recursive_row(
                 row,
                 is_cycle,
                 generated_schema,
                 &mut seen,
-                &mut emitted,
-                &mut expandable,
+                &mut emitted_rows,
+                &mut expandable_rows,
             )?;
         }
+        push_annotated_recursive_batch(
+            generated_schema,
+            emitted_rows,
+            expandable_rows,
+            &mut emitted,
+            &mut expandable,
+        )?;
     }
     Ok((
         emitted
@@ -517,6 +499,9 @@ fn annotate_recursive_step_rows(
     let mut expandable = uqa_execution::SpillBuffer::new(1);
     for batch in step_rows.reader().map_err(physical_exec_error)? {
         let batch = batch.map_err(physical_exec_error)?;
+        let capacity = batch.rows.len().min(uqa_execution::DEFAULT_BATCH_SIZE);
+        let mut emitted_rows = Vec::with_capacity(capacity);
+        let mut expandable_rows = Vec::with_capacity(capacity);
         for row in batch.rows {
             let source = uqa_execution::OwnedPhysicalRow::new(batch.schema.clone(), row);
             let base_values = (0..base_schema.len())
@@ -572,15 +557,22 @@ fn annotate_recursive_step_rows(
                 Some(&parent),
                 depth,
             )?;
-            push_annotated_recursive_row(
+            collect_annotated_recursive_row(
                 row,
                 is_cycle,
                 generated_schema,
                 &mut seen,
-                &mut emitted,
-                &mut expandable,
+                &mut emitted_rows,
+                &mut expandable_rows,
             )?;
         }
+        push_annotated_recursive_batch(
+            generated_schema,
+            emitted_rows,
+            expandable_rows,
+            &mut emitted,
+            &mut expandable,
+        )?;
     }
     Ok((
         emitted
@@ -675,13 +667,13 @@ fn annotate_recursive_row(
     Ok((uqa_execution::PhysicalRow::from_values(values), is_cycle))
 }
 
-fn push_annotated_recursive_row(
+fn collect_annotated_recursive_row(
     row: uqa_execution::PhysicalRow,
     is_cycle: bool,
     generated_schema: &uqa_execution::RowSchema,
     seen: &mut Option<&mut uqa_execution::ExactRowSet>,
-    emitted: &mut uqa_execution::SpillBuffer,
-    expandable: &mut uqa_execution::SpillBuffer,
+    emitted: &mut Vec<uqa_execution::PhysicalRow>,
+    expandable: &mut Vec<uqa_execution::PhysicalRow>,
 ) -> Result<(), SQLError> {
     let is_new = match seen.as_deref_mut() {
         Some(seen) => seen
@@ -692,17 +684,33 @@ fn push_annotated_recursive_row(
     if !is_new {
         return Ok(());
     }
-    emitted
-        .push(uqa_execution::Batch::from_physical_rows(
-            generated_schema.clone(),
-            vec![row.clone()],
-        ))
-        .map_err(physical_exec_error)?;
+    emitted.push(row.clone());
     if !is_cycle {
+        expandable.push(row);
+    }
+    Ok(())
+}
+
+fn push_annotated_recursive_batch(
+    generated_schema: &uqa_execution::RowSchema,
+    emitted_rows: Vec<uqa_execution::PhysicalRow>,
+    expandable_rows: Vec<uqa_execution::PhysicalRow>,
+    emitted: &mut uqa_execution::SpillBuffer,
+    expandable: &mut uqa_execution::SpillBuffer,
+) -> Result<(), SQLError> {
+    if !emitted_rows.is_empty() {
+        emitted
+            .push(uqa_execution::Batch::from_physical_rows(
+                generated_schema.clone(),
+                emitted_rows,
+            ))
+            .map_err(physical_exec_error)?;
+    }
+    if !expandable_rows.is_empty() {
         expandable
             .push(uqa_execution::Batch::from_physical_rows(
                 generated_schema.clone(),
-                vec![row],
+                expandable_rows,
             ))
             .map_err(physical_exec_error)?;
     }

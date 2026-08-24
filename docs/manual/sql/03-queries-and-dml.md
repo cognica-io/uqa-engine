@@ -154,6 +154,8 @@ SELECT n, is_cycle, cardinality(path) AS path_length FROM ring ORDER BY path_len
 
 `SEARCH` and `CYCLE` require an actually self-referencing `WITH RECURSIVE` query. Their `BY`/cycle columns must be unique members of the CTE column list, and generated sequence, mark, and path names must not conflict with one another or the declared columns. The cycle mark and default use a common type with equality semantics. These structural failures use PostgreSQL SQLSTATEs such as syntax error (`42601`), ambiguous column (`42702`), datatype mismatch (`42804`), and undefined equality operator (`42883`).
 
+PostgreSQL 18 rejects a recursive query's combined top-level `ORDER BY`, `OFFSET`, and `LIMIT` or `FETCH` clauses with feature-not-supported (`0A000`), and UQA Engine rejects the same shapes before execution. Parenthesized clauses local to a nonrecursive or recursive UNION operand remain distinct and follow PostgreSQL's operand-local behavior.
+
 An ordinary CTE defaults to PostgreSQL's planning policy: a side-effect-free, nonrecursive CTE referenced once may be folded into its parent, while a multiply referenced CTE is evaluated once and shared. `AS MATERIALIZED` is an optimization fence and forces one shared evaluation. `AS NOT MATERIALIZED` allows each reference to be folded and evaluated independently; PostgreSQL ignores that request for recursive or volatile CTEs and UQA Engine does the same.
 
 ```sql execute

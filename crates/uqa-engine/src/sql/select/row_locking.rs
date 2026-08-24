@@ -514,7 +514,9 @@ fn reject_unusable_lock_leaf(
             strength.sql_name(),
             source.display_name
         ))),
-        LockLeafKind::Virtual { lockable: true } => Ok(()),
+        LockLeafKind::Virtual { lockable: true } => {
+            reject_nullable_lock_source(source.nullable, strength)
+        }
         LockLeafKind::Virtual { lockable: false } => Err(SQLError::Unsupported(format!(
             "{} cannot be applied to relation \"{}\"",
             strength.sql_name(),

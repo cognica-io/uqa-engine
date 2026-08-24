@@ -349,6 +349,28 @@ fn cte_materialization_search_and_cycle_controls_survive_compilation() {
 }
 
 #[test]
+fn recursive_query_top_level_ordering_and_slicing_match_postgresql_18_rejections() {
+    for (sql, expected) in [
+        (
+            "WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n<3 ORDER BY n) SELECT * FROM t",
+            "ORDER BY in a recursive query is not implemented",
+        ),
+        (
+            "WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n<3 OFFSET 1) SELECT * FROM t",
+            "OFFSET in a recursive query is not implemented",
+        ),
+        (
+            "WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n<3 FETCH FIRST 1 ROW ONLY) SELECT * FROM t",
+            "LIMIT in a recursive query is not implemented",
+        ),
+    ] {
+        let error = compile(sql).expect_err(sql);
+        assert_eq!(error.sqlstate(), Some("0A000"), "{sql}: {error}");
+        assert!(error.to_string().contains(expected), "{sql}: {error}");
+    }
+}
+
+#[test]
 fn cte_values_body_is_preserved() {
     let Statement::Select(select) =
         first("WITH rows(id, label) AS (VALUES (1, 'one'), (2, 'two')) SELECT * FROM rows")
