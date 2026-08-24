@@ -29,7 +29,7 @@ use crate::sql::from_rows::{
 use crate::sql::virtual_relation_schema;
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_execution::{FunctionTypeResolver, ResolvedFunctionOverload, RowSchema};
-use uqa_sql::ast::ColumnType;
+use uqa_sql::ast::{ColumnType, JoinKind, JoinUsing};
 
 type ProjectionStarColumn = (String, Option<ColumnType>);
 
@@ -44,6 +44,21 @@ struct SchemaScope {
 struct QueryFunctionTypeResolver<'a> {
     engine: &'a Engine,
     scalar_subquery_types: Vec<Option<ColumnType>>,
+}
+
+struct JoinSchemaBinding<'a> {
+    engine: &'a Engine,
+    kind: JoinKind,
+    on: Option<&'a ScalarExpr>,
+    using: Option<&'a JoinUsing>,
+    natural: bool,
+    alias: Option<&'a str>,
+    column_aliases: &'a [String],
+    left: &'a RowSchema,
+    right: &'a RowSchema,
+    subqueries: &'a [QueryPlan],
+    params: &'a [SQLParam],
+    outer: Option<&'a RowSchema>,
 }
 
 fn table_function_member_source(function: &uqa_planner::TableFunctionPlan) -> SourcePlan {
@@ -521,6 +536,41 @@ impl SchemaScope {
             .collect())
     }
 
+    fn bind_join_output_schema(
+        &mut self,
+        binding: JoinSchemaBinding<'_>,
+    ) -> Result<RowSchema, SQLError> {
+        let JoinSchemaBinding {
+            engine,
+            kind,
+            on,
+            using,
+            natural,
+            alias,
+            column_aliases,
+            left,
+            right,
+            subqueries,
+            params,
+            outer,
+        } = binding;
+        if let Some(on) = on {
+            let input = RowSchema::join(left, right, std::iter::empty::<String>());
+            let input = overlay_outer_schema(&input, outer);
+            if self.validate_references {
+                self.bind_expression_type(engine, on, &input, subqueries, params, outer)?;
+            } else {
+                uqa_execution::scalar_type_with_resolver(on, &input, params, engine)?;
+            }
+        }
+        let resolved = resolve_join_using(using, natural, left, right)?;
+        let schema = resolved.map_or_else(
+            || Ok(RowSchema::join(left, right, std::iter::empty())),
+            |using| join_using_output_schema(kind, left, right, &using),
+        )?;
+        alias_join_schema(&schema, alias, column_aliases)
+    }
+
     fn bind_source(
         &mut self,
         engine: &Engine,
@@ -813,29 +863,20 @@ impl SchemaScope {
                     params,
                     right_scope.as_ref().or(outer),
                 )?;
-                if let Some(on) = on {
-                    let input =
-                        RowSchema::join(&left_schema, &right_schema, std::iter::empty::<String>());
-                    let input = overlay_outer_schema(&input, outer);
-                    if self.validate_references {
-                        self.bind_expression_type(engine, on, &input, subqueries, params, outer)?;
-                    } else {
-                        uqa_execution::scalar_type_with_resolver(on, &input, params, engine)?;
-                    }
-                }
-                let resolved =
-                    resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
-                let schema = resolved.map_or_else(
-                    || {
-                        Ok(RowSchema::join(
-                            &left_schema,
-                            &right_schema,
-                            std::iter::empty(),
-                        ))
-                    },
-                    |using| join_using_output_schema(*kind, &left_schema, &right_schema, &using),
-                )?;
-                alias_join_schema(&schema, alias.as_deref(), column_aliases)
+                self.bind_join_output_schema(JoinSchemaBinding {
+                    engine,
+                    kind: *kind,
+                    on: on.as_ref(),
+                    using: using.as_ref(),
+                    natural: *natural,
+                    alias: alias.as_deref(),
+                    column_aliases,
+                    left: &left_schema,
+                    right: &right_schema,
+                    subqueries,
+                    params,
+                    outer,
+                })
             }
         }
     }
@@ -852,6 +893,12 @@ impl SchemaScope {
             SourcePlan::Join {
                 left,
                 right,
+                kind,
+                on,
+                using,
+                natural,
+                alias,
+                column_aliases,
                 lateral,
                 ..
             } => {
@@ -863,13 +910,27 @@ impl SchemaScope {
                 );
                 let right_scope = (*lateral || implicit_lateral_function)
                     .then(|| overlay_outer_schema(&left_schema, outer));
-                self.bind_source_for_execution(
+                let right_schema = self.bind_source_for_execution(
                     engine,
                     right,
                     subqueries,
                     params,
                     right_scope.as_ref().or(outer),
                 )?;
+                return self.bind_join_output_schema(JoinSchemaBinding {
+                    engine,
+                    kind: *kind,
+                    on: on.as_ref(),
+                    using: using.as_ref(),
+                    natural: *natural,
+                    alias: alias.as_deref(),
+                    column_aliases,
+                    left: &left_schema,
+                    right: &right_schema,
+                    subqueries,
+                    params,
+                    outer,
+                });
             }
             SourcePlan::Function {
                 name,

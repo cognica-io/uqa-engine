@@ -523,14 +523,18 @@ impl Engine {
         relations.extend(rows.iter().map(|row| row.relation.clone()));
 
         let mut views = BTreeMap::new();
+        let mut legacy_views = Vec::new();
         for row in rows {
             let view_name = row.relation.qualified_name();
             let mut view = match serde_json::from_str::<RestoredView>(&row.definition_json)? {
                 RestoredView::Current(view) => view,
-                RestoredView::Legacy(query) => StoredView {
-                    query,
-                    output_columns: None,
-                },
+                RestoredView::Legacy(query) => {
+                    legacy_views.push(row.relation.clone());
+                    StoredView {
+                        query,
+                        output_columns: None,
+                    }
+                }
             };
             bind_stored_view_relations(&mut view.query, &relations).map_err(|error| {
                 StorageBackendError::Other(format!("restore view `{view_name}`: {error}"))
@@ -542,6 +546,59 @@ impl Engine {
                 StorageBackendError::Other(format!("restore view `{view_name}`: {error}"))
             })?;
             views.insert(row.relation, view);
+        }
+
+        if !legacy_views.is_empty() {
+            // Install the complete provisional registry so nested legacy views can derive each other's schemas, then persist the exact routine identities so later refreshes load the current format without repeating migration.
+            let previous_views = {
+                let mut loaded = self.durable.views.write();
+                std::mem::replace(&mut *loaded, views.clone())
+            };
+            let migration = (|| -> StorageBackendResult<()> {
+                for relation in &legacy_views {
+                    let view_name = relation.qualified_name();
+                    let view = views.get_mut(relation).ok_or_else(|| {
+                        StorageBackendError::Other(format!(
+                            "legacy view `{view_name}` disappeared during restoration"
+                        ))
+                    })?;
+                    crate::sql::bind_catalog_query_routines(self, &mut view.query, &[]).map_err(
+                        |error| {
+                            StorageBackendError::Other(format!(
+                                "restore view `{view_name}` routine bindings: {error}"
+                            ))
+                        },
+                    )?;
+                    self.durable
+                        .views
+                        .write()
+                        .insert(relation.clone(), view.clone());
+                }
+                for relation in &legacy_views {
+                    let view_name = relation.qualified_name();
+                    let view = views.get(relation).ok_or_else(|| {
+                        StorageBackendError::Other(format!(
+                            "legacy view `{view_name}` disappeared during migration"
+                        ))
+                    })?;
+                    let definition_json = serde_json::to_string(view)?;
+                    catalog
+                        .save_view(&ViewRow {
+                            relation: relation.clone(),
+                            definition_json,
+                        })
+                        .map_err(|error| {
+                            StorageBackendError::Other(format!(
+                                "migrate legacy view `{view_name}` routine bindings: {error}"
+                            ))
+                        })?;
+                }
+                Ok(())
+            })();
+            if let Err(error) = migration {
+                *self.durable.views.write() = previous_views;
+                return Err(error);
+            }
         }
         *self.durable.views.write() = views;
         Ok(())

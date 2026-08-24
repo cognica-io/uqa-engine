@@ -343,3 +343,78 @@ fn legacy_query_only_view_definitions_still_restore() {
     assert_eq!(result.column_types, [Some(ColumnType::SmallInteger)]);
     assert_eq!(result.rows[0]["value"], Value::Int(7));
 }
+
+#[test]
+fn legacy_views_restore_exact_scalar_function_and_function_group_bindings() {
+    fn remove_bindings(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Array(values) => {
+                for value in values {
+                    remove_bindings(value);
+                }
+            }
+            serde_json::Value::Object(object) => {
+                object.remove("binding");
+                for value in object.values_mut() {
+                    remove_bindings(value);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("legacy-view-routine-bindings.db");
+    let legacy_json = {
+        let engine = Engine::open(&path).unwrap();
+        for sql in [
+            "CREATE FUNCTION legacy_scalar(value INTEGER) RETURNS TEXT LANGUAGE SQL AS 'SELECT ''integer'''",
+            "CREATE FUNCTION legacy_scalar(value BIGINT) RETURNS TEXT LANGUAGE SQL AS 'SELECT ''bigint'''",
+            "CREATE FUNCTION legacy_rows(value INTEGER) RETURNS TABLE(item INTEGER) LANGUAGE SQL AS 'SELECT $1'",
+            "CREATE FUNCTION legacy_rows(value BIGINT) RETURNS TABLE(item BIGINT) LANGUAGE SQL AS 'SELECT $1'",
+            "CREATE FUNCTION legacy_group(value INTEGER) RETURNS TABLE(item INTEGER) LANGUAGE SQL AS 'SELECT $1'",
+            "CREATE FUNCTION legacy_group(value BIGINT) RETURNS TABLE(item BIGINT) LANGUAGE SQL AS 'SELECT $1'",
+            "CREATE VIEW legacy_routine_view AS SELECT legacy_scalar(single_item) AS chosen, grouped_item FROM legacy_rows(1::INTEGER) AS single(single_item) CROSS JOIN ROWS FROM (legacy_group(2::INTEGER)) AS grouped(grouped_item)",
+        ] {
+            exec(&engine, sql);
+        }
+        let mut plan = serde_json::to_value(
+            engine
+                .view("legacy_routine_view")
+                .unwrap()
+                .expect("view must exist"),
+        )
+        .unwrap();
+        remove_bindings(&mut plan);
+        serde_json::to_string(&plan).unwrap()
+    };
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    let updated_rows = connection
+        .execute(
+            "UPDATE _views SET definition_json = ?1 WHERE schema_name = 'public' AND relation_name = 'legacy_routine_view'",
+            [legacy_json],
+        )
+        .unwrap();
+    assert_eq!(updated_rows, 1, "legacy view fixture must update one row");
+    drop(connection);
+
+    let engine = Engine::open(&path).unwrap();
+    let result = exec(
+        &engine,
+        "SELECT chosen, grouped_item FROM legacy_routine_view",
+    );
+    assert_eq!(result.rows[0]["chosen"], Value::Str("integer".into()));
+    assert_eq!(result.rows[0]["grouped_item"], Value::Int(2));
+    drop(engine);
+
+    let engine = Engine::open(&path).unwrap();
+    for function in ["legacy_scalar", "legacy_rows", "legacy_group"] {
+        engine
+            .sql(&format!("DROP FUNCTION {function}(BIGINT)"), &[])
+            .unwrap();
+        let dependency = engine
+            .sql(&format!("DROP FUNCTION {function}(INTEGER)"), &[])
+            .unwrap_err();
+        assert_eq!(dependency.sqlstate(), Some("2BP01"), "{dependency}");
+    }
+}

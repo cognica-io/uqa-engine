@@ -7,6 +7,7 @@
 //! SQL join coverage.
 
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 
 use uqa_core::Value;
 use uqa_engine::Engine;
@@ -427,6 +428,23 @@ fn nested_join_using_rebinds_the_merged_row_type() {
     assert_eq!(result.rows[0]["right_id"], Value::Int(1));
     assert_eq!(result.rows[0]["third_id"], Value::Int(1));
     assert_eq!(result.rows[0]["t_only"], Value::Str("t1".into()));
+}
+
+#[test]
+fn deeply_nested_join_binding_composes_each_level_schema() {
+    let engine = Engine::new();
+    let mut from = "(VALUES (1)) AS j0(id)".to_string();
+    for index in 1..=32 {
+        write!(from, " JOIN (VALUES (1)) AS j{index}(id) USING (id)").unwrap();
+    }
+    let result = query(
+        &engine,
+        &format!("SELECT id, j0.id AS first_id, j32.id AS last_id FROM {from}"),
+    );
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["id"], Value::Int(1));
+    assert_eq!(result.rows[0]["first_id"], Value::Int(1));
+    assert_eq!(result.rows[0]["last_id"], Value::Int(1));
 }
 
 #[test]

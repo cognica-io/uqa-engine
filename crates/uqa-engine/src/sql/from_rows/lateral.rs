@@ -37,7 +37,7 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
         if matches!(&self.right, SourcePlan::FunctionGroup { .. }) {
             let mut scoped_ctes = self.ctes.clone();
             scoped_ctes.set_row_lock_outer_row(left_row.clone());
-            let mut operator = build_join_operator_with_ctes(
+            let operator = build_join_operator_with_ctes(
                 self.engine,
                 &self.right,
                 self.params,
@@ -45,14 +45,19 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
                 None,
                 None,
             )?;
+            let columns = operator.schema().to_vec();
+            let output = crate::sql::select::collect_query_operator(
+                self.engine,
+                columns,
+                operator,
+                QueryOutputMode::SharedSpill,
+            )?;
+            let rows = query_output_shared(output, "lateral function group")?;
             let schema = self.right_schema.clone();
-            let mut rows = Vec::new();
-            for batch in uqa_execution::OperatorBatchCursor::open(operator.as_mut())? {
-                for row in batch?.into_owned_rows() {
-                    rows.push(row.relabel(schema.clone())?);
-                }
-            }
-            return Ok(Box::new(rows.into_iter().map(Ok)));
+            return Ok(Box::new(
+                rows.read_rows()?
+                    .map(move |row| row?.relabel(schema.clone())),
+            ));
         }
         if let SourcePlan::Function {
             name,

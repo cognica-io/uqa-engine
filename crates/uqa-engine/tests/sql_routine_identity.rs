@@ -9,6 +9,8 @@
 use tempfile::TempDir;
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLParam};
+use uqa_sql::ast::{Expr, FunctionBinding};
+use uqa_sql::Statement;
 
 #[path = "sql_routine_identity/scalar_overloads.rs"]
 mod scalar_overloads;
@@ -559,6 +561,45 @@ fn multi_argument_from_unnest_uses_postgresql_syntax_before_user_overloads() {
             "SELECT unnest(ARRAY[1]::INTEGER[], ARRAY[2]::INTEGER[]) AS v",
         ),
         Value::Str("user-unnest".into())
+    );
+}
+
+#[test]
+fn builtin_set_projection_binding_survives_same_named_user_routine_family() {
+    let engine = Engine::new();
+    engine.sql("CREATE SCHEMA projection_api", &[]).unwrap();
+    let mut statements = uqa_sql::compile("SELECT generate_series(1, 3) AS value").unwrap();
+    let Statement::Select(mut body) = statements.remove(0) else {
+        panic!("expected SELECT statement");
+    };
+    let Expr::Func { binding, .. } = &mut body.projections[0].expr else {
+        panic!("expected function projection");
+    };
+    *binding = Some(FunctionBinding {
+        name: "pg_catalog.generate_series".into(),
+        argument_types: vec!["integer".into(), "integer".into()],
+        builtin: true,
+    });
+    engine
+        .register_view("projection_api.builtin_series", *body)
+        .unwrap();
+    for sql in [
+        "CREATE FUNCTION projection_api.generate_series(first_value TEXT, last_value TEXT) RETURNS SETOF TEXT LANGUAGE SQL AS 'SELECT $1'",
+        "SET search_path = pg_catalog, projection_api, public",
+    ] {
+        engine.sql(sql, &[]).unwrap();
+    }
+
+    let result = engine
+        .sql("SELECT value FROM projection_api.builtin_series", &[])
+        .unwrap();
+    assert_eq!(
+        result
+            .rows
+            .iter()
+            .map(|row| row["value"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Int(1), Value::Int(2), Value::Int(3)]
     );
 }
 

@@ -56,6 +56,19 @@ fn table_function_column_definitions_preserve_type_modifiers() {
 }
 
 #[test]
+fn table_function_temporal_column_definitions_do_not_require_stored_typmods() {
+    let Statement::Select(select) = first(
+        "SELECT * FROM f() AS (created_at timestamp(3) with time zone, local_time time(3), elapsed interval hour to minute)",
+    ) else {
+        panic!("expected SELECT");
+    };
+    let Some(FromClause::Function { column_types, .. }) = select.from else {
+        panic!("expected function source");
+    };
+    assert_eq!(column_types, ["timestamptz", "time", "interval"]);
+}
+
+#[test]
 fn multi_argument_from_unnest_expands_to_canonical_unary_group_members() {
     let Statement::Select(select) =
         first("SELECT * FROM unnest(ARRAY[1, 2], ARRAY['a']) AS expanded(left_value, right_value)")

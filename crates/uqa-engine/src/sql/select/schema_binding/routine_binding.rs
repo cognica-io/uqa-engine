@@ -147,7 +147,12 @@ impl SchemaScope {
             }
         }
 
-        let output = self.bind_root(engine, root, params, outer, false)?;
+        let set_output = match &*root {
+            RelationalPlan::SetOp { .. } => {
+                Some(self.bind_root(engine, root, params, outer, false)?)
+            }
+            RelationalPlan::QueryBlock(_) | RelationalPlan::Values { .. } => None,
+        };
         match root {
             RelationalPlan::QueryBlock(block) => {
                 let source_schema = block.from.as_ref().map_or_else(
@@ -255,11 +260,14 @@ impl SchemaScope {
                 subqueries,
                 ..
             } => {
+                let output = set_output
+                    .as_ref()
+                    .expect("set-operation output schema was bound before routine expressions");
                 for order in order_by {
                     self.bind_scalar_routines_for_storage(
                         engine,
                         &mut order.expr,
-                        &output,
+                        output,
                         subqueries,
                         params,
                         outer,
@@ -267,12 +275,12 @@ impl SchemaScope {
                 }
                 if let Some(limit) = limit {
                     self.bind_scalar_routines_for_storage(
-                        engine, limit, &output, subqueries, params, outer,
+                        engine, limit, output, subqueries, params, outer,
                     )?;
                 }
                 if let Some(offset) = offset {
                     self.bind_scalar_routines_for_storage(
-                        engine, offset, &output, subqueries, params, outer,
+                        engine, offset, output, subqueries, params, outer,
                     )?;
                 }
             }

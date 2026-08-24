@@ -46,6 +46,13 @@ pub(crate) enum CompiledFunctionBody {
     SQL(Vec<UnifiedPlan>),
 }
 
+struct SQLFunctionDropPlan {
+    is_procedure: bool,
+    kind: &'static str,
+    targets: Vec<(String, Vec<String>)>,
+    notices: Vec<(&'static str, String)>,
+}
+
 pub(crate) fn routine_signature_types(def: &CreateFunction) -> Vec<String> {
     def.signature_params()
         .iter()
@@ -766,6 +773,15 @@ impl Engine {
     /// statement, mirroring `PostgreSQL`'s resolution and error
     /// texts. `IF EXISTS` misses emit a notice instead of failing.
     pub(crate) fn drop_sql_functions(&self, stmt: &DropFunctionStmt) -> Result<(), SQLError> {
+        let plan = self.preflight_sql_function_drop(stmt)?;
+        self.commit_sql_function_drop(plan)
+    }
+
+    /// Resolve every target and dependency before acquiring the registry write lock. Dependency scans take table and view locks, so keeping them out of the registry critical section preserves the catalog lock order.
+    fn preflight_sql_function_drop(
+        &self,
+        stmt: &DropFunctionStmt,
+    ) -> Result<SQLFunctionDropPlan, SQLError> {
         if stmt.cascade {
             return Err(SQLError::Unsupported(
                 "DROP FUNCTION/PROCEDURE CASCADE is not supported".into(),
@@ -815,23 +831,59 @@ impl Engine {
                 self.ensure_no_function_dependencies(name, argument_types)?;
             }
         }
+        Ok(SQLFunctionDropPlan {
+            is_procedure: stmt.is_procedure,
+            kind,
+            targets,
+            notices,
+        })
+    }
+
+    /// Apply a completed DROP preflight against the latest registry snapshot. The write guard serializes this persistence boundary with CREATE OR REPLACE, while exact target revalidation prevents partial multi-target removal if another DROP won the race.
+    fn commit_sql_function_drop(&self, plan: SQLFunctionDropPlan) -> Result<(), SQLError> {
+        let SQLFunctionDropPlan {
+            is_procedure,
+            kind,
+            targets,
+            notices,
+        } = plan;
         if !targets.is_empty() {
+            let mut registry = self.durable.sql_user_functions.write();
             let mut next = registry.clone();
+
+            // Revalidate every target before mutating `next`. This retains a concurrently registered unrelated overload and keeps a multi-target DROP all-or-nothing if any preflighted identity has disappeared.
+            for (name, argument_types) in &targets {
+                let overloads = next.get(name).ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "resolved {kind} registry entry `{name}` disappeared before DROP"
+                    ))
+                })?;
+                if !overloads.iter().any(|function| {
+                    function.def.is_procedure == is_procedure
+                        && routine_signature_types(&function.def) == *argument_types
+                }) {
+                    return Err(SQLError::Internal(format!(
+                        "resolved {} disappeared before DROP",
+                        routine_signature_label(name, argument_types)
+                    )));
+                }
+            }
+
             for (name, argument_types) in &targets {
                 let overloads = next.get_mut(name).ok_or_else(|| {
                     SQLError::Internal(format!(
-                        "resolved {kind} registry entry `{name}` disappeared before DROP"
+                        "resolved {kind} registry entry `{name}` disappeared while applying DROP"
                     ))
                 })?;
                 let position = overloads
                     .iter()
                     .position(|function| {
-                        function.def.is_procedure == stmt.is_procedure
+                        function.def.is_procedure == is_procedure
                             && routine_signature_types(&function.def) == *argument_types
                     })
                     .ok_or_else(|| {
                         SQLError::Internal(format!(
-                            "resolved {} disappeared before DROP",
+                            "resolved {} disappeared while applying DROP",
                             routine_signature_label(name, argument_types)
                         ))
                     })?;
@@ -841,7 +893,8 @@ impl Engine {
                 }
             }
             self.persist_sql_functions_snapshot(&next)?;
-            *self.durable.sql_user_functions.write() = next;
+            *registry = next;
+            drop(registry);
             self.note_catalog_registry_changed();
         }
         for (level, message) in notices {
@@ -1202,4 +1255,106 @@ fn same_return_shape(a: &CreateFunction, b: &CreateFunction) -> bool {
         _ => false,
     };
     same_kind && same_outputs
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{mpsc, Arc};
+
+    use super::*;
+
+    fn create_function(sql: &str) -> CreateFunction {
+        let mut statements = uqa_sql::compile(sql).expect("compile CREATE FUNCTION");
+        assert_eq!(statements.len(), 1);
+        let Statement::CreateFunction(definition) = statements.remove(0) else {
+            panic!("expected CREATE FUNCTION statement");
+        };
+        *definition
+    }
+
+    fn drop_function(sql: &str) -> DropFunctionStmt {
+        let mut statements = uqa_sql::compile(sql).expect("compile DROP FUNCTION");
+        assert_eq!(statements.len(), 1);
+        let Statement::DropFunction(statement) = statements.remove(0) else {
+            panic!("expected DROP FUNCTION statement");
+        };
+        statement
+    }
+
+    fn has_function(engine: &Engine, name: &str, argument_types: &[&str]) -> bool {
+        let expected = argument_types
+            .iter()
+            .map(|type_name| canonical_routine_type_name(type_name))
+            .collect::<Vec<_>>();
+        engine
+            .durable
+            .sql_user_functions
+            .read()
+            .get(name)
+            .is_some_and(|overloads| {
+                overloads
+                    .iter()
+                    .any(|function| routine_signature_types(&function.def) == expected)
+            })
+    }
+
+    #[test]
+    fn drop_preserves_registration_completed_after_dependency_preflight() {
+        let engine = Arc::new(Engine::new());
+        engine
+            .register_sql_function(create_function(
+                "CREATE FUNCTION public.drop_target() RETURNS INTEGER LANGUAGE SQL IMMUTABLE AS 'SELECT 1'",
+            ))
+            .unwrap();
+        let drop_statement = drop_function("DROP FUNCTION public.drop_target()");
+        let (preflight_complete_tx, preflight_complete_rx) = mpsc::sync_channel(0);
+        let (continue_tx, continue_rx) = mpsc::sync_channel(0);
+        let drop_engine = Arc::clone(&engine);
+        let drop_thread = std::thread::spawn(move || {
+            let plan = drop_engine
+                .preflight_sql_function_drop(&drop_statement)
+                .unwrap();
+            preflight_complete_tx.send(()).unwrap();
+            continue_rx.recv().unwrap();
+            drop_engine.commit_sql_function_drop(plan)
+        });
+
+        preflight_complete_rx.recv().unwrap();
+        engine
+            .register_sql_function(create_function(
+                "CREATE FUNCTION public.drop_target(value INTEGER) RETURNS INTEGER LANGUAGE SQL IMMUTABLE AS 'SELECT $1'",
+            ))
+            .unwrap();
+        continue_tx.send(()).unwrap();
+        drop_thread.join().unwrap().unwrap();
+
+        assert!(!has_function(&engine, "public.drop_target", &[]));
+        assert!(has_function(&engine, "public.drop_target", &["INTEGER"]));
+    }
+
+    #[test]
+    fn multi_target_drop_revalidation_is_atomic() {
+        let engine = Engine::new();
+        for sql in [
+            "CREATE FUNCTION public.drop_first() RETURNS INTEGER LANGUAGE SQL IMMUTABLE AS 'SELECT 1'",
+            "CREATE FUNCTION public.drop_second() RETURNS INTEGER LANGUAGE SQL IMMUTABLE AS 'SELECT 2'",
+        ] {
+            engine
+                .register_sql_function(create_function(sql))
+                .unwrap();
+        }
+        let plan = engine
+            .preflight_sql_function_drop(&drop_function(
+                "DROP FUNCTION public.drop_first(), public.drop_second()",
+            ))
+            .unwrap();
+        engine
+            .drop_sql_functions(&drop_function("DROP FUNCTION public.drop_second()"))
+            .unwrap();
+
+        let error = engine.commit_sql_function_drop(plan).unwrap_err();
+        assert!(matches!(error, SQLError::Internal(_)), "{error}");
+        assert!(has_function(&engine, "public.drop_first", &[]));
+        assert!(!has_function(&engine, "public.drop_second", &[]));
+    }
 }

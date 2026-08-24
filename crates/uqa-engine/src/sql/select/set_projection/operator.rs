@@ -145,6 +145,7 @@ impl<'a> SetProjection<'a> {
         }
         if !self.engine.has_registered_table_function(&identity)
             && self.engine.lookup_sql_functions(&call.name).is_some()
+            && call.binding.as_ref().is_none_or(|binding| !binding.builtin)
         {
             let hook = ScopedEngineHook::new(self.engine, &self.ctes);
             let subqueries = PlanSubqueryArena::new(&self.ctes.scalar_subqueries, Some(&hook));

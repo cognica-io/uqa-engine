@@ -380,22 +380,18 @@ pub(in crate::compiler) fn compile_column_definitions(
                                 .to_ascii_lowercase();
                             if !type_node.typmods.is_empty() {
                                 let rendered = column_type.sql_name();
-                                let modifier = rendered.find('(').ok_or_else(|| {
-                                    SQLError::Internal(format!(
-                                        "function column `{}` lost its validated type modifier",
-                                        col.colname
-                                    ))
-                                })?;
-                                let modifier_end = rendered[modifier..]
-                                    .find(')')
-                                    .map(|position| modifier + position + 1)
-                                    .ok_or_else(|| {
+                                if let Some(modifier) = rendered.find('(') {
+                                    let modifier_end = rendered[modifier..]
+                                        .find(')')
+                                        .map(|position| modifier + position + 1)
+                                        .ok_or_else(|| {
                                         SQLError::Internal(format!(
-                                        "function column `{}` has an unterminated type modifier",
-                                        col.colname
-                                    ))
+                                            "function column `{}` has an unterminated type modifier",
+                                            col.colname
+                                        ))
                                     })?;
-                                type_name.push_str(&rendered[modifier..modifier_end]);
+                                    type_name.push_str(&rendered[modifier..modifier_end]);
+                                }
                             }
                             for _ in &type_node.array_bounds {
                                 type_name.push_str("[]");

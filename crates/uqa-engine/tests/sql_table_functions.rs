@@ -736,6 +736,29 @@ fn rows_from_is_implicitly_lateral_and_left_lateral_null_extends_empty_groups() 
 }
 
 #[test]
+fn lateral_rows_from_spills_correlated_function_groups_under_tiny_work_mem() {
+    let eng = Engine::new();
+    eng.sql("SET work_mem TO '1B'", &[]).unwrap();
+
+    let result = eng
+        .sql(
+            "SELECT count(*) AS total_rows,
+                    count(member.short_value) AS complete_short_rows
+             FROM (VALUES (4096), (8192)) AS input(upper_bound)
+             CROSS JOIN LATERAL ROWS FROM (
+                 pg_catalog.generate_series(1, input.upper_bound),
+                 pg_catalog.generate_series(1, input.upper_bound - 1)
+             ) AS member(long_value, short_value)",
+            &[],
+        )
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.value_at(0, 0), Some(&Value::Int(12_288)));
+    assert_eq!(result.value_at(0, 1), Some(&Value::Int(12_286)));
+}
+
+#[test]
 fn rows_from_member_bindings_survive_view_reopen_and_search_path_changes() {
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("rows-from-view.db");
