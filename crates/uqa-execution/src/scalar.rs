@@ -9,7 +9,7 @@
 use uqa_core::{ArrayValue, Value};
 use uqa_sql::ast::{BinaryOp, FrameMode, FunctionBinding, NullsOrder};
 use uqa_sql::expr::{
-    cast_value_from, eval_binary_values, eval_binary_values_with_integer_width,
+    cast_value_with_type_resolution, eval_binary_values, eval_binary_values_with_integer_width,
     eval_builtin_function_call, eval_function_call, integer_width_for_literal,
     integer_width_for_type, negate_value, truthy, EngineHook, EvalContext, IntegerWidth, RowLookup,
     NAMED_ARG_FUNCTION,
@@ -808,7 +808,7 @@ pub fn eval_scalar(
         ScalarExpr::Cast { expr, ty } => {
             let source_ty = scalar_source_type(expr);
             let value = eval_scalar(expr, context)?;
-            cast_value_from(&value, ty, source_ty)
+            cast_value_with_type_resolution(&value, source_ty, ty, context.function_hook)
         }
         ScalarExpr::ScalarSubquery(subquery) => execute_scalar_subquery(*subquery, context),
         ScalarExpr::Exists { subquery, negated } => {

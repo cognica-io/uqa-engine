@@ -121,7 +121,7 @@ impl<'a> Interpreter<'a> {
             }
             if let Some(default) = &var.default {
                 let value = interpreter.eval_expr(default)?;
-                let value = coerce_routine_value(&value, &var.type_name)?;
+                let value = coerce_routine_value(interpreter.engine, &value, &var.type_name)?;
                 interpreter.values[idx] = value;
             }
             if var.not_null && matches!(interpreter.values[idx], Value::Null) {

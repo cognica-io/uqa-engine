@@ -688,6 +688,13 @@ fn random_state_from_seed(mut seed: u64) -> SessionRandomState {
 }
 
 impl uqa_sql::expr::EngineHook for Engine {
+    fn resolve_type_name(
+        &self,
+        name: &str,
+    ) -> std::result::Result<Option<uqa_sql::ast::ColumnType>, String> {
+        Ok(crate::sql::resolve_catalog_column_type(self, name))
+    }
+
     fn nextval(&self, name: &str) -> std::result::Result<i64, String> {
         Engine::nextval(self, name)
     }

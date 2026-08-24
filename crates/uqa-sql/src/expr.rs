@@ -11,7 +11,7 @@ use std::borrow::Cow;
 
 use uqa_core::{ArrayValue, DecimalValue, TemporalValue, Value};
 
-use crate::ast::{BinaryOp, Expr};
+use crate::ast::{BinaryOp, ColumnType, Expr};
 use crate::error::{Result, SQLError};
 use crate::params::SQLParam;
 use crate::result::ResultRow;
@@ -80,6 +80,15 @@ use scalar_helpers::{
 };
 pub use scalar_helpers::{quote_ident, CompiledLikePattern};
 
+#[must_use]
+pub fn coercion_type_name(ty: &ColumnType) -> String {
+    match ty {
+        ColumnType::Domain { base, .. } => coercion_type_name(base),
+        ColumnType::Array(element) => format!("{}[]", coercion_type_name(element)),
+        _ => ty.sql_name(),
+    }
+}
+
 /// Engine-side hook that scalar function evaluation calls for stateful
 /// sequence and user-defined functions. Query-valued expressions are not
 /// accepted here: lowering assigns them physical query-plan slots executed by
@@ -95,6 +104,11 @@ pub trait EngineHook {
 
     fn has_scalar_functions(&self) -> bool {
         true
+    }
+
+    /// Resolve a catalog-owned SQL type name for casts evaluated with an engine context.
+    fn resolve_type_name(&self, _name: &str) -> std::result::Result<Option<ColumnType>, String> {
+        Ok(None)
     }
 
     /// Resolve the first existing schema on the logical session's search
@@ -150,6 +164,33 @@ pub trait EngineHook {
     ) -> Option<Result<Value>> {
         None
     }
+}
+
+/// Cast a value after resolving catalog-owned source and target types and flattening domains to their coercion types.
+pub fn cast_value_with_type_resolution(
+    value: &Value,
+    source_ty: Option<&str>,
+    target_ty: &str,
+    engine: Option<&dyn EngineHook>,
+) -> Result<Value> {
+    let resolved_source = match (engine, source_ty) {
+        (Some(engine), Some(source_ty)) => engine
+            .resolve_type_name(source_ty)
+            .map_err(SQLError::Internal)?
+            .map(|ty| coercion_type_name(&ty)),
+        _ => None,
+    };
+    let source_ty = resolved_source.as_deref().or(source_ty);
+    let resolved_target = engine
+        .map(|engine| engine.resolve_type_name(target_ty))
+        .transpose()
+        .map_err(SQLError::Internal)?
+        .flatten();
+    let target_ty = resolved_target.as_ref().map_or_else(
+        || Cow::Borrowed(target_ty),
+        |ty| Cow::Owned(coercion_type_name(ty)),
+    );
+    cast_value_from(value, &target_ty, source_ty)
 }
 
 /// Read-only row interface used by the expression evaluator. Most callers
@@ -396,7 +437,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         Expr::Cast { expr, ty } => {
             let source_ty = explicit_expr_type(expr);
             let v = eval(expr, ctx)?;
-            cast_value_from(&v, ty, source_ty)
+            cast_value_with_type_resolution(&v, source_ty, ty, ctx.engine)
         }
         Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => {
             Err(SQLError::Unsupported(

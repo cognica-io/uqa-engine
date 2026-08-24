@@ -10,14 +10,15 @@ use std::sync::Arc;
 
 use uqa_execution::{
     builtin_binding_matches, builtin_name_matches, match_builtin_function_overload,
-    BuiltinFunctionOverload, FunctionTypeResolver, ResolvedFunctionOverload,
+    rank_function_matches, BuiltinFunctionOverload, FunctionTypeResolver, RankedFunctionMatch,
+    ResolvedFunctionOverload,
 };
 use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::SQLError;
 
 use super::{
-    rank_function_matches, routine_signature_types, static_function_match,
-    static_function_return_type, Engine, RankedFunctionMatch, SQLUserFunction,
+    retain_earliest_effective_signatures, routine_signature_types, static_function_match,
+    static_function_return_type, Engine, SQLUserFunction,
 };
 
 enum FunctionTarget {
@@ -28,6 +29,7 @@ enum FunctionTarget {
 struct FunctionMatch {
     target: FunctionTarget,
     argument_types: Vec<String>,
+    raw_exact_matches: usize,
     exact_matches: usize,
     preferred_matches: usize,
 }
@@ -35,6 +37,10 @@ struct FunctionMatch {
 impl RankedFunctionMatch for FunctionMatch {
     fn argument_types(&self) -> &[String] {
         &self.argument_types
+    }
+
+    fn raw_exact_matches(&self) -> usize {
+        self.raw_exact_matches
     }
 
     fn exact_matches(&self) -> usize {
@@ -64,7 +70,9 @@ pub(super) fn resolve(
             builtins,
         );
     }
-    let users = engine.lookup_sql_functions(name).unwrap_or_default();
+    let users = engine
+        .lookup_sql_routine_candidates(name)
+        .unwrap_or_default();
     let builtins = builtins
         .iter()
         .filter(|builtin| builtin_name_matches(name, &builtin.name))
@@ -122,17 +130,20 @@ fn resolve_candidates(
         function.def.is_procedure
             && static_function_match(function.clone(), argument_names, argument_types).is_some()
     });
-    let mut user_candidates = users
+    let mut matched_users = users
         .into_iter()
         .filter(|function| !function.def.is_procedure)
-        .filter_map(|function| {
-            let matched = static_function_match(function, argument_names, argument_types)?;
-            Some(FunctionMatch {
-                target: FunctionTarget::User(matched.function),
-                argument_types: matched.argument_types,
-                exact_matches: matched.exact_matches,
-                preferred_matches: matched.preferred_matches,
-            })
+        .filter_map(|function| static_function_match(function, argument_names, argument_types))
+        .collect::<Vec<_>>();
+    retain_earliest_effective_signatures(&mut matched_users);
+    let mut user_candidates = matched_users
+        .into_iter()
+        .map(|matched| FunctionMatch {
+            target: FunctionTarget::User(matched.function),
+            argument_types: matched.argument_types,
+            raw_exact_matches: matched.raw_exact_matches,
+            exact_matches: matched.exact_matches,
+            preferred_matches: matched.preferred_matches,
         })
         .collect::<Vec<_>>();
     let mut builtin_candidates = builtins
@@ -182,8 +193,7 @@ fn resolve_candidates(
         ));
     }
 
-    rank_function_matches(&mut candidates, argument_types);
-    if candidates.len() != 1 {
+    if !rank_function_matches(&mut candidates, argument_types) || candidates.len() != 1 {
         return Err(resolution_error(
             "42725",
             name,
@@ -228,6 +238,7 @@ fn builtin_function_match(
     Some(FunctionMatch {
         target: FunctionTarget::Builtin(matched.overload),
         argument_types: matched.argument_types,
+        raw_exact_matches: matched.raw_exact_matches,
         exact_matches: matched.exact_matches,
         preferred_matches: matched.preferred_matches,
     })

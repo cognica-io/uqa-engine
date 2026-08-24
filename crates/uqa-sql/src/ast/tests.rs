@@ -82,6 +82,33 @@ fn function_binding_builtin_identity_is_backward_compatible() {
 }
 
 #[test]
+fn polymorphic_builtin_syntax_binding_has_stable_serde_shape() {
+    for name in ["coalesce", "greatest", "least", "nullif"] {
+        let binding = FunctionBinding::polymorphic_builtin_syntax(name);
+        assert!(binding.is_polymorphic_builtin_syntax());
+        assert_eq!(
+            serde_json::to_value(&binding).unwrap(),
+            serde_json::json!({
+                "name": name,
+                "argument_types": [],
+                "builtin": true
+            })
+        );
+    }
+    for ordinary_name in ["upper", "\"coalesce\"", "ordinary.coalesce"] {
+        assert!(!FunctionBinding::is_polymorphic_builtin_syntax_name(
+            ordinary_name
+        ));
+    }
+    let fixed = FunctionBinding {
+        name: "coalesce".into(),
+        argument_types: vec!["text".into(), "text".into()],
+        builtin: true,
+    };
+    assert!(!fixed.is_polymorphic_builtin_syntax());
+}
+
+#[test]
 fn create_table_as_reads_legacy_statements_without_optional_fields() {
     let mut statement = crate::compile("CREATE TABLE copy AS SELECT 1")
         .unwrap()

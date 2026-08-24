@@ -11,6 +11,7 @@ use super::{
     Expr, NodeEnum, OrderBy, Result, SQLError, Value, WindowReference, WindowReferenceKind,
     WindowSpec,
 };
+use crate::ast::FunctionBinding;
 
 pub(in crate::compiler) fn compile_const(c: &pg_query::protobuf::AConst) -> Result<Expr> {
     if c.isnull {
@@ -112,9 +113,13 @@ pub(in crate::compiler) fn compile_column_ref(c: &pg_query::protobuf::ColumnRef)
 }
 
 pub(in crate::compiler) fn compile_func_call(f: &pg_query::protobuf::FuncCall) -> Result<Expr> {
-    let raw_name = compile_qualified_name(&f.funcname, "function call")?;
+    let mut raw_name = compile_qualified_name(&f.funcname, "function call")?;
     if raw_name.is_empty() {
         return Err(SQLError::Internal("function call has an empty name".into()));
+    }
+    // An unqualified syntax keyword reaches FuncCall only when it was quoted; preserve that distinction after libpg_query has removed the quote token.
+    if FunctionBinding::is_polymorphic_builtin_syntax_name(&raw_name) {
+        raw_name = format!("\"{raw_name}\"");
     }
     if f.func_variadic {
         return Err(SQLError::Unsupported(format!(

@@ -69,6 +69,196 @@ fn compatibility_resolvers_accept_mixed_case_pg_catalog_qualification() {
 }
 
 #[test]
+fn non_fixed_udf_introspection_retains_the_resolver_binding() {
+    struct StableUdfResolver {
+        binding: FunctionBinding,
+    }
+
+    impl FunctionTypeResolver for StableUdfResolver {
+        fn resolve_function_type(
+            &self,
+            _name: &str,
+            _binding: Option<&FunctionBinding>,
+            _argument_names: &[Option<String>],
+            _argument_types: &[Option<ColumnType>],
+        ) -> Result<Option<ColumnType>, SQLError> {
+            Ok(None)
+        }
+
+        fn resolve_function_overload(
+            &self,
+            name: &str,
+            binding: Option<&FunctionBinding>,
+            argument_names: &[Option<String>],
+            argument_types: &[Option<ColumnType>],
+        ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
+            assert_eq!(name, "stable_udf");
+            assert_eq!(binding, None);
+            assert_eq!(argument_names, [None]);
+            assert_eq!(argument_types, [Some(ColumnType::Integer)]);
+            Ok(Some(ResolvedFunctionOverload {
+                binding: self.binding.clone(),
+                return_type: ColumnType::Text,
+                exact_matches: 1,
+                known_arguments: 1,
+                preferred_matches: 0,
+                precedes_pg_catalog: true,
+            }))
+        }
+
+        fn is_scalar_function_binding(&self, binding: &FunctionBinding) -> Result<bool, SQLError> {
+            assert_eq!(binding, &self.binding);
+            Ok(true)
+        }
+    }
+
+    let resolver = StableUdfResolver {
+        binding: FunctionBinding {
+            name: "application.stable_udf".into(),
+            argument_types: vec!["integer".into()],
+            builtin: false,
+        },
+    };
+    let parameters = [SQLParam::Scalar(Value::Int(7))];
+    let expression = ScalarExpr::Func {
+        name: "stable_udf".into(),
+        binding: None,
+        args: vec![ScalarExpr::Param(1)],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    let bound = bind_type_introspection_with_resolver(
+        expression,
+        &RowSchema::default(),
+        &parameters,
+        &resolver,
+    );
+    let ScalarExpr::Func {
+        binding: Some(binding),
+        ..
+    } = &bound
+    else {
+        panic!("ordinary UDF calls must retain the catalog-selected binding");
+    };
+    assert_eq!(binding, &resolver.binding);
+}
+
+#[test]
+fn scalar_introspection_rejects_non_scalar_catalog_bindings() {
+    struct NonScalarResolver {
+        binding: FunctionBinding,
+    }
+
+    impl FunctionTypeResolver for NonScalarResolver {
+        fn resolve_function_type(
+            &self,
+            _name: &str,
+            _binding: Option<&FunctionBinding>,
+            _argument_names: &[Option<String>],
+            _argument_types: &[Option<ColumnType>],
+        ) -> Result<Option<ColumnType>, SQLError> {
+            Ok(None)
+        }
+
+        fn resolve_function_overload(
+            &self,
+            _name: &str,
+            _binding: Option<&FunctionBinding>,
+            _argument_names: &[Option<String>],
+            _argument_types: &[Option<ColumnType>],
+        ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
+            Ok(Some(ResolvedFunctionOverload {
+                binding: self.binding.clone(),
+                return_type: ColumnType::Text,
+                exact_matches: 1,
+                known_arguments: 1,
+                preferred_matches: 0,
+                precedes_pg_catalog: true,
+            }))
+        }
+
+        fn is_scalar_function_binding(&self, binding: &FunctionBinding) -> Result<bool, SQLError> {
+            assert_eq!(binding, &self.binding);
+            Ok(false)
+        }
+    }
+
+    for routine_name in ["catalog_aggregate", "catalog_setof"] {
+        let resolver = NonScalarResolver {
+            binding: FunctionBinding {
+                name: format!("application.{routine_name}"),
+                argument_types: vec!["integer".into()],
+                builtin: false,
+            },
+        };
+        let expression = ScalarExpr::Func {
+            name: routine_name.into(),
+            binding: None,
+            args: vec![ScalarExpr::Literal(Value::Int(7))],
+            distinct: false,
+            order_by: Vec::new(),
+            filter: None,
+        };
+        let bound = bind_type_introspection_with_resolver(
+            expression,
+            &RowSchema::default(),
+            &[],
+            &resolver,
+        );
+        assert!(
+            matches!(bound, ScalarExpr::Func { binding: None, .. }),
+            "{routine_name} must not be attached to a scalar call"
+        );
+    }
+}
+
+#[test]
+fn scalar_introspection_does_not_resolve_builtin_aggregates_as_catalog_functions() {
+    struct UnexpectedResolver;
+
+    impl FunctionTypeResolver for UnexpectedResolver {
+        fn resolve_function_type(
+            &self,
+            _name: &str,
+            _binding: Option<&FunctionBinding>,
+            _argument_names: &[Option<String>],
+            _argument_types: &[Option<ColumnType>],
+        ) -> Result<Option<ColumnType>, SQLError> {
+            panic!("aggregate introspection must not query scalar function types")
+        }
+
+        fn resolve_function_overload(
+            &self,
+            _name: &str,
+            _binding: Option<&FunctionBinding>,
+            _argument_names: &[Option<String>],
+            _argument_types: &[Option<ColumnType>],
+        ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
+            panic!("aggregate introspection must not bind a scalar catalog function")
+        }
+    }
+
+    for name in ["sum", "PG_CATALOG.SUM"] {
+        let expression = ScalarExpr::Func {
+            name: name.into(),
+            binding: None,
+            args: vec![ScalarExpr::Literal(Value::Null)],
+            distinct: false,
+            order_by: Vec::new(),
+            filter: None,
+        };
+        let bound = bind_type_introspection_with_resolver(
+            expression,
+            &RowSchema::default(),
+            &[],
+            &UnexpectedResolver,
+        );
+        assert!(matches!(bound, ScalarExpr::Func { binding: None, .. }));
+    }
+}
+
+#[test]
 fn fixed_builtin_binding_uses_typed_sql_parameters_across_families() {
     let param = SQLParam::scalar;
     let int8 = i64::from(i32::MAX) + 1;

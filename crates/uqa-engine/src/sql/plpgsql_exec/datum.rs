@@ -30,7 +30,7 @@ impl Interpreter<'_> {
                         message: format!("variable \"{}\" is declared CONSTANT", var.name),
                     });
                 }
-                let value = coerce_routine_value(&value, &var.type_name)?;
+                let value = coerce_routine_value(self.engine, &value, &var.type_name)?;
                 if var.not_null && matches!(value, Value::Null) {
                     return Err(SQLError::Routine {
                         sqlstate: "22004".into(),

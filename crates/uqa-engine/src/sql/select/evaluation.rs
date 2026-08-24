@@ -771,6 +771,10 @@ impl FunctionTypeResolver for EngineExpressionEvaluator<'_> {
         self.engine.has_untyped_function(name)
     }
 
+    fn resolve_type_name(&self, name: &str) -> Result<Option<uqa_sql::ast::ColumnType>, SQLError> {
+        Ok(crate::sql::resolve_catalog_column_type(self.engine, name))
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,
@@ -791,6 +795,13 @@ impl FunctionTypeResolver for EngineExpressionEvaluator<'_> {
     ) -> Result<Option<uqa_execution::ResolvedFunctionOverload>, SQLError> {
         self.engine
             .resolve_function_overload(name, binding, argument_names, argument_types)
+    }
+
+    fn is_scalar_function_binding(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+    ) -> Result<bool, SQLError> {
+        self.engine.is_scalar_function_binding(binding)
     }
 
     fn resolve_function_overload_with_builtins(
@@ -833,6 +844,13 @@ impl FunctionTypeResolver for EngineExpressionEvaluator<'_> {
 }
 
 impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
+    fn resolve_type_name(
+        &self,
+        name: &str,
+    ) -> std::result::Result<Option<uqa_sql::ast::ColumnType>, String> {
+        Ok(crate::sql::resolve_catalog_column_type(self.engine, name))
+    }
+
     fn nextval(&self, name: &str) -> std::result::Result<i64, String> {
         self.engine.nextval(name)
     }

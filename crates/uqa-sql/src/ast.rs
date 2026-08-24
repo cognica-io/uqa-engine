@@ -370,6 +370,33 @@ pub struct FunctionBinding {
     pub builtin: bool,
 }
 
+impl FunctionBinding {
+    /// Construct the identity marker used when `PostgreSQL` parses a polymorphic syntax expression instead of an ordinary function call.
+    #[must_use]
+    pub fn polymorphic_builtin_syntax(name: &str) -> Self {
+        assert!(Self::is_polymorphic_builtin_syntax_name(name));
+        Self {
+            name: name.into(),
+            argument_types: Vec::new(),
+            builtin: true,
+        }
+    }
+
+    /// Return whether this binding marks a polymorphic syntax expression whose argument types must be inferred from its operands.
+    #[must_use]
+    pub fn is_polymorphic_builtin_syntax(&self) -> bool {
+        self.builtin
+            && self.argument_types.is_empty()
+            && Self::is_polymorphic_builtin_syntax_name(&self.name)
+    }
+
+    /// Return whether an unqualified local name belongs to `PostgreSQL`'s polymorphic function-like syntax expressions.
+    #[must_use]
+    pub fn is_polymorphic_builtin_syntax_name(name: &str) -> bool {
+        matches!(name, "coalesce" | "greatest" | "least" | "nullif")
+    }
+}
+
 pub type GeneratedFunctionDependency = FunctionBinding;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -126,9 +126,46 @@ fn bind_function_calls(
             )? {
                 return Ok(());
             }
-            if engine.lookup_sql_functions(name).is_some() {
+            if binding
+                .as_ref()
+                .is_some_and(FunctionBinding::is_polymorphic_builtin_syntax)
+            {
+                return Ok(());
+            }
+            if binding.as_ref().is_some_and(|binding| !binding.builtin)
+                || engine.lookup_sql_functions(name).is_some()
+            {
+                let declared_argument_types = args
+                    .iter()
+                    .zip(&argument_types)
+                    .map(|(argument, inferred)| {
+                        let (_, value) = named_argument(argument)?;
+                        Ok(generation_expression_column_type(columns, value, inferred))
+                    })
+                    .collect::<Result<Vec<_>, SQLError>>()?;
                 let selected =
-                    resolve_user_function_binding(engine, name, &argument_names, &argument_types)?;
+                    <Engine as uqa_execution::FunctionTypeResolver>::resolve_function_overload(
+                        engine,
+                        name,
+                        binding.as_ref(),
+                        &argument_names,
+                        &declared_argument_types,
+                    )?
+                    .ok_or_else(|| {
+                        uqa_execution::function_resolution_error(
+                            "42883",
+                            name,
+                            &argument_names,
+                            &declared_argument_types,
+                            "does not exist",
+                        )
+                    })?;
+                let selected = validate_bound_function(
+                    engine,
+                    &selected.binding,
+                    &argument_names,
+                    &argument_types,
+                )?;
                 dependencies.push(selected.clone());
                 *binding = Some(selected);
             }
@@ -570,235 +607,6 @@ pub(super) fn validate_bound_function(
         validate_unknown_literal_cast(argument_type, &parameter.type_name)?;
     }
     Ok(binding.clone())
-}
-
-fn resolve_user_function_binding(
-    engine: &Engine,
-    name: &str,
-    argument_names: &[Option<String>],
-    argument_types: &[GenerationType],
-) -> Result<FunctionBinding, SQLError> {
-    let overloads = engine
-        .lookup_sql_functions(name)
-        .ok_or_else(|| SQLError::UnknownFunction(name.to_string()))?;
-    let mut candidates = overloads
-        .into_iter()
-        .filter(|function| !function.def.is_procedure && !function.def.returns_set())
-        .filter_map(|function| {
-            user_function_match_cost(&function.def, argument_names, argument_types)
-                .map(|matched| (function, matched))
-        })
-        .collect::<Vec<_>>();
-    let Some(best_cost) = candidates.iter().map(|(_, matched)| matched.cost).min() else {
-        return Err(SQLError::Routine {
-            sqlstate: "42883".into(),
-            message: format!(
-                "function {name}({}) does not exist",
-                argument_types
-                    .iter()
-                    .map(generation_type_name)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        });
-    };
-    candidates.retain(|(_, matched)| matched.cost == best_cost);
-    for (argument_index, argument_type) in argument_types.iter().enumerate() {
-        if !matches!(
-            argument_type,
-            GenerationType::Null | GenerationType::UnknownLiteral(_)
-        ) {
-            continue;
-        }
-        let mut categories = candidates
-            .iter()
-            .map(|(_, matched)| routine_type_category(&matched.argument_types[argument_index]))
-            .collect::<Vec<_>>();
-        categories.sort_unstable();
-        categories.dedup();
-        let selected_category = if categories.contains(&'S') {
-            Some('S')
-        } else if categories.len() == 1 {
-            categories.first().copied()
-        } else {
-            None
-        };
-        if let Some(category) = selected_category {
-            candidates.retain(|(_, matched)| {
-                routine_type_category(&matched.argument_types[argument_index]) == category
-            });
-            if candidates.iter().any(|(_, matched)| {
-                routine_type_is_preferred(&matched.argument_types[argument_index])
-            }) {
-                candidates.retain(|(_, matched)| {
-                    routine_type_is_preferred(&matched.argument_types[argument_index])
-                });
-            }
-        }
-    }
-    if candidates.len() != 1 {
-        return Err(SQLError::Routine {
-            sqlstate: "42725".into(),
-            message: format!(
-                "function {name}({}) is not unique",
-                argument_types
-                    .iter()
-                    .map(generation_type_name)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        });
-    }
-    let (function, matched) = candidates
-        .pop()
-        .ok_or_else(|| SQLError::Internal("bound function candidate disappeared".into()))?;
-    for (actual, declared) in argument_types.iter().zip(&matched.argument_types) {
-        validate_unknown_literal_cast(actual, declared)?;
-    }
-    if function.def.volatility != uqa_sql::ast::FunctionVolatility::Immutable {
-        return Err(non_immutable_function(name));
-    }
-    Ok(FunctionBinding {
-        name: function.def.name.clone(),
-        argument_types: routine_signature_types(&function.def),
-        builtin: false,
-    })
-}
-
-struct UserFunctionMatch {
-    cost: u32,
-    argument_types: Vec<String>,
-}
-
-fn user_function_match_cost(
-    function: &uqa_sql::ast::CreateFunction,
-    argument_names: &[Option<String>],
-    argument_types: &[GenerationType],
-) -> Option<UserFunctionMatch> {
-    let signature = function.signature_params();
-    if argument_types.len() > signature.len() {
-        return None;
-    }
-    let mut slots = vec![None; signature.len()];
-    let mut matched_argument_types = Vec::with_capacity(argument_types.len());
-    let mut positional = 0usize;
-    let mut saw_named = false;
-    for (argument_name, argument_type) in argument_names.iter().zip(argument_types) {
-        let index = if let Some(argument_name) = argument_name {
-            saw_named = true;
-            signature
-                .iter()
-                .position(|parameter| parameter.name == *argument_name)?
-        } else {
-            if saw_named || positional >= signature.len() {
-                return None;
-            }
-            let index = positional;
-            positional += 1;
-            index
-        };
-        if slots[index].replace(argument_type).is_some() {
-            return None;
-        }
-        matched_argument_types.push(canonical_routine_type_name(&signature[index].type_name));
-    }
-    let mut cost = 0_u32;
-    for (index, parameter) in signature.iter().enumerate() {
-        let Some(argument_type) = slots[index] else {
-            parameter.default.as_ref()?;
-            continue;
-        };
-        cost = cost.checked_add(function_argument_cast_cost(
-            argument_type,
-            &parameter.type_name,
-        )?)?;
-    }
-    Some(UserFunctionMatch {
-        cost,
-        argument_types: matched_argument_types,
-    })
-}
-
-fn function_argument_cast_cost(actual: &GenerationType, declared: &str) -> Option<u32> {
-    if matches!(
-        actual,
-        GenerationType::Null | GenerationType::UnknownLiteral(_)
-    ) {
-        return Some(1);
-    }
-    let declared = canonical_routine_type_name(declared);
-    if generation_type_identity(actual).as_deref() == Some(declared.as_str()) {
-        return Some(0);
-    }
-    if is_numeric(actual) && routine_type_category(&declared) == 'N' {
-        return Some(1);
-    }
-    match actual {
-        GenerationType::Text | GenerationType::Uuid
-            if matches!(declared.as_str(), "text" | "varchar" | "bpchar") =>
-        {
-            Some(1)
-        }
-        GenerationType::Date if matches!(declared.as_str(), "timestamp" | "timestamptz") => Some(1),
-        GenerationType::Time if declared == "timetz" => Some(1),
-        GenerationType::Timestamp if declared == "timestamptz" => Some(1),
-        GenerationType::Array(actual) => {
-            let declared = declared.strip_suffix("[]")?;
-            function_argument_cast_cost(actual, declared)
-        }
-        _ => None,
-    }
-}
-
-fn generation_type_identity(ty: &GenerationType) -> Option<String> {
-    Some(match ty {
-        GenerationType::Null | GenerationType::UnknownLiteral(_) => return None,
-        GenerationType::Boolean => "bool".into(),
-        GenerationType::SmallInteger => "int2".into(),
-        GenerationType::Integer => "int4".into(),
-        GenerationType::BigInteger => "int8".into(),
-        GenerationType::Oid => "oid".into(),
-        GenerationType::Xid => "xid".into(),
-        GenerationType::Real => "float8".into(),
-        GenerationType::Numeric => "numeric".into(),
-        GenerationType::Text => "text".into(),
-        GenerationType::Uuid => "uuid".into(),
-        GenerationType::Bytea => "bytea".into(),
-        GenerationType::Json => "json".into(),
-        GenerationType::JsonB => "jsonb".into(),
-        GenerationType::Array(element) => format!("{}[]", generation_type_identity(element)?),
-        GenerationType::Date => "date".into(),
-        GenerationType::Time => "time".into(),
-        GenerationType::TimeTz => "timetz".into(),
-        GenerationType::Timestamp => "timestamp".into(),
-        GenerationType::TimestampTz => "timestamptz".into(),
-        GenerationType::Interval => "interval".into(),
-        GenerationType::Vector => "vector".into(),
-        GenerationType::Tensor => "tensor".into(),
-        GenerationType::Record => "record".into(),
-    })
-}
-
-fn routine_type_category(type_name: &str) -> char {
-    let canonical = canonical_routine_type_name(type_name);
-    if canonical.ends_with("[]") {
-        return 'A';
-    }
-    match canonical.as_str() {
-        "bool" => 'B',
-        "int2" | "int4" | "int8" | "float4" | "float8" | "numeric" => 'N',
-        "text" | "varchar" | "bpchar" | "name" => 'S',
-        "date" | "time" | "timetz" | "timestamp" | "timestamptz" => 'D',
-        "interval" => 'T',
-        _ => 'U',
-    }
-}
-
-fn routine_type_is_preferred(type_name: &str) -> bool {
-    matches!(
-        canonical_routine_type_name(type_name).as_str(),
-        "bool" | "float8" | "text" | "timestamptz" | "interval"
-    )
 }
 
 mod builtin;

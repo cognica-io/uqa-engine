@@ -11,6 +11,19 @@ use super::{
     compile_null_test, compile_select, compile_type_cast, extract_strings, Expr, Node, NodeEnum,
     Result, SQLError, Value,
 };
+use crate::ast::FunctionBinding;
+
+/// Mark a dedicated `PostgreSQL` syntax expression as a polymorphic built-in call; the empty argument signature is inferred from the expression operands instead of representing a fixed overload.
+pub(super) fn builtin_syntax_call(name: &str, args: Vec<Expr>) -> Expr {
+    Expr::Func {
+        binding: Some(FunctionBinding::polymorphic_builtin_syntax(name)),
+        name: name.into(),
+        args,
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    }
+}
 
 pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
     let Some(inner) = node.node.as_ref() else {
@@ -87,14 +100,7 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
                 .iter()
                 .map(compile_expr)
                 .collect::<Result<Vec<_>>>()?;
-            Ok(Expr::Func {
-                binding: None,
-                name: "coalesce".into(),
-                args,
-                distinct: false,
-                order_by: Vec::new(),
-                filter: None,
-            })
+            Ok(builtin_syntax_call("coalesce", args))
         }
         NodeEnum::MinMaxExpr(me) => {
             use pg_query::protobuf::MinMaxOp;
@@ -119,14 +125,7 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
                     name.to_ascii_uppercase()
                 )));
             }
-            Ok(Expr::Func {
-                binding: None,
-                name: name.into(),
-                args,
-                distinct: false,
-                order_by: Vec::new(),
-                filter: None,
-            })
+            Ok(builtin_syntax_call(name, args))
         }
         NodeEnum::SubLink(sl) => compile_sublink(sl),
         NodeEnum::RowExpr(row) => {

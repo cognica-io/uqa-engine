@@ -8,11 +8,55 @@ use super::casting::cast_integer;
 use super::*;
 use crate::ast::Expr;
 
+struct DomainCastHook;
+
+impl EngineHook for DomainCastHook {
+    fn nextval(&self, _name: &str) -> std::result::Result<i64, String> {
+        unreachable!("domain cast test does not call sequence functions")
+    }
+
+    fn currval(&self, _name: &str) -> std::result::Result<i64, String> {
+        unreachable!("domain cast test does not call sequence functions")
+    }
+
+    fn setval(&self, _name: &str, _value: i64) -> std::result::Result<i64, String> {
+        unreachable!("domain cast test does not call sequence functions")
+    }
+
+    fn resolve_type_name(&self, name: &str) -> std::result::Result<Option<ColumnType>, String> {
+        let base = match name {
+            "integer_domain" => ColumnType::Integer,
+            "bytea_domain" => ColumnType::Bytea,
+            _ => return Ok(None),
+        };
+        Ok(Some(ColumnType::Domain {
+            schema: "public".into(),
+            name: name.into(),
+            base: Box::new(base),
+            oid: 80_000,
+        }))
+    }
+}
+
 #[test]
 fn literal_passthrough() {
     let ctx = EvalContext::new(None, &[]);
     let got = eval(&Expr::Literal(Value::Int(42)), &ctx).unwrap();
     assert_eq!(got, Value::Int(42));
+}
+
+#[test]
+fn catalog_domain_cast_resolution_flattens_source_and_target_types() {
+    assert_eq!(
+        cast_value_with_type_resolution(
+            &Value::Int(-1),
+            Some("integer_domain"),
+            "bytea_domain",
+            Some(&DomainCastHook),
+        )
+        .unwrap(),
+        Value::Bytes(vec![0xff; 4])
+    );
 }
 
 #[test]

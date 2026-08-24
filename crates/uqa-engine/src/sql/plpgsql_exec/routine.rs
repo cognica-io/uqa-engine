@@ -122,7 +122,7 @@ fn execute_sql_language(
             }
             if out_params.is_empty() {
                 if let FunctionReturns::SetOf { type_name } = &def.returns {
-                    values[0] = coerce_routine_value(&values[0], type_name)?;
+                    values[0] = coerce_routine_value(engine, &values[0], type_name)?;
                 }
             }
             set_rows.push(values);
@@ -156,7 +156,7 @@ fn execute_sql_language(
                 let value = values.remove(0);
                 match &def.returns {
                     FunctionReturns::Scalar { type_name } => {
-                        coerce_routine_value(&value, type_name)?
+                        coerce_routine_value(engine, &value, type_name)?
                     }
                     _ => value,
                 }

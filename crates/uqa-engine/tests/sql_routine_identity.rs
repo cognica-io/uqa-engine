@@ -10,6 +10,9 @@ use tempfile::TempDir;
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "sql_routine_identity/scalar_overloads.rs"]
+mod scalar_overloads;
+
 fn scalar(engine: &Engine, sql: &str) -> Value {
     engine
         .sql(sql, &[])

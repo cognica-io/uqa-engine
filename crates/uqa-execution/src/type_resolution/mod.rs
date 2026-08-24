@@ -86,6 +86,12 @@ pub trait FunctionTypeResolver: Send + Sync {
         false
     }
 
+    /// Resolve a catalog-owned SQL type name that is not represented by the
+    /// built-in [`ColumnType::from_sql_name`] mapping, such as a domain.
+    fn resolve_type_name(&self, _name: &str) -> Result<Option<ColumnType>, SQLError> {
+        Ok(None)
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,
@@ -103,6 +109,11 @@ pub trait FunctionTypeResolver: Send + Sync {
         _argument_types: &[Option<ColumnType>],
     ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
         Ok(None)
+    }
+
+    /// Return whether an exact catalog-selected binding can execute in a scalar expression. The conservative default prevents aggregate, procedure, and set-returning routines from being attached to [`ScalarExpr::Func`].
+    fn is_scalar_function_binding(&self, _binding: &FunctionBinding) -> Result<bool, SQLError> {
+        Ok(false)
     }
 
     /// Resolve catalog-backed routines and the supplied built-in overloads as
@@ -193,7 +204,15 @@ pub(super) fn scalar_type_inner(
             .and_then(common::parameter_type)),
         ScalarExpr::Cast { expr, ty } => {
             scalar_type_inner(expr, schema, params, resolver)?;
-            ColumnType::from_sql_name(ty).map(Some)
+            match ColumnType::from_sql_name(ty) {
+                Ok(ty) => Ok(Some(ty)),
+                Err(error) => match resolver {
+                    Some(resolver) => resolver
+                        .resolve_type_name(ty)?
+                        .map_or(Err(error), |ty| Ok(Some(ty))),
+                    None => Err(error),
+                },
+            }
         }
         ScalarExpr::Array(items) => {
             let mut element = None;

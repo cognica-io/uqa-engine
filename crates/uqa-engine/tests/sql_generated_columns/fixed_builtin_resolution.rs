@@ -141,3 +141,114 @@ fn generated_fixed_builtin_binding_rejects_invalid_names_and_user_volatility() {
         .unwrap_err();
     assert!(error.to_string().contains("not immutable"), "{error}");
 }
+
+#[test]
+fn generated_syntax_builtins_ignore_incompatible_visible_sql_routines() {
+    let engine = Engine::new();
+    for sql in [
+        "CREATE SCHEMA generated_builtin_shadow",
+        "CREATE FUNCTION generated_builtin_shadow.coalesce(value UUID) RETURNS UUID LANGUAGE SQL IMMUTABLE AS 'SELECT value'",
+        "CREATE FUNCTION generated_builtin_shadow.greatest(value UUID) RETURNS UUID LANGUAGE SQL IMMUTABLE AS 'SELECT value'",
+        "CREATE FUNCTION generated_builtin_shadow.least(value UUID) RETURNS UUID LANGUAGE SQL IMMUTABLE AS 'SELECT value'",
+        "CREATE FUNCTION generated_builtin_shadow.nullif(value UUID) RETURNS UUID LANGUAGE SQL IMMUTABLE AS 'SELECT value'",
+        "SET search_path = generated_builtin_shadow, pg_catalog, public",
+        "CREATE TABLE generated_builtin_shadow.generated_values (
+             source INTEGER,
+             coalesce_value INTEGER GENERATED ALWAYS AS (coalesce(source, 7)) STORED,
+             greatest_value INTEGER GENERATED ALWAYS AS (greatest(source, 7)) STORED,
+             least_value INTEGER GENERATED ALWAYS AS (least(source, 7)) STORED,
+             nullif_value INTEGER GENERATED ALWAYS AS (nullif(source, 7)) STORED
+         )",
+        "INSERT INTO generated_builtin_shadow.generated_values(source) VALUES (NULL), (3)",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    let rows = engine
+        .sql(
+            "SELECT source, coalesce_value, greatest_value, least_value, nullif_value
+             FROM generated_builtin_shadow.generated_values ORDER BY coalesce_value",
+            &[],
+        )
+        .unwrap()
+        .rows;
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["source"], Value::Int(3));
+    assert_eq!(rows[0]["coalesce_value"], Value::Int(3));
+    assert_eq!(rows[0]["greatest_value"], Value::Int(7));
+    assert_eq!(rows[0]["least_value"], Value::Int(3));
+    assert_eq!(rows[0]["nullif_value"], Value::Int(3));
+    assert_eq!(rows[1]["source"], Value::Null);
+    assert_eq!(rows[1]["coalesce_value"], Value::Int(7));
+    assert_eq!(rows[1]["greatest_value"], Value::Int(7));
+    assert_eq!(rows[1]["least_value"], Value::Int(7));
+    assert_eq!(rows[1]["nullif_value"], Value::Null);
+}
+
+#[test]
+fn generated_regular_builtin_names_preserve_user_search_path_selection() {
+    let engine = Engine::new();
+    for sql in [
+        "CREATE SCHEMA generated_regular_shadow",
+        "CREATE FUNCTION generated_regular_shadow.upper(value TEXT) RETURNS TEXT LANGUAGE SQL IMMUTABLE AS 'SELECT ''user-upper'''",
+        "CREATE FUNCTION generated_regular_shadow.concat(left_value TEXT, right_value TEXT) RETURNS TEXT LANGUAGE SQL IMMUTABLE AS 'SELECT ''user-concat'''",
+        "CREATE FUNCTION generated_regular_shadow.coalesce(left_value TEXT, right_value TEXT) RETURNS TEXT LANGUAGE SQL IMMUTABLE AS 'SELECT ''user-coalesce'''",
+        "SET search_path = generated_regular_shadow, pg_catalog, public",
+        "CREATE TABLE generated_regular_shadow.generated_values (
+             source TEXT,
+             upper_value TEXT GENERATED ALWAYS AS (upper(source)) STORED,
+             concat_value TEXT GENERATED ALWAYS AS (concat(source, source)) STORED,
+             syntax_coalesce_value TEXT GENERATED ALWAYS AS (coalesce(source, 'fallback')) STORED,
+             quoted_coalesce_value TEXT GENERATED ALWAYS AS (\"coalesce\"(source, source)) STORED,
+             qualified_coalesce_value TEXT GENERATED ALWAYS AS (generated_regular_shadow.coalesce(source, source)) STORED
+         )",
+        "INSERT INTO generated_regular_shadow.generated_values(source) VALUES ('abc')",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    let function_row = engine
+        .sql(
+            "SELECT coalesce(NULL::text, 'builtin') AS syntax_value,
+                    \"coalesce\"(NULL::text, 'builtin') AS quoted_value,
+                    generated_regular_shadow.coalesce(NULL::text, 'builtin') AS qualified_value",
+            &[],
+        )
+        .unwrap()
+        .rows
+        .pop()
+        .unwrap();
+    assert_eq!(function_row["syntax_value"], Value::Str("builtin".into()));
+    assert_eq!(
+        function_row["quoted_value"],
+        Value::Str("user-coalesce".into())
+    );
+    assert_eq!(
+        function_row["qualified_value"],
+        Value::Str("user-coalesce".into())
+    );
+    let row = engine
+        .sql(
+            "SELECT upper_value, concat_value, syntax_coalesce_value, quoted_coalesce_value,
+                    qualified_coalesce_value
+             FROM generated_regular_shadow.generated_values",
+            &[],
+        )
+        .unwrap()
+        .rows
+        .pop()
+        .unwrap();
+    assert_eq!(row["upper_value"], Value::Str("user-upper".into()));
+    assert_eq!(row["concat_value"], Value::Str("user-concat".into()));
+    assert_eq!(row["syntax_coalesce_value"], Value::Str("abc".into()));
+    assert_eq!(
+        row["quoted_coalesce_value"],
+        Value::Str("user-coalesce".into())
+    );
+    assert_eq!(
+        row["qualified_coalesce_value"],
+        Value::Str("user-coalesce".into())
+    );
+}
