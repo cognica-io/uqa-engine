@@ -9,7 +9,7 @@
 use uqa_core::{ArrayValue, Value};
 use uqa_sql::ast::{BinaryOp, FrameMode, FunctionBinding, NullsOrder};
 use uqa_sql::expr::{
-    cast_value_from, eval_binary_values, eval_binary_values_with_integer_width,
+    cast_value_from, coercion_type_name, eval_binary_values, eval_binary_values_with_integer_width,
     eval_builtin_function_call, eval_function_call, integer_width_for_literal,
     integer_width_for_type, negate_value, truthy, EngineHook, EvalContext, IntegerWidth, RowLookup,
     NAMED_ARG_FUNCTION,
@@ -808,7 +808,24 @@ pub fn eval_scalar(
         ScalarExpr::Cast { expr, ty } => {
             let source_ty = scalar_source_type(expr);
             let value = eval_scalar(expr, context)?;
-            cast_value_from(&value, ty, source_ty)
+            let resolved_source = match (context.function_hook, source_ty) {
+                (Some(hook), Some(source_ty)) => hook
+                    .resolve_type_name(source_ty)
+                    .map_err(SQLError::Internal)?
+                    .map(|ty| coercion_type_name(&ty)),
+                _ => None,
+            };
+            let source_ty = resolved_source.as_deref().or(source_ty);
+            let resolved = context
+                .function_hook
+                .map(|hook| hook.resolve_type_name(ty))
+                .transpose()
+                .map_err(SQLError::Internal)?
+                .flatten();
+            let target = resolved
+                .as_ref()
+                .map_or_else(|| ty.clone(), coercion_type_name);
+            cast_value_from(&value, &target, source_ty)
         }
         ScalarExpr::ScalarSubquery(subquery) => execute_scalar_subquery(*subquery, context),
         ScalarExpr::Exists { subquery, negated } => {

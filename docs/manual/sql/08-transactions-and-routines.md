@@ -146,6 +146,8 @@ An anonymous block executes without creating a durable routine identity.
 
 Routine identity includes schema, name, kind, and input argument types. The engine resolves overloaded calls with implemented coercion rules and supports default and named arguments.
 
+Ordinary scalar SQL function overloads retain declared argument types from direct casts and scalar subqueries until candidate selection. Named and default arguments are matched before effective-signature search-path shadowing, typed routine identities survive catalog reopen, and an exact implemented information-schema domain overload outranks its base-type overload, including when a nested cast restores the domain at the call boundary. This verified slice does not extend those claims to procedures, `CALL`, PL/pgSQL variables, table routines, or `SETOF` execution.
+
 `CREATE OR REPLACE` replaces a compatible routine identity. It does not permit an incompatible return contract to masquerade as the same routine. Use qualified names when `search_path` could make an overload ambiguous.
 
 ## Volatility and mutation

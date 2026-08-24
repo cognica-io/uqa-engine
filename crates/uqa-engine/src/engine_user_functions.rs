@@ -13,8 +13,11 @@ mod combined_overloads;
 
 use std::collections::BTreeMap;
 
+pub(crate) use uqa_execution::canonical_routine_type_name;
 use uqa_execution::{
-    BuiltinFunctionOverload, FunctionTypeResolver, ResolvedFunctionOverload, ScalarExpr,
+    match_function_signature, rank_function_matches, BuiltinFunctionOverload,
+    FunctionParameterDescriptor, FunctionTypeResolver, RankedFunctionMatch,
+    ResolvedFunctionOverload, ScalarExpr,
 };
 use uqa_planner::UnifiedPlan;
 use uqa_sql::ast::{
@@ -43,42 +46,6 @@ pub(crate) enum CompiledFunctionBody {
     SQL(Vec<UnifiedPlan>),
 }
 
-/// Canonical type spelling used by routine identity and overload
-/// resolution. `PostgreSQL` aliases such as `int`, `integer`, and `int4`
-/// identify the same argument type even when their source spelling differs.
-pub(crate) fn canonical_routine_type_name(type_name: &str) -> String {
-    let compact = type_name
-        .trim()
-        .to_ascii_lowercase()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    if let Some(element) = compact.strip_suffix("[]") {
-        return format!("{}[]", canonical_routine_type_name(element));
-    }
-    let without_catalog = compact.strip_prefix("pg_catalog.").unwrap_or(&compact);
-    let base = without_catalog
-        .split_once('(')
-        .map_or(without_catalog, |(base, _)| base.trim());
-    match base {
-        "smallint" | "int2" => "int2",
-        "integer" | "int" | "int4" | "serial" | "serial4" => "int4",
-        "bigint" | "int8" | "bigserial" | "serial8" => "int8",
-        "real" | "float4" => "float4",
-        "double" | "double precision" | "float8" => "float8",
-        "decimal" | "numeric" => "numeric",
-        "character varying" | "varchar" => "varchar",
-        "character" | "char" | "bpchar" => "bpchar",
-        "bool" | "boolean" => "bool",
-        "timestamp without time zone" | "timestamp" => "timestamp",
-        "timestamp with time zone" | "timestamptz" => "timestamptz",
-        "time without time zone" | "time" => "time",
-        "time with time zone" | "timetz" => "timetz",
-        other => other,
-    }
-    .to_string()
-}
-
 pub(crate) fn routine_signature_types(def: &CreateFunction) -> Vec<String> {
     def.signature_params()
         .iter()
@@ -89,19 +56,18 @@ pub(crate) fn routine_signature_types(def: &CreateFunction) -> Vec<String> {
 struct StaticFunctionMatch {
     function: Arc<SQLUserFunction>,
     argument_types: Vec<String>,
+    raw_exact_matches: usize,
     exact_matches: usize,
     preferred_matches: usize,
-}
-
-trait RankedFunctionMatch {
-    fn argument_types(&self) -> &[String];
-    fn exact_matches(&self) -> usize;
-    fn preferred_matches(&self) -> usize;
 }
 
 impl RankedFunctionMatch for StaticFunctionMatch {
     fn argument_types(&self) -> &[String] {
         &self.argument_types
+    }
+
+    fn raw_exact_matches(&self) -> usize {
+        self.raw_exact_matches
     }
 
     fn exact_matches(&self) -> usize {
@@ -116,6 +82,10 @@ impl RankedFunctionMatch for StaticFunctionMatch {
 impl FunctionTypeResolver for Engine {
     fn has_untyped_function(&self, name: &str) -> bool {
         self.has_registered_scalar_function(name)
+    }
+
+    fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
+        Ok(crate::sql::resolve_catalog_column_type(self, name))
     }
 
     fn resolve_function_type(
@@ -136,17 +106,12 @@ impl FunctionTypeResolver for Engine {
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
     ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
-        let Some(function) =
-            self.resolve_static_sql_function(name, binding, argument_names, argument_types)?
+        let Some(matched) =
+            self.resolve_static_sql_function_match(name, binding, argument_names, argument_types)?
         else {
             return Ok(None);
         };
-        let matched = static_function_match(function.clone(), argument_names, argument_types)
-            .ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "resolved function `{name}` no longer matches its arguments"
-                ))
-            })?;
+        let function = &matched.function;
         Ok(Some(ResolvedFunctionOverload {
             binding: FunctionBinding {
                 name: function.def.name.clone(),
@@ -203,14 +168,46 @@ impl Engine {
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
     ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+        self.resolve_static_sql_function_match(name, binding, argument_names, argument_types)
+            .map(|matched| matched.map(|matched| matched.function))
+    }
+
+    fn resolve_static_sql_function_match(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+    ) -> Result<Option<StaticFunctionMatch>, SQLError> {
         if let Some(binding) = binding {
-            return self
+            if binding.builtin {
+                return Ok(None);
+            }
+            let function = self
                 .lookup_sql_functions(&binding.name)
                 .and_then(|overloads| {
                     overloads.into_iter().find(|function| {
                         routine_signature_types(&function.def) == binding.argument_types
                     })
                 })
+                .ok_or_else(|| SQLError::Routine {
+                    sqlstate: "42883".into(),
+                    message: format!(
+                        "bound function {}({}) does not exist",
+                        binding.name,
+                        binding.argument_types.join(", ")
+                    ),
+                })?;
+            if function.def.is_procedure {
+                return Err(static_function_resolution_error(
+                    "42809",
+                    name,
+                    argument_types,
+                    "is a procedure",
+                ));
+            }
+            let structural_types = vec![None; argument_types.len()];
+            return static_function_match(function, argument_names, &structural_types)
                 .map(Some)
                 .ok_or_else(|| SQLError::Routine {
                     sqlstate: "42883".into(),
@@ -221,7 +218,7 @@ impl Engine {
                     ),
                 });
         }
-        let Some(overloads) = self.lookup_sql_functions(name) else {
+        let Some(overloads) = self.lookup_sql_routine_candidates(name) else {
             return Ok(None);
         };
         resolve_static_function_overload(name, overloads, argument_names, argument_types).map(Some)
@@ -233,18 +230,17 @@ fn resolve_static_function_overload(
     overloads: Vec<Arc<SQLUserFunction>>,
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
-) -> Result<Arc<SQLUserFunction>, SQLError> {
-    let candidates = overloads
+) -> Result<StaticFunctionMatch, SQLError> {
+    let procedure_matches = overloads.iter().any(|function| {
+        function.def.is_procedure
+            && static_function_match(function.clone(), argument_names, argument_types).is_some()
+    });
+    let mut candidates = overloads
         .into_iter()
+        .filter(|function| !function.def.is_procedure)
         .filter_map(|function| static_function_match(function, argument_names, argument_types))
         .collect::<Vec<_>>();
-    let procedure_matches = candidates
-        .iter()
-        .any(|candidate| candidate.function.def.is_procedure);
-    let mut candidates = candidates
-        .into_iter()
-        .filter(|candidate| !candidate.function.def.is_procedure)
-        .collect::<Vec<_>>();
+    retain_earliest_effective_signatures(&mut candidates);
     if candidates.is_empty() {
         return Err(static_function_resolution_error(
             if procedure_matches { "42809" } else { "42883" },
@@ -258,9 +254,7 @@ fn resolve_static_function_overload(
         ));
     }
 
-    rank_function_matches(&mut candidates, argument_types);
-
-    if candidates.len() != 1 {
+    if !rank_function_matches(&mut candidates, argument_types) || candidates.len() != 1 {
         return Err(static_function_resolution_error(
             "42725",
             name,
@@ -270,75 +264,24 @@ fn resolve_static_function_overload(
     }
     candidates
         .pop()
-        .map(|candidate| candidate.function)
         .ok_or_else(|| SQLError::Internal("resolved function candidate disappeared".into()))
 }
 
-fn rank_function_matches<T: RankedFunctionMatch>(
-    candidates: &mut Vec<T>,
-    argument_types: &[Option<ColumnType>],
-) {
-    let most_exact = candidates
-        .iter()
-        .map(RankedFunctionMatch::exact_matches)
-        .max()
-        .unwrap_or(0);
-    candidates.retain(|candidate| candidate.exact_matches() == most_exact);
-    let most_preferred = candidates
-        .iter()
-        .map(RankedFunctionMatch::preferred_matches)
-        .max()
-        .unwrap_or(0);
-    candidates.retain(|candidate| candidate.preferred_matches() == most_preferred);
-
-    for (index, actual) in argument_types.iter().enumerate() {
-        if actual.is_some() || candidates.len() <= 1 {
-            continue;
-        }
-        let mut categories = candidates
-            .iter()
-            .map(|candidate| routine_type_category(&candidate.argument_types()[index]))
-            .collect::<Vec<_>>();
-        categories.sort_unstable();
-        categories.dedup();
-        let selected = if categories.contains(&'S') {
-            Some('S')
-        } else if categories.len() == 1 {
-            categories.first().copied()
-        } else {
-            None
-        };
-        if let Some(selected) = selected {
-            candidates.retain(|candidate| {
-                routine_type_category(&candidate.argument_types()[index]) == selected
-            });
-            if candidates
-                .iter()
-                .any(|candidate| routine_type_is_preferred(&candidate.argument_types()[index]))
-            {
-                candidates.retain(|candidate| {
-                    routine_type_is_preferred(&candidate.argument_types()[index])
-                });
-            }
-        }
-    }
-
-    if candidates.len() <= 1 {
-        return;
-    }
-    let mut known = argument_types.iter().flatten();
-    let Some(first) = known.next() else {
-        return;
-    };
-    let identity = canonical_column_type_name(first);
-    if !known.all(|ty| canonical_column_type_name(ty) == identity) {
-        return;
-    }
+fn retain_earliest_effective_signatures(candidates: &mut Vec<StaticFunctionMatch>) {
+    let mut visible = Vec::<(Vec<String>, String)>::new();
     candidates.retain(|candidate| {
-        argument_types.iter().enumerate().all(|(index, actual)| {
-            actual.is_some()
-                || routine_type_accepts_implicit_cast(&identity, &candidate.argument_types()[index])
-        })
+        let schema = RelationIdentity::parse_reference(&candidate.function.def.name)
+            .ok()
+            .and_then(|(schema, _)| schema)
+            .unwrap_or_default();
+        if let Some((_, first_schema)) = visible
+            .iter()
+            .find(|(signature, _)| signature == &candidate.argument_types)
+        {
+            return first_schema == &schema;
+        }
+        visible.push((candidate.argument_types.clone(), schema));
+        true
     });
 }
 
@@ -348,120 +291,22 @@ fn static_function_match(
     argument_types: &[Option<ColumnType>],
 ) -> Option<StaticFunctionMatch> {
     let signature = function.def.signature_params();
-    if argument_types.len() > signature.len() || argument_names.len() != argument_types.len() {
-        return None;
-    }
-    let mut slots = vec![None; signature.len()];
-    let mut matched_argument_types = Vec::with_capacity(argument_types.len());
-    let mut positional = 0usize;
-    let mut saw_named = false;
-    for (argument_name, argument_type) in argument_names.iter().zip(argument_types) {
-        let index = if let Some(argument_name) = argument_name {
-            saw_named = true;
-            signature
-                .iter()
-                .position(|parameter| parameter.name == *argument_name)?
-        } else {
-            if saw_named || positional >= signature.len() {
-                return None;
-            }
-            let index = positional;
-            positional += 1;
-            index
-        };
-        if slots[index].replace(argument_type.as_ref()).is_some() {
-            return None;
-        }
-        matched_argument_types.push(canonical_routine_type_name(&signature[index].type_name));
-    }
-
-    let mut exact_matches = 0usize;
-    let mut preferred_matches = 0usize;
-    for (index, parameter) in signature.iter().enumerate() {
-        let Some(actual) = slots[index] else {
-            parameter.default.as_ref()?;
-            continue;
-        };
-        let Some(actual_type) = actual else {
-            continue;
-        };
-        let declared = canonical_routine_type_name(&parameter.type_name);
-        let actual = canonical_column_type_name(actual_type);
-        if actual == declared {
-            exact_matches += 1;
-        } else if routine_type_accepts_implicit_cast(&actual, &declared) {
-            preferred_matches += usize::from(routine_type_is_preferred(&declared));
-        } else if let ColumnType::Domain { base, .. } = actual_type {
-            let base = canonical_column_type_name(base);
-            if !routine_type_accepts_implicit_cast(&base, &declared) {
-                return None;
-            }
-            preferred_matches += usize::from(routine_type_is_preferred(&declared));
-        } else {
-            return None;
-        }
-    }
+    let parameters = signature
+        .iter()
+        .map(|parameter| FunctionParameterDescriptor {
+            name: Some(parameter.name.clone()),
+            type_name: canonical_routine_type_name(&parameter.type_name),
+            has_default: parameter.default.is_some(),
+        })
+        .collect::<Vec<_>>();
+    let matched = match_function_signature(&parameters, argument_names, argument_types)?;
     Some(StaticFunctionMatch {
         function,
-        argument_types: matched_argument_types,
-        exact_matches,
-        preferred_matches,
+        argument_types: matched.argument_types,
+        raw_exact_matches: matched.raw_exact_matches,
+        exact_matches: matched.exact_matches,
+        preferred_matches: matched.preferred_matches,
     })
-}
-
-fn canonical_column_type_name(ty: &ColumnType) -> String {
-    canonical_routine_type_name(&ty.sql_name())
-}
-
-fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool {
-    if actual == declared {
-        return true;
-    }
-    if let (Some(actual), Some(declared)) = (actual.strip_suffix("[]"), declared.strip_suffix("[]"))
-    {
-        return routine_type_accepts_implicit_cast(actual, declared);
-    }
-    matches!(
-        (actual, declared),
-        (
-            "int2",
-            "int4" | "int8" | "float4" | "float8" | "numeric" | "oid"
-        ) | ("int4", "int8" | "float4" | "float8" | "numeric" | "oid")
-            | ("int8", "float4" | "float8" | "numeric" | "oid")
-            | ("numeric", "float4" | "float8")
-            | ("float4", "float8")
-            | ("bpchar", "varchar" | "name" | "text")
-            | ("varchar", "bpchar" | "name" | "text")
-            | ("text", "bpchar" | "varchar" | "name")
-            | ("name" | "\"char\"", "text")
-            | ("date", "timestamp" | "timestamptz")
-            | ("timestamp", "timestamptz")
-            | ("time", "timetz" | "interval")
-    )
-}
-
-fn routine_type_category(type_name: &str) -> char {
-    let canonical = canonical_routine_type_name(type_name);
-    if canonical.ends_with("[]") {
-        return 'A';
-    }
-    match canonical.as_str() {
-        "bool" => 'B',
-        "date" | "time" | "timetz" | "timestamp" | "timestamptz" => 'D',
-        "int2" | "int4" | "int8" | "float4" | "float8" | "numeric" | "oid" | "regproc"
-        | "regtype" => 'N',
-        "bpchar" | "name" | "text" | "varchar" => 'S',
-        "interval" => 'T',
-        "\"char\"" => 'Z',
-        _ => 'U',
-    }
-}
-
-fn routine_type_is_preferred(type_name: &str) -> bool {
-    matches!(
-        canonical_routine_type_name(type_name).as_str(),
-        "bool" | "float8" | "oid" | "text" | "timestamptz" | "interval"
-    )
 }
 
 fn static_function_return_type(name: &str, def: &CreateFunction) -> Result<ColumnType, SQLError> {
@@ -1011,6 +856,18 @@ impl Engine {
             }
         }
         (!visible.is_empty()).then_some(visible)
+    }
+
+    /// Call-resolution candidates before search-path shadowing. Named notation can make a later identical declared signature visible when an earlier routine uses different parameter names, so structural matching must happen first.
+    fn lookup_sql_routine_candidates(&self, name: &str) -> Option<Vec<Arc<SQLUserFunction>>> {
+        let keys = self.routine_lookup_keys(name).ok()?;
+        let registry = self.durable.sql_user_functions.read();
+        let candidates = keys
+            .into_iter()
+            .filter_map(|key| registry.get(&key))
+            .flat_map(|overloads| overloads.iter().cloned())
+            .collect::<Vec<_>>();
+        (!candidates.is_empty()).then_some(candidates)
     }
 
     /// Every registered routine, sorted by qualified name then signature. Feeds

@@ -144,7 +144,7 @@ pub(super) fn validate_scalar_function(
     {
         return Ok(());
     }
-    if resolve_sql_function(engine, name, binding, args, schema, params)?.is_some() {
+    if resolve_sql_function(engine, name, binding, args, schema, params, resolver)?.is_some() {
         return Ok(());
     }
     if builtin_function_type(&lower, args, order_by, schema, params)?.is_some() {
@@ -234,7 +234,7 @@ pub(super) fn validate_window_function(
             | ("nth_value", 2)
             | ("ntile", 1)
     ) || engine.has_registered_aggregate_function(name)
-        || resolve_sql_function(engine, name, None, args, schema, params)?.is_some()
+        || resolve_sql_function(engine, name, None, args, schema, params, engine)?.is_some()
     {
         Ok(())
     } else {
@@ -254,7 +254,7 @@ pub(super) fn validate_table_function(
     if builtin_table_function(&lower)
         || crate::operator_tree_bridge::is_operator_join_table_function(&lower)
         || engine.has_registered_table_function(&identity)
-        || resolve_sql_function(engine, name, None, args, input, params)?.is_some()
+        || resolve_sql_function(engine, name, None, args, input, params, engine)?.is_some()
     {
         Ok(())
     } else {
@@ -269,6 +269,7 @@ fn resolve_sql_function(
     args: &[ScalarExpr],
     schema: &RowSchema,
     params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<std::sync::Arc<crate::engine_user_functions::SQLUserFunction>>, SQLError> {
     if binding.is_none() && engine.lookup_sql_functions(name).is_none() {
         return Ok(None);
@@ -282,7 +283,7 @@ fn resolve_sql_function(
             value,
             schema,
             params,
-            Some(engine),
+            Some(resolver),
         )?);
     }
     engine.resolve_static_sql_function(name, binding, &argument_names, &argument_types)

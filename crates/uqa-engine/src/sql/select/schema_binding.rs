@@ -48,6 +48,10 @@ impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
         self.engine.has_untyped_function(name)
     }
 
+    fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
+        Ok(crate::sql::resolve_catalog_column_type(self.engine, name))
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,

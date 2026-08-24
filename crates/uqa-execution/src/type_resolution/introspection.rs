@@ -5,7 +5,7 @@
 //
 
 use uqa_core::Value;
-use uqa_sql::ast::ColumnType;
+use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::SQLParam;
 
 use crate::{RowSchema, ScalarExpr};
@@ -70,6 +70,7 @@ fn bind_type_introspection_inner(
                 array_transform::bind_call(name, &mut binding, &mut args, schema, params, resolver);
             let name =
                 fixed_builtin::bind_call(name, &mut binding, &mut args, schema, params, resolver);
+            bind_catalog_function(&name, &mut binding, &args, schema, params, resolver);
             if is_pg_typeof(&name) && args.len() == 1 {
                 let name = scalar_type_inner(&args[0], schema, params, resolver)
                     .ok()
@@ -267,27 +268,10 @@ fn bind_type_introspection_inner(
 
 fn requires_type_introspection_binding(expression: &ScalarExpr) -> bool {
     match expression {
-        ScalarExpr::Func {
-            name,
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            is_pg_typeof(name)
-                || is_common_type_function(name)
-                || fixed_builtin::is_function(name)
-                || array_transform::is_function(name)
-                || containment::is_operator(name)
-                || args.iter().any(requires_type_introspection_binding)
-                || order_by
-                    .iter()
-                    .any(|order| requires_type_introspection_binding(&order.expr))
-                || filter
-                    .as_deref()
-                    .is_some_and(requires_type_introspection_binding)
-        }
-        ScalarExpr::Array(_) | ScalarExpr::Case { .. } | ScalarExpr::UnaryMinus(_) => true,
+        ScalarExpr::Func { .. }
+        | ScalarExpr::Array(_)
+        | ScalarExpr::Case { .. }
+        | ScalarExpr::UnaryMinus(_) => true,
         ScalarExpr::Row(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
             items.iter().any(requires_type_introspection_binding)
         }
@@ -336,6 +320,47 @@ fn requires_type_introspection_binding(expression: &ScalarExpr) -> bool {
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. } => false,
+    }
+}
+
+fn bind_catalog_function(
+    name: &str,
+    binding: &mut Option<FunctionBinding>,
+    args: &[ScalarExpr],
+    schema: &RowSchema,
+    params: &[SQLParam],
+    resolver: Option<&dyn FunctionTypeResolver>,
+) {
+    if binding.is_some() || name == uqa_sql::expr::NAMED_ARG_FUNCTION {
+        return;
+    }
+    if super::functions::builtin_function_type_inner(name, None, args, &[], schema, params, None)
+        .ok()
+        .flatten()
+        .is_some()
+    {
+        return;
+    }
+    let Some(resolver) = resolver else {
+        return;
+    };
+    let mut argument_names = Vec::with_capacity(args.len());
+    let mut argument_types = Vec::with_capacity(args.len());
+    for argument in args {
+        let (argument_name, value) = super::functions::named_argument(argument);
+        let Ok(argument_type) = scalar_type_inner(value, schema, params, Some(resolver)) else {
+            return;
+        };
+        argument_names.push(argument_name);
+        argument_types.push(super::effective_overload_argument_type(
+            value,
+            argument_type,
+        ));
+    }
+    if let Ok(Some(selected)) =
+        resolver.resolve_function_overload(name, None, &argument_names, &argument_types)
+    {
+        *binding = Some(selected.binding);
     }
 }
 

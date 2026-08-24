@@ -11,6 +11,7 @@ use super::{
     value_type_name, Arc, CreateFunction, Engine, FunctionBinding, SQLError, SQLUserFunction,
     Value,
 };
+use uqa_sql::expr::coercion_type_name;
 
 pub(super) fn output_column_names(def: &CreateFunction) -> Vec<String> {
     def.output_params()
@@ -60,7 +61,7 @@ enum ArgSlot {
     NeedsDefault(usize),
 }
 
-fn argument_type_cost(value: &Value, declared_type: &str) -> Option<u32> {
+fn argument_type_cost(engine: &Engine, value: &Value, declared_type: &str) -> Option<u32> {
     if matches!(value, Value::Null) {
         // NULL has no concrete input type, so it cannot prefer one overload
         // over another but remains coercible to every declared type.
@@ -80,17 +81,21 @@ fn argument_type_cost(value: &Value, declared_type: &str) -> Option<u32> {
         "int2" | "int4" | "int8" | "float4" | "float8" | "numeric"
     );
     if actual_is_numeric && declared_is_numeric {
-        return coerce_routine_value(value, declared_type).ok().map(|_| 1);
+        return coerce_routine_value(engine, value, declared_type)
+            .ok()
+            .map(|_| 1);
     }
-    coerce_routine_value(value, declared_type).ok().map(|_| 2)
+    coerce_routine_value(engine, value, declared_type)
+        .ok()
+        .map(|_| 2)
 }
 
-fn overload_match_cost(def: &CreateFunction, slots: &[ArgSlot]) -> Option<u32> {
+fn overload_match_cost(engine: &Engine, def: &CreateFunction, slots: &[ArgSlot]) -> Option<u32> {
     let signature = def.signature_params();
     let mut cost = 0_u32;
     for (parameter, slot) in signature.iter().zip(slots) {
         if let ArgSlot::Filled(value) = slot {
-            cost = cost.checked_add(argument_type_cost(value, &parameter.type_name)?)?;
+            cost = cost.checked_add(argument_type_cost(engine, value, &parameter.type_name)?)?;
         }
     }
     Some(cost)
@@ -159,7 +164,7 @@ pub(super) fn resolve_routine(
     let mut candidates: Vec<(Arc<SQLUserFunction>, Vec<ArgSlot>, u32)> = Vec::new();
     for function in overloads {
         if let Some(slots) = try_match_arguments(&function.def, args) {
-            if let Some(cost) = overload_match_cost(&function.def, &slots) {
+            if let Some(cost) = overload_match_cost(engine, &function.def, &slots) {
                 candidates.push((function, slots, cost));
             }
         }
@@ -234,7 +239,11 @@ fn materialize_arguments(
                 eval_lowered_expression(engine, default, None, &[])?
             }
         };
-        bound.push(coerce_routine_value(&value, &signature[idx].type_name)?);
+        bound.push(coerce_routine_value(
+            engine,
+            &value,
+            &signature[idx].type_name,
+        )?);
     }
     Ok(bound)
 }
@@ -242,7 +251,11 @@ fn materialize_arguments(
 /// Apply a routine declaration's already-resolved SQL type. Pseudo-types use
 /// their own carrier validation; every scalar type goes through the SQL cast
 /// layer and an unsupported declaration remains an error.
-pub(super) fn coerce_routine_value(value: &Value, type_name: &str) -> Result<Value, SQLError> {
+pub(super) fn coerce_routine_value(
+    engine: &Engine,
+    value: &Value,
+    type_name: &str,
+) -> Result<Value, SQLError> {
     match canonical_routine_type_name(type_name).as_str() {
         "record" => match value {
             Value::Record(_) | Value::Null => Ok(value.clone()),
@@ -278,6 +291,11 @@ pub(super) fn coerce_routine_value(value: &Value, type_name: &str) -> Result<Val
             sqlstate: "42804".into(),
             message: "cannot cast non-null value to type void".into(),
         }),
-        _ => cast_value(value, type_name),
+        _ => {
+            let target = crate::sql::resolve_catalog_column_type(engine, type_name)
+                .as_ref()
+                .map_or_else(|| type_name.to_string(), coercion_type_name);
+            cast_value(value, &target)
+        }
     }
 }

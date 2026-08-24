@@ -141,8 +141,17 @@ fn function_may_return_set(
     if builtin_returns_set(&builtin) || engine.has_registered_table_function(&identity) {
         return Ok(true);
     }
-    if engine.lookup_sql_functions(name).is_none() {
+    let Some(overloads) = engine.lookup_sql_functions(name) else {
         return Ok(false);
+    };
+    let mut setness = overloads
+        .iter()
+        .filter(|function| !function.def.is_procedure)
+        .map(|function| function.def.returns_set());
+    if let Some(first) = setness.next() {
+        if setness.all(|returns_set| returns_set == first) {
+            return Ok(first);
+        }
     }
     let mut argument_names = Vec::with_capacity(args.len());
     let mut argument_types = Vec::with_capacity(args.len());

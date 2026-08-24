@@ -771,6 +771,10 @@ impl FunctionTypeResolver for EngineExpressionEvaluator<'_> {
         self.engine.has_untyped_function(name)
     }
 
+    fn resolve_type_name(&self, name: &str) -> Result<Option<uqa_sql::ast::ColumnType>, SQLError> {
+        Ok(crate::sql::resolve_catalog_column_type(self.engine, name))
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,
@@ -833,6 +837,13 @@ impl FunctionTypeResolver for EngineExpressionEvaluator<'_> {
 }
 
 impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
+    fn resolve_type_name(
+        &self,
+        name: &str,
+    ) -> std::result::Result<Option<uqa_sql::ast::ColumnType>, String> {
+        Ok(crate::sql::resolve_catalog_column_type(self.engine, name))
+    }
+
     fn nextval(&self, name: &str) -> std::result::Result<i64, String> {
         self.engine.nextval(name)
     }

@@ -307,13 +307,10 @@ fn resolve_extension_function_type(
     for (argument, resolved_type) in args.iter().zip(resolved_types) {
         let (name, value) = named_argument(argument);
         argument_names.push(name);
-        argument_types.push(
-            if matches!(value, ScalarExpr::Literal(Value::Str(_) | Value::Null)) {
-                None
-            } else {
-                resolved_type.clone()
-            },
-        );
+        argument_types.push(super::effective_overload_argument_type(
+            value,
+            resolved_type.clone(),
+        ));
     }
     resolver.resolve_function_type(name, binding, &argument_names, &argument_types)
 }

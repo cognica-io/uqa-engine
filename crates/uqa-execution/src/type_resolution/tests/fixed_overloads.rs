@@ -69,6 +69,77 @@ fn compatibility_resolvers_accept_mixed_case_pg_catalog_qualification() {
 }
 
 #[test]
+fn non_fixed_udf_introspection_retains_the_resolver_binding() {
+    struct StableUdfResolver {
+        binding: FunctionBinding,
+    }
+
+    impl FunctionTypeResolver for StableUdfResolver {
+        fn resolve_function_type(
+            &self,
+            _name: &str,
+            _binding: Option<&FunctionBinding>,
+            _argument_names: &[Option<String>],
+            _argument_types: &[Option<ColumnType>],
+        ) -> Result<Option<ColumnType>, SQLError> {
+            Ok(None)
+        }
+
+        fn resolve_function_overload(
+            &self,
+            name: &str,
+            binding: Option<&FunctionBinding>,
+            argument_names: &[Option<String>],
+            argument_types: &[Option<ColumnType>],
+        ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
+            assert_eq!(name, "stable_udf");
+            assert_eq!(binding, None);
+            assert_eq!(argument_names, [None]);
+            assert_eq!(argument_types, [Some(ColumnType::Integer)]);
+            Ok(Some(ResolvedFunctionOverload {
+                binding: self.binding.clone(),
+                return_type: ColumnType::Text,
+                exact_matches: 1,
+                known_arguments: 1,
+                preferred_matches: 0,
+                precedes_pg_catalog: true,
+            }))
+        }
+    }
+
+    let resolver = StableUdfResolver {
+        binding: FunctionBinding {
+            name: "application.stable_udf".into(),
+            argument_types: vec!["integer".into()],
+            builtin: false,
+        },
+    };
+    let parameters = [SQLParam::Scalar(Value::Int(7))];
+    let expression = ScalarExpr::Func {
+        name: "stable_udf".into(),
+        binding: None,
+        args: vec![ScalarExpr::Param(1)],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    let bound = bind_type_introspection_with_resolver(
+        expression,
+        &RowSchema::default(),
+        &parameters,
+        &resolver,
+    );
+    let ScalarExpr::Func {
+        binding: Some(binding),
+        ..
+    } = &bound
+    else {
+        panic!("ordinary UDF calls must retain the catalog-selected binding");
+    };
+    assert_eq!(binding, &resolver.binding);
+}
+
+#[test]
 fn fixed_builtin_binding_uses_typed_sql_parameters_across_families() {
     let param = SQLParam::scalar;
     let int8 = i64::from(i32::MAX) + 1;

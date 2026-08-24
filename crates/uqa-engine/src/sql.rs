@@ -78,6 +78,7 @@ use aggregates::{
     PhysicalAggregateExecutor,
 };
 use catalog::build_info_schema_rows;
+pub(crate) use catalog::resolve_catalog_column_type;
 pub(in crate::sql) use catalog::virtual_relation_schema;
 use ddl::{
     coerce_to_column_type, column_type_name, core_value_to_json, json_table_arg,

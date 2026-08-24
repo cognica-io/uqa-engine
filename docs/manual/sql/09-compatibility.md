@@ -87,6 +87,8 @@ SQL and PL/pgSQL routines cover a broad tested subset, including overloads, defa
 
 The implemented fixed-signature built-ins documented in the function manual share candidate selection with visible SQL routines for qualification, search-path shadowing, exact and implicit matches, preferred and unknown categories, domains, named and default slots, and stable stored bindings where generated expressions are allowed. Catalog evidence includes the PostgreSQL 18 `pg_proc` identities for unit `random()` (1598), `to_hex(integer|bigint)` (2089 and 2090), `gen_random_uuid()` (3432), `casefold(text)` (6412), `uuidv4()` (6428), and `uuidv7()` / `uuidv7(interval)` (6429 and 6430). The complete PostgreSQL built-in, polymorphic, operator, cast, and `pg_proc` matrix remains open.
 
+Ordinary scalar SQL functions use PostgreSQL-shaped candidate selection for the implemented routine type surface. Direct casts and scalar-subquery results preserve declared argument types, named and default slots are matched before effective-signature search-path shadowing, typed identities persist across catalog reopen, and exact information-schema domain overloads outrank base-type overloads when the call expression retains or restores the domain through nested casts. Procedure, `CALL`, PL/pgSQL variable, table-routine, and `SETOF` parity are separate scopes.
+
 Volatility affects planning, but UQA Engine does not reproduce every PostgreSQL catalog and privilege consequence of routine declarations.
 
 ## Graph compatibility

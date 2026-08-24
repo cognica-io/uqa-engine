@@ -454,21 +454,31 @@ pub(in crate::compiler) fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) 
         .ok_or_else(|| SQLError::Internal("TypeCast without a target type".into()))?;
     let raw_names = extract_strings(&type_name.names)?;
     // libpg_query reports built-in types qualified as `pg_catalog.<name>`;
-    // peel the schema off so the evaluator only ever sees the bare type
-    // and treat aliases (`int4` -> `integer`, `float8` -> `double
-    // precision`) up front.
-    let mut ty = raw_names
-        .last()
-        .ok_or_else(|| SQLError::Internal("TypeCast target has no name components".into()))?
-        .to_lowercase();
-    ty = match ty.as_str() {
-        "int2" => "smallint".to_string(),
-        "int4" => "integer".to_string(),
-        "int8" => "bigint".to_string(),
-        "float4" => "real".to_string(),
-        "float8" => "double precision".to_string(),
-        _ => ty,
-    };
+    // discard only that implicit qualification. Catalog-owned domains need
+    // their schema retained through overload selection and runtime coercion.
+    let mut names = raw_names
+        .iter()
+        .map(|name| name.to_lowercase())
+        .collect::<Vec<_>>();
+    if names.first().is_some_and(|name| name == "pg_catalog") {
+        names.remove(0);
+    }
+    if names.is_empty() {
+        return Err(SQLError::Internal(
+            "TypeCast target has no name components".into(),
+        ));
+    }
+    let mut ty = names.join(".");
+    if names.len() == 1 {
+        ty = match ty.as_str() {
+            "int2" => "smallint".to_string(),
+            "int4" => "integer".to_string(),
+            "int8" => "bigint".to_string(),
+            "float4" => "real".to_string(),
+            "float8" => "double precision".to_string(),
+            _ => ty,
+        };
+    }
     // Carry length / precision modifiers (`varchar(1)`, `numeric(10,2)`)
     // so the evaluator can truncate / rescale like PostgreSQL.
     if matches!(
@@ -512,7 +522,9 @@ pub(in crate::compiler) fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) 
                 "string constant did not compile to a literal".into(),
             ));
         };
-        crate::expr::cast_value(value, &ty)?;
+        if crate::ast::ColumnType::from_sql_name(&ty).is_ok() {
+            crate::expr::cast_value(value, &ty)?;
+        }
     }
     Ok(Expr::Cast {
         expr: Box::new(inner),

@@ -147,7 +147,9 @@ impl Interpreter<'_> {
             }
             let value = self.eval_return_value(value)?;
             self.ret = match &self.def.returns {
-                FunctionReturns::Scalar { type_name } => coerce_routine_value(&value, type_name)?,
+                FunctionReturns::Scalar { type_name } => {
+                    coerce_routine_value(self.engine, &value, type_name)?
+                }
                 _ => value,
             };
             return Ok(Flow::Return);
@@ -207,7 +209,9 @@ impl Interpreter<'_> {
         };
         let value = self.eval_return_value(value)?;
         let value = match &self.def.returns {
-            FunctionReturns::SetOf { type_name } => coerce_routine_value(&value, type_name)?,
+            FunctionReturns::SetOf { type_name } => {
+                coerce_routine_value(self.engine, &value, type_name)?
+            }
             _ => value,
         };
         self.set_rows.push(vec![value]);
