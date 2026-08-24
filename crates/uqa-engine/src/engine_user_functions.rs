@@ -249,15 +249,7 @@ impl Engine {
                             && routine_signature_types(&function.def) == binding.argument_types
                     })
                 })
-                .ok_or_else(|| SQLError::Routine {
-                    sqlstate: "42883".into(),
-                    message: format!(
-                        "bound {} {}({}) does not exist",
-                        kind.name(),
-                        binding.name,
-                        binding.argument_types.join(", ")
-                    ),
-                })?;
+                .ok_or_else(|| static_bound_routine_error(kind, binding))?;
             // The binding already fixes identity; re-match only named/default structure. Unknown structural types yield zero ranking scores, which are unused on this return path.
             let bound_argument_types = vec![None; argument_types.len()];
             let matched =
