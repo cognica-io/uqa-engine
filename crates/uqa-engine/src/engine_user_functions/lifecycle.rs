@@ -6,10 +6,11 @@
 
 //! Routine registration, catalog persistence, alteration, and removal.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_sql::ast::{
     AlterRoutineKind, AlterRoutineStmt, CreateFunction, DropFunctionItem, DropFunctionStmt,
+    FunctionBinding, FunctionBody,
 };
 use uqa_sql::SQLError;
 
@@ -22,19 +23,101 @@ use super::declaration::{
     compile_function_body, resolve_alter_routine_identity_types, resolve_routine_type_references,
 };
 use super::resolution::{routine_kind, routine_signature_types};
-use super::{canonical_routine_type_name, SQLUserFunction};
+use super::{canonical_routine_type_name, CompiledFunctionBody, SQLUserFunction};
 
 struct SQLFunctionDropPlan {
-    is_procedure: bool,
-    kind: &'static str,
-    targets: Vec<(String, Vec<String>)>,
+    targets: Vec<RoutineDropTarget>,
     dependent_views: Vec<String>,
     dependent_columns: Vec<(String, String)>,
     notices: Vec<(&'static str, String)>,
 }
 
+struct RoutineDropResolution {
+    targets: Vec<RoutineDropTarget>,
+    seen_targets: BTreeSet<RoutineDropTarget>,
+    notices: Vec<(&'static str, String)>,
+}
+
+struct RoutineObjectDependents {
+    views: Vec<String>,
+    columns: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct RoutineDropTarget {
+    name: String,
+    argument_types: Vec<String>,
+    is_procedure: bool,
+}
+
+impl RoutineDropTarget {
+    fn kind(&self) -> &'static str {
+        if self.is_procedure {
+            "procedure"
+        } else {
+            "function"
+        }
+    }
+
+    fn label(&self) -> String {
+        routine_signature_label(&self.name, &self.argument_types)
+    }
+
+    fn binding(&self) -> FunctionBinding {
+        FunctionBinding {
+            name: self.name.clone(),
+            argument_types: self.argument_types.clone(),
+            builtin: false,
+            invocation: None,
+        }
+    }
+}
+
 fn routine_signature_label(name: &str, types: &[String]) -> String {
-    format!("{name}({})", types.join(", "))
+    let display_types = types
+        .iter()
+        .map(|type_name| {
+            uqa_sql::ast::ColumnType::from_sql_name(type_name)
+                .map_or_else(|_| type_name.clone(), |column_type| column_type.sql_name())
+        })
+        .collect::<Vec<_>>();
+    format!("{name}({})", display_types.join(", "))
+}
+
+fn sql_standard_routine_dependents(
+    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    target: &RoutineDropTarget,
+) -> Vec<RoutineDropTarget> {
+    let binding = target.binding();
+    let mut dependents = registry
+        .iter()
+        .flat_map(|(name, overloads)| {
+            let binding = &binding;
+            overloads.iter().filter_map(move |function| {
+                if !matches!(function.def.body, FunctionBody::Statements(_)) {
+                    return None;
+                }
+                let CompiledFunctionBody::SQL(plans) = &function.compiled else {
+                    return None;
+                };
+                let references_target = plans.iter().any(|plan| match plan {
+                    uqa_planner::UnifiedPlan::Query(query) => {
+                        crate::engine_session::query_plan_references_function(query, binding)
+                    }
+                    uqa_planner::UnifiedPlan::Command(_) => false,
+                });
+                references_target.then(|| RoutineDropTarget {
+                    name: name.clone(),
+                    argument_types: routine_signature_types(&function.def),
+                    is_procedure: function.def.is_procedure,
+                })
+            })
+        })
+        .filter(|dependent| dependent != target)
+        .collect::<Vec<_>>();
+    dependents.sort();
+    dependents.dedup();
+    dependents
 }
 
 fn wrong_routine_kind_error(
@@ -57,6 +140,34 @@ fn wrong_routine_kind_error(
     }
 }
 
+fn append_routine_cascade_notice(
+    notices: &mut Vec<(&'static str, String)>,
+    cascaded_routines: &[RoutineDropTarget],
+    dependents: &RoutineObjectDependents,
+) {
+    let mut cascaded = cascaded_routines
+        .iter()
+        .map(|target| format!("{} {}", target.kind(), target.label()))
+        .collect::<Vec<_>>();
+    cascaded.extend(
+        dependents
+            .columns
+            .iter()
+            .map(|(table, column)| format!("column {column} of table {table}")),
+    );
+    cascaded.extend(dependents.views.iter().map(|view| format!("view {view}")));
+    cascaded.sort();
+    cascaded.dedup();
+    match cascaded.as_slice() {
+        [] => {}
+        [object] => notices.push(("NOTICE", format!("drop cascades to {object}"))),
+        objects => notices.push((
+            "NOTICE",
+            format!("drop cascades to {} other objects", objects.len()),
+        )),
+    }
+}
+
 impl Engine {
     /// Register (or replace) a user-defined routine. Applies the
     /// `PostgreSQL` conflict rules for `(schema, name, argument types)`
@@ -70,6 +181,12 @@ impl Engine {
                 message: error,
             })?;
         resolve_routine_type_references(self, &mut def)?;
+        if matches!(def.body, FunctionBody::Statements(_)) {
+            def.creation_search_path
+                .clone_from(&self.session.state.read().search_path);
+        } else {
+            def.creation_search_path.clear();
+        }
         let compiled = compile_function_body(self, &def)?;
         let name = def.name.clone();
         let signature = routine_signature_types(&def);
@@ -191,16 +308,44 @@ impl Engine {
             "function"
         };
         let registry = self.durable.sql_user_functions.read().clone();
-        let mut targets = Vec::new();
-        let mut seen_targets = std::collections::BTreeSet::new();
-        let mut notices = Vec::new();
+        let mut resolution = self.resolve_sql_function_drop_targets(stmt, &registry, kind)?;
+        let cascaded_routines =
+            Self::expand_sql_standard_drop_dependents(&registry, stmt.cascade, &mut resolution)?;
+        let dependents = self.routine_object_dependents(&resolution.targets, stmt.cascade)?;
+        if stmt.cascade {
+            append_routine_cascade_notice(&mut resolution.notices, &cascaded_routines, &dependents);
+        }
+        Ok(SQLFunctionDropPlan {
+            targets: resolution.targets,
+            dependent_views: dependents.views,
+            dependent_columns: dependents.columns,
+            notices: resolution.notices,
+        })
+    }
+
+    fn resolve_sql_function_drop_targets(
+        &self,
+        stmt: &DropFunctionStmt,
+        registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+        kind: &'static str,
+    ) -> Result<RoutineDropResolution, SQLError> {
+        let mut resolution = RoutineDropResolution {
+            targets: Vec::new(),
+            seen_targets: BTreeSet::new(),
+            notices: Vec::new(),
+        };
         for item in &stmt.items {
             let target =
-                self.resolve_sql_function_drop_target(&registry, item, stmt.is_procedure, kind)?;
+                self.resolve_sql_function_drop_target(registry, item, stmt.is_procedure, kind)?;
             if let Some((key, position)) = target {
-                let signature = routine_signature_types(&registry[&key][position].def);
-                if seen_targets.insert((key.clone(), signature.clone())) {
-                    targets.push((key, signature));
+                let function = &registry[&key][position];
+                let target = RoutineDropTarget {
+                    name: key,
+                    argument_types: routine_signature_types(&function.def),
+                    is_procedure: function.def.is_procedure,
+                };
+                if resolution.seen_targets.insert(target.clone()) {
+                    resolution.targets.push(target);
                 }
             } else {
                 let spelled = match &item.arg_types {
@@ -208,7 +353,7 @@ impl Engine {
                     None => format!("{}()", item.name),
                 };
                 if stmt.if_exists {
-                    notices.push((
+                    resolution.notices.push((
                         "NOTICE",
                         format!("{kind} {spelled} does not exist, skipping"),
                     ));
@@ -224,42 +369,87 @@ impl Engine {
                 });
             }
         }
+        Ok(resolution)
+    }
+
+    fn expand_sql_standard_drop_dependents(
+        registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+        cascade: bool,
+        resolution: &mut RoutineDropResolution,
+    ) -> Result<Vec<RoutineDropTarget>, SQLError> {
+        let explicit_targets = resolution.seen_targets.clone();
+        let mut cascaded_routines = Vec::new();
+        let mut target_index = 0;
+        while target_index < resolution.targets.len() {
+            let target = resolution.targets[target_index].clone();
+            target_index += 1;
+            if target.is_procedure {
+                continue;
+            }
+            for dependent in sql_standard_routine_dependents(registry, &target) {
+                if explicit_targets.contains(&dependent)
+                    || resolution.seen_targets.contains(&dependent)
+                {
+                    continue;
+                }
+                if !cascade {
+                    return Err(SQLError::Routine {
+                        sqlstate: "2BP01".into(),
+                        message: format!(
+                            "cannot drop function {} because other objects depend on it",
+                            target.label()
+                        ),
+                    });
+                }
+                resolution.seen_targets.insert(dependent.clone());
+                cascaded_routines.push(dependent.clone());
+                resolution.targets.push(dependent);
+            }
+        }
+        Ok(cascaded_routines)
+    }
+
+    fn routine_object_dependents(
+        &self,
+        targets: &[RoutineDropTarget],
+        cascade: bool,
+    ) -> Result<RoutineObjectDependents, SQLError> {
         let mut dependent_views = Vec::new();
         let mut dependent_columns = Vec::new();
-        if !stmt.is_procedure {
-            for (name, argument_types) in &targets {
-                let columns = self.generated_function_dependents(name, argument_types)?;
+        for target in targets {
+            if !target.is_procedure {
+                let columns =
+                    self.generated_function_dependents(&target.name, &target.argument_types)?;
                 let views = self
-                    .views_depending_on_function(name, argument_types)
+                    .views_depending_on_function(&target.name, &target.argument_types)
                     .map_err(|error| {
                         SQLError::Internal(format!("read view function dependencies: {error}"))
                     })?;
-                if stmt.cascade {
+                if cascade {
                     dependent_columns.extend(columns);
                     dependent_views.extend(views);
                 } else {
-                    self.ensure_no_function_dependencies(name, argument_types)?;
+                    Self::ensure_no_function_dependencies(
+                        &target.name,
+                        &target.argument_types,
+                        &columns,
+                        &views,
+                    )?;
                 }
             }
         }
         dependent_columns.sort();
         dependent_columns.dedup();
         dependent_views = self.cascade_view_closure(dependent_views)?;
-        Ok(SQLFunctionDropPlan {
-            is_procedure: stmt.is_procedure,
-            kind,
-            targets,
-            dependent_views,
-            dependent_columns,
-            notices,
+        Ok(RoutineObjectDependents {
+            views: dependent_views,
+            columns: dependent_columns,
         })
     }
 
     /// Apply a completed DROP preflight against the latest registry snapshot. The write guard serializes this persistence boundary with CREATE OR REPLACE, while exact target revalidation prevents partial multi-target removal if another DROP won the race.
     fn commit_sql_function_drop(&self, plan: SQLFunctionDropPlan) -> Result<(), SQLError> {
         let SQLFunctionDropPlan {
-            is_procedure,
-            kind,
             targets,
             dependent_views,
             dependent_columns,
@@ -284,44 +474,50 @@ impl Engine {
             let mut next = registry.clone();
 
             // Revalidate every target before mutating `next`. This retains a concurrently registered unrelated overload and keeps a multi-target DROP all-or-nothing if any preflighted identity has disappeared.
-            for (name, argument_types) in &targets {
-                let overloads = next.get(name).ok_or_else(|| {
+            for target in &targets {
+                let overloads = next.get(&target.name).ok_or_else(|| {
                     SQLError::Internal(format!(
-                        "resolved {kind} registry entry `{name}` disappeared before DROP"
+                        "resolved {} registry entry `{}` disappeared before DROP",
+                        target.kind(),
+                        target.name
                     ))
                 })?;
                 if !overloads.iter().any(|function| {
-                    function.def.is_procedure == is_procedure
-                        && routine_signature_types(&function.def) == *argument_types
+                    function.def.is_procedure == target.is_procedure
+                        && routine_signature_types(&function.def) == target.argument_types
                 }) {
                     return Err(SQLError::Internal(format!(
-                        "resolved {} disappeared before DROP",
-                        routine_signature_label(name, argument_types)
+                        "resolved {} {} disappeared before DROP",
+                        target.kind(),
+                        target.label()
                     )));
                 }
             }
 
-            for (name, argument_types) in &targets {
-                let overloads = next.get_mut(name).ok_or_else(|| {
+            for target in targets.iter().rev() {
+                let overloads = next.get_mut(&target.name).ok_or_else(|| {
                     SQLError::Internal(format!(
-                        "resolved {kind} registry entry `{name}` disappeared while applying DROP"
+                        "resolved {} registry entry `{}` disappeared while applying DROP",
+                        target.kind(),
+                        target.name
                     ))
                 })?;
                 let position = overloads
                     .iter()
                     .position(|function| {
-                        function.def.is_procedure == is_procedure
-                            && routine_signature_types(&function.def) == *argument_types
+                        function.def.is_procedure == target.is_procedure
+                            && routine_signature_types(&function.def) == target.argument_types
                     })
                     .ok_or_else(|| {
                         SQLError::Internal(format!(
-                            "resolved {} disappeared while applying DROP",
-                            routine_signature_label(name, argument_types)
+                            "resolved {} {} disappeared while applying DROP",
+                            target.kind(),
+                            target.label()
                         ))
                     })?;
                 overloads.remove(position);
                 if overloads.is_empty() {
-                    next.remove(name);
+                    next.remove(&target.name);
                 }
             }
             self.persist_sql_functions_snapshot(&next)?;
@@ -388,16 +584,11 @@ impl Engine {
     }
 
     fn ensure_no_function_dependencies(
-        &self,
         name: &str,
         argument_types: &[String],
+        generated: &[(String, String)],
+        views: &[String],
     ) -> Result<(), SQLError> {
-        let generated = self.generated_function_dependents(name, argument_types)?;
-        let views = self
-            .views_depending_on_function(name, argument_types)
-            .map_err(|error| {
-                SQLError::Internal(format!("read view function dependencies: {error}"))
-            })?;
         if generated.is_empty() && views.is_empty() {
             return Ok(());
         }
@@ -693,6 +884,22 @@ impl Engine {
             .map_err(|err| SQLError::Internal(format!("persist function catalog: {err}")))
     }
 
+    fn compile_persisted_sql_function(
+        &self,
+        def: &CreateFunction,
+    ) -> Result<CompiledFunctionBody, SQLError> {
+        if !matches!(def.body, FunctionBody::Statements(_)) || def.creation_search_path.is_empty() {
+            return compile_function_body(self, def);
+        }
+        let previous = {
+            let mut state = self.session.state.write();
+            std::mem::replace(&mut state.search_path, def.creation_search_path.clone())
+        };
+        let compiled = compile_function_body(self, def);
+        self.session.state.write().search_path = previous;
+        compiled
+    }
+
     pub(crate) fn restore_sql_functions_from_metadata(
         &self,
         catalog: &dyn CatalogFacade,
@@ -701,7 +908,7 @@ impl Engine {
             return Ok(());
         };
         let defs = serde_json::from_str::<BTreeMap<String, Vec<CreateFunction>>>(&json)?;
-        let mut restored: BTreeMap<String, Vec<Arc<SQLUserFunction>>> = BTreeMap::new();
+        let mut canonical_defs: BTreeMap<String, Vec<CreateFunction>> = BTreeMap::new();
         for (stored_name, overloads) in defs {
             let stored_relation =
                 RelationIdentity::from_legacy_name(&stored_name).map_err(|error| {
@@ -737,28 +944,65 @@ impl Engine {
                 }
                 def.name.clone_from(&canonical_name);
                 let signature = routine_signature_types(&def);
-                let compiled_overloads = restored.entry(canonical_name.clone()).or_default();
-                if compiled_overloads
+                let definitions = canonical_defs.entry(canonical_name.clone()).or_default();
+                if definitions
                     .iter()
-                    .any(|function| routine_signature_types(&function.def) == signature)
+                    .any(|existing| routine_signature_types(existing) == signature)
                 {
                     return Err(StorageBackendError::Other(format!(
                         "duplicate persisted routine identity `{}`",
                         routine_signature_label(&canonical_name, &signature)
                     )));
                 }
-                let compiled = compile_function_body(self, &def)
-                    .map_err(|err| StorageBackendError::Other(err.to_string()))?;
-                compiled_overloads.push(Arc::new(SQLUserFunction { def, compiled }));
+                definitions.push(def);
             }
         }
-        for overloads in restored.values_mut() {
-            overloads.sort_by(|left, right| {
-                routine_signature_types(&left.def)
-                    .cmp(&routine_signature_types(&right.def))
-                    .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
-            });
-        }
+
+        // Install definition-only placeholders before compiling stored SQL-standard bodies so every exact routine identity is visible while durable function bindings are rebuilt. No routine can execute during engine construction, and any compile failure restores the previous registry atomically.
+        let placeholders = canonical_defs
+            .iter()
+            .map(|(name, definitions)| {
+                let overloads = definitions
+                    .iter()
+                    .cloned()
+                    .map(|def| {
+                        Arc::new(SQLUserFunction {
+                            def,
+                            compiled: CompiledFunctionBody::SQL(Vec::new()),
+                        })
+                    })
+                    .collect();
+                (name.clone(), overloads)
+            })
+            .collect();
+        let previous =
+            std::mem::replace(&mut *self.durable.sql_user_functions.write(), placeholders);
+        let compiled = (|| {
+            let mut restored: BTreeMap<String, Vec<Arc<SQLUserFunction>>> = BTreeMap::new();
+            for (name, definitions) in canonical_defs {
+                let mut overloads = Vec::with_capacity(definitions.len());
+                for def in definitions {
+                    let compiled = self
+                        .compile_persisted_sql_function(&def)
+                        .map_err(|err| StorageBackendError::Other(err.to_string()))?;
+                    overloads.push(Arc::new(SQLUserFunction { def, compiled }));
+                }
+                overloads.sort_by(|left, right| {
+                    routine_signature_types(&left.def)
+                        .cmp(&routine_signature_types(&right.def))
+                        .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
+                });
+                restored.insert(name, overloads);
+            }
+            Ok(restored)
+        })();
+        let restored = match compiled {
+            Ok(restored) => restored,
+            Err(error) => {
+                *self.durable.sql_user_functions.write() = previous;
+                return Err(error);
+            }
+        };
         *self.durable.sql_user_functions.write() = restored;
         Ok(())
     }

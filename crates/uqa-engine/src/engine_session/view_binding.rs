@@ -382,7 +382,7 @@ fn query_plan_sources_reference_function(plan: &QueryPlan, target: &FunctionBind
         || relational_plan_references_function(&plan.root, target)
 }
 
-pub(super) fn query_plan_references_function(plan: &QueryPlan, target: &FunctionBinding) -> bool {
+pub(crate) fn query_plan_references_function(plan: &QueryPlan, target: &FunctionBinding) -> bool {
     let mut scalar_plan = plan.clone();
     let mut referenced = false;
     scalar_plan.rewrite_scalar_expressions(&mut |expression| {

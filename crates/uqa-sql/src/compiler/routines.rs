@@ -317,6 +317,7 @@ pub(super) fn compile_create_function(
         return_type_reference,
         language,
         body,
+        creation_search_path: Vec::new(),
         volatility,
         strict,
     })

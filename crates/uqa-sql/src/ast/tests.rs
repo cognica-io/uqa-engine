@@ -167,6 +167,7 @@ fn routine_identity_and_call_parameters_are_distinct() {
         return_type_reference: None,
         language: "sql".into(),
         body: FunctionBody::Statements(Vec::new()),
+        creation_search_path: Vec::new(),
         volatility: FunctionVolatility::Volatile,
         strict: false,
     };
@@ -199,6 +200,24 @@ fn routine_identity_and_call_parameters_are_distinct() {
     assert_eq!(procedure.identity_arity(), 3);
     assert_eq!(procedure.call_arity(), 4);
     assert_eq!(procedure.required_call_arity(), 3);
+
+    let mut legacy = serde_json::to_value(&function).unwrap();
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("creation_search_path");
+    assert!(serde_json::from_value::<CreateFunction>(legacy)
+        .unwrap()
+        .creation_search_path
+        .is_empty());
+    let mut persisted = function;
+    persisted.creation_search_path = vec!["app".into(), "public".into()];
+    assert_eq!(
+        serde_json::from_value::<CreateFunction>(serde_json::to_value(&persisted).unwrap())
+            .unwrap()
+            .creation_search_path,
+        ["app", "public"]
+    );
 }
 
 #[test]
