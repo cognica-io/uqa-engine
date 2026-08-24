@@ -52,6 +52,7 @@ pub(in crate::sql) fn run_do_block(
         return_type_reference: None,
         language: "plpgsql".into(),
         body: uqa_sql::ast::FunctionBody::Source(body.to_string()),
+        creation_search_path: Vec::new(),
         volatility: uqa_sql::ast::FunctionVolatility::Volatile,
         strict: false,
     };

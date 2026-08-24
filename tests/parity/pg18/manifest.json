@@ -399,9 +399,9 @@
       "id": "routines.function-procedure-drop-cascade-extended",
       "postgresql_reference": "PostgreSQL 18.4 dependency catalogs, DROP FUNCTION and DROP PROCEDURE documentation, and live CASCADE ordering and diagnostics for every routine-dependent object kind",
       "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::; python3 tests/parity/pg18/run_routines_stateful.py",
-      "supported_version": "The bounded generated-column, direct-view, transitive-view, unrelated-object, no-dependent-procedure, failure-atomicity, and durable-reopen slice recorded by routines.function-procedure-drop-cascade",
+      "supported_version": "Generated columns, direct and transitive stored views, exact SQL-standard routine query-body dependencies, dependent functions and procedures, explicit multi-target dependency satisfaction, transitive CASCADE, primary notices, dynamic SQL string-body behavior, failure atomicity, and durable binding rebuild on reopen",
       "status": "partial",
-      "open_issue": "Routine dependencies through every remaining PostgreSQL object kind, dependent procedures, multi-target CASCADE graphs, catalog deletion ordering, notices, and complete diagnostics remain to be implemented and differentially verified."
+      "open_issue": "SQL-standard command-body and parameter-default dependencies, every remaining PostgreSQL dependency-object kind, exact catalog deletion ordering, and complete diagnostic detail remain to be implemented and differentially verified."
     },
     {
       "id": "routines.extension-language-privilege-security",

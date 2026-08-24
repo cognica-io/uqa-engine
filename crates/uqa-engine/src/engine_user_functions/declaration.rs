@@ -419,12 +419,15 @@ pub(super) fn compile_function_body(
             Ok(CompiledFunctionBody::PLpgSQL(function))
         }
         "sql" => {
-            let statements = match &def.body {
-                FunctionBody::Source(source) => uqa_sql::compile(source)?,
-                FunctionBody::Statements(statements) => statements.clone(),
+            let (statements, bind_catalog_dependencies) = match &def.body {
+                FunctionBody::Source(source) => (uqa_sql::compile(source)?, false),
+                FunctionBody::Statements(statements) => (statements.clone(), true),
             };
             Ok(CompiledFunctionBody::SQL(compile_sql_routine_plans(
-                engine, def, statements,
+                engine,
+                def,
+                statements,
+                bind_catalog_dependencies,
             )?))
         }
         other => Err(SQLError::Routine {
@@ -438,19 +441,51 @@ fn compile_sql_routine_plans(
     engine: &Engine,
     def: &CreateFunction,
     statements: Vec<Statement>,
+    bind_catalog_dependencies: bool,
 ) -> Result<Vec<UnifiedPlan>, SQLError> {
     let local_name = routine_local_name(&def.name)?;
-    let parameter_names: Vec<String> = def
-        .signature_params()
+    let signature_params = def.signature_params();
+    let parameter_names: Vec<String> = signature_params
         .iter()
         .map(|parameter| parameter.name.clone())
         .collect();
+    let parameter_types = signature_params
+        .iter()
+        .map(|parameter| {
+            crate::sql::resolve_catalog_column_type(engine, &parameter.type_name)
+                .or_else(|| ColumnType::from_sql_name(&parameter.type_name).ok())
+        })
+        .collect::<Vec<_>>();
+    let positional_parameters = parameter_types
+        .iter()
+        .map(|parameter_type| match parameter_type {
+            Some(parameter_type) => {
+                uqa_sql::SQLParam::typed_scalar(crate::Value::Null, parameter_type.clone())
+            }
+            None => uqa_sql::SQLParam::scalar(crate::Value::Null),
+        })
+        .collect::<Vec<_>>();
+    let parameter_scope = uqa_execution::RowSchema::with_qualified_types(
+        &local_name,
+        parameter_names.clone(),
+        parameter_types,
+    );
     statements
         .into_iter()
         .map(|statement| {
             let mut plan = UnifiedPlan::lower_with(statement, &|name: &str| {
                 engine.has_registered_aggregate_function(name)
             });
+            if bind_catalog_dependencies {
+                if let UnifiedPlan::Query(query) = &mut plan {
+                    crate::sql::bind_catalog_query_routines_with_outer(
+                        engine,
+                        query,
+                        &positional_parameters,
+                        &parameter_scope,
+                    )?;
+                }
+            }
             plan.rewrite_scalar_expressions(&mut |expression| {
                 let parameter = match expression {
                     ScalarExpr::Column(name) => parameter_names

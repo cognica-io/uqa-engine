@@ -784,6 +784,9 @@ pub struct CreateFunction {
     /// Lower-cased language name (`plpgsql`, `sql`).
     pub language: String,
     pub body: FunctionBody,
+    /// Effective schema search path captured when a SQL-standard body is catalog-bound. String and PL/pgSQL bodies keep dynamic lookup and leave this empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub creation_search_path: Vec<String>,
     pub volatility: FunctionVolatility,
     /// `STRICT` / `RETURNS NULL ON NULL INPUT` - the function is not
     /// invoked when any input argument is NULL; the result is NULL.

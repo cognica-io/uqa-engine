@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "24d199e8bac8a4ade03acd470f580a402c997ba043cf011921dee3312f398454",
+  "fixture_sha256": "fea607399038461e73144b4345e567cbbf1a2f66c74f75a841469bd9e435b2ad",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -758,6 +758,99 @@
       "name": "dropped_procedure_call",
       "kind": "error",
       "sqlstate": "42883"
+    },
+    {
+      "name": "create_dependency_base",
+      "kind": "ok"
+    },
+    {
+      "name": "create_dependency_middle",
+      "kind": "ok"
+    },
+    {
+      "name": "create_dependency_leaf",
+      "kind": "ok"
+    },
+    {
+      "name": "create_dependency_procedure",
+      "kind": "ok"
+    },
+    {
+      "name": "routine_dependency_restrict",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "routine_dependency_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "routine_dependency_catalog_empty",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "create_multi_dependency_base",
+      "kind": "ok"
+    },
+    {
+      "name": "create_multi_dependency_leaf",
+      "kind": "ok"
+    },
+    {
+      "name": "drop_multi_dependency_graph_restrict",
+      "kind": "ok"
+    },
+    {
+      "name": "create_dynamic_dependency_base",
+      "kind": "ok"
+    },
+    {
+      "name": "create_dynamic_dependency_leaf",
+      "kind": "ok"
+    },
+    {
+      "name": "drop_dynamic_dependency_base_restrict",
+      "kind": "ok"
+    },
+    {
+      "name": "dynamic_dependency_call_after_drop",
+      "kind": "error",
+      "sqlstate": "42883"
+    },
+    {
+      "name": "create_positional_dependency_integer",
+      "kind": "ok"
+    },
+    {
+      "name": "create_positional_dependency_bigint",
+      "kind": "ok"
+    },
+    {
+      "name": "create_positional_dependency_leaf",
+      "kind": "ok"
+    },
+    {
+      "name": "positional_dependency_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "drop_unreferenced_positional_overload",
+      "kind": "ok"
+    },
+    {
+      "name": "positional_dependency_restrict",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "positional_dependency_cascade",
+      "kind": "ok"
     }
   ]
 }

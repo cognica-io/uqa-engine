@@ -441,3 +441,89 @@ DROP PROCEDURE sf_cascade_procedure(integer) CASCADE;
 -- @case dropped_procedure_call error
 CALL sf_cascade_procedure(1);
 -- @end
+
+-- SQL-standard query bodies own exact routine dependencies; string bodies stay dynamic.
+-- @case create_dependency_base ok
+CREATE FUNCTION sf_dependency_base(value integer) RETURNS integer RETURN value + 1;
+-- @end
+
+-- @case create_dependency_middle ok
+CREATE FUNCTION sf_dependency_middle(value integer) RETURNS integer RETURN sf_dependency_base(value);
+-- @end
+
+-- @case create_dependency_leaf ok
+CREATE FUNCTION sf_dependency_leaf(value integer) RETURNS integer RETURN sf_dependency_middle(value);
+-- @end
+
+-- @case create_dependency_procedure ok
+CREATE PROCEDURE sf_dependency_procedure(value integer) LANGUAGE SQL BEGIN ATOMIC SELECT sf_dependency_leaf(value); END;
+-- @end
+
+-- @case routine_dependency_restrict error
+DROP FUNCTION sf_dependency_base(integer) RESTRICT;
+-- @end
+
+-- @case routine_dependency_cascade ok
+DROP FUNCTION sf_dependency_base(integer) CASCADE;
+-- @end
+
+-- @case routine_dependency_catalog_empty rows
+SELECT proname FROM pg_catalog.pg_proc WHERE proname IN ('sf_dependency_base', 'sf_dependency_middle', 'sf_dependency_leaf', 'sf_dependency_procedure') AND pronamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = current_schema()) ORDER BY proname;
+-- @end
+
+-- @case create_multi_dependency_base ok
+CREATE FUNCTION sf_multi_dependency_base(value integer) RETURNS integer RETURN value + 1;
+-- @end
+
+-- @case create_multi_dependency_leaf ok
+CREATE FUNCTION sf_multi_dependency_leaf(value integer) RETURNS integer RETURN sf_multi_dependency_base(value);
+-- @end
+
+-- @case drop_multi_dependency_graph_restrict ok
+DROP FUNCTION sf_multi_dependency_base(integer), sf_multi_dependency_leaf(integer) RESTRICT;
+-- @end
+
+-- @case create_dynamic_dependency_base ok
+CREATE FUNCTION sf_dynamic_dependency_base(value integer) RETURNS integer RETURN value + 1;
+-- @end
+
+-- @case create_dynamic_dependency_leaf ok
+CREATE FUNCTION sf_dynamic_dependency_leaf(value integer) RETURNS integer LANGUAGE SQL AS 'SELECT sf_dynamic_dependency_base($1)';
+-- @end
+
+-- @case drop_dynamic_dependency_base_restrict ok
+DROP FUNCTION sf_dynamic_dependency_base(integer) RESTRICT;
+-- @end
+
+-- @case dynamic_dependency_call_after_drop error
+SELECT sf_dynamic_dependency_leaf(1);
+-- @end
+
+-- Positional SQL-standard parameters retain their declared types while overload dependencies bind.
+-- @case create_positional_dependency_integer ok
+CREATE FUNCTION sf_positional_dependency(value integer) RETURNS integer RETURN value + 1;
+-- @end
+
+-- @case create_positional_dependency_bigint ok
+CREATE FUNCTION sf_positional_dependency(value bigint) RETURNS bigint RETURN value + 2;
+-- @end
+
+-- @case create_positional_dependency_leaf ok
+CREATE FUNCTION sf_positional_dependency_leaf(value integer) RETURNS integer RETURN sf_positional_dependency($1);
+-- @end
+
+-- @case positional_dependency_result rows
+SELECT sf_positional_dependency_leaf(1) AS value;
+-- @end
+
+-- @case drop_unreferenced_positional_overload ok
+DROP FUNCTION sf_positional_dependency(bigint) RESTRICT;
+-- @end
+
+-- @case positional_dependency_restrict error
+DROP FUNCTION sf_positional_dependency(integer) RESTRICT;
+-- @end
+
+-- @case positional_dependency_cascade ok
+DROP FUNCTION sf_positional_dependency(integer) CASCADE;
+-- @end

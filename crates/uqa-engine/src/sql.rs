@@ -138,6 +138,22 @@ pub(crate) fn bind_catalog_query_routines(
     select::bind_query_plan_routines_for_storage(engine, query, params, &CteScope::default(), None)
 }
 
+/// Bind a catalog-owned query whose expressions may reference a statically typed routine parameter scope.
+pub(crate) fn bind_catalog_query_routines_with_outer(
+    engine: &Engine,
+    query: &mut uqa_planner::QueryPlan,
+    params: &[SQLParam],
+    outer: &uqa_execution::RowSchema,
+) -> Result<uqa_execution::RowSchema, SQLError> {
+    select::bind_query_plan_routines_for_storage(
+        engine,
+        query,
+        params,
+        &CteScope::default(),
+        Some(outer),
+    )
+}
+
 const SCORE_COLUMN: &str = "_score";
 pub(in crate::sql) const DOC_ID_COLUMN: &str = "_doc_id";
 const MERGE_ACTION_COLUMN: &str = "_merge_action";

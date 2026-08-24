@@ -16,6 +16,8 @@ use uqa_sql::Statement;
 mod alter_routine;
 #[path = "sql_routine_identity/polymorphic_variadic.rs"]
 mod polymorphic_variadic;
+#[path = "sql_routine_identity/routine_cascade.rs"]
+mod routine_cascade;
 #[path = "sql_routine_identity/scalar_overloads.rs"]
 mod scalar_overloads;
 
