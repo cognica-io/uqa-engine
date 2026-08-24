@@ -72,7 +72,7 @@ Every fixture case starts with `-- @case <name> <ok|rows|error>` and ends with `
 
 `clients/run.sh` builds pinned psycopg, pgx, and node-postgres images, provisions a password-authenticated role in a running PostgreSQL 18.4 container, checks the deterministic operation/version evidence from each driver against `clients/expected.json`, and reruns the same operations against the server fixture assembled from `uqa-pg-wire`. The matrix covers prepared reuse, binary formats, COPY in and out, failed-transaction rollback recovery, and one-connection pool reuse; it also runs the existing PostgreSQL 18 psql/libpq protocol 3.0/3.2 suite.
 
-The default container name is `pg-parity`, the default published PostgreSQL port is `15432`, and the default Docker-reachable host is `host.docker.internal`. Override `UQA_PG18_WIRE_CONTAINER`, `UQA_PG18_ORACLE_PORT`, or `UQA_PG18_DOCKER_HOST` for another local runtime, then run:
+The default container name is `pg-parity`, the default published PostgreSQL port is `15432`, and the runner uses the Docker runtime's host-gateway alias. Override `UQA_PG18_WIRE_CONTAINER`, `UQA_PG18_ORACLE_PORT`, or `UQA_PG18_DOCKER_HOST` for another local runtime, then run:
 
 ```sh
 bash tests/parity/pg18/clients/run.sh
