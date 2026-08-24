@@ -767,6 +767,10 @@ impl ExpressionEvaluator for EngineExpressionEvaluator<'_> {
 }
 
 impl FunctionTypeResolver for EngineExpressionEvaluator<'_> {
+    fn has_untyped_function(&self, name: &str) -> bool {
+        self.engine.has_untyped_function(name)
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,

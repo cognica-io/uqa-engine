@@ -129,3 +129,13 @@ pub use type_resolution::{
     ResolvedLengthOverload, ResolvedMd5Overload, ResolvedReverseOverload,
     ResolvedStringBinaryOverload, ResolvedTextByteaOverload,
 };
+#[doc(hidden)]
+pub use type_resolution::{
+    builtin_binding_matches, builtin_name_matches, canonical_column_type_name,
+    canonical_routine_type_name, effective_overload_argument_type, fixed_builtin_return_type,
+    function_resolution_error, is_fixed_builtin, match_builtin_function_overload,
+    match_function_signature, rank_function_matches, resolve_fixed_builtin_call,
+    resolve_local_builtin_overload, routine_type_accepts_implicit_cast, routine_type_category,
+    routine_type_is_preferred, FunctionParameterDescriptor, MatchedBuiltinFunction,
+    MatchedFunctionSignature, RankedFunctionMatch, ResolvedFixedBuiltinCall,
+};

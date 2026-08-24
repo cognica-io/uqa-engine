@@ -14,8 +14,8 @@ use super::common::{
     base_type, common_numeric_type, common_type, merge_optional_types, numeric_type,
 };
 use super::{
-    array_transform, checksum, containment, gamma, integer_base, json_strip, length, md5,
-    random_range, reverse, scalar_type_inner, FunctionTypeResolver,
+    array_transform, containment, fixed_builtin, integer_base, random_range, scalar_type_inner,
+    FunctionTypeResolver,
 };
 
 pub fn builtin_function_type(
@@ -36,47 +36,18 @@ pub fn builtin_function_argument_targets(
 ) -> Vec<Option<ColumnType>> {
     let lower = name.to_ascii_lowercase();
     let name = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
+    if let Some(targets) = fixed_builtin::selected_argument_targets(name, argument_types) {
+        return targets;
+    }
     let mut targets = argument_types.to_vec();
     match name {
-        "upper" | "lower" | "casefold" | "initcap" | "trim" | "btrim" | "ltrim" | "rtrim" => {
+        "upper" | "lower" | "initcap" | "trim" | "btrim" | "ltrim" | "rtrim" => {
             targets.fill(Some(ColumnType::Text));
-        }
-        "uuid_extract_version" | "uuid_extract_timestamp" if targets.len() == 1 => {
-            targets.fill(Some(ColumnType::Uuid));
-        }
-        "random" if targets.len() == 2 => {
-            if let Some(target) = random_range::selected_argument_type(argument_types) {
-                targets.fill(Some(target));
-            }
         }
         "array_sort" if matches!(targets.len(), 2 | 3) => {
             targets.iter_mut().skip(1).for_each(|target| {
                 *target = Some(ColumnType::Boolean);
             });
-        }
-        "json_strip_nulls" | "jsonb_strip_nulls" if matches!(targets.len(), 1 | 2) => {
-            targets[0] = Some(if name == "jsonb_strip_nulls" {
-                ColumnType::JsonB
-            } else {
-                ColumnType::Json
-            });
-            if targets.len() == 2 {
-                targets[1] = Some(ColumnType::Boolean);
-            }
-        }
-        "reverse" | "md5" | "crc32" | "crc32c" | "length" | "char_length" | "character_length"
-        | "octet_length" | "bit_length"
-            if targets.len() == 1 =>
-        {
-            let target = match name {
-                "reverse" => reverse::builtin_argument_type(argument_types),
-                "md5" => md5::builtin_argument_type(argument_types),
-                "crc32" | "crc32c" => checksum::builtin_argument_type(name, argument_types),
-                _ => length::builtin_argument_type(name, argument_types),
-            };
-            if let Some(target) = target {
-                targets.fill(Some(target));
-            }
         }
         "concat_op" if targets.len() == 2 => {
             for position in 0..2 {
@@ -107,6 +78,11 @@ pub(super) fn builtin_function_type_inner(
             scalar_type_inner(expression, schema, params, resolver)
         });
     }
+    if binding.is_none()
+        && resolver.is_some_and(|resolver| resolver.has_untyped_function(original_name))
+    {
+        return Ok(None);
+    }
     if name.contains('.') && resolver.is_none() {
         return Ok(None);
     }
@@ -130,12 +106,20 @@ pub(super) fn builtin_function_type_inner(
     let argument = |position: usize| argument_types.get(position).cloned().flatten();
     let ordered_argument = || ordered_argument_types.first().cloned().flatten();
     let first = || argument(0);
+    if fixed_builtin::is_function(name) {
+        return fixed_builtin::resolve_type(
+            original_name,
+            binding,
+            args,
+            &argument_types,
+            resolver,
+        );
+    }
     match name {
         "pg_typeof" => Ok(Some(ColumnType::Regtype)),
         "typeof"
         | "upper"
         | "lower"
-        | "casefold"
         | "initcap"
         | "trim"
         | "btrim"
@@ -184,28 +168,8 @@ pub(super) fn builtin_function_type_inner(
             Ok(random_range::bound_function_type(name))
         }
         name if array_transform::is_bound_function(name) => Ok(first()),
-        "to_bin" | "to_hex" | "to_oct" => {
-            integer_base::resolve_type(original_name, args, &argument_types)
-        }
-        "random" if !args.is_empty() => {
-            random_range::resolve_type(original_name, args, &argument_types)
-        }
         "array_sort" | "array_reverse" => {
             array_transform::resolve_type(original_name, binding, args, &argument_types, resolver)
-        }
-        "md5" => md5::resolve_type(original_name, binding, args, &argument_types, resolver),
-        "crc32" | "crc32c" => {
-            checksum::resolve_type(original_name, binding, args, &argument_types, resolver)
-        }
-        "length" | "char_length" | "character_length" | "octet_length" | "bit_length" => {
-            length::resolve_type(original_name, binding, args, &argument_types, resolver)
-        }
-        "reverse" => reverse::resolve_type(original_name, binding, args, &argument_types, resolver),
-        "gamma" | "lgamma" => {
-            gamma::resolve_type(original_name, binding, args, &argument_types, resolver)
-        }
-        "json_strip_nulls" | "jsonb_strip_nulls" => {
-            json_strip::resolve_type(original_name, binding, args, &argument_types, resolver)
         }
         "count" | "row_number" | "rank" | "dense_rank" | "nextval" | "currval" | "setval" => {
             Ok(Some(ColumnType::BigInteger))
@@ -296,8 +260,9 @@ pub(super) fn builtin_function_type_inner(
         "power" | "pow" => numeric_power_type(args, &argument_types),
         "sqrt" | "ln" | "log" | "log10" => numeric_transcendental_type(args, &argument_types),
         "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "atan2" | "sinh" | "cosh" | "tanh"
-        | "exp" | "log2" | "cbrt" | "degrees" | "radians" | "pi" | "random" | "st_distance"
-        | "date_part" => Ok(Some(ColumnType::DoublePrecision)),
+        | "exp" | "log2" | "cbrt" | "degrees" | "radians" | "pi" | "st_distance" | "date_part" => {
+            Ok(Some(ColumnType::DoublePrecision))
+        }
         "regexp_match" | "regexp_matches" | "string_to_array" => {
             Ok(Some(ColumnType::Array(Box::new(ColumnType::Text))))
         }
@@ -310,7 +275,7 @@ pub(super) fn builtin_function_type_inner(
             Ok(Some(ColumnType::TimestampTz))
         }
         "current_date" | "make_date" | "to_date" => Ok(Some(ColumnType::Date)),
-        "to_timestamp" | "uuid_extract_timestamp" => Ok(Some(ColumnType::TimestampTz)),
+        "to_timestamp" => Ok(Some(ColumnType::TimestampTz)),
         "age" | "make_interval" | "justify_hours" => Ok(Some(ColumnType::Interval)),
         "date_trunc" => Ok(argument(1).map(|ty| match base_type(&ty) {
             ColumnType::Interval => ColumnType::Interval,
@@ -318,8 +283,6 @@ pub(super) fn builtin_function_type_inner(
             _ => ColumnType::TimestampTz,
         })),
         "make_timestamp" => Ok(Some(ColumnType::Timestamp)),
-        "gen_random_uuid" | "uuidv4" | "uuidv7" => Ok(Some(ColumnType::Uuid)),
-        "uuid_extract_version" => Ok(Some(ColumnType::SmallInteger)),
         "current_database" | "current_catalog" | "current_schema" | "current_user"
         | "session_user" => Ok(Some(ColumnType::Name)),
         "current_schemas" => Ok(Some(ColumnType::Array(Box::new(ColumnType::Name)))),
@@ -355,7 +318,7 @@ fn resolve_extension_function_type(
     resolver.resolve_function_type(name, binding, &argument_names, &argument_types)
 }
 
-fn named_argument(expression: &ScalarExpr) -> (Option<String>, &ScalarExpr) {
+pub(super) fn named_argument(expression: &ScalarExpr) -> (Option<String>, &ScalarExpr) {
     let ScalarExpr::Func { name, args, .. } = expression else {
         return (None, expression);
     };

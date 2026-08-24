@@ -9,9 +9,10 @@
 use uqa_core::{ArrayValue, Value};
 use uqa_sql::ast::{BinaryOp, FrameMode, FunctionBinding, NullsOrder};
 use uqa_sql::expr::{
-    cast_value_from, eval_binary_values, eval_binary_values_with_integer_width, eval_function_call,
-    integer_width_for_literal, integer_width_for_type, negate_value, truthy, EngineHook,
-    EvalContext, IntegerWidth, RowLookup, NAMED_ARG_FUNCTION,
+    cast_value_from, eval_binary_values, eval_binary_values_with_integer_width,
+    eval_builtin_function_call, eval_function_call, integer_width_for_literal,
+    integer_width_for_type, negate_value, truthy, EngineHook, EvalContext, IntegerWidth, RowLookup,
+    NAMED_ARG_FUNCTION,
 };
 use uqa_sql::{ResultRow, SQLError, SQLParam};
 
@@ -725,7 +726,12 @@ pub fn eval_scalar(
             let arguments = eval_call_arguments(args, context)?;
             if let Some(binding) = binding {
                 if binding.builtin {
-                    return eval_function_call(&binding.name, arguments, &context.sql_context());
+                    let dispatch_name = crate::type_resolution::runtime_dispatch_name(binding);
+                    return eval_builtin_function_call(
+                        dispatch_name.as_deref().unwrap_or(&binding.name),
+                        arguments,
+                        &context.sql_context(),
+                    );
                 }
                 let sql_context = context.sql_context();
                 let engine = sql_context.engine.ok_or_else(|| {

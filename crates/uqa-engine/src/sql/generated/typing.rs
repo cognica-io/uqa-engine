@@ -47,7 +47,6 @@ enum TypeClass {
     Integer,
     Numeric,
     Text,
-    Uuid,
     Bytea,
     Array,
     Json,
@@ -106,36 +105,15 @@ fn bind_function_calls(
                 argument_names.push(argument_name);
                 argument_types.push(infer_expression(engine, columns, value, dependencies)?);
             }
-            if builtin::bind_string_binary_call(
-                builtin::StringBinaryCall {
-                    engine,
-                    columns,
-                    name,
-                    args,
-                    argument_names: &argument_names,
-                    argument_types: &argument_types,
-                },
-                binding,
-                dependencies,
-            )? {
+            if binding.is_none()
+                && engine
+                    .registered_runtime_function_volatility(name)
+                    .is_some()
+            {
                 return Ok(());
             }
-            if builtin::bind_gamma_call(
-                builtin::GammaCall {
-                    engine,
-                    columns,
-                    name,
-                    args,
-                    argument_names: &argument_names,
-                    argument_types: &argument_types,
-                },
-                binding,
-                dependencies,
-            )? {
-                return Ok(());
-            }
-            if builtin::bind_json_strip_call(
-                builtin::JsonStripCall {
+            if builtin::bind_fixed_builtin_call(
+                builtin::FixedBuiltinCall {
                     engine,
                     columns,
                     name,
@@ -454,6 +432,9 @@ fn infer_function(
 
     if let Some(binding) = binding {
         if binding.builtin {
+            if let Some(return_type) = uqa_execution::fixed_builtin_return_type(binding) {
+                return Ok(column_generation_type(&return_type));
+            }
             let dispatch_name = builtin_function_dispatch_name(&binding.name);
             return infer_builtin_function(&dispatch_name, &argument_names, &argument_types)?
                 .ok_or_else(|| SQLError::UnknownFunction(binding.name.clone()));
@@ -523,6 +504,72 @@ fn named_argument(expression: &Expr) -> Result<(Option<String>, &Expr), SQLError
         ));
     };
     Ok((Some(name.to_ascii_lowercase()), value))
+}
+
+pub(super) fn generation_expression_column_type(
+    columns: &[ColumnDef],
+    expression: &Expr,
+    inferred: &GenerationType,
+) -> Option<ColumnType> {
+    match expression {
+        Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } => columns
+            .iter()
+            .find(|column| column.name == *name)
+            .map(|column| column.ty.clone()),
+        Expr::Cast { ty, .. } => ColumnType::from_sql_name(ty).ok(),
+        Expr::Literal(Value::Str(_) | Value::Null) => None,
+        _ => ColumnType::from_sql_name(&generation_type_name(inferred)).ok(),
+    }
+}
+
+pub(super) fn validate_bound_function(
+    engine: &Engine,
+    binding: &FunctionBinding,
+    argument_names: &[Option<String>],
+    argument_types: &[GenerationType],
+) -> Result<FunctionBinding, SQLError> {
+    let function = engine
+        .lookup_sql_functions(&binding.name)
+        .and_then(|overloads| {
+            overloads
+                .into_iter()
+                .find(|function| routine_signature_types(&function.def) == binding.argument_types)
+        })
+        .ok_or_else(|| SQLError::UnknownFunction(binding.name.clone()))?;
+    if function.def.is_procedure || function.def.returns_set() {
+        return Err(SQLError::TypeMismatch(format!(
+            "generated-column function `{}` must return one scalar value",
+            binding.name
+        )));
+    }
+    if function.def.volatility != uqa_sql::ast::FunctionVolatility::Immutable {
+        return Err(non_immutable_function(&binding.name));
+    }
+    let signature = function.def.signature_params();
+    let mut positional = 0usize;
+    for (argument_name, argument_type) in argument_names.iter().zip(argument_types) {
+        let position = argument_name.as_ref().map_or_else(
+            || {
+                let position = positional;
+                positional += 1;
+                position
+            },
+            |argument_name| {
+                signature
+                    .iter()
+                    .position(|parameter| parameter.name == *argument_name)
+                    .unwrap_or(signature.len())
+            },
+        );
+        let parameter = signature.get(position).ok_or_else(|| {
+            SQLError::Internal(format!(
+                "resolved generated-column function `{}` lost its argument mapping",
+                binding.name
+            ))
+        })?;
+        validate_unknown_literal_cast(argument_type, &parameter.type_name)?;
+    }
+    Ok(binding.clone())
 }
 
 fn resolve_user_function_binding(
@@ -1081,7 +1128,6 @@ fn require_one(name: &str, argument: &GenerationType, expected: TypeClass) -> Re
                 TypeClass::Integer => "integer",
                 TypeClass::Numeric => "numeric",
                 TypeClass::Text => "text",
-                TypeClass::Uuid => "uuid",
                 TypeClass::Bytea => "bytea",
                 TypeClass::Array => "array",
                 TypeClass::Json => "json",
@@ -1108,7 +1154,6 @@ fn accepts_class(ty: &GenerationType, class: TypeClass) -> bool {
         ),
         TypeClass::Numeric => is_numeric(ty),
         TypeClass::Text => matches!(ty, GenerationType::Text),
-        TypeClass::Uuid => matches!(ty, GenerationType::Uuid),
         TypeClass::Bytea => matches!(ty, GenerationType::Bytea),
         TypeClass::Array => matches!(
             ty,

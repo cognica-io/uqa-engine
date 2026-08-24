@@ -9,7 +9,7 @@
 use super::super::{ColumnType, Engine, SQLError, SQLParam, ScalarExpr};
 use std::collections::BTreeSet;
 use uqa_execution::type_resolution::builtin_function_type;
-use uqa_execution::{RowSchema, ScalarOrder};
+use uqa_execution::{FunctionTypeResolver, RowSchema, ScalarOrder};
 use uqa_sql::ast::FunctionBinding;
 
 pub(super) fn validate_unqualified_column(
@@ -101,6 +101,7 @@ pub(super) struct ScalarFunctionValidation<'a> {
     pub(super) expression: &'a ScalarExpr,
     pub(super) schema: &'a RowSchema,
     pub(super) params: &'a [SQLParam],
+    pub(super) resolver: &'a dyn FunctionTypeResolver,
 }
 
 pub(super) fn validate_scalar_function(
@@ -115,9 +116,16 @@ pub(super) fn validate_scalar_function(
         expression,
         schema,
         params,
+        resolver,
     } = validation;
     let identity = name.to_ascii_lowercase();
     let lower = crate::sql::builtin_function_dispatch_name(&identity);
+    if engine.has_registered_scalar_function(&identity) {
+        return Ok(());
+    }
+    if validate_fixed_builtin(engine, name, binding, args, schema, params, resolver)? {
+        return Ok(());
+    }
     if matches!(
         lower.as_str(),
         "uuid_extract_version" | "uuid_extract_timestamp"
@@ -131,7 +139,6 @@ pub(super) fn validate_scalar_function(
     if lower == uqa_sql::expr::NAMED_ARG_FUNCTION
         || uqa_sql::registry::is_registered(&lower)
         || crate::sql::aggregates::is_aggregate(engine, expression)
-        || engine.has_registered_scalar_function(&identity)
         || engine.has_registered_aggregate_function(&identity)
         || builtin_scalar_function(&lower, args.len())
     {
@@ -144,6 +151,40 @@ pub(super) fn validate_scalar_function(
         return Ok(());
     }
     Err(undefined_function(name, args, schema, params))
+}
+
+fn validate_fixed_builtin(
+    engine: &Engine,
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    args: &[ScalarExpr],
+    schema: &RowSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<bool, SQLError> {
+    if !uqa_execution::is_fixed_builtin(name) {
+        return Ok(false);
+    }
+    let mut argument_names = Vec::with_capacity(args.len());
+    let mut argument_types = Vec::with_capacity(args.len());
+    for argument in args {
+        let (argument_name, value) = named_argument(argument);
+        let argument_type =
+            uqa_execution::common_context_expression_type(value, schema, params, Some(resolver))?;
+        argument_names.push(argument_name);
+        argument_types.push(uqa_execution::effective_overload_argument_type(
+            value,
+            argument_type,
+        ));
+    }
+    uqa_execution::resolve_fixed_builtin_call(
+        name,
+        binding,
+        &argument_names,
+        &argument_types,
+        Some(engine),
+    )
+    .map(|resolved| resolved.is_some())
 }
 
 fn validate_uuid_extraction_function(

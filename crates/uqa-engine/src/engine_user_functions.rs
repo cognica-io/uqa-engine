@@ -114,6 +114,10 @@ impl RankedFunctionMatch for StaticFunctionMatch {
 }
 
 impl FunctionTypeResolver for Engine {
+    fn has_untyped_function(&self, name: &str) -> bool {
+        self.has_registered_scalar_function(name)
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,

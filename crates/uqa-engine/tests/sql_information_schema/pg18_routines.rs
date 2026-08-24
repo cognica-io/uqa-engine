@@ -94,12 +94,12 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
                     proargmodes, proargnames, proargdefaults, protrftypes, prosrc, probin, prosqlbody, \
                     proconfig, proacl \
              FROM pg_catalog.pg_proc \
-             WHERE oid IN (720, 1317, 1318, 1367, 1369, 1372, 1374, 1375, 1381, 1810, 1811, 2010, 2311, 2321, 3062, 3261, 3262, 6330, 6331, 6332, 6333, 6342, 6343, 6364, 6365, 6382, 6383, 6384, 6389, 6390, 6429, 6430) \
+             WHERE oid IN (720, 1317, 1318, 1367, 1369, 1372, 1374, 1375, 1381, 1598, 1810, 1811, 2010, 2089, 2090, 2311, 2321, 3062, 3261, 3262, 3432, 6330, 6331, 6332, 6333, 6342, 6343, 6364, 6365, 6382, 6383, 6384, 6389, 6390, 6412, 6428, 6429, 6430) \
              ORDER BY oid",
             &[],
         )
         .unwrap();
-    assert_eq!(routines.rows.len(), 32);
+    assert_eq!(routines.rows.len(), 38);
     let row = |oid: i64| {
         routines
             .rows
@@ -114,6 +114,8 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     assert_md5_routines(&engine, &routines);
     assert_reverse_routines(&engine, &routines);
     for (oid, argument_type, source) in [
+        (2089, 23, "to_hex32"),
+        (2090, 20, "to_hex64"),
         (6330, 23, "to_bin32"),
         (6331, 20, "to_bin64"),
         (6332, 23, "to_oct32"),
@@ -126,6 +128,7 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
         );
         assert_eq!(row(oid)["proisstrict"], Value::Bool(true));
         assert_eq!(row(oid)["provolatile"], Value::Str("i".into()));
+        assert_eq!(row(oid)["proparallel"], Value::Str("s".into()));
         assert_eq!(row(oid)["proleakproof"], Value::Bool(false));
         assert_eq!(row(oid)["prosrc"], Value::Str(source.into()));
     }
@@ -153,12 +156,103 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     assert_eq!(row(6429)["provolatile"], Value::Str("v".into()));
     assert_eq!(row(6430)["prorettype"], Value::Int(2950));
 
+    assert_pg18_fixed_routine_metadata(&routines);
+    assert_pg18_fixed_routine_information_schema(&engine);
     assert_uuidv7_information_schema(&engine);
     assert_integer_base_conversion_routines(&engine);
     assert_array_transform_routines(&engine);
     assert_random_range_pg_proc(&engine);
     assert_random_range_routines(&engine);
     assert_uuid_extraction_routines(&engine);
+}
+
+fn assert_pg18_fixed_routine_metadata(routines: &SQLResult) {
+    let row = |oid: i64| {
+        routines
+            .rows
+            .iter()
+            .find(|row| row["oid"] == Value::Int(oid))
+            .unwrap_or_else(|| panic!("missing pg_proc row {oid}"))
+    };
+    for (oid, name, volatility, parallel, return_type, argument_types, source) in [
+        (1598, "random", "v", "r", 701, vec![], "drandom"),
+        (2089, "to_hex", "i", "s", 25, vec![23], "to_hex32"),
+        (2090, "to_hex", "i", "s", 25, vec![20], "to_hex64"),
+        (
+            3432,
+            "gen_random_uuid",
+            "v",
+            "s",
+            2950,
+            vec![],
+            "gen_random_uuid",
+        ),
+        (6412, "casefold", "i", "s", 25, vec![25], "casefold"),
+        (6428, "uuidv4", "v", "s", 2950, vec![], "gen_random_uuid"),
+    ] {
+        assert_eq!(row(oid)["proname"], Value::Str(name.into()));
+        assert_eq!(row(oid)["pronamespace"], Value::Int(11));
+        assert_eq!(row(oid)["proowner"], Value::Int(10));
+        assert_eq!(row(oid)["prolang"], Value::Int(12));
+        assert_eq!(row(oid)["procost"], Value::Float(1.0));
+        assert_eq!(row(oid)["prorows"], Value::Float(0.0));
+        assert_eq!(row(oid)["provariadic"], Value::Int(0));
+        assert_eq!(row(oid)["prosupport"], Value::Str("-".into()));
+        assert_eq!(row(oid)["prokind"], Value::Str("f".into()));
+        assert_eq!(row(oid)["prosecdef"], Value::Bool(false));
+        assert_eq!(row(oid)["proleakproof"], Value::Bool(false));
+        assert_eq!(row(oid)["proisstrict"], Value::Bool(true));
+        assert_eq!(row(oid)["proretset"], Value::Bool(false));
+        assert_eq!(row(oid)["provolatile"], Value::Str(volatility.into()));
+        assert_eq!(row(oid)["proparallel"], Value::Str(parallel.into()));
+        assert_eq!(
+            row(oid)["pronargs"],
+            Value::Int(i64::try_from(argument_types.len()).expect("routine arity fits i64"))
+        );
+        assert_eq!(row(oid)["pronargdefaults"], Value::Int(0));
+        assert_eq!(row(oid)["prorettype"], Value::Int(return_type));
+        assert_eq!(
+            row(oid)["proargtypes"],
+            Value::List(argument_types.into_iter().map(Value::Int).collect())
+        );
+        assert_eq!(row(oid)["proallargtypes"], Value::Null);
+        assert_eq!(row(oid)["proargmodes"], Value::Null);
+        assert_eq!(row(oid)["proargnames"], Value::Null);
+        assert_eq!(row(oid)["proargdefaults"], Value::Null);
+        assert_eq!(row(oid)["protrftypes"], Value::Null);
+        assert_eq!(row(oid)["prosrc"], Value::Str(source.into()));
+        assert_eq!(row(oid)["probin"], Value::Null);
+        assert_eq!(row(oid)["prosqlbody"], Value::Null);
+        assert_eq!(row(oid)["proconfig"], Value::Null);
+        assert_eq!(row(oid)["proacl"], Value::Null);
+    }
+}
+
+fn assert_pg18_fixed_routine_information_schema(engine: &Engine) {
+    let routines = engine
+        .sql(
+            "SELECT specific_name, routine_name, data_type, is_deterministic, external_language \
+             FROM information_schema.routines \
+             WHERE specific_name IN ('random_1598', 'gen_random_uuid_3432', 'casefold_6412', 'uuidv4_6428') \
+             ORDER BY specific_name",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(routines.rows.len(), 4);
+    for (row, (specific_name, routine_name, data_type, deterministic)) in
+        routines.rows.iter().zip([
+            ("casefold_6412", "casefold", "text", "YES"),
+            ("gen_random_uuid_3432", "gen_random_uuid", "uuid", "NO"),
+            ("random_1598", "random", "double precision", "NO"),
+            ("uuidv4_6428", "uuidv4", "uuid", "NO"),
+        ])
+    {
+        assert_eq!(row["specific_name"], Value::Str(specific_name.into()));
+        assert_eq!(row["routine_name"], Value::Str(routine_name.into()));
+        assert_eq!(row["data_type"], Value::Str(data_type.into()));
+        assert_eq!(row["is_deterministic"], Value::Str(deterministic.into()));
+        assert_eq!(row["external_language"], Value::Str("INTERNAL".into()));
+    }
 }
 
 fn assert_json_strip_routines(engine: &Engine, routines: &SQLResult) {
@@ -646,18 +740,32 @@ fn assert_random_range_pg_proc(engine: &Engine) {
 fn assert_integer_base_conversion_routines(engine: &Engine) {
     let routines = engine
         .sql(
-            "SELECT routine_name, data_type, is_deterministic, external_language \
+            "SELECT specific_name, routine_name, data_type, is_deterministic, external_language \
              FROM information_schema.routines \
-             WHERE routine_name IN ('to_bin', 'to_oct') \
+             WHERE routine_name IN ('to_bin', 'to_hex', 'to_oct') \
              ORDER BY routine_name, specific_name",
             &[],
         )
         .unwrap();
-    assert_eq!(routines.rows.len(), 4);
-    for (index, expected_name) in ["to_bin", "to_bin", "to_oct", "to_oct"].iter().enumerate() {
+    assert_eq!(routines.rows.len(), 6);
+    for (index, (specific_name, routine_name)) in [
+        ("to_bin_6330", "to_bin"),
+        ("to_bin_6331", "to_bin"),
+        ("to_hex_2089", "to_hex"),
+        ("to_hex_2090", "to_hex"),
+        ("to_oct_6332", "to_oct"),
+        ("to_oct_6333", "to_oct"),
+    ]
+    .iter()
+    .enumerate()
+    {
+        assert_eq!(
+            routines.rows[index]["specific_name"],
+            Value::Str((*specific_name).into())
+        );
         assert_eq!(
             routines.rows[index]["routine_name"],
-            Value::Str((*expected_name).into())
+            Value::Str((*routine_name).into())
         );
         assert_eq!(routines.rows[index]["data_type"], Value::Str("text".into()));
         assert_eq!(

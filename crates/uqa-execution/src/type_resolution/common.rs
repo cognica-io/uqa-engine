@@ -12,6 +12,14 @@ use crate::{RowSchema, ScalarExpr};
 
 use super::{scalar_type_inner, FunctionTypeResolver};
 
+pub(super) fn local_routine_name(name: &str) -> String {
+    let lower = name.to_ascii_lowercase();
+    lower
+        .strip_prefix("pg_catalog.")
+        .unwrap_or(&lower)
+        .to_string()
+}
+
 pub(super) fn numeric_type() -> ColumnType {
     ColumnType::Numeric {
         precision: None,
@@ -63,6 +71,22 @@ pub fn common_context_expression_type(
         return Ok(None);
     }
     scalar_type_inner(expression, schema, params, resolver)
+}
+
+/// Preserve parser-level `unknown` identity for fixed built-in overload selection.
+#[doc(hidden)]
+pub fn effective_overload_argument_type(
+    expression: &ScalarExpr,
+    resolved: Option<ColumnType>,
+) -> Option<ColumnType> {
+    if matches!(expression, ScalarExpr::Literal(Value::Str(_) | Value::Null))
+        || matches!(expression, ScalarExpr::Param(_))
+            && matches!(resolved.as_ref(), Some(ColumnType::Text))
+    {
+        None
+    } else {
+        resolved
+    }
 }
 
 pub(super) fn parameter_type(parameter: &SQLParam) -> Option<ColumnType> {
