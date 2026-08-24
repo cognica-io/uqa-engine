@@ -6,6 +6,8 @@
 
 //! `information_schema` and `pg_catalog` virtual row synthesis.
 
+use std::sync::LazyLock;
+
 use uqa_core::Value;
 use uqa_sql::ast::{ColumnDef as SQLColumnDef, ColumnType, Expr};
 use uqa_sql::registry::registered_names;
@@ -78,11 +80,11 @@ use pg_catalog::{
 pub(in crate::sql) use schema::virtual_relation_schema;
 use schema::{resolve_virtual_relation, VirtualRelation};
 
-fn catalog_domain_types() -> Vec<ColumnType> {
+static CATALOG_DOMAIN_TYPES: LazyLock<Vec<ColumnType>> = LazyLock::new(|| {
     let mut domains = schema::information_schema_domains();
     domains.extend(schema::ag_catalog_domains());
     domains
-}
+});
 
 pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> Option<ColumnType> {
     if let Ok(ty) = ColumnType::from_sql_name(type_name) {
@@ -100,8 +102,8 @@ pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> O
             (Some(schema.trim_matches('"')), local_name)
         });
     let local_name = local_name.trim_matches('"');
-    let mut resolved = catalog_domain_types()
-        .into_iter()
+    let mut resolved = CATALOG_DOMAIN_TYPES
+        .iter()
         .find(|domain| match domain {
             ColumnType::Domain {
                 schema: domain_schema,
@@ -115,7 +117,8 @@ pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> O
                     )
             }
             _ => false,
-        });
+        })
+        .cloned();
     if let Some(ty) = resolved.as_mut() {
         for _ in 0..array_dimensions {
             *ty = ColumnType::Array(Box::new(ty.clone()));

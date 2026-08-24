@@ -126,6 +126,12 @@ fn bind_function_calls(
             )? {
                 return Ok(());
             }
+            if binding
+                .as_ref()
+                .is_some_and(FunctionBinding::is_polymorphic_builtin_syntax)
+            {
+                return Ok(());
+            }
             if binding.as_ref().is_some_and(|binding| !binding.builtin)
                 || engine.lookup_sql_functions(name).is_some()
             {

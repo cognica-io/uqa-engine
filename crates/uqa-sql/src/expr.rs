@@ -166,6 +166,33 @@ pub trait EngineHook {
     }
 }
 
+/// Cast a value after resolving catalog-owned source and target types and flattening domains to their coercion types.
+pub fn cast_value_with_type_resolution(
+    value: &Value,
+    source_ty: Option<&str>,
+    target_ty: &str,
+    engine: Option<&dyn EngineHook>,
+) -> Result<Value> {
+    let resolved_source = match (engine, source_ty) {
+        (Some(engine), Some(source_ty)) => engine
+            .resolve_type_name(source_ty)
+            .map_err(SQLError::Internal)?
+            .map(|ty| coercion_type_name(&ty)),
+        _ => None,
+    };
+    let source_ty = resolved_source.as_deref().or(source_ty);
+    let resolved_target = engine
+        .map(|engine| engine.resolve_type_name(target_ty))
+        .transpose()
+        .map_err(SQLError::Internal)?
+        .flatten();
+    let target_ty = resolved_target.as_ref().map_or_else(
+        || Cow::Borrowed(target_ty),
+        |ty| Cow::Owned(coercion_type_name(ty)),
+    );
+    cast_value_from(value, &target_ty, source_ty)
+}
+
 /// Read-only row interface used by the expression evaluator. Most callers
 /// use a materialised [`ResultRow`], while hot execution paths can expose a
 /// projected value slice without rebuilding a string-keyed map for every row.
@@ -410,25 +437,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         Expr::Cast { expr, ty } => {
             let source_ty = explicit_expr_type(expr);
             let v = eval(expr, ctx)?;
-            let resolved_source = match (ctx.engine, source_ty) {
-                (Some(engine), Some(source_ty)) => engine
-                    .resolve_type_name(source_ty)
-                    .map_err(SQLError::Internal)?
-                    .map(|ty| coercion_type_name(&ty)),
-                _ => None,
-            };
-            let source_ty = resolved_source.as_deref().or(source_ty);
-            let resolved = ctx
-                .engine
-                .map(|engine| engine.resolve_type_name(ty))
-                .transpose()
-                .map_err(SQLError::Internal)?
-                .flatten();
-            let target = resolved.as_ref().map_or_else(
-                || Cow::Borrowed(ty.as_str()),
-                |ty| Cow::Owned(coercion_type_name(ty)),
-            );
-            cast_value_from(&v, &target, source_ty)
+            cast_value_with_type_resolution(&v, source_ty, ty, ctx.engine)
         }
         Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => {
             Err(SQLError::Unsupported(

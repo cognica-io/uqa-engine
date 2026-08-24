@@ -111,6 +111,11 @@ pub trait FunctionTypeResolver: Send + Sync {
         Ok(None)
     }
 
+    /// Return whether an exact catalog-selected binding can execute in a scalar expression. The conservative default prevents aggregate, procedure, and set-returning routines from being attached to [`ScalarExpr::Func`].
+    fn is_scalar_function_binding(&self, _binding: &FunctionBinding) -> Result<bool, SQLError> {
+        Ok(false)
+    }
+
     /// Resolve catalog-backed routines and the supplied built-in overloads as
     /// one `PostgreSQL` candidate set. Implementations with catalog visibility
     /// should override this so search-path shadowing and unknown-category

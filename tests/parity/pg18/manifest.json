@@ -172,8 +172,8 @@
     {
       "id": "routines.scalar-domain-overload-resolution",
       "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live ordinary scalar SQL function candidate-selection results plus PostgreSQL function type-resolution, CREATE FUNCTION, domain, named-argument, default-argument, and search-path documentation",
-      "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::scalar_overloads::",
-      "supported_version": "PostgreSQL 18.4 ordinary scalar SQL function overload selection for direct-cast and scalar-subquery declared types, structural named and default arguments before effective-signature search-path shadowing, durable typed routine identities across catalog reopen, exact implemented information-schema domain signatures over their base types, and nested casts that restore the domain at the call boundary",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::scalar_overloads::; cargo test -p uqa-engine --test integration engine_catalog::sql_generated_columns::fixed_builtin_resolution::; cargo test -p uqa-sql --lib syntax_calls_preserve_polymorphic_builtin_identity",
+      "supported_version": "PostgreSQL 18.4 ordinary scalar SQL function overload selection for direct-cast and scalar-subquery declared types, structural named and default arguments before effective-signature search-path shadowing, durable typed routine identities across catalog reopen, exact implemented information-schema domain signatures over their base types, nested casts that restore the domain at the call boundary, unqualified COALESCE/GREATEST/LEAST/NULLIF syntax identity, quoted and qualified ordinary calls, and regular search-path-selected functions in generated expressions",
       "status": "verified",
       "open_issue": null
     },

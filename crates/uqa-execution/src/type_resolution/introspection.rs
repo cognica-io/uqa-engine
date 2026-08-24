@@ -10,7 +10,9 @@ use uqa_sql::SQLParam;
 
 use crate::{RowSchema, ScalarExpr};
 
-use super::common::{base_type, common_context_expression_type, merge_optional_types};
+use super::common::{
+    base_type, common_context_expression_type, local_routine_name, merge_optional_types,
+};
 use super::operators::unary_minus_result_type;
 use super::{array_transform, containment, fixed_builtin, scalar_type_inner, FunctionTypeResolver};
 
@@ -334,6 +336,9 @@ fn bind_catalog_function(
     if binding.is_some() || name == uqa_sql::expr::NAMED_ARG_FUNCTION {
         return;
     }
+    if uqa_sql::ast::is_builtin_aggregate_function(&local_routine_name(name)) {
+        return;
+    }
     if super::functions::builtin_function_type_inner(name, None, args, &[], schema, params, None)
         .ok()
         .flatten()
@@ -360,7 +365,12 @@ fn bind_catalog_function(
     if let Ok(Some(selected)) =
         resolver.resolve_function_overload(name, None, &argument_names, &argument_types)
     {
-        *binding = Some(selected.binding);
+        if resolver
+            .is_scalar_function_binding(&selected.binding)
+            .is_ok_and(|is_scalar| is_scalar)
+        {
+            *binding = Some(selected.binding);
+        }
     }
 }
 

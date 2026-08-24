@@ -51,6 +51,46 @@ fn returning_row_aliases_preserve_quoted_identifier_case() {
         .contains("table name \"image\" specified more than once"));
 }
 
+#[test]
+fn syntax_calls_preserve_polymorphic_builtin_identity() {
+    let Statement::Select(select) = first(
+        "SELECT coalesce(1, 2), greatest(1, 2), least(1, 2), nullif(1, 2),
+                \"coalesce\"(1, 2), ordinary.coalesce(1, 2)",
+    ) else {
+        panic!("expected SELECT");
+    };
+    for (projection, expected_name) in select.projections[..4]
+        .iter()
+        .zip(["coalesce", "greatest", "least", "nullif"])
+    {
+        let Expr::Func {
+            name,
+            binding: Some(binding),
+            ..
+        } = &projection.expr
+        else {
+            panic!("expected syntax call for {expected_name}");
+        };
+        assert_eq!(name, expected_name);
+        assert_eq!(binding.name, expected_name);
+        assert!(binding.builtin);
+        assert!(binding.argument_types.is_empty());
+    }
+    for (projection, expected_name) in select.projections[4..]
+        .iter()
+        .zip(["\"coalesce\"", "ordinary.coalesce"])
+    {
+        assert!(matches!(
+            &projection.expr,
+            Expr::Func {
+                name,
+                binding: None,
+                ..
+            } if name == expected_name
+        ));
+    }
+}
+
 fn first(sql: &str) -> Statement {
     let mut v = compile(sql).unwrap();
     assert_eq!(v.len(), 1, "expected 1 stmt");

@@ -6,6 +6,7 @@
 
 //! SQL operator, boolean, and null-test lowering.
 
+use super::expression_core::builtin_syntax_call;
 use super::{
     compile_expr, extract_strings, json_path_args, BinaryOp, Expr, NodeEnum, Result, SQLError,
     Value,
@@ -479,14 +480,10 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 .rexpr
                 .as_ref()
                 .ok_or_else(|| SQLError::Internal("NULLIF without rhs".into()))?;
-            return Ok(Expr::Func {
-                binding: None,
-                name: "nullif".into(),
-                args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                distinct: false,
-                order_by: Vec::new(),
-                filter: None,
-            });
+            return Ok(builtin_syntax_call(
+                "nullif",
+                vec![compile_expr(lhs)?, compile_expr(rhs)?],
+            ));
         }
         AExprKind::AexprLike => {
             // libpg_query encodes LIKE as `~~` and NOT LIKE as `!~~` in

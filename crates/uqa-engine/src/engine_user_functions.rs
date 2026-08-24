@@ -126,6 +126,21 @@ impl FunctionTypeResolver for Engine {
         }))
     }
 
+    fn is_scalar_function_binding(&self, binding: &FunctionBinding) -> Result<bool, SQLError> {
+        if binding.builtin {
+            return Ok(false);
+        }
+        let function = self
+            .lookup_sql_functions(&binding.name)
+            .and_then(|overloads| {
+                overloads.into_iter().find(|function| {
+                    routine_signature_types(&function.def) == binding.argument_types
+                })
+            });
+        Ok(function
+            .is_some_and(|function| !function.def.is_procedure && !function.def.returns_set()))
+    }
+
     fn resolve_function_overload_with_builtins(
         &self,
         name: &str,
@@ -206,6 +221,7 @@ impl Engine {
                     "is a procedure",
                 ));
             }
+            // The binding already fixes identity; re-match only named/default structure. Unknown structural types yield zero ranking scores, which are unused on this return path.
             let structural_types = vec![None; argument_types.len()];
             return static_function_match(function, argument_names, &structural_types)
                 .map(Some)

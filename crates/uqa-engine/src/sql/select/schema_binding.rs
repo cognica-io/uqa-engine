@@ -74,6 +74,13 @@ impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
             .resolve_function_overload(name, binding, argument_names, argument_types)
     }
 
+    fn is_scalar_function_binding(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+    ) -> Result<bool, SQLError> {
+        self.engine.is_scalar_function_binding(binding)
+    }
+
     fn resolve_function_overload_with_builtins(
         &self,
         name: &str,
