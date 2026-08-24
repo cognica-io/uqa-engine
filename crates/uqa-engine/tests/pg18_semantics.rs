@@ -63,6 +63,8 @@ mod checksums;
 mod comparisons_and_arrays;
 #[path = "pg18_semantics/gamma_functions.rs"]
 mod gamma_functions;
+#[path = "pg18_semantics/json_strip_nulls.rs"]
+mod json_strip_nulls;
 #[path = "pg18_semantics/md5_overloads.rs"]
 mod md5_overloads;
 #[path = "pg18_semantics/numeric_exactness.rs"]

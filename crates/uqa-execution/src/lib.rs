@@ -122,9 +122,10 @@ pub use type_resolution::{
     bind_type_introspection, bind_type_introspection_with_resolver,
     builtin_function_argument_targets, common_context_expression_type, common_type,
     equality_operand_type, resolve_checksum_overload, resolve_gamma_overload,
-    resolve_length_overload, resolve_md5_overload, resolve_reverse_overload, scalar_type,
-    scalar_type_with_resolver, values_column_types, BuiltinFunctionOverload, FunctionTypeResolver,
-    ResolvedChecksumOverload, ResolvedFunctionOverload, ResolvedGammaOverload,
+    resolve_json_strip_overload, resolve_length_overload, resolve_md5_overload,
+    resolve_reverse_overload, scalar_type, scalar_type_with_resolver, values_column_types,
+    BuiltinFunctionOverload, FunctionTypeResolver, ResolvedChecksumOverload,
+    ResolvedFunctionOverload, ResolvedGammaOverload, ResolvedJsonStripOverload,
     ResolvedLengthOverload, ResolvedMd5Overload, ResolvedReverseOverload,
     ResolvedStringBinaryOverload, ResolvedTextByteaOverload,
 };

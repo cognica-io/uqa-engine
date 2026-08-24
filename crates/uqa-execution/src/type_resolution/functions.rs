@@ -14,8 +14,8 @@ use super::common::{
     base_type, common_numeric_type, common_type, merge_optional_types, numeric_type,
 };
 use super::{
-    array_transform, checksum, containment, gamma, integer_base, length, md5, random_range,
-    reverse, scalar_type_inner, FunctionTypeResolver,
+    array_transform, checksum, containment, gamma, integer_base, json_strip, length, md5,
+    random_range, reverse, scalar_type_inner, FunctionTypeResolver,
 };
 
 pub fn builtin_function_type(
@@ -53,6 +53,16 @@ pub fn builtin_function_argument_targets(
             targets.iter_mut().skip(1).for_each(|target| {
                 *target = Some(ColumnType::Boolean);
             });
+        }
+        "json_strip_nulls" | "jsonb_strip_nulls" if matches!(targets.len(), 1 | 2) => {
+            targets[0] = Some(if name == "jsonb_strip_nulls" {
+                ColumnType::JsonB
+            } else {
+                ColumnType::Json
+            });
+            if targets.len() == 2 {
+                targets[1] = Some(ColumnType::Boolean);
+            }
         }
         "reverse" | "md5" | "crc32" | "crc32c" | "length" | "char_length" | "character_length"
         | "octet_length" | "bit_length"
@@ -194,6 +204,9 @@ pub(super) fn builtin_function_type_inner(
         "gamma" | "lgamma" => {
             gamma::resolve_type(original_name, binding, args, &argument_types, resolver)
         }
+        "json_strip_nulls" | "jsonb_strip_nulls" => {
+            json_strip::resolve_type(original_name, binding, args, &argument_types, resolver)
+        }
         "count" | "row_number" | "rank" | "dense_rank" | "nextval" | "currval" | "setval" => {
             Ok(Some(ColumnType::BigInteger))
         }
@@ -222,7 +235,6 @@ pub(super) fn builtin_function_type_inner(
         | "json_object_agg"
         | "json_array_elements"
         | "json_extract_path"
-        | "json_strip_nulls"
         | "to_json"
         | "row_to_json"
         | "json_build_object"
@@ -234,7 +246,6 @@ pub(super) fn builtin_function_type_inner(
         | "json_delete_path"
         | "jsonb_set"
         | "jsonb_insert"
-        | "jsonb_strip_nulls"
         | "to_jsonb"
         | "jsonb_build_object"
         | "jsonb_build_array" => Ok(Some(ColumnType::JsonB)),

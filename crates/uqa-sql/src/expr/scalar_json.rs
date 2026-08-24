@@ -9,8 +9,8 @@
 use super::{
     format_jsonb_pretty, json_build_array_value, json_build_object_value, json_contained_by,
     json_contains, json_delete_path, json_extract_path, json_has_key, json_has_keys, json_typeof,
-    jsonb_insert, jsonb_set, jsonpath_exists, jsonpath_match, parse_json, strip_nulls,
-    typed_json_value, value_to_json_text, value_to_string, Result, SQLError, Value,
+    jsonb_insert, jsonb_set, jsonpath_exists, jsonpath_match, parse_json, strip_json_nulls_text,
+    strip_nulls, typed_json_value, value_to_json_text, value_to_string, Result, SQLError, Value,
 };
 
 pub(super) fn eval_json_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
@@ -154,9 +154,14 @@ pub(super) fn eval_json_functions(name: &str, args: &[Value]) -> Option<Result<V
                         )));
                     }
                 };
-                let mut parsed = parse_json(&value_to_string(&args[0]))?;
-                strip_nulls(&mut parsed, strip_in_arrays);
-                typed_json_value(&parsed, name.starts_with("jsonb"))
+                let input = value_to_string(&args[0]);
+                if name.starts_with("jsonb") {
+                    let mut parsed = parse_json(&input)?;
+                    strip_nulls(&mut parsed, strip_in_arrays);
+                    typed_json_value(&parsed, true)
+                } else {
+                    Ok(Value::Json(strip_json_nulls_text(&input, strip_in_arrays)?))
+                }
             }
             "json_object_keys" | "jsonb_object_keys" => {
                 if args.len() != 1 {

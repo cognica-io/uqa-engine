@@ -88,6 +88,14 @@ fn builtin_argument_targets_resolve_fixed_and_overloaded_unknowns() {
         builtin_function_argument_targets("bit_length", &[Some(ColumnType::Character(3))]),
         vec![Some(ColumnType::Text)]
     );
+    assert_eq!(
+        builtin_function_argument_targets("json_strip_nulls", &[None, None]),
+        vec![Some(ColumnType::Json), Some(ColumnType::Boolean)]
+    );
+    assert_eq!(
+        builtin_function_argument_targets("pg_catalog.jsonb_strip_nulls", &[None]),
+        vec![Some(ColumnType::JsonB)]
+    );
 }
 
 #[test]
@@ -113,6 +121,128 @@ fn gamma_binding_preserves_the_float8_signature_and_function_identity() {
     )
     .unwrap_err();
     assert_eq!(error.sqlstate(), Some("42883"));
+}
+
+#[test]
+fn json_strip_binding_preserves_defaults_named_slots_and_declared_types() {
+    let resolved = resolve_json_strip_overload(
+        "json_strip_nulls",
+        None,
+        &[None],
+        &[Some(ColumnType::Json)],
+        None,
+    )
+    .unwrap();
+    assert_eq!(resolved.return_type, ColumnType::Json);
+    assert_eq!(resolved.binding.name, "pg_catalog.json_strip_nulls");
+    assert_eq!(resolved.binding.argument_types, ["json", "boolean"]);
+    assert!(resolved.binding.builtin);
+    let json_domain = ColumnType::Domain {
+        schema: "public".into(),
+        name: "json_document".into(),
+        oid: 99_997,
+        base: Box::new(ColumnType::Json),
+    };
+    let boolean_domain = ColumnType::Domain {
+        schema: "public".into(),
+        name: "boolean_flag".into(),
+        oid: 99_996,
+        base: Box::new(ColumnType::Boolean),
+    };
+    assert_eq!(
+        resolve_json_strip_overload(
+            "json_strip_nulls",
+            None,
+            &[None, None],
+            &[Some(json_domain), Some(boolean_domain)],
+            None,
+        )
+        .unwrap()
+        .return_type,
+        ColumnType::Json
+    );
+
+    let named = |name: &str, value: ScalarExpr| ScalarExpr::Func {
+        name: uqa_sql::expr::NAMED_ARG_FUNCTION.into(),
+        binding: None,
+        args: vec![ScalarExpr::Literal(Value::Str(name.into())), value],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    let expression = ScalarExpr::Func {
+        name: "jsonb_strip_nulls".into(),
+        binding: None,
+        args: vec![
+            named("strip_in_arrays", ScalarExpr::Param(1)),
+            named(
+                "target",
+                ScalarExpr::Literal(Value::Str(r#"{"a":null}"#.into())),
+            ),
+        ],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    let parameters = [SQLParam::Scalar(Value::Str("true".into()))];
+    assert_eq!(
+        scalar_type(&expression, &RowSchema::default(), &parameters).unwrap(),
+        Some(ColumnType::JsonB)
+    );
+    let ScalarExpr::Func {
+        binding: Some(binding),
+        args,
+        ..
+    } = bind_type_introspection(expression, &RowSchema::default(), &parameters)
+    else {
+        panic!("jsonb_strip_nulls must retain a bound scalar call");
+    };
+    assert_eq!(binding.name, "pg_catalog.jsonb_strip_nulls");
+    assert_eq!(binding.argument_types, ["jsonb", "boolean"]);
+    assert!(matches!(
+        &args[0],
+        ScalarExpr::Cast { expr, ty }
+            if ty == "jsonb" && matches!(expr.as_ref(), ScalarExpr::Literal(Value::Str(_)))
+    ));
+    assert!(matches!(
+        &args[1],
+        ScalarExpr::Cast { expr, ty }
+            if ty == "boolean" && matches!(expr.as_ref(), ScalarExpr::Param(1))
+    ));
+
+    let defaulted = ScalarExpr::Func {
+        name: "json_strip_nulls".into(),
+        binding: None,
+        args: vec![ScalarExpr::Literal(Value::Str("{}".into()))],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    let ScalarExpr::Func { args, .. } =
+        bind_type_introspection(defaulted, &RowSchema::default(), &[])
+    else {
+        panic!("json_strip_nulls must retain a scalar call");
+    };
+    assert_eq!(args.len(), 2);
+    assert_eq!(args[1], ScalarExpr::Literal(Value::Bool(false)));
+
+    let invalid = ScalarExpr::Func {
+        name: "json_strip_nulls".into(),
+        binding: None,
+        args: vec![ScalarExpr::Cast {
+            expr: Box::new(ScalarExpr::Literal(Value::Str("{}".into()))),
+            ty: "text".into(),
+        }],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    assert_eq!(
+        scalar_type(&invalid, &RowSchema::default(), &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("42883")
+    );
 }
 
 #[test]

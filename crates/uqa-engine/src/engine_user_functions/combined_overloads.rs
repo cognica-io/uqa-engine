@@ -113,57 +113,60 @@ fn resolve_candidates(
     engine: &Engine,
     name: &str,
     users: Vec<Arc<SQLUserFunction>>,
-    mut builtins: Vec<BuiltinFunctionOverload>,
+    builtins: Vec<BuiltinFunctionOverload>,
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
 ) -> Result<ResolvedFunctionOverload, SQLError> {
-    let mut visible_users = Vec::with_capacity(users.len());
-    for function in users {
-        let signature = routine_signature_types(&function.def);
-        let same_builtin = builtins.iter().any(|builtin| {
-            builtin
-                .argument_types
-                .iter()
-                .map(|ty| canonical_routine_type_name(&ty.sql_name()))
-                .eq(signature.iter().cloned())
-        });
-        if same_builtin && !function.def.is_procedure {
-            if engine.user_function_precedes_pg_catalog(&function.def.name) {
-                builtins.retain(|builtin| {
-                    !builtin
-                        .argument_types
-                        .iter()
-                        .map(|ty| canonical_routine_type_name(&ty.sql_name()))
-                        .eq(signature.iter().cloned())
-                });
-            } else {
-                continue;
-            }
-        }
-        visible_users.push(function);
-    }
-
-    let procedure_matches = visible_users.iter().any(|function| {
+    let procedure_matches = users.iter().any(|function| {
         function.def.is_procedure
             && static_function_match(function.clone(), argument_names, argument_types).is_some()
     });
-    let mut candidates =
-        visible_users
-            .into_iter()
-            .filter(|function| !function.def.is_procedure)
-            .filter_map(|function| {
-                let matched = static_function_match(function, argument_names, argument_types)?;
-                Some(FunctionMatch {
-                    target: FunctionTarget::User(matched.function),
-                    argument_types: matched.argument_types,
-                    exact_matches: matched.exact_matches,
-                    preferred_matches: matched.preferred_matches,
-                })
+    let mut user_candidates = users
+        .into_iter()
+        .filter(|function| !function.def.is_procedure)
+        .filter_map(|function| {
+            let matched = static_function_match(function, argument_names, argument_types)?;
+            Some(FunctionMatch {
+                target: FunctionTarget::User(matched.function),
+                argument_types: matched.argument_types,
+                exact_matches: matched.exact_matches,
+                preferred_matches: matched.preferred_matches,
             })
-            .chain(builtins.into_iter().filter_map(|builtin| {
-                builtin_function_match(builtin, argument_names, argument_types)
-            }))
-            .collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
+    let mut builtin_candidates = builtins
+        .into_iter()
+        .filter_map(|builtin| builtin_function_match(builtin, argument_names, argument_types))
+        .collect::<Vec<_>>();
+
+    let builtin_signatures = builtin_candidates
+        .iter()
+        .map(|candidate| candidate.argument_types.clone())
+        .collect::<Vec<_>>();
+    let user_signatures_preceding_pg_catalog = user_candidates
+        .iter()
+        .filter_map(|candidate| match &candidate.target {
+            FunctionTarget::User(function)
+                if engine.user_function_precedes_pg_catalog(&function.def.name) =>
+            {
+                Some(candidate.argument_types.clone())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    builtin_candidates.retain(|candidate| {
+        !user_signatures_preceding_pg_catalog.contains(&candidate.argument_types)
+    });
+    user_candidates.retain(|candidate| {
+        let FunctionTarget::User(function) = &candidate.target else {
+            return true;
+        };
+        engine.user_function_precedes_pg_catalog(&function.def.name)
+            || !builtin_signatures.contains(&candidate.argument_types)
+    });
+
+    let mut candidates = user_candidates;
+    candidates.extend(builtin_candidates);
     if candidates.is_empty() {
         return Err(resolution_error(
             if procedure_matches { "42809" } else { "42883" },
@@ -220,7 +223,11 @@ fn builtin_function_match(
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
 ) -> Option<FunctionMatch> {
-    if argument_types.len() != builtin.argument_types.len()
+    let required_arguments = builtin
+        .argument_types
+        .len()
+        .checked_sub(builtin.default_arguments)?;
+    if !(required_arguments..=builtin.argument_types.len()).contains(&argument_types.len())
         || argument_names.len() != argument_types.len()
         || builtin.argument_names.len() != builtin.argument_types.len()
     {
@@ -255,8 +262,15 @@ fn builtin_function_match(
 
     let mut exact_matches = 0usize;
     let mut preferred_matches = 0usize;
-    for (actual, declared_type) in slots.into_iter().zip(&builtin.argument_types) {
-        let actual_type = actual?;
+    for (index, (actual, declared_type)) in
+        slots.into_iter().zip(&builtin.argument_types).enumerate()
+    {
+        let Some(actual_type) = actual else {
+            if index < required_arguments {
+                return None;
+            }
+            continue;
+        };
         let Some(actual_type) = actual_type else {
             continue;
         };

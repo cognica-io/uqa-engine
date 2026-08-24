@@ -14,7 +14,7 @@ use super::{hex_encode, out_of_range, value_to_string};
 
 pub(super) fn parse_json(s: &str) -> Result<serde_json::Value> {
     serde_json::from_str::<serde_json::Value>(s)
-        .map_err(|e| SQLError::TypeMismatch(format!("invalid JSON: {e}")))
+        .map_err(|_| super::json_strip::invalid_json_input(s))
 }
 
 /// Render a parsed JSON value in `PostgreSQL`'s compact result format. JSONB
