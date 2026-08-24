@@ -19,7 +19,7 @@ This plan distinguishes a PostgreSQL 18 baseline from complete compatibility. Th
 - Historical PostgreSQL 17 measurements remain historical evidence. Active fixture names, paths, defaults, tests, and compatibility prose move to `pg18`; old benchmark and changelog facts are not relabeled.
 - Protocol 3.0 remains supported while protocol 3.2 is added. Version negotiation and unsupported `_pq_.` options must follow PostgreSQL rather than relying on the current libpq default.
 - A compatibility claim is no broader than its passing evidence. The manual must identify the current milestone until the complete-compatibility gates pass.
-- Add a newly confirmed compatibility gap to the manifest and this plan with an incomplete status when its implementation starts; promote it to `verified` only after focused tests and the PostgreSQL 18 differential oracle pass.
+- Add every newly confirmed compatibility gap to the manifest and this plan immediately with an incomplete status; promote it to `verified` only after focused tests and the PostgreSQL 18 differential oracle pass.
 
 ## Current implementation status and open PostgreSQL 18 bugs
 
@@ -27,65 +27,77 @@ The historical starting point used `pg_query` 6.1.1 with PostgreSQL 17 grammar, 
 
 The PostgreSQL 18 parser migration replaces the four DML `returning_list` fields with complete `returning_clause` handling. PostgreSQL 18's PL/pgSQL JSON producer also needs to serialize `retvarno` for datum-backed `RETURN` and `RETURN NEXT`; UQA Engine consumes those slots directly and does not rewrite routine source. The reproducible parser chain is imported as the `uqa-pg-query` workspace crate from `jaepil/pg_query.rs@516b3a03fed42e606ce01bc8b5a864a1698c210d` and `jaepil/libpg_query@898cd71c96375d6d4219916996701571dbe2b239`; the latter contains the PostgreSQL 18 parser, corrected PL/pgSQL datum serialization, structured `%TYPE` and `%ROWTYPE` identifier metadata, trigger-promise and type-cache fixes, and a process-wide pthread exit key with a `PTHREAD_KEYS_MAX + 1` regression test so one integration-test executable can safely create parser threads throughout its lifetime.
 
-The following compact ledger is the readable projection of the machine-readable compatibility manifest. Pull-request checks compare every milestone and evidence-item status, so adding or changing manifest accounting without updating this plan fails immediately.
+The following compact ledger is the readable projection of the machine-readable compatibility manifest. Schema version 2 owns milestone names and exit gates, assigns every evidence item to exactly one milestone, derives milestone status from those item states, and synchronizes this ledger and the manual snapshot; pull-request checks reject missing, duplicate, orphaned, or textually drifting accounting.
 
 <!-- pg18-manifest-status:start -->
 
-| Milestone | Status |
-| --- | --- |
-| `M0` | `in_progress` |
-| `M1` | `complete` |
-| `M2` | `complete` |
-| `M3` | `not_started` |
-| `M4` | `not_started` |
-| `M5` | `not_started` |
-| `M6` | `not_started` |
+| Milestone | Name | Status | Exit gate |
+| --- | --- | --- | --- |
+| `M0` | PG18 baseline | `in_progress` | PG18 parser pinned; all AST deltas audited; unsupported shapes fail explicitly; active names and fixtures use pg18; 22/22 TPC-H-derived results match PostgreSQL 18 |
+| `M1` | Discovered semantic fixes | `complete` | Bounded DML row-image, constraint-metadata, identified-function, and independently verified semantic slices pass their PostgreSQL 18.4 evidence |
+| `M2` | Protocol 3.2 | `complete` | Byte-exact codec tests and live PostgreSQL 18 libpq 3.0/3.2/latest negotiation and cancellation tests pass |
+| `M3` | PG18 DDL and types | `in_progress` | Generated columns, range/multirange, temporal constraints, catalogs, dump/restore, and reopen tests pass |
+| `M4` | Core regression parity | `in_progress` | PostgreSQL 18 core regression and isolation suites pass with every remaining failure recorded and reduced to zero |
+| `M5` | Client parity | `in_progress` | The supported driver, migration, introspection, dump/restore, COPY, and pooling matrix passes |
+| `M6` | Complete compatibility | `not_started` | M0 through M5 and every manifest item are verified, the final zero-exemption audit passes, and the manual removes the implemented-subset qualification |
 
-| Evidence item | Status |
-| --- | --- |
-| `baseline.pg18-differential-probes` | `verified` |
-| `baseline.tpch-derived-queries` | `verified` |
-| `parser.pg18-chain` | `partial` |
-| `query.join-using-natural` | `partial` |
-| `query.parenthesized-join-alias` | `verified` |
-| `query.fetch-with-ties` | `verified` |
-| `query.pattern-escape` | `verified` |
-| `query.group-by-distinct` | `verified` |
-| `query.table-function-with-ordinality` | `verified` |
-| `query.rows-from-and-multi-array-unnest` | `verified` |
-| `query.named-window` | `verified` |
-| `dml.returning-row-images` | `partial` |
-| `ddl.constraint-metadata` | `partial` |
-| `ddl.ctas-column-names` | `verified` |
-| `ddl.ctas-with-no-data` | `verified` |
-| `ddl.select-into` | `verified` |
-| `ddl.view-column-aliases` | `verified` |
-| `functions.identified-pg18-additions` | `partial` |
-| `functions.fixed-builtin-overload-resolution` | `verified` |
-| `routines.scalar-domain-overload-resolution` | `verified` |
-| `routines.procedure-call-overload-resolution` | `verified` |
-| `routines.table-setof-overload-resolution` | `verified` |
-| `routines.stored-view-function-drop-restrict` | `verified` |
-| `functions.json-null-stripping` | `verified` |
-| `functions.array-transforms` | `verified` |
-| `functions.integer-base-conversion` | `verified` |
-| `functions.random-range` | `verified` |
-| `functions.reverse-overloads` | `verified` |
-| `functions.md5-overloads` | `verified` |
-| `functions.crc-checksums` | `verified` |
-| `functions.gamma-functions` | `verified` |
-| `functions.string-binary-lengths` | `verified` |
-| `functions.uuid-extraction` | `verified` |
-| `execution.static-row-schema-and-spill-v1` | `partial` |
-| `types.declared-identity-casts-and-catalog` | `partial` |
-| `ddl.alter-type-and-migration` | `partial` |
-| `catalog.pg-database-locale` | `partial` |
-| `plpgsql.datum-slots-and-bound-cursors` | `partial` |
-| `protocol.frontend-backend-3.2` | `partial` |
-| `ddl.generated-columns` | `partial` |
-| `ddl.temporal-constraints` | `explicitly_rejected` |
-| `regression.core-and-isolation` | `not_audited` |
-| `clients.driver-and-operations-matrix` | `partial` |
+| Evidence item | Milestone | Status |
+| --- | --- | --- |
+| `baseline.pg18-differential-probes` | `M0` | `verified` |
+| `baseline.tpch-derived-queries` | `M0` | `verified` |
+| `parser.pg18-chain` | `M0` | `partial` |
+| `query.join-using-natural` | `M3` | `partial` |
+| `query.parenthesized-join-alias` | `M1` | `verified` |
+| `query.fetch-with-ties` | `M1` | `verified` |
+| `query.pattern-escape` | `M1` | `verified` |
+| `query.group-by-distinct` | `M1` | `verified` |
+| `query.table-function-with-ordinality` | `M1` | `verified` |
+| `query.rows-from-and-multi-array-unnest` | `M1` | `verified` |
+| `query.named-window` | `M1` | `verified` |
+| `query.row-locking-complete-matrix` | `M4` | `partial` |
+| `query.cte-search-cycle-and-materialization` | `M4` | `explicitly_rejected` |
+| `dml.returning-row-images` | `M1` | `verified` |
+| `dml.returning-row-images-extended` | `M4` | `partial` |
+| `dml.merge-not-matched-by-source` | `M4` | `explicitly_rejected` |
+| `ddl.constraint-metadata` | `M1` | `verified` |
+| `ddl.constraint-lifecycle` | `M3` | `partial` |
+| `ddl.relation-forms-and-options` | `M3` | `explicitly_rejected` |
+| `ddl.ctas-column-names` | `M1` | `verified` |
+| `ddl.ctas-with-no-data` | `M1` | `verified` |
+| `ddl.select-into` | `M1` | `verified` |
+| `ddl.view-column-aliases` | `M1` | `verified` |
+| `functions.identified-pg18-additions` | `M1` | `verified` |
+| `functions.full-pg18-matrix` | `M4` | `partial` |
+| `functions.fixed-builtin-overload-resolution` | `M1` | `verified` |
+| `routines.scalar-domain-overload-resolution` | `M1` | `verified` |
+| `routines.procedure-call-overload-resolution` | `M1` | `verified` |
+| `routines.table-setof-overload-resolution` | `M1` | `verified` |
+| `routines.stored-view-function-drop-restrict` | `M1` | `verified` |
+| `routines.polymorphic-variadic-pseudotype-overloads` | `M4` | `partial` |
+| `routines.function-procedure-drop-cascade` | `M3` | `explicitly_rejected` |
+| `functions.json-null-stripping` | `M1` | `verified` |
+| `functions.array-transforms` | `M1` | `verified` |
+| `functions.integer-base-conversion` | `M1` | `verified` |
+| `functions.random-range` | `M1` | `verified` |
+| `functions.reverse-overloads` | `M1` | `verified` |
+| `functions.md5-overloads` | `M1` | `verified` |
+| `functions.crc-checksums` | `M1` | `verified` |
+| `functions.gamma-functions` | `M1` | `verified` |
+| `functions.string-binary-lengths` | `M1` | `verified` |
+| `functions.uuid-extraction` | `M1` | `verified` |
+| `execution.static-row-schema-and-spill-v1` | `M3` | `partial` |
+| `types.declared-identity-casts-and-catalog` | `M3` | `partial` |
+| `ddl.alter-type-and-migration` | `M3` | `partial` |
+| `catalog.pg-database-locale` | `M3` | `partial` |
+| `plpgsql.datum-slots-and-bound-cursors` | `M4` | `partial` |
+| `protocol.frontend-backend-3.2` | `M2` | `verified` |
+| `protocol.frontend-backend-3.2-extended` | `M5` | `partial` |
+| `ddl.generated-columns` | `M3` | `partial` |
+| `ddl.temporal-constraints` | `M3` | `explicitly_rejected` |
+| `graph.age-default-label-drop` | `M4` | `explicitly_rejected` |
+| `regression.core-and-isolation` | `M4` | `not_audited` |
+| `clients.driver-and-operations-matrix` | `M5` | `partial` |
+| `compatibility.complete-zero-exemption-audit` | `M6` | `not_audited` |
 
 <!-- pg18-manifest-status:end -->
 
@@ -98,13 +110,15 @@ The following compact ledger is the readable projection of the machine-readable 
 | Derived relation creation | CTAS positional column names, CTAS `WITH NO DATA`, ordinary `SELECT INTO`, and CREATE VIEW positional column names preserve static types, validation ordering, transactionality, and durable reopen behavior | Add temporary and unlogged relation forms and complete upstream DDL/catalog coverage |
 | `RETURNING WITH (OLD/NEW ...)` | Old and new images and custom aliases are preserved through SQL AST, planning, and DML execution | Expand live differential coverage to triggers, partitions, and every MERGE action as those features become available |
 | Constraint metadata | CHECK and foreign-key enforcement flags and named NOT NULL catalog rows are represented and tested | Complete `NOT VALID`, `ALTER CONSTRAINT`, and all dump/reopen cases |
-| Identified PG18 functions and casts | The original array, bytea, Unicode, UUID generation, checksum, JSON, numeric, interval, Roman-numeral, aggregate, and regex inventory is implemented and tested, including its identified `pg_proc` overload metadata; separately tracked slices cover `json_strip_nulls(json [, boolean])` / `jsonb_strip_nulls(jsonb [, boolean])`, `array_sort` / `array_reverse`, `reverse(text\|bytea)`, `md5(text\|bytea)`, `crc32(bytea)` / `crc32c(bytea)`, `gamma(double precision)` / `lgamma(double precision)`, the one-argument string and binary length family, UUID extraction, the `to_bin(integer\|bigint)` / `to_oct(integer\|bigint)` overloads, and the three `random(min,max)` overloads with exact results, scalar-subquery typing, errors, generated-column behavior, session-state semantics where applicable, user-overload ranking, and catalog metadata | Continue expanding the PostgreSQL 18 function, type, overload, and catalog matrix one independently verified slice at a time |
+| Bounded identified PG18 functions and casts | The original bounded array, bytea, Unicode, UUID-generation, checksum, JSON, numeric, interval, Roman-numeral, aggregate, and regular-expression inventory is implemented and differentially verified, including its identified `pg_proc` metadata; separately tracked slices retain their own exact evidence | This bounded inventory is complete; newly discovered gaps are tracked independently and do not reopen it |
+| Full PG18 function, operator, cast, and catalog matrix | Dedicated verified evidence items cover the implemented slices | Inventory every PostgreSQL 18 signature and catalog identity and reduce every unverified entry to zero |
 | Implemented fixed-signature overload resolution | The documented fixed-signature built-in subset uses one registry and candidate-selection path for ordinary execution and generated-expression typing and binding, including visible SQL user functions, explicit `pg_catalog` qualification, search-path order, exact and implicit matches, preferred and unknown categories, domain base types, named and default slots, declared return types, and durable stored bindings where volatility permits; exact `pg_proc` evidence now includes unit `random()`, `to_hex(integer\|bigint)`, `gen_random_uuid()`, `casefold(text)`, `uuidv4()`, and both `uuidv7` signatures | Polymorphic families retain specialized type substitution; complete the PostgreSQL built-in, operator, cast, extension, and `pg_proc` matrix |
 | Scalar SQL routine overload resolution | Ordinary scalar SQL functions retain direct-cast and scalar-subquery declared types through candidate selection, structurally match named and default slots before effective-signature search-path shadowing, preserve typed identities through catalog reopen, prefer exact implemented information-schema domain signatures over their base types, including nested casts that restore the domain at the call boundary, and distinguish unqualified polymorphic function-like syntax from quoted, qualified, and regular search-path-selected routines | Complete polymorphic, variadic, pseudo-type, extension-language, and privilege parity |
 | Procedure, `CALL`, and scalar PL/pgSQL overload resolution | Scalar PL/pgSQL functions retain direct-cast and scalar-subquery declarations, while procedures and `CALL` retain direct-cast and concrete PL/pgSQL datum declarations through candidate selection, including typed NULL variables and exact implemented information-schema domains; `CALL` rejects subqueries and distinguishes missing required OUT/TABLE placeholders (`42883`) from a structurally matching wrong-kind function (`42809`) | Complete polymorphic, variadic, pseudo-type, extension-language, and privilege parity |
 | Table-returning and `SETOF` overload resolution | Table-returning and `SETOF` functions retain direct-cast and scalar-subquery declared types, exact implemented information-schema domains, named and default slots before effective-signature search-path shadowing, stable scalar-versus-set projection bindings, user-versus-built-in search-path selection, exact DML and correlated LATERAL source bindings, and durable table-routine and stored-view identities across catalog reopen | Complete polymorphic, variadic, pseudo-type, extension-language, and privilege parity |
 | Range-function groups and multi-array `unnest` | Explicit `ROWS FROM` preserves independently bound members, anonymous-record member descriptors and type checks, concatenated column order, longest-member zip with NULL padding, outer aliases, group ordinality, implicit LATERAL behavior, and durable stored-view bindings; unqualified multi-array `unnest` in FROM expands to canonical unary `pg_catalog.unnest` members while qualified calls retain ordinary overload resolution | Continue the remaining PostgreSQL table-function signatures, polymorphic carriers, and upstream range-function regression matrix |
 | Stored-view function dependencies | Stored scalar, table-function, function-group, CTE, subquery, join, and set-operation plans retain exact user-function identities; `DROP FUNCTION` RESTRICT reports `2BP01` for the referenced overload, leaves unrelated overloads droppable, preflights multi-target drops atomically, combines generated-column and view dependents, and follows `CREATE OR REPLACE VIEW` dependency replacement | Implement `DROP FUNCTION ... CASCADE` and complete dependency-graph parity for every remaining stored object kind |
+| Explicitly tracked syntax and lifecycle gaps | Unsupported recursive CTE controls, `MERGE WHEN NOT MATCHED BY SOURCE`, relation forms and options, routine CASCADE, and Apache AGE default-label removal fail explicitly without partial mutation | Implement the exact PostgreSQL 18.4 with Apache AGE behavior and promote each independent manifest item only after live differential evidence |
 | PG18 database locale catalog | `pg_database` exposes PostgreSQL 18's builtin provider, `datlocale`, `daticurules`, `datcollversion`, and `dathasloginevt` shape for the engine database, with Unicode behavior tests | Implement the complete database, collation, locale-provider, ownership, ACL, and lifecycle surface |
 | PL/pgSQL datum slots and bound cursors | `retvarno`, the `-1` cursor sentinel, bound cursor arguments, named arguments, `OPEN`, `FETCH NEXT`, and `CLOSE` are structural AST and interpreter state backed by the pinned parser revisions; scalar and cursor-argument `SelectStmt` envelopes reject unsupported structure; qualified named types and `%TYPE` references resolve against actual table metadata and every ordinary assignment/return coercion propagates SQL cast errors | Add session portal state before supporting refcursor parameters, returns, or cursors surviving routine exit |
 | Protocol 3.2 | Byte-exact tests cover minor negotiation, ordered `_pq_.` reporting, message tag `v`, variable cancellation keys, legacy 3.0 validation, FunctionCall, GSS/SSPI authentication messages, notifications, COPY format validation, and the PostgreSQL 18 reserved-3.1 edge; PostgreSQL 18.4 `psql`/libpq live tests cover 3.0, 3.2, `latest`, 3.2-to-3.0 downgrade, authentication ordering, SSL rejection and retry, both cancellation-key shapes, and extended Parse/Bind/Describe/Execute/Sync flow | Add a credentialed Kerberos environment, non-trust authentication exchanges, binary-format coverage, and the wider driver matrix |
@@ -163,7 +177,7 @@ Implement range and multirange types before temporal constraints. Add comparison
 
 ### 5. PG18 functions, casts, collations, and output
 
-The original PostgreSQL 18 additions inventory is implemented and differentially covered: `array_sort`, `array_reverse`, `reverse(bytea)`, integer/`bytea` casts, Unicode 16 full case mapping, `casefold`, `json_strip_nulls` and `jsonb_strip_nulls` array-null option, `uuidv4`, `uuidv7`, `crc32`, `crc32c`, `gamma`, `lgamma`, interval `EXTRACT(WEEK)`, negative-quarter output, `to_number(..., 'RN')`, array/composite `MIN` and `MAX`, and named regex and PL/pgSQL cursor arguments. The `array_sort(anyarray [, boolean [, boolean]])` and `array_reverse(anyarray)` discovery is independently verified with first-dimension multidimensional behavior, preserved bounds, concrete base-array return types and array-domain flattening, declaration-order-independent named arguments, unknown literal and bare-parameter Boolean context, explicit non-Boolean rejection, concrete user-overload ranking and ambiguity, polymorphic and undefined-function errors, scalar-subquery and generated-column typing, comparator failures for `json` and nested composites, and exact OIDs 6381 and 6388 through 6390. The `reverse(text)` and PostgreSQL 18 `reverse(bytea)` overload pair is independently verified with Unicode and raw-byte results, preferred `text` resolution for unknown literals, NULL, and untyped parameters, character-family implicit casts, scalar-subquery typing, exact undefined-function errors for invalid types, names, and arities, concrete user-overload ranking with explicit and implicit `pg_catalog` search order, stored generated-expression binding, and exact OIDs 3062 and 6382. The `md5(text|bytea)` slice shares that exact overload-resolution boundary while always returning `text`; it hashes raw `bytea` payloads, rejects unrelated types and invalid arities as undefined functions, persists generated-expression bindings, and exposes PostgreSQL OIDs 2311 and 2321 with their leakproof metadata. The subsequent `uuid_extract_version(uuid)` and `uuid_extract_timestamp(uuid)` discovery is implemented as its own verified parity slice with declared UUID overload resolution, PostgreSQL 18 version 1 and 7 timestamp conversion, exact return types and errors, immutable generated-column support, and `pg_proc` metadata. The `to_bin(integer|bigint)` and `to_oct(integer|bigint)` slice likewise preserves the declared 32-bit or 64-bit width through execution, scalar-subquery output binding, and generated-expression validation, emits PostgreSQL's two's-complement text for negative values, and exposes OIDs 6330 through 6333 with exact `pg_proc` metadata. The `random(integer,integer)`, `random(bigint,bigint)`, and `random(numeric,numeric)` slice uses PostgreSQL's shared xoroshiro128** stream and exact inclusive sampling algorithms, preserves overloads and arbitrary-precision numeric scale, keeps consumed draws and reseeding nontransactional across statement, transaction, and savepoint rollback, rejects invalid bounds and generated-column use with PostgreSQL SQLSTATEs, and exposes OIDs 6339 through 6341 with their strict, volatile, parallel-restricted `pg_proc` metadata; future discoveries must remain independently accounted instead of being hidden inside the broad inventory.
+The bounded original PostgreSQL 18 function-and-cast inventory is implemented and differentially verified: `array_sort`, `array_reverse`, `reverse(bytea)`, identified integer/`bytea` casts, Unicode 16 full case mapping, `casefold`, `json_strip_nulls` and `jsonb_strip_nulls` array-null options, `uuidv4`, `uuidv7`, `crc32`, `crc32c`, `gamma`, `lgamma`, interval week and negative-quarter extraction, Roman-numeral parsing, array/composite aggregates, and named regular-expression arguments. This closes only `functions.identified-pg18-additions`; `functions.full-pg18-matrix` and `routines.polymorphic-variadic-pseudotype-overloads` remain incomplete, while PL/pgSQL cursor work remains under `plpgsql.datum-slots-and-bound-cursors`. The `array_sort(anyarray [, boolean [, boolean]])` and `array_reverse(anyarray)` discovery is independently verified with first-dimension multidimensional behavior, preserved bounds, concrete base-array return types and array-domain flattening, declaration-order-independent named arguments, unknown literal and bare-parameter Boolean context, explicit non-Boolean rejection, concrete user-overload ranking and ambiguity, polymorphic and undefined-function errors, scalar-subquery and generated-column typing, comparator failures for `json` and nested composites, and exact OIDs 6381 and 6388 through 6390. The `reverse(text)` and PostgreSQL 18 `reverse(bytea)` overload pair is independently verified with Unicode and raw-byte results, preferred `text` resolution for unknown literals, NULL, and untyped parameters, character-family implicit casts, scalar-subquery typing, exact undefined-function errors for invalid types, names, and arities, concrete user-overload ranking with explicit and implicit `pg_catalog` search order, stored generated-expression binding, and exact OIDs 3062 and 6382. The `md5(text|bytea)` slice shares that exact overload-resolution boundary while always returning `text`; it hashes raw `bytea` payloads, rejects unrelated types and invalid arities as undefined functions, persists generated-expression bindings, and exposes PostgreSQL OIDs 2311 and 2321 with their leakproof metadata. The subsequent `uuid_extract_version(uuid)` and `uuid_extract_timestamp(uuid)` discovery is implemented as its own verified parity slice with declared UUID overload resolution, PostgreSQL 18 version 1 and 7 timestamp conversion, exact return types and errors, immutable generated-column support, and `pg_proc` metadata. The `to_bin(integer|bigint)` and `to_oct(integer|bigint)` slice likewise preserves the declared 32-bit or 64-bit width through execution, scalar-subquery output binding, and generated-expression validation, emits PostgreSQL's two's-complement text for negative values, and exposes OIDs 6330 through 6333 with exact `pg_proc` metadata. The `random(integer,integer)`, `random(bigint,bigint)`, and `random(numeric,numeric)` slice uses PostgreSQL's shared xoroshiro128** stream and exact inclusive sampling algorithms, preserves overloads and arbitrary-precision numeric scale, keeps consumed draws and reseeding nontransactional across statement, transaction, and savepoint rollback, rejects invalid bounds and generated-column use with PostgreSQL SQLSTATEs, and exposes OIDs 6339 through 6341 with their strict, volatile, parallel-restricted `pg_proc` metadata; future discoveries must remain independently accounted instead of being hidden inside the broad inventory.
 
 The documented fixed-signature subset now uses one registry and resolver for ordinary execution and generated-expression typing and binding. The shared path covers the listed case-folding, reverse, hash, checksum, one-argument string and binary length, gamma, JSON null-stripping, integer-base conversion, random, and UUID generation and extraction signatures together with visible SQL user-function candidates, qualification, search-path order, exact and implicit matches, preferred and unknown categories, domain base types, named and default slots, declared return types, and durable stored bindings where volatility permits. Consolidated catalog tests verify the PostgreSQL 18 `pg_proc` identities for unit `random()` (1598), `to_hex(integer|bigint)` (2089 and 2090), `gen_random_uuid()` (3432), `casefold(text)` (6412), `uuidv4()` (6428), and `uuidv7()` / `uuidv7(interval)` (6429 and 6430). Polymorphic array functions retain specialized type substitution, and this verified slice does not claim PostgreSQL's complete built-in, operator, cast, extension, or `pg_proc` matrix.
 
@@ -215,15 +229,7 @@ Add long-running concurrency, restart, crash-recovery, backup/restore, and upgra
 
 ## Milestones and exit gates
 
-| Milestone | Exit gate |
-| --- | --- |
-| M0: PG18 baseline | PG18 parser pinned; all AST deltas audited; unsupported shapes fail explicitly; active names and fixtures use `pg18`; 22/22 TPC-H-derived results match PostgreSQL 18 |
-| M1: Discovered semantic fixes | DML row images, constraint enforcement metadata, named NOT NULL catalogs, `reverse(bytea)`, and identified PG18 functions pass live differential tests |
-| M2: Protocol 3.2 | Byte-exact codec tests and live PG18 libpq 3.0/3.2/latest negotiation and cancellation tests pass |
-| M3: PG18 DDL and types | Generated columns, range/multirange, temporal constraints, catalogs, dump/restore, and reopen tests pass |
-| M4: Core regression parity | PostgreSQL 18 core regression and isolation suites pass with every remaining failure recorded and trending to zero |
-| M5: Client parity | The supported driver, migration, introspection, dump/restore, COPY, and pooling matrix passes |
-| M6: Complete compatibility | Regression, isolation, protocol, catalog, client, concurrency, recovery, and administration matrices have zero semantic exemptions; the manual removes the implemented-subset qualification |
+Milestone names, exit gates, evidence ownership, and derived states are defined once in manifest schema version 2 and rendered in the synchronized ledger above. A milestone is `complete` only when every owned item is `verified`, `not_started` only when every owned item is `not_audited`, and otherwise `in_progress`; M6 additionally requires M0 through M5 and every manifest item to be complete.
 
 ## Required verification on every compatibility change
 
@@ -242,6 +248,6 @@ Run repository policy scripts, binding builds and examples, and supported-platfo
 
 ## Completion accounting
 
-Maintain the machine-readable PostgreSQL 18 compatibility manifest at `tests/parity/pg18/manifest.json` alongside the differential harness. Each item records the PostgreSQL reference section or regression test, UQA Engine test, supported version, status, and any open issue. Every compatibility PR must update its manifest evidence, this plan's narrative, the synchronized ledger above, and the authoritative manual together. `run_diff.py --validate-manifest` rejects ledger drift and refuses a complete-compatibility claim while an item or milestone remains incomplete. Milestone completion requires positive evidence for every row; absence of a failing test is not evidence.
+Maintain the machine-readable PostgreSQL 18 compatibility manifest at `tests/parity/pg18/manifest.json` alongside the differential harness. Schema version 2 records each milestone title and exit gate, assigns every item to exactly one owning milestone, and records each item's PostgreSQL reference, UQA Engine test, supported boundary, status, and open issue. Every compatibility PR must update its manifest evidence, this plan's narrative, the generated ledger above, and the authoritative manual together. `run_diff.py --validate-manifest` rejects invalid ownership, derived-status contradictions, plan or manual drift, and any complete-compatibility claim before M6 is derived complete. Milestone completion requires positive evidence for every owned row; absence of a failing test is not evidence.
 
 The final complete-compatibility audit must inspect the current parser revision, manifest, test results, live server provenance, protocol traces, client matrix, catalog diffs, persistent reopen behavior, and manual. The project must not declare complete PostgreSQL 18 compatibility while any item is missing, explicitly rejected, silently approximated, or supported only by an indirect test.
