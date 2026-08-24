@@ -30,6 +30,10 @@ Manifest schema version 2 records the pinned parser chain, oracle provenance, mi
 
 The differential summary line reports `total/match/diff`, and any difference makes the runner exit nonzero. Error rows match only when their SQLSTATE codes match; message text is not compared. Update `probes.sql` freely: one probe per line, `--` comments skipped; probes must be side-effect-free single statements. Set `UQA_PG_CONTAINER`, `UQA_PG_DATABASE`, or `UQA_USQL` to override the defaults while keeping both systems under test in equivalent contexts.
 
+## MERGE and RETURNING oracle
+
+[`merge_returning_oracle.md`](merge_returning_oracle.md) records the pinned PostgreSQL 18.4 container provenance, full-join candidate results, clause-order and visibility SQLSTATEs, repeated-target cardinality behavior, all mutation row images, `DO NOTHING`, source-column NULLs, `merge_action()`, and source-before-target `RETURNING *` layout used by the focused compiler and engine tests.
+
 ## Stateful routine oracle
 
 `run_routines_stateful.py` executes the delimited cases in `routines_stateful.sql` against PostgreSQL 18.4 with Apache AGE and UQA, then compares both results with `routines_stateful.expected.json`. It covers polymorphic and variadic resolution, pseudo-type declaration validation, user `pg_proc` identity, ALTER lifecycle, persisted concrete bindings, bounded function `DROP CASCADE` effects, and no-dependent procedure CASCADE removal.

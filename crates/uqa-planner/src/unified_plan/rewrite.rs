@@ -178,13 +178,19 @@ pub(super) fn rewrite_command_scalars(
                     MergeWhenPlan::UpdateMatched {
                         condition,
                         assignments,
+                    }
+                    | MergeWhenPlan::UpdateNotMatchedBySource {
+                        condition,
+                        assignments,
                     } => {
                         rewrite_optional_scalar(condition, rewrite);
                         rewrite_assignments(assignments, rewrite);
                     }
                     MergeWhenPlan::DeleteMatched { condition }
+                    | MergeWhenPlan::DeleteNotMatchedBySource { condition }
                     | MergeWhenPlan::NothingMatched { condition }
-                    | MergeWhenPlan::NothingNotMatched { condition } => {
+                    | MergeWhenPlan::NothingNotMatched { condition }
+                    | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
                         rewrite_optional_scalar(condition, rewrite);
                     }
                     MergeWhenPlan::InsertNotMatched {

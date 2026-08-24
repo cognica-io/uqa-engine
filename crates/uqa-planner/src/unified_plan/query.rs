@@ -84,6 +84,22 @@ pub(super) fn lower_merge_when(
         uqa_sql::ast::MergeWhen::DeleteMatched { condition } => MergeWhenPlan::DeleteMatched {
             condition: lower_optional(condition),
         },
+        uqa_sql::ast::MergeWhen::UpdateNotMatchedBySource {
+            condition,
+            assignments,
+        } => {
+            let condition = lower_optional(condition);
+            let assignments = lower_assignments(assignments, aggregates, subqueries);
+            MergeWhenPlan::UpdateNotMatchedBySource {
+                condition,
+                assignments,
+            }
+        }
+        uqa_sql::ast::MergeWhen::DeleteNotMatchedBySource { condition } => {
+            MergeWhenPlan::DeleteNotMatchedBySource {
+                condition: lower_optional(condition),
+            }
+        }
         uqa_sql::ast::MergeWhen::InsertNotMatched {
             condition,
             columns,
@@ -105,6 +121,11 @@ pub(super) fn lower_merge_when(
         },
         uqa_sql::ast::MergeWhen::NothingNotMatched { condition } => {
             MergeWhenPlan::NothingNotMatched {
+                condition: lower_optional(condition),
+            }
+        }
+        uqa_sql::ast::MergeWhen::NothingNotMatchedBySource { condition } => {
+            MergeWhenPlan::NothingNotMatchedBySource {
                 condition: lower_optional(condition),
             }
         }

@@ -308,6 +308,13 @@ pub enum MergeWhenPlan {
     DeleteMatched {
         condition: Option<ScalarExpr>,
     },
+    UpdateNotMatchedBySource {
+        condition: Option<ScalarExpr>,
+        assignments: Vec<AssignmentPlan>,
+    },
+    DeleteNotMatchedBySource {
+        condition: Option<ScalarExpr>,
+    },
     InsertNotMatched {
         condition: Option<ScalarExpr>,
         columns: Vec<String>,
@@ -317,6 +324,9 @@ pub enum MergeWhenPlan {
         condition: Option<ScalarExpr>,
     },
     NothingNotMatched {
+        condition: Option<ScalarExpr>,
+    },
+    NothingNotMatchedBySource {
         condition: Option<ScalarExpr>,
     },
 }

@@ -304,13 +304,26 @@ Foreign-key actions can update or delete related rows as part of the same transa
 MERGE INTO inventory AS target
 USING incoming AS source
 ON target.item_id = source.item_id
-WHEN MATCHED THEN
+WHEN MATCHED AND target.quantity <> source.quantity THEN
     UPDATE SET quantity = source.quantity
-WHEN NOT MATCHED THEN
-    INSERT (item_id, quantity) VALUES (source.item_id, source.quantity);
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT (item_id, quantity) VALUES (source.item_id, source.quantity)
+WHEN NOT MATCHED BY SOURCE THEN
+    DELETE
+RETURNING WITH (OLD AS before, NEW AS after)
+    merge_action() AS action,
+    source.item_id AS source_item_id,
+    before.quantity AS old_quantity,
+    after.quantity AS new_quantity;
 ```
 
-Implemented matched actions are `UPDATE`, `DELETE`, and `DO NOTHING`. Implemented not-matched actions are `INSERT` and `DO NOTHING`. `WHEN NOT MATCHED BY SOURCE` is not implemented.
+`MERGE` performs a full candidate join whenever both target-missing and source-missing clauses are present. Each candidate is classified exactly once as `MATCHED`, `NOT MATCHED BY SOURCE`, or `NOT MATCHED [BY TARGET]`, and clauses are tested in written order until the first condition succeeds. MATCHED conditions and UPDATE expressions can read source and target columns, `NOT MATCHED BY SOURCE` conditions and UPDATE expressions can read only target columns, and `NOT MATCHED [BY TARGET]` conditions and INSERT values can read only source columns.
+
+MATCHED and `NOT MATCHED BY SOURCE` support `UPDATE`, `DELETE`, and `DO NOTHING`; `NOT MATCHED [BY TARGET]` supports `INSERT` and `DO NOTHING`. One source row may change multiple distinct target rows, but two selected mutation actions for one target row fail atomically with cardinality violation (`21000`). An unconditional clause is the last reachable clause of its candidate kind, so a later clause of that kind fails with syntax error (`42601`); a relation hidden by the candidate kind fails with undefined table (`42P01`); join and action conditions must be boolean (`42804`); and a MERGE requiring both source-missing and target-missing candidates requires at least one hash-joinable or merge-joinable equality in the join condition (`0A000`).
+
+The command count and `RETURNING` rows include only inserted, updated, and deleted rows. `DO NOTHING` neither increments the count nor emits a row. `merge_action()` returns `INSERT`, `UPDATE`, or `DELETE`; source columns are NULL for source-missing candidates; the target qualifier denotes the new image for INSERT and UPDATE and the old image for DELETE; `OLD` and `NEW` or aliases declared by `WITH` expose both images explicitly. Unqualified `RETURNING *` emits source columns first and target columns second, while qualified stars select their named source, target, old-image, or new-image relation.
+
+All selected actions are validated and staged before publication, including target-column names, candidate-kind visibility, unique and foreign-key constraints, generated columns, repeated-target cardinality, and referential actions, so a failed MERGE leaves no partial target mutation.
 
 ## Determinism and bags
 

@@ -92,6 +92,10 @@ pub(super) fn optimize_command(
                     MergeWhenPlan::UpdateMatched {
                         condition,
                         assignments,
+                    }
+                    | MergeWhenPlan::UpdateNotMatchedBySource {
+                        condition,
+                        assignments,
                     } => {
                         if let Some(condition) = condition {
                             optimize_scalar_slot(condition, config);
@@ -99,8 +103,10 @@ pub(super) fn optimize_command(
                         optimize_assignments(assignments, config);
                     }
                     MergeWhenPlan::DeleteMatched { condition }
+                    | MergeWhenPlan::DeleteNotMatchedBySource { condition }
                     | MergeWhenPlan::NothingMatched { condition }
-                    | MergeWhenPlan::NothingNotMatched { condition } => {
+                    | MergeWhenPlan::NothingNotMatched { condition }
+                    | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
                         if let Some(condition) = condition {
                             optimize_scalar_slot(condition, config);
                         }

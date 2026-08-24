@@ -229,9 +229,9 @@
     },
     {
       "id": "dml.returning-row-images",
-      "postgresql_reference": "PostgreSQL 18.4 DML RETURNING row-image syntax, results, row descriptions, errors, and SQLSTATEs",
-      "uqa_test": "cargo test -p uqa-sql --lib returning; cargo test -p uqa-engine --test integration engine_catalog::sql_update_delete::postgresql_18_returning_exposes_old_and_new_row_images; cargo test -p uqa-engine --test integration engine_catalog::sql_update_delete::returning_old_and_new_stars_preserve_duplicate_output_positions; cargo test -p uqa-engine --test integration engine_catalog::sql_merge::merge_returning_exposes_postgresql_18_row_images",
-      "supported_version": "PostgreSQL 18.4 old and new row images, default and explicit aliases, duplicate output positions, declared result types, alias conflicts, and implemented INSERT, UPDATE, DELETE, ON CONFLICT, and MERGE actions",
+      "postgresql_reference": "PostgreSQL 18.4 DML RETURNING row-image syntax, results, row descriptions, errors, and SQLSTATEs plus tests/parity/pg18/merge_returning_oracle.md",
+      "uqa_test": "cargo test -p uqa-sql --lib returning; cargo test -p uqa-engine --test integration engine_catalog::sql_update_delete::postgresql_18_returning_exposes_old_and_new_row_images; cargo test -p uqa-engine --test integration engine_catalog::sql_update_delete::returning_old_and_new_stars_preserve_duplicate_output_positions; cargo test -p uqa-engine --test integration engine_catalog::sql_merge::",
+      "supported_version": "PostgreSQL 18.4 old and new row images, default and explicit aliases, duplicate output positions, declared result types, alias conflicts, and implemented INSERT, UPDATE, DELETE, ON CONFLICT, and all MERGE action kinds with source columns, merge_action(), DO NOTHING exclusion, and source-before-target star layout",
       "status": "verified",
       "open_issue": null
     },
@@ -239,17 +239,17 @@
       "id": "dml.returning-row-images-extended",
       "postgresql_reference": "PostgreSQL 18.4 DML RETURNING documentation and official trigger, partition, and MERGE regression cases",
       "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_update_delete::; cargo test -p uqa-engine --test integration engine_catalog::sql_merge::",
-      "supported_version": "The bounded PostgreSQL 18.4 row-image behavior recorded by dml.returning-row-images",
+      "supported_version": "The PostgreSQL 18.4 row-image behavior recorded by dml.returning-row-images, including every ordinary-table MERGE candidate and action kind",
       "status": "partial",
-      "open_issue": "Trigger, partition, and complete MERGE-action differential coverage remains."
+      "open_issue": "Trigger and partition row-image coverage remains."
     },
     {
       "id": "dml.merge-not-matched-by-source",
-      "postgresql_reference": "PostgreSQL 18.4 MERGE documentation and official regression cases for WHEN NOT MATCHED BY SOURCE",
-      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::data_commands::merge_not_matched_by_source_fails_explicitly",
-      "supported_version": "Implemented PostgreSQL 18 MERGE actions excluding WHEN NOT MATCHED BY SOURCE",
-      "status": "explicitly_rejected",
-      "open_issue": "MERGE WHEN NOT MATCHED BY SOURCE is rejected and must be implemented with PostgreSQL 18 action ordering, visibility, result, and error semantics."
+      "postgresql_reference": "PostgreSQL 18.4 MERGE documentation and pinned live results and SQLSTATEs in tests/parity/pg18/merge_returning_oracle.md",
+      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::data_commands::merge_; cargo test -p uqa-engine --test integration engine_catalog::sql_merge::",
+      "supported_version": "PostgreSQL 18.4 full-join MATCHED, NOT MATCHED BY SOURCE, and NOT MATCHED BY TARGET candidate classification; written-order first-action selection; candidate-specific visibility; UPDATE, DELETE, INSERT, and DO NOTHING effects; repeated-target cardinality; atomicity; source and target row images; merge_action(); and RETURNING star layout",
+      "status": "verified",
+      "open_issue": null
     },
     {
       "id": "ddl.constraint-metadata",

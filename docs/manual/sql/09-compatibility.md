@@ -46,7 +46,6 @@ These forms currently fail during compilation without creating a partial object.
 - Collations, domains, user-defined equality operators, and the complete common-type matrix for `JOIN ... USING` columns with different declared types
 - Recursive CTE `SEARCH` and `CYCLE`
 - CTE `NOT MATERIALIZED`
-- `MERGE WHEN NOT MATCHED BY SOURCE`
 
 Each missing clause above must be implemented with PostgreSQL 18 semantics; source-query rewriting is not an accepted compatibility solution.
 

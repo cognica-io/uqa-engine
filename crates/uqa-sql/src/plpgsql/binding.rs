@@ -492,6 +492,16 @@ pub(super) fn bind_merge_when(when: &MergeWhen, r: &mut dyn VariableResolver) ->
         MergeWhen::DeleteMatched { condition } => MergeWhen::DeleteMatched {
             condition: bind_opt_expr(condition.as_ref(), r)?,
         },
+        MergeWhen::UpdateNotMatchedBySource {
+            condition,
+            assignments,
+        } => MergeWhen::UpdateNotMatchedBySource {
+            condition: bind_opt_expr(condition.as_ref(), r)?,
+            assignments: bind_assignments(assignments, r)?,
+        },
+        MergeWhen::DeleteNotMatchedBySource { condition } => MergeWhen::DeleteNotMatchedBySource {
+            condition: bind_opt_expr(condition.as_ref(), r)?,
+        },
         MergeWhen::InsertNotMatched {
             condition,
             columns,
@@ -507,5 +517,10 @@ pub(super) fn bind_merge_when(when: &MergeWhen, r: &mut dyn VariableResolver) ->
         MergeWhen::NothingNotMatched { condition } => MergeWhen::NothingNotMatched {
             condition: bind_opt_expr(condition.as_ref(), r)?,
         },
+        MergeWhen::NothingNotMatchedBySource { condition } => {
+            MergeWhen::NothingNotMatchedBySource {
+                condition: bind_opt_expr(condition.as_ref(), r)?,
+            }
+        }
     })
 }

@@ -1356,6 +1356,13 @@ pub enum MergeWhen {
     },
     /// `WHEN MATCHED [AND <cond>] THEN DELETE`.
     DeleteMatched { condition: Option<Expr> },
+    /// `WHEN NOT MATCHED BY SOURCE [AND <cond>] THEN UPDATE SET ...`.
+    UpdateNotMatchedBySource {
+        condition: Option<Expr>,
+        assignments: Vec<(String, Expr)>,
+    },
+    /// `WHEN NOT MATCHED BY SOURCE [AND <cond>] THEN DELETE`.
+    DeleteNotMatchedBySource { condition: Option<Expr> },
     /// `WHEN NOT MATCHED [AND <cond>] THEN INSERT (cols) VALUES (vals)`.
     InsertNotMatched {
         condition: Option<Expr>,
@@ -1366,6 +1373,8 @@ pub enum MergeWhen {
     NothingMatched { condition: Option<Expr> },
     /// `WHEN NOT MATCHED [AND <cond>] THEN DO NOTHING`.
     NothingNotMatched { condition: Option<Expr> },
+    /// `WHEN NOT MATCHED BY SOURCE [AND <cond>] THEN DO NOTHING`.
+    NothingNotMatchedBySource { condition: Option<Expr> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
