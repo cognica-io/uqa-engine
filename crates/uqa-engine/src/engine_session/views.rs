@@ -12,6 +12,7 @@ use super::{
     query_plan_references_sequence, BTreeMap, CatalogFacade, Engine, QueryPlan, RelationIdentity,
     SQLError, StorageBackendError, StorageBackendResult, StoredView, ViewRow,
 };
+use uqa_sql::ast::FunctionBinding;
 
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
@@ -242,7 +243,7 @@ impl Engine {
         let relation = RelationIdentity::from_legacy_name(&name)
             .map_err(|err| SQLError::Internal(format!("invalid canonical view name: {err}")))?;
         self.bind_view_plan_for_create(&mut plan)?;
-        let query_schema = crate::sql::bind_catalog_query_table_functions(self, &mut plan, params)?;
+        let query_schema = crate::sql::bind_catalog_query_routines(self, &mut plan, params)?;
         let output_columns = create_view_output_columns(&query_schema, column_names)?;
         let replacement_schema = named_view_schema(&query_schema, &output_columns)?;
         let existing_kind = self
@@ -472,6 +473,34 @@ impl Engine {
             .read()
             .iter()
             .filter(|(_, view)| query_plan_references_sequence(&view.query, &target))
+            .map(|(relation, _)| relation.qualified_name())
+            .collect::<Vec<_>>();
+        dependents.sort_unstable();
+        Ok(dependents)
+    }
+
+    /// Return stored views whose persisted query plan is bound to one exact
+    /// non-builtin function identity. Return type is deliberately excluded:
+    /// `PostgreSQL` function identity is its canonical name plus input types.
+    pub(crate) fn views_depending_on_function(
+        &self,
+        canonical_name: &str,
+        argument_types: &[String],
+    ) -> StorageBackendResult<Vec<String>> {
+        self.synchronize_catalog_registries()?;
+        let target = FunctionBinding {
+            name: canonical_name.to_string(),
+            argument_types: argument_types.to_vec(),
+            builtin: false,
+        };
+        let mut dependents = self
+            .durable
+            .views
+            .read()
+            .iter()
+            .filter(|(_, view)| {
+                super::view_binding::query_plan_references_function(&view.query, &target)
+            })
             .map(|(relation, _)| relation.qualified_name())
             .collect::<Vec<_>>();
         dependents.sort_unstable();

@@ -8,12 +8,19 @@
 //! bodies, including series generation, unnesting, regular-expression splits,
 //! and JSON object or array expansion.
 
+use tempfile::TempDir;
 use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_sql::ast::ColumnType;
 
 fn values(result: &uqa_engine::SQLResult, column: &str) -> Vec<Value> {
     result.rows.iter().map(|row| row[column].clone()).collect()
+}
+
+fn assert_sql_error(eng: &Engine, sql: &str, sqlstate: &str, message: &str) {
+    let error = eng.sql(sql, &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some(sqlstate), "{sql}");
+    assert_eq!(error.to_string(), message, "{sql}");
 }
 
 #[test]
@@ -361,6 +368,457 @@ fn multi_array_unnest_is_rejected_outside_from() {
         .sql("SELECT unnest(ARRAY[1], ARRAY[2])", &[])
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("42883"));
+}
+
+#[test]
+fn rows_from_zips_independent_members_and_appends_group_ordinality() {
+    let eng = Engine::new();
+    let result = eng
+        .sql(
+            "SELECT number, label, sequence
+             FROM ROWS FROM (
+                 pg_catalog.generate_series(1, 2),
+                 pg_catalog.unnest(ARRAY['a', 'b', 'c'])
+             ) WITH ORDINALITY AS rows(number, label, sequence)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.columns, ["number", "label", "sequence"]);
+    assert_eq!(
+        result.column_types,
+        [
+            Some(ColumnType::Integer),
+            Some(ColumnType::Text),
+            Some(ColumnType::BigInteger),
+        ]
+    );
+    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(result.value_at(1, 0), Some(&Value::Int(2)));
+    assert_eq!(result.value_at(2, 0), Some(&Value::Null));
+    assert_eq!(result.value_at(2, 1), Some(&Value::Str("c".into())));
+    assert_eq!(result.value_at(2, 2), Some(&Value::Int(3)));
+
+    let empty_member = eng
+        .sql(
+            "SELECT number, label
+             FROM ROWS FROM (
+                 pg_catalog.unnest(ARRAY[]::INTEGER[]),
+                 pg_catalog.unnest(ARRAY['only'])
+             ) AS rows(number, label)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(empty_member.rows.len(), 1);
+    assert_eq!(empty_member.value_at(0, 0), Some(&Value::Null));
+    assert_eq!(
+        empty_member.value_at(0, 1),
+        Some(&Value::Str("only".into()))
+    );
+
+    let too_many_aliases = eng
+        .sql(
+            "SELECT * FROM ROWS FROM (pg_catalog.unnest(ARRAY[1])) AS rows(a, b)",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(too_many_aliases.sqlstate(), Some("42P10"));
+}
+
+#[test]
+fn rows_from_resolves_each_unary_member_but_multiarg_unnest_bypasses_users() {
+    let eng = Engine::new();
+    for sql in [
+        "CREATE SCHEMA rows_api",
+        "CREATE FUNCTION rows_api.unnest(input_values INTEGER[]) RETURNS TABLE(chosen TEXT) LANGUAGE SQL AS 'SELECT ''user-unary'''",
+        "CREATE FUNCTION rows_api.unnest(left_values INTEGER[], right_values INTEGER[]) RETURNS TABLE(chosen TEXT) LANGUAGE SQL AS 'SELECT ''user-binary'''",
+        "SET search_path = pg_catalog, rows_api, public",
+    ] {
+        eng.sql(sql, &[]).unwrap();
+    }
+
+    let single = eng
+        .sql("SELECT chosen FROM unnest(ARRAY[1]::INTEGER[])", &[])
+        .unwrap();
+    assert_eq!(single.rows[0]["chosen"], Value::Str("user-unary".into()));
+
+    let explicit = eng
+        .sql(
+            "SELECT chosen, builtin_value
+             FROM ROWS FROM (
+                 unnest(ARRAY[1]::INTEGER[]),
+                 pg_catalog.unnest(ARRAY['a', 'b'])
+             ) AS rows(chosen, builtin_value)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(explicit.rows.len(), 2);
+    assert_eq!(
+        explicit.value_at(0, 0),
+        Some(&Value::Str("user-unary".into()))
+    );
+    assert_eq!(explicit.value_at(0, 1), Some(&Value::Str("a".into())));
+    assert_eq!(explicit.value_at(1, 0), Some(&Value::Null));
+    assert_eq!(explicit.value_at(1, 1), Some(&Value::Str("b".into())));
+
+    let special = eng
+        .sql(
+            "SELECT left_value, right_value
+             FROM ROWS FROM (
+                 unnest(ARRAY[1, 3]::INTEGER[], ARRAY[2]::INTEGER[])
+             ) AS rows(left_value, right_value)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(special.rows.len(), 2);
+    assert_eq!(special.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(special.value_at(0, 1), Some(&Value::Int(2)));
+    assert_eq!(special.value_at(1, 0), Some(&Value::Int(3)));
+    assert_eq!(special.value_at(1, 1), Some(&Value::Null));
+
+    let qualified = eng
+        .sql(
+            "SELECT chosen
+             FROM rows_api.unnest(ARRAY[1]::INTEGER[], ARRAY[2]::INTEGER[])",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        qualified.rows[0]["chosen"],
+        Value::Str("user-binary".into())
+    );
+}
+
+#[test]
+fn column_definition_lists_distinguish_named_and_anonymous_records() {
+    let eng = Engine::new();
+    for sql in [
+        "CREATE SCHEMA named_rows",
+        "CREATE FUNCTION named_rows.unnest(left_values INTEGER[], right_values INTEGER[]) RETURNS TABLE(chosen TEXT) LANGUAGE SQL AS 'SELECT ''user-table'''",
+        "CREATE FUNCTION named_rows.two_columns() RETURNS TABLE(first_value TEXT, second_value INTEGER) LANGUAGE SQL AS 'SELECT ''first'', 2'",
+        "SET search_path = pg_catalog, named_rows, public",
+    ] {
+        eng.sql(sql, &[]).unwrap();
+    }
+
+    assert_sql_error(
+        &eng,
+        "SELECT renamed
+         FROM ROWS FROM (
+             unnest(ARRAY[1]::INTEGER[], ARRAY[2]::INTEGER[]) AS (renamed TEXT)
+         ) AS rows",
+        "42601",
+        "a column definition list is only allowed for functions returning \"record\"",
+    );
+    assert_sql_error(
+        &eng,
+        "SELECT * FROM two_columns() AS (renamed_first TEXT, renamed_second INTEGER)",
+        "42601",
+        "a column definition list is redundant for a function with OUT parameters",
+    );
+}
+
+#[test]
+fn anonymous_record_table_sources_shape_sql_plpgsql_and_setof_rows() {
+    let eng = Engine::new();
+    for sql in [
+        "CREATE SCHEMA anonymous_rows",
+        "CREATE FUNCTION anonymous_rows.unnest(left_values INTEGER[], right_values INTEGER[]) RETURNS record LANGUAGE SQL AS 'SELECT ''user-record''::TEXT, 99::INTEGER'",
+        "CREATE FUNCTION anonymous_rows.sql_record_set() RETURNS SETOF record LANGUAGE SQL AS $$ SELECT 'first-record'::TEXT, 1::INTEGER UNION ALL SELECT 'second-record'::TEXT, 2::INTEGER $$",
+        "CREATE FUNCTION anonymous_rows.plpgsql_record() RETURNS record LANGUAGE plpgsql AS $$ BEGIN RETURN ROW('plpgsql-record'::TEXT, 100::INTEGER); END $$",
+        "SET search_path = pg_catalog, anonymous_rows, public",
+    ] {
+        eng.sql(sql, &[]).unwrap();
+    }
+
+    let sql_record = eng
+        .sql(
+            "SELECT chosen, marker
+             FROM ROWS FROM (
+                 unnest(ARRAY[1]::INTEGER[], ARRAY[2]::INTEGER[])
+                     AS (chosen TEXT, marker INTEGER)
+             ) AS rows",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(sql_record.columns, ["chosen", "marker"]);
+    assert_eq!(
+        sql_record.column_types,
+        [Some(ColumnType::Text), Some(ColumnType::Integer)]
+    );
+    assert_eq!(
+        sql_record.value_at(0, 0),
+        Some(&Value::Str("user-record".into()))
+    );
+    assert_eq!(sql_record.value_at(0, 1), Some(&Value::Int(99)));
+
+    let plpgsql_record = eng
+        .sql(
+            "SELECT chosen, marker
+             FROM ROWS FROM (
+                 plpgsql_record() AS (chosen TEXT, marker INTEGER)
+             ) AS rows",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        plpgsql_record.value_at(0, 0),
+        Some(&Value::Str("plpgsql-record".into()))
+    );
+    assert_eq!(plpgsql_record.value_at(0, 1), Some(&Value::Int(100)));
+
+    let record_set = eng
+        .sql(
+            "SELECT chosen, marker
+             FROM ROWS FROM (
+                 sql_record_set() AS (chosen TEXT, marker INTEGER)
+             ) AS rows
+             ORDER BY marker",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(record_set.rows.len(), 2);
+    assert_eq!(
+        record_set.value_at(0, 0),
+        Some(&Value::Str("first-record".into()))
+    );
+    assert_eq!(record_set.value_at(1, 1), Some(&Value::Int(2)));
+
+    for sql in [
+        "SELECT * FROM anonymous_rows.unnest(ARRAY[1]::INTEGER[], ARRAY[2]::INTEGER[])",
+        "SELECT * FROM ROWS FROM (anonymous_rows.unnest(ARRAY[1]::INTEGER[], ARRAY[2]::INTEGER[])) AS rows",
+    ] {
+        assert_sql_error(
+            &eng,
+            sql,
+            "42601",
+            "a column definition list is required for functions returning \"record\"",
+        );
+    }
+}
+
+#[test]
+fn anonymous_record_column_definitions_enforce_assignment_compatibility() {
+    let eng = Engine::new();
+    for sql in [
+        "CREATE FUNCTION assignment_record() RETURNS record LANGUAGE SQL AS $$ SELECT 7::INTEGER, 'wide'::TEXT $$",
+        "CREATE FUNCTION parseable_text_record() RETURNS record LANGUAGE SQL AS $$ SELECT '42'::TEXT $$",
+        "CREATE FUNCTION long_text_record() RETURNS record LANGUAGE SQL AS $$ SELECT 'toolong'::TEXT $$",
+        "CREATE FUNCTION plpgsql_text_record() RETURNS record LANGUAGE plpgsql AS $$ BEGIN RETURN ROW('42'::TEXT); END $$",
+    ] {
+        eng.sql(sql, &[]).unwrap();
+    }
+    let assignment_compatible = eng
+        .sql(
+            "SELECT widened, label
+             FROM assignment_record() AS (widened BIGINT, label VARCHAR(8))",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        assignment_compatible.column_types,
+        [
+            Some(ColumnType::BigInteger),
+            Some(ColumnType::Varchar(Some(8))),
+        ]
+    );
+    assert_eq!(assignment_compatible.value_at(0, 0), Some(&Value::Int(7)));
+    assert_eq!(
+        assignment_compatible.value_at(0, 1),
+        Some(&Value::Str("wide".into()))
+    );
+
+    for sql in [
+        "SELECT * FROM parseable_text_record() AS (parsed INTEGER)",
+        "SELECT * FROM plpgsql_text_record() AS (parsed INTEGER)",
+        "SELECT * FROM assignment_record() AS (only_column BIGINT)",
+    ] {
+        assert_sql_error(
+            &eng,
+            sql,
+            "42P13",
+            "return type mismatch in function declared to return record",
+        );
+    }
+
+    assert_sql_error(
+        &eng,
+        "SELECT * FROM long_text_record() AS (short_value VARCHAR(3))",
+        "22001",
+        "value too long for type character varying(3)",
+    );
+}
+
+#[test]
+fn json_each_out_columns_reject_redundant_definition_lists() {
+    let eng = Engine::new();
+    for (function, argument, value_type) in [
+        ("json_each", "'{\"a\":1}'::JSON", "JSON"),
+        ("jsonb_each", "'{\"a\":1}'::JSONB", "JSONB"),
+        ("json_each_text", "'{\"a\":1}'::JSON", "TEXT"),
+        ("jsonb_each_text", "'{\"a\":1}'::JSONB", "TEXT"),
+    ] {
+        for sql in [
+            format!(
+                "SELECT * FROM pg_catalog.{function}({argument}) AS (k TEXT, v {value_type})"
+            ),
+            format!(
+                "SELECT * FROM ROWS FROM (pg_catalog.{function}({argument}) AS (k TEXT, v {value_type})) AS rows"
+            ),
+        ] {
+            let error = eng.sql(&sql, &[]).unwrap_err();
+            assert_eq!(error.sqlstate(), Some("42601"), "{sql}");
+            assert_eq!(
+                error.to_string(),
+                "a column definition list is redundant for a function with OUT parameters",
+                "{sql}"
+            );
+        }
+    }
+
+    for sql in [
+        "CREATE SCHEMA json_shadow",
+        "CREATE FUNCTION json_shadow.json_each(input_value JSON) RETURNS record LANGUAGE SQL AS $$ SELECT 'shadow'::TEXT, 7::INTEGER $$",
+        "SET search_path = json_shadow, pg_catalog, public",
+    ] {
+        eng.sql(sql, &[]).unwrap();
+    }
+    let shadow = eng
+        .sql(
+            "SELECT source_name, marker
+             FROM json_each('{}'::JSON) AS (source_name TEXT, marker INTEGER)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(shadow.value_at(0, 0), Some(&Value::Str("shadow".into())));
+    assert_eq!(shadow.value_at(0, 1), Some(&Value::Int(7)));
+}
+
+#[test]
+fn rows_from_is_implicitly_lateral_and_left_lateral_null_extends_empty_groups() {
+    let eng = Engine::new();
+    for sql in [
+        "CREATE TABLE rows_from_input (id INTEGER PRIMARY KEY, values INTEGER[])",
+        "INSERT INTO rows_from_input VALUES (1, ARRAY[10, 20]), (2, ARRAY[]::INTEGER[])",
+    ] {
+        eng.sql(sql, &[]).unwrap();
+    }
+
+    let correlated = eng
+        .sql(
+            "SELECT input.id, member.value, member.sequence
+             FROM rows_from_input AS input
+             CROSS JOIN ROWS FROM (pg_catalog.unnest(input.values))
+                        WITH ORDINALITY AS member(value, sequence)
+             ORDER BY input.id, member.sequence",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(correlated.rows.len(), 2);
+    assert_eq!(correlated.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(correlated.value_at(0, 1), Some(&Value::Int(10)));
+    assert_eq!(correlated.value_at(1, 1), Some(&Value::Int(20)));
+    assert_eq!(correlated.value_at(1, 2), Some(&Value::Int(2)));
+
+    let null_extended = eng
+        .sql(
+            "SELECT input.id, member.value
+             FROM rows_from_input AS input
+             LEFT JOIN LATERAL ROWS FROM (pg_catalog.unnest(input.values))
+                  AS member(value) ON TRUE
+             ORDER BY input.id, member.value",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(null_extended.rows.len(), 3);
+    assert_eq!(null_extended.value_at(2, 0), Some(&Value::Int(2)));
+    assert_eq!(null_extended.value_at(2, 1), Some(&Value::Null));
+}
+
+#[test]
+fn rows_from_member_bindings_survive_view_reopen_and_search_path_changes() {
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("rows-from-view.db");
+    {
+        let eng = Engine::open(&database).unwrap();
+        for sql in [
+            "CREATE SCHEMA rows_first",
+            "CREATE SCHEMA rows_second",
+            "CREATE FUNCTION rows_first.group_pick(value BIGINT) RETURNS TABLE(chosen TEXT) LANGUAGE SQL AS 'SELECT ''first'''",
+            "CREATE FUNCTION rows_second.group_pick(value BIGINT) RETURNS TABLE(chosen TEXT) LANGUAGE SQL AS 'SELECT ''second'''",
+            "SET search_path = rows_first, rows_second, public",
+            "CREATE VIEW rows_first.bound_group AS SELECT chosen, number FROM ROWS FROM (group_pick(7::BIGINT), pg_catalog.unnest(ARRAY[1, 2])) AS rows(chosen, number)",
+        ] {
+            eng.sql(sql, &[]).unwrap();
+        }
+    }
+
+    let reopened = Engine::open(&database).unwrap();
+    reopened
+        .sql("SET search_path = rows_second, rows_first, public", &[])
+        .unwrap();
+    let result = reopened
+        .sql(
+            "SELECT chosen, number FROM rows_first.bound_group ORDER BY number",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.value_at(0, 0), Some(&Value::Str("first".into())));
+    assert_eq!(result.value_at(0, 1), Some(&Value::Int(1)));
+    assert_eq!(result.value_at(1, 0), Some(&Value::Null));
+    assert_eq!(result.value_at(1, 1), Some(&Value::Int(2)));
+}
+
+#[test]
+fn rows_from_exact_overload_bindings_reach_update_delete_and_merge() {
+    let eng = Engine::new();
+    for sql in [
+        "CREATE FUNCTION rows_dml_pick(value INTEGER) RETURNS TABLE(int4_value TEXT) LANGUAGE SQL AS 'SELECT ''int4'''",
+        "CREATE FUNCTION rows_dml_pick(value BIGINT) RETURNS TABLE(int8_value TEXT) LANGUAGE SQL AS 'SELECT ''int8'''",
+        "CREATE TABLE rows_dml_target (id INTEGER PRIMARY KEY, chosen TEXT)",
+        "INSERT INTO rows_dml_target VALUES (1, 'old'), (2, 'old'), (3, 'old')",
+    ] {
+        eng.sql(sql, &[]).unwrap();
+    }
+
+    let updated = eng
+        .sql(
+            "UPDATE rows_dml_target AS target
+             SET chosen = source.int8_value
+             FROM ROWS FROM (rows_dml_pick((SELECT 7::BIGINT))) AS source(int8_value)
+             WHERE target.id = 1
+             RETURNING target.chosen AS v",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(updated.affected_rows, 1);
+    assert_eq!(updated.rows[0]["v"], Value::Str("int8".into()));
+
+    let deleted = eng
+        .sql(
+            "DELETE FROM rows_dml_target AS target
+             USING ROWS FROM (rows_dml_pick((SELECT 7::BIGINT))) AS source(int8_value)
+             WHERE target.id = 2 AND source.int8_value = 'int8'
+             RETURNING source.int8_value AS v",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(deleted.affected_rows, 1);
+    assert_eq!(deleted.rows[0]["v"], Value::Str("int8".into()));
+
+    let merged = eng
+        .sql(
+            "MERGE INTO rows_dml_target AS target
+             USING ROWS FROM (rows_dml_pick((SELECT 7::BIGINT))) AS source(int8_value)
+             ON target.id = 3
+             WHEN MATCHED THEN UPDATE SET chosen = source.int8_value
+             RETURNING target.chosen AS v",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(merged.affected_rows, 1);
+    assert_eq!(merged.rows[0]["v"], Value::Str("int8".into()));
 }
 
 #[test]

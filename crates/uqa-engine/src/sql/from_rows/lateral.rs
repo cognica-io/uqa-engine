@@ -9,10 +9,10 @@
 use super::{
     build_join_operator_with_ctes, build_table_function_row_stream_with_row, eval_scalar,
     multi_unnest_internal_columns, projection_columns, query_output_shared,
-    resolve_user_table_function, AccessPathPlan, ComputePlan, CteScope, Engine, PlanSubqueryArena,
-    QueryBlockPlan, QueryOutput, QueryOutputMode, QueryPlan, RelationalPlan, SQLError, SQLParam,
-    ScalarEvalContext, ScalarExpr, ScopedEngineHook, SourceEvalContext, SourcePlan,
-    TableFunctionCall, TABLE_FUNCTION_ORDINALITY_COLUMN,
+    resolve_user_table_function, validate_table_function_column_definition, AccessPathPlan,
+    ComputePlan, CteScope, Engine, PlanSubqueryArena, QueryBlockPlan, QueryOutput, QueryOutputMode,
+    QueryPlan, RelationalPlan, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, ScopedEngineHook,
+    SourceEvalContext, SourcePlan, TableFunctionCall, TABLE_FUNCTION_ORDINALITY_COLUMN,
 };
 use crate::sql::select::{expand_from_star_columns, resolve_row_locks};
 
@@ -33,6 +33,26 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
     ) -> uqa_execution::ExecResult<uqa_execution::LateralRows> {
         if let Some(row) = self.pinned_right.as_ref() {
             return Ok(Box::new(std::iter::once(Ok(row.clone()))));
+        }
+        if matches!(&self.right, SourcePlan::FunctionGroup { .. }) {
+            let mut scoped_ctes = self.ctes.clone();
+            scoped_ctes.set_row_lock_outer_row(left_row.clone());
+            let mut operator = build_join_operator_with_ctes(
+                self.engine,
+                &self.right,
+                self.params,
+                &mut scoped_ctes,
+                None,
+                None,
+            )?;
+            let schema = self.right_schema.clone();
+            let mut rows = Vec::new();
+            for batch in uqa_execution::OperatorBatchCursor::open(operator.as_mut())? {
+                for row in batch?.into_owned_rows() {
+                    rows.push(row.relabel(schema.clone())?);
+                }
+            }
+            return Ok(Box::new(rows.into_iter().map(Ok)));
         }
         if let SourcePlan::Function {
             name,
@@ -55,6 +75,12 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
                 &left_row.schema,
                 self.params,
                 &hook,
+            )?;
+            validate_table_function_column_definition(
+                name,
+                binding.as_ref(),
+                resolved.as_ref().map(|resolved| resolved.function.as_ref()),
+                column_types,
             )?;
             let context = SourceEvalContext::new(
                 self.engine,
@@ -127,9 +153,11 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
                     reader.map(move |row| row?.relabel(schema.clone())),
                 ))
             }
-            SourcePlan::Function { .. } => Err(uqa_execution::ExecError::SQL(SQLError::Internal(
-                "function source reached the relational-source fallback".into(),
-            ))),
+            SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. } => {
+                Err(uqa_execution::ExecError::SQL(SQLError::Internal(
+                    "function source reached the relational-source fallback".into(),
+                )))
+            }
             source => {
                 let operator = build_join_operator_with_ctes(
                     self.engine,

@@ -96,7 +96,7 @@ FROM generate_series(2, 4) WITH ORDINALITY AS series(value, sequence)
 ORDER BY sequence;
 ```
 
-Multiple functions inside one `ROWS FROM` item are not implemented.
+`ROWS FROM` groups one or more table functions into one implicitly lateral source, concatenates their columns in declaration order, and zips their rows to the longest member with NULL padding; group-wide aliases and `WITH ORDINALITY` apply after that combined output is formed. See [General table functions](04-expressions-and-functions.md#general-table-functions) for member resolution, multi-array `unnest`, errors, and a runnable example.
 
 ## Subqueries
 

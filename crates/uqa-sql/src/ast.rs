@@ -1120,6 +1120,23 @@ pub enum FromClause {
         #[serde(default)]
         column_types: Vec<String>,
     },
+    /// One `PostgreSQL` range-function group. This represents explicit
+    /// `ROWS FROM (...)` syntax and the parser transform of an unqualified
+    /// multi-argument `unnest(a, b, ...)` into independent unary
+    /// `pg_catalog.unnest` members. Members are evaluated independently and
+    /// their result columns are concatenated in declaration order.
+    FunctionGroup {
+        functions: Vec<TableFunction>,
+        /// Alias applied to the complete group rather than to an individual
+        /// member.
+        alias: Option<String>,
+        /// Positional aliases for the concatenated group output.
+        column_aliases: Vec<String>,
+        /// Append one group-wide, one-based `bigint` ordinality column after
+        /// every member's ordinary output columns.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ordinality: bool,
+    },
     /// `FROM (SELECT ...) AS <alias>` -- subquery as a relation.
     /// The body re-runs as if a CTE; the alias renames the result
     /// columns when supplied.
@@ -1128,6 +1145,25 @@ pub enum FromClause {
         alias: Option<String>,
         column_aliases: Vec<String>,
     },
+}
+
+/// One function inside a [`FromClause::FunctionGroup`].
+///
+/// A member owns its column definition list because `ROWS FROM` permits a
+/// distinct `AS (name type, ...)` clause after each call. The range item's
+/// relation alias, positional aliases, and ordinality remain on the enclosing
+/// group.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableFunction {
+    pub name: String,
+    pub output_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relation: Option<String>,
+    pub args: Vec<Expr>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub column_aliases: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub column_types: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1156,6 +1192,7 @@ impl FromClause {
             }
             FromClause::Values { alias, .. }
             | FromClause::Function { alias, .. }
+            | FromClause::FunctionGroup { alias, .. }
             | FromClause::Subquery { alias, .. } => {
                 if let Some(a) = alias {
                     out.push((a.clone(), Some(a.clone())));

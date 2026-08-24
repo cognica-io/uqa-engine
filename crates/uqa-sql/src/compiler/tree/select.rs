@@ -268,7 +268,8 @@ fn collect_visible_qualifiers(from: &FromClause, names: &mut std::collections::B
         }
         FromClause::Values { alias, .. }
         | FromClause::Subquery { alias, .. }
-        | FromClause::Function { alias, .. } => {
+        | FromClause::Function { alias, .. }
+        | FromClause::FunctionGroup { alias, .. } => {
             if let Some(alias) = alias {
                 names.insert(alias.clone());
             }

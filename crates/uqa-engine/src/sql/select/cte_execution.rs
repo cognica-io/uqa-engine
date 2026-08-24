@@ -295,7 +295,9 @@ fn count_source_cte_references(
         SourcePlan::Subquery { body, .. } => {
             count_plan_cte_references(body, targets, counts);
         }
-        SourcePlan::Values { .. } | SourcePlan::Function { .. } => {}
+        SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. } => {}
     }
 }
 
@@ -357,7 +359,10 @@ fn collect_target_cte_references_from_source(
         SourcePlan::Subquery { body, .. } => {
             collect_target_cte_references_from_nested_query(body, targets, shadowed, references);
         }
-        SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Function { .. } => {}
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. } => {}
     }
 }
 

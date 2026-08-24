@@ -53,6 +53,15 @@ pub(crate) fn routine_signature_types(def: &CreateFunction) -> Vec<String> {
         .collect()
 }
 
+pub(crate) fn routine_returns_anonymous_record(def: &CreateFunction) -> bool {
+    def.output_params().is_empty()
+        && matches!(
+            &def.returns,
+            FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }
+                if canonical_routine_type_name(type_name) == "record"
+        )
+}
+
 struct StaticFunctionMatch {
     function: Arc<SQLUserFunction>,
     argument_types: Vec<String>,
@@ -767,26 +776,18 @@ impl Engine {
         } else {
             "function"
         };
-        let mut registry = self.durable.sql_user_functions.write();
-        let mut next = registry.clone();
-        let mut dropped = false;
+        let registry = self.durable.sql_user_functions.read().clone();
+        let mut targets = Vec::new();
+        let mut seen_targets = std::collections::BTreeSet::new();
         let mut notices = Vec::new();
         for item in &stmt.items {
             let target =
-                self.resolve_sql_function_drop_target(&next, item, stmt.is_procedure, kind)?;
+                self.resolve_sql_function_drop_target(&registry, item, stmt.is_procedure, kind)?;
             if let Some((key, position)) = target {
-                let list = next.get_mut(&key).ok_or_else(|| {
-                    SQLError::Internal(format!(
-                        "resolved {kind} registry entry `{key}` disappeared before DROP"
-                    ))
-                })?;
-                let signature = routine_signature_types(&list[position].def);
-                self.ensure_no_generated_function_dependencies(&key, &signature)?;
-                list.remove(position);
-                if list.is_empty() {
-                    next.remove(&key);
+                let signature = routine_signature_types(&registry[&key][position].def);
+                if seen_targets.insert((key.clone(), signature.clone())) {
+                    targets.push((key, signature));
                 }
-                dropped = true;
             } else {
                 let spelled = match &item.arg_types {
                     Some(types) => format!("{}({})", item.name, types.join(", ")),
@@ -809,10 +810,38 @@ impl Engine {
                 });
             }
         }
-        if dropped {
+        if !stmt.is_procedure {
+            for (name, argument_types) in &targets {
+                self.ensure_no_function_dependencies(name, argument_types)?;
+            }
+        }
+        if !targets.is_empty() {
+            let mut next = registry.clone();
+            for (name, argument_types) in &targets {
+                let overloads = next.get_mut(name).ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "resolved {kind} registry entry `{name}` disappeared before DROP"
+                    ))
+                })?;
+                let position = overloads
+                    .iter()
+                    .position(|function| {
+                        function.def.is_procedure == stmt.is_procedure
+                            && routine_signature_types(&function.def) == *argument_types
+                    })
+                    .ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "resolved {} disappeared before DROP",
+                            routine_signature_label(name, argument_types)
+                        ))
+                    })?;
+                overloads.remove(position);
+                if overloads.is_empty() {
+                    next.remove(name);
+                }
+            }
             self.persist_sql_functions_snapshot(&next)?;
-            *registry = next;
-            drop(registry);
+            *self.durable.sql_user_functions.write() = next;
             self.note_catalog_registry_changed();
         }
         for (level, message) in notices {
@@ -851,21 +880,33 @@ impl Engine {
         Ok(dependents)
     }
 
-    fn ensure_no_generated_function_dependencies(
+    fn ensure_no_function_dependencies(
         &self,
         name: &str,
         argument_types: &[String],
     ) -> Result<(), SQLError> {
-        let dependents = self.generated_function_dependents(name, argument_types)?;
-        if dependents.is_empty() {
+        let generated = self.generated_function_dependents(name, argument_types)?;
+        let views = self
+            .views_depending_on_function(name, argument_types)
+            .map_err(|error| {
+                SQLError::Internal(format!("read view function dependencies: {error}"))
+            })?;
+        if generated.is_empty() && views.is_empty() {
             return Ok(());
+        }
+        let mut dependency_kinds = Vec::new();
+        if !generated.is_empty() {
+            dependency_kinds.push(format!("generated column(s) `{}`", generated.join("`, `")));
+        }
+        if !views.is_empty() {
+            dependency_kinds.push(format!("view(s) `{}`", views.join("`, `")));
         }
         Err(SQLError::Routine {
             sqlstate: "2BP01".into(),
             message: format!(
-                "cannot drop function {} because generated column(s) `{}` depend on it",
+                "cannot drop function {} because {} depend on it",
                 routine_signature_label(name, argument_types),
-                dependents.join("`, `")
+                dependency_kinds.join(" and ")
             ),
         })
     }

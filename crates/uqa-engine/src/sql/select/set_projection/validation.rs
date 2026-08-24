@@ -691,6 +691,18 @@ fn validate_source_set_contexts(
                 "set-returning functions must appear at top level of FROM",
             )?;
         }
+        SourcePlan::FunctionGroup { functions, .. } => {
+            for function in functions {
+                reject_set_descendant(
+                    engine,
+                    resolver,
+                    &function.args,
+                    schema,
+                    params,
+                    "set-returning functions must appear at top level of FROM",
+                )?;
+            }
+        }
         SourcePlan::Subquery { .. } | SourcePlan::Table { .. } => {}
     }
     Ok(())
@@ -714,7 +726,10 @@ pub(in crate::sql) fn validate_source_set_contexts_before_build(
             validate_source_set_contexts_before_build(engine, resolver, left, params, ctes, outer)?;
             let left_schema =
                 super::super::bind_source_plan_schema(engine, left, params, ctes, outer)?;
-            let implicit_lateral_function = matches!(right.as_ref(), SourcePlan::Function { .. });
+            let implicit_lateral_function = matches!(
+                right.as_ref(),
+                SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
+            );
             let right_scope = (*lateral || implicit_lateral_function)
                 .then(|| overlay_set_validation_scope(&left_schema, outer));
             validate_source_set_contexts_before_build(
@@ -740,6 +755,20 @@ pub(in crate::sql) fn validate_source_set_contexts_before_build(
                 params,
                 "set-returning functions must appear at top level of FROM",
             )
+        }
+        SourcePlan::FunctionGroup { functions, .. } => {
+            let empty = RowSchema::default();
+            for function in functions {
+                reject_set_descendant(
+                    engine,
+                    resolver,
+                    &function.args,
+                    outer.unwrap_or(&empty),
+                    params,
+                    "set-returning functions must appear at top level of FROM",
+                )?;
+            }
+            Ok(())
         }
         SourcePlan::Subquery { .. } | SourcePlan::Table { .. } => Ok(()),
     }

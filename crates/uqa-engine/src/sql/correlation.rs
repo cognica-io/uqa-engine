@@ -412,6 +412,49 @@ fn source_scope(
                 columns: RelationColumns { names, complete },
             })
         }
+        SourcePlan::FunctionGroup {
+            functions,
+            alias,
+            column_aliases,
+            ordinality,
+        } => {
+            let qualifier = alias.clone().or_else(|| {
+                functions
+                    .first()
+                    .map(|function| function.output_name.clone())
+            });
+            let qualifiers = qualifier.into_iter().collect();
+            let mut names = Vec::new();
+            let mut complete = true;
+            for function in functions {
+                if function.column_aliases.is_empty() {
+                    let local = crate::sql::builtin_function_dispatch_name(&function.name);
+                    if matches!(
+                        local.as_str(),
+                        "generate_series" | "unnest" | "regexp_split_to_table" | "string_to_table"
+                    ) {
+                        names.push(function.output_name.clone());
+                    } else {
+                        complete = false;
+                    }
+                } else {
+                    names.extend(function.column_aliases.iter().cloned());
+                }
+            }
+            if *ordinality {
+                names.push("ordinality".into());
+            }
+            for (name, alias) in names.iter_mut().zip(column_aliases) {
+                name.clone_from(alias);
+            }
+            Ok(QueryScope {
+                qualifiers,
+                columns: RelationColumns {
+                    names: names.into_iter().collect(),
+                    complete,
+                },
+            })
+        }
         SourcePlan::Subquery {
             body,
             alias,
@@ -484,6 +527,12 @@ fn source_has_external_reference(
         SourcePlan::Function { args, .. } => Ok(args
             .iter()
             .any(|expr| expression_has_external_reference(expr, scopes))),
+        SourcePlan::FunctionGroup { functions, .. } => Ok(functions.iter().any(|function| {
+            function
+                .args
+                .iter()
+                .any(|expr| expression_has_external_reference(expr, scopes))
+        })),
         SourcePlan::Subquery { body, .. } => query_has_external_reference(engine, body, scopes),
         SourcePlan::Table { .. } => Ok(false),
     }

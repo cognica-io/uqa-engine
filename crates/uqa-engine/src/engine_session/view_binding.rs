@@ -7,6 +7,7 @@
 //! Stored-view relation and sequence binding/dependency analysis.
 
 use super::{QueryPlan, RelationIdentity, RelationalPlan, ScalarExpr, SourcePlan, Value};
+use uqa_sql::ast::FunctionBinding;
 
 pub(super) fn canonical_virtual_relation_reference(reference: &str) -> Option<String> {
     let (schema, relation) = RelationIdentity::parse_reference(reference).ok()?;
@@ -203,6 +204,17 @@ pub(super) fn bind_source_plan_relations<E>(
                 *relation = resolve(relation)?;
             }
         }
+        SourcePlan::FunctionGroup { functions, .. } => {
+            for function in functions {
+                if function.output_name.is_empty() {
+                    function.output_name = RelationIdentity::parse_reference(&function.name)
+                        .map_or_else(|_| function.name.clone(), |(_, name)| name);
+                }
+                if let Some(relation) = &mut function.relation {
+                    *relation = resolve(relation)?;
+                }
+            }
+        }
         SourcePlan::Values { .. } => {}
     }
     Ok(())
@@ -240,6 +252,14 @@ pub(super) fn source_plan_references_relation(
         uqa_planner::SourcePlan::Function { relation, .. } => relation
             .as_ref()
             .is_some_and(|relation| relation_reference_matches(relation, target)),
+        uqa_planner::SourcePlan::FunctionGroup { functions, .. } => {
+            functions.iter().any(|function| {
+                function
+                    .relation
+                    .as_ref()
+                    .is_some_and(|relation| relation_reference_matches(relation, target))
+            })
+        }
         uqa_planner::SourcePlan::Values { .. } => false,
     }
 }
@@ -296,4 +316,83 @@ pub(super) fn query_plan_references_sequence(plan: &QueryPlan, target: &Relation
         }
     });
     referenced
+}
+
+fn function_binding_matches(binding: &FunctionBinding, target: &FunctionBinding) -> bool {
+    !binding.builtin
+        && !target.builtin
+        && binding.name == target.name
+        && binding.argument_types == target.argument_types
+}
+
+fn source_plan_references_function(source: &SourcePlan, target: &FunctionBinding) -> bool {
+    match source {
+        SourcePlan::Table { .. } | SourcePlan::Values { .. } => false,
+        SourcePlan::Join { left, right, .. } => {
+            source_plan_references_function(left, target)
+                || source_plan_references_function(right, target)
+        }
+        SourcePlan::Subquery { body, .. } => query_plan_sources_reference_function(body, target),
+        SourcePlan::Function { binding, .. } => binding
+            .as_ref()
+            .is_some_and(|binding| function_binding_matches(binding, target)),
+        SourcePlan::FunctionGroup { functions, .. } => functions.iter().any(|function| {
+            function
+                .binding
+                .as_ref()
+                .is_some_and(|binding| function_binding_matches(binding, target))
+        }),
+    }
+}
+
+fn relational_plan_references_function(plan: &RelationalPlan, target: &FunctionBinding) -> bool {
+    match plan {
+        RelationalPlan::QueryBlock(block) => {
+            block
+                .from
+                .as_ref()
+                .is_some_and(|source| source_plan_references_function(source, target))
+                || block
+                    .subqueries
+                    .iter()
+                    .any(|query| query_plan_sources_reference_function(query, target))
+        }
+        RelationalPlan::SetOp {
+            left,
+            right,
+            subqueries,
+            ..
+        } => {
+            query_plan_sources_reference_function(left, target)
+                || query_plan_sources_reference_function(right, target)
+                || subqueries
+                    .iter()
+                    .any(|query| query_plan_sources_reference_function(query, target))
+        }
+        RelationalPlan::Values { subqueries, .. } => subqueries
+            .iter()
+            .any(|query| query_plan_sources_reference_function(query, target)),
+    }
+}
+
+fn query_plan_sources_reference_function(plan: &QueryPlan, target: &FunctionBinding) -> bool {
+    plan.ctes
+        .iter()
+        .any(|cte| query_plan_sources_reference_function(&cte.query, target))
+        || relational_plan_references_function(&plan.root, target)
+}
+
+pub(super) fn query_plan_references_function(plan: &QueryPlan, target: &FunctionBinding) -> bool {
+    let mut scalar_plan = plan.clone();
+    let mut referenced = false;
+    scalar_plan.rewrite_scalar_expressions(&mut |expression| {
+        if let ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } = expression
+        {
+            referenced |= function_binding_matches(binding, target);
+        }
+    });
+    referenced || query_plan_sources_reference_function(plan, target)
 }

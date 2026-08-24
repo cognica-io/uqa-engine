@@ -12,9 +12,9 @@
 //! the same declared `PostgreSQL` type identities as non-empty relations.
 
 mod analysis;
-mod table_function_binding;
+mod routine_binding;
 
-pub(in crate::sql) use table_function_binding::bind_query_plan_table_functions_for_storage;
+pub(in crate::sql) use routine_binding::bind_query_plan_routines_for_storage;
 
 use super::{
     cte_references_own_name, expr_contains_subquery, is_score_provenance_column, ordered_plan_ctes,
@@ -24,7 +24,7 @@ use super::{
 use crate::sql::from_rows::{
     alias_join_schema, apply_table_function_aliases, join_using_output_schema, resolve_join_using,
     table_function_column_types, table_function_empty_schema, validate_table_function_alias_count,
-    TableFunctionTypeRequest,
+    validate_table_function_column_definition, TableFunctionTypeRequest,
 };
 use crate::sql::virtual_relation_schema;
 use std::collections::{BTreeMap, BTreeSet};
@@ -44,6 +44,20 @@ struct SchemaScope {
 struct QueryFunctionTypeResolver<'a> {
     engine: &'a Engine,
     scalar_subquery_types: Vec<Option<ColumnType>>,
+}
+
+fn table_function_member_source(function: &uqa_planner::TableFunctionPlan) -> SourcePlan {
+    SourcePlan::Function {
+        name: function.name.clone(),
+        binding: function.binding.clone(),
+        output_name: function.output_name.clone(),
+        relation: function.relation.clone(),
+        args: function.args.clone(),
+        alias: None,
+        column_aliases: function.column_aliases.clone(),
+        ordinality: false,
+        column_types: function.column_types.clone(),
+    }
 }
 
 impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
@@ -672,6 +686,14 @@ impl SchemaScope {
                             .map_or(engine as &dyn FunctionTypeResolver, |resolver| resolver),
                     )?
                 };
+                validate_table_function_column_definition(
+                    name,
+                    binding.as_ref(),
+                    user_function
+                        .as_ref()
+                        .map(|resolved| resolved.function.as_ref()),
+                    column_types,
+                )?;
                 let columns = user_function
                     .as_ref()
                     .and_then(|resolved| {
@@ -723,6 +745,40 @@ impl SchemaScope {
                 let qualifier = alias.as_deref().unwrap_or(output_name);
                 Ok(RowSchema::with_qualified_types(qualifier, columns, types))
             }
+            SourcePlan::FunctionGroup {
+                functions,
+                alias,
+                column_aliases,
+                ordinality,
+            } => {
+                let first = functions
+                    .first()
+                    .ok_or_else(|| SQLError::Internal("ROWS FROM group has no functions".into()))?;
+                let mut columns = Vec::new();
+                let mut types = Vec::new();
+                for function in functions {
+                    let member = table_function_member_source(function);
+                    let schema = self.bind_source(engine, &member, subqueries, params, outer)?;
+                    columns.extend(schema.iter().enumerate().map(|(position, column)| {
+                        schema.public_name(position).unwrap_or(column).to_string()
+                    }));
+                    types.extend(schema.column_types().iter().cloned());
+                }
+                if *ordinality {
+                    columns.push("ordinality".into());
+                    types.push(Some(ColumnType::BigInteger));
+                }
+                let qualifier = alias.as_deref().unwrap_or(&first.output_name);
+                validate_table_function_alias_count(
+                    qualifier,
+                    columns.len(),
+                    column_aliases.len(),
+                )?;
+                for (column, alias) in columns.iter_mut().zip(column_aliases) {
+                    column.clone_from(alias);
+                }
+                Ok(RowSchema::with_qualified_types(qualifier, columns, types))
+            }
             SourcePlan::Subquery {
                 body,
                 alias,
@@ -744,8 +800,10 @@ impl SchemaScope {
                 ..
             } => {
                 let left_schema = self.bind_source(engine, left, subqueries, params, outer)?;
-                let implicit_lateral_function =
-                    matches!(right.as_ref(), SourcePlan::Function { .. });
+                let implicit_lateral_function = matches!(
+                    right.as_ref(),
+                    SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
+                );
                 let right_scope = (*lateral || implicit_lateral_function)
                     .then(|| overlay_outer_schema(&left_schema, outer));
                 let right_schema = self.bind_source(
@@ -799,8 +857,10 @@ impl SchemaScope {
             } => {
                 let left_schema =
                     self.bind_source_for_execution(engine, left, subqueries, params, outer)?;
-                let implicit_lateral_function =
-                    matches!(right.as_ref(), SourcePlan::Function { .. });
+                let implicit_lateral_function = matches!(
+                    right.as_ref(),
+                    SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
+                );
                 let right_scope = (*lateral || implicit_lateral_function)
                     .then(|| overlay_outer_schema(&left_schema, outer));
                 self.bind_source_for_execution(
@@ -846,6 +906,16 @@ impl SchemaScope {
                     resolver,
                 )? {
                     *binding = Some(selected);
+                }
+            }
+            SourcePlan::FunctionGroup { functions, .. } => {
+                for function in functions {
+                    let mut member = table_function_member_source(function);
+                    self.bind_source_for_execution(engine, &mut member, subqueries, params, outer)?;
+                    let SourcePlan::Function { binding, .. } = member else {
+                        unreachable!("table-function member changed source kind during binding")
+                    };
+                    function.binding = binding;
                 }
             }
             SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Subquery { .. } => {}

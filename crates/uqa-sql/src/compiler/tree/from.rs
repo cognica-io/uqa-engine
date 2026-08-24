@@ -10,6 +10,7 @@ use super::{
     compile_expr, compile_select, extract_strings, range_var_name, render_relation_component, Expr,
     FromClause, JoinKind, Node, NodeEnum, Result, SQLError,
 };
+use crate::ast::TableFunction;
 
 fn compile_relation_argument(node: &Node, function_name: &str) -> Result<String> {
     let Some(NodeEnum::ColumnRef(reference)) = node.node.as_ref() else {
@@ -37,6 +38,116 @@ fn compile_relation_argument(node: &Node, function_name: &str) -> Result<String>
             "{function_name}.relation: cross-database relation names are not supported"
         ))),
     }
+}
+
+fn range_function_pair(node: &Node) -> Result<(&Node, &[Node])> {
+    let Some(NodeEnum::List(pair)) = node.node.as_ref() else {
+        return Ok((node, &[]));
+    };
+    let call = pair
+        .items
+        .first()
+        .ok_or_else(|| SQLError::Internal("RangeFunction empty pair".into()))?;
+    let column_definitions = match pair.items.get(1).and_then(|node| node.node.as_ref()) {
+        Some(NodeEnum::List(definitions)) => definitions.items.as_slice(),
+        None => &[],
+        Some(other) => {
+            return Err(SQLError::Internal(format!(
+                "RangeFunction column-definition list has unexpected node {other:?}"
+            )));
+        }
+    };
+    Ok((call, column_definitions))
+}
+
+fn expands_multi_argument_unnest(
+    call: &pg_query::protobuf::FuncCall,
+    column_definitions: &[Node],
+) -> Result<bool> {
+    let names = extract_strings(&call.funcname)?;
+    Ok(names.as_slice() == ["unnest"]
+        && call.args.len() > 1
+        && call.agg_order.is_empty()
+        && call.agg_filter.is_none()
+        && call.over.is_none()
+        && !call.agg_star
+        && !call.agg_distinct
+        && !call.func_variadic
+        && column_definitions.is_empty())
+}
+
+fn compile_table_function(call: &Node, column_definitions: &[Node]) -> Result<TableFunction> {
+    let Some(NodeEnum::FuncCall(raw_call)) = call.node.as_ref() else {
+        return Err(SQLError::Internal(
+            "RangeFunction lost its function-call parse node".into(),
+        ));
+    };
+    let output_name = extract_strings(&raw_call.funcname)?
+        .into_iter()
+        .last()
+        .ok_or_else(|| SQLError::Internal("RangeFunction has an empty name".into()))?;
+    let expr = compile_expr(call)?;
+    let (name, mut args) = match expr {
+        Expr::Func { name, args, .. } => (name, args),
+        other => {
+            return Err(SQLError::Unsupported(format!(
+                "RangeFunction body must be a function call, got {other:?}"
+            )));
+        }
+    };
+    let relation = if crate::registry::is_operator_join_table_function(&name) {
+        let relation_node = raw_call.args.first().ok_or_else(|| SQLError::BadArity {
+            name: name.clone(),
+            expected: "a relation identifier followed by operator operands".into(),
+            actual: 0,
+        })?;
+        let relation = compile_relation_argument(relation_node, &name)?;
+        args.remove(0);
+        Some(relation)
+    } else {
+        None
+    };
+    let column_definitions = compile_column_definitions(column_definitions)?;
+    Ok(TableFunction {
+        name,
+        output_name,
+        relation,
+        args,
+        column_aliases: column_definitions
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect(),
+        column_types: column_definitions
+            .into_iter()
+            .map(|(_, data_type)| data_type)
+            .collect(),
+    })
+}
+
+fn compile_range_function_members(node: &Node) -> Result<Vec<TableFunction>> {
+    let (call, column_definitions) = range_function_pair(node)?;
+    let Some(NodeEnum::FuncCall(raw_call)) = call.node.as_ref() else {
+        return Err(SQLError::Internal(
+            "RangeFunction lost its function-call parse node".into(),
+        ));
+    };
+    if expands_multi_argument_unnest(raw_call, column_definitions)? {
+        return raw_call
+            .args
+            .iter()
+            .map(|argument| {
+                Ok(TableFunction {
+                    name: "pg_catalog.unnest".into(),
+                    output_name: "unnest".into(),
+                    relation: None,
+                    args: vec![compile_expr(argument)?],
+                    column_aliases: Vec::new(),
+                    column_types: Vec::new(),
+                })
+            })
+            .collect();
+    }
+    Ok(vec![compile_table_function(call, column_definitions)?])
 }
 
 pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> {
@@ -158,75 +269,60 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
             })
         }
         NodeEnum::RangeFunction(rf) => {
-            if rf.is_rowsfrom || rf.functions.len() > 1 {
-                return Err(SQLError::Unsupported(
-                    "ROWS FROM and multiple table functions in one FROM item are not supported"
-                        .into(),
-                ));
-            }
-            // A single function in `functions` carries the call. Re-use
-            // compile_expr to lift it into an Expr::Func, then peel back
-            // the name and arguments.
-            let Some(first_node) = rf.functions.first() else {
+            if rf.functions.is_empty() {
                 return Err(SQLError::Internal("RangeFunction without functions".into()));
-            };
-            // RangeFunction.functions is a list of `[FuncCall, alias_definition]`
-            // pairs encoded as a List. Take the first element of the
-            // first pair as the call.
-            let call = match first_node.node.as_ref() {
-                Some(NodeEnum::List(l)) => l
-                    .items
-                    .first()
-                    .ok_or_else(|| SQLError::Internal("RangeFunction empty pair".into()))?,
-                _ => first_node,
-            };
-            let Some(NodeEnum::FuncCall(raw_call)) = call.node.as_ref() else {
-                return Err(SQLError::Internal(
-                    "RangeFunction lost its function-call parse node".into(),
-                ));
-            };
-            let output_name = extract_strings(&raw_call.funcname)?
+            }
+            let functions = rf
+                .functions
+                .iter()
+                .map(compile_range_function_members)
+                .collect::<Result<Vec<_>>>()?
                 .into_iter()
-                .last()
-                .ok_or_else(|| SQLError::Internal("RangeFunction has an empty name".into()))?;
-            let expr = compile_expr(call)?;
-            let (name, mut args) = match expr {
-                Expr::Func { name, args, .. } => (name, args),
-                other => {
-                    return Err(SQLError::Unsupported(format!(
-                        "RangeFunction body must be a function call, got {other:?}"
-                    )));
-                }
-            };
-            let relation = if crate::registry::is_operator_join_table_function(&name) {
-                let relation_node = raw_call.args.first().ok_or_else(|| SQLError::BadArity {
-                    name: name.clone(),
-                    expected: "a relation identifier followed by operator operands".into(),
-                    actual: 0,
-                })?;
-                let relation = compile_relation_argument(relation_node, &name)?;
-                args.remove(0);
-                Some(relation)
-            } else {
-                None
-            };
+                .flatten()
+                .collect::<Vec<_>>();
             let (alias, column_aliases) = compile_alias(rf.alias.as_ref())?;
+            if rf.is_rowsfrom || functions.len() > 1 {
+                if !rf.coldeflist.is_empty() {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42601".into(),
+                        message: "a column definition list cannot be applied to a function group"
+                            .into(),
+                    });
+                }
+                return Ok(FromClause::FunctionGroup {
+                    functions,
+                    alias,
+                    column_aliases,
+                    ordinality: rf.ordinality,
+                });
+            }
+            let mut function = functions.into_iter().next().ok_or_else(|| {
+                SQLError::Internal("RangeFunction produced no function members".into())
+            })?;
             let coldefs = compile_column_definitions(&rf.coldeflist)?;
             let column_types: Vec<String> = coldefs.iter().map(|(_, ty)| ty.clone()).collect();
             let coldef_aliases: Vec<String> = coldefs.into_iter().map(|(name, _)| name).collect();
             Ok(FromClause::Function {
-                name,
-                output_name,
-                relation,
-                args,
+                name: function.name,
+                output_name: function.output_name,
+                relation: function.relation,
+                args: function.args,
                 alias,
                 column_aliases: if coldef_aliases.is_empty() {
-                    column_aliases
+                    if function.column_aliases.is_empty() {
+                        column_aliases
+                    } else {
+                        std::mem::take(&mut function.column_aliases)
+                    }
                 } else {
                     coldef_aliases
                 },
                 ordinality: rf.ordinality,
-                column_types,
+                column_types: if column_types.is_empty() {
+                    function.column_types
+                } else {
+                    column_types
+                },
             })
         }
         other => Err(SQLError::Unsupported(format!("FROM form: {other:?}"))),
@@ -270,15 +366,58 @@ pub(in crate::compiler) fn compile_column_definitions(
                 let type_node = col.type_name.as_ref().ok_or_else(|| {
                     SQLError::Internal(format!("function column `{}` has no type", col.colname))
                 })?;
-                let type_name = extract_strings(&type_node.names)?
-                    .last()
-                    .ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "function column `{}` has an empty type name",
-                            col.colname
-                        ))
-                    })?
-                    .to_ascii_lowercase();
+                let type_name =
+                    match super::super::types::compile_pg_type_name(type_node, &col.colname) {
+                        Ok(column_type) => {
+                            let mut type_name = extract_strings(&type_node.names)?
+                                .last()
+                                .ok_or_else(|| {
+                                    SQLError::Internal(format!(
+                                        "function column `{}` has an empty type name",
+                                        col.colname
+                                    ))
+                                })?
+                                .to_ascii_lowercase();
+                            if !type_node.typmods.is_empty() {
+                                let rendered = column_type.sql_name();
+                                let modifier = rendered.find('(').ok_or_else(|| {
+                                    SQLError::Internal(format!(
+                                        "function column `{}` lost its validated type modifier",
+                                        col.colname
+                                    ))
+                                })?;
+                                let modifier_end = rendered[modifier..]
+                                    .find(')')
+                                    .map(|position| modifier + position + 1)
+                                    .ok_or_else(|| {
+                                        SQLError::Internal(format!(
+                                        "function column `{}` has an unterminated type modifier",
+                                        col.colname
+                                    ))
+                                    })?;
+                                type_name.push_str(&rendered[modifier..modifier_end]);
+                            }
+                            for _ in &type_node.array_bounds {
+                                type_name.push_str("[]");
+                            }
+                            type_name
+                        }
+                        Err(SQLError::Unsupported(_)) => {
+                            let names = extract_strings(&type_node.names)?;
+                            if names.is_empty() {
+                                return Err(SQLError::Internal(format!(
+                                    "function column `{}` has an empty type name",
+                                    col.colname
+                                )));
+                            }
+                            let mut type_name = names.join(".").to_ascii_lowercase();
+                            for _ in &type_node.array_bounds {
+                                type_name.push_str("[]");
+                            }
+                            type_name
+                        }
+                        Err(error) => return Err(error),
+                    };
                 Ok((col.colname.clone(), type_name))
             }
             other => Err(SQLError::Unsupported(format!(

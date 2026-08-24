@@ -105,7 +105,10 @@ pub(in crate::sql) fn collect_source_query_cte_names(
             collect_source_query_cte_names(right, names);
         }
         SourcePlan::Subquery { body, .. } => collect_query_cte_names(body, names),
-        SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Function { .. } => {}
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. } => {}
     }
 }
 

@@ -9,13 +9,136 @@
 use super::*;
 
 #[test]
-fn unsupported_from_forms_fail_instead_of_becoming_cross_joins() {
-    let sql = "SELECT * FROM ROWS FROM (generate_series(1, 2), generate_series(3, 4)) AS f(a, b)";
-    let error = compile(sql).expect_err(sql);
-    assert!(
-        matches!(&error, SQLError::Unsupported(message) if message.contains("ROWS FROM")),
-        "unexpected error for {sql}: {error}"
+fn rows_from_preserves_members_column_definitions_aliases_and_ordinality() {
+    let Statement::Select(select) = first(
+        "SELECT * FROM ROWS FROM (f(1) AS (left_id int4, left_label text), g(2)) \
+         WITH ORDINALITY AS grouped(a, b, c, sequence)",
+    ) else {
+        panic!("expected SELECT");
+    };
+    let Some(FromClause::FunctionGroup {
+        functions,
+        alias,
+        column_aliases,
+        ordinality,
+    }) = select.from
+    else {
+        panic!("expected function group");
+    };
+    assert_eq!(alias.as_deref(), Some("grouped"));
+    assert_eq!(column_aliases, ["a", "b", "c", "sequence"]);
+    assert!(ordinality);
+    assert_eq!(functions.len(), 2);
+    assert_eq!(functions[0].name, "f");
+    assert_eq!(functions[0].output_name, "f");
+    assert_eq!(functions[0].column_aliases, ["left_id", "left_label"]);
+    assert_eq!(functions[0].column_types, ["int4", "text"]);
+    assert_eq!(functions[0].args.len(), 1);
+    assert_eq!(functions[1].name, "g");
+    assert!(functions[1].column_aliases.is_empty());
+    assert!(functions[1].column_types.is_empty());
+}
+
+#[test]
+fn table_function_column_definitions_preserve_type_modifiers() {
+    let Statement::Select(select) =
+        first("SELECT * FROM f() AS (label varchar(8), amount numeric(10,2), labels varchar(3)[])")
+    else {
+        panic!("expected SELECT");
+    };
+    let Some(FromClause::Function { column_types, .. }) = select.from else {
+        panic!("expected function source");
+    };
+    assert_eq!(
+        column_types,
+        ["varchar(8)", "numeric(10,2)", "varchar(3)[]"]
     );
+}
+
+#[test]
+fn multi_argument_from_unnest_expands_to_canonical_unary_group_members() {
+    let Statement::Select(select) =
+        first("SELECT * FROM unnest(ARRAY[1, 2], ARRAY['a']) AS expanded(left_value, right_value)")
+    else {
+        panic!("expected SELECT");
+    };
+    let Some(FromClause::FunctionGroup {
+        functions,
+        alias,
+        column_aliases,
+        ordinality,
+    }) = select.from
+    else {
+        panic!("expected expanded function group");
+    };
+    assert_eq!(alias.as_deref(), Some("expanded"));
+    assert_eq!(column_aliases, ["left_value", "right_value"]);
+    assert!(!ordinality);
+    assert_eq!(functions.len(), 2);
+    for function in &functions {
+        assert_eq!(function.name, "pg_catalog.unnest");
+        assert_eq!(function.output_name, "unnest");
+        assert_eq!(function.args.len(), 1);
+        assert!(function.column_aliases.is_empty());
+        assert!(function.column_types.is_empty());
+    }
+}
+
+#[test]
+fn rows_from_uses_the_same_multi_argument_unnest_expansion() {
+    let Statement::Select(select) =
+        first("SELECT * FROM ROWS FROM (unnest(ARRAY[1], ARRAY[2]), generate_series(1, 2))")
+    else {
+        panic!("expected SELECT");
+    };
+    let Some(FromClause::FunctionGroup { functions, .. }) = select.from else {
+        panic!("expected function group");
+    };
+    assert_eq!(functions.len(), 3);
+    assert_eq!(functions[0].name, "pg_catalog.unnest");
+    assert_eq!(functions[1].name, "pg_catalog.unnest");
+    assert_eq!(functions[2].name, "generate_series");
+}
+
+#[test]
+fn unnest_expansion_respects_single_argument_and_qualified_boundaries() {
+    let Statement::Select(single) = first("SELECT * FROM unnest(ARRAY[1, 2])") else {
+        panic!("expected SELECT");
+    };
+    assert!(matches!(
+        single.from,
+        Some(FromClause::Function { ref name, ref args, .. })
+            if name == "unnest" && args.len() == 1
+    ));
+
+    let Statement::Select(rows_from_single) =
+        first("SELECT * FROM ROWS FROM (unnest(ARRAY[1, 2]))")
+    else {
+        panic!("expected SELECT");
+    };
+    assert!(matches!(
+        rows_from_single.from,
+        Some(FromClause::FunctionGroup { ref functions, .. })
+            if matches!(functions.as_slice(), [function]
+                if function.name == "unnest" && function.args.len() == 1)
+    ));
+
+    for (sql, expected_name) in [
+        ("SELECT * FROM app.unnest(ARRAY[1], ARRAY[2])", "app.unnest"),
+        (
+            "SELECT * FROM pg_catalog.unnest(ARRAY[1], ARRAY[2])",
+            "pg_catalog.unnest",
+        ),
+    ] {
+        let Statement::Select(select) = first(sql) else {
+            panic!("expected SELECT");
+        };
+        assert!(matches!(
+            select.from,
+            Some(FromClause::Function { ref name, ref args, .. })
+                if name == expected_name && args.len() == 2
+        ));
+    }
 }
 
 #[test]

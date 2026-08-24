@@ -215,6 +215,7 @@ impl<'a> SetProjection<'a> {
                             self.engine,
                             &call.name,
                             &arguments,
+                            None,
                         )
                     },
                     |binding| {
@@ -222,6 +223,7 @@ impl<'a> SetProjection<'a> {
                             self.engine,
                             binding,
                             &arguments,
+                            None,
                         )
                     },
                 )

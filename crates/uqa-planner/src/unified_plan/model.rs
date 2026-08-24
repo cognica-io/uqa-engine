@@ -123,6 +123,21 @@ pub enum JoinExecutionStrategy {
     Hash,
 }
 
+/// One independently resolved and bound function inside a range-function group.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TableFunctionPlan {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<uqa_sql::ast::FunctionBinding>,
+    #[serde(default)]
+    pub output_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relation: Option<String>,
+    pub args: Vec<ScalarExpr>,
+    pub column_aliases: Vec<String>,
+    pub column_types: Vec<String>,
+}
+
 /// The row-producing source below a query block.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SourcePlan {
@@ -168,6 +183,13 @@ pub enum SourcePlan {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         ordinality: bool,
         column_types: Vec<String>,
+    },
+    FunctionGroup {
+        functions: Vec<TableFunctionPlan>,
+        alias: Option<String>,
+        column_aliases: Vec<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ordinality: bool,
     },
     Subquery {
         body: Box<QueryPlan>,

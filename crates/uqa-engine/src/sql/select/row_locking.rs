@@ -58,7 +58,10 @@ fn source_plan_has_row_locks(source: &SourcePlan) -> bool {
             source_plan_has_row_locks(left) || source_plan_has_row_locks(right)
         }
         SourcePlan::Subquery { body, .. } => query_plan_has_row_locks(body),
-        SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Function { .. } => false,
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. } => false,
     }
 }
 
@@ -177,6 +180,7 @@ fn source_contains_join_alias(source: &SourcePlan, target: &str) -> bool {
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { .. } => false,
     }
 }
@@ -228,7 +232,10 @@ fn apply_propagated_lock_to_subqueries(
         SourcePlan::Subquery { body, .. } => {
             apply_propagated_lock_to_relational(&mut body.root, strength, wait);
         }
-        SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Function { .. } => {}
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. } => {}
     }
 }
 
@@ -338,6 +345,22 @@ fn collect_source_leaves(
                 nullable,
             }])
         }
+        SourcePlan::FunctionGroup {
+            functions, alias, ..
+        } => {
+            let first = functions
+                .first()
+                .ok_or_else(|| SQLError::Internal("ROWS FROM group has no functions".into()))?;
+            let visible = alias.as_deref().unwrap_or(&first.output_name);
+            Ok(vec![LockLeaf {
+                names: vec![visible.to_string()],
+                qualifier: visible.to_string(),
+                storage_name: String::new(),
+                display_name: visible.to_string(),
+                kind: LockLeafKind::Function,
+                nullable,
+            }])
+        }
         SourcePlan::Subquery { body, alias, .. } => {
             let visible = alias.clone().unwrap_or_default();
             Ok(vec![LockLeaf {
@@ -377,6 +400,7 @@ fn collect_source_leaf_plans<'a>(
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { .. } => leaves.push((path.clone(), source)),
     }
 }
@@ -615,7 +639,9 @@ fn validate_propagated_source(
         SourcePlan::Subquery { body, .. } => {
             validate_propagated_query(engine, body, strength, nullable, false)
         }
-        SourcePlan::Values { .. } | SourcePlan::Function { .. } => Ok(()),
+        SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. } => Ok(()),
     }
 }
 

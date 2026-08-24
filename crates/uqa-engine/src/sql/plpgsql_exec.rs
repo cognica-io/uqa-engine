@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use uqa_core::Value;
 use uqa_sql::ast::{
-    CreateFunction, DropFunctionStmt, Expr, FunctionBinding, FunctionReturns, Statement,
+    ColumnType, CreateFunction, DropFunctionStmt, Expr, FunctionBinding, FunctionReturns, Statement,
 };
 use uqa_sql::expr::{cast_value, truthy, value_type_name};
 use uqa_sql::plpgsql::{
@@ -85,6 +85,7 @@ struct RoutineOutcome {
     value: Value,
     out_values: Vec<Value>,
     set_rows: Vec<Vec<Value>>,
+    anonymous_record_column_types: Option<Vec<Option<ColumnType>>>,
 }
 
 #[derive(Clone)]

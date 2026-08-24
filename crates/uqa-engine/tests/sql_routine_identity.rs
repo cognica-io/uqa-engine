@@ -302,6 +302,7 @@ fn table_routine_view_binding_survives_search_path_changes_and_reopen() {
             "CREATE SCHEMA table_view_first",
             "CREATE SCHEMA table_view_second",
             "CREATE FUNCTION table_view_first.bound_table(value BIGINT) RETURNS TABLE(chosen TEXT) LANGUAGE SQL AS 'SELECT ''first'''",
+            "CREATE FUNCTION table_view_first.bound_table(value INTEGER) RETURNS TABLE(unused TEXT) LANGUAGE SQL AS 'SELECT ''unused'''",
             "CREATE FUNCTION table_view_second.bound_table(value BIGINT) RETURNS TABLE(other TEXT) LANGUAGE SQL AS 'SELECT ''second'''",
             "SET search_path = table_view_first, table_view_second, public",
             "CREATE VIEW bound_table_view AS SELECT chosen FROM bound_table(7::BIGINT)",
@@ -334,20 +335,183 @@ fn table_routine_view_binding_survives_search_path_changes_and_reopen() {
     );
 
     reopened
-        .sql("DROP FUNCTION table_view_first.bound_table(BIGINT)", &[])
+        .sql("DROP FUNCTION table_view_first.bound_table(INTEGER)", &[])
         .unwrap();
-    let missing = reopened
-        .sql(
+    reopened
+        .sql("DROP FUNCTION table_view_second.bound_table(BIGINT)", &[])
+        .unwrap();
+    let dependency = reopened
+        .sql("DROP FUNCTION table_view_first.bound_table(BIGINT)", &[])
+        .unwrap_err();
+    assert_eq!(dependency.sqlstate(), Some("2BP01"), "{dependency}");
+    assert!(
+        dependency.to_string().contains("bound_table_view"),
+        "{dependency}"
+    );
+    assert_eq!(
+        scalar(
+            &reopened,
             "SELECT chosen AS v FROM table_view_first.bound_table_view",
+        ),
+        Value::Str("first".into())
+    );
+    let remaining = reopened
+        .sql(
+            "SELECT routine_name AS v FROM information_schema.routines WHERE routine_schema = 'table_view_first' AND routine_name = 'bound_table'",
             &[],
         )
-        .unwrap_err();
-    assert_eq!(missing.sqlstate(), Some("42883"), "{missing}");
-    assert!(missing.to_string().contains("bound function"), "{missing}");
+        .unwrap();
+    assert_eq!(remaining.rows.len(), 1);
 }
 
 #[test]
-fn user_unnest_overload_precedes_pg_catalog_and_keeps_its_declared_shape() {
+fn scalar_view_function_dependencies_are_exact_replaceable_and_drop_atomic() {
+    let engine = Engine::new();
+    for sql in [
+        "CREATE SCHEMA view_dep",
+        "SET search_path = view_dep, pg_catalog, public",
+        "CREATE FUNCTION chosen(value INTEGER) RETURNS TEXT LANGUAGE SQL AS 'SELECT ''chosen'''",
+        "CREATE FUNCTION chosen(value BIGINT) RETURNS TEXT LANGUAGE SQL AS 'SELECT ''other-overload'''",
+        "CREATE FUNCTION replacement(value INTEGER) RETURNS TEXT LANGUAGE SQL AS 'SELECT ''replacement'''",
+        "CREATE FUNCTION free_function(value INTEGER) RETURNS TEXT LANGUAGE SQL AS 'SELECT ''free'''",
+        "CREATE VIEW exact_scalar_view AS SELECT chosen(1::INTEGER) AS value",
+    ] {
+        engine.sql(sql, &[]).unwrap();
+    }
+
+    engine
+        .sql("DROP FUNCTION view_dep.chosen(BIGINT)", &[])
+        .unwrap();
+    let atomic = engine
+        .sql(
+            "DROP FUNCTION view_dep.free_function(INTEGER), view_dep.chosen(INTEGER)",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(atomic.sqlstate(), Some("2BP01"), "{atomic}");
+    assert_eq!(
+        scalar(&engine, "SELECT view_dep.free_function(1) AS v"),
+        Value::Str("free".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT value AS v FROM view_dep.exact_scalar_view"),
+        Value::Str("chosen".into())
+    );
+
+    engine
+        .sql(
+            "CREATE OR REPLACE VIEW view_dep.exact_scalar_view AS SELECT view_dep.replacement(1::INTEGER) AS value",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql("DROP FUNCTION view_dep.chosen(INTEGER)", &[])
+        .unwrap();
+    let replacement_dependency = engine
+        .sql("DROP FUNCTION view_dep.replacement(INTEGER)", &[])
+        .unwrap_err();
+    assert_eq!(
+        replacement_dependency.sqlstate(),
+        Some("2BP01"),
+        "{replacement_dependency}"
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT value AS v FROM view_dep.exact_scalar_view"),
+        Value::Str("replacement".into())
+    );
+
+    for sql in [
+        "CREATE FUNCTION view_dep.shared_dependency(value INTEGER) RETURNS TEXT LANGUAGE SQL IMMUTABLE AS 'SELECT ''shared'''",
+        "CREATE TABLE view_dep.generated_dependency (source INTEGER, derived TEXT GENERATED ALWAYS AS (view_dep.shared_dependency(source)) STORED)",
+        "CREATE VIEW view_dep.function_dependency AS SELECT view_dep.shared_dependency(1::INTEGER) AS value",
+    ] {
+        engine.sql(sql, &[]).unwrap();
+    }
+    let combined_dependency = engine
+        .sql("DROP FUNCTION view_dep.shared_dependency(INTEGER)", &[])
+        .unwrap_err();
+    assert_eq!(
+        combined_dependency.sqlstate(),
+        Some("2BP01"),
+        "{combined_dependency}"
+    );
+    assert!(
+        combined_dependency
+            .to_string()
+            .contains("generated_dependency.derived"),
+        "{combined_dependency}"
+    );
+    assert!(
+        combined_dependency
+            .to_string()
+            .contains("function_dependency"),
+        "{combined_dependency}"
+    );
+
+    engine
+        .sql(
+            "CREATE VIEW view_dep.builtin_scalar_view AS SELECT pg_catalog.lower('ABC') AS value",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE FUNCTION view_dep.lower(value TEXT) RETURNS TEXT LANGUAGE SQL AS 'SELECT ''user-lower'''",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql("DROP FUNCTION view_dep.lower(TEXT)", &[])
+        .unwrap();
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT value AS v FROM view_dep.builtin_scalar_view",
+        ),
+        Value::Str("abc".into())
+    );
+}
+
+#[test]
+fn view_function_dependency_scan_covers_function_groups_and_nested_query_shapes() {
+    let engine = Engine::new();
+    for sql in [
+        "CREATE SCHEMA structural_dep",
+        "SET search_path = structural_dep, pg_catalog, public",
+        "CREATE FUNCTION group_left(value INTEGER) RETURNS TABLE(left_value INTEGER) LANGUAGE SQL AS 'SELECT $1'",
+        "CREATE FUNCTION group_right(value INTEGER) RETURNS TABLE(right_value INTEGER) LANGUAGE SQL AS 'SELECT $1'",
+        "CREATE FUNCTION nested_scalar(value INTEGER) RETURNS INTEGER LANGUAGE SQL IMMUTABLE AS 'SELECT $1 + 10'",
+        "CREATE VIEW function_group_view AS SELECT left_value, right_value FROM ROWS FROM (group_left(1), group_right(2)) AS grouped(left_value, right_value)",
+        "CREATE VIEW nested_plan_view AS WITH source AS (SELECT left_value AS value FROM ROWS FROM (group_left(1)) AS grouped(left_value)) SELECT nested_scalar(derived.value) AS value FROM (SELECT value FROM source) AS derived JOIN (VALUES (1)) AS marker(id) ON true UNION ALL SELECT (SELECT nested_scalar(nested.v) FROM (VALUES (2)) AS nested(v)) AS value",
+    ] {
+        engine.sql(sql, &[]).unwrap();
+    }
+
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT value AS v FROM structural_dep.nested_plan_view ORDER BY value LIMIT 1",
+        ),
+        Value::Int(11)
+    );
+    for (signature, expected_view) in [
+        ("structural_dep.group_left(INTEGER)", "function_group_view"),
+        ("structural_dep.group_right(INTEGER)", "function_group_view"),
+        ("structural_dep.nested_scalar(INTEGER)", "nested_plan_view"),
+    ] {
+        let dependency = engine
+            .sql(&format!("DROP FUNCTION {signature}"), &[])
+            .unwrap_err();
+        assert_eq!(dependency.sqlstate(), Some("2BP01"), "{dependency}");
+        assert!(
+            dependency.to_string().contains(expected_view),
+            "{dependency}"
+        );
+    }
+}
+
+#[test]
+fn multi_argument_from_unnest_uses_postgresql_syntax_before_user_overloads() {
     let engine = Engine::new();
     for sql in [
         "CREATE SCHEMA user_table_api",
@@ -357,10 +521,42 @@ fn user_unnest_overload_precedes_pg_catalog_and_keeps_its_declared_shape() {
         engine.sql(sql, &[]).unwrap();
     }
 
+    let builtin = engine
+        .sql(
+            "SELECT left_value, right_value
+             FROM unnest(ARRAY[1, 3]::INTEGER[], ARRAY[2]::INTEGER[])
+                  AS u(left_value, right_value)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(builtin.rows.len(), 2);
+    assert_eq!(builtin.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(builtin.value_at(0, 1), Some(&Value::Int(2)));
+    assert_eq!(builtin.value_at(1, 0), Some(&Value::Int(3)));
+    assert_eq!(builtin.value_at(1, 1), Some(&Value::Null));
+
     assert_eq!(
         scalar(
             &engine,
-            "SELECT chosen AS v FROM unnest(ARRAY[1]::INTEGER[], ARRAY[2]::INTEGER[])",
+            "SELECT chosen AS v
+             FROM user_table_api.unnest(ARRAY[1]::INTEGER[], ARRAY[2]::INTEGER[])",
+        ),
+        Value::Str("user-unnest".into())
+    );
+
+    let qualified_builtin = engine
+        .sql(
+            "SELECT *
+             FROM pg_catalog.unnest(ARRAY[1]::INTEGER[], ARRAY[2]::INTEGER[])",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(qualified_builtin.sqlstate(), Some("42883"));
+
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT unnest(ARRAY[1]::INTEGER[], ARRAY[2]::INTEGER[]) AS v",
         ),
         Value::Str("user-unnest".into())
     );

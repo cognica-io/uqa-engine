@@ -222,6 +222,7 @@ fn source_contains_join_alias(source: &SourcePlan) -> bool {
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { .. } => false,
     }
 }
@@ -251,6 +252,7 @@ fn collect_join_binding_prune_columns(engine: &Engine, from: &SourcePlan, prune:
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { .. } => {}
     }
 }
@@ -343,6 +345,53 @@ fn add_all_source_columns_to_prune(engine: &Engine, source: &SourcePlan, prune: 
                 ),
             );
         }
+        SourcePlan::FunctionGroup {
+            functions,
+            alias,
+            column_aliases,
+            ordinality,
+        } => {
+            let Some(qualifier) = alias
+                .as_ref()
+                .or_else(|| functions.first().map(|function| &function.output_name))
+            else {
+                return;
+            };
+            let Some(columns) = prune.get_mut(qualifier) else {
+                return;
+            };
+            let mut group_columns = Vec::new();
+            for function in functions {
+                group_columns.extend(
+                    super::user_function_output_columns(engine, &function.name).map_or_else(
+                        || {
+                            crate::sql::from_rows::table_function_empty_schema(
+                                &function.name,
+                                &function.output_name,
+                                None,
+                                &function.column_aliases,
+                                function.args.len(),
+                                false,
+                            )
+                        },
+                        |base| {
+                            crate::sql::from_rows::apply_table_function_aliases(
+                                base,
+                                &function.column_aliases,
+                                false,
+                            )
+                        },
+                    ),
+                );
+            }
+            if *ordinality {
+                group_columns.push("ordinality".into());
+            }
+            for (column, alias) in group_columns.iter_mut().zip(column_aliases) {
+                column.clone_from(alias);
+            }
+            columns.extend(group_columns);
+        }
         SourcePlan::Subquery {
             body,
             alias,
@@ -375,6 +424,7 @@ pub(in crate::sql) fn collect_from_qualifiers(from: &SourcePlan, out: &mut Vec<S
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { .. } => {
             if let Some(qualifier) = from.visible_qualifier() {
                 out.push(qualifier.to_string());
@@ -409,6 +459,13 @@ pub(in crate::sql) fn collect_from_prune_columns(
         SourcePlan::Function { args, .. } => {
             for expr in args {
                 collect_expr_prune_columns(expr, qualifiers, prune, valid);
+            }
+        }
+        SourcePlan::FunctionGroup { functions, .. } => {
+            for function in functions {
+                for expr in &function.args {
+                    collect_expr_prune_columns(expr, qualifiers, prune, valid);
+                }
             }
         }
         SourcePlan::Subquery { .. } => {

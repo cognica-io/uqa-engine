@@ -128,19 +128,13 @@ pub(crate) fn analyze_catalog_query_schema(
     select::analyze_query_plan_schema(engine, query, params, &CteScope::default(), None)
 }
 
-/// Bind catalog-owned table-function calls to exact routine identities before the query plan is serialized.
-pub(crate) fn bind_catalog_query_table_functions(
+/// Bind every catalog-owned scalar and table-function call to an exact routine identity before the query plan is serialized.
+pub(crate) fn bind_catalog_query_routines(
     engine: &Engine,
     query: &mut uqa_planner::QueryPlan,
     params: &[SQLParam],
 ) -> Result<uqa_execution::RowSchema, SQLError> {
-    select::bind_query_plan_table_functions_for_storage(
-        engine,
-        query,
-        params,
-        &CteScope::default(),
-        None,
-    )
+    select::bind_query_plan_routines_for_storage(engine, query, params, &CteScope::default(), None)
 }
 
 const SCORE_COLUMN: &str = "_score";

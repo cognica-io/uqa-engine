@@ -74,10 +74,23 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
             return registered_table_function_rows(name, result?, alias, column_aliases);
         }
     }
+    let record_definition = (!column_types.is_empty()).then_some((column_aliases, column_types));
     let user_result = binding.map_or_else(
-        || crate::sql::plpgsql_exec::call_user_table_function(engine, &identity, &call_args),
+        || {
+            crate::sql::plpgsql_exec::call_user_table_function(
+                engine,
+                &identity,
+                &call_args,
+                record_definition,
+            )
+        },
         |binding| {
-            crate::sql::plpgsql_exec::call_bound_user_table_function(engine, binding, &call_args)
+            crate::sql::plpgsql_exec::call_bound_user_table_function(
+                engine,
+                binding,
+                &call_args,
+                record_definition,
+            )
         },
     );
     if let Some(result) = user_result {
