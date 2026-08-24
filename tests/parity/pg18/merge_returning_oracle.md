@@ -40,6 +40,6 @@ An unconditional `WHEN NOT MATCHED BY SOURCE THEN DO NOTHING` followed later by 
 
 One source row matching two distinct target rows updated both target rows and returned two UPDATE rows. Two source rows selecting UPDATE for the same target failed atomically with SQLSTATE `21000` and `MERGE command cannot affect row a second time`; a candidate selecting `DO NOTHING` did not count as a prior modification and did not cause the cardinality error.
 
-For a MATCHED UPDATE and a `NOT MATCHED BY TARGET` INSERT, unqualified `RETURNING *` produced source columns before target columns with the header `id|delta|marker|id|val|note`; the two rows were `1|5|m|1|15|m` and `3|30|new|3|30|new`.
+For a MATCHED UPDATE and a `NOT MATCHED BY TARGET` INSERT, unqualified `RETURNING *` produced source columns before target columns with the header `id|delta|marker|id|val|note`; the two rows were `1|5|m|1|15|m` and `4|40|new|4|40|new`.
 
 The corresponding `RETURNING WITH (OLD AS before, NEW AS after) s.*, before.*, after.*` preserved source, old-image, and new-image groups in that order; the INSERT row contained NULL in every `before.*` position and the UPDATE row retained both target images.
