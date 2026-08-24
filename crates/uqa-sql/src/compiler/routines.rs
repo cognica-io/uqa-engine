@@ -127,11 +127,7 @@ pub(super) fn compile_create_function(
                 has_table_param = true;
                 FunctionParamMode::Table
             }
-            FunctionParameterMode::FuncParamVariadic => {
-                return Err(SQLError::Unsupported(format!(
-                    "{keyword}: VARIADIC parameters"
-                )));
-            }
+            FunctionParameterMode::FuncParamVariadic => FunctionParamMode::Variadic,
             FunctionParameterMode::Undefined => {
                 return Err(SQLError::Internal(format!(
                     "{keyword}: parameter mode missing"
@@ -165,7 +161,10 @@ pub(super) fn compile_create_function(
     // has a DEFAULT, every following input parameter needs one too.
     let mut saw_default = false;
     for p in &params {
-        if !matches!(p.mode, FunctionParamMode::In | FunctionParamMode::InOut) {
+        if !matches!(
+            p.mode,
+            FunctionParamMode::In | FunctionParamMode::InOut | FunctionParamMode::Variadic
+        ) {
             continue;
         }
         if p.default.is_some() {
@@ -420,11 +419,23 @@ pub(super) fn compile_call(stmt: &pg_query::protobuf::CallStmt) -> Result<Statem
         .as_ref()
         .ok_or_else(|| SQLError::Internal("CALL without a function".into()))?;
     let name = compile_qualified_name(&call.funcname, "CALL")?;
-    let args = call
+    crate::expr::validate_named_argument_order(call.args.iter().map(|argument| {
+        match argument.node.as_ref() {
+            Some(NodeEnum::NamedArgExpr(argument)) => Some(argument.name.as_str()),
+            _ => None,
+        }
+    }))?;
+    let mut args = call
         .args
         .iter()
         .map(compile_expr)
         .collect::<Result<Vec<_>>>()?;
+    if call.func_variadic {
+        let argument = args.pop().ok_or_else(|| {
+            SQLError::Internal(format!("VARIADIC invocation of `{name}` has no argument"))
+        })?;
+        args.push(crate::expr::wrap_variadic_argument(argument));
+    }
     Ok(Statement::Call { name, args })
 }
 
@@ -479,4 +490,115 @@ pub(super) fn compile_drop_function(
         ),
         items,
     }))
+}
+
+pub(super) fn compile_alter_routine(
+    stmt: &pg_query::protobuf::AlterFunctionStmt,
+) -> Result<crate::ast::AlterRoutineStmt> {
+    use crate::ast::{AlterRoutineKind, AlterRoutineStmt, FunctionVolatility};
+    use pg_query::protobuf::ObjectType;
+
+    let (kind, keyword) = match stmt.objtype() {
+        ObjectType::ObjectFunction => (AlterRoutineKind::Function, "ALTER FUNCTION"),
+        ObjectType::ObjectProcedure => (AlterRoutineKind::Procedure, "ALTER PROCEDURE"),
+        ObjectType::ObjectRoutine => (AlterRoutineKind::Routine, "ALTER ROUTINE"),
+        other => {
+            return Err(SQLError::Unsupported(format!(
+                "ALTER routine target {other:?} is not supported"
+            )))
+        }
+    };
+    let target = stmt
+        .func
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal(format!("{keyword} without a target")))?;
+    let name = compile_qualified_name(&target.objname, keyword)?;
+    let (arg_types, mut arg_type_references) = if target.args_unspecified {
+        (None, Vec::new())
+    } else {
+        let mut arg_types = Vec::with_capacity(target.objargs.len());
+        let mut references = Vec::with_capacity(target.objargs.len());
+        for argument in &target.objargs {
+            let Some(NodeEnum::TypeName(type_name)) = argument.node.as_ref() else {
+                return Err(SQLError::Unsupported(format!(
+                    "{keyword}: malformed argument type node {:?}",
+                    argument.node
+                )));
+            };
+            let compiled = compile_function_type_name(type_name)?;
+            arg_types.push(compiled.name);
+            references.push(compiled.reference);
+        }
+        (Some(arg_types), references)
+    };
+    if arg_type_references.iter().all(Option::is_none) {
+        arg_type_references.clear();
+    }
+
+    let mut volatility = None;
+    let mut strict = None;
+    for action in &stmt.actions {
+        let Some(NodeEnum::DefElem(element)) = action.node.as_ref() else {
+            return Err(SQLError::Unsupported(format!(
+                "{keyword}: malformed action node {:?}",
+                action.node
+            )));
+        };
+        match element.defname.to_ascii_lowercase().as_str() {
+            "volatility" => {
+                if volatility.is_some() {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42601".into(),
+                        message: format!("{keyword}: conflicting or redundant volatility option"),
+                    });
+                }
+                volatility = Some(match def_elem_string(element)?.as_str() {
+                    "immutable" => FunctionVolatility::Immutable,
+                    "stable" => FunctionVolatility::Stable,
+                    "volatile" => FunctionVolatility::Volatile,
+                    other => {
+                        return Err(SQLError::TypeMismatch(format!(
+                            "{keyword}: invalid volatility `{other}`"
+                        )))
+                    }
+                });
+            }
+            "strict" => {
+                if strict.is_some() {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42601".into(),
+                        message: format!("{keyword}: conflicting or redundant null-input option"),
+                    });
+                }
+                strict = Some(
+                    match element.arg.as_ref().and_then(|arg| arg.node.as_ref()) {
+                        Some(NodeEnum::Boolean(value)) => value.boolval,
+                        other => {
+                            return Err(SQLError::TypeMismatch(format!(
+                                "{keyword}: null-input option expects a boolean, got {other:?}"
+                            )))
+                        }
+                    },
+                );
+            }
+            other => {
+                return Err(SQLError::Unsupported(format!(
+                    "{keyword}: action `{other}` is not supported"
+                )))
+            }
+        }
+    }
+    if volatility.is_none() && strict.is_none() {
+        return Err(SQLError::Unsupported(format!(
+            "{keyword}: no supported action"
+        )));
+    }
+    Ok(AlterRoutineStmt {
+        kind,
+        name,
+        arg_types,
+        arg_type_references,
+        volatility,
+        strict,
+    })
 }

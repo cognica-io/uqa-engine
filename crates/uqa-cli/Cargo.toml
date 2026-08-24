@@ -26,6 +26,7 @@ uqa-engine = { workspace = true }
 uqa-core = { workspace = true }
 uqa-fdw = { workspace = true }
 uqa-graph = { workspace = true }
+uqa-pg-query = { workspace = true }
 uqa-sql = { workspace = true }
 rustyline = "18.0.0"
 rpassword = "7.4"

@@ -784,9 +784,15 @@ impl FunctionTypeResolver for EngineExpressionEvaluator<'_> {
         binding: Option<&uqa_sql::ast::FunctionBinding>,
         argument_names: &[Option<String>],
         argument_types: &[Option<uqa_sql::ast::ColumnType>],
+        explicit_variadic: bool,
     ) -> Result<Option<uqa_sql::ast::ColumnType>, SQLError> {
-        self.engine
-            .resolve_function_type(name, binding, argument_names, argument_types)
+        self.engine.resolve_function_type(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+        )
     }
 
     fn resolve_function_overload(
@@ -795,9 +801,15 @@ impl FunctionTypeResolver for EngineExpressionEvaluator<'_> {
         binding: Option<&uqa_sql::ast::FunctionBinding>,
         argument_names: &[Option<String>],
         argument_types: &[Option<uqa_sql::ast::ColumnType>],
+        explicit_variadic: bool,
     ) -> Result<Option<uqa_execution::ResolvedFunctionOverload>, SQLError> {
-        self.engine
-            .resolve_function_overload(name, binding, argument_names, argument_types)
+        self.engine.resolve_function_overload(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+        )
     }
 
     fn is_scalar_function_binding(
@@ -813,6 +825,7 @@ impl FunctionTypeResolver for EngineExpressionEvaluator<'_> {
         binding: Option<&uqa_sql::ast::FunctionBinding>,
         argument_names: &[Option<String>],
         argument_types: &[Option<uqa_sql::ast::ColumnType>],
+        explicit_variadic: bool,
         builtins: &[uqa_execution::BuiltinFunctionOverload],
     ) -> Result<Option<uqa_execution::ResolvedFunctionOverload>, SQLError> {
         self.engine.resolve_function_overload_with_builtins(
@@ -820,6 +833,7 @@ impl FunctionTypeResolver for EngineExpressionEvaluator<'_> {
             binding,
             argument_names,
             argument_types,
+            explicit_variadic,
             builtins,
         )
     }

@@ -112,5 +112,6 @@ mod ddl_lifecycle;
 mod grouping;
 mod query_features;
 mod relations;
+mod routines;
 mod row_locking;
 mod schema_definitions;

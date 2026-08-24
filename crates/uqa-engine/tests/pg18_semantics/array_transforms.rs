@@ -9,6 +9,20 @@
 use super::*;
 use uqa_engine::SQLParam;
 
+fn assert_query_error(
+    engine: &Engine,
+    sql: &str,
+    params: &[SQLParam],
+    expected_sqlstate: &str,
+    expected_message: &str,
+) {
+    let Err(error) = engine.sql(sql, params) else {
+        panic!("expected `{sql}` to fail");
+    };
+    assert_eq!(error.sqlstate(), Some(expected_sqlstate), "{sql}: {error}");
+    assert_eq!(error.to_string(), expected_message, "{sql}");
+}
+
 #[test]
 fn pg18_array_sort_and_reverse() {
     let eng = engine();
@@ -45,6 +59,10 @@ fn pg18_array_sort_and_reverse() {
             Value::List(vec![Value::Int(3), Value::Int(4)]),
             Value::List(vec![Value::Int(1), Value::Int(2)]),
         ])
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT pg_catalog.array_reverse(VARIADIC ARRAY[1,2])"),
+        array(vec![Value::Int(2), Value::Int(1)])
     );
     assert_eq!(
         scalar(&eng, "SELECT array_sort(ARRAY[ARRAY[1,NULL],ARRAY[1,2]])"),
@@ -184,6 +202,11 @@ fn pg18_array_transforms_report_exact_overload_errors() {
             "function pg_catalog.array_sort(integer) does not exist",
         ),
         (
+            "SELECT pg_catalog.array_sort(VARIADIC \"array\" => ARRAY[2,1])",
+            "42883",
+            "function pg_catalog.array_sort(array => integer[]) does not exist",
+        ),
+        (
             "SELECT array_sort(ARRAY[1], 1)",
             "42883",
             "function array_sort(integer[], integer) does not exist",
@@ -229,39 +252,28 @@ fn pg18_array_transforms_report_exact_overload_errors() {
             "could not determine polymorphic type because input has type unknown",
         ),
     ] {
-        let error = eng.sql(sql, &[]).unwrap_err();
-        assert_eq!(error.sqlstate(), Some(sqlstate), "{sql}: {error}");
-        assert_eq!(error.to_string(), message, "{sql}");
+        assert_query_error(&eng, sql, &[], sqlstate, message);
     }
-    let error = eng
-        .sql("SELECT array_sort(ARRAY[2,1], 'not-a-boolean')", &[])
-        .unwrap_err();
-    assert_eq!(error.sqlstate(), Some("22P02"));
-    assert_eq!(
-        error.to_string(),
-        "invalid input syntax for type boolean: \"not-a-boolean\""
+    assert_query_error(
+        &eng,
+        "SELECT array_sort(ARRAY[2,1], 'not-a-boolean')",
+        &[],
+        "22P02",
+        "invalid input syntax for type boolean: \"not-a-boolean\"",
     );
-    let error = eng
-        .sql(
-            "SELECT array_sort(ARRAY[2,1], $1)",
-            &[SQLParam::Scalar(Value::Str("not-a-boolean".into()))],
-        )
-        .unwrap_err();
-    assert_eq!(error.sqlstate(), Some("22P02"));
-    assert_eq!(
-        error.to_string(),
-        "invalid input syntax for type boolean: \"not-a-boolean\""
+    assert_query_error(
+        &eng,
+        "SELECT array_sort(ARRAY[2,1], $1)",
+        &[SQLParam::Scalar(Value::Str("not-a-boolean".into()))],
+        "22P02",
+        "invalid input syntax for type boolean: \"not-a-boolean\"",
     );
-    let error = eng
-        .sql(
-            "SELECT array_sort(ARRAY[2,1], $1::text)",
-            &[SQLParam::Scalar(Value::Str("true".into()))],
-        )
-        .unwrap_err();
-    assert_eq!(error.sqlstate(), Some("42883"));
-    assert_eq!(
-        error.to_string(),
-        "function array_sort(integer[], text) does not exist"
+    assert_query_error(
+        &eng,
+        "SELECT array_sort(ARRAY[2,1], $1::text)",
+        &[SQLParam::Scalar(Value::Str("true".into()))],
+        "42883",
+        "function array_sort(integer[], text) does not exist",
     );
 }
 

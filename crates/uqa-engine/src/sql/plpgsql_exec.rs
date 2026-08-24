@@ -13,7 +13,7 @@ use std::cell::Cell;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
-use uqa_core::Value;
+use uqa_core::{ArrayValue, Value};
 use uqa_sql::ast::{
     ColumnType, CreateFunction, DropFunctionStmt, Expr, FunctionBinding, FunctionReturns, Statement,
 };
@@ -61,7 +61,7 @@ use diagnostics::{
 };
 use resolution::{
     call_signature, coerce_routine_value, output_column_names, resolve_bound_routine,
-    resolve_routine, routine_resolution_error,
+    resolve_routine, routine_resolution_error, ResolvedRoutine,
 };
 use routine::{execute_routine, DepthGuard};
 

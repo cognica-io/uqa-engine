@@ -10,7 +10,7 @@ use crate::sql::{Engine, SQLError};
 use uqa_sql::ast::{ColumnDef, Expr, FunctionBinding, GeneratedFunctionDependency};
 
 use super::super::{
-    generation_expression_column_type, named_argument, non_immutable_function,
+    generated_call_arguments, generation_expression_column_type, non_immutable_function,
     validate_bound_function, validate_unknown_literal_cast, GenerationType,
 };
 
@@ -21,6 +21,7 @@ pub(in super::super) struct FixedBuiltinCall<'a> {
     pub(in super::super) args: &'a [Expr],
     pub(in super::super) argument_names: &'a [Option<String>],
     pub(in super::super) argument_types: &'a [GenerationType],
+    pub(in super::super) explicit_variadic: bool,
 }
 
 pub(in super::super) fn bind_call(
@@ -28,15 +29,14 @@ pub(in super::super) fn bind_call(
     binding: &mut Option<FunctionBinding>,
     dependencies: &mut Vec<GeneratedFunctionDependency>,
 ) -> Result<bool, SQLError> {
-    let declared_argument_types = call
-        .args
+    let call_arguments = generated_call_arguments(call.args)?;
+    let declared_argument_types = call_arguments
         .iter()
         .zip(call.argument_types)
         .map(|(argument, inferred)| {
-            let (_, value) = named_argument(argument)?;
             Ok(generation_expression_column_type(
                 call.columns,
-                value,
+                argument.value,
                 inferred,
             ))
         })
@@ -46,6 +46,7 @@ pub(in super::super) fn bind_call(
         binding.as_ref(),
         call.argument_names,
         &declared_argument_types,
+        call.explicit_variadic,
         Some(call.engine),
     )?
     else {

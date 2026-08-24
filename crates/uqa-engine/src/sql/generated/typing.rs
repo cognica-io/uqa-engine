@@ -95,15 +95,26 @@ fn bind_function_calls(
             if let Some(filter) = filter {
                 bind_function_calls(engine, columns, filter, dependencies)?;
             }
-            if name == uqa_sql::expr::NAMED_ARG_FUNCTION {
+            if matches!(
+                name.as_str(),
+                uqa_sql::expr::NAMED_ARG_FUNCTION | uqa_sql::expr::VARIADIC_ARG_FUNCTION
+            ) {
                 return Ok(());
             }
-            let mut argument_names = Vec::with_capacity(args.len());
-            let mut argument_types = Vec::with_capacity(args.len());
-            for argument in args.iter() {
-                let (argument_name, value) = named_argument(argument)?;
-                argument_names.push(argument_name);
-                argument_types.push(infer_expression(engine, columns, value, dependencies)?);
+            let call_arguments = generated_call_arguments(args)?;
+            let explicit_variadic = call_arguments
+                .iter()
+                .any(|argument| argument.explicit_variadic);
+            let mut argument_names = Vec::with_capacity(call_arguments.len());
+            let mut argument_types = Vec::with_capacity(call_arguments.len());
+            for argument in &call_arguments {
+                argument_names.push(argument.name.clone());
+                argument_types.push(infer_expression(
+                    engine,
+                    columns,
+                    argument.value,
+                    dependencies,
+                )?);
             }
             if binding.is_none()
                 && engine
@@ -120,6 +131,7 @@ fn bind_function_calls(
                     args,
                     argument_names: &argument_names,
                     argument_types: &argument_types,
+                    explicit_variadic,
                 },
                 binding,
                 dependencies,
@@ -135,12 +147,15 @@ fn bind_function_calls(
             if binding.as_ref().is_some_and(|binding| !binding.builtin)
                 || engine.lookup_sql_functions(name).is_some()
             {
-                let declared_argument_types = args
+                let declared_argument_types = call_arguments
                     .iter()
                     .zip(&argument_types)
                     .map(|(argument, inferred)| {
-                        let (_, value) = named_argument(argument)?;
-                        Ok(generation_expression_column_type(columns, value, inferred))
+                        Ok(generation_expression_column_type(
+                            columns,
+                            argument.value,
+                            inferred,
+                        ))
                     })
                     .collect::<Result<Vec<_>, SQLError>>()?;
                 let selected =
@@ -150,6 +165,7 @@ fn bind_function_calls(
                         binding.as_ref(),
                         &argument_names,
                         &declared_argument_types,
+                        explicit_variadic,
                     )?
                     .ok_or_else(|| {
                         uqa_execution::function_resolution_error(
@@ -459,12 +475,17 @@ fn infer_function(
     args: &[Expr],
     dependencies: &mut Vec<GeneratedFunctionDependency>,
 ) -> Result<GenerationType, SQLError> {
-    let mut argument_names = Vec::with_capacity(args.len());
-    let mut argument_types = Vec::with_capacity(args.len());
-    for argument in args {
-        let (argument_name, value) = named_argument(argument)?;
-        argument_names.push(argument_name);
-        argument_types.push(infer_expression(engine, columns, value, dependencies)?);
+    let call_arguments = generated_call_arguments(args)?;
+    let mut argument_names = Vec::with_capacity(call_arguments.len());
+    let mut argument_types = Vec::with_capacity(call_arguments.len());
+    for argument in call_arguments {
+        argument_names.push(argument.name);
+        argument_types.push(infer_expression(
+            engine,
+            columns,
+            argument.value,
+            dependencies,
+        )?);
     }
 
     if let Some(binding) = binding {
@@ -484,6 +505,22 @@ fn infer_function(
                 })
             })
             .ok_or_else(|| SQLError::UnknownFunction(binding.name.clone()))?;
+        if let Some(type_name) = binding
+            .invocation
+            .as_deref()
+            .and_then(|invocation| invocation.return_type.as_deref())
+        {
+            let return_type = crate::sql::resolve_catalog_column_type(engine, type_name)
+                .as_ref()
+                .map(column_generation_type)
+                .or_else(|| generation_type_from_name(type_name))
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(format!(
+                        "generated-column function `{name}` returns unsupported type `{type_name}`"
+                    ))
+                })?;
+            return Ok(return_type);
+        }
         let return_type = match &function.def.returns {
             FunctionReturns::Scalar { type_name } => generation_type_from_name(type_name)
                 .ok_or_else(|| {
@@ -528,19 +565,154 @@ fn infer_function(
         .ok_or_else(|| SQLError::UnknownFunction(name.to_string()))
 }
 
-fn named_argument(expression: &Expr) -> Result<(Option<String>, &Expr), SQLError> {
-    let Expr::Func { name, args, .. } = expression else {
-        return Ok((None, expression));
-    };
-    if name != uqa_sql::expr::NAMED_ARG_FUNCTION {
-        return Ok((None, expression));
+#[derive(Debug)]
+pub(super) struct GeneratedCallArgument<'a> {
+    pub(super) name: Option<String>,
+    pub(super) value: &'a Expr,
+    pub(super) explicit_variadic: bool,
+}
+
+pub(super) fn generated_call_arguments(
+    arguments: &[Expr],
+) -> Result<Vec<GeneratedCallArgument<'_>>, SQLError> {
+    let decoded = arguments
+        .iter()
+        .map(generated_call_argument)
+        .collect::<Result<Vec<_>, _>>()?;
+    let variadic_positions = decoded
+        .iter()
+        .enumerate()
+        .filter_map(|(position, argument)| argument.explicit_variadic.then_some(position))
+        .collect::<Vec<_>>();
+    if variadic_positions.len() > 1 {
+        return Err(malformed_generated_argument(
+            "call contains more than one explicit VARIADIC argument",
+        ));
     }
-    let [Expr::Literal(Value::Str(name)), value] = args.as_slice() else {
-        return Err(SQLError::TypeMismatch(
-            "malformed named argument in generation expression".into(),
+    if variadic_positions
+        .first()
+        .is_some_and(|position| *position + 1 != arguments.len())
+    {
+        return Err(malformed_generated_argument(
+            "explicit VARIADIC argument must be the final call argument",
+        ));
+    }
+    Ok(decoded)
+}
+
+fn generated_call_argument(expression: &Expr) -> Result<GeneratedCallArgument<'_>, SQLError> {
+    let Expr::Func {
+        name,
+        args,
+        binding,
+        distinct,
+        order_by,
+        filter,
+    } = expression
+    else {
+        return Ok(GeneratedCallArgument {
+            name: None,
+            value: expression,
+            explicit_variadic: false,
+        });
+    };
+    if name == uqa_sql::expr::NAMED_ARG_FUNCTION {
+        validate_generated_marker(
+            binding.as_ref(),
+            *distinct,
+            order_by,
+            filter.as_deref(),
+            name,
+        )?;
+        let [Expr::Literal(Value::Str(argument_name)), value] = args.as_slice() else {
+            return Err(malformed_generated_argument(
+                "named argument marker must contain a string name and one value",
+            ));
+        };
+        let (value, explicit_variadic) = generated_variadic_argument(value)?;
+        if !explicit_variadic
+            && matches!(
+                value,
+                Expr::Func { name, .. } if name == uqa_sql::expr::NAMED_ARG_FUNCTION
+            )
+        {
+            return Err(malformed_generated_argument(
+                "call argument contains nested syntax markers",
+            ));
+        }
+        return Ok(GeneratedCallArgument {
+            name: Some(argument_name.clone()),
+            value,
+            explicit_variadic,
+        });
+    }
+    let (value, explicit_variadic) = generated_variadic_argument(expression)?;
+    Ok(GeneratedCallArgument {
+        name: None,
+        value,
+        explicit_variadic,
+    })
+}
+
+fn generated_variadic_argument(expression: &Expr) -> Result<(&Expr, bool), SQLError> {
+    let Expr::Func {
+        name,
+        args,
+        binding,
+        distinct,
+        order_by,
+        filter,
+    } = expression
+    else {
+        return Ok((expression, false));
+    };
+    if name != uqa_sql::expr::VARIADIC_ARG_FUNCTION {
+        return Ok((expression, false));
+    }
+    validate_generated_marker(
+        binding.as_ref(),
+        *distinct,
+        order_by,
+        filter.as_deref(),
+        name,
+    )?;
+    let [value] = args.as_slice() else {
+        return Err(malformed_generated_argument(
+            "VARIADIC argument marker must contain exactly one value",
         ));
     };
-    Ok((Some(name.to_ascii_lowercase()), value))
+    if matches!(
+        value,
+        Expr::Func { name, .. }
+            if name == uqa_sql::expr::VARIADIC_ARG_FUNCTION
+                || name == uqa_sql::expr::NAMED_ARG_FUNCTION
+    ) {
+        return Err(malformed_generated_argument(
+            "call argument contains nested syntax markers",
+        ));
+    }
+    Ok((value, true))
+}
+
+fn validate_generated_marker(
+    binding: Option<&FunctionBinding>,
+    distinct: bool,
+    order_by: &[uqa_sql::ast::OrderBy],
+    filter: Option<&Expr>,
+    name: &str,
+) -> Result<(), SQLError> {
+    if binding.is_some() || distinct || !order_by.is_empty() || filter.is_some() {
+        return Err(malformed_generated_argument(&format!(
+            "{name} syntax marker contains function-call metadata"
+        )));
+    }
+    Ok(())
+}
+
+fn malformed_generated_argument(message: &str) -> SQLError {
+    SQLError::TypeMismatch(format!(
+        "malformed generated-column call argument: {message}"
+    ))
 }
 
 pub(super) fn generation_expression_column_type(
@@ -1023,4 +1195,60 @@ fn non_immutable_function(name: &str) -> SQLError {
     SQLError::TypeMismatch(format!(
         "generation expression function `{name}` is not immutable for these argument types"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::generated_call_arguments;
+    use uqa_core::Value;
+    use uqa_sql::ast::Expr;
+
+    #[test]
+    fn generated_call_arguments_decode_named_variadic_marker() {
+        let arguments = vec![marker(
+            uqa_sql::expr::NAMED_ARG_FUNCTION,
+            vec![
+                Expr::Literal(Value::Str("ITEMS".into())),
+                marker(
+                    uqa_sql::expr::VARIADIC_ARG_FUNCTION,
+                    vec![Expr::Literal(Value::Int(42))],
+                ),
+            ],
+        )];
+
+        let decoded = generated_call_arguments(&arguments).unwrap();
+        assert_eq!(decoded[0].name.as_deref(), Some("ITEMS"));
+        assert!(decoded[0].explicit_variadic);
+        assert!(matches!(decoded[0].value, Expr::Literal(Value::Int(42))));
+    }
+
+    #[test]
+    fn generated_call_arguments_reject_multiple_variadic_markers() {
+        let arguments = vec![
+            marker(
+                uqa_sql::expr::VARIADIC_ARG_FUNCTION,
+                vec![Expr::Literal(Value::Int(1))],
+            ),
+            marker(
+                uqa_sql::expr::VARIADIC_ARG_FUNCTION,
+                vec![Expr::Literal(Value::Int(2))],
+            ),
+        ];
+
+        assert!(generated_call_arguments(&arguments)
+            .unwrap_err()
+            .to_string()
+            .contains("more than one"));
+    }
+
+    fn marker(name: &str, args: Vec<Expr>) -> Expr {
+        Expr::Func {
+            name: name.into(),
+            binding: None,
+            args,
+            distinct: false,
+            order_by: Vec::new(),
+            filter: None,
+        }
+    }
 }

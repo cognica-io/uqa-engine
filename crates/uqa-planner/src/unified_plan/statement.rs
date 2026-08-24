@@ -292,6 +292,9 @@ impl UnifiedPlan {
             Statement::DropFunction(value) => {
                 Self::Command(Box::new(CommandPlan::DropFunction(value)))
             }
+            Statement::AlterRoutine(value) => {
+                Self::Command(Box::new(CommandPlan::AlterRoutine(value)))
+            }
             Statement::DoBlock { language, body } => {
                 Self::Command(Box::new(CommandPlan::DoBlock { language, body }))
             }
@@ -358,6 +361,7 @@ impl CommandPlan {
             Self::Merge(_) => "Merge",
             Self::CreateFunction(_) => "CreateFunction",
             Self::DropFunction(_) => "DropFunction",
+            Self::AlterRoutine(_) => "AlterRoutine",
             Self::DoBlock { .. } => "DoBlock",
             Self::Call { .. } => "Call",
         }

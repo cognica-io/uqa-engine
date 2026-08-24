@@ -152,6 +152,7 @@ pub(super) fn optimize_command(
         | CommandPlan::CreateForeignTable(_)
         | CommandPlan::CreateFunction(_)
         | CommandPlan::DropFunction(_)
+        | CommandPlan::AlterRoutine(_)
         | CommandPlan::DoBlock { .. } => {}
     }
 }

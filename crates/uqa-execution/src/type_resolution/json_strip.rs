@@ -36,5 +36,12 @@ pub fn resolve_json_strip_overload(
             "does not exist",
         ));
     }
-    fixed_builtin::resolve_overload(name, binding, argument_names, argument_types, resolver)
+    fixed_builtin::resolve_overload(
+        name,
+        binding,
+        argument_names,
+        argument_types,
+        false,
+        resolver,
+    )
 }

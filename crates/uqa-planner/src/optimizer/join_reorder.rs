@@ -139,6 +139,7 @@ fn reorder_command_joins(
         | CommandPlan::CreateForeignTable(_)
         | CommandPlan::CreateFunction(_)
         | CommandPlan::DropFunction(_)
+        | CommandPlan::AlterRoutine(_)
         | CommandPlan::DoBlock { .. } => {}
     }
     Ok(())

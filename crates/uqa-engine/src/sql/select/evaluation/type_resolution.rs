@@ -26,9 +26,15 @@ impl FunctionTypeResolver for ScopedEngineHook<'_> {
         binding: Option<&FunctionBinding>,
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
+        explicit_variadic: bool,
     ) -> Result<Option<ColumnType>, SQLError> {
-        self.engine
-            .resolve_function_type(name, binding, argument_names, argument_types)
+        self.engine.resolve_function_type(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+        )
     }
 
     fn resolve_function_overload(
@@ -37,9 +43,15 @@ impl FunctionTypeResolver for ScopedEngineHook<'_> {
         binding: Option<&FunctionBinding>,
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
+        explicit_variadic: bool,
     ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
-        self.engine
-            .resolve_function_overload(name, binding, argument_names, argument_types)
+        self.engine.resolve_function_overload(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+        )
     }
 
     fn is_scalar_function_binding(&self, binding: &FunctionBinding) -> Result<bool, SQLError> {
@@ -52,6 +64,7 @@ impl FunctionTypeResolver for ScopedEngineHook<'_> {
         binding: Option<&FunctionBinding>,
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
+        explicit_variadic: bool,
         builtins: &[BuiltinFunctionOverload],
     ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
         self.engine.resolve_function_overload_with_builtins(
@@ -59,6 +72,7 @@ impl FunctionTypeResolver for ScopedEngineHook<'_> {
             binding,
             argument_names,
             argument_types,
+            explicit_variadic,
             builtins,
         )
     }

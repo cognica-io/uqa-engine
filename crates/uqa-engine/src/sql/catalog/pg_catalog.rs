@@ -13,12 +13,12 @@ use super::helpers::{
     default_expr_text, index_columns, indexdef, int_value, list_int, pg_type_align,
     pg_type_array_oid, pg_type_by_value, pg_type_collation_oid, pg_type_element_oid, pg_type_len,
     pg_type_modifier, pg_type_oid, pg_type_routine_oids, pg_type_storage,
-    pg_type_subscript_handler, relation_oid, routine_type_oid, row, schema_oid, split_index_name,
-    split_schema_name, stable_oid, str_value, table_columns_for, view_columns_for,
-    PgTypeRoutineOids,
+    pg_type_subscript_handler, relation_oid, routine_type_oid, routine_variadic_element_oid, row,
+    schema_expr_text, schema_oid, split_index_name, split_schema_name, stable_oid, str_value,
+    table_columns_for, view_columns_for, PgTypeRoutineOids,
 };
 use super::{
-    registered_names, routine_signature_types, value_to_text, ColumnType, Engine, ResultRow,
+    canonical_routine_type_name, registered_names, value_to_text, ColumnType, Engine, ResultRow,
     SQLColumnDef, SQLError, Value,
 };
 
@@ -1070,7 +1070,11 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
     for function in engine.list_sql_functions() {
         let def = &function.def;
         let (routine_schema, routine_name) = split_schema_name(&def.name)?;
-        let signature = routine_signature_types(def);
+        let signature = def
+            .identity_params()
+            .iter()
+            .map(|parameter| canonical_routine_type_name(&parameter.type_name))
+            .collect::<Vec<_>>();
         let identity = format!(
             "{}:{}:{}",
             def.name,
@@ -1090,29 +1094,30 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
             uqa_sql::ast::FunctionVolatility::Stable => "s",
             uqa_sql::ast::FunctionVolatility::Volatile => "v",
         };
-        let input_params = def
-            .params
-            .iter()
-            .filter(|parameter| {
-                matches!(
-                    parameter.mode,
-                    uqa_sql::ast::FunctionParamMode::In | uqa_sql::ast::FunctionParamMode::InOut
-                )
-            })
-            .collect::<Vec<_>>();
+        let input_params = def.identity_params();
         let defaults = input_params
             .iter()
             .filter(|parameter| parameter.default.is_some())
             .count();
+        let argument_defaults = input_params
+            .iter()
+            .filter_map(|parameter| parameter.default.as_ref())
+            .map(schema_expr_text)
+            .collect::<Vec<_>>();
+        let argument_defaults = if argument_defaults.is_empty() {
+            Value::Null
+        } else {
+            str_value(argument_defaults.join(", "))
+        };
         let argument_type_oids = input_params
             .iter()
             .map(|parameter| int_value(routine_type_oid(&parameter.type_name)))
             .collect::<Vec<_>>();
-        let has_output_mode = def
+        let has_non_input_mode = def
             .params
             .iter()
             .any(|parameter| parameter.mode != uqa_sql::ast::FunctionParamMode::In);
-        let all_argument_type_oids = if has_output_mode {
+        let all_argument_type_oids = if has_non_input_mode {
             catalog_array(
                 def.params
                     .iter()
@@ -1123,7 +1128,7 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
         } else {
             Value::Null
         };
-        let arg_modes = if has_output_mode {
+        let arg_modes = if has_non_input_mode {
             catalog_array(
                 def.params
                     .iter()
@@ -1132,6 +1137,7 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
                             uqa_sql::ast::FunctionParamMode::In => "i",
                             uqa_sql::ast::FunctionParamMode::Out => "o",
                             uqa_sql::ast::FunctionParamMode::InOut => "b",
+                            uqa_sql::ast::FunctionParamMode::Variadic => "v",
                             uqa_sql::ast::FunctionParamMode::Table => "t",
                         })
                     })
@@ -1156,6 +1162,13 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
         } else {
             Value::Null
         };
+        let variadic_type_oid = def
+            .params
+            .iter()
+            .find(|parameter| parameter.mode == uqa_sql::ast::FunctionParamMode::Variadic)
+            .map(|parameter| routine_variadic_element_oid(&parameter.type_name))
+            .transpose()?
+            .unwrap_or(0);
         let return_type_oid = if def.is_procedure {
             if def.output_params().is_empty() {
                 2278
@@ -1166,12 +1179,13 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
             match &def.returns {
                 uqa_sql::ast::FunctionReturns::Scalar { type_name }
                 | uqa_sql::ast::FunctionReturns::SetOf { type_name } => routine_type_oid(type_name),
-                uqa_sql::ast::FunctionReturns::Table => 2249,
-                uqa_sql::ast::FunctionReturns::None => match def.output_params().as_slice() {
-                    [output] => routine_type_oid(&output.type_name),
-                    [] => 2278,
-                    _ => 2249,
-                },
+                uqa_sql::ast::FunctionReturns::Table | uqa_sql::ast::FunctionReturns::None => {
+                    match def.output_params().as_slice() {
+                        [output] => routine_type_oid(&output.type_name),
+                        [] => 2278,
+                        _ => 2249,
+                    }
+                }
             }
         };
         rows.push(row([
@@ -1185,7 +1199,7 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
                 "prorows",
                 Value::Float(if def.returns_set() { 1000.0 } else { 0.0 }),
             ),
-            ("provariadic", int_value(0)),
+            ("provariadic", int_value(variadic_type_oid)),
             ("prosupport", str_value("-")),
             (
                 "prokind",
@@ -1210,7 +1224,7 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
             ("proallargtypes", all_argument_type_oids),
             ("proargmodes", arg_modes),
             ("proargnames", arg_names),
-            ("proargdefaults", Value::Null),
+            ("proargdefaults", argument_defaults),
             ("protrftypes", Value::Null),
             ("prosrc", str_value(source)),
             ("probin", Value::Null),

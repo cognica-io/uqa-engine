@@ -90,9 +90,15 @@ impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
         binding: Option<&uqa_sql::ast::FunctionBinding>,
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
+        explicit_variadic: bool,
     ) -> Result<Option<ColumnType>, SQLError> {
-        self.engine
-            .resolve_function_type(name, binding, argument_names, argument_types)
+        self.engine.resolve_function_type(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+        )
     }
 
     fn resolve_function_overload(
@@ -101,9 +107,15 @@ impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
         binding: Option<&uqa_sql::ast::FunctionBinding>,
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
+        explicit_variadic: bool,
     ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
-        self.engine
-            .resolve_function_overload(name, binding, argument_names, argument_types)
+        self.engine.resolve_function_overload(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+        )
     }
 
     fn is_scalar_function_binding(
@@ -119,6 +131,7 @@ impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
         binding: Option<&uqa_sql::ast::FunctionBinding>,
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
+        explicit_variadic: bool,
         builtins: &[uqa_execution::BuiltinFunctionOverload],
     ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
         self.engine.resolve_function_overload_with_builtins(
@@ -126,6 +139,7 @@ impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
             binding,
             argument_names,
             argument_types,
+            explicit_variadic,
             builtins,
         )
     }
@@ -782,6 +796,9 @@ impl SchemaScope {
                         user_function: user_function
                             .as_ref()
                             .map(|resolved| resolved.function.as_ref()),
+                        user_invocation: user_function
+                            .as_ref()
+                            .and_then(|resolved| resolved.binding.invocation.as_deref()),
                         declared_types: column_types,
                         columns: &columns,
                         ordinality: *ordinality,

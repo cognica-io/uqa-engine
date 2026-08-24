@@ -120,6 +120,13 @@ pub(super) fn validate_scalar_function(
     } = validation;
     let identity = name.to_ascii_lowercase();
     let lower = crate::sql::builtin_function_dispatch_name(&identity);
+    if matches!(
+        lower.as_str(),
+        uqa_sql::expr::NAMED_ARG_FUNCTION | uqa_sql::expr::VARIADIC_ARG_FUNCTION
+    ) {
+        return Ok(());
+    }
+    uqa_execution::scalar_call_arguments(args)?;
     if engine.has_registered_scalar_function(&identity) {
         return Ok(());
     }
@@ -136,8 +143,7 @@ pub(super) fn validate_scalar_function(
         uqa_execution::scalar_type_with_resolver(expression, schema, params, resolver)?;
         return Ok(());
     }
-    if lower == uqa_sql::expr::NAMED_ARG_FUNCTION
-        || uqa_sql::registry::is_registered(&lower)
+    if uqa_sql::registry::is_registered(&lower)
         || crate::sql::aggregates::is_aggregate(engine, expression)
         || engine.has_registered_aggregate_function(&identity)
         || builtin_scalar_function(&lower, args.len())
@@ -165,23 +171,14 @@ fn validate_fixed_builtin(
     if !uqa_execution::is_fixed_builtin(name) {
         return Ok(false);
     }
-    let mut argument_names = Vec::with_capacity(args.len());
-    let mut argument_types = Vec::with_capacity(args.len());
-    for argument in args {
-        let (argument_name, value) = named_argument(argument);
-        let argument_type =
-            uqa_execution::common_context_expression_type(value, schema, params, Some(resolver))?;
-        argument_names.push(argument_name);
-        argument_types.push(uqa_execution::effective_overload_argument_type(
-            value,
-            argument_type,
-        ));
-    }
+    let (argument_names, argument_types, explicit_variadic) =
+        uqa_execution::function_call_argument_signature(args, schema, params, Some(resolver))?;
     uqa_execution::resolve_fixed_builtin_call(
         name,
         binding,
         &argument_names,
         &argument_types,
+        explicit_variadic,
         Some(engine),
     )
     .map(|resolved| resolved.is_some())
@@ -194,12 +191,18 @@ fn validate_uuid_extraction_function(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
-    let valid = if let [argument] = args {
-        let (argument_name, value) = named_argument(argument);
-        argument_name.is_none()
-            && uqa_execution::common_context_expression_type(value, schema, params, Some(engine))?
-                .as_ref()
-                .is_none_or(uuid_compatible_type)
+    let call_arguments = uqa_execution::scalar_call_arguments(args)?;
+    let valid = if let [argument] = call_arguments.as_slice() {
+        argument.name.is_none()
+            && !argument.explicit_variadic
+            && uqa_execution::common_context_expression_type(
+                argument.value,
+                schema,
+                params,
+                Some(engine),
+            )?
+            .as_ref()
+            .is_none_or(uuid_compatible_type)
     } else {
         false
     };
@@ -282,33 +285,21 @@ fn resolve_sql_function(
     if binding.is_none() && engine.lookup_sql_functions(name).is_none() {
         return Ok(None);
     }
-    let mut argument_names = Vec::with_capacity(args.len());
-    let mut argument_types = Vec::with_capacity(args.len());
-    for argument in args {
-        let (argument_name, value) = named_argument(argument);
-        argument_names.push(argument_name);
-        let argument_type =
-            uqa_execution::common_context_expression_type(value, schema, params, Some(resolver))?;
-        argument_types.push(uqa_execution::effective_overload_argument_type(
-            value,
-            argument_type,
-        ));
-    }
-    engine.resolve_static_sql_function(name, binding, &argument_names, &argument_types)
+    let (argument_names, argument_types, explicit_variadic) =
+        uqa_execution::function_call_argument_signature(args, schema, params, Some(resolver))?;
+    engine.resolve_static_sql_function(
+        name,
+        binding,
+        &argument_names,
+        &argument_types,
+        explicit_variadic,
+    )
 }
 
 fn named_argument(expression: &ScalarExpr) -> (Option<String>, &ScalarExpr) {
-    let ScalarExpr::Func { name, args, .. } = expression else {
-        return (None, expression);
-    };
-    if name != uqa_sql::expr::NAMED_ARG_FUNCTION {
-        return (None, expression);
-    }
-    let name = args.first().and_then(|name| match name {
-        ScalarExpr::Literal(uqa_core::Value::Str(name)) => Some(name.clone()),
-        _ => None,
-    });
-    (name, args.get(1).unwrap_or(expression))
+    uqa_execution::scalar_call_argument(expression).map_or((None, expression), |argument| {
+        (argument.name.map(str::to_string), argument.value)
+    })
 }
 
 fn builtin_scalar_function(name: &str, argument_count: usize) -> bool {
@@ -363,7 +354,9 @@ fn undefined_function(
                 Some(resolver),
             )
             .ok()
-            .and_then(|ty| uqa_execution::effective_overload_argument_type(value, ty))
+            .and_then(|ty| {
+                uqa_execution::effective_overload_argument_type_with_params(value, ty, params)
+            })
             .map_or_else(|| "unknown".to_string(), |ty| ty.sql_name());
             argument_name.map_or(ty.clone(), |name| format!("{name} => {ty}"))
         })

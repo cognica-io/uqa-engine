@@ -59,6 +59,7 @@ pub(super) fn synthesize_create_text(def: &CreateFunction, body: &str) -> String
         match p.mode {
             FunctionParamMode::Out => sql.push_str("OUT "),
             FunctionParamMode::InOut => sql.push_str("INOUT "),
+            FunctionParamMode::Variadic => sql.push_str("VARIADIC "),
             FunctionParamMode::In | FunctionParamMode::Table => {}
         }
         if !p.name.is_empty() {

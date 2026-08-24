@@ -8,9 +8,40 @@ use uqa_core::Value;
 use uqa_sql::ast::ColumnType;
 use uqa_sql::{SQLError, SQLParam};
 
-use crate::{RowSchema, ScalarExpr};
+use crate::{scalar_call_arguments, RowSchema, ScalarExpr};
 
 use super::{scalar_type_inner, FunctionTypeResolver};
+
+/// Decoded function-call argument names, effective overload types, and whether the call used explicit `VARIADIC` syntax.
+#[doc(hidden)]
+pub type FunctionCallArgumentSignature = (Vec<Option<String>>, Vec<Option<ColumnType>>, bool);
+
+/// Build the PostgreSQL-compatible overload signature for one physical function call using the shared common-context typing rule.
+#[doc(hidden)]
+pub fn function_call_argument_signature(
+    arguments: &[ScalarExpr],
+    schema: &RowSchema,
+    params: &[SQLParam],
+    resolver: Option<&dyn FunctionTypeResolver>,
+) -> Result<FunctionCallArgumentSignature, SQLError> {
+    let call_arguments = scalar_call_arguments(arguments)?;
+    let explicit_variadic = call_arguments
+        .iter()
+        .any(|argument| argument.explicit_variadic);
+    let mut argument_names = Vec::with_capacity(call_arguments.len());
+    let mut argument_types = Vec::with_capacity(call_arguments.len());
+    for argument in call_arguments {
+        argument_names.push(argument.name.map(str::to_string));
+        let argument_type =
+            common_context_expression_type(argument.value, schema, params, resolver)?;
+        argument_types.push(effective_overload_argument_type_with_params(
+            argument.value,
+            argument_type,
+            params,
+        ));
+    }
+    Ok((argument_names, argument_types, explicit_variadic))
+}
 
 pub(super) fn local_routine_name(name: &str) -> String {
     let lower = name.to_ascii_lowercase();
@@ -89,9 +120,29 @@ pub fn effective_overload_argument_type(
     }
 }
 
+/// Preserve an explicitly typed scalar parameter while retaining the legacy `unknown` treatment of untyped text-valued [`SQLParam::Scalar`] parameters.
+#[doc(hidden)]
+pub fn effective_overload_argument_type_with_params(
+    expression: &ScalarExpr,
+    resolved: Option<ColumnType>,
+    params: &[SQLParam],
+) -> Option<ColumnType> {
+    if let ScalarExpr::Param(index) = expression {
+        if index
+            .checked_sub(1)
+            .and_then(|index| params.get(index))
+            .is_some_and(|parameter| parameter.declared_scalar_type().is_some())
+        {
+            return resolved;
+        }
+    }
+    effective_overload_argument_type(expression, resolved)
+}
+
 pub(super) fn parameter_type(parameter: &SQLParam) -> Option<ColumnType> {
     match parameter {
         SQLParam::Scalar(value) => value_type(value),
+        SQLParam::TypedScalar { ty, .. } => Some(ty.clone()),
         SQLParam::Vector(values) => u32::try_from(values.len()).ok().map(ColumnType::Vector),
         SQLParam::Tensor(values) => values
             .first()

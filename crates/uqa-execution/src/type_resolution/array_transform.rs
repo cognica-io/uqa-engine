@@ -9,7 +9,7 @@
 use super::common::{base_type, common_context_expression_type};
 use super::functions::named_argument_value;
 use super::{FunctionTypeResolver, ResolvedFunctionOverload};
-use crate::{RowSchema, ScalarExpr};
+use crate::{scalar_call_arguments, RowSchema, ScalarExpr};
 use uqa_core::Value;
 use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::expr::ARRAY_SORT_JSON_FUNCTION;
@@ -20,9 +20,18 @@ pub(super) fn resolve_type(
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
     argument_types: &[Option<ColumnType>],
+    explicit_variadic: bool,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {
-    select_overload(name, binding, args, argument_types, resolver).map(|selected| {
+    select_overload(
+        name,
+        binding,
+        args,
+        argument_types,
+        explicit_variadic,
+        resolver,
+    )
+    .map(|selected| {
         Some(match selected {
             SelectedOverload::Builtin(return_type) => return_type,
             SelectedOverload::User(resolved) => resolved.return_type,
@@ -40,10 +49,26 @@ fn select_overload(
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
     argument_types: &[Option<ColumnType>],
+    explicit_variadic: bool,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<SelectedOverload, SQLError> {
-    let builtin = resolve_builtin_type(name, args, argument_types);
-    let user = match resolve_user_overload(name, binding, args, argument_types, resolver) {
+    let builtin = if explicit_variadic
+        && args
+            .iter()
+            .any(|argument| named_argument_name(argument).is_some())
+    {
+        Err(undefined_function(name, args, argument_types))
+    } else {
+        resolve_builtin_type(name, args, argument_types)
+    };
+    let user = match resolve_user_overload(
+        name,
+        binding,
+        args,
+        argument_types,
+        explicit_variadic,
+        resolver,
+    ) {
         Err(error) if binding.is_none() && error.sqlstate() == Some("42883") => None,
         other => other?,
     };
@@ -118,6 +143,7 @@ fn resolve_user_overload(
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
     argument_types: &[Option<ColumnType>],
+    explicit_variadic: bool,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
     if binding.is_none() && name.to_ascii_lowercase().starts_with("pg_catalog.") {
@@ -135,6 +161,7 @@ fn resolve_user_overload(
         binding,
         &argument_names,
         &user_argument_types(args, argument_types),
+        explicit_variadic,
     )
 }
 
@@ -180,15 +207,26 @@ pub(super) fn bind_call(
     if binding.is_some() || !is_function(&name) {
         return name;
     }
-    let argument_types = args
+    let Ok(call_arguments) = scalar_call_arguments(args) else {
+        return name;
+    };
+    let explicit_variadic = call_arguments
         .iter()
-        .map(|argument| {
-            super::scalar_type_inner(named_argument_value(argument), schema, params, resolver)
-        })
+        .any(|argument| argument.explicit_variadic);
+    let argument_types = call_arguments
+        .iter()
+        .map(|argument| super::scalar_type_inner(argument.value, schema, params, resolver))
         .collect::<Result<Vec<_>, _>>();
-    if let Ok(SelectedOverload::User(resolved)) = argument_types
-        .and_then(|argument_types| select_overload(&name, None, args, &argument_types, resolver))
-    {
+    if let Ok(SelectedOverload::User(resolved)) = argument_types.and_then(|argument_types| {
+        select_overload(
+            &name,
+            None,
+            args,
+            &argument_types,
+            explicit_variadic,
+            resolver,
+        )
+    }) {
         *binding = Some(resolved.binding);
         return name;
     }
@@ -242,16 +280,9 @@ pub(super) fn bind_call(
 }
 
 fn named_argument_name(expression: &ScalarExpr) -> Option<&str> {
-    let ScalarExpr::Func { name, args, .. } = expression else {
-        return None;
-    };
-    if name != uqa_sql::expr::NAMED_ARG_FUNCTION {
-        return None;
-    }
-    match args.first() {
-        Some(ScalarExpr::Literal(Value::Str(name))) => Some(name),
-        _ => None,
-    }
+    crate::scalar_call_argument(expression)
+        .ok()
+        .and_then(|argument| argument.name)
 }
 
 fn named_argument_value_owned(expression: ScalarExpr) -> ScalarExpr {

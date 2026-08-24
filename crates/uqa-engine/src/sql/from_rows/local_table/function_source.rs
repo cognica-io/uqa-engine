@@ -274,6 +274,9 @@ fn build_table_function_operator<'a>(
             name: source.name,
             args: source.args,
             user_function: resolved.as_ref().map(|resolved| resolved.function.as_ref()),
+            user_invocation: resolved
+                .as_ref()
+                .and_then(|resolved| resolved.binding.invocation.as_deref()),
             declared_types: source.column_types,
             columns: &columns,
             ordinality: source.ordinality,

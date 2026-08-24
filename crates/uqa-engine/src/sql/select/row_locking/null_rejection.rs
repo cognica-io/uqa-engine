@@ -273,8 +273,8 @@ fn expression_is_null_with_side(
             )? {
                 return Ok(false);
             }
-            for argument in args.iter().map(row_lock_function_argument_value) {
-                if expression_is_null_with_side(engine, argument, side, other, params)? {
+            for argument in uqa_execution::scalar_call_arguments(args)? {
+                if expression_is_null_with_side(engine, argument.value, side, other, params)? {
                     return Ok(true);
                 }
             }
@@ -307,39 +307,17 @@ fn scalar_function_is_strict(
         return Ok(false);
     }
     let schema = RowSchema::join(side, other, std::iter::empty::<String>());
-    let mut argument_names = Vec::with_capacity(args.len());
-    let mut argument_types = Vec::with_capacity(args.len());
-    for argument in args {
-        let (argument_name, value) = row_lock_function_argument(argument);
-        argument_names.push(argument_name);
-        argument_types.push(uqa_execution::common_context_expression_type(
-            value,
-            &schema,
-            params,
-            Some(engine),
-        )?);
-    }
+    let (argument_names, argument_types, explicit_variadic) =
+        uqa_execution::function_call_argument_signature(args, &schema, params, Some(engine))?;
     Ok(engine
-        .resolve_static_sql_function(name, binding, &argument_names, &argument_types)?
+        .resolve_static_sql_function(
+            name,
+            binding,
+            &argument_names,
+            &argument_types,
+            explicit_variadic,
+        )?
         .is_some_and(|function| function.def.strict))
-}
-
-fn row_lock_function_argument(expression: &ScalarExpr) -> (Option<String>, &ScalarExpr) {
-    let ScalarExpr::Func { name, args, .. } = expression else {
-        return (None, expression);
-    };
-    if name != uqa_sql::expr::NAMED_ARG_FUNCTION {
-        return (None, expression);
-    }
-    let argument_name = args.first().and_then(|name| match name {
-        ScalarExpr::Literal(Value::Str(name)) => Some(name.clone()),
-        _ => None,
-    });
-    (argument_name, args.get(1).unwrap_or(expression))
-}
-
-fn row_lock_function_argument_value(expression: &ScalarExpr) -> &ScalarExpr {
-    row_lock_function_argument(expression).1
 }
 
 fn negate_truth_values(values: u8) -> u8 {

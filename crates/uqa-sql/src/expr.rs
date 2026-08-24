@@ -324,7 +324,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         )),
         Expr::Literal(v) => Ok(v.clone()),
         Expr::Param(i) => match i.checked_sub(1).and_then(|index| ctx.params.get(index)) {
-            Some(SQLParam::Scalar(v)) => Ok(v.clone()),
+            Some(SQLParam::Scalar(v) | SQLParam::TypedScalar { value: v, .. }) => Ok(v.clone()),
             Some(SQLParam::Vector(v)) => Ok(Value::List(
                 v.iter().map(|x| Value::Float(f64::from(*x))).collect(),
             )),
@@ -562,6 +562,74 @@ fn normalized_function_name(name: &str) -> Cow<'_, str> {
 /// in (`NamedArgExpr` has no dedicated AST node).
 pub const NAMED_ARG_FUNCTION: &str = "__named_arg";
 
+/// Marker function the compiler wraps around an explicitly `VARIADIC` call argument.
+pub const VARIADIC_ARG_FUNCTION: &str = "__variadic_arg";
+
+fn direct_variadic_argument_value(argument: &Expr) -> Option<&Expr> {
+    let Expr::Func { name, args, .. } = argument else {
+        return None;
+    };
+    if name != VARIADIC_ARG_FUNCTION {
+        return None;
+    }
+    let [value] = args.as_slice() else {
+        return None;
+    };
+    Some(value)
+}
+
+fn named_argument_value(argument: &Expr) -> Option<&Expr> {
+    let Expr::Func { name, args, .. } = argument else {
+        return None;
+    };
+    if name == NAMED_ARG_FUNCTION {
+        args.get(1)
+    } else {
+        None
+    }
+}
+
+/// Wrap the last actual argument of an explicit `VARIADIC` invocation while preserving a named-argument marker at the top level.
+#[must_use]
+pub fn wrap_variadic_argument(mut argument: Expr) -> Expr {
+    if variadic_argument_value(&argument).is_some() {
+        return argument;
+    }
+    if let Expr::Func { name, args, .. } = &mut argument {
+        if name == NAMED_ARG_FUNCTION && args.len() == 2 {
+            let value = args.remove(1);
+            args.push(variadic_argument_marker(value));
+            return argument;
+        }
+    }
+    variadic_argument_marker(argument)
+}
+
+fn variadic_argument_marker(value: Expr) -> Expr {
+    Expr::Func {
+        binding: None,
+        name: VARIADIC_ARG_FUNCTION.into(),
+        args: vec![value],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    }
+}
+
+/// Return the value expression carried by an explicit `VARIADIC` marker, including one nested inside a named argument.
+#[must_use]
+pub fn variadic_argument_value(argument: &Expr) -> Option<&Expr> {
+    let value = named_argument_value(argument).unwrap_or(argument);
+    direct_variadic_argument_value(value)
+}
+
+/// Return a call argument's value expression after stripping named and explicit `VARIADIC` syntax markers.
+#[must_use]
+pub fn call_argument_value(argument: &Expr) -> &Expr {
+    let value = named_argument_value(argument).unwrap_or(argument);
+    direct_variadic_argument_value(value).unwrap_or(value)
+}
+
 /// Enforce `PostgreSQL` function-call ordering before overload resolution.
 /// Positional arguments must precede named arguments, and each explicit name
 /// may occur only once.
@@ -769,11 +837,28 @@ pub fn evaluate_call_args(
                 let value_expr = inner
                     .get(1)
                     .ok_or_else(|| SQLError::Internal("named argument without a value".into()))?;
-                Ok((Some(arg_name.clone()), eval(value_expr, ctx)?))
+                Ok((
+                    Some(arg_name.clone()),
+                    evaluate_call_argument_value(value_expr, ctx)?,
+                ))
             }
-            other => Ok((None, eval(other, ctx)?)),
+            other => Ok((None, evaluate_call_argument_value(other, ctx)?)),
         })
         .collect()
+}
+
+fn evaluate_call_argument_value(argument: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
+    if let Expr::Func { name, args, .. } = argument {
+        if name == VARIADIC_ARG_FUNCTION {
+            let [value] = args.as_slice() else {
+                return Err(SQLError::Internal(
+                    "VARIADIC argument marker must contain one value".into(),
+                ));
+            };
+            return eval(value, ctx);
+        }
+    }
+    eval(argument, ctx)
 }
 
 /// Execute a scalar function after its argument expressions have already

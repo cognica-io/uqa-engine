@@ -18,6 +18,10 @@ pub trait RankedFunctionMatch {
     fn raw_exact_matches(&self) -> usize;
     fn exact_matches(&self) -> usize;
     fn preferred_matches(&self) -> usize;
+
+    fn is_variadic_expansion(&self) -> bool {
+        false
+    }
 }
 
 /// One declared parameter in a function signature used for structural matching and type scoring.
@@ -317,6 +321,17 @@ pub fn rank_function_matches<T: RankedFunctionMatch>(
     candidates: &mut Vec<T>,
     argument_types: &[Option<ColumnType>],
 ) -> bool {
+    let fixed_signatures = candidates
+        .iter()
+        .filter(|candidate| !candidate.is_variadic_expansion())
+        .map(|candidate| candidate.argument_types().to_vec())
+        .collect::<Vec<_>>();
+    candidates.retain(|candidate| {
+        !candidate.is_variadic_expansion()
+            || !fixed_signatures
+                .iter()
+                .any(|signature| signature == candidate.argument_types())
+    });
     if argument_types.iter().all(Option::is_some) {
         let raw_exact = candidates
             .iter()
@@ -546,6 +561,7 @@ fn resolved_builtin_overload(
                 .map(ColumnType::sql_name)
                 .collect(),
             builtin: true,
+            invocation: None,
         },
         return_type: matched.overload.return_type,
         exact_matches: matched.exact_matches,

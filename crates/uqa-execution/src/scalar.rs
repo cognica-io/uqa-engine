@@ -12,7 +12,7 @@ use uqa_sql::expr::{
     cast_value_with_type_resolution, eval_binary_values, eval_binary_values_with_integer_width,
     eval_builtin_function_call, eval_function_call, integer_width_for_literal,
     integer_width_for_type, negate_value, truthy, EngineHook, EvalContext, IntegerWidth, RowLookup,
-    NAMED_ARG_FUNCTION,
+    NAMED_ARG_FUNCTION, VARIADIC_ARG_FUNCTION,
 };
 use uqa_sql::{ResultRow, SQLError, SQLParam};
 
@@ -834,7 +834,7 @@ fn eval_parameter(index: usize, params: &[SQLParam]) -> Result<Value, SQLError> 
         .checked_sub(1)
         .and_then(|parameter_index| params.get(parameter_index))
     {
-        Some(SQLParam::Scalar(value)) => Ok(value.clone()),
+        Some(SQLParam::Scalar(value) | SQLParam::TypedScalar { value, .. }) => Ok(value.clone()),
         Some(SQLParam::Vector(vector)) => Ok(Value::List(
             vector
                 .iter()
@@ -862,26 +862,177 @@ pub fn eval_call_arguments(
     arguments: &[ScalarExpr],
     context: &ScalarEvalContext<'_>,
 ) -> Result<Vec<(Option<String>, Value)>, SQLError> {
-    arguments
-        .iter()
-        .map(|argument| match argument {
-            ScalarExpr::Func {
-                name,
-                args: marker_args,
-                ..
-            } if name == NAMED_ARG_FUNCTION => {
-                let Some(ScalarExpr::Literal(Value::Str(argument_name))) = marker_args.first()
-                else {
-                    return Err(SQLError::Internal("named argument without a name".into()));
-                };
-                let value = marker_args
-                    .get(1)
-                    .ok_or_else(|| SQLError::Internal("named argument without a value".into()))?;
-                Ok((Some(argument_name.clone()), eval_scalar(value, context)?))
-            }
-            other => Ok((None, eval_scalar(other, context)?)),
+    scalar_call_arguments(arguments)?
+        .into_iter()
+        .map(|argument| {
+            Ok((
+                argument.name.map(str::to_string),
+                eval_scalar(argument.value, context)?,
+            ))
         })
         .collect()
+}
+
+/// A physical call argument after removing the compiler's named and explicit `VARIADIC` syntax markers.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScalarCallArgument<'a> {
+    pub name: Option<&'a str>,
+    pub value: &'a ScalarExpr,
+    pub explicit_variadic: bool,
+}
+
+/// Decode and validate all compiler-owned call-argument markers. PostgreSQL permits one explicit `VARIADIC` argument and requires it to be the final argument.
+#[doc(hidden)]
+pub fn scalar_call_arguments(
+    arguments: &[ScalarExpr],
+) -> Result<Vec<ScalarCallArgument<'_>>, SQLError> {
+    let mut decoded = Vec::with_capacity(arguments.len());
+    for argument in arguments {
+        decoded.push(scalar_call_argument(argument)?);
+    }
+    validate_scalar_call_arguments(&decoded)?;
+    Ok(decoded)
+}
+
+/// Validate cross-argument invariants after individual syntax markers have been decoded, returning whether the call used explicit `VARIADIC` syntax.
+#[doc(hidden)]
+pub fn validate_scalar_call_arguments(
+    arguments: &[ScalarCallArgument<'_>],
+) -> Result<bool, SQLError> {
+    let variadic_positions = arguments
+        .iter()
+        .enumerate()
+        .filter_map(|(position, argument)| argument.explicit_variadic.then_some(position))
+        .collect::<Vec<_>>();
+    if variadic_positions.len() > 1 {
+        return Err(malformed_call_argument(
+            "call contains more than one explicit VARIADIC argument",
+        ));
+    }
+    if variadic_positions
+        .first()
+        .is_some_and(|position| position + 1 != arguments.len())
+    {
+        return Err(malformed_call_argument(
+            "explicit VARIADIC argument must be the final call argument",
+        ));
+    }
+    Ok(!variadic_positions.is_empty())
+}
+
+/// Decode one compiler-owned call-argument marker. Use [`scalar_call_arguments`] for a complete call so duplicate and ordering invariants are also checked.
+#[doc(hidden)]
+pub fn scalar_call_argument(expression: &ScalarExpr) -> Result<ScalarCallArgument<'_>, SQLError> {
+    let ScalarExpr::Func {
+        name,
+        args,
+        binding,
+        distinct,
+        order_by,
+        filter,
+    } = expression
+    else {
+        return Ok(ScalarCallArgument {
+            name: None,
+            value: expression,
+            explicit_variadic: false,
+        });
+    };
+    if name == NAMED_ARG_FUNCTION {
+        validate_marker_shape(
+            binding.as_ref(),
+            *distinct,
+            order_by,
+            filter.as_deref(),
+            name,
+        )?;
+        let [ScalarExpr::Literal(Value::Str(argument_name)), value] = args.as_slice() else {
+            return Err(malformed_call_argument(
+                "named argument marker must contain a string name and one value",
+            ));
+        };
+        let (value, explicit_variadic) = direct_variadic_argument(value)?;
+        if !explicit_variadic
+            && matches!(
+                value,
+                ScalarExpr::Func { name, .. } if name == NAMED_ARG_FUNCTION
+            )
+        {
+            return Err(malformed_call_argument(
+                "call argument contains nested syntax markers",
+            ));
+        }
+        return Ok(ScalarCallArgument {
+            name: Some(argument_name),
+            value,
+            explicit_variadic,
+        });
+    }
+    let (value, explicit_variadic) = direct_variadic_argument(expression)?;
+    Ok(ScalarCallArgument {
+        name: None,
+        value,
+        explicit_variadic,
+    })
+}
+
+fn direct_variadic_argument(expression: &ScalarExpr) -> Result<(&ScalarExpr, bool), SQLError> {
+    let ScalarExpr::Func {
+        name,
+        args,
+        binding,
+        distinct,
+        order_by,
+        filter,
+    } = expression
+    else {
+        return Ok((expression, false));
+    };
+    if name != VARIADIC_ARG_FUNCTION {
+        return Ok((expression, false));
+    }
+    validate_marker_shape(
+        binding.as_ref(),
+        *distinct,
+        order_by,
+        filter.as_deref(),
+        name,
+    )?;
+    let [value] = args.as_slice() else {
+        return Err(malformed_call_argument(
+            "VARIADIC argument marker must contain exactly one value",
+        ));
+    };
+    if matches!(
+        value,
+        ScalarExpr::Func { name, .. }
+            if name == VARIADIC_ARG_FUNCTION || name == NAMED_ARG_FUNCTION
+    ) {
+        return Err(malformed_call_argument(
+            "call argument contains nested syntax markers",
+        ));
+    }
+    Ok((value, true))
+}
+
+fn validate_marker_shape(
+    binding: Option<&FunctionBinding>,
+    distinct: bool,
+    order_by: &[ScalarOrder],
+    filter: Option<&ScalarExpr>,
+    name: &str,
+) -> Result<(), SQLError> {
+    if binding.is_some() || distinct || !order_by.is_empty() || filter.is_some() {
+        return Err(malformed_call_argument(&format!(
+            "{name} syntax marker contains function-call metadata"
+        )));
+    }
+    Ok(())
+}
+
+fn malformed_call_argument(message: &str) -> SQLError {
+    SQLError::Internal(format!("malformed call argument: {message}"))
 }
 
 fn eval_and(items: &[ScalarExpr], context: &ScalarEvalContext<'_>) -> Result<Value, SQLError> {
@@ -1066,9 +1217,11 @@ pub(crate) fn scalar_integer_binary_width(
 
 #[cfg(test)]
 mod tests {
-    use super::{eval_scalar, ScalarEvalContext, ScalarExpr};
+    use super::{
+        eval_call_arguments, eval_scalar, scalar_call_arguments, ScalarEvalContext, ScalarExpr,
+    };
     use uqa_core::Value;
-    use uqa_sql::ast::BinaryOp;
+    use uqa_sql::ast::{BinaryOp, ColumnType};
     use uqa_sql::{SQLError, SQLParam};
 
     #[test]
@@ -1097,6 +1250,22 @@ mod tests {
     }
 
     #[test]
+    fn typed_scalar_parameter_evaluates_like_scalar() {
+        let params = [SQLParam::typed_scalar(
+            Value::Int(7),
+            ColumnType::SmallInteger,
+        )];
+        assert_eq!(
+            eval_scalar(
+                &ScalarExpr::Param(1),
+                &ScalarEvalContext::new(None, &params)
+            )
+            .unwrap(),
+            Value::Int(7)
+        );
+    }
+
+    #[test]
     fn parameter_detection_descends_into_nested_expressions() {
         let expression = ScalarExpr::Func {
             name: "knn_match".into(),
@@ -1113,5 +1282,69 @@ mod tests {
 
         assert!(expression.contains_parameter());
         assert!(!ScalarExpr::Literal(Value::Int(3)).contains_parameter());
+    }
+
+    #[test]
+    fn explicit_variadic_call_argument_is_transparent_to_runtime_evaluation() {
+        let arguments = vec![marker(
+            uqa_sql::expr::NAMED_ARG_FUNCTION,
+            vec![
+                ScalarExpr::Literal(Value::Str("items".into())),
+                marker(
+                    uqa_sql::expr::VARIADIC_ARG_FUNCTION,
+                    vec![ScalarExpr::Literal(Value::Int(42))],
+                ),
+            ],
+        )];
+
+        let decoded = scalar_call_arguments(&arguments).unwrap();
+        assert_eq!(decoded[0].name, Some("items"));
+        assert!(decoded[0].explicit_variadic);
+        assert_eq!(decoded[0].value, &ScalarExpr::Literal(Value::Int(42)));
+        assert_eq!(
+            eval_call_arguments(&arguments, &ScalarEvalContext::new(None, &[])).unwrap(),
+            vec![(Some("items".into()), Value::Int(42))]
+        );
+    }
+
+    #[test]
+    fn call_argument_markers_reject_duplicates_and_malformed_nesting() {
+        let duplicate = vec![
+            marker(
+                uqa_sql::expr::VARIADIC_ARG_FUNCTION,
+                vec![ScalarExpr::Literal(Value::Int(1))],
+            ),
+            marker(
+                uqa_sql::expr::VARIADIC_ARG_FUNCTION,
+                vec![ScalarExpr::Literal(Value::Int(2))],
+            ),
+        ];
+        assert!(matches!(
+            scalar_call_arguments(&duplicate),
+            Err(SQLError::Internal(message)) if message.contains("more than one")
+        ));
+
+        let nested = vec![marker(
+            uqa_sql::expr::VARIADIC_ARG_FUNCTION,
+            vec![marker(
+                uqa_sql::expr::VARIADIC_ARG_FUNCTION,
+                vec![ScalarExpr::Literal(Value::Int(1))],
+            )],
+        )];
+        assert!(matches!(
+            scalar_call_arguments(&nested),
+            Err(SQLError::Internal(message)) if message.contains("nested")
+        ));
+    }
+
+    fn marker(name: &str, args: Vec<ScalarExpr>) -> ScalarExpr {
+        ScalarExpr::Func {
+            name: name.into(),
+            binding: None,
+            args,
+            distinct: false,
+            order_by: Vec::new(),
+            filter: None,
+        }
     }
 }

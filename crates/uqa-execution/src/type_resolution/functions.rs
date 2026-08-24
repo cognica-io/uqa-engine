@@ -8,7 +8,7 @@ use uqa_core::Value;
 use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::{SQLError, SQLParam};
 
-use crate::{RowSchema, ScalarExpr};
+use crate::{scalar_call_argument, scalar_call_arguments, RowSchema, ScalarExpr};
 
 use super::common::{
     base_type, common_numeric_type, common_type, merge_optional_types, numeric_type,
@@ -73,11 +73,6 @@ pub(super) fn builtin_function_type_inner(
     let original_name = name;
     let lower = name.to_ascii_lowercase();
     let name = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
-    if name == uqa_sql::expr::NAMED_ARG_FUNCTION {
-        return args.get(1).map_or(Ok(None), |expression| {
-            scalar_type_inner(expression, schema, params, resolver)
-        });
-    }
     if binding.is_none()
         && resolver.is_some_and(|resolver| resolver.has_untyped_function(original_name))
     {
@@ -86,9 +81,13 @@ pub(super) fn builtin_function_type_inner(
     if name.contains('.') && resolver.is_none() {
         return Ok(None);
     }
-    let argument_types = args
+    let call_arguments = scalar_call_arguments(args)?;
+    let explicit_variadic = call_arguments
         .iter()
-        .map(|argument| scalar_type_inner(named_argument_value(argument), schema, params, resolver))
+        .any(|argument| argument.explicit_variadic);
+    let argument_types = call_arguments
+        .iter()
+        .map(|argument| scalar_type_inner(argument.value, schema, params, resolver))
         .collect::<Result<Vec<_>, _>>()?;
     if name.contains('.') {
         return resolve_extension_function_type(
@@ -97,6 +96,8 @@ pub(super) fn builtin_function_type_inner(
             binding,
             args,
             &argument_types,
+            explicit_variadic,
+            params,
         );
     }
     let ordered_argument_types = order_by
@@ -112,6 +113,8 @@ pub(super) fn builtin_function_type_inner(
             binding,
             args,
             &argument_types,
+            explicit_variadic,
+            params,
             resolver,
         );
     }
@@ -168,9 +171,14 @@ pub(super) fn builtin_function_type_inner(
             Ok(random_range::bound_function_type(name))
         }
         name if array_transform::is_bound_function(name) => Ok(first()),
-        "array_sort" | "array_reverse" => {
-            array_transform::resolve_type(original_name, binding, args, &argument_types, resolver)
-        }
+        "array_sort" | "array_reverse" => array_transform::resolve_type(
+            original_name,
+            binding,
+            args,
+            &argument_types,
+            explicit_variadic,
+            resolver,
+        ),
         "count" | "row_number" | "rank" | "dense_rank" | "nextval" | "currval" | "setval" => {
             Ok(Some(ColumnType::BigInteger))
         }
@@ -286,9 +294,15 @@ pub(super) fn builtin_function_type_inner(
         "current_database" | "current_catalog" | "current_schema" | "current_user"
         | "session_user" => Ok(Some(ColumnType::Name)),
         "current_schemas" => Ok(Some(ColumnType::Array(Box::new(ColumnType::Name)))),
-        _ => {
-            resolve_extension_function_type(resolver, original_name, binding, args, &argument_types)
-        }
+        _ => resolve_extension_function_type(
+            resolver,
+            original_name,
+            binding,
+            args,
+            &argument_types,
+            explicit_variadic,
+            params,
+        ),
     }
 }
 
@@ -298,6 +312,8 @@ fn resolve_extension_function_type(
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
     resolved_types: &[Option<ColumnType>],
+    explicit_variadic: bool,
+    params: &[SQLParam],
 ) -> Result<Option<ColumnType>, SQLError> {
     let Some(resolver) = resolver else {
         return Ok(None);
@@ -307,36 +323,29 @@ fn resolve_extension_function_type(
     for (argument, resolved_type) in args.iter().zip(resolved_types) {
         let (name, value) = named_argument(argument);
         argument_names.push(name);
-        argument_types.push(super::effective_overload_argument_type(
+        argument_types.push(super::effective_overload_argument_type_with_params(
             value,
             resolved_type.clone(),
+            params,
         ));
     }
-    resolver.resolve_function_type(name, binding, &argument_names, &argument_types)
+    resolver.resolve_function_type(
+        name,
+        binding,
+        &argument_names,
+        &argument_types,
+        explicit_variadic,
+    )
 }
 
 pub(super) fn named_argument(expression: &ScalarExpr) -> (Option<String>, &ScalarExpr) {
-    let ScalarExpr::Func { name, args, .. } = expression else {
-        return (None, expression);
-    };
-    if name != uqa_sql::expr::NAMED_ARG_FUNCTION {
-        return (None, expression);
-    }
-    let argument_name = args.first().and_then(|name| match name {
-        ScalarExpr::Literal(Value::Str(name)) => Some(name.clone()),
-        _ => None,
-    });
-    (argument_name, named_argument_value(expression))
+    scalar_call_argument(expression).map_or((None, expression), |argument| {
+        (argument.name.map(str::to_string), argument.value)
+    })
 }
 
 pub(super) fn named_argument_value(expression: &ScalarExpr) -> &ScalarExpr {
-    let ScalarExpr::Func { name, args, .. } = expression else {
-        return expression;
-    };
-    if name != uqa_sql::expr::NAMED_ARG_FUNCTION {
-        return expression;
-    }
-    args.get(1).unwrap_or(expression)
+    scalar_call_argument(expression).map_or(expression, |argument| argument.value)
 }
 
 fn aggregate_sum_type(ty: &ColumnType) -> Option<ColumnType> {

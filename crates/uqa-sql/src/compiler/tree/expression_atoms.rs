@@ -121,11 +121,6 @@ pub(in crate::compiler) fn compile_func_call(f: &pg_query::protobuf::FuncCall) -
     if FunctionBinding::is_polymorphic_builtin_syntax_name(&raw_name) {
         raw_name = format!("\"{raw_name}\"");
     }
-    if f.func_variadic {
-        return Err(SQLError::Unsupported(format!(
-            "VARIADIC invocation of `{raw_name}` is not represented by Expr::Func"
-        )));
-    }
     crate::expr::validate_named_argument_order(f.args.iter().map(|argument| {
         match argument.node.as_ref() {
             Some(NodeEnum::NamedArgExpr(argument)) => Some(argument.name.as_str()),
@@ -137,6 +132,14 @@ pub(in crate::compiler) fn compile_func_call(f: &pg_query::protobuf::FuncCall) -
         .iter()
         .map(compile_expr)
         .collect::<Result<Vec<_>>>()?;
+    if f.func_variadic {
+        let argument = args.pop().ok_or_else(|| {
+            SQLError::Internal(format!(
+                "VARIADIC invocation of `{raw_name}` has no argument"
+            ))
+        })?;
+        args.push(crate::expr::wrap_variadic_argument(argument));
+    }
     if f.agg_star {
         if !args.is_empty() {
             return Err(SQLError::Internal(format!(

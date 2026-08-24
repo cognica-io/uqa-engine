@@ -135,6 +135,20 @@ fn command_string_returns_failure_when_sql_execution_fails() {
 }
 
 #[test]
+fn command_string_preserves_sql_standard_function_body_for_engine_validation() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sql = "CREATE FUNCTION cli_atomic(value anyelement) RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT 1; END;";
+    let output = run_usql(&["-c", sql], "", dir.path());
+    assert!(!output.status.success(), "stdout: {}", stdout(&output));
+    assert!(
+        stdout(&output).contains("ERROR: 42P13"),
+        "{}",
+        stdout(&output)
+    );
+    assert!(!stdout(&output).contains("42601"), "{}", stdout(&output));
+}
+
+#[test]
 fn piped_sql_returns_failure_when_execution_fails() {
     let dir = tempfile::tempdir().expect("tempdir");
     let output = run_usql(&[], "SELECT * FROM missing_table;\n", dir.path());

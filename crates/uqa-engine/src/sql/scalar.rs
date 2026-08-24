@@ -8,11 +8,11 @@
 
 use uqa_core::Value;
 use uqa_execution::{
-    eval_scalar, PhysicalRow, RowSchema, ScalarEvalContext, ScalarExpr, ScalarSubqueryRunner,
-    SubqueryId, SubqueryResult,
+    eval_scalar, scalar_call_argument, validate_scalar_call_arguments, PhysicalRow, RowSchema,
+    ScalarEvalContext, ScalarExpr, ScalarSubqueryRunner, SubqueryId, SubqueryResult,
 };
 use uqa_planner::{ExpressionPlan, QueryPlan};
-use uqa_sql::expr::{EngineHook, RowLookup, NAMED_ARG_FUNCTION};
+use uqa_sql::expr::{EngineHook, RowLookup};
 use uqa_sql::{ResultRow, SQLError, SQLParam};
 
 use super::{CteScope, Engine, ScopedEngineHook};
@@ -196,29 +196,28 @@ pub(super) fn eval_physical_call_arguments(
     arguments: &[ExpressionPlan],
     context: &PhysicalEvalContext<'_>,
 ) -> Result<Vec<(Option<String>, Value)>, SQLError> {
+    let (decoded, _) = analyze_physical_call_arguments(arguments)?;
     arguments
         .iter()
-        .map(|argument| match &argument.scalar {
-            ScalarExpr::Func {
-                name,
-                args: marker_args,
-                ..
-            } if name == NAMED_ARG_FUNCTION => {
-                let Some(ScalarExpr::Literal(Value::Str(argument_name))) = marker_args.first()
-                else {
-                    return Err(SQLError::Internal("named argument without a name".into()));
-                };
-                let value = marker_args
-                    .get(1)
-                    .ok_or_else(|| SQLError::Internal("named argument without a value".into()))?;
-                Ok((
-                    Some(argument_name.clone()),
-                    eval_physical_scalar(value, &argument.subqueries, context)?,
-                ))
-            }
-            _ => Ok((None, eval_physical(argument, context)?)),
+        .zip(decoded)
+        .map(|(plan, argument)| {
+            Ok((
+                argument.name.map(str::to_string),
+                eval_physical_scalar(argument.value, &plan.subqueries, context)?,
+            ))
         })
         .collect()
+}
+
+pub(super) fn analyze_physical_call_arguments(
+    arguments: &[ExpressionPlan],
+) -> Result<(Vec<uqa_execution::ScalarCallArgument<'_>>, bool), SQLError> {
+    let decoded = arguments
+        .iter()
+        .map(|argument| scalar_call_argument(&argument.scalar))
+        .collect::<Result<Vec<_>, _>>()?;
+    let explicit_variadic = validate_scalar_call_arguments(&decoded)?;
+    Ok((decoded, explicit_variadic))
 }
 
 pub(super) fn eval_physical_scalar(
@@ -411,7 +410,10 @@ mod tests {
     use uqa_sql::ast::{BinaryOp, Expr};
     use uqa_sql::SQLParam;
 
-    use super::{eval_physical, PhysicalEvalContext};
+    use super::{
+        analyze_physical_call_arguments, eval_physical, eval_physical_call_arguments,
+        PhysicalEvalContext,
+    };
 
     #[test]
     fn engine_evaluates_the_physical_expression_field() {
@@ -424,6 +426,36 @@ mod tests {
         assert_eq!(
             eval_physical(&expression, &PhysicalEvalContext::new(None, &params)).unwrap(),
             Value::Int(21)
+        );
+    }
+
+    #[test]
+    fn physical_call_arguments_preserve_and_unwrap_explicit_variadic_syntax() {
+        let variadic = Expr::Func {
+            name: uqa_sql::expr::VARIADIC_ARG_FUNCTION.into(),
+            binding: None,
+            args: vec![Expr::Literal(Value::Int(42))],
+            distinct: false,
+            order_by: Vec::new(),
+            filter: None,
+        };
+        let named = Expr::Func {
+            name: uqa_sql::expr::NAMED_ARG_FUNCTION.into(),
+            binding: None,
+            args: vec![Expr::Literal(Value::Str("items".into())), variadic],
+            distinct: false,
+            order_by: Vec::new(),
+            filter: None,
+        };
+        let arguments = vec![ExpressionPlan::lower(named)];
+
+        let (decoded, explicit_variadic) = analyze_physical_call_arguments(&arguments).unwrap();
+        assert!(explicit_variadic);
+        assert_eq!(decoded[0].name, Some("items"));
+        assert_eq!(
+            eval_physical_call_arguments(&arguments, &PhysicalEvalContext::new(None, &[]),)
+                .unwrap(),
+            vec![(Some("items".into()), Value::Int(42))]
         );
     }
 }

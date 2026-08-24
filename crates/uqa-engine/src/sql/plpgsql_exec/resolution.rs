@@ -8,11 +8,10 @@
 
 use super::{
     canonical_routine_type_name, cast_value, eval_lowered_expression, value_type_name, Arc,
-    CreateFunction, Engine, FunctionBinding, SQLError, SQLUserFunction, Value,
+    ArrayValue, CreateFunction, Engine, FunctionBinding, SQLError, SQLUserFunction, Value,
 };
 use crate::engine_user_functions::RoutineCallKind;
-use uqa_execution::{match_function_signature, FunctionParameterDescriptor};
-use uqa_sql::ast::ColumnType;
+use uqa_sql::ast::{ColumnType, FunctionParamMode, RoutineInvocationBinding, RoutineVariadicMode};
 use uqa_sql::expr::coercion_type_name;
 
 pub(super) fn output_column_names(def: &CreateFunction) -> Vec<String> {
@@ -57,57 +56,12 @@ pub(super) fn routine_resolution_error(
     }
 }
 
-/// One argument slot after structural matching.
-enum ArgSlot {
-    Filled(Value),
-    NeedsDefault(usize),
-}
-
-/// Match a call's argument list against a routine signature without
-/// evaluating defaults. `None` = not a candidate.
-fn try_match_arguments(
-    def: &CreateFunction,
-    args: &[(Option<String>, Value)],
-) -> Option<Vec<ArgSlot>> {
-    let signature = def.signature_params();
-    let parameters = signature
-        .iter()
-        .map(|parameter| FunctionParameterDescriptor {
-            name: Some(parameter.name.clone()),
-            type_name: canonical_routine_type_name(&parameter.type_name),
-            has_default: parameter.default.is_some(),
-        })
-        .collect::<Vec<_>>();
-    let argument_names = args
-        .iter()
-        .map(|(name, _)| name.clone())
-        .collect::<Vec<_>>();
-    let argument_types = vec![None; args.len()];
-    let matched = match_function_signature(&parameters, &argument_names, &argument_types)?;
-    if args.len() > signature.len() {
-        return None;
-    }
-    let mut slots: Vec<Option<ArgSlot>> = (0..signature.len()).map(|_| None).collect();
-    for ((_, value), position) in args.iter().zip(matched.argument_positions) {
-        if slots[position].is_some() {
-            return None;
-        }
-        slots[position] = Some(ArgSlot::Filled(value.clone()));
-    }
-    let mut out = Vec::with_capacity(slots.len());
-    for (idx, slot) in slots.into_iter().enumerate() {
-        if let Some(slot) = slot {
-            out.push(slot);
-        } else {
-            signature[idx].default.as_ref()?;
-            out.push(ArgSlot::NeedsDefault(idx));
-        }
-    }
-    Some(out)
-}
-
 /// A resolved overload plus its bound argument values.
-type ResolvedRoutine = (Arc<SQLUserFunction>, Vec<Value>);
+pub(super) struct ResolvedRoutine {
+    pub(super) function: Arc<SQLUserFunction>,
+    pub(super) bound: Vec<Value>,
+    pub(super) invocation: Box<RoutineInvocationBinding>,
+}
 
 /// Resolve `name(args)` to a single overload and its bound argument
 /// values (declared-type casts applied, defaults evaluated).
@@ -118,6 +72,7 @@ pub(super) fn resolve_routine(
     args: &[(Option<String>, Value)],
     declared_argument_types: Option<&[Option<ColumnType>]>,
     kind: &str,
+    explicit_variadic: bool,
 ) -> Result<Option<ResolvedRoutine>, SQLError> {
     if engine.lookup_sql_functions(name).is_none() {
         return Ok(None);
@@ -146,14 +101,22 @@ pub(super) fn resolve_routine(
     } else {
         RoutineCallKind::Function
     };
-    let function = engine
-        .resolve_static_sql_routine(name, None, &argument_names, argument_types, call_kind)?
+    let matched = engine
+        .resolve_static_sql_routine_match(
+            name,
+            None,
+            &argument_names,
+            argument_types,
+            explicit_variadic,
+            call_kind,
+        )?
         .ok_or_else(|| routine_resolution_error(kind, name, args, "does not exist"))?;
-    let slots = try_match_arguments(&function.def, args).ok_or_else(|| {
-        SQLError::Internal("resolved routine no longer matches its runtime arguments".into())
-    })?;
-    let bound = materialize_arguments(engine, &function.def, slots)?;
-    Ok(Some((function, bound)))
+    let bound = materialize_arguments(engine, &matched.function.def, &matched.invocation, args)?;
+    Ok(Some(ResolvedRoutine {
+        function: matched.function,
+        bound,
+        invocation: matched.invocation,
+    }))
 }
 
 pub(super) fn resolve_bound_routine(
@@ -166,12 +129,19 @@ pub(super) fn resolve_bound_routine(
         .map(|(name, _)| name.clone())
         .collect::<Vec<_>>();
     let argument_types = runtime_argument_types(args)?;
-    let function = engine
-        .resolve_static_sql_routine(
+    let explicit_variadic = binding.invocation.as_ref().is_some_and(|invocation| {
+        matches!(
+            invocation.variadic_mode,
+            RoutineVariadicMode::Explicit { .. }
+        )
+    });
+    let matched = engine
+        .resolve_static_sql_routine_match(
             &binding.name,
             Some(binding),
             &argument_names,
             &argument_types,
+            explicit_variadic,
             RoutineCallKind::Function,
         )?
         .ok_or_else(|| SQLError::Routine {
@@ -182,11 +152,12 @@ pub(super) fn resolve_bound_routine(
                 binding.argument_types.join(", ")
             ),
         })?;
-    let slots = try_match_arguments(&function.def, args).ok_or_else(|| {
-        routine_resolution_error("function", &binding.name, args, "does not exist")
-    })?;
-    let bound = materialize_arguments(engine, &function.def, slots)?;
-    Ok(Some((function, bound)))
+    let bound = materialize_arguments(engine, &matched.function.def, &matched.invocation, args)?;
+    Ok(Some(ResolvedRoutine {
+        function: matched.function,
+        bound,
+        invocation: matched.invocation,
+    }))
 }
 
 fn runtime_argument_types(
@@ -208,25 +179,76 @@ fn runtime_argument_types(
 fn materialize_arguments(
     engine: &Engine,
     def: &CreateFunction,
-    slots: Vec<ArgSlot>,
+    invocation: &RoutineInvocationBinding,
+    args: &[(Option<String>, Value)],
 ) -> Result<Vec<Value>, SQLError> {
-    let signature = def.signature_params();
-    let mut bound = Vec::with_capacity(slots.len());
-    for (idx, slot) in slots.into_iter().enumerate() {
-        let value = match slot {
-            ArgSlot::Filled(value) => value,
-            ArgSlot::NeedsDefault(param_idx) => {
-                let default = signature[param_idx].default.as_ref().ok_or_else(|| {
-                    SQLError::Internal("argument default vanished during resolution".into())
-                })?;
-                eval_lowered_expression(engine, default, None, &[])?
-            }
-        };
-        bound.push(coerce_routine_value(
+    if invocation.argument_positions.len() != args.len()
+        || invocation.argument_targets.len() != args.len()
+        || invocation.parameter_types.len() != def.params.len()
+    {
+        return Err(SQLError::Internal(format!(
+            "routine `{}` has an inconsistent invocation binding",
+            def.name
+        )));
+    }
+    let expanded_parameter = match invocation.variadic_mode {
+        RoutineVariadicMode::Expanded { parameter_index } => Some(parameter_index),
+        RoutineVariadicMode::None | RoutineVariadicMode::Explicit { .. } => None,
+    };
+    let mut slots = vec![None; def.params.len()];
+    let mut expanded_values = Vec::new();
+    for (argument_index, ((_, value), parameter_index)) in
+        args.iter().zip(&invocation.argument_positions).enumerate()
+    {
+        let target = &invocation.argument_targets[argument_index];
+        let value = coerce_routine_value(engine, value, target)?;
+        if Some(*parameter_index) == expanded_parameter {
+            expanded_values.push(value);
+        } else if slots[*parameter_index].replace(value).is_some() {
+            return Err(SQLError::Internal(format!(
+                "routine `{}` bound more than one argument to parameter {}",
+                def.name,
+                parameter_index + 1
+            )));
+        }
+    }
+    if let Some(parameter_index) = expanded_parameter {
+        let array = ArrayValue::try_new(expanded_values).ok_or_else(|| {
+            SQLError::Internal(format!(
+                "routine `{}` could not materialize its variadic array",
+                def.name
+            ))
+        })?;
+        slots[parameter_index] = Some(coerce_routine_value(
             engine,
-            &value,
-            &signature[idx].type_name,
+            &Value::Array(array),
+            &invocation.parameter_types[parameter_index],
         )?);
+    }
+    let mut bound = Vec::with_capacity(def.call_arity());
+    for (parameter_index, parameter) in def.params.iter().enumerate() {
+        let takes_argument = match parameter.mode {
+            FunctionParamMode::In | FunctionParamMode::InOut | FunctionParamMode::Variadic => true,
+            FunctionParamMode::Out => def.is_procedure,
+            FunctionParamMode::Table => false,
+        };
+        if !takes_argument {
+            continue;
+        }
+        let value = if let Some(value) = slots[parameter_index].take() {
+            value
+        } else {
+            let default = parameter.default.as_ref().ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "routine `{}` lost required parameter {} after overload resolution",
+                    def.name,
+                    parameter_index + 1
+                ))
+            })?;
+            let value = eval_lowered_expression(engine, default, None, &[])?;
+            coerce_routine_value(engine, &value, &invocation.parameter_types[parameter_index])?
+        };
+        bound.push(value);
     }
     Ok(bound)
 }

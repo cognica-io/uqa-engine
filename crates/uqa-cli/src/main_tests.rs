@@ -102,12 +102,66 @@ fn split_statements_respects_comments_and_identifiers() {
 }
 
 #[test]
+fn split_statements_respects_postgresql_escape_and_delimited_quotes() {
+    let text = r#"SELECT E'escaped\';semicolon', """odd;identifier"""; SELECT U&'d\0061t;a';"#;
+    let parts = split_statements(text);
+    assert_eq!(parts.len(), 2, "{parts:?}");
+    assert!(parts[0].contains("escaped\\';semicolon"));
+    assert!(parts[0].contains(r#"""odd;identifier"""#));
+    assert!(parts[1].contains(r"U&'d\0061t;a'"));
+}
+
+#[test]
+fn split_statements_keeps_sql_standard_atomic_body_together() {
+    let text = "CREATE FUNCTION atomic_body(value anyelement) RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT 1; END; SELECT 2;";
+    let parts = split_statements(text);
+    assert_eq!(parts.len(), 2, "{parts:?}");
+    assert!(parts[0].contains("BEGIN ATOMIC SELECT 1; END"));
+    assert_eq!(parts[1], "SELECT 2");
+}
+
+#[test]
+fn split_statements_tracks_case_and_nested_atomic_bodies() {
+    let text = "CREATE FUNCTION outer_body() RETURNS integer LANGUAGE SQL BEGIN ATOMIC \
+                SELECT CASE WHEN ';' = ';' THEN 1 ELSE 0 END; \
+                CREATE FUNCTION inner_body() RETURNS integer LANGUAGE SQL BEGIN ATOMIC \
+                    SELECT 2 /* body; comment */; \
+                END; \
+                SELECT 3; \
+                END; \
+                SELECT $$after;body$$;";
+    let parts = split_statements(text);
+    assert_eq!(parts.len(), 2, "{parts:?}");
+    assert!(parts[0].contains("CASE WHEN ';' = ';' THEN 1 ELSE 0 END;"));
+    assert!(parts[0].contains("CREATE FUNCTION inner_body()"));
+    assert!(parts[0].contains("SELECT 2 /* body; comment */;"));
+    assert!(parts[0].contains("SELECT 3;"));
+    assert_eq!(parts[1], "SELECT $$after;body$$");
+}
+
+#[test]
+fn begin_atomic_only_nests_inside_a_routine_declaration() {
+    let parts = split_statements("BEGIN ATOMIC; SELECT 2;");
+    assert_eq!(parts, ["BEGIN ATOMIC", "SELECT 2"]);
+}
+
+#[test]
 fn terminator_detection_waits_for_dollar_quote_close() {
     assert!(!contains_statement_terminator(
         "CREATE FUNCTION f() AS $$ BEGIN RETURN 1;"
     ));
     assert!(contains_statement_terminator(
         "CREATE FUNCTION f() AS $$ BEGIN RETURN 1; END; $$ LANGUAGE plpgsql;"
+    ));
+}
+
+#[test]
+fn terminator_detection_waits_for_atomic_body_end() {
+    assert!(!contains_statement_terminator(
+        "CREATE FUNCTION f() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT 1;"
+    ));
+    assert!(contains_statement_terminator(
+        "CREATE FUNCTION f() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT 1; END;"
     ));
 }
 

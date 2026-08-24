@@ -68,7 +68,9 @@ impl TryFrom<&SQLParam> for SQLParameter {
 
     fn try_from(parameter: &SQLParam) -> Result<Self, Self::Error> {
         match parameter {
-            SQLParam::Scalar(value) => scalar_parameter(value),
+            SQLParam::Scalar(value) | SQLParam::TypedScalar { value, .. } => {
+                scalar_parameter(value)
+            }
             SQLParam::Vector(value) if finite_vector(value) => Ok(Self::Vector {
                 value: value.clone(),
             }),

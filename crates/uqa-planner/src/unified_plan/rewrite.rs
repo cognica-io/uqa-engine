@@ -231,6 +231,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::CreateForeignTable(_)
         | CommandPlan::CreateFunction(_)
         | CommandPlan::DropFunction(_)
+        | CommandPlan::AlterRoutine(_)
         | CommandPlan::DoBlock { .. } => {}
     }
 }

@@ -12,10 +12,12 @@ use uqa_planner::{
     UpdatePlan,
 };
 use uqa_sql::ast::{CreateForeignServer, CreateForeignTable};
-use uqa_sql::expr::NAMED_ARG_FUNCTION;
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 
-use super::scalar::{eval_physical, eval_physical_call_arguments, PhysicalEvalContext};
+use super::scalar::{
+    analyze_physical_call_arguments, eval_physical, eval_physical_call_arguments,
+    PhysicalEvalContext,
+};
 use super::{
     plpgsql_exec, run_alter_sequence, run_alter_table, run_create_index, run_create_sequence,
     run_create_table, run_create_table_as, run_delete, run_drop, run_explain, run_insert,
@@ -320,19 +322,12 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             ));
         }
         let scope = select::CteScope::new();
+        let (call_arguments, explicit_variadic) = analyze_physical_call_arguments(arguments)?;
         let argument_types = arguments
             .iter()
-            .map(|argument| {
-                let value = match &argument.scalar {
-                    uqa_execution::ScalarExpr::Func {
-                        name,
-                        args: marker_args,
-                        ..
-                    } if name == NAMED_ARG_FUNCTION => marker_args.get(1).ok_or_else(|| {
-                        SQLError::Internal("named argument without a value".into())
-                    })?,
-                    value => value,
-                };
+            .zip(&call_arguments)
+            .map(|(argument, call_argument)| {
+                let value = call_argument.value;
                 if matches!(
                     value,
                     uqa_execution::ScalarExpr::Literal(Value::Str(_) | Value::Null)
@@ -348,7 +343,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             .with_function_hook(&hook)
             .with_subquery_runner(&hook);
         let args = eval_physical_call_arguments(arguments, &context)?;
-        plpgsql_exec::run_call(self.engine, name, &args, &argument_types)
+        plpgsql_exec::run_call(self.engine, name, &args, &argument_types, explicit_variadic)
     }
 
     fn execute_command(&self, command: &CommandPlan) -> Result<SQLResult, SQLError> {
@@ -445,6 +440,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             }
             CommandPlan::DropFunction(statement) => {
                 plpgsql_exec::run_drop_function(self.engine, statement)
+            }
+            CommandPlan::AlterRoutine(statement) => {
+                self.engine.alter_sql_routine(statement)?;
+                Ok(SQLResult::empty())
             }
             CommandPlan::DoBlock { language, body } => {
                 plpgsql_exec::run_do_block(self.engine, language, body)

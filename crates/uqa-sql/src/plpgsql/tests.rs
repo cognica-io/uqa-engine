@@ -5,8 +5,25 @@
 //
 
 use super::lowering_statement::{lower_stmt, lower_stmt_list};
-use super::parsing::{lower_datum, parse_plpgsql_text, validate_datums};
+use super::parsing::{lower_datum, parse_plpgsql_text, synthesize_create_text, validate_datums};
 use super::*;
+
+#[test]
+fn plpgsql_synthesized_definition_preserves_variadic_parameters() {
+    let mut statements = crate::compile(
+        "CREATE FUNCTION variadic_probe(VARIADIC items integer[]) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RETURN cardinality(items); END $$",
+    )
+    .unwrap();
+    let Statement::CreateFunction(definition) = statements.remove(0) else {
+        panic!("expected CREATE FUNCTION");
+    };
+    let FunctionBody::Source(body) = &definition.body else {
+        panic!("expected source body");
+    };
+    let synthesized = synthesize_create_text(&definition, body);
+    assert!(synthesized.contains("VARIADIC \"items\" int4[]"));
+    parse_function(&definition).unwrap();
+}
 
 #[test]
 fn pg18_bound_cursor_named_arguments_lower_in_declaration_order() {

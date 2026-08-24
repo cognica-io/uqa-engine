@@ -16,6 +16,27 @@ fn one(sql: &str) -> UnifiedPlan {
 }
 
 #[test]
+fn alter_routine_lowers_as_an_exact_identity_command() {
+    let plan = one("ALTER FUNCTION app.f(integer, text) IMMUTABLE STRICT");
+    assert_eq!(plan.name(), "AlterRoutine");
+    let UnifiedPlan::Command(command) = plan else {
+        panic!("ALTER FUNCTION must be a command plan");
+    };
+    let CommandPlan::AlterRoutine(alter) = command.as_ref() else {
+        panic!("expected ALTER routine command");
+    };
+    assert_eq!(alter.kind, uqa_sql::ast::AlterRoutineKind::Function);
+    assert_eq!(alter.name, "app.f");
+    assert_eq!(alter.arg_types.as_deref().unwrap(), ["int4", "text"]);
+    assert!(alter.arg_type_references.is_empty());
+    assert_eq!(
+        alter.volatility,
+        Some(uqa_sql::ast::FunctionVolatility::Immutable)
+    );
+    assert_eq!(alter.strict, Some(true));
+}
+
+#[test]
 fn arithmetic_and_window_are_relational_compute_nodes() {
     let arithmetic = one("SELECT a + 1 AS b FROM t");
     let UnifiedPlan::Query(query) = arithmetic else {

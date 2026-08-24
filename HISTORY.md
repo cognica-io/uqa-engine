@@ -18,12 +18,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Implemented PostgreSQL 18 `CREATE TABLE AS ... WITH NO DATA`, including static query analysis without execution, exact output schemas, vector and tensor field metadata, `IF NOT EXISTS` validation order, and durable reopen behavior.
 - Implemented PostgreSQL 18 `SELECT ... INTO` for ordinary durable tables with CTAS-equivalent type identity, validation order, transactionality, and persistence.
 - Implemented PostgreSQL 18 `CREATE VIEW` column-name lists with positional and partial aliases, quoted identifier preservation, static creation-time analysis, durable fixed output names, duplicate and width errors, and `CREATE OR REPLACE VIEW` row-type compatibility checks.
+- Implemented PostgreSQL 18 polymorphic and `VARIADIC` routine resolution for represented scalar and array types across SQL, PL/pgSQL, `CALL`, `TABLE`, `SETOF`, generated columns, stored views, user `pg_proc` metadata, volatility/null-input ALTER lifecycle, and bounded routine CASCADE dependencies.
 - Made the PyPI `uqa` package install the `usql` console command backed by the same Rust CLI implementation as the standalone `uqa-cli` binary.
 - Added npm trusted publishing for the `@cognica-io/uqa` Node.js and `@cognica-io/uqa-wasm` browser packages, with six platform-constrained native addons published under the `@cognica-io` organization and selected through exact-version optional dependencies.
 
 ### Fixed
 
 - Made the Python source distribution include every manifest-declared benchmark source so pip can build a wheel from the sdist instead of failing during Cargo metadata validation.
+- Made `usql` preserve SQL-standard `BEGIN ATOMIC ... END` routine bodies as one statement by using the pinned PostgreSQL 18 scanner for lexical boundaries.
 
 ## [0.1.6] - 2026-08-21
 

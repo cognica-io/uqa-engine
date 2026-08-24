@@ -8,10 +8,11 @@
 
 use super::{
     coerce_routine_value, result_row_values, Cell, CompiledFunctionBody, CreateFunction, Engine,
-    FunctionReturns, Interpreter, RoutineOutcome, SQLError, SQLParam, SQLResult, SQLUserFunction,
-    UnifiedPlanExecutor, Value,
+    FunctionReturns, Interpreter, PLpgSQLDatum, RoutineOutcome, SQLError, SQLParam, SQLResult,
+    SQLUserFunction, UnifiedPlanExecutor, Value,
 };
 use crate::engine_user_functions::routine_returns_anonymous_record;
+use uqa_sql::ast::RoutineInvocationBinding;
 
 thread_local! {
     static CALL_DEPTH: Cell<usize> = const { Cell::new(0) };
@@ -70,18 +71,83 @@ pub(super) fn execute_routine(
     engine: &Engine,
     function: &SQLUserFunction,
     bound: Vec<Value>,
+    invocation: &RoutineInvocationBinding,
 ) -> Result<RoutineOutcome, SQLError> {
     let _guard = DepthGuard::enter(engine)?;
+    let specialized = specialized_definition(&function.def, invocation)?;
+    let definition = specialized.as_ref().unwrap_or(&function.def);
     match &function.compiled {
         CompiledFunctionBody::PLpgSQL(parsed) => {
-            let mut interpreter = Interpreter::new(engine, &function.def, parsed, bound)?;
-            interpreter.run(&parsed.action)?;
-            Ok(interpreter.into_outcome())
+            if specialized.is_some() {
+                let mut parsed = parsed.clone();
+                for (index, parameter) in definition.params.iter().enumerate() {
+                    if let Some(PLpgSQLDatum::Var(variable)) = parsed.datums.get_mut(index) {
+                        variable.type_name.clone_from(&parameter.type_name);
+                    }
+                }
+                return execute_plpgsql_language(engine, definition, &parsed, bound);
+            }
+            execute_plpgsql_language(engine, definition, parsed, bound)
         }
         CompiledFunctionBody::SQL(statements) => {
-            execute_sql_language(engine, &function.def, statements, &bound)
+            execute_sql_language(engine, definition, statements, &bound)
         }
     }
+}
+
+fn execute_plpgsql_language(
+    engine: &Engine,
+    definition: &CreateFunction,
+    parsed: &uqa_sql::plpgsql::PLpgSQLFunction,
+    bound: Vec<Value>,
+) -> Result<RoutineOutcome, SQLError> {
+    let mut interpreter = Interpreter::new(engine, definition, parsed, bound)?;
+    interpreter.run(&parsed.action)?;
+    Ok(interpreter.into_outcome())
+}
+
+fn specialized_definition(
+    definition: &CreateFunction,
+    invocation: &RoutineInvocationBinding,
+) -> Result<Option<CreateFunction>, SQLError> {
+    if invocation.parameter_types.len() != definition.params.len() {
+        return Err(SQLError::Internal(format!(
+            "routine `{}` has {} concrete parameter types for {} parameters",
+            definition.name,
+            invocation.parameter_types.len(),
+            definition.params.len()
+        )));
+    }
+    let parameters_match = definition
+        .params
+        .iter()
+        .zip(&invocation.parameter_types)
+        .all(|(parameter, type_name)| parameter.type_name == *type_name);
+    let return_type_matches = match (&invocation.return_type, &definition.returns) {
+        (Some(concrete), FunctionReturns::Scalar { type_name })
+        | (Some(concrete), FunctionReturns::SetOf { type_name }) => concrete == type_name,
+        (None, _) | (Some(_), FunctionReturns::None | FunctionReturns::Table) => true,
+    };
+    if parameters_match && return_type_matches {
+        return Ok(None);
+    }
+    let mut specialized = definition.clone();
+    for (parameter, type_name) in specialized
+        .params
+        .iter_mut()
+        .zip(&invocation.parameter_types)
+    {
+        parameter.type_name.clone_from(type_name);
+    }
+    if let Some(return_type) = &invocation.return_type {
+        match &mut specialized.returns {
+            FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
+                type_name.clone_from(return_type);
+            }
+            FunctionReturns::None | FunctionReturns::Table => {}
+        }
+    }
+    Ok(Some(specialized))
 }
 
 /// `LANGUAGE sql` body: run every statement; the last statement's
@@ -92,7 +158,29 @@ fn execute_sql_language(
     plans: &[uqa_planner::UnifiedPlan],
     bound: &[Value],
 ) -> Result<RoutineOutcome, SQLError> {
-    let params: Vec<SQLParam> = bound.iter().cloned().map(SQLParam::Scalar).collect();
+    let call_params = def.call_params();
+    if call_params.len() != bound.len() {
+        return Err(SQLError::Internal(format!(
+            "routine `{}` received {} values for {} concrete call parameters",
+            def.name,
+            bound.len(),
+            call_params.len()
+        )));
+    }
+    let params = bound
+        .iter()
+        .cloned()
+        .zip(call_params)
+        .map(|(value, parameter)| {
+            let ty = uqa_sql::ast::ColumnType::from_sql_name(&parameter.type_name)
+                .ok()
+                .or_else(|| crate::sql::resolve_catalog_column_type(engine, &parameter.type_name))
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(format!("unknown type `{}`", parameter.type_name))
+                })?;
+            Ok(SQLParam::typed_scalar(value, ty))
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?;
     let mut last = SQLResult::empty();
     for plan in plans {
         last = UnifiedPlanExecutor::new(engine, &params).execute(plan)?;
@@ -129,6 +217,10 @@ fn execute_sql_language(
                 if let FunctionReturns::SetOf { type_name } = &def.returns {
                     values[0] = coerce_routine_value(engine, &values[0], type_name)?;
                 }
+            } else {
+                for (value, parameter) in values.iter_mut().zip(&out_params) {
+                    *value = coerce_routine_value(engine, value, &parameter.type_name)?;
+                }
             }
             set_rows.push(values);
         }
@@ -145,7 +237,7 @@ fn execute_sql_language(
         let mut out_values = vec![Value::Null; out_params.len()];
         if let Some(values) = first {
             for (idx, value) in values.into_iter().take(out_values.len()).enumerate() {
-                out_values[idx] = value;
+                out_values[idx] = coerce_routine_value(engine, &value, &out_params[idx].type_name)?;
             }
         }
         return Ok(RoutineOutcome {
