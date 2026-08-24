@@ -182,7 +182,9 @@ pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
                         | "character_length"
                         | "crc32"
                         | "crc32c"
+                        | "gamma"
                         | "length"
+                        | "lgamma"
                         | "md5"
                         | "octet_length"
                         | "reverse"
@@ -420,7 +422,7 @@ mod mutability_classifier_tests {
             builtin_function_dispatch_name("pg_catalog.reverse"),
             "reverse"
         );
-        for function in ["crc32", "crc32c", "md5"] {
+        for function in ["crc32", "crc32c", "gamma", "lgamma", "md5"] {
             assert_eq!(
                 builtin_function_dispatch_name(&format!("pg_catalog.{function}")),
                 function

@@ -9,9 +9,13 @@
 //! metadata like views and sequences; the compiled body is rebuilt
 //! from the definition at registration and restore time.
 
+mod combined_overloads;
+
 use std::collections::BTreeMap;
 
-use uqa_execution::{FunctionTypeResolver, ResolvedFunctionOverload, ScalarExpr};
+use uqa_execution::{
+    BuiltinFunctionOverload, FunctionTypeResolver, ResolvedFunctionOverload, ScalarExpr,
+};
 use uqa_planner::UnifiedPlan;
 use uqa_sql::ast::{
     ColumnType, CreateFunction, DropFunctionItem, DropFunctionStmt, FunctionBinding, FunctionBody,
@@ -89,6 +93,26 @@ struct StaticFunctionMatch {
     preferred_matches: usize,
 }
 
+trait RankedFunctionMatch {
+    fn argument_types(&self) -> &[String];
+    fn exact_matches(&self) -> usize;
+    fn preferred_matches(&self) -> usize;
+}
+
+impl RankedFunctionMatch for StaticFunctionMatch {
+    fn argument_types(&self) -> &[String] {
+        &self.argument_types
+    }
+
+    fn exact_matches(&self) -> usize {
+        self.exact_matches
+    }
+
+    fn preferred_matches(&self) -> usize {
+        self.preferred_matches
+    }
+}
+
 impl FunctionTypeResolver for Engine {
     fn resolve_function_type(
         &self,
@@ -131,6 +155,25 @@ impl FunctionTypeResolver for Engine {
             preferred_matches: matched.preferred_matches,
             precedes_pg_catalog: self.user_function_precedes_pg_catalog(&function.def.name),
         }))
+    }
+
+    fn resolve_function_overload_with_builtins(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+        builtins: &[BuiltinFunctionOverload],
+    ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
+        combined_overloads::resolve(
+            self,
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            builtins,
+        )
+        .map(Some)
     }
 }
 
@@ -211,50 +254,7 @@ fn resolve_static_function_overload(
         ));
     }
 
-    let most_exact = candidates
-        .iter()
-        .map(|candidate| candidate.exact_matches)
-        .max()
-        .unwrap_or(0);
-    candidates.retain(|candidate| candidate.exact_matches == most_exact);
-    let most_preferred = candidates
-        .iter()
-        .map(|candidate| candidate.preferred_matches)
-        .max()
-        .unwrap_or(0);
-    candidates.retain(|candidate| candidate.preferred_matches == most_preferred);
-    narrow_unknown_function_arguments(&mut candidates, argument_types);
-
-    if candidates.len() > 1 {
-        let mut known = argument_types.iter().flatten();
-        if let Some(first) = known.next() {
-            let identity = canonical_column_type_name(first);
-            if known.all(|ty| canonical_column_type_name(ty) == identity) {
-                let narrowed = candidates
-                    .into_iter()
-                    .filter(|candidate| {
-                        argument_types.iter().enumerate().all(|(index, actual)| {
-                            actual.is_some()
-                                || routine_type_accepts_implicit_cast(
-                                    &identity,
-                                    &candidate.argument_types[index],
-                                )
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                if narrowed.len() == 1 {
-                    return narrowed
-                        .into_iter()
-                        .next()
-                        .map(|candidate| candidate.function)
-                        .ok_or_else(|| {
-                            SQLError::Internal("resolved function candidate disappeared".into())
-                        });
-                }
-                candidates = narrowed;
-            }
-        }
-    }
+    rank_function_matches(&mut candidates, argument_types);
 
     if candidates.len() != 1 {
         return Err(static_function_resolution_error(
@@ -270,17 +270,30 @@ fn resolve_static_function_overload(
         .ok_or_else(|| SQLError::Internal("resolved function candidate disappeared".into()))
 }
 
-fn narrow_unknown_function_arguments(
-    candidates: &mut Vec<StaticFunctionMatch>,
+fn rank_function_matches<T: RankedFunctionMatch>(
+    candidates: &mut Vec<T>,
     argument_types: &[Option<ColumnType>],
 ) {
+    let most_exact = candidates
+        .iter()
+        .map(RankedFunctionMatch::exact_matches)
+        .max()
+        .unwrap_or(0);
+    candidates.retain(|candidate| candidate.exact_matches() == most_exact);
+    let most_preferred = candidates
+        .iter()
+        .map(RankedFunctionMatch::preferred_matches)
+        .max()
+        .unwrap_or(0);
+    candidates.retain(|candidate| candidate.preferred_matches() == most_preferred);
+
     for (index, actual) in argument_types.iter().enumerate() {
         if actual.is_some() || candidates.len() <= 1 {
             continue;
         }
         let mut categories = candidates
             .iter()
-            .map(|candidate| routine_type_category(&candidate.argument_types[index]))
+            .map(|candidate| routine_type_category(&candidate.argument_types()[index]))
             .collect::<Vec<_>>();
         categories.sort_unstable();
         categories.dedup();
@@ -293,18 +306,36 @@ fn narrow_unknown_function_arguments(
         };
         if let Some(selected) = selected {
             candidates.retain(|candidate| {
-                routine_type_category(&candidate.argument_types[index]) == selected
+                routine_type_category(&candidate.argument_types()[index]) == selected
             });
             if candidates
                 .iter()
-                .any(|candidate| routine_type_is_preferred(&candidate.argument_types[index]))
+                .any(|candidate| routine_type_is_preferred(&candidate.argument_types()[index]))
             {
                 candidates.retain(|candidate| {
-                    routine_type_is_preferred(&candidate.argument_types[index])
+                    routine_type_is_preferred(&candidate.argument_types()[index])
                 });
             }
         }
     }
+
+    if candidates.len() <= 1 {
+        return;
+    }
+    let mut known = argument_types.iter().flatten();
+    let Some(first) = known.next() else {
+        return;
+    };
+    let identity = canonical_column_type_name(first);
+    if !known.all(|ty| canonical_column_type_name(ty) == identity) {
+        return;
+    }
+    candidates.retain(|candidate| {
+        argument_types.iter().enumerate().all(|(index, actual)| {
+            actual.is_some()
+                || routine_type_accepts_implicit_cast(&identity, &candidate.argument_types()[index])
+        })
+    });
 }
 
 fn static_function_match(

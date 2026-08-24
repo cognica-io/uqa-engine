@@ -27,6 +27,10 @@ libm = { workspace = true }
 regex = { workspace = true }
 thiserror = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+errno = { workspace = true }
+libc = { workspace = true }
+
 [dev-dependencies]
 proptest = { workspace = true }
 

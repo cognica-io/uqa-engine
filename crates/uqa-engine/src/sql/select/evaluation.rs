@@ -789,6 +789,23 @@ impl FunctionTypeResolver for EngineExpressionEvaluator<'_> {
             .resolve_function_overload(name, binding, argument_names, argument_types)
     }
 
+    fn resolve_function_overload_with_builtins(
+        &self,
+        name: &str,
+        binding: Option<&uqa_sql::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<uqa_sql::ast::ColumnType>],
+        builtins: &[uqa_execution::BuiltinFunctionOverload],
+    ) -> Result<Option<uqa_execution::ResolvedFunctionOverload>, SQLError> {
+        self.engine.resolve_function_overload_with_builtins(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            builtins,
+        )
+    }
+
     fn resolve_scalar_subquery_type(
         &self,
         subquery: uqa_execution::SubqueryId,

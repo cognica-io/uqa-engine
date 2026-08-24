@@ -88,15 +88,18 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     let engine = Engine::new();
     let routines = engine
         .sql(
-            "SELECT oid, proname, prolang, prokind, proisstrict, proleakproof, provolatile, \
-                    proparallel, pronargs, pronargdefaults, prorettype, proargtypes, proargnames, prosrc, prosqlbody \
+            "SELECT oid, proname, pronamespace, proowner, prolang, procost, prorows, provariadic, \
+                    prosupport, prokind, prosecdef, proleakproof, proisstrict, proretset, provolatile, \
+                    proparallel, pronargs, pronargdefaults, prorettype, proargtypes, proallargtypes, \
+                    proargmodes, proargnames, proargdefaults, protrftypes, prosrc, probin, prosqlbody, \
+                    proconfig, proacl \
              FROM pg_catalog.pg_proc \
-             WHERE oid IN (720, 1317, 1318, 1367, 1369, 1372, 1374, 1375, 1381, 1810, 1811, 2010, 2311, 2321, 3062, 3261, 6330, 6331, 6332, 6333, 6342, 6343, 6364, 6365, 6382, 6383, 6389, 6390, 6429, 6430) \
+             WHERE oid IN (720, 1317, 1318, 1367, 1369, 1372, 1374, 1375, 1381, 1810, 1811, 2010, 2311, 2321, 3062, 3261, 6330, 6331, 6332, 6333, 6342, 6343, 6364, 6365, 6382, 6383, 6384, 6389, 6390, 6429, 6430) \
              ORDER BY oid",
             &[],
         )
         .unwrap();
-    assert_eq!(routines.rows.len(), 30);
+    assert_eq!(routines.rows.len(), 31);
     let row = |oid: i64| {
         routines
             .rows
@@ -119,6 +122,7 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     );
     assert_string_binary_length_routines(&engine, &routines);
     assert_checksum_routines(&engine, &routines);
+    assert_gamma_routines(&engine, &routines);
     assert_md5_routines(&engine, &routines);
     assert_reverse_routines(&engine, &routines);
     for (oid, argument_type, source) in [
@@ -153,7 +157,6 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
         row(6343)["prosrc"],
         Value::Str("uuid_extract_version".into())
     );
-    assert_eq!(row(6383)["prosrc"], Value::Str("dgamma".into()));
     assert_eq!(
         row(6389)["proargtypes"],
         Value::List(vec![Value::Int(2277), Value::Int(16)])
@@ -168,6 +171,82 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     assert_random_range_pg_proc(&engine);
     assert_random_range_routines(&engine);
     assert_uuid_extraction_routines(&engine);
+}
+
+fn assert_gamma_routines(engine: &Engine, routines: &SQLResult) {
+    let row = |oid: i64| {
+        routines
+            .rows
+            .iter()
+            .find(|row| row["oid"] == Value::Int(oid))
+            .unwrap_or_else(|| panic!("missing pg_proc row {oid}"))
+    };
+    for (oid, name, source) in [(6383, "gamma", "dgamma"), (6384, "lgamma", "dlgamma")] {
+        assert_eq!(row(oid)["proname"], Value::Str(name.into()));
+        assert_eq!(row(oid)["pronamespace"], Value::Int(11));
+        assert_eq!(row(oid)["proowner"], Value::Int(10));
+        assert_eq!(row(oid)["prolang"], Value::Int(12));
+        assert_eq!(row(oid)["procost"], Value::Float(1.0));
+        assert_eq!(row(oid)["prorows"], Value::Float(0.0));
+        assert_eq!(row(oid)["provariadic"], Value::Int(0));
+        assert_eq!(row(oid)["prosupport"], Value::Str("-".into()));
+        assert_eq!(row(oid)["prokind"], Value::Str("f".into()));
+        assert_eq!(row(oid)["prosecdef"], Value::Bool(false));
+        assert_eq!(row(oid)["proleakproof"], Value::Bool(false));
+        assert_eq!(row(oid)["proisstrict"], Value::Bool(true));
+        assert_eq!(row(oid)["proretset"], Value::Bool(false));
+        assert_eq!(row(oid)["provolatile"], Value::Str("i".into()));
+        assert_eq!(row(oid)["proparallel"], Value::Str("s".into()));
+        assert_eq!(row(oid)["pronargs"], Value::Int(1));
+        assert_eq!(row(oid)["pronargdefaults"], Value::Int(0));
+        assert_eq!(row(oid)["prorettype"], Value::Int(701));
+        assert_eq!(row(oid)["proargtypes"], Value::List(vec![Value::Int(701)]));
+        assert_eq!(row(oid)["proallargtypes"], Value::Null);
+        assert_eq!(row(oid)["proargmodes"], Value::Null);
+        assert_eq!(row(oid)["proargnames"], Value::Null);
+        assert_eq!(row(oid)["proargdefaults"], Value::Null);
+        assert_eq!(row(oid)["protrftypes"], Value::Null);
+        assert_eq!(row(oid)["prosrc"], Value::Str(source.into()));
+        assert_eq!(row(oid)["probin"], Value::Null);
+        assert_eq!(row(oid)["prosqlbody"], Value::Null);
+        assert_eq!(row(oid)["proconfig"], Value::Null);
+        assert_eq!(row(oid)["proacl"], Value::Null);
+    }
+    let vector_text = engine
+        .sql(
+            "SELECT proargtypes::text AS args FROM pg_catalog.pg_proc \
+             WHERE oid IN (6383, 6384) ORDER BY oid",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        vector_text
+            .rows
+            .iter()
+            .map(|row| row["args"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Str("701".into()), Value::Str("701".into())]
+    );
+    let information_schema = engine
+        .sql(
+            "SELECT specific_name, routine_name, data_type, is_deterministic, external_language \
+             FROM information_schema.routines \
+             WHERE specific_name IN ('gamma_6383', 'lgamma_6384') ORDER BY specific_name",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(information_schema.rows.len(), 2);
+    for (row, (specific_name, routine_name)) in information_schema
+        .rows
+        .iter()
+        .zip([("gamma_6383", "gamma"), ("lgamma_6384", "lgamma")])
+    {
+        assert_eq!(row["specific_name"], Value::Str(specific_name.into()));
+        assert_eq!(row["routine_name"], Value::Str(routine_name.into()));
+        assert_eq!(row["data_type"], Value::Str("double precision".into()));
+        assert_eq!(row["is_deterministic"], Value::Str("YES".into()));
+        assert_eq!(row["external_language"], Value::Str("INTERNAL".into()));
+    }
 }
 
 fn assert_string_binary_length_routines(engine: &Engine, routines: &SQLResult) {
