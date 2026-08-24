@@ -32,7 +32,7 @@ pub(in crate::sql) struct SetProjection<'a> {
 }
 
 fn set_call_output_type(
-    engine: &Engine,
+    resolver: &dyn uqa_execution::FunctionTypeResolver,
     call: &SetFunctionCall,
     input_schema: &RowSchema,
     params: &[SQLParam],
@@ -45,7 +45,7 @@ fn set_call_output_type(
         order_by: Vec::new(),
         filter: None,
     };
-    uqa_execution::scalar_type_with_resolver(&expression, input_schema, params, engine)
+    uqa_execution::scalar_type_with_resolver(&expression, input_schema, params, resolver)
         .ok()
         .flatten()
 }
@@ -61,10 +61,11 @@ impl<'a> SetProjection<'a> {
         pass_through: bool,
     ) -> Self {
         let projections = &plan.projections;
+        let resolver = ScopedEngineHook::new(engine, ctes);
         let call_types = plan
             .calls
             .iter()
-            .map(|call| set_call_output_type(engine, call, child.row_schema(), params))
+            .map(|call| set_call_output_type(&resolver, call, child.row_schema(), params))
             .collect::<Vec<_>>();
         let appended = projections
             .iter()
@@ -133,7 +134,9 @@ impl<'a> SetProjection<'a> {
         row: &OwnedPhysicalRow,
     ) -> ExecResult<SetFunctionState> {
         let identity = call.name.to_ascii_lowercase();
-        if crate::sql::builtin_function_dispatch_name(&identity) == "unnest" && call.args.len() != 1
+        if crate::sql::builtin_function_dispatch_name(&identity) == "unnest"
+            && call.args.len() != 1
+            && call.binding.as_ref().is_none_or(|binding| binding.builtin)
         {
             return Err(SQLError::UnknownFunction(
                 "unnest with multiple arrays is only valid in FROM".into(),
@@ -142,6 +145,7 @@ impl<'a> SetProjection<'a> {
         }
         if !self.engine.has_registered_table_function(&identity)
             && self.engine.lookup_sql_functions(&call.name).is_some()
+            && call.binding.as_ref().is_none_or(|binding| !binding.builtin)
         {
             let hook = ScopedEngineHook::new(self.engine, &self.ctes);
             let subqueries = PlanSubqueryArena::new(&self.ctes.scalar_subqueries, Some(&hook));
@@ -150,42 +154,86 @@ impl<'a> SetProjection<'a> {
                 .with_subquery_runner(&subqueries)
                 .with_physical_outer_row(&row.schema, &row.row);
             let arguments = eval_call_arguments(&call.args, &context)?;
-            let returns_set = crate::sql::plpgsql_exec::resolved_user_function_returns_set(
-                self.engine,
-                &call.name,
-                &arguments,
-            )
-            .ok_or_else(|| {
-                uqa_execution::ExecError::Other(format!(
-                    "user function `{}` disappeared during projection",
-                    call.name
-                ))
-            })??;
-            if !returns_set {
-                let value = crate::sql::plpgsql_exec::call_user_scalar_function(
-                    self.engine,
-                    &call.name,
-                    &arguments,
+            let returns_set = call
+                .binding
+                .as_ref()
+                .map_or_else(
+                    || {
+                        crate::sql::plpgsql_exec::resolved_user_function_returns_set(
+                            self.engine,
+                            &call.name,
+                            &arguments,
+                        )
+                    },
+                    |binding| {
+                        crate::sql::plpgsql_exec::resolved_bound_user_function_returns_set(
+                            self.engine,
+                            binding,
+                            &arguments,
+                        )
+                    },
                 )
                 .ok_or_else(|| {
                     uqa_execution::ExecError::Other(format!(
-                        "user function `{}` disappeared during scalar projection",
+                        "user function `{}` disappeared during projection",
                         call.name
                     ))
                 })??;
+            if !returns_set {
+                let value = call
+                    .binding
+                    .as_ref()
+                    .map_or_else(
+                        || {
+                            crate::sql::plpgsql_exec::call_user_scalar_function(
+                                self.engine,
+                                &call.name,
+                                &arguments,
+                            )
+                        },
+                        |binding| {
+                            crate::sql::plpgsql_exec::call_bound_user_scalar_function(
+                                self.engine,
+                                binding,
+                                &arguments,
+                            )
+                        },
+                    )
+                    .ok_or_else(|| {
+                        uqa_execution::ExecError::Other(format!(
+                            "user function `{}` disappeared during scalar projection",
+                            call.name
+                        ))
+                    })??;
                 return Ok(SetFunctionState::Scalar(value));
             }
-            let result = crate::sql::plpgsql_exec::call_user_table_function(
-                self.engine,
-                &call.name,
-                &arguments,
-            )
-            .ok_or_else(|| {
-                uqa_execution::ExecError::Other(format!(
-                    "user function `{}` disappeared during set projection",
-                    call.name
-                ))
-            })??;
+            let result = call
+                .binding
+                .as_ref()
+                .map_or_else(
+                    || {
+                        crate::sql::plpgsql_exec::call_user_table_function(
+                            self.engine,
+                            &call.name,
+                            &arguments,
+                            None,
+                        )
+                    },
+                    |binding| {
+                        crate::sql::plpgsql_exec::call_bound_user_table_function(
+                            self.engine,
+                            binding,
+                            &arguments,
+                            None,
+                        )
+                    },
+                )
+                .ok_or_else(|| {
+                    uqa_execution::ExecError::Other(format!(
+                        "user function `{}` disappeared during set projection",
+                        call.name
+                    ))
+                })??;
             let rows = crate::sql::from_rows::registered_table_function_rows(
                 &call.name,
                 result,
@@ -208,6 +256,7 @@ impl<'a> SetProjection<'a> {
         );
         let table_call = crate::sql::from_rows::TableFunctionCall {
             name: &call.name,
+            binding: call.binding.as_ref(),
             output_name: &call.name,
             relation: None,
             args: &call.args,

@@ -106,6 +106,13 @@ pub(super) fn rewrite_source_scalars(
                 rewrite_scalar(expression, rewrite);
             }
         }
+        SourcePlan::FunctionGroup { functions, .. } => {
+            for function in functions {
+                for expression in &mut function.args {
+                    rewrite_scalar(expression, rewrite);
+                }
+            }
+        }
         SourcePlan::Subquery { body, .. } => rewrite_query_scalars(body, rewrite),
     }
 }
@@ -362,6 +369,17 @@ pub(super) fn rewrite_scalar(
         | ScalarExpr::Exists { .. } => {}
     }
     rewrite(expression);
+}
+
+/// Visit one scalar-expression tree in post-order and rewrite each node once.
+///
+/// Query-owned callers that need scope-sensitive rewriting can use this entry
+/// point without duplicating the exhaustive [`ScalarExpr`] traversal.
+pub fn rewrite_scalar_expression(
+    expression: &mut ScalarExpr,
+    rewrite: &mut dyn FnMut(&mut ScalarExpr),
+) {
+    rewrite_scalar(expression, rewrite);
 }
 
 pub(super) fn rewrite_frame_bound(

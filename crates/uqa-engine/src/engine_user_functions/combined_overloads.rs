@@ -13,7 +13,7 @@ use uqa_execution::{
     rank_function_matches, BuiltinFunctionOverload, FunctionTypeResolver, RankedFunctionMatch,
     ResolvedFunctionOverload,
 };
-use uqa_sql::ast::{ColumnType, FunctionBinding};
+use uqa_sql::ast::{ColumnType, FunctionBinding, FunctionReturns};
 use uqa_sql::SQLError;
 
 use super::{
@@ -32,6 +32,12 @@ struct FunctionMatch {
     raw_exact_matches: usize,
     exact_matches: usize,
     preferred_matches: usize,
+}
+
+#[derive(Clone, Copy)]
+enum ResolutionContext {
+    Scalar,
+    Table,
 }
 
 impl RankedFunctionMatch for FunctionMatch {
@@ -60,6 +66,45 @@ pub(super) fn resolve(
     argument_types: &[Option<ColumnType>],
     builtins: &[BuiltinFunctionOverload],
 ) -> Result<ResolvedFunctionOverload, SQLError> {
+    resolve_in_context(
+        engine,
+        name,
+        binding,
+        argument_names,
+        argument_types,
+        builtins,
+        ResolutionContext::Scalar,
+    )
+}
+
+pub(super) fn resolve_table(
+    engine: &Engine,
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    argument_names: &[Option<String>],
+    argument_types: &[Option<ColumnType>],
+    builtins: &[BuiltinFunctionOverload],
+) -> Result<ResolvedFunctionOverload, SQLError> {
+    resolve_in_context(
+        engine,
+        name,
+        binding,
+        argument_names,
+        argument_types,
+        builtins,
+        ResolutionContext::Table,
+    )
+}
+
+fn resolve_in_context(
+    engine: &Engine,
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    argument_names: &[Option<String>],
+    argument_types: &[Option<ColumnType>],
+    builtins: &[BuiltinFunctionOverload],
+    context: ResolutionContext,
+) -> Result<ResolvedFunctionOverload, SQLError> {
     if let Some(binding) = binding {
         return resolve_bound(
             engine,
@@ -68,6 +113,7 @@ pub(super) fn resolve(
             argument_names,
             argument_types,
             builtins,
+            context,
         );
     }
     let users = engine
@@ -85,6 +131,7 @@ pub(super) fn resolve(
         builtins,
         argument_names,
         argument_types,
+        context,
     )
 }
 
@@ -95,16 +142,30 @@ fn resolve_bound(
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
     builtins: &[BuiltinFunctionOverload],
+    context: ResolutionContext,
 ) -> Result<ResolvedFunctionOverload, SQLError> {
     if !binding.builtin {
-        return <Engine as FunctionTypeResolver>::resolve_function_overload(
-            engine,
-            name,
-            Some(binding),
-            argument_names,
-            argument_types,
-        )?
-        .ok_or_else(|| bound_function_resolution_error(binding));
+        if matches!(context, ResolutionContext::Scalar) {
+            return <Engine as FunctionTypeResolver>::resolve_function_overload(
+                engine,
+                name,
+                Some(binding),
+                argument_names,
+                argument_types,
+            )?
+            .ok_or_else(|| bound_function_resolution_error(binding));
+        }
+        let function = engine
+            .resolve_static_sql_function(name, Some(binding), argument_names, argument_types)?
+            .ok_or_else(|| bound_function_resolution_error(binding))?;
+        return Ok(ResolvedFunctionOverload {
+            binding: binding.clone(),
+            return_type: table_function_return_type(name, &function.def)?,
+            exact_matches: 0,
+            known_arguments: argument_types.iter().flatten().count(),
+            preferred_matches: 0,
+            precedes_pg_catalog: engine.user_function_precedes_pg_catalog(&function.def.name),
+        });
     }
     let builtin = builtins
         .iter()
@@ -125,6 +186,7 @@ fn resolve_candidates(
     builtins: Vec<BuiltinFunctionOverload>,
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
+    context: ResolutionContext,
 ) -> Result<ResolvedFunctionOverload, SQLError> {
     let procedure_matches = users.iter().any(|function| {
         function.def.is_procedure
@@ -214,7 +276,10 @@ fn resolve_candidates(
                 argument_types: routine_signature_types(&function.def),
                 builtin: false,
             },
-            return_type: static_function_return_type(name, &function.def)?,
+            return_type: match context {
+                ResolutionContext::Scalar => static_function_return_type(name, &function.def)?,
+                ResolutionContext::Table => table_function_return_type(name, &function.def)?,
+            },
             exact_matches: selected.exact_matches,
             known_arguments,
             preferred_matches: selected.preferred_matches,
@@ -226,6 +291,17 @@ fn resolve_candidates(
             resolved.preferred_matches = selected.preferred_matches;
             Ok(resolved)
         }
+    }
+}
+
+fn table_function_return_type(
+    name: &str,
+    definition: &uqa_sql::ast::CreateFunction,
+) -> Result<ColumnType, SQLError> {
+    if matches!(definition.returns, FunctionReturns::Table) {
+        Ok(ColumnType::Record)
+    } else {
+        static_function_return_type(name, definition)
     }
 }
 

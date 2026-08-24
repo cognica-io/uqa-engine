@@ -6,10 +6,10 @@
 //! Recursive physical operator assembly for FROM sources.
 
 use super::{
-    attach_qualifier_filter, build_function_source_operator, build_join_source_operator,
-    build_subquery_source_operator, build_table_source_operator, build_values_source_operator,
-    qualifier_filter, ColumnPrune, CteScope, Engine, QualifierFilters, SQLError, SQLParam,
-    SourcePlan,
+    attach_qualifier_filter, build_function_group_source_operator, build_function_source_operator,
+    build_join_source_operator, build_subquery_source_operator, build_table_source_operator,
+    build_values_source_operator, qualifier_filter, ColumnPrune, CteScope, Engine,
+    QualifierFilters, SQLError, SQLParam, SourcePlan,
 };
 
 /// Build a complete FROM source as a pull-based physical operator. Unlike the compatibility `build_join_rows_*` entry points below, this is the query executor's primary path and never collects a join, view, CTE, derived table, or table-function result into a cardinality-sized `Vec`.
@@ -91,6 +91,9 @@ pub(super) fn build_join_operator_with_ctes_at_path<'a>(
         }
         SourcePlan::Function { .. } => {
             build_function_source_operator(engine, from, params, ctes, prune, filters)
+        }
+        SourcePlan::FunctionGroup { .. } => {
+            build_function_group_source_operator(engine, from, params, ctes, prune, filters)
         }
         SourcePlan::Subquery { .. } => {
             build_subquery_source_operator(engine, from, params, ctes, prune, filters)

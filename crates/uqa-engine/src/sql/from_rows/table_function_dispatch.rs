@@ -22,6 +22,7 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
 ) -> Result<Vec<ResultRow>, SQLError> {
     let TableFunctionCall {
         name,
+        binding,
         output_name,
         relation,
         args,
@@ -43,7 +44,9 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
         .with_subquery_runner(&subquery_arena);
     let identity = name.to_ascii_lowercase();
     let lower = crate::sql::builtin_function_dispatch_name(&identity);
-    if crate::operator_tree_bridge::is_operator_join_table_function(&lower) {
+    if binding.is_none_or(|binding| binding.builtin)
+        && crate::operator_tree_bridge::is_operator_join_table_function(&lower)
+    {
         let tuples = crate::operator_tree_bridge::execute_operator_join_table_function(
             engine,
             &lower,
@@ -66,15 +69,42 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
         r.insert(default_col.clone(), value);
         out.push(r);
     };
-    if !has_named_args {
+    if !has_named_args && binding.is_none_or(|binding| binding.builtin) {
         if let Some(result) = engine.call_registered_table_function(&identity, &evaluated) {
             return registered_table_function_rows(name, result?, alias, column_aliases);
         }
     }
-    if let Some(result) =
-        crate::sql::plpgsql_exec::call_user_table_function(engine, &identity, &call_args)
-    {
+    let record_definition = (!column_types.is_empty()).then_some((column_aliases, column_types));
+    let user_result = binding.map_or_else(
+        || {
+            crate::sql::plpgsql_exec::call_user_table_function(
+                engine,
+                &identity,
+                &call_args,
+                record_definition,
+            )
+        },
+        |binding| {
+            crate::sql::plpgsql_exec::call_bound_user_table_function(
+                engine,
+                binding,
+                &call_args,
+                record_definition,
+            )
+        },
+    );
+    if let Some(result) = user_result {
         return registered_table_function_rows(name, result?, alias, column_aliases);
+    }
+    if let Some(binding) = binding.filter(|binding| !binding.builtin) {
+        return Err(SQLError::Routine {
+            sqlstate: "42883".into(),
+            message: format!(
+                "bound function {}({}) does not exist",
+                binding.name,
+                binding.argument_types.join(", ")
+            ),
+        });
     }
     if has_named_args {
         return Err(unknown_function_error(&lower, &call_args));

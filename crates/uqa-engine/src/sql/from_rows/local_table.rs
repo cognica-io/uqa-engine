@@ -8,20 +8,20 @@
 
 use super::{
     alias_join_operator, apply_table_function_aliases, attach_qualifier_filter,
-    build_info_schema_rows, build_table_function_row_stream, build_values_physical_rows,
+    build_info_schema_rows, build_table_function_row_stream_with_row, build_values_physical_rows,
     combine_filters, decide_join_sides, execute_query_plan_output,
     execute_view_plan_output_with_parent_cache, has_filters_for_qualifier,
-    is_score_provenance_column, join_conjuncts, join_using_predicate,
-    multi_unnest_internal_columns, null_row_for_schema, physical_work_mem_bytes,
-    propagated_join_filters, push_output_filter_into_query_plan, qualifier_filter, qualifier_for,
-    qualify_source_operator, qualify_source_operator_with_columns,
+    is_score_provenance_column, join_conjuncts, join_using_predicate, null_row_for_schema,
+    physical_work_mem_bytes, propagated_join_filters, push_output_filter_into_query_plan,
+    qualifier_filter, qualifier_for, qualify_source_operator, qualify_source_operator_with_columns,
     query_contains_volatile_function, query_cte_names, query_output_shared, resolve_join_using,
-    shape_join_using_output, table_function_column_types, table_function_empty_schema,
-    validate_table_function_alias_count, ColumnPrune, CteScope, Engine, EngineExpressionEvaluator,
-    EngineLateralSource, JoinExecutionStrategy, JoinKind, QualifierFilters, QueryOutputMode,
-    ResultRow, SQLError, SQLParam, ScalarExpr, ScopedEngineHook, ScoredDocumentSource, ScoredInput,
-    SourceEvalContext, SourcePlan, TableFunctionCall, TableFunctionTypeRequest, Value,
-    TABLE_FUNCTION_ORDINALITY_COLUMN,
+    resolve_user_table_function, shape_join_using_output, table_function_column_types,
+    table_function_empty_schema, validate_table_function_alias_count,
+    validate_table_function_column_definition, ColumnPrune, CteScope, Engine,
+    EngineExpressionEvaluator, EngineLateralSource, JoinExecutionStrategy, JoinKind,
+    QualifierFilters, QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
+    ScoredDocumentSource, ScoredInput, SourceEvalContext, SourcePlan, TableFunctionCall,
+    TableFunctionTypeRequest, Value, TABLE_FUNCTION_ORDINALITY_COLUMN,
 };
 
 use crate::sql::select::{
@@ -74,6 +74,8 @@ mod function_source;
 mod join_source;
 #[path = "local_table/row_source.rs"]
 mod row_source;
+#[path = "local_table/rows_from.rs"]
+mod rows_from;
 #[path = "local_table/source_operator.rs"]
 mod source_operator;
 #[path = "local_table/streaming_scan.rs"]
@@ -87,9 +89,10 @@ mod table_source;
 #[path = "local_table/values_source.rs"]
 mod values_source;
 
-use function_source::build_function_source_operator;
+use function_source::{build_function_group_source_operator, build_function_source_operator};
 use join_source::build_join_source_operator;
 use row_source::table_lock_origin;
+use rows_from::RowsFromOperator;
 use source_operator::build_join_operator_with_ctes_at_path;
 use streaming_scan::try_streaming_local_table_scan;
 use streaming_subquery::try_build_streaming_subquery_operator;

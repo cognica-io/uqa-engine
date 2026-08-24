@@ -223,6 +223,26 @@ pub(crate) fn resolved_user_function_returns_set(
     Some(Ok(function.def.returns_set()))
 }
 
+pub(crate) fn resolved_bound_user_function_returns_set(
+    engine: &Engine,
+    binding: &FunctionBinding,
+    args: &[(Option<String>, Value)],
+) -> Option<Result<bool, SQLError>> {
+    let resolved = match resolve_bound_routine(engine, binding, args) {
+        Ok(Some(resolved)) => resolved,
+        Ok(None) => return None,
+        Err(error) => return Some(Err(error)),
+    };
+    let (function, _) = resolved;
+    if function.def.is_procedure {
+        return Some(Err(SQLError::Routine {
+            sqlstate: "42809".into(),
+            message: format!("{} is a procedure", call_signature(&binding.name, args)),
+        }));
+    }
+    Some(Ok(function.def.returns_set()))
+}
+
 /// FROM-clause invocation: any user routine is callable as a table
 /// source (`SELECT * FROM f(...)`); scalar functions produce a single
 /// row. `None` means no routine with this name exists.
@@ -230,25 +250,66 @@ pub(crate) fn call_user_table_function(
     engine: &Engine,
     name: &str,
     args: &[(Option<String>, Value)],
+    record_definition: Option<AnonymousRecordDefinition<'_>>,
 ) -> Option<Result<SQLTableFunctionResult, SQLError>> {
     let resolved = match resolve_routine(engine, name, args, None, "function") {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(e) => return Some(Err(e)),
     };
+    Some(execute_resolved_table_function(
+        engine,
+        name,
+        args,
+        resolved,
+        record_definition,
+    ))
+}
+
+type AnonymousRecordDefinition<'a> = (&'a [String], &'a [String]);
+
+pub(crate) fn call_bound_user_table_function(
+    engine: &Engine,
+    binding: &FunctionBinding,
+    args: &[(Option<String>, Value)],
+    record_definition: Option<AnonymousRecordDefinition<'_>>,
+) -> Option<Result<SQLTableFunctionResult, SQLError>> {
+    let resolved = match resolve_bound_routine(engine, binding, args) {
+        Ok(Some(resolved)) => resolved,
+        Ok(None) => return None,
+        Err(error) => return Some(Err(error)),
+    };
+    Some(execute_resolved_table_function(
+        engine,
+        &binding.name,
+        args,
+        resolved,
+        record_definition,
+    ))
+}
+
+fn execute_resolved_table_function(
+    engine: &Engine,
+    name: &str,
+    args: &[(Option<String>, Value)],
+    resolved: (
+        std::sync::Arc<crate::engine_user_functions::SQLUserFunction>,
+        Vec<Value>,
+    ),
+    record_definition: Option<AnonymousRecordDefinition<'_>>,
+) -> Result<SQLTableFunctionResult, SQLError> {
     let (function, bound) = resolved;
     if function.def.is_procedure {
-        return Some(Err(SQLError::Routine {
+        return Err(SQLError::Routine {
             sqlstate: "42809".into(),
             message: format!("{} is a procedure", call_signature(name, args)),
-        }));
+        });
     }
     let out_params = function.def.output_params();
-    let columns = if out_params.is_empty() {
-        match routine_local_name(&function.def.name) {
-            Ok(name) => vec![name],
-            Err(error) => return Some(Err(error)),
-        }
+    let columns = if let Some((columns, _)) = record_definition {
+        columns.to_vec()
+    } else if out_params.is_empty() {
+        vec![routine_local_name(&function.def.name)?]
     } else {
         output_column_names(&function.def)
     };
@@ -258,12 +319,24 @@ pub(crate) fn call_user_table_function(
         } else {
             vec![vec![Value::Null; columns.len()]]
         };
-        return Some(Ok(SQLTableFunctionResult::new(columns, rows)));
+        return Ok(SQLTableFunctionResult::new(columns, rows));
     }
-    let outcome = match execute_routine(engine, &function, bound) {
-        Ok(outcome) => outcome,
-        Err(e) => return Some(Err(e)),
-    };
+    let outcome = execute_routine(engine, &function, bound)?;
+    if let Some((columns, types)) = record_definition {
+        if !crate::engine_user_functions::routine_returns_anonymous_record(&function.def) {
+            return Err(SQLError::Internal(format!(
+                "non-anonymous routine `{}` reached record-definition shaping",
+                function.def.name
+            )));
+        }
+        return shape_anonymous_record_outcome(
+            engine,
+            outcome,
+            function.def.returns_set(),
+            columns,
+            types,
+        );
+    }
     let rows = if function.def.returns_set() {
         outcome.set_rows
     } else if out_params.is_empty() {
@@ -271,5 +344,111 @@ pub(crate) fn call_user_table_function(
     } else {
         vec![outcome.out_values]
     };
-    Some(Ok(SQLTableFunctionResult::new(columns, rows)))
+    Ok(SQLTableFunctionResult::new(columns, rows))
+}
+
+fn shape_anonymous_record_outcome(
+    engine: &Engine,
+    outcome: super::RoutineOutcome,
+    returns_set: bool,
+    columns: &[String],
+    types: &[String],
+) -> Result<SQLTableFunctionResult, SQLError> {
+    if columns.len() != types.len() {
+        return Err(SQLError::Internal(format!(
+            "anonymous record definition has {} columns but {} types",
+            columns.len(),
+            types.len()
+        )));
+    }
+    if let Some(source_types) = outcome.anonymous_record_column_types.as_deref() {
+        validate_anonymous_record_column_types(source_types, types)?;
+    }
+    let source_rows = if returns_set {
+        outcome.set_rows
+    } else {
+        vec![vec![outcome.value]]
+    };
+    let mut rows = Vec::with_capacity(source_rows.len());
+    for row in source_rows {
+        let mut values = match row.as_slice() {
+            [Value::Record(fields)] => fields.iter().map(|(_, value)| value.clone()).collect(),
+            [Value::Row(values)] => values.clone(),
+            [Value::Null] => vec![Value::Null; columns.len()],
+            _ if row.len() == columns.len() => row,
+            _ => return Err(anonymous_record_shape_error()),
+        };
+        if values.len() != columns.len() {
+            return Err(anonymous_record_shape_error());
+        }
+        if outcome.anonymous_record_column_types.is_none() {
+            let source_types = values
+                .iter()
+                .map(runtime_record_column_type)
+                .collect::<Vec<_>>();
+            validate_anonymous_record_column_types(&source_types, types)?;
+        }
+        for (value, type_name) in values.iter_mut().zip(types) {
+            *value = coerce_anonymous_record_value(engine, value, type_name)?;
+        }
+        rows.push(values);
+    }
+    Ok(SQLTableFunctionResult::new(columns.iter().cloned(), rows))
+}
+
+fn validate_anonymous_record_column_types(
+    source_types: &[Option<uqa_sql::ast::ColumnType>],
+    target_types: &[String],
+) -> Result<(), SQLError> {
+    if source_types.len() != target_types.len() {
+        return Err(anonymous_record_shape_error());
+    }
+    for (source, target) in source_types.iter().zip(target_types) {
+        let Some(source) = source else {
+            continue;
+        };
+        let source = uqa_execution::canonical_column_type_name(source);
+        let target = crate::engine_user_functions::canonical_routine_type_name(target);
+        if !uqa_execution::routine_type_accepts_implicit_cast(&source, &target) {
+            return Err(anonymous_record_shape_error());
+        }
+    }
+    Ok(())
+}
+
+fn runtime_record_column_type(value: &Value) -> Option<uqa_sql::ast::ColumnType> {
+    if matches!(value, Value::Null) {
+        return None;
+    }
+    uqa_sql::ast::ColumnType::from_sql_name(uqa_sql::expr::value_type_name(value)).ok()
+}
+
+fn coerce_anonymous_record_value(
+    engine: &Engine,
+    value: &Value,
+    type_name: &str,
+) -> Result<Value, SQLError> {
+    let target = crate::sql::resolve_catalog_column_type(engine, type_name)
+        .or_else(|| uqa_sql::ast::ColumnType::from_sql_name(type_name).ok());
+    let Some(target) = target else {
+        return super::coerce_routine_value(engine, value, type_name);
+    };
+    crate::sql::ddl::convert_value_to_column_type(value.clone(), &target).map_err(|error| {
+        match error {
+            SQLError::TypeMismatch(message) if message.starts_with("value too long for type ") => {
+                SQLError::Routine {
+                    sqlstate: "22001".into(),
+                    message,
+                }
+            }
+            other => other,
+        }
+    })
+}
+
+fn anonymous_record_shape_error() -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42P13".into(),
+        message: "return type mismatch in function declared to return record".into(),
+    }
 }

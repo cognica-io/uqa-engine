@@ -95,7 +95,7 @@ pub(super) fn validate_expression(
                     }
                 }
             }
-            validate_window_function(engine, name, args, schema, params)
+            validate_window_function(engine, name, args, schema, params, resolver)
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)

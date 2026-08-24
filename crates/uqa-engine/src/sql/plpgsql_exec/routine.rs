@@ -11,6 +11,7 @@ use super::{
     FunctionReturns, Interpreter, RoutineOutcome, SQLError, SQLParam, SQLResult, SQLUserFunction,
     UnifiedPlanExecutor, Value,
 };
+use crate::engine_user_functions::routine_returns_anonymous_record;
 
 thread_local! {
     static CALL_DEPTH: Cell<usize> = const { Cell::new(0) };
@@ -97,6 +98,7 @@ fn execute_sql_language(
         last = UnifiedPlanExecutor::new(engine, &params).execute(plan)?;
     }
     let out_params = def.output_params();
+    let returns_anonymous_record = routine_returns_anonymous_record(def);
     let returns_void = matches!(
         &def.returns,
         FunctionReturns::Scalar { type_name } if type_name == "void"
@@ -109,7 +111,8 @@ fn execute_sql_language(
     // PostgreSQL enforces the final statement's column shape at
     // CREATE time; the engine has no schema binding there, so the
     // same 42P13 error surfaces on the first call instead.
-    let shape_checked = !returns_void && (!def.is_procedure || !out_params.is_empty());
+    let shape_checked =
+        !returns_void && !returns_anonymous_record && (!def.is_procedure || !out_params.is_empty());
     if shape_checked && last.columns.len() != expected {
         return Err(sql_body_shape_error(def));
     }
@@ -117,10 +120,12 @@ fn execute_sql_language(
         let mut set_rows = Vec::with_capacity(last.rows.len());
         for row_index in 0..last.rows.len() {
             let mut values = result_row_values(&last, row_index).unwrap_or_default();
-            if values.len() != expected {
+            if !returns_anonymous_record && values.len() != expected {
                 return Err(sql_body_shape_error(def));
             }
-            if out_params.is_empty() {
+            if returns_anonymous_record {
+                values = vec![anonymous_record_value(&last.columns, values)];
+            } else if out_params.is_empty() {
                 if let FunctionReturns::SetOf { type_name } = &def.returns {
                     values[0] = coerce_routine_value(engine, &values[0], type_name)?;
                 }
@@ -131,6 +136,8 @@ fn execute_sql_language(
             value: Value::Null,
             out_values: vec![Value::Null; out_params.len()],
             set_rows,
+            anonymous_record_column_types: returns_anonymous_record
+                .then(|| last.column_types.clone()),
         });
     }
     let first = result_row_values(&last, 0);
@@ -145,10 +152,12 @@ fn execute_sql_language(
             value: Value::Null,
             out_values,
             set_rows: Vec::new(),
+            anonymous_record_column_types: None,
         });
     }
     let value = match first {
         Some(_) if returns_void => Value::Null,
+        Some(values) if returns_anonymous_record => anonymous_record_value(&last.columns, values),
         Some(mut values) => {
             if values.is_empty() {
                 Value::Null
@@ -168,7 +177,12 @@ fn execute_sql_language(
         value,
         out_values: Vec::new(),
         set_rows: Vec::new(),
+        anonymous_record_column_types: returns_anonymous_record.then(|| last.column_types.clone()),
     })
+}
+
+fn anonymous_record_value(columns: &[String], values: Vec<Value>) -> Value {
+    Value::Record(columns.iter().cloned().zip(values).collect())
 }
 
 fn sql_body_shape_error(def: &CreateFunction) -> SQLError {

@@ -43,6 +43,7 @@ impl<'a> SourceEvalContext<'a> {
 #[derive(Clone, Copy)]
 pub(in crate::sql) struct TableFunctionCall<'a> {
     pub(in crate::sql) name: &'a str,
+    pub(in crate::sql) binding: Option<&'a uqa_sql::ast::FunctionBinding>,
     pub(in crate::sql) output_name: &'a str,
     pub(in crate::sql) relation: Option<&'a str>,
     pub(in crate::sql) args: &'a [ScalarExpr],
@@ -54,17 +55,7 @@ pub(in crate::sql) struct TableFunctionCall<'a> {
 
 pub(in crate::sql) const TABLE_FUNCTION_ORDINALITY_COLUMN: &str = "\0uqa.table_function.ordinality";
 
-/// Build a table-function result as a fallible owned row stream. Built-in
-/// cardinality-producing functions are evaluated lazily; registered/user
-/// functions keep their existing vector-valued API and are adapted at this
-/// explicit extension boundary.
-pub(in crate::sql) fn build_table_function_row_stream(
-    context: &SourceEvalContext<'_>,
-    call: TableFunctionCall<'_>,
-) -> Result<uqa_execution::ProjectRows, SQLError> {
-    build_table_function_row_stream_with_row(context, call, None)
-}
-
+/// Build a table-function result as a fallible owned row stream. Built-in cardinality-producing functions are evaluated lazily; registered/user functions keep their existing vector-valued API and are adapted at this explicit extension boundary. A correlated lateral caller supplies its physical outer row so function arguments are evaluated in the same scope used during binding.
 #[allow(clippy::similar_names)]
 pub(in crate::sql) fn build_table_function_row_stream_with_row(
     context: &SourceEvalContext<'_>,
@@ -99,6 +90,7 @@ fn build_table_function_value_row_stream_with_row(
 ) -> Result<uqa_execution::ProjectRows, SQLError> {
     let TableFunctionCall {
         name,
+        binding,
         output_name,
         args,
         alias,
@@ -108,23 +100,25 @@ fn build_table_function_value_row_stream_with_row(
     } = call;
     let identity = name.to_ascii_lowercase();
     let lower = crate::sql::builtin_function_dispatch_name(&identity);
-    if matches!(
-        lower.as_str(),
-        "generate_series"
-            | "unnest"
-            | "regexp_split_to_table"
-            | "string_to_table"
-            | "json_array_elements"
-            | "jsonb_array_elements"
-            | "json_array_elements_text"
-            | "jsonb_array_elements_text"
-            | "json_object_keys"
-            | "jsonb_object_keys"
-            | "json_each"
-            | "jsonb_each"
-            | "json_each_text"
-            | "jsonb_each_text"
-    ) {
+    if binding.is_none_or(|binding| binding.builtin)
+        && matches!(
+            lower.as_str(),
+            "generate_series"
+                | "unnest"
+                | "regexp_split_to_table"
+                | "string_to_table"
+                | "json_array_elements"
+                | "jsonb_array_elements"
+                | "json_array_elements_text"
+                | "jsonb_array_elements_text"
+                | "json_object_keys"
+                | "jsonb_object_keys"
+                | "json_each"
+                | "jsonb_each"
+                | "json_each_text"
+                | "jsonb_each_text"
+        )
+    {
         let subquery_arena =
             PlanSubqueryArena::new(context.subqueries, Some(context.subquery_runner));
         let scalar_context = match row {
@@ -175,7 +169,9 @@ fn build_table_function_value_row_stream_with_row(
         ));
     }
 
-    if context.engine.has_registered_table_function(&identity) {
+    if binding.is_none_or(|binding| binding.builtin)
+        && context.engine.has_registered_table_function(&identity)
+    {
         let subquery_arena =
             PlanSubqueryArena::new(context.subqueries, Some(context.subquery_runner));
         let scalar_context = match row {

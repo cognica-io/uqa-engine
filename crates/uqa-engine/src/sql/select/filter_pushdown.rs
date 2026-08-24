@@ -232,6 +232,7 @@ pub(in crate::sql) fn qualifier_filter_elision_safe(from: &SourcePlan) -> bool {
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { .. } => true,
     }
 }
@@ -728,8 +729,16 @@ fn collect_source_column_owners(engine: &Engine, source: &SourcePlan, owners: &m
         } if !column_aliases.is_empty() => {
             register_column_owners(owners, alias, column_aliases.clone());
         }
+        SourcePlan::FunctionGroup {
+            alias: Some(alias),
+            column_aliases,
+            ..
+        } if !column_aliases.is_empty() => {
+            register_column_owners(owners, alias, column_aliases.clone());
+        }
         SourcePlan::Values { alias: None, .. }
         | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { alias: None, .. } => {}
     }
 }
@@ -787,6 +796,7 @@ pub(in crate::sql) fn collect_cte_source_references(
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { .. } => {}
     }
 }

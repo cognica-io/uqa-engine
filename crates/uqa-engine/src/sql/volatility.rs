@@ -396,6 +396,14 @@ fn source_contains_volatile_function(
                         .any(|expr| expr_contains_volatile_function(engine, expr)),
             )
         }
+        SourcePlan::FunctionGroup { functions, .. } => Ok(functions.iter().any(|function| {
+            function_volatility(engine, &function.name, function.args.len())
+                == FunctionVolatility::Volatile
+                || function
+                    .args
+                    .iter()
+                    .any(|expr| expr_contains_volatile_function(engine, expr))
+        })),
         SourcePlan::Subquery { body, .. } => {
             query_contains_volatile_function_inner(engine, body, visiting_views)
         }

@@ -19,6 +19,9 @@ use super::{
 use uqa_execution::FunctionTypeResolver;
 use uqa_sql::expr::RowLookup;
 
+#[path = "evaluation/type_resolution.rs"]
+mod type_resolution;
+
 type RecheckStoragePin = (String, String, Arc<Vec<RecheckDoc>>);
 
 #[derive(Clone, Copy, Default)]

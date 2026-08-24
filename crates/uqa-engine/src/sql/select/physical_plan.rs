@@ -16,8 +16,8 @@ use super::{
     resolve_limit_offset_with_ctes, should_defer_distinct_limit, Arc, ComputePlan, CteScope,
     Engine, EngineExpressionEvaluator, HashSet, OutputColumnMapping, PhysicalAggregateExecutor,
     PhysicalProjection, PhysicalWindowExecutor, ProjectionPlan, QueryBlockPlan, QueryOutput,
-    QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr, SharedExpressionEvaluator, Value,
-    DOC_ID_COLUMN, MERGE_ACTION_COLUMN, SCORE_COLUMN,
+    QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
+    SharedExpressionEvaluator, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN, SCORE_COLUMN,
 };
 use uqa_execution::ScalarFrameBound;
 
@@ -100,20 +100,8 @@ pub(in crate::sql) fn user_function_output_columns(
 ) -> Option<Vec<String>> {
     let overloads = engine.lookup_sql_functions(name)?;
     for function in &overloads {
-        let outs = function.def.output_params();
-        if !outs.is_empty() {
-            return Some(
-                outs.iter()
-                    .enumerate()
-                    .map(|(idx, p)| {
-                        if p.name.is_empty() {
-                            format!("column{}", idx + 1)
-                        } else {
-                            p.name.clone()
-                        }
-                    })
-                    .collect(),
-            );
+        if let Some(columns) = crate::sql::from_rows::user_function_output_columns_for(function) {
+            return Some(columns);
         }
     }
     None
@@ -401,6 +389,7 @@ pub(in crate::sql) fn resolve_order_expression(
 
 fn prepare_order_set_projections(
     engine: &Engine,
+    type_resolver: &dyn uqa_execution::FunctionTypeResolver,
     statement: &QueryBlockPlan,
     output_columns: &[OutputColumnMapping],
     projections: &mut Vec<PhysicalProjection>,
@@ -432,7 +421,7 @@ fn prepare_order_set_projections(
         {
             prepared.get_or_insert_with(|| statement.clone()).order_by[index].expr =
                 ScalarExpr::Column(column.clone());
-        } else if expression_may_return_set(engine, &expression, schema, params)? {
+        } else if expression_may_return_set(engine, type_resolver, &expression, schema, params)? {
             let column = format!("{ORDER_SET_COLUMN_PREFIX}{index}");
             projections.push((column.clone(), expression));
             prepared.get_or_insert_with(|| statement.clone()).order_by[index].expr =
@@ -642,6 +631,7 @@ pub(in crate::sql) fn execute_query_block_operator_output<'a>(
     columns: Vec<String>,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
+    let type_resolver = ScopedEngineHook::new(engine, ctes);
     if matches!(&output_mode, QueryOutputMode::ExistsKeySet)
         && matches!(statement.compute, ComputePlan::Project)
         && statement.order_by.is_empty()
@@ -651,6 +641,7 @@ pub(in crate::sql) fn execute_query_block_operator_output<'a>(
         && statement.distinct_on.is_empty()
         && !projections_may_return_set(
             engine,
+            &type_resolver,
             &physical_projections(&statement.projections),
             operator.row_schema(),
             params,
@@ -844,6 +835,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
 ) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
     use uqa_execution::{ColumnSelection, HashAggregate, Project, Window};
 
+    let type_resolver = ScopedEngineHook::new(engine, ctes);
     let expanded_statement = statement
         .projections
         .iter()
@@ -873,10 +865,21 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                 return Ok(true);
             }
             let expression = resolve_order_expression(&order.expr, &output)?;
-            expression_may_return_set(engine, &expression, operator.row_schema(), params)
+            expression_may_return_set(
+                engine,
+                &type_resolver,
+                &expression,
+                operator.row_schema(),
+                params,
+            )
         })?;
-        if projections_may_return_set(engine, &projections, operator.row_schema(), params)?
-            || order_returns_set
+        if projections_may_return_set(
+            engine,
+            &type_resolver,
+            &projections,
+            operator.row_schema(),
+            params,
+        )? || order_returns_set
         {
             return Err(SQLError::Unsupported(format!(
                 "{} is not allowed with set-returning functions in the target list",
@@ -894,9 +897,13 @@ pub(in crate::sql) fn build_relational_operator<'a>(
     let statement = distinct_group_statement.as_ref().unwrap_or(statement);
     let mut group_statement = None;
     if matches!(statement.compute, ComputePlan::Aggregate) {
-        if let Some(plan) =
-            prepare_group_set_projection(engine, statement, operator.row_schema(), params)?
-        {
+        if let Some(plan) = prepare_group_set_projection(
+            engine,
+            &type_resolver,
+            statement,
+            operator.row_schema(),
+            params,
+        )? {
             operator = build_set_projection(
                 operator,
                 engine,
@@ -942,6 +949,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                     operator = Box::new(ColumnSelection::with_positions(operator, output));
                 } else if projections_may_return_set(
                     engine,
+                    &type_resolver,
                     &projections,
                     operator.row_schema(),
                     params,
@@ -1012,6 +1020,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                     append_distinct_set_projections(statement, &order_output, &mut physical)?;
                 let order_statement = prepare_order_set_projections(
                     engine,
+                    &type_resolver,
                     statement,
                     &order_output,
                     &mut physical,
@@ -1041,6 +1050,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                 if statement.locking.is_empty() && !ctes.streams_command_progress() {
                     operator = if projections_may_return_set(
                         engine,
+                        &type_resolver,
                         &physical,
                         operator.row_schema(),
                         params,
@@ -1089,6 +1099,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                     }
                     if projections_may_return_set(
                         engine,
+                        &type_resolver,
                         &after_sort,
                         operator.row_schema(),
                         params,
@@ -1253,6 +1264,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
             append_distinct_set_projections(statement, &output_columns, &mut projections)?;
             let order_statement = prepare_order_set_projections(
                 engine,
+                &type_resolver,
                 statement,
                 &output_columns,
                 &mut projections,

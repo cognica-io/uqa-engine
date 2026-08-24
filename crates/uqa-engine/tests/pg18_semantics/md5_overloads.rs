@@ -135,3 +135,34 @@ fn pg18_md5_ranks_user_overloads_and_pg_catalog_search_order() {
         assert_eq!(scalar(&eng, sql), Value::Str(expected.into()), "{sql}");
     }
 }
+
+#[test]
+fn pg18_set_returning_user_overload_uses_the_combined_stable_binding() {
+    let eng = engine();
+    for sql in [
+        "CREATE SCHEMA md5_set",
+        "CREATE FUNCTION md5_set.md5(value TEXT) RETURNS SETOF TEXT AS $$
+         BEGIN
+           RETURN NEXT 'set-1';
+           RETURN NEXT 'set-2';
+         END;
+         $$ LANGUAGE plpgsql",
+        "SET search_path = md5_set, pg_catalog, public",
+    ] {
+        eng.sql(sql, &[]).unwrap();
+    }
+
+    let user = eng
+        .sql("SELECT md5('abc'::text) AS value ORDER BY value", &[])
+        .unwrap();
+    assert_eq!(user.rows.len(), 2);
+    assert_eq!(user.rows[0]["value"], Value::Str("set-1".into()));
+    assert_eq!(user.rows[1]["value"], Value::Str("set-2".into()));
+
+    eng.sql("SET search_path = pg_catalog, md5_set, public", &[])
+        .unwrap();
+    assert_eq!(
+        scalar(&eng, "SELECT md5('abc'::text)"),
+        Value::Str("900150983cd24fb0d6963f7d28e17f72".into())
+    );
+}

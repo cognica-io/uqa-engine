@@ -66,6 +66,7 @@ pub(super) fn build_join_source_operator<'a>(
                     let lower = crate::sql::builtin_function_dispatch_name(&identity);
                     !crate::operator_tree_bridge::is_operator_join_table_function(&lower)
                 }
+                SourcePlan::FunctionGroup { .. } => true,
                 _ => false,
             };
             if *lateral || implicit_lateral_function {

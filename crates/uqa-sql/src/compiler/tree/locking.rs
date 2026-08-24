@@ -86,6 +86,7 @@ fn contains_any_join_alias(from: &FromClause) -> bool {
         FromClause::Table { .. }
         | FromClause::Values { .. }
         | FromClause::Function { .. }
+        | FromClause::FunctionGroup { .. }
         | FromClause::Subquery { .. } => false,
     }
 }
@@ -102,6 +103,7 @@ fn contains_join_alias(from: &FromClause, target: &str) -> bool {
         FromClause::Table { .. }
         | FromClause::Values { .. }
         | FromClause::Function { .. }
+        | FromClause::FunctionGroup { .. }
         | FromClause::Subquery { .. } => false,
     }
 }
@@ -192,7 +194,10 @@ fn apply_pushed_subquery_clauses(
             }
             Ok(())
         }
-        FromClause::Table { .. } | FromClause::Values { .. } | FromClause::Function { .. } => {
+        FromClause::Table { .. }
+        | FromClause::Values { .. }
+        | FromClause::Function { .. }
+        | FromClause::FunctionGroup { .. } => {
             *source_index += 1;
             Ok(())
         }
@@ -349,6 +354,22 @@ fn collect_lock_sources_matching<'a>(
             } else {
                 push_unique(&mut names, output_name);
                 push_unique(&mut names, name);
+            }
+            vec![LockSource {
+                names,
+                kind: LockSourceKind::Function,
+                nullable,
+            }]
+        }
+        FromClause::FunctionGroup {
+            functions, alias, ..
+        } => {
+            let mut names = Vec::new();
+            if let Some(alias) = alias {
+                push_unique(&mut names, alias);
+            } else if let Some(function) = functions.first() {
+                push_unique(&mut names, &function.output_name);
+                push_unique(&mut names, &function.name);
             }
             vec![LockSource {
                 names,

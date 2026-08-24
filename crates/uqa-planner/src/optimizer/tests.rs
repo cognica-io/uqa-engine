@@ -62,9 +62,10 @@ fn source_aliases(source: &SourcePlan) -> BTreeSet<String> {
             aliases.extend(source_aliases(right));
             aliases
         }
-        SourcePlan::Values { .. } | SourcePlan::Function { .. } | SourcePlan::Subquery { .. } => {
-            BTreeSet::new()
-        }
+        SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
+        | SourcePlan::Subquery { .. } => BTreeSet::new(),
     }
 }
 
@@ -87,6 +88,7 @@ fn source_predicate_count(source: &SourcePlan) -> usize {
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { .. } => 0,
     }
 }
@@ -106,6 +108,7 @@ fn source_hash_join_count(source: &SourcePlan) -> usize {
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { .. } => 0,
     }
 }

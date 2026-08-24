@@ -14,7 +14,7 @@ use super::{
     run_single_table_select_output, validate_query_block_expression_types,
     validate_query_set_contexts, validate_source_set_contexts_before_build, BTreeSet, ColumnPrune,
     CteScope, Engine, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr,
-    SingleRelation, SourcePlan,
+    ScopedEngineHook, SingleRelation, SourcePlan,
 };
 
 pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
@@ -32,12 +32,13 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
     )?;
     let expression_schema = overlay_outer_schema(&source_schema, outer);
     validate_query_block_expression_types(engine, stmt, &expression_schema, params, ctes)?;
-    validate_query_set_contexts(engine, stmt, &expression_schema, params)?;
+    let type_resolver = ScopedEngineHook::new(engine, ctes);
+    validate_query_set_contexts(engine, &type_resolver, stmt, &expression_schema, params)?;
 
     let Some(from) = stmt.from.as_ref() else {
         return run_select_without_from_output(engine, block, stmt, params, ctes, output_mode);
     };
-    validate_source_set_contexts_before_build(engine, from, params, ctes, outer)?;
+    validate_source_set_contexts_before_build(engine, &type_resolver, from, params, ctes, outer)?;
 
     // Set-op branches, CTEs, and derived-table bodies still need the same
     // search-aware single-table physical access path as top-level queries;
@@ -221,6 +222,7 @@ fn source_contains_join_alias(source: &SourcePlan) -> bool {
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { .. } => false,
     }
 }
@@ -250,6 +252,7 @@ fn collect_join_binding_prune_columns(engine: &Engine, from: &SourcePlan, prune:
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { .. } => {}
     }
 }
@@ -342,6 +345,53 @@ fn add_all_source_columns_to_prune(engine: &Engine, source: &SourcePlan, prune: 
                 ),
             );
         }
+        SourcePlan::FunctionGroup {
+            functions,
+            alias,
+            column_aliases,
+            ordinality,
+        } => {
+            let Some(qualifier) = alias
+                .as_ref()
+                .or_else(|| functions.first().map(|function| &function.output_name))
+            else {
+                return;
+            };
+            let Some(columns) = prune.get_mut(qualifier) else {
+                return;
+            };
+            let mut group_columns = Vec::new();
+            for function in functions {
+                group_columns.extend(
+                    super::user_function_output_columns(engine, &function.name).map_or_else(
+                        || {
+                            crate::sql::from_rows::table_function_empty_schema(
+                                &function.name,
+                                &function.output_name,
+                                None,
+                                &function.column_aliases,
+                                function.args.len(),
+                                false,
+                            )
+                        },
+                        |base| {
+                            crate::sql::from_rows::apply_table_function_aliases(
+                                base,
+                                &function.column_aliases,
+                                false,
+                            )
+                        },
+                    ),
+                );
+            }
+            if *ordinality {
+                group_columns.push("ordinality".into());
+            }
+            for (column, alias) in group_columns.iter_mut().zip(column_aliases) {
+                column.clone_from(alias);
+            }
+            columns.extend(group_columns);
+        }
         SourcePlan::Subquery {
             body,
             alias,
@@ -374,6 +424,7 @@ pub(in crate::sql) fn collect_from_qualifiers(from: &SourcePlan, out: &mut Vec<S
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { .. } => {
             if let Some(qualifier) = from.visible_qualifier() {
                 out.push(qualifier.to_string());
@@ -408,6 +459,13 @@ pub(in crate::sql) fn collect_from_prune_columns(
         SourcePlan::Function { args, .. } => {
             for expr in args {
                 collect_expr_prune_columns(expr, qualifiers, prune, valid);
+            }
+        }
+        SourcePlan::FunctionGroup { functions, .. } => {
+            for function in functions {
+                for expr in &function.args {
+                    collect_expr_prune_columns(expr, qualifiers, prune, valid);
+                }
             }
         }
         SourcePlan::Subquery { .. } => {

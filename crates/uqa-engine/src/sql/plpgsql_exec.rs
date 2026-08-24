@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use uqa_core::Value;
 use uqa_sql::ast::{
-    CreateFunction, DropFunctionStmt, Expr, FunctionBinding, FunctionReturns, Statement,
+    ColumnType, CreateFunction, DropFunctionStmt, Expr, FunctionBinding, FunctionReturns, Statement,
 };
 use uqa_sql::expr::{cast_value, truthy, value_type_name};
 use uqa_sql::plpgsql::{
@@ -48,7 +48,8 @@ mod state;
 mod statements;
 
 pub(crate) use handlers::{
-    call_bound_user_scalar_function, call_user_scalar_function, call_user_table_function,
+    call_bound_user_scalar_function, call_bound_user_table_function, call_user_scalar_function,
+    call_user_table_function, resolved_bound_user_function_returns_set,
     resolved_user_function_returns_set,
 };
 pub(super) use handlers::{run_call, run_create_function, run_do_block, run_drop_function};
@@ -84,6 +85,7 @@ struct RoutineOutcome {
     value: Value,
     out_values: Vec<Value>,
     set_rows: Vec<Vec<Value>>,
+    anonymous_record_column_types: Option<Vec<Option<ColumnType>>>,
 }
 
 #[derive(Clone)]

@@ -180,6 +180,11 @@ fn resolve_named_windows_in_from(from: &mut FromClause, windows: &NamedWindows) 
         FromClause::Function { args, .. } => {
             resolve_named_windows_in_exprs(args, windows)?;
         }
+        FromClause::FunctionGroup { functions, .. } => {
+            for function in functions {
+                resolve_named_windows_in_exprs(&mut function.args, windows)?;
+            }
+        }
     }
     Ok(())
 }

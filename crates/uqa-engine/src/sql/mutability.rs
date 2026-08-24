@@ -128,6 +128,9 @@ fn source_may_mutate_engine(
         uqa_planner::SourcePlan::Function { name, .. } => {
             Ok(function_may_mutate_engine(engine, name))
         }
+        uqa_planner::SourcePlan::FunctionGroup { functions, .. } => Ok(functions
+            .iter()
+            .any(|function| function_may_mutate_engine(engine, &function.name))),
         uqa_planner::SourcePlan::Join { left, right, .. } => {
             Ok(source_may_mutate_engine(engine, left, visiting_views)?
                 || source_may_mutate_engine(engine, right, visiting_views)?)

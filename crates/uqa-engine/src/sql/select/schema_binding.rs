@@ -12,6 +12,9 @@
 //! the same declared `PostgreSQL` type identities as non-empty relations.
 
 mod analysis;
+mod routine_binding;
+
+pub(in crate::sql) use routine_binding::bind_query_plan_routines_for_storage;
 
 use super::{
     cte_references_own_name, expr_contains_subquery, is_score_provenance_column, ordered_plan_ctes,
@@ -21,12 +24,12 @@ use super::{
 use crate::sql::from_rows::{
     alias_join_schema, apply_table_function_aliases, join_using_output_schema, resolve_join_using,
     table_function_column_types, table_function_empty_schema, validate_table_function_alias_count,
-    TableFunctionTypeRequest,
+    validate_table_function_column_definition, TableFunctionTypeRequest,
 };
 use crate::sql::virtual_relation_schema;
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_execution::{FunctionTypeResolver, ResolvedFunctionOverload, RowSchema};
-use uqa_sql::ast::ColumnType;
+use uqa_sql::ast::{ColumnType, JoinKind, JoinUsing};
 
 type ProjectionStarColumn = (String, Option<ColumnType>);
 
@@ -41,6 +44,35 @@ struct SchemaScope {
 struct QueryFunctionTypeResolver<'a> {
     engine: &'a Engine,
     scalar_subquery_types: Vec<Option<ColumnType>>,
+}
+
+struct JoinSchemaBinding<'a> {
+    engine: &'a Engine,
+    kind: JoinKind,
+    on: Option<&'a ScalarExpr>,
+    using: Option<&'a JoinUsing>,
+    natural: bool,
+    alias: Option<&'a str>,
+    column_aliases: &'a [String],
+    left: &'a RowSchema,
+    right: &'a RowSchema,
+    subqueries: &'a [QueryPlan],
+    params: &'a [SQLParam],
+    outer: Option<&'a RowSchema>,
+}
+
+fn table_function_member_source(function: &uqa_planner::TableFunctionPlan) -> SourcePlan {
+    SourcePlan::Function {
+        name: function.name.clone(),
+        binding: function.binding.clone(),
+        output_name: function.output_name.clone(),
+        relation: function.relation.clone(),
+        args: function.args.clone(),
+        alias: None,
+        column_aliases: function.column_aliases.clone(),
+        ordinality: false,
+        column_types: function.column_types.clone(),
+    }
 }
 
 impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
@@ -123,7 +155,26 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<Option<QueryFunctionTypeResolver<'a>>, SQLError> {
-        if subqueries.is_empty() || !expr_contains_subquery(expression) {
+        self.query_function_type_resolver_for_subqueries(
+            engine,
+            expr_contains_subquery(expression),
+            schema,
+            subqueries,
+            params,
+            outer,
+        )
+    }
+
+    fn query_function_type_resolver_for_subqueries<'a>(
+        &mut self,
+        engine: &'a Engine,
+        contains_subquery: bool,
+        schema: &RowSchema,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<Option<QueryFunctionTypeResolver<'a>>, SQLError> {
+        if subqueries.is_empty() || !contains_subquery {
             return Ok(None);
         }
         let subquery_outer = self.validate_references.then_some(schema).or(outer);
@@ -416,11 +467,6 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<Option<ColumnType>, SQLError> {
-        if self.validate_references && !matches!(expression, ScalarExpr::ScalarSubquery(_)) {
-            self.validate_expression_references(
-                engine, expression, schema, None, subqueries, params,
-            )?;
-        }
         if let ScalarExpr::ScalarSubquery(index) = expression {
             let plan = subqueries.get(*index).ok_or_else(|| {
                 SQLError::Internal(format!("scalar subquery slot {index} is out of bounds"))
@@ -429,14 +475,28 @@ impl SchemaScope {
             let output = self.bind_query(engine, plan, params, subquery_outer)?;
             return Ok(output.column_type(0).cloned());
         }
-        match self
-            .query_function_type_resolver(engine, expression, schema, subqueries, params, outer)?
-        {
-            Some(resolver) => {
-                uqa_execution::scalar_type_with_resolver(expression, schema, params, &resolver)
-            }
-            None => uqa_execution::scalar_type_with_resolver(expression, schema, params, engine),
+        let resolver = self
+            .query_function_type_resolver(engine, expression, schema, subqueries, params, outer)?;
+        if self.validate_references {
+            Self::validate_expression_references_with_resolver(
+                engine,
+                expression,
+                schema,
+                None,
+                params,
+                resolver
+                    .as_ref()
+                    .map_or(engine as &dyn FunctionTypeResolver, |resolver| resolver),
+            )?;
         }
+        uqa_execution::scalar_type_with_resolver(
+            expression,
+            schema,
+            params,
+            resolver
+                .as_ref()
+                .map_or(engine as &dyn FunctionTypeResolver, |resolver| resolver),
+        )
     }
 
     fn bind_values_types(
@@ -474,6 +534,41 @@ impl SchemaScope {
             .into_iter()
             .map(|ty| ty.or(Some(ColumnType::Text)))
             .collect())
+    }
+
+    fn bind_join_output_schema(
+        &mut self,
+        binding: JoinSchemaBinding<'_>,
+    ) -> Result<RowSchema, SQLError> {
+        let JoinSchemaBinding {
+            engine,
+            kind,
+            on,
+            using,
+            natural,
+            alias,
+            column_aliases,
+            left,
+            right,
+            subqueries,
+            params,
+            outer,
+        } = binding;
+        if let Some(on) = on {
+            let input = RowSchema::join(left, right, std::iter::empty::<String>());
+            let input = overlay_outer_schema(&input, outer);
+            if self.validate_references {
+                self.bind_expression_type(engine, on, &input, subqueries, params, outer)?;
+            } else {
+                uqa_execution::scalar_type_with_resolver(on, &input, params, engine)?;
+            }
+        }
+        let resolved = resolve_join_using(using, natural, left, right)?;
+        let schema = resolved.map_or_else(
+            || Ok(RowSchema::join(left, right, std::iter::empty())),
+            |using| join_using_output_schema(kind, left, right, &using),
+        )?;
+        alias_join_schema(&schema, alias, column_aliases)
     }
 
     fn bind_source(
@@ -591,6 +686,7 @@ impl SchemaScope {
             }
             SourcePlan::Function {
                 name,
+                binding,
                 output_name,
                 relation,
                 args,
@@ -607,24 +703,72 @@ impl SchemaScope {
                 } else {
                     outer.cloned().unwrap_or_default()
                 };
-                if self.validate_references {
+                let type_resolver = self.query_function_type_resolver_for_subqueries(
+                    engine,
+                    args.iter().any(expr_contains_subquery),
+                    &input,
+                    subqueries,
+                    params,
+                    Some(&input),
+                )?;
+                let user_function = if self.validate_references {
                     self.validate_table_function_source(
-                        engine, name, args, subqueries, &input, params,
-                    )?;
-                }
-                let columns = user_function_output_columns(engine, name).map_or_else(
-                    || {
-                        table_function_empty_schema(
+                        engine,
+                        analysis::TableFunctionSourceValidation {
                             name,
-                            output_name,
-                            alias.as_deref(),
-                            column_aliases,
-                            args.len(),
-                            *ordinality,
-                        )
-                    },
-                    |columns| apply_table_function_aliases(columns, column_aliases, *ordinality),
-                );
+                            binding: binding.as_ref(),
+                            args,
+                            subqueries,
+                            input: &input,
+                            params,
+                        },
+                    )?
+                } else {
+                    crate::sql::from_rows::resolve_user_table_function(
+                        engine,
+                        name,
+                        binding.as_ref(),
+                        args,
+                        &input,
+                        params,
+                        type_resolver
+                            .as_ref()
+                            .map_or(engine as &dyn FunctionTypeResolver, |resolver| resolver),
+                    )?
+                };
+                validate_table_function_column_definition(
+                    name,
+                    binding.as_ref(),
+                    user_function
+                        .as_ref()
+                        .map(|resolved| resolved.function.as_ref()),
+                    column_types,
+                )?;
+                let columns = user_function
+                    .as_ref()
+                    .and_then(|resolved| {
+                        crate::sql::from_rows::user_function_output_columns_for(&resolved.function)
+                    })
+                    .or_else(|| {
+                        (!self.validate_references && user_function.is_none())
+                            .then(|| user_function_output_columns(engine, name))
+                            .flatten()
+                    })
+                    .map_or_else(
+                        || {
+                            table_function_empty_schema(
+                                name,
+                                output_name,
+                                alias.as_deref(),
+                                column_aliases,
+                                args.len(),
+                                *ordinality,
+                            )
+                        },
+                        |columns| {
+                            apply_table_function_aliases(columns, column_aliases, *ordinality)
+                        },
+                    );
                 validate_table_function_alias_count(
                     alias.as_deref().unwrap_or(output_name),
                     columns.len(),
@@ -635,14 +779,54 @@ impl SchemaScope {
                     TableFunctionTypeRequest {
                         name,
                         args,
+                        user_function: user_function
+                            .as_ref()
+                            .map(|resolved| resolved.function.as_ref()),
                         declared_types: column_types,
                         columns: &columns,
                         ordinality: *ordinality,
                     },
                     &input,
                     params,
+                    type_resolver
+                        .as_ref()
+                        .map_or(engine as &dyn FunctionTypeResolver, |resolver| resolver),
                 );
                 let qualifier = alias.as_deref().unwrap_or(output_name);
+                Ok(RowSchema::with_qualified_types(qualifier, columns, types))
+            }
+            SourcePlan::FunctionGroup {
+                functions,
+                alias,
+                column_aliases,
+                ordinality,
+            } => {
+                let first = functions
+                    .first()
+                    .ok_or_else(|| SQLError::Internal("ROWS FROM group has no functions".into()))?;
+                let mut columns = Vec::new();
+                let mut types = Vec::new();
+                for function in functions {
+                    let member = table_function_member_source(function);
+                    let schema = self.bind_source(engine, &member, subqueries, params, outer)?;
+                    columns.extend(schema.iter().enumerate().map(|(position, column)| {
+                        schema.public_name(position).unwrap_or(column).to_string()
+                    }));
+                    types.extend(schema.column_types().iter().cloned());
+                }
+                if *ordinality {
+                    columns.push("ordinality".into());
+                    types.push(Some(ColumnType::BigInteger));
+                }
+                let qualifier = alias.as_deref().unwrap_or(&first.output_name);
+                validate_table_function_alias_count(
+                    qualifier,
+                    columns.len(),
+                    column_aliases.len(),
+                )?;
+                for (column, alias) in columns.iter_mut().zip(column_aliases) {
+                    column.clone_from(alias);
+                }
                 Ok(RowSchema::with_qualified_types(qualifier, columns, types))
             }
             SourcePlan::Subquery {
@@ -666,8 +850,10 @@ impl SchemaScope {
                 ..
             } => {
                 let left_schema = self.bind_source(engine, left, subqueries, params, outer)?;
-                let implicit_lateral_function =
-                    matches!(right.as_ref(), SourcePlan::Function { .. });
+                let implicit_lateral_function = matches!(
+                    right.as_ref(),
+                    SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
+                );
                 let right_scope = (*lateral || implicit_lateral_function)
                     .then(|| overlay_outer_schema(&left_schema, outer));
                 let right_schema = self.bind_source(
@@ -677,31 +863,125 @@ impl SchemaScope {
                     params,
                     right_scope.as_ref().or(outer),
                 )?;
-                if let Some(on) = on {
-                    let input =
-                        RowSchema::join(&left_schema, &right_schema, std::iter::empty::<String>());
-                    let input = overlay_outer_schema(&input, outer);
-                    if self.validate_references {
-                        self.bind_expression_type(engine, on, &input, subqueries, params, outer)?;
-                    } else {
-                        uqa_execution::scalar_type_with_resolver(on, &input, params, engine)?;
-                    }
-                }
-                let resolved =
-                    resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
-                let schema = resolved.map_or_else(
-                    || {
-                        Ok(RowSchema::join(
-                            &left_schema,
-                            &right_schema,
-                            std::iter::empty(),
-                        ))
-                    },
-                    |using| join_using_output_schema(*kind, &left_schema, &right_schema, &using),
-                )?;
-                alias_join_schema(&schema, alias.as_deref(), column_aliases)
+                self.bind_join_output_schema(JoinSchemaBinding {
+                    engine,
+                    kind: *kind,
+                    on: on.as_ref(),
+                    using: using.as_ref(),
+                    natural: *natural,
+                    alias: alias.as_deref(),
+                    column_aliases,
+                    left: &left_schema,
+                    right: &right_schema,
+                    subqueries,
+                    params,
+                    outer,
+                })
             }
         }
+    }
+
+    fn bind_source_for_execution(
+        &mut self,
+        engine: &Engine,
+        source: &mut SourcePlan,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<RowSchema, SQLError> {
+        match source {
+            SourcePlan::Join {
+                left,
+                right,
+                kind,
+                on,
+                using,
+                natural,
+                alias,
+                column_aliases,
+                lateral,
+                ..
+            } => {
+                let left_schema =
+                    self.bind_source_for_execution(engine, left, subqueries, params, outer)?;
+                let implicit_lateral_function = matches!(
+                    right.as_ref(),
+                    SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
+                );
+                let right_scope = (*lateral || implicit_lateral_function)
+                    .then(|| overlay_outer_schema(&left_schema, outer));
+                let right_schema = self.bind_source_for_execution(
+                    engine,
+                    right,
+                    subqueries,
+                    params,
+                    right_scope.as_ref().or(outer),
+                )?;
+                return self.bind_join_output_schema(JoinSchemaBinding {
+                    engine,
+                    kind: *kind,
+                    on: on.as_ref(),
+                    using: using.as_ref(),
+                    natural: *natural,
+                    alias: alias.as_deref(),
+                    column_aliases,
+                    left: &left_schema,
+                    right: &right_schema,
+                    subqueries,
+                    params,
+                    outer,
+                });
+            }
+            SourcePlan::Function {
+                name,
+                binding,
+                relation,
+                args,
+                ..
+            } => {
+                let lower = crate::sql::builtin_function_dispatch_name(name);
+                let input = if crate::operator_tree_bridge::is_operator_join_table_function(&lower)
+                {
+                    operator_join_relation_schema(engine, relation.as_deref())?
+                } else {
+                    outer.cloned().unwrap_or_default()
+                };
+                let resolver = self.query_function_type_resolver_for_subqueries(
+                    engine,
+                    args.iter().any(expr_contains_subquery),
+                    &input,
+                    subqueries,
+                    params,
+                    Some(&input),
+                )?;
+                let resolver = resolver
+                    .as_ref()
+                    .map_or(engine as &dyn FunctionTypeResolver, |resolver| resolver);
+                if let Some(selected) = crate::sql::from_rows::resolve_table_function_binding(
+                    engine,
+                    name,
+                    binding.as_ref(),
+                    args,
+                    &input,
+                    params,
+                    resolver,
+                )? {
+                    *binding = Some(selected);
+                }
+            }
+            SourcePlan::FunctionGroup { functions, .. } => {
+                for function in functions {
+                    let mut member = table_function_member_source(function);
+                    self.bind_source_for_execution(engine, &mut member, subqueries, params, outer)?;
+                    let SourcePlan::Function { binding, .. } = member else {
+                        unreachable!("table-function member changed source kind during binding")
+                    };
+                    function.binding = binding;
+                }
+            }
+            SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Subquery { .. } => {}
+        }
+        self.bind_source(engine, source, subqueries, params, outer)
     }
 }
 
@@ -753,6 +1033,23 @@ pub(in crate::sql) fn bind_source_plan_schema(
     outer: Option<&RowSchema>,
 ) -> Result<RowSchema, SQLError> {
     SchemaScope::from_execution_scope(ctes).bind_source(
+        engine,
+        source,
+        &ctes.scalar_subqueries,
+        params,
+        outer,
+    )
+}
+
+/// Bind every table-function source in one execution-owned source plan to its exact routine identity and return the schema derived from those same bindings.
+pub(in crate::sql) fn bind_source_plan_schema_for_execution(
+    engine: &Engine,
+    source: &mut SourcePlan,
+    params: &[SQLParam],
+    ctes: &CteScope,
+    outer: Option<&RowSchema>,
+) -> Result<RowSchema, SQLError> {
+    SchemaScope::from_execution_scope(ctes).bind_source_for_execution(
         engine,
         source,
         &ctes.scalar_subqueries,

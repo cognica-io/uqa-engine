@@ -221,6 +221,7 @@ fn collect_from_qualifiers(from: &SourcePlan, out: &mut BTreeSet<String>) {
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { .. } => {
             if let Some(qualifier) = from.visible_qualifier() {
                 out.insert(qualifier.to_string());

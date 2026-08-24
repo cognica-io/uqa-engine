@@ -171,6 +171,13 @@ pub(super) fn optimize_source(
                 optimize_scalar_slot(expression, config);
             }
         }
+        SourcePlan::FunctionGroup { functions, .. } => {
+            for function in functions {
+                for expression in &mut function.args {
+                    optimize_scalar_slot(expression, config);
+                }
+            }
+        }
         SourcePlan::Subquery { body, .. } => optimize_query(body, config, aggregates),
         SourcePlan::Table { .. } => {}
     }

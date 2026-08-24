@@ -31,6 +31,7 @@ mod scalar;
 mod statement;
 
 pub use model::*;
+pub use rewrite::rewrite_scalar_expression;
 pub(crate) use scalar::is_builtin_aggregate;
 
 #[cfg(test)]

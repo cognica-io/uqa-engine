@@ -340,6 +340,29 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             ordinality: *ordinality,
             column_types: column_types.clone(),
         },
+        FromClause::FunctionGroup {
+            functions,
+            alias,
+            column_aliases,
+            ordinality,
+        } => FromClause::FunctionGroup {
+            functions: functions
+                .iter()
+                .map(|function| {
+                    Ok(crate::ast::TableFunction {
+                        name: function.name.clone(),
+                        output_name: function.output_name.clone(),
+                        relation: function.relation.clone(),
+                        args: bind_exprs(&function.args, r)?,
+                        column_aliases: function.column_aliases.clone(),
+                        column_types: function.column_types.clone(),
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?,
+            alias: alias.clone(),
+            column_aliases: column_aliases.clone(),
+            ordinality: *ordinality,
+        },
         FromClause::Subquery {
             body,
             alias,

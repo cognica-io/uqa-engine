@@ -227,6 +227,9 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
     if actual == declared {
         return true;
     }
+    if declared == "anyarray" && actual.ends_with("[]") {
+        return true;
+    }
     if let (Some(actual), Some(declared)) = (actual.strip_suffix("[]"), declared.strip_suffix("[]"))
     {
         return routine_type_accepts_implicit_cast(actual, declared);
@@ -755,6 +758,7 @@ mod tests {
         assert!(routine_type_is_preferred("double precision"));
         assert!(routine_type_accepts_implicit_cast("int4", "numeric"));
         assert!(routine_type_accepts_implicit_cast("int4", "regclass"));
+        assert!(routine_type_accepts_implicit_cast("int4[]", "anyarray"));
         assert!(routine_type_accepts_implicit_cast("regclass", "oid"));
         assert!(routine_type_accepts_implicit_cast("text", "regclass"));
         assert!(!routine_type_accepts_implicit_cast("text", "bytea"));

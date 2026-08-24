@@ -155,7 +155,10 @@ fn reorder_source_joins(
             reorder_source_joins(right, &[], statistics)?;
         }
         SourcePlan::Subquery { body, .. } => reorder_query_joins(body, statistics)?,
-        SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Function { .. } => {}
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. } => {}
     }
 
     if let Some(reordered) = reordered_inner_join_source(source, external_predicates, statistics)? {
@@ -227,9 +230,10 @@ fn reordered_inner_join_source(
                     estimate.paradigm,
                 )
             }
-            SourcePlan::Join { .. } | SourcePlan::Values { .. } | SourcePlan::Subquery { .. } => {
-                return Ok(None)
-            }
+            SourcePlan::Join { .. }
+            | SourcePlan::Values { .. }
+            | SourcePlan::FunctionGroup { .. }
+            | SourcePlan::Subquery { .. } => return Ok(None),
         };
         if qualifier.is_empty() || !aliases.insert(qualifier.clone()) {
             return Ok(None);
@@ -335,7 +339,10 @@ fn flatten_reorderable_inner_join(
             atoms.push(source.clone());
             true
         }
-        SourcePlan::Join { .. } | SourcePlan::Values { .. } | SourcePlan::Subquery { .. } => false,
+        SourcePlan::Join { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::FunctionGroup { .. }
+        | SourcePlan::Subquery { .. } => false,
     }
 }
 
@@ -708,6 +715,7 @@ fn source_qualifiers(source: &SourcePlan) -> BTreeSet<String> {
         SourcePlan::Join { .. } => {}
         SourcePlan::Table { .. }
         | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Subquery { .. } => {
             if let Some(qualifier) = source.visible_qualifier() {

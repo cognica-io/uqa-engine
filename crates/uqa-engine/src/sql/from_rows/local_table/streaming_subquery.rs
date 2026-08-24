@@ -6,9 +6,8 @@
 //! Pull-based derived-table projection assembly.
 
 use super::{
-    bind_source_plan_schema, build_join_operator_with_ctes, query_contains_volatile_function,
-    resolve_row_locks, AccessPathPlan, ComputePlan, CteScope, Engine, RelationalPlan, SQLError,
-    SQLParam,
+    build_join_operator_with_ctes, query_contains_volatile_function, resolve_row_locks,
+    AccessPathPlan, ComputePlan, CteScope, Engine, RelationalPlan, SQLError, SQLParam,
 };
 
 /// Build a single-consumer derived-table projection as a pull pipeline. Blocking operators inside the query block retain their own bounded state, but a second `SharedSpill` boundary would eagerly exhaust that pipeline before the parent can apply demand such as `LIMIT`.
@@ -26,6 +25,7 @@ pub(super) fn try_build_streaming_subquery_operator<'a>(
     let RelationalPlan::QueryBlock(block) = &body.root else {
         return Ok(None);
     };
+    let mut block = block.clone();
     // A block whose qualification calls a registered retrieval function (text_match, knn_match, graph_traverse, rpq, ...) executes it through the operator-tree bridge of the single-table executor; the residual scalar filter of a streamed block cannot evaluate such calls. Plain comparisons keep streaming so an outer LIMIT still bounds locking demand inside the derived table.
     if !matches!(block.compute, ComputePlan::Project)
         || matches!(block.access, AccessPathPlan::Hybrid)
@@ -40,17 +40,33 @@ pub(super) fn try_build_streaming_subquery_operator<'a>(
         return Ok(None);
     }
 
+    // The block's scalar subqueries live in their own arena for the whole pull pipeline: the evaluators built below snapshot this scope, so a derived table with subqueries still streams and an outer LIMIT keeps its inner locking demand-driven.
+    let mut ctes = ctes.enter_scalar_subqueries(&block.subqueries);
+    let ctes: &mut CteScope = &mut ctes;
+    let source_schema = crate::sql::select::bind_source_plan_schema_for_execution(
+        engine,
+        block
+            .from
+            .as_mut()
+            .expect("derived-table FROM checked above"),
+        params,
+        ctes,
+        None,
+    )?;
+    let block = &*block;
     let from = block
         .from
         .as_ref()
         .expect("derived-table FROM checked above");
-    // The block's scalar subqueries live in their own arena for the whole pull pipeline: the evaluators built below snapshot this scope, so a derived table with subqueries still streams and an outer LIMIT keeps its inner locking demand-driven.
-    let mut ctes = ctes.enter_scalar_subqueries(&block.subqueries);
-    let ctes: &mut CteScope = &mut ctes;
-    let source_schema = bind_source_plan_schema(engine, from, params, ctes, None)?;
     let projections = crate::sql::select::physical_projections(&block.projections);
-    if crate::sql::select::projections_may_return_set(engine, &projections, &source_schema, params)?
-    {
+    let type_resolver = crate::sql::select::ScopedEngineHook::new(engine, ctes);
+    if crate::sql::select::projections_may_return_set(
+        engine,
+        &type_resolver,
+        &projections,
+        &source_schema,
+        params,
+    )? {
         return Ok(None);
     }
     let (_, order_output) =
@@ -59,6 +75,7 @@ pub(super) fn try_build_streaming_subquery_operator<'a>(
         let expression = crate::sql::select::resolve_order_expression(&order.expr, &order_output)?;
         if crate::sql::select::expression_may_return_set(
             engine,
+            &type_resolver,
             &expression,
             &source_schema,
             params,

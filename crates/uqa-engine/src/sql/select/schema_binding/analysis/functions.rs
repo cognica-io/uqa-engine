@@ -133,7 +133,7 @@ pub(super) fn validate_scalar_function(
         return validate_uuid_extraction_function(engine, name, args, schema, params);
     }
     if binding.is_none() && matches!(lower.as_str(), "array_sort" | "array_reverse") {
-        uqa_execution::scalar_type_with_resolver(expression, schema, params, engine)?;
+        uqa_execution::scalar_type_with_resolver(expression, schema, params, resolver)?;
         return Ok(());
     }
     if lower == uqa_sql::expr::NAMED_ARG_FUNCTION
@@ -150,7 +150,7 @@ pub(super) fn validate_scalar_function(
     if builtin_function_type(&lower, args, order_by, schema, params)?.is_some() {
         return Ok(());
     }
-    Err(undefined_function(name, args, schema, params))
+    Err(undefined_function(name, args, schema, params, resolver))
 }
 
 fn validate_fixed_builtin(
@@ -206,7 +206,7 @@ fn validate_uuid_extraction_function(
     if valid {
         Ok(())
     } else {
-        Err(undefined_function(name, args, schema, params))
+        Err(undefined_function(name, args, schema, params, engine))
     }
 }
 
@@ -224,6 +224,7 @@ pub(super) fn validate_window_function(
     args: &[ScalarExpr],
     schema: &RowSchema,
     params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
 ) -> Result<(), SQLError> {
     let lower = crate::sql::builtin_function_dispatch_name(name);
     if matches!(
@@ -234,32 +235,39 @@ pub(super) fn validate_window_function(
             | ("nth_value", 2)
             | ("ntile", 1)
     ) || engine.has_registered_aggregate_function(name)
-        || resolve_sql_function(engine, name, None, args, schema, params, engine)?.is_some()
+        || resolve_sql_function(engine, name, None, args, schema, params, resolver)?.is_some()
     {
         Ok(())
     } else {
-        Err(undefined_function(name, args, schema, params))
+        Err(undefined_function(name, args, schema, params, resolver))
     }
 }
 
 pub(super) fn validate_table_function(
     engine: &Engine,
     name: &str,
+    binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
     input: &RowSchema,
     params: &[SQLParam],
-) -> Result<(), SQLError> {
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<Option<crate::sql::from_rows::ResolvedUserTableFunction>, SQLError> {
     let identity = name.to_ascii_lowercase();
     let lower = crate::sql::builtin_function_dispatch_name(&identity);
-    if builtin_table_function(&lower)
-        || crate::operator_tree_bridge::is_operator_join_table_function(&lower)
-        || engine.has_registered_table_function(&identity)
-        || resolve_sql_function(engine, name, None, args, input, params, engine)?.is_some()
+    let selected_user = binding.is_some_and(|binding| !binding.builtin);
+    if !selected_user
+        && (crate::sql::from_rows::is_builtin_table_function(&lower)
+            || crate::operator_tree_bridge::is_operator_join_table_function(&lower)
+            || engine.has_registered_table_function(&identity))
     {
-        Ok(())
-    } else {
-        Err(undefined_function(name, args, input, params))
+        return Ok(None);
     }
+    if let Some(resolved) = crate::sql::from_rows::resolve_user_table_function(
+        engine, name, binding, args, input, params, resolver,
+    )? {
+        return Ok(Some(resolved));
+    }
+    Err(undefined_function(name, args, input, params, resolver))
 }
 
 fn resolve_sql_function(
@@ -279,12 +287,12 @@ fn resolve_sql_function(
     for argument in args {
         let (argument_name, value) = named_argument(argument);
         argument_names.push(argument_name);
-        argument_types.push(uqa_execution::common_context_expression_type(
+        let argument_type =
+            uqa_execution::common_context_expression_type(value, schema, params, Some(resolver))?;
+        argument_types.push(uqa_execution::effective_overload_argument_type(
             value,
-            schema,
-            params,
-            Some(resolver),
-        )?);
+            argument_type,
+        ));
     }
     engine.resolve_static_sql_function(name, binding, &argument_names, &argument_types)
 }
@@ -337,54 +345,26 @@ fn builtin_scalar_function(name: &str, argument_count: usize) -> bool {
     )
 }
 
-fn builtin_table_function(name: &str) -> bool {
-    matches!(
-        name,
-        "generate_series"
-            | "unnest"
-            | "regexp_split_to_table"
-            | "string_to_table"
-            | "json_array_elements"
-            | "jsonb_array_elements"
-            | "json_array_elements_text"
-            | "jsonb_array_elements_text"
-            | "json_object_keys"
-            | "jsonb_object_keys"
-            | "json_each"
-            | "jsonb_each"
-            | "json_each_text"
-            | "jsonb_each_text"
-            | "create_analyzer"
-            | "drop_analyzer"
-            | "list_analyzers"
-            | "fts_index_stats"
-            | "set_table_analyzer"
-            | "pagerank"
-            | "graph_pagerank"
-            | "hits"
-            | "graph_hits"
-            | "betweenness"
-            | "graph_betweenness"
-            | "graph_edges"
-            | "rpq"
-            | "cypher"
-    )
-}
-
 fn undefined_function(
     name: &str,
     args: &[ScalarExpr],
     schema: &RowSchema,
     params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
 ) -> SQLError {
     let signature = args
         .iter()
         .map(|argument| {
             let (argument_name, value) = named_argument(argument);
-            let ty = uqa_execution::common_context_expression_type(value, schema, params, None)
-                .ok()
-                .flatten()
-                .map_or_else(|| "unknown".to_string(), |ty| ty.sql_name());
+            let ty = uqa_execution::common_context_expression_type(
+                value,
+                schema,
+                params,
+                Some(resolver),
+            )
+            .ok()
+            .and_then(|ty| uqa_execution::effective_overload_argument_type(value, ty))
+            .map_or_else(|| "unknown".to_string(), |ty| ty.sql_name());
             argument_name.map_or(ty.clone(), |name| format!("{name} => {ty}"))
         })
         .collect::<Vec<_>>()

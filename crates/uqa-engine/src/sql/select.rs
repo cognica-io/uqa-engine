@@ -600,12 +600,17 @@ pub(super) fn execute_query_plan_output(
             collect_query_operator(engine, columns, operation, output_mode)
         }
         RelationalPlan::Values { rows, subqueries } => {
-            validate_values_set_contexts(
-                engine,
-                rows,
-                &uqa_execution::RowSchema::default(),
-                params,
-            )?;
+            {
+                let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
+                let type_resolver = ScopedEngineHook::new(engine, &scoped_ctes);
+                validate_values_set_contexts(
+                    engine,
+                    &type_resolver,
+                    rows,
+                    &uqa_execution::RowSchema::default(),
+                    params,
+                )?;
+            }
             execute_plan_values_output(engine, rows, subqueries, params, ctes, output_mode)
         }
     }
@@ -953,7 +958,11 @@ fn execute_query_block_output(
     scoped_ctes.lock_identities.retain_after_lock =
         inherited_lock_identities && !row_identity_barrier;
     let defer_distinct_limit = should_defer_distinct_limit(block);
-    let execution = select_execution_stmt(block, defer_distinct_limit);
+    let mut execution = select_execution_stmt(block, defer_distinct_limit);
+    let outer = scoped_ctes.row_lock_outer_row().map(|row| &row.schema);
+    if let Some(source) = execution.from.as_mut() {
+        bind_source_plan_schema_for_execution(engine, source, params, &scoped_ctes, outer)?;
+    }
     run_query_block_with_prepared_exists_output(
         engine,
         block,

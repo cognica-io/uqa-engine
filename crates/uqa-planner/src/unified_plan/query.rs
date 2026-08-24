@@ -12,7 +12,7 @@ use super::{
     AccessPathPlan, AggregateClassifier, AssignmentPlan, ComputePlan, CtePlan, Expr,
     ExpressionPlan, FromClause, JoinExecutionStrategy, MergeWhenPlan, NoRegisteredAggregates,
     OrderBy, OrderPlan, Projection, ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan,
-    ScalarExpr, SelectStmt, SourcePlan, CTE,
+    ScalarExpr, SelectStmt, SourcePlan, TableFunctionPlan, CTE,
 };
 
 impl QueryPlan {
@@ -290,6 +290,13 @@ impl SourcePlan {
             Self::Function {
                 output_name, alias, ..
             } => Some(alias.as_deref().unwrap_or(output_name)),
+            Self::FunctionGroup {
+                functions, alias, ..
+            } => alias.as_deref().or_else(|| {
+                functions
+                    .first()
+                    .map(|function| function.output_name.as_str())
+            }),
             Self::Values { alias, .. } | Self::Subquery { alias, .. } => alias.as_deref(),
             Self::Join { alias, .. } => alias.as_deref(),
         }
@@ -359,6 +366,7 @@ impl SourcePlan {
                 column_types,
             } => Self::Function {
                 name,
+                binding: None,
                 output_name,
                 relation,
                 args: args
@@ -369,6 +377,32 @@ impl SourcePlan {
                 column_aliases,
                 ordinality,
                 column_types,
+            },
+            FromClause::FunctionGroup {
+                functions,
+                alias,
+                column_aliases,
+                ordinality,
+            } => Self::FunctionGroup {
+                functions: functions
+                    .into_iter()
+                    .map(|function| TableFunctionPlan {
+                        name: function.name,
+                        binding: None,
+                        output_name: function.output_name,
+                        relation: function.relation,
+                        args: function
+                            .args
+                            .into_iter()
+                            .map(|expr| lower_scalar_expression(expr, aggregates, subqueries))
+                            .collect(),
+                        column_aliases: function.column_aliases,
+                        column_types: function.column_types,
+                    })
+                    .collect(),
+                alias,
+                column_aliases,
+                ordinality,
             },
             FromClause::Subquery {
                 body,
@@ -400,6 +434,11 @@ impl SourcePlan {
                 }
             }
             Self::Function { args, .. } => output.extend(args),
+            Self::FunctionGroup { functions, .. } => {
+                for function in functions {
+                    output.extend(&function.args);
+                }
+            }
         }
     }
 
@@ -417,7 +456,10 @@ impl SourcePlan {
                 left.collect_tables(output);
                 right.collect_tables(output);
             }
-            Self::Values { .. } | Self::Function { .. } | Self::Subquery { .. } => {}
+            Self::Values { .. }
+            | Self::Function { .. }
+            | Self::FunctionGroup { .. }
+            | Self::Subquery { .. } => {}
         }
     }
 }

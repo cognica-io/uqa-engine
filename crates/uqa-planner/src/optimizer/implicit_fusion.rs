@@ -95,7 +95,10 @@ fn source_contains_implicit_hybrid_fusion(source: &SourcePlan) -> bool {
                 || source_contains_implicit_hybrid_fusion(right)
         }
         SourcePlan::Subquery { body, .. } => query_contains_implicit_hybrid_fusion(body),
-        SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Function { .. } => false,
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. } => false,
     }
 }
 

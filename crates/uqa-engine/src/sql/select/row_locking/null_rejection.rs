@@ -84,7 +84,10 @@ fn reduce_null_rejected_outer_joins(
         return Ok(false);
     };
     let left_schema = bind_source_plan_schema(engine, left, params, ctes, outer)?;
-    let implicit_lateral_function = matches!(right.as_ref(), SourcePlan::Function { .. });
+    let implicit_lateral_function = matches!(
+        right.as_ref(),
+        SourcePlan::Function { .. } | SourcePlan::FunctionGroup { .. }
+    );
     let right_scope =
         (*lateral || implicit_lateral_function).then(|| overlay_outer_schema(&left_schema, outer));
     let right_outer = right_scope.as_ref().or(outer);

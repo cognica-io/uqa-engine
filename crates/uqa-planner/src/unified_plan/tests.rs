@@ -50,6 +50,66 @@ fn from_and_scalar_subqueries_own_query_children() {
 }
 
 #[test]
+fn range_function_groups_lower_each_member_with_an_independent_binding_slot() {
+    let UnifiedPlan::Query(query) = one(
+        "SELECT * FROM ROWS FROM (f(1) AS (left_id int4, left_label text), g(2)) \
+         WITH ORDINALITY AS grouped(a, b, c, sequence)",
+    ) else {
+        panic!("expected query plan");
+    };
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("expected query block");
+    };
+    let Some(SourcePlan::FunctionGroup {
+        functions,
+        alias,
+        column_aliases,
+        ordinality,
+    }) = &block.from
+    else {
+        panic!("expected function group");
+    };
+    assert_eq!(alias.as_deref(), Some("grouped"));
+    assert_eq!(column_aliases.as_slice(), ["a", "b", "c", "sequence"]);
+    assert!(*ordinality);
+    assert_eq!(functions.len(), 2);
+    assert_eq!(functions[0].name, "f");
+    assert!(functions[0].binding.is_none());
+    assert_eq!(functions[0].args.len(), 1);
+    assert_eq!(
+        functions[0].column_aliases.as_slice(),
+        ["left_id", "left_label"]
+    );
+    assert_eq!(functions[0].column_types.as_slice(), ["int4", "text"]);
+    assert_eq!(functions[1].name, "g");
+    assert!(functions[1].binding.is_none());
+    assert_eq!(functions[1].args.len(), 1);
+    assert_eq!(block.subqueries.len(), 0);
+}
+
+#[test]
+fn multi_argument_unnest_lowers_as_a_canonical_function_group() {
+    let UnifiedPlan::Query(query) = one("SELECT * FROM unnest(ARRAY[1], ARRAY[2])") else {
+        panic!("expected query plan");
+    };
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("expected query block");
+    };
+    let source = block.from.as_ref().expect("FROM source");
+    assert_eq!(source.visible_qualifier(), Some("unnest"));
+    let SourcePlan::FunctionGroup { functions, .. } = source else {
+        panic!("expected function group");
+    };
+    assert_eq!(functions.len(), 2);
+    assert!(functions.iter().all(|function| {
+        function.name == "pg_catalog.unnest"
+            && function.output_name == "unnest"
+            && function.binding.is_none()
+            && function.args.len() == 1
+    }));
+}
+
+#[test]
 fn set_operations_and_ctes_are_structural_children() {
     let plan = one("WITH q AS (SELECT 1 AS x) SELECT x FROM q UNION SELECT 2");
     let UnifiedPlan::Query(query) = plan else {

@@ -214,7 +214,23 @@ Ranking and offset windows are `row_number`, `rank`, `dense_rank`, `lag`, `lead`
 | JSON expansion functions | Key/value or element rows |
 | Registered table callbacks | Schema returned by the callback |
 
-Table functions can be aliased with a relation name and column definition list. `WITH ORDINALITY` and multi-function `ROWS FROM` are not implemented.
+Table functions accept a relation alias, positional output-column aliases, and a column definition list where the function contract requires one. PostgreSQL's `ROWS FROM (function_call [AS (column type, ...)], ...) [WITH ORDINALITY] [AS alias (column, ...)]` form preserves each member and its declared columns independently, while the relation alias, positional aliases, and ordinality apply to the complete group.
+
+Each `ROWS FROM` member resolves as an ordinary table-function call against its own arguments and the active `search_path`. The group concatenates member columns in declaration order, emits as many rows as its longest member, and fills columns from exhausted members with SQL NULL. `WITH ORDINALITY` appends one group-wide, one-based `bigint` column after all member columns and resets for each correlated LATERAL invocation.
+
+The group construct does not itself mutate database or session state; each member retains the state and volatility behavior of that function. Range-function groups are implicitly lateral where PostgreSQL permits an earlier `FROM` item to supply an argument, and a `LEFT JOIN LATERAL` null-extends an empty group.
+
+PostgreSQL gives unqualified multi-argument `unnest(array1, array2, ...)` special syntax only in a `FROM` range-function position, including as a member of `ROWS FROM`: it expands to independent unary `pg_catalog.unnest` members, zips them to the longest array, and NULL-pads shorter arrays, so a visible user-defined two-argument `unnest` cannot intercept that syntax. A single unqualified `unnest(array)` remains an ordinary overload-resolved call, a schema-qualified `schema.unnest(array1, array2)` remains one ordinary function call, and `pg_catalog.unnest(array1, array2)` reports undefined function (`42883`) because the catalog has no such ordinary signature. Outside a `FROM` range-function position, a multi-argument `unnest` is also an ordinary function call rather than this syntax transform.
+
+An outer positional alias list may rename any prefix of the concatenated output but cannot contain more names than the group exposes; an oversized list reports invalid column reference (`42P10`). A typed per-member column definition list supplies the required call-site row descriptor for an anonymous `record` or `SETOF record` routine, and execution validates the produced field count and declared source types before applying compatible coercions and type modifiers. Omitting that descriptor from an anonymous record source, attaching one to a scalar or single-output routine, or redundantly attaching one to a known multi-OUT result such as `json_each` reports syntax error (`42601`). Stored views retain every exact member binding across reopen, and missing or ambiguous ordinary member signatures report the corresponding PostgreSQL function-resolution SQLSTATE.
+
+```sql execute
+SELECT number, label, sequence
+FROM ROWS FROM (
+    pg_catalog.generate_series(1, 2),
+    pg_catalog.unnest(ARRAY['a', 'b', 'c'])
+) WITH ORDINALITY AS rows(number, label, sequence);
+```
 
 ## Analyzer and index table functions
 
