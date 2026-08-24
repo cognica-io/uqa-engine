@@ -98,6 +98,34 @@ impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
     }
 }
 
+impl SchemaScope {
+    fn query_function_type_resolver<'a>(
+        &mut self,
+        engine: &'a Engine,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<Option<QueryFunctionTypeResolver<'a>>, SQLError> {
+        if subqueries.is_empty() || !expr_contains_subquery(expression) {
+            return Ok(None);
+        }
+        let subquery_outer = self.validate_references.then_some(schema).or(outer);
+        let scalar_subquery_types = subqueries
+            .iter()
+            .map(|plan| {
+                self.bind_query(engine, plan, params, subquery_outer)
+                    .map(|output| output.column_type(0).cloned())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Some(QueryFunctionTypeResolver {
+            engine,
+            scalar_subquery_types,
+        }))
+    }
+}
+
 /// Bind an operator join's relation argument as the input schema for its retrieval expressions.
 fn operator_join_relation_schema(
     engine: &Engine,

@@ -26,6 +26,8 @@ mod behavior;
 mod catalog_and_persistence;
 #[path = "sql_generated_columns/checksums.rs"]
 mod checksums;
+#[path = "sql_generated_columns/fixed_builtin_resolution.rs"]
+mod fixed_builtin_resolution;
 #[path = "sql_generated_columns/gamma_functions.rs"]
 mod gamma_functions;
 #[path = "sql_generated_columns/json_strip_nulls.rs"]

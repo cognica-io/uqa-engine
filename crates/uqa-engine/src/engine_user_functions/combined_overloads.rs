@@ -8,15 +8,16 @@
 
 use std::sync::Arc;
 
-use uqa_execution::{BuiltinFunctionOverload, FunctionTypeResolver, ResolvedFunctionOverload};
+use uqa_execution::{
+    builtin_binding_matches, builtin_name_matches, match_builtin_function_overload,
+    BuiltinFunctionOverload, FunctionTypeResolver, ResolvedFunctionOverload,
+};
 use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::SQLError;
 
 use super::{
-    canonical_column_type_name, canonical_routine_type_name, rank_function_matches,
-    routine_signature_types, routine_type_accepts_implicit_cast, routine_type_is_preferred,
-    static_function_match, static_function_return_type, Engine, RankedFunctionMatch,
-    SQLUserFunction,
+    rank_function_matches, routine_signature_types, static_function_match,
+    static_function_return_type, Engine, RankedFunctionMatch, SQLUserFunction,
 };
 
 enum FunctionTarget {
@@ -223,101 +224,13 @@ fn builtin_function_match(
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
 ) -> Option<FunctionMatch> {
-    let required_arguments = builtin
-        .argument_types
-        .len()
-        .checked_sub(builtin.default_arguments)?;
-    if !(required_arguments..=builtin.argument_types.len()).contains(&argument_types.len())
-        || argument_names.len() != argument_types.len()
-        || builtin.argument_names.len() != builtin.argument_types.len()
-    {
-        return None;
-    }
-    let mut slots = vec![None; builtin.argument_types.len()];
-    let mut matched_argument_types = Vec::with_capacity(argument_types.len());
-    let mut positional = 0usize;
-    let mut saw_named = false;
-    for (argument_name, argument_type) in argument_names.iter().zip(argument_types) {
-        let index = if let Some(argument_name) = argument_name {
-            saw_named = true;
-            builtin
-                .argument_names
-                .iter()
-                .position(|name| name.as_deref() == Some(argument_name.as_str()))?
-        } else {
-            if saw_named || positional >= builtin.argument_types.len() {
-                return None;
-            }
-            let index = positional;
-            positional += 1;
-            index
-        };
-        if slots[index].replace(argument_type.as_ref()).is_some() {
-            return None;
-        }
-        matched_argument_types.push(canonical_routine_type_name(
-            &builtin.argument_types[index].sql_name(),
-        ));
-    }
-
-    let mut exact_matches = 0usize;
-    let mut preferred_matches = 0usize;
-    for (index, (actual, declared_type)) in
-        slots.into_iter().zip(&builtin.argument_types).enumerate()
-    {
-        let Some(actual_type) = actual else {
-            if index < required_arguments {
-                return None;
-            }
-            continue;
-        };
-        let Some(actual_type) = actual_type else {
-            continue;
-        };
-        let declared = canonical_routine_type_name(&declared_type.sql_name());
-        let actual = canonical_column_type_name(actual_type);
-        if actual == declared {
-            exact_matches += 1;
-        } else if routine_type_accepts_implicit_cast(&actual, &declared) {
-            preferred_matches += usize::from(routine_type_is_preferred(&declared));
-        } else if let ColumnType::Domain { base, .. } = actual_type {
-            let base = canonical_column_type_name(base);
-            if !routine_type_accepts_implicit_cast(&base, &declared) {
-                return None;
-            }
-            preferred_matches += usize::from(routine_type_is_preferred(&declared));
-        } else {
-            return None;
-        }
-    }
+    let matched = match_builtin_function_overload(builtin, argument_names, argument_types)?;
     Some(FunctionMatch {
-        target: FunctionTarget::Builtin(builtin),
-        argument_types: matched_argument_types,
-        exact_matches,
-        preferred_matches,
+        target: FunctionTarget::Builtin(matched.overload),
+        argument_types: matched.argument_types,
+        exact_matches: matched.exact_matches,
+        preferred_matches: matched.preferred_matches,
     })
-}
-
-fn builtin_name_matches(name: &str, builtin_name: &str) -> bool {
-    let name = name.to_ascii_lowercase();
-    let builtin_name = builtin_name.to_ascii_lowercase();
-    if name.contains('.') {
-        name == builtin_name
-    } else {
-        builtin_name.rsplit('.').next() == Some(name.as_str())
-    }
-}
-
-fn builtin_binding_matches(builtin: &BuiltinFunctionOverload, binding: &FunctionBinding) -> bool {
-    builtin.name.eq_ignore_ascii_case(&binding.name)
-        && builtin
-            .argument_types
-            .iter()
-            .map(|ty| canonical_routine_type_name(&ty.sql_name()))
-            .eq(binding
-                .argument_types
-                .iter()
-                .map(|ty| canonical_routine_type_name(ty)))
 }
 
 fn resolved_builtin_overload(

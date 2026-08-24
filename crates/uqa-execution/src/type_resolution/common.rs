@@ -65,6 +65,22 @@ pub fn common_context_expression_type(
     scalar_type_inner(expression, schema, params, resolver)
 }
 
+/// Preserve parser-level `unknown` identity for fixed built-in overload selection.
+#[doc(hidden)]
+pub fn effective_overload_argument_type(
+    expression: &ScalarExpr,
+    resolved: Option<ColumnType>,
+) -> Option<ColumnType> {
+    if matches!(expression, ScalarExpr::Literal(Value::Str(_) | Value::Null))
+        || matches!(expression, ScalarExpr::Param(_))
+            && matches!(resolved.as_ref(), Some(ColumnType::Text))
+    {
+        None
+    } else {
+        resolved
+    }
+}
+
 pub(super) fn parameter_type(parameter: &SQLParam) -> Option<ColumnType> {
     match parameter {
         SQLParam::Scalar(value) => value_type(value),

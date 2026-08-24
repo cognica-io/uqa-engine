@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod fixed_overloads;
+
 #[test]
 fn regclass_cast_preserves_postgresql_type_identity() {
     let expression = ScalarExpr::Cast {

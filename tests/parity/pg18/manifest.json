@@ -162,6 +162,14 @@
       "open_issue": "The complete PostgreSQL 18 function, type, overload, and catalog matrix remains."
     },
     {
+      "id": "functions.fixed-builtin-overload-resolution",
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live fixed-signature built-in results, declared return types, qualification, overload errors, SQLSTATEs, generated-expression validation and binding, implemented pg_proc rows, and PostgreSQL function type-resolution rules",
+      "uqa_test": "cargo test -p uqa-execution --lib type_resolution::; cargo test -p uqa-engine --test integration engine_functions::pg18_semantics::; cargo test -p uqa-engine --test integration engine_catalog::sql_generated_columns::fixed_builtin_resolution; cargo test -p uqa-engine --test integration postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata; tests/parity/pg18/probes.sql",
+      "supported_version": "PostgreSQL 18.4 candidate selection for the implemented fixed-signature casefold, reverse, hash, checksum, string and binary length, gamma, JSON null-stripping, integer-base conversion, random, and UUID generation and extraction subset, including qualification, visible SQL user-function candidates, exact and implicit matches, preferred and unknown categories, domain base types, named and default slots, declared return types, durable generated-expression bindings where volatility permits, and exact pg_proc identities including unit random() (1598), to_hex(integer|bigint) (2089 and 2090), gen_random_uuid() (3432), casefold(text) (6412), uuidv4() (6428), and uuidv7() / uuidv7(interval) (6429 and 6430)",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "functions.json-null-stripping",
       "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live json_strip_nulls and jsonb_strip_nulls textual and binary results, default and named arguments, strictness, overload errors, SQLSTATEs, return types, user-overload search-path ranking, generated-column behavior, and pg_proc metadata plus JSON-function documentation",
       "uqa_test": "cargo test -p uqa-sql --lib textual_json_null; cargo test -p uqa-execution --lib json_strip_binding; cargo test -p uqa-engine --test integration json_strip; cargo test -p uqa-engine --test integration postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata; tests/parity/pg18/probes.sql",

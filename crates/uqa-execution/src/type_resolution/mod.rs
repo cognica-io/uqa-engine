@@ -25,6 +25,7 @@ mod checksum;
 mod common;
 mod containment;
 mod equality;
+mod fixed_builtin;
 mod functions;
 mod gamma;
 mod integer_base;
@@ -33,16 +34,24 @@ mod json_strip;
 mod length;
 mod md5;
 mod operators;
+mod overload_resolution;
 mod qualified_column;
 mod random_range;
 mod reverse;
 mod string_binary;
-mod uuid;
 
 #[doc(hidden)]
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
-pub use common::{common_context_expression_type, common_type, values_column_types};
+pub use common::{
+    common_context_expression_type, common_type, effective_overload_argument_type,
+    values_column_types,
+};
 pub use equality::equality_operand_type;
+pub(crate) use fixed_builtin::runtime_dispatch_name;
+#[doc(hidden)]
+pub use fixed_builtin::{
+    fixed_builtin_return_type, resolve_fixed_builtin_call, ResolvedFixedBuiltinCall,
+};
 pub use functions::{builtin_function_argument_targets, builtin_function_type};
 #[doc(hidden)]
 pub use gamma::{resolve_gamma_overload, ResolvedGammaOverload};
@@ -53,6 +62,15 @@ pub use json_strip::{resolve_json_strip_overload, ResolvedJsonStripOverload};
 pub use length::{resolve_length_overload, ResolvedLengthOverload};
 #[doc(hidden)]
 pub use md5::{resolve_md5_overload, ResolvedMd5Overload};
+#[doc(hidden)]
+pub use overload_resolution::{
+    builtin_binding_matches, builtin_name_matches, canonical_column_type_name,
+    canonical_routine_type_name, function_resolution_error, match_builtin_function_overload,
+    match_function_signature, rank_function_matches, resolve_local_builtin_overload,
+    routine_type_accepts_implicit_cast, routine_type_category, routine_type_is_preferred,
+    FunctionParameterDescriptor, MatchedBuiltinFunction, MatchedFunctionSignature,
+    RankedFunctionMatch,
+};
 #[doc(hidden)]
 pub use reverse::{resolve_reverse_overload, ResolvedReverseOverload};
 #[doc(hidden)]

@@ -10,7 +10,7 @@ mod functions;
 mod references;
 
 use super::{Engine, QueryBlockPlan, QueryPlan, SQLError, SQLParam, ScalarExpr, SchemaScope};
-use uqa_execution::{ColumnIdentity, RowSchema};
+use uqa_execution::{ColumnIdentity, FunctionTypeResolver, RowSchema};
 use uqa_sql::ast::ColumnType;
 
 pub(super) struct SetOperationClauses<'a> {
@@ -181,8 +181,23 @@ impl SchemaScope {
         subqueries: &[QueryPlan],
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
+        let resolver = self.query_function_type_resolver(
+            engine,
+            expression,
+            schema,
+            subqueries,
+            params,
+            Some(schema),
+        )?;
         references::validate_expression(
-            self, engine, expression, schema, fallback, subqueries, params,
+            engine,
+            expression,
+            schema,
+            fallback,
+            params,
+            resolver
+                .as_ref()
+                .map_or(engine as &dyn FunctionTypeResolver, |resolver| resolver),
         )
     }
 

@@ -12,10 +12,7 @@ use crate::{RowSchema, ScalarExpr};
 
 use super::common::{base_type, common_context_expression_type, merge_optional_types};
 use super::operators::unary_minus_result_type;
-use super::{
-    array_transform, checksum, containment, gamma, integer_base, json_strip, length, md5,
-    random_range, reverse, scalar_type_inner, uuid, FunctionTypeResolver,
-};
+use super::{array_transform, containment, fixed_builtin, scalar_type_inner, FunctionTypeResolver};
 
 /// Bind polymorphic type-introspection calls and common-type coercions while the input schema still carries declared SQL types. Runtime values deliberately do not encode integer widths, varchar identity, or float widths, and selector expressions must return the common SQL type rather than the storage type of the branch selected at runtime.
 pub fn bind_type_introspection(
@@ -69,32 +66,10 @@ fn bind_type_introspection_inner(
             if is_common_type_function(&name) {
                 bind_common_type_expressions(&mut args, schema, params, resolver);
             }
-            let name = integer_base::bind_overload(
-                name,
-                binding.as_ref(),
-                &args,
-                schema,
-                params,
-                resolver,
-            );
-            let name = random_range::bind_overload(
-                name,
-                binding.as_ref(),
-                &args,
-                schema,
-                params,
-                resolver,
-            );
             let name =
                 array_transform::bind_call(name, &mut binding, &mut args, schema, params, resolver);
-            let name = reverse::bind_call(name, &mut binding, &mut args, schema, params, resolver);
-            let name = md5::bind_call(name, &mut binding, &mut args, schema, params, resolver);
-            let name = checksum::bind_call(name, &mut binding, &mut args, schema, params, resolver);
-            let name = length::bind_call(name, &mut binding, &mut args, schema, params, resolver);
-            let name = gamma::bind_call(name, &mut binding, &mut args, schema, params, resolver);
             let name =
-                json_strip::bind_call(name, &mut binding, &mut args, schema, params, resolver);
-            let name = uuid::bind_extraction_signature(name, &args, schema, params, resolver);
+                fixed_builtin::bind_call(name, &mut binding, &mut args, schema, params, resolver);
             if is_pg_typeof(&name) && args.len() == 1 {
                 let name = scalar_type_inner(&args[0], schema, params, resolver)
                     .ok()
@@ -301,16 +276,8 @@ fn requires_type_introspection_binding(expression: &ScalarExpr) -> bool {
         } => {
             is_pg_typeof(name)
                 || is_common_type_function(name)
-                || integer_base::is_function(name)
-                || random_range::is_function(name)
+                || fixed_builtin::is_function(name)
                 || array_transform::is_function(name)
-                || reverse::is_function(name)
-                || md5::is_function(name)
-                || checksum::is_function(name)
-                || length::is_function(name)
-                || gamma::is_function(name)
-                || json_strip::is_function(name)
-                || uuid::is_extraction_function(name)
                 || containment::is_operator(name)
                 || args.iter().any(requires_type_introspection_binding)
                 || order_by

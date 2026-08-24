@@ -14,13 +14,9 @@ use super::{
 };
 
 mod array_transform;
-mod gamma;
-mod json_strip;
-mod string_binary;
+mod fixed;
 
-pub(super) use gamma::{bind_call as bind_gamma_call, GammaCall};
-pub(super) use json_strip::{bind_call as bind_json_strip_call, JsonStripCall};
-pub(super) use string_binary::{bind_call as bind_string_binary_call, StringBinaryCall};
+pub(super) use fixed::{bind_call as bind_fixed_builtin_call, FixedBuiltinCall};
 
 #[allow(clippy::too_many_lines)]
 pub(super) fn infer_builtin_function(
@@ -38,7 +34,7 @@ pub(super) fn infer_builtin_function(
             common_type(&args[0], &args[1])?;
             finalize_common_type(args[0].clone())
         }
-        "upper" | "lower" | "casefold" | "initcap" => {
+        "upper" | "lower" | "initcap" => {
             require_signature(name, args, &[TypeClass::Text])?;
             GenerationType::Text
         }
@@ -46,10 +42,6 @@ pub(super) fn infer_builtin_function(
             require_arity(name, args, 1, 2)?;
             require_class(name, args, TypeClass::Text)?;
             GenerationType::Text
-        }
-        "bit_length" | "char_length" | "character_length" | "crc32" | "crc32c" | "length"
-        | "md5" | "octet_length" | "reverse" => {
-            string_binary::require_signature(name, argument_names, args)?
         }
         "concat" | "concat_ws" | "format" => {
             return Err(non_immutable_function(name));
@@ -102,7 +94,7 @@ pub(super) fn infer_builtin_function(
             }
         }
         "sqrt" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh"
-        | "exp" | "ln" | "log2" | "cbrt" | "gamma" | "lgamma" | "degrees" | "radians" => {
+        | "exp" | "ln" | "log2" | "cbrt" | "degrees" | "radians" => {
             require_signature(name, args, &[TypeClass::Numeric])?;
             GenerationType::Real
         }
@@ -164,18 +156,6 @@ pub(super) fn infer_builtin_function(
             require_arity(name, args, 0, 0)?;
             GenerationType::Real
         }
-        "uuid_extract_version" => {
-            require_uuid_extraction_signature(name, args)?;
-            GenerationType::Integer
-        }
-        "uuid_extract_timestamp" => {
-            require_uuid_extraction_signature(name, args)?;
-            GenerationType::TimestampTz
-        }
-        "random" => {
-            require_random_signature(name, argument_names, args)?;
-            return Err(non_immutable_function(name));
-        }
         "array_sample"
         | "now"
         | "current_timestamp"
@@ -183,9 +163,6 @@ pub(super) fn infer_builtin_function(
         | "clock_timestamp"
         | "statement_timestamp"
         | "timeofday"
-        | "gen_random_uuid"
-        | "uuidv4"
-        | "uuidv7"
         | "current_database"
         | "current_catalog"
         | "current_user"
@@ -260,9 +237,6 @@ pub(super) fn infer_builtin_function(
         "factorial" => {
             require_signature(name, args, &[TypeClass::Integer])?;
             GenerationType::Numeric
-        }
-        "to_bin" | "to_hex" | "to_oct" => {
-            return infer_integer_base_conversion(name, args).map(Some);
         }
         "string_to_array" => {
             require_arity(name, args, 2, 3)?;
@@ -427,9 +401,6 @@ pub(super) fn infer_builtin_function(
             require_one(name, &args[0], TypeClass::JsonB)?;
             GenerationType::JsonB
         }
-        "json_strip_nulls" | "jsonb_strip_nulls" => {
-            json_strip::require_signature(name, argument_names, args)?
-        }
         "to_timestamp" => {
             require_signature(name, args, &[TypeClass::Numeric])?;
             GenerationType::TimestampTz
@@ -498,130 +469,6 @@ pub(super) fn infer_builtin_function(
         _ => return Ok(None),
     };
     Ok(Some(result))
-}
-
-fn infer_integer_base_conversion(
-    name: &str,
-    args: &[GenerationType],
-) -> Result<GenerationType, SQLError> {
-    if let [GenerationType::Integer | GenerationType::BigInteger] = args {
-        return Ok(GenerationType::Text);
-    }
-    let signature = args
-        .iter()
-        .map(generation_type_name)
-        .collect::<Vec<_>>()
-        .join(", ");
-    let ambiguous = matches!(
-        args,
-        [GenerationType::Null | GenerationType::UnknownLiteral(_) | GenerationType::SmallInteger]
-    );
-    Err(SQLError::Routine {
-        sqlstate: if ambiguous { "42725" } else { "42883" }.into(),
-        message: if ambiguous {
-            format!("function {name}({signature}) is not unique")
-        } else {
-            format!("function {name}({signature}) does not exist")
-        },
-    })
-}
-
-fn require_random_signature(
-    name: &str,
-    argument_names: &[Option<String>],
-    args: &[GenerationType],
-) -> Result<(), SQLError> {
-    uqa_sql::expr::validate_named_argument_order(
-        argument_names.iter().map(|name| name.as_deref()),
-    )?;
-    if args.is_empty() && argument_names.is_empty() {
-        return Ok(());
-    }
-    let valid_names = if args.len() == 2 && argument_names.len() == 2 {
-        let mut positions = [false; 2];
-        let mut positional = 0;
-        argument_names.iter().all(|argument_name| {
-            let position = match argument_name.as_deref() {
-                Some("min") => 0,
-                Some("max") => 1,
-                Some(_) => return false,
-                None => {
-                    let position = positional;
-                    positional += 1;
-                    position
-                }
-            };
-            positions.get_mut(position).is_some_and(|occupied| {
-                let available = !*occupied;
-                *occupied = true;
-                available
-            })
-        }) && positions.into_iter().all(|occupied| occupied)
-    } else {
-        false
-    };
-    let strongest = args
-        .iter()
-        .try_fold(None, |strongest, argument| {
-            let rank = match argument {
-                GenerationType::Null | GenerationType::UnknownLiteral(_) => return Some(strongest),
-                GenerationType::SmallInteger => 0,
-                GenerationType::Integer => 1,
-                GenerationType::BigInteger => 2,
-                GenerationType::Numeric => 3,
-                _ => return None,
-            };
-            Some(Some(
-                strongest.map_or(rank, |current: u8| current.max(rank)),
-            ))
-        })
-        .flatten();
-    if valid_names && matches!(strongest, Some(1..=3)) {
-        return Ok(());
-    }
-    let signature = args
-        .iter()
-        .zip(argument_names)
-        .map(|(argument, argument_name)| {
-            let argument = generation_type_name(argument);
-            argument_name
-                .as_ref()
-                .map_or(argument.clone(), |name| format!("{name} => {argument}"))
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let ambiguous = valid_names
-        && args.iter().all(|argument| {
-            matches!(
-                argument,
-                GenerationType::Null
-                    | GenerationType::UnknownLiteral(_)
-                    | GenerationType::SmallInteger
-            )
-        });
-    Err(SQLError::Routine {
-        sqlstate: if ambiguous { "42725" } else { "42883" }.into(),
-        message: if ambiguous {
-            format!("function {name}({signature}) is not unique")
-        } else {
-            format!("function {name}({signature}) does not exist")
-        },
-    })
-}
-
-fn require_uuid_extraction_signature(name: &str, args: &[GenerationType]) -> Result<(), SQLError> {
-    if matches!(args, [argument] if accepts_class(argument, TypeClass::Uuid)) {
-        return Ok(());
-    }
-    let signature = args
-        .iter()
-        .map(generation_type_name)
-        .collect::<Vec<_>>()
-        .join(", ");
-    Err(SQLError::Routine {
-        sqlstate: "42883".into(),
-        message: format!("function {name}({signature}) does not exist"),
-    })
 }
 
 fn require_containment_operands(name: &str, args: &[GenerationType]) -> Result<(), SQLError> {

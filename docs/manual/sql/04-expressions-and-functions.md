@@ -31,6 +31,12 @@ WHERE value LIKE 'a!_b' ESCAPE '!';
 | `greatest`, `least` | Extremum across scalar arguments |
 | `num_nulls`, `num_nonnulls` | Count NULL or non-NULL arguments |
 
+## Function overload resolution
+
+For the implemented fixed-signature built-ins documented below, ordinary expressions and generated expressions use one PostgreSQL 18-style candidate-selection contract. Unqualified calls combine visible SQL user functions with `pg_catalog` candidates according to `search_path`; qualified names, exact and implicit matches, preferred types, unknown-category selection, domain base types, named arguments, defaults, and stored bindings use the same resolver. This contract is limited to the listed implemented signatures and does not imply support for PostgreSQL's complete built-in, polymorphic, operator, cast, or `pg_proc` matrix.
+
+The shared fixed-signature registry covers `casefold`, `reverse`, `md5`, `crc32`, `crc32c`, the documented one-argument length family, `gamma`, `lgamma`, `json_strip_nulls`, `jsonb_strip_nulls`, `to_bin`, `to_hex`, `to_oct`, the unit and range `random` functions, and the documented UUID generation and extraction functions. Polymorphic array transformations retain their specialized type-substitution path.
+
 ## Text functions
 
 | Group | Functions |
@@ -46,7 +52,7 @@ WHERE value LIKE 'a!_b' ESCAPE '!';
 | Arrays and tables | `string_to_array`, `array_to_string`, `string_to_table`, `regexp_split_to_table` |
 | Hash and encoding | `md5`, `crc32`, `crc32c`, `encode`, `decode` |
 
-`casefold` uses the Unicode 16 full default case-fold mapping. The regular-expression functions accept PostgreSQL 18 named argument notation; `regexp_replace` also implements its `start` and `N` overloads.
+`casefold(text)` uses the Unicode 16 full default case-fold mapping and returns `text`. It is strict, immutable, parallel-safe, not leakproof, and available through `pg_catalog`; unrelated types, named arguments, and every arity other than one report SQLSTATE `42883`. The regular-expression functions accept PostgreSQL 18 named argument notation; `regexp_replace` also implements its `start` and `N` overloads.
 
 `reverse(text)` reverses Unicode scalar values and `reverse(bytea)` reverses raw bytes. An unknown literal, NULL, or untyped parameter selects the preferred `text` overload; `varchar`, `character`, `name`, and internal `"char"` inputs are implicitly converted to `text`, while unrelated types and every call other than one positional argument report PostgreSQL's undefined-function SQLSTATE `42883`. Both overloads are strict, immutable, parallel-safe, and available through `pg_catalog`; unqualified user overloads participate in PostgreSQL search-path, exact-match, and preferred-type resolution before a stable function binding is stored in generated expressions.
 
@@ -92,7 +98,7 @@ SELECT length('é') AS characters,
 
 `gamma(double precision)` evaluates the gamma function and `lgamma(double precision)` evaluates the natural logarithm of its absolute value. PostgreSQL's implicit numeric conversions let `smallint`, `integer`, `bigint`, `numeric`, and `real` inputs reach the `double precision` signature, while unknown inputs participate in the same category, preferred-type, exact-match, and search-path ranking as user-defined overloads. Both functions are strict, immutable, parallel-safe, not leakproof, available through `pg_catalog` as OIDs 6383 and 6384, and retain their selected binding in generated expressions across reopen. Native builds call the host C math library as PostgreSQL does, so platform-specific last-bit results follow that library; targets without a native C ABI use the portable Rust math implementation. `gamma` reports SQLSTATE `22003` at poles, overflow, and underflow and for negative infinity while preserving positive infinity and NaN; `lgamma` reports `22003` at poles while preserving either infinity as positive infinity and preserving NaN. Invalid unknown text reports the `double precision` input error SQLSTATE `22P02`, and unsupported explicit signatures report `42883`.
 
-`to_bin`, `to_oct`, and `to_hex` accept PostgreSQL's exact `integer` and `bigint` overloads and return lowercase, unprefixed text; negative values use the argument type's 32-bit or 64-bit two's-complement representation. `to_number(text, 'RN')` reads the PostgreSQL Roman-numeral prefix after leading whitespace, accepts values from 1 through 3999, and ignores input after that prefix.
+`to_bin`, `to_oct`, and `to_hex` accept PostgreSQL's exact `integer` and `bigint` overloads and return lowercase, unprefixed text; negative values use the argument type's 32-bit or 64-bit two's-complement representation. Because neither overload is preferred, an unknown, NULL, or `smallint` argument without an explicit target is ambiguous and reports SQLSTATE `42725`; unrelated types, named arguments, and unsupported arities report `42883`. `to_number(text, 'RN')` reads the PostgreSQL Roman-numeral prefix after leading whitespace, accepts values from 1 through 3999, and ignores input after that prefix.
 
 `random()` returns a `double precision` value from 0.0 inclusive to 1.0 exclusive. `random(min, max)` has exact `integer`, `bigint`, and `numeric` overloads and samples both bounds inclusively; mixed integer arguments select PostgreSQL's promoted overload, and a numeric result uses the greater fractional scale of its bounds. NULL bounds produce NULL, a lower bound greater than the upper bound and non-finite numeric bounds report SQLSTATE `22023`, and equal bounds do not advance the random stream. Random state is session-local and nontransactional, so failed statements and transaction or savepoint rollback leave consumed draws and `setseed` changes in place; `setseed` reproduces PostgreSQL's sequence across the unit and range forms. Use these functions for deterministic tests and non-cryptographic sampling only; `gen_random_uuid` and `uuidv4` produce random version 4 UUIDs, while `uuidv7([shift interval])` produces time-ordered version 7 UUIDs.
 
@@ -106,6 +112,8 @@ SELECT length('é') AS characters,
 | `uuid_extract_timestamp(uuid)` | Version 1 or version 7 timestamp as `timestamp with time zone`, or NULL for every other version or variant |
 
 The extraction functions are strict and immutable. Version 1 timestamps use the UUID 100-nanosecond epoch and are floored to PostgreSQL's microsecond precision, while version 7 timestamps use the leading 48-bit Unix millisecond field; sub-millisecond random or counter bits do not affect the extracted timestamp.
+
+`gen_random_uuid()` and `uuidv4()` accept no arguments. `uuidv7()` also accepts one `interval` argument whose declared name is `shift`; unsupported argument types, names, and arities report SQLSTATE `42883`. The three generator functions are volatile and therefore unavailable in generated expressions. This signature contract does not assert byte-for-byte UUID output or PostgreSQL's complete interval-shift edge semantics.
 
 ## Array functions
 
