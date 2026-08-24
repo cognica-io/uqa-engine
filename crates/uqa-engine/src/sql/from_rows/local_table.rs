@@ -25,7 +25,8 @@ use super::{
 };
 
 use crate::sql::select::{
-    apply_propagated_view_lock, bind_source_plan_schema, materialize_plan_ctes, resolve_row_locks,
+    alias_query_output_to_shared, apply_propagated_view_lock, bind_source_plan_schema,
+    materialize_plan_ctes, resolve_row_locks,
 };
 use crate::sql::virtual_relation_schema;
 use std::sync::Arc;

@@ -32,7 +32,31 @@ pub struct CtePlan {
     pub name: String,
     pub columns: Vec<String>,
     pub recursive: bool,
+    #[serde(default)]
+    pub materialization: uqa_sql::ast::CteMaterialization,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<CteSearchPlan>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cycle: Option<CteCyclePlan>,
     pub query: Box<QueryPlan>,
+}
+
+/// Generated traversal-order column for a recursive CTE.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CteSearchPlan {
+    pub columns: Vec<String>,
+    pub breadth_first: bool,
+    pub sequence_column: String,
+}
+
+/// Generated cycle mark and path columns for a recursive CTE.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CteCyclePlan {
+    pub columns: Vec<String>,
+    pub mark_column: String,
+    pub mark_value: ScalarExpr,
+    pub mark_default: ScalarExpr,
+    pub path_column: String,
 }
 
 /// Relational nodes common to ordinary SQL, retrieval SQL, and table/graph

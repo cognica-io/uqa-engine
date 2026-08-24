@@ -77,6 +77,10 @@ fn for_update_rejects_postgresql_illegal_shapes() {
             "DISTINCT clause",
         ),
         (
+            "SELECT DISTINCT id FROM employees FOR UPDATE OF missing",
+            "DISTINCT clause",
+        ),
+        (
             "SELECT department, count(*) FROM employees GROUP BY department FOR UPDATE",
             "GROUP BY clause",
         ),

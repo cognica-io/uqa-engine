@@ -668,6 +668,14 @@ SELECT reverse(1)
 SELECT reverse('abc', 'def')
 SELECT reverse(string => 'abc')
 SELECT oid, prorettype, proargtypes, proargnames, pronargs, pronargdefaults, proisstrict, provolatile, proparallel, proleakproof, prosrc FROM pg_catalog.pg_proc WHERE oid IN (3062, 6382) ORDER BY oid
+-- recursive CTE controls and materialization
+WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n<3) SEARCH DEPTH FIRST BY n SET ord SELECT n, pg_typeof(ord), cardinality(ord) FROM t ORDER BY ord
+WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n<3) SEARCH BREADTH FIRST BY n SET ord SELECT n, pg_typeof(ord) FROM t ORDER BY ord
+WITH RECURSIVE t(n) AS (VALUES (0) UNION ALL SELECT (n+1)%3 FROM t WHERE NOT is_cycle) CYCLE n SET is_cycle USING path SELECT n, is_cycle, cardinality(path), pg_typeof(path) FROM t ORDER BY cardinality(path)
+WITH RECURSIVE t(n) AS (VALUES (1),(2) UNION ALL (SELECT n+10 FROM t WHERE n<15 LIMIT 1)) SEARCH DEPTH FIRST BY n SET ord SELECT n FROM t ORDER BY n
+WITH c AS MATERIALIZED (SELECT * FROM (VALUES (1),(2)) AS v(n)) SELECT a.n,b.n FROM c a JOIN c b ON a.n=b.n ORDER BY a.n
+WITH c AS NOT MATERIALIZED (SELECT * FROM (VALUES (1),(2)) AS v(n)) SELECT a.n,b.n FROM c a JOIN c b ON a.n=b.n ORDER BY a.n
+WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n<2) SEARCH DEPTH FIRST BY n,n SET ord SELECT * FROM t
 -- qualified joins
 SELECT * FROM (VALUES (1, 'left-value')) AS l(id, shared) JOIN (VALUES (1, 'right-value')) AS r(id, shared) USING (id)
 SELECT * FROM (VALUES (1, 'l1'), (2, 'l2')) AS l(id, lval) FULL JOIN (VALUES (1, 'r1'), (3, 'r3')) AS r(id, rval) USING (id) ORDER BY id

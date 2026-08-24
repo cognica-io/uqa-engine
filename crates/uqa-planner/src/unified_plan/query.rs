@@ -9,10 +9,10 @@
 use super::rewrite::rewrite_query_scalars;
 use super::scalar::{is_builtin_aggregate, lower_scalar_expression};
 use super::{
-    AccessPathPlan, AggregateClassifier, AssignmentPlan, ComputePlan, CtePlan, Expr,
-    ExpressionPlan, FromClause, JoinExecutionStrategy, MergeWhenPlan, NoRegisteredAggregates,
-    OrderBy, OrderPlan, Projection, ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan,
-    ScalarExpr, SelectStmt, SourcePlan, TableFunctionPlan, CTE,
+    AccessPathPlan, AggregateClassifier, AssignmentPlan, ComputePlan, CteCyclePlan, CtePlan,
+    CteSearchPlan, Expr, ExpressionPlan, FromClause, JoinExecutionStrategy, MergeWhenPlan,
+    NoRegisteredAggregates, OrderBy, OrderPlan, Projection, ProjectionPlan, QueryBlockPlan,
+    QueryPlan, RelationalPlan, ScalarExpr, SelectStmt, SourcePlan, TableFunctionPlan, CTE,
 };
 
 impl QueryPlan {
@@ -42,6 +42,27 @@ pub(super) fn lower_ctes(ctes: &[CTE], aggregates: &dyn AggregateClassifier) -> 
             name: cte.name.clone(),
             columns: cte.columns.clone(),
             recursive: cte.recursive,
+            materialization: cte.materialization,
+            search: cte.search.as_ref().map(|search| CteSearchPlan {
+                columns: search.columns.clone(),
+                breadth_first: search.breadth_first,
+                sequence_column: search.sequence_column.clone(),
+            }),
+            cycle: cte.cycle.as_ref().map(|cycle| CteCyclePlan {
+                columns: cycle.columns.clone(),
+                mark_column: cycle.mark_column.clone(),
+                mark_value: lower_scalar_expression(
+                    cycle.mark_value.clone(),
+                    aggregates,
+                    &mut Vec::new(),
+                ),
+                mark_default: lower_scalar_expression(
+                    cycle.mark_default.clone(),
+                    aggregates,
+                    &mut Vec::new(),
+                ),
+                path_column: cycle.path_column.clone(),
+            }),
             query: Box::new(QueryPlan::lower_with((*cte.query).clone(), aggregates)),
         })
         .collect()

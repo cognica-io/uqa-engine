@@ -214,18 +214,18 @@
     {
       "id": "query.row-locking-complete-matrix",
       "postgresql_reference": "PostgreSQL 18.4 SELECT locking clauses, tuple recheck semantics, official row-lock regression cases, and isolation schedules",
-      "uqa_test": "cargo test -p uqa-engine --test integration engine_queries::sql_row_locks::; cargo test -p uqa-engine --test integration engine_queries::sql_row_locks_recheck::",
-      "supported_version": "Implemented FOR UPDATE, FOR NO KEY UPDATE, FOR SHARE, FOR KEY SHARE, OF, NOWAIT, SKIP LOCKED, tuple recheck, process-boundary, join, subquery, view, CTE, mutation, savepoint, and persistent-provider slices",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_queries::sql_row_locks::; cargo test -p uqa-engine --test integration engine_queries::sql_row_locks_recheck::; cargo test -p uqa-engine --test integration engine_queries::sql_cte_pg18_controls::row_lock_errors_follow_shape_clause_and_cte_ordering",
+      "supported_version": "Implemented FOR UPDATE, FOR NO KEY UPDATE, FOR SHARE, FOR KEY SHARE, OF, NOWAIT, SKIP LOCKED, tuple recheck, process-boundary, join, subquery, view, CTE, mutation, savepoint, persistent-provider, validation-order, CTE-interaction, and base pg_catalog plus Apache AGE catalog-relation slices",
       "status": "partial",
-      "open_issue": "The complete PostgreSQL 18 row-lock regression, isolation, unsupported-relation, deadlock, and process-boundary matrix remains."
+      "open_issue": "The complete PostgreSQL 18 row-lock regression, isolation, remaining virtual-view and unsupported-relation diagnostics, deadlock, and process-boundary matrix remains."
     },
     {
       "id": "query.cte-search-cycle-and-materialization",
       "postgresql_reference": "PostgreSQL 18.4 WITH documentation and official recursive CTE SEARCH, CYCLE, and materialization regression cases",
-      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::relations::unsupported_cte_control_clauses_fail_explicitly",
-      "supported_version": "Implemented ordinary and recursive CTE surface excluding SEARCH, CYCLE, and NOT MATERIALIZED",
-      "status": "explicitly_rejected",
-      "open_issue": "Recursive CTE SEARCH and CYCLE clauses and CTE NOT MATERIALIZED are rejected and must be implemented with PostgreSQL 18 planning, result, and error semantics."
+      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::relations::cte_materialization_search_and_cycle_controls_survive_compilation; cargo test -p uqa-engine --test integration engine_queries::sql_cte_pg18_controls::; tests/parity/pg18/probes.sql",
+      "supported_version": "PostgreSQL 18.4 recursive CTE SEARCH depth/breadth sequence values, CYCLE default and custom marks plus record-array paths, generated-column binding and wildcard scope, cycle-row termination, path-aware UNION distinctness, iteration-wide LIMIT behavior, syntax/type/equality validation ordering, combined SEARCH/CYCLE, multiple CTEs, stored-view reopen, and MATERIALIZED/default/NOT MATERIALIZED folding with recursive and volatile safeguards",
+      "status": "verified",
+      "open_issue": null
     },
     {
       "id": "dml.returning-row-images",

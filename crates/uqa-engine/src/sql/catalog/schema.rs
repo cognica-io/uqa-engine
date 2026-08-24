@@ -135,7 +135,32 @@ pub(in crate::sql) fn virtual_relation_schema(
     super::ag_catalog::age_label_relation_schema(engine, name)
 }
 
+pub(in crate::sql) fn virtual_relation_accepts_row_lock(
+    engine: &Engine,
+    name: &str,
+) -> Option<bool> {
+    resolve_virtual_relation(engine, name).map(VirtualRelation::accepts_row_lock)
+}
+
 impl VirtualRelation {
+    const fn accepts_row_lock(self) -> bool {
+        matches!(
+            self,
+            Self::PgNamespace
+                | Self::PgClass
+                | Self::PgAttribute
+                | Self::PgAttrdef
+                | Self::PgConstraint
+                | Self::PgIndex
+                | Self::PgType
+                | Self::PgProc
+                | Self::PgDatabase
+                | Self::PgDescription
+                | Self::AgGraph
+                | Self::AgLabel
+        )
+    }
+
     pub(super) fn schema(self) -> Vec<(String, ColumnType)> {
         macro_rules! columns {
             ($($name:literal => $ty:expr),* $(,)?) => {

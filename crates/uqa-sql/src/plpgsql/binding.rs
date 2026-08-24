@@ -229,6 +229,21 @@ pub(super) fn bind_ctes(items: &[CTE], r: &mut dyn VariableResolver) -> Result<V
                 name: cte.name.clone(),
                 columns: cte.columns.clone(),
                 recursive: cte.recursive,
+                materialization: cte.materialization,
+                search: cte.search.clone(),
+                cycle: cte
+                    .cycle
+                    .as_ref()
+                    .map(|cycle| -> Result<crate::ast::CteCycleClause> {
+                        Ok(crate::ast::CteCycleClause {
+                            columns: cycle.columns.clone(),
+                            mark_column: cycle.mark_column.clone(),
+                            mark_value: bind_expr(&cycle.mark_value, r)?,
+                            mark_default: bind_expr(&cycle.mark_default, r)?,
+                            path_column: cycle.path_column.clone(),
+                        })
+                    })
+                    .transpose()?,
                 query: Box::new(bind_select(&cte.query, r)?),
             })
         })

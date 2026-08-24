@@ -12,9 +12,15 @@
 //! the same declared `PostgreSQL` type identities as non-empty relations.
 
 mod analysis;
+mod cte_controls;
 mod routine_binding;
 
+pub(in crate::sql) use cte_controls::{
+    analyze_recursive_control_step, extend_cte_generated_schema,
+};
 pub(in crate::sql) use routine_binding::bind_query_plan_routines_for_storage;
+
+use cte_controls::{extend_recursive_cte_binding_schema, hide_recursive_generated_schema};
 
 use super::{
     cte_references_own_name, expr_contains_subquery, is_score_provenance_column, ordered_plan_ctes,
@@ -252,7 +258,14 @@ impl SchemaScope {
             ctes: ctes
                 .rows
                 .iter()
-                .map(|(name, rows)| (name.clone(), rows.row_schema().clone()))
+                .map(|(name, rows)| {
+                    let schema = rows.row_schema();
+                    let schema = ctes.recursive_control_width(name).map_or_else(
+                        || schema.clone(),
+                        |visible| hide_recursive_generated_schema(schema, visible),
+                    );
+                    (name.clone(), schema)
+                })
                 .collect(),
             deferred_ctes: ctes.deferred_ctes().clone(),
             visiting_views: BTreeSet::new(),
@@ -303,6 +316,11 @@ impl SchemaScope {
                 self.bind_query(engine, &cte.query, params, outer)?
             };
             let provisional = rename_schema(&provisional, &cte.columns, None);
+            let provisional = if self_recursive {
+                extend_recursive_cte_binding_schema(engine, cte, provisional, params)?
+            } else {
+                extend_cte_generated_schema(engine, cte, provisional, params)?
+            };
             previous.push((
                 cte.name.clone(),
                 self.ctes.insert(cte.name.clone(), provisional),
@@ -310,10 +328,9 @@ impl SchemaScope {
 
             if self_recursive {
                 let complete = self.bind_query(engine, &cte.query, params, outer)?;
-                self.ctes.insert(
-                    cte.name.clone(),
-                    rename_schema(&complete, &cte.columns, None),
-                );
+                let complete = rename_schema(&complete, &cte.columns, None);
+                let complete = extend_cte_generated_schema(engine, cte, complete, params)?;
+                self.ctes.insert(cte.name.clone(), complete);
             }
         }
 
@@ -1209,12 +1226,38 @@ fn rename_schema(schema: &RowSchema, aliases: &[String], qualifier: Option<&str>
             base
         })
         .collect();
-    match qualifier {
+    let renamed = match qualifier {
         Some(qualifier) => {
             RowSchema::with_qualified_types(qualifier, columns, schema.column_types().to_vec())
         }
         None => RowSchema::with_types(columns, schema.column_types().to_vec()),
+    };
+    let mut hidden = Vec::new();
+    let mut conflicting = Vec::new();
+    for (identity, ty) in schema.typed_virtual_identities() {
+        let conflicts = match identity.qualifier() {
+            Some(source) => schema.qualified_column_is_ambiguous(source, identity.column()),
+            None => schema.column_is_ambiguous(identity.column()),
+        };
+        let mapped = qualifier.map_or_else(
+            || vec![identity.clone()],
+            |qualifier| {
+                vec![
+                    uqa_execution::ColumnIdentity::unqualified(identity.column()),
+                    uqa_execution::ColumnIdentity::qualified(qualifier, identity.column()),
+                ]
+            },
+        );
+        for identity in mapped {
+            if conflicts {
+                conflicting.push((identity, ty.cloned()));
+            } else {
+                hidden.push((identity, ty.cloned()));
+            }
+        }
     }
+    let renamed = RowSchema::with_typed_virtual_identities(&renamed, &hidden);
+    RowSchema::with_typed_conflicting_virtual_identities(&renamed, &conflicting)
 }
 
 pub(in crate::sql) fn overlay_outer_schema(

@@ -133,6 +133,46 @@ impl<'a> ColumnSelection<'a> {
         }
     }
 
+    /// Hide recursive-CTE generated columns from `*` while retaining them as real qualified and unqualified lookup aliases. `PostgreSQL` adds SEARCH/CYCLE state after expanding the recursive term's wildcard, but still permits the recursive term to name the generated cycle columns explicitly.
+    pub fn hiding_trailing_columns(
+        child: Box<dyn PhysicalOperator + 'a>,
+        visible: usize,
+        qualifier: &str,
+    ) -> Self {
+        let visible = visible.min(child.row_schema().len());
+        let input_positions = (0..visible).map(Some).collect::<Vec<_>>();
+        let ordering = remap_ordering(child.output_ordering(), &input_positions);
+        let columns = (0..visible)
+            .map(|position| {
+                let label = child.row_schema().columns()[position].clone();
+                let identity = if qualifier.is_empty() {
+                    ColumnIdentity::unqualified(&label)
+                } else {
+                    ColumnIdentity::qualified(qualifier, &label)
+                };
+                let ty = child.row_schema().column_type(position).cloned();
+                (label, identity, position, ty)
+            })
+            .collect::<Vec<_>>();
+        let mut aliases = Vec::new();
+        for position in visible..child.row_schema().len() {
+            let name = child.row_schema().columns()[position].clone();
+            aliases.push((ColumnIdentity::unqualified(&name), position));
+            if !qualifier.is_empty() {
+                aliases.push((ColumnIdentity::qualified(qualifier, name), position));
+            }
+        }
+        let schema = RowSchema::remap_typed_identities(child.row_schema(), &columns, &aliases);
+        Self {
+            child,
+            schema,
+            ordering,
+            rebind_lock_qualifier: None,
+            discard_lock_origins: true,
+            compact_slots: None,
+        }
+    }
+
     /// Select positions under identities that replace, rather than extend, the child's SQL namespace.
     pub fn with_fresh_identities(
         child: Box<dyn PhysicalOperator + 'a>,

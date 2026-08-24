@@ -46,6 +46,7 @@ pub(crate) struct CteScope {
     pub(in crate::sql) lock_identities: LockIdentityOptions,
     row_lock: Option<Box<RowLockScopeState>>,
     visible_cte_names: BTreeSet<String>,
+    recursive_control_widths: BTreeMap<String, usize>,
     scalar_subquery_arena: u64,
     read_command_overlay: bool,
     stream_command_progress: bool,
@@ -63,6 +64,7 @@ impl Default for CteScope {
             lock_identities: LockIdentityOptions::default(),
             row_lock: None,
             visible_cte_names: BTreeSet::new(),
+            recursive_control_widths: BTreeMap::new(),
             scalar_subquery_arena: 0,
             read_command_overlay: true,
             stream_command_progress: false,
@@ -179,8 +181,48 @@ impl CteScope {
         self.deferred_ctes.remove(name)
     }
 
+    /// Return one deferred CTE for a scan. `NOT MATERIALIZED` definitions remain available so every syntactic reference is independently folded, while the default single-reference fast path is consumed exactly once.
+    pub(in crate::sql) fn deferred_for_scan(&mut self, name: &str) -> Option<CtePlan> {
+        let persistent = self.deferred_ctes.get(name).is_some_and(|plan| {
+            plan.materialization == uqa_sql::ast::CteMaterialization::NotMaterialized
+        });
+        if persistent {
+            self.deferred_ctes.get(name).cloned()
+        } else {
+            self.deferred_ctes.remove(name)
+        }
+    }
+
     pub(in crate::sql) fn deferred_ctes(&self) -> &BTreeMap<String, CtePlan> {
         &self.deferred_ctes
+    }
+
+    pub(in crate::sql) fn recursive_control_width(&self, name: &str) -> Option<usize> {
+        self.recursive_control_widths.get(name).copied()
+    }
+
+    pub(in crate::sql) fn set_recursive_control_width(
+        &mut self,
+        name: String,
+        width: usize,
+    ) -> Option<usize> {
+        self.recursive_control_widths.insert(name, width)
+    }
+
+    pub(in crate::sql) fn restore_recursive_control_width(
+        &mut self,
+        name: &str,
+        previous: Option<usize>,
+    ) {
+        match previous {
+            Some(width) => {
+                self.recursive_control_widths
+                    .insert(name.to_string(), width);
+            }
+            None => {
+                self.recursive_control_widths.remove(name);
+            }
+        }
     }
 
     pub(in crate::sql) fn remove_materialized(

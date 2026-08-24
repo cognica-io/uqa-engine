@@ -111,6 +111,26 @@ fn typed_virtual_identities_bind_without_changing_visible_layout() {
 }
 
 #[test]
+fn conflicting_virtual_identities_are_hidden_but_ambiguous() {
+    let base = RowSchema::with_qualified_types(
+        "recursive",
+        vec!["value".into()],
+        vec![Some(ColumnType::Integer)],
+    );
+    let schema = RowSchema::with_typed_conflicting_virtual_identities(
+        &base,
+        &[(
+            ColumnIdentity::qualified("recursive", "value"),
+            Some(ColumnType::Array(Box::new(ColumnType::Record))),
+        )],
+    );
+
+    assert_eq!(schema.columns(), ["value"]);
+    assert!(schema.column_is_ambiguous("value"));
+    assert!(schema.qualified_column_is_ambiguous("recursive", "value"));
+}
+
+#[test]
 fn join_composes_fragments_without_cloning_values() {
     let left_schema = RowSchema::new(vec!["l.value".into()]);
     let right_schema = RowSchema::new(vec!["r.value".into()]);

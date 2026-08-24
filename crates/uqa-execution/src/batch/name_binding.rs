@@ -170,4 +170,44 @@ impl RowSchema {
             },
         )
     }
+
+    /// Add binding-only identities and preserve collisions as ambiguous names. This models SQL scopes that expose a hidden generated column for explicit lookup while deliberately excluding it from wildcard expansion.
+    pub fn with_typed_conflicting_virtual_identities(
+        input: &Self,
+        identities: &[(ColumnIdentity, Option<ColumnType>)],
+    ) -> Self {
+        let mut binding_only = input.index.cold.binding_only.clone();
+        let mut ambiguous_unqualified = input.index.ambiguous_unqualified.clone();
+        let mut ambiguous_qualified = input.index.ambiguous_qualified.clone();
+        for (identity, ty) in identities {
+            if input.column_is_ambiguous(identity.column())
+                || input.has_unqualified_column(identity.column())
+            {
+                ambiguous_unqualified.insert(Box::<str>::from(identity.column()));
+            }
+            if let Some(qualifier) = identity.qualifier() {
+                if input.has_qualified_column(qualifier, identity.column()) {
+                    ambiguous_qualified.insert(identity.clone());
+                }
+            }
+            binding_only
+                .entry(identity.clone())
+                .or_insert_with(|| ty.clone());
+        }
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
+            input.columns().to_vec(),
+            input.identities().to_vec(),
+            input.column_types().to_vec(),
+            input.index.slots.to_vec(),
+            input.physical_width(),
+            SchemaBuildMetadata {
+                aliases: input.index.aliases.clone(),
+                alias_types: input.index.cold.aliases.clone(),
+                binding_only,
+                extra_ambiguous_unqualified: ambiguous_unqualified,
+                extra_ambiguous_qualified: ambiguous_qualified,
+                ..SchemaBuildMetadata::default()
+            },
+        )
+    }
 }

@@ -7,13 +7,15 @@
 //! Recursive CTE materialization and spill deduplication.
 
 use super::{
-    attach_order_limit, collect_query_operator, execute_query_plan_output, identity_order_columns,
-    is_score_provenance_column, materialize_plan_ctes, physical_exec_error,
-    physical_work_mem_bytes, push_output_filter_into_query_plan, query_plan_output_columns,
-    AccessPathPlan, ComputePlan, CtePlan, CteScope, Engine, EngineExpressionEvaluator,
-    QueryBlockPlan, QueryOutput, QueryOutputMode, QueryRows, RelationalPlan, SQLError, SQLParam,
-    ScalarExpr, SetOpKind,
+    analyze_recursive_control_step, attach_order_limit, collect_query_operator, eval_scalar,
+    execute_query_plan_output, identity_order_columns, is_score_provenance_column,
+    materialize_plan_ctes, physical_exec_error, physical_work_mem_bytes,
+    push_output_filter_into_query_plan, query_plan_output_columns, AccessPathPlan, ComputePlan,
+    CtePlan, CteScope, Engine, EngineExpressionEvaluator, ProjectionPlan, QueryBlockPlan,
+    QueryOutput, QueryOutputMode, QueryRows, RelationalPlan, SQLError, SQLParam, ScalarExpr,
+    SetOpKind, SourcePlan, Value,
 };
+use uqa_core::ArrayValue;
 
 /// Iterate the recursive `CtePlan`: take the anchor (LHS of UNION ALL) as
 /// the initial row set, then repeatedly evaluate the recursive step
@@ -54,7 +56,10 @@ pub(in crate::sql) fn materialize_recursive_cte(
     }
 
     let declared_columns = (!cte.columns.is_empty()).then_some(cte.columns.as_slice());
-    let (anchor_plan, step_plan) = if let Some((qualifier, filter)) = output_filter {
+    let controls_recursion = cte.search.is_some() || cte.cycle.is_some();
+    let (anchor_plan, step_plan) = if controls_recursion {
+        ((**left).clone(), (**right).clone())
+    } else if let Some((qualifier, filter)) = output_filter {
         let output_columns = declared_columns
             .map(<[String]>::to_vec)
             .or_else(|| query_plan_output_columns(left));
@@ -84,6 +89,18 @@ pub(in crate::sql) fn materialize_recursive_cte(
     } else {
         ((**left).clone(), (**right).clone())
     };
+
+    if controls_recursion {
+        return materialize_controlled_recursive_cte(
+            engine,
+            cte,
+            params,
+            ctes,
+            &anchor_plan,
+            &step_plan,
+            *all,
+        );
+    }
 
     let anchor = execute_query_plan_output(
         engine,
@@ -192,6 +209,506 @@ pub(in crate::sql) fn materialize_recursive_cte(
     Ok(rows)
 }
 
+fn materialize_controlled_recursive_cte(
+    engine: &Engine,
+    cte: &CtePlan,
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+    anchor_plan: &uqa_planner::QueryPlan,
+    step_plan: &uqa_planner::QueryPlan,
+    all: bool,
+) -> Result<uqa_execution::SharedSpill, SQLError> {
+    let anchor = execute_query_plan_output(
+        engine,
+        anchor_plan,
+        params,
+        ctes,
+        QueryOutputMode::SharedSpill,
+    )?;
+    let base_columns = if cte.columns.is_empty() {
+        anchor.columns.clone()
+    } else {
+        cte.columns.clone()
+    };
+    let anchor = alias_query_output_to_shared(engine, anchor, &base_columns)?;
+    let base_schema = anchor.row_schema().clone();
+    analyze_recursive_control_step(engine, cte, step_plan, base_schema.clone(), params, ctes)?;
+    let generated_schema =
+        super::extend_cte_generated_schema(engine, cte, base_schema.clone(), params)?;
+    let search_positions = cte
+        .search
+        .as_ref()
+        .map(|search| resolve_control_positions(&base_schema, &search.columns, "search"))
+        .transpose()?;
+    let cycle_positions = cte
+        .cycle
+        .as_ref()
+        .map(|cycle| resolve_control_positions(&base_schema, &cycle.columns, "cycle"))
+        .transpose()?;
+    let cycle_marks = cte
+        .cycle
+        .as_ref()
+        .map(|cycle| cycle_mark_values(engine, cycle, params, &generated_schema))
+        .transpose()?;
+    let controlled_step = controlled_recursive_step_plan(cte, step_plan)?;
+
+    let work_mem = physical_work_mem_bytes(engine)?.max(1);
+    let state_budget = (work_mem / 2).max(1);
+    let mut seen = (!all).then(|| uqa_execution::ExactRowSet::new(state_budget));
+    let (mut emitted, mut expandable) = annotate_recursive_rows(
+        &anchor,
+        &generated_schema,
+        cte,
+        search_positions.as_deref(),
+        cycle_positions.as_deref(),
+        cycle_marks.as_ref(),
+        seen.as_mut(),
+        None,
+        0,
+    )?;
+
+    let mut accumulated = uqa_execution::SpillBuffer::new(state_budget);
+    const MAX_ITERATIONS: usize = 1024;
+    let mut iterations = 0usize;
+    while emitted.rows() != 0 {
+        append_shared_spill(&mut accumulated, &emitted)?;
+        if expandable.rows() == 0 {
+            break;
+        }
+        if iterations == MAX_ITERATIONS {
+            return Err(SQLError::Unsupported(format!(
+                "recursive CTE `{}` exceeded {MAX_ITERATIONS} iterations",
+                cte.name
+            )));
+        }
+        iterations += 1;
+        ctes.insert_shared(cte.name.clone(), expandable);
+        let previous_width = ctes.set_recursive_control_width(cte.name.clone(), base_schema.len());
+        let step_result = execute_query_plan_output(
+            engine,
+            &controlled_step.plan,
+            params,
+            ctes,
+            QueryOutputMode::SharedSpill,
+        );
+        ctes.restore_recursive_control_width(&cte.name, previous_width);
+        ctes.remove_materialized(&cte.name);
+        let step = step_result?;
+        let step = alias_query_output_to_shared(engine, step, &base_columns)?;
+        (emitted, expandable) = annotate_recursive_step_rows(
+            &step,
+            &base_schema,
+            &generated_schema,
+            cte,
+            search_positions.as_deref(),
+            cycle_positions.as_deref(),
+            cycle_marks.as_ref(),
+            seen.as_mut(),
+            &controlled_step,
+            iterations,
+        )?;
+    }
+    accumulated
+        .into_shared(generated_schema)
+        .map_err(physical_exec_error)
+}
+
+struct ControlledRecursiveStep {
+    plan: uqa_planner::QueryPlan,
+    parent_search: bool,
+    parent_cycle_path: bool,
+}
+
+fn controlled_recursive_step_plan(
+    cte: &CtePlan,
+    step: &uqa_planner::QueryPlan,
+) -> Result<ControlledRecursiveStep, SQLError> {
+    let mut plan = step.clone();
+    let parent_search = cte
+        .search
+        .as_ref()
+        .is_some_and(|search| !search.breadth_first);
+    let parent_cycle_path = cte.cycle.is_some();
+    if !parent_search && !parent_cycle_path {
+        return Ok(ControlledRecursiveStep {
+            plan,
+            parent_search,
+            parent_cycle_path,
+        });
+    }
+    let RelationalPlan::QueryBlock(block) = &mut plan.root else {
+        return Err(SQLError::Unsupported(
+            "recursive SEARCH/CYCLE term must be one SELECT query block".into(),
+        ));
+    };
+    let qualifier = block
+        .from
+        .as_ref()
+        .and_then(|source| recursive_reference_qualifier(source, &cte.name))
+        .ok_or_else(|| {
+            SQLError::Unsupported(
+                "recursive SEARCH/CYCLE reference must be visible in the recursive term".into(),
+            )
+        })?;
+    if parent_search {
+        let search = cte.search.as_ref().expect("depth-first SEARCH");
+        block.projections.push(ProjectionPlan {
+            expr: ScalarExpr::qualified_column(&qualifier, &search.sequence_column),
+            alias: Some("__uqa_recursive_parent_search".into()),
+        });
+    }
+    if parent_cycle_path {
+        let cycle = cte.cycle.as_ref().expect("CYCLE clause");
+        block.projections.push(ProjectionPlan {
+            expr: ScalarExpr::qualified_column(qualifier, &cycle.path_column),
+            alias: Some("__uqa_recursive_parent_cycle_path".into()),
+        });
+    }
+    Ok(ControlledRecursiveStep {
+        plan,
+        parent_search,
+        parent_cycle_path,
+    })
+}
+
+fn recursive_reference_qualifier(source: &SourcePlan, cte_name: &str) -> Option<String> {
+    match source {
+        SourcePlan::Table {
+            name,
+            qualifier,
+            alias,
+        } if name == cte_name => Some(alias.as_deref().unwrap_or(qualifier).to_string()),
+        SourcePlan::Join { left, right, .. } => recursive_reference_qualifier(left, cte_name)
+            .or_else(|| recursive_reference_qualifier(right, cte_name)),
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. }
+        | SourcePlan::Subquery { .. } => None,
+    }
+}
+
+fn resolve_control_positions(
+    schema: &uqa_execution::RowSchema,
+    columns: &[String],
+    kind: &str,
+) -> Result<Vec<usize>, SQLError> {
+    columns
+        .iter()
+        .map(|column| {
+            schema
+                .columns()
+                .iter()
+                .position(|candidate| candidate == column)
+                .ok_or_else(|| SQLError::Routine {
+                    sqlstate: "42601".into(),
+                    message: format!("{kind} column \"{column}\" not in WITH query column list"),
+                })
+        })
+        .collect()
+}
+
+fn cycle_mark_values(
+    engine: &Engine,
+    cycle: &uqa_planner::CteCyclePlan,
+    params: &[SQLParam],
+    schema: &uqa_execution::RowSchema,
+) -> Result<(Value, Value), SQLError> {
+    let empty = uqa_execution::RowSchema::default();
+    let mark_type = schema
+        .columns()
+        .iter()
+        .position(|column| column == &cycle.mark_column)
+        .and_then(|position| schema.column_type(position));
+    let value_type =
+        uqa_execution::scalar_type_with_resolver(&cycle.mark_value, &empty, params, engine)?;
+    let default_type =
+        uqa_execution::scalar_type_with_resolver(&cycle.mark_default, &empty, params, engine)?;
+    let context = uqa_execution::ScalarEvalContext::new(None, params).with_function_hook(engine);
+    let mark = super::coerce_common_context_value(
+        eval_scalar(&cycle.mark_value, &context)?,
+        value_type.as_ref(),
+        mark_type,
+    )?;
+    let default = super::coerce_common_context_value(
+        eval_scalar(&cycle.mark_default, &context)?,
+        default_type.as_ref(),
+        mark_type,
+    )?;
+    Ok((mark, default))
+}
+
+#[derive(Default)]
+struct RecursiveParentState {
+    search_sequence: Option<Value>,
+    cycle_path: Option<Value>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn annotate_recursive_rows(
+    base_rows: &uqa_execution::SharedSpill,
+    generated_schema: &uqa_execution::RowSchema,
+    cte: &CtePlan,
+    search_positions: Option<&[usize]>,
+    cycle_positions: Option<&[usize]>,
+    cycle_marks: Option<&(Value, Value)>,
+    mut seen: Option<&mut uqa_execution::ExactRowSet>,
+    parent: Option<&RecursiveParentState>,
+    depth: usize,
+) -> Result<(uqa_execution::SharedSpill, uqa_execution::SharedSpill), SQLError> {
+    let mut emitted = uqa_execution::SpillBuffer::new(1);
+    let mut expandable = uqa_execution::SpillBuffer::new(1);
+    for batch in base_rows.reader().map_err(physical_exec_error)? {
+        let batch = batch.map_err(physical_exec_error)?;
+        for row in batch.rows {
+            let base = uqa_execution::OwnedPhysicalRow::new(batch.schema.clone(), row);
+            let (row, is_cycle) = annotate_recursive_row(
+                &base,
+                cte,
+                search_positions,
+                cycle_positions,
+                cycle_marks,
+                parent,
+                depth,
+            )?;
+            push_annotated_recursive_row(
+                row,
+                is_cycle,
+                generated_schema,
+                &mut seen,
+                &mut emitted,
+                &mut expandable,
+            )?;
+        }
+    }
+    Ok((
+        emitted
+            .into_shared(generated_schema.clone())
+            .map_err(physical_exec_error)?,
+        expandable
+            .into_shared(generated_schema.clone())
+            .map_err(physical_exec_error)?,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn annotate_recursive_step_rows(
+    step_rows: &uqa_execution::SharedSpill,
+    base_schema: &uqa_execution::RowSchema,
+    generated_schema: &uqa_execution::RowSchema,
+    cte: &CtePlan,
+    search_positions: Option<&[usize]>,
+    cycle_positions: Option<&[usize]>,
+    cycle_marks: Option<&(Value, Value)>,
+    mut seen: Option<&mut uqa_execution::ExactRowSet>,
+    controlled_step: &ControlledRecursiveStep,
+    depth: usize,
+) -> Result<(uqa_execution::SharedSpill, uqa_execution::SharedSpill), SQLError> {
+    let lineage_width =
+        usize::from(controlled_step.parent_search) + usize::from(controlled_step.parent_cycle_path);
+    let expected_width = base_schema.len() + lineage_width;
+    if step_rows.row_schema().len() != expected_width {
+        return Err(SQLError::TypeMismatch(format!(
+            "recursive term has {} columns but expected {expected_width}",
+            step_rows.row_schema().len()
+        )));
+    }
+    let mut emitted = uqa_execution::SpillBuffer::new(1);
+    let mut expandable = uqa_execution::SpillBuffer::new(1);
+    for batch in step_rows.reader().map_err(physical_exec_error)? {
+        let batch = batch.map_err(physical_exec_error)?;
+        for row in batch.rows {
+            let source = uqa_execution::OwnedPhysicalRow::new(batch.schema.clone(), row);
+            let base_values = (0..base_schema.len())
+                .map(|position| {
+                    source.view().value_at(position).cloned().ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "recursive term is missing base column at position {position}"
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let base = uqa_execution::OwnedPhysicalRow::new(
+                base_schema.clone(),
+                uqa_execution::PhysicalRow::from_values(base_values),
+            );
+            let mut lineage_position = base_schema.len();
+            let search_sequence = if controlled_step.parent_search {
+                let value = source
+                    .view()
+                    .value_at(lineage_position)
+                    .cloned()
+                    .ok_or_else(|| {
+                        SQLError::Internal("recursive term lost SEARCH parent state".into())
+                    })?;
+                lineage_position += 1;
+                Some(value)
+            } else {
+                None
+            };
+            let cycle_path = if controlled_step.parent_cycle_path {
+                Some(
+                    source
+                        .view()
+                        .value_at(lineage_position)
+                        .cloned()
+                        .ok_or_else(|| {
+                            SQLError::Internal("recursive term lost CYCLE parent state".into())
+                        })?,
+                )
+            } else {
+                None
+            };
+            let parent = RecursiveParentState {
+                search_sequence,
+                cycle_path,
+            };
+            let (row, is_cycle) = annotate_recursive_row(
+                &base,
+                cte,
+                search_positions,
+                cycle_positions,
+                cycle_marks,
+                Some(&parent),
+                depth,
+            )?;
+            push_annotated_recursive_row(
+                row,
+                is_cycle,
+                generated_schema,
+                &mut seen,
+                &mut emitted,
+                &mut expandable,
+            )?;
+        }
+    }
+    Ok((
+        emitted
+            .into_shared(generated_schema.clone())
+            .map_err(physical_exec_error)?,
+        expandable
+            .into_shared(generated_schema.clone())
+            .map_err(physical_exec_error)?,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn annotate_recursive_row(
+    base: &uqa_execution::OwnedPhysicalRow,
+    cte: &CtePlan,
+    search_positions: Option<&[usize]>,
+    cycle_positions: Option<&[usize]>,
+    cycle_marks: Option<&(Value, Value)>,
+    parent: Option<&RecursiveParentState>,
+    depth: usize,
+) -> Result<(uqa_execution::PhysicalRow, bool), SQLError> {
+    let mut values = base
+        .view()
+        .iter()
+        .map(|(_, value)| value.clone())
+        .collect::<Vec<_>>();
+    if let (Some(search), Some(positions)) = (&cte.search, search_positions) {
+        let key = positions
+            .iter()
+            .map(|position| {
+                base.view()
+                    .value_at(*position)
+                    .cloned()
+                    .unwrap_or(Value::Null)
+            })
+            .collect::<Vec<_>>();
+        let sequence = if search.breadth_first {
+            let mut fields = Vec::with_capacity(key.len() + 1);
+            fields.push(Value::Int(i64::try_from(depth).map_err(|_| {
+                SQLError::Unsupported("recursive CTE depth exceeds bigint".into())
+            })?));
+            fields.extend(key);
+            Value::Row(fields)
+        } else {
+            let mut path = parent
+                .and_then(|parent| parent.search_sequence.as_ref())
+                .and_then(|value| match value {
+                    Value::Array(array) => Some(array.elements().to_vec()),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            path.push(Value::Row(key));
+            Value::Array(ArrayValue::try_new(path).ok_or_else(|| {
+                SQLError::Internal("SEARCH path is not a rectangular SQL array".into())
+            })?)
+        };
+        values.push(sequence);
+    }
+    let mut is_cycle = false;
+    if let (Some(_cycle), Some(positions), Some((mark, default))) =
+        (&cte.cycle, cycle_positions, cycle_marks)
+    {
+        let key = Value::Row(
+            positions
+                .iter()
+                .map(|position| {
+                    base.view()
+                        .value_at(*position)
+                        .cloned()
+                        .unwrap_or(Value::Null)
+                })
+                .collect(),
+        );
+        let mut path = parent
+            .and_then(|parent| parent.cycle_path.as_ref())
+            .and_then(|value| match value {
+                Value::Array(array) => Some(array.elements().to_vec()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        is_cycle = path.iter().any(|existing| existing == &key);
+        path.push(key);
+        values.push(if is_cycle {
+            mark.clone()
+        } else {
+            default.clone()
+        });
+        values.push(Value::Array(ArrayValue::try_new(path).ok_or_else(
+            || SQLError::Internal("CYCLE path is not a rectangular SQL array".into()),
+        )?));
+    }
+    Ok((uqa_execution::PhysicalRow::from_values(values), is_cycle))
+}
+
+fn push_annotated_recursive_row(
+    row: uqa_execution::PhysicalRow,
+    is_cycle: bool,
+    generated_schema: &uqa_execution::RowSchema,
+    seen: &mut Option<&mut uqa_execution::ExactRowSet>,
+    emitted: &mut uqa_execution::SpillBuffer,
+    expandable: &mut uqa_execution::SpillBuffer,
+) -> Result<(), SQLError> {
+    let is_new = match seen.as_deref_mut() {
+        Some(seen) => seen
+            .insert_physical(&row, generated_schema)
+            .map_err(physical_exec_error)?,
+        None => true,
+    };
+    if !is_new {
+        return Ok(());
+    }
+    emitted
+        .push(uqa_execution::Batch::from_physical_rows(
+            generated_schema.clone(),
+            vec![row.clone()],
+        ))
+        .map_err(physical_exec_error)?;
+    if !is_cycle {
+        expandable
+            .push(uqa_execution::Batch::from_physical_rows(
+                generated_schema.clone(),
+                vec![row],
+            ))
+            .map_err(physical_exec_error)?;
+    }
+    Ok(())
+}
+
 pub(in crate::sql) fn alias_query_output_to_shared(
     engine: &Engine,
     output: QueryOutput,
@@ -244,7 +761,7 @@ pub(in crate::sql) fn alias_query_output_to_shared(
     let output = collect_query_operator(engine, columns, operator, QueryOutputMode::SharedSpill)?;
     let QueryRows::SharedSpill(rows) = output.rows else {
         return Err(SQLError::Internal(
-            "recursive term collector returned in-memory rows".into(),
+            "CTE collector returned in-memory rows".into(),
         ));
     };
     Ok(rows)
