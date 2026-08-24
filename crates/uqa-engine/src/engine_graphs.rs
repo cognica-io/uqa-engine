@@ -368,17 +368,28 @@ impl Engine {
         })
     }
 
-    fn drop_graph_label_inner(&self, graph: &str, label: &str) -> StorageBackendResult<bool> {
+    /// Stored views whose exact relation binding prevents a label relation from being dropped.
+    pub(crate) fn graph_label_relation_dependents(
+        &self,
+        graph: &str,
+        label: &str,
+    ) -> StorageBackendResult<Vec<String>> {
         self.synchronize_catalog_registries()?;
         let relation_name = format!(
             "{}.{}",
             uqa_sql::expr::quote_ident(graph),
             uqa_sql::expr::quote_ident(label)
         );
-        let dependent_views = self.views_depending_on_relation(&relation_name)?;
+        self.views_depending_on_relation(&relation_name)
+    }
+
+    fn drop_graph_label_inner(&self, graph: &str, label: &str) -> StorageBackendResult<bool> {
+        let dependent_views = self.graph_label_relation_dependents(graph, label)?;
         if !dependent_views.is_empty() {
             return Err(super::StorageBackendError::Other(format!(
-                "cannot drop label `{relation_name}`: dependent view(s) `{}` still reference it",
+                "cannot drop label `{}.{}`: dependent view(s) `{}` still reference it",
+                uqa_sql::expr::quote_ident(graph),
+                uqa_sql::expr::quote_ident(label),
                 dependent_views.join("`, `")
             )));
         }

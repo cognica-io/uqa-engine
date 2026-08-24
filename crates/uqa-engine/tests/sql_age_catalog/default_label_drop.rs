@@ -279,6 +279,12 @@ fn drop_graph_restrict_succeeds_after_all_labels_are_gone(engine: &Engine) {
         engine,
         "SELECT drop_label('default_drop_restrict', '_ag_label_edge')",
     );
+    assert_age_error(
+        engine,
+        "DROP SCHEMA default_drop_restrict RESTRICT",
+        "2BP01",
+        "cannot drop schema default_drop_restrict because other objects depend on it",
+    );
     exec(engine, "SELECT drop_graph('default_drop_restrict', false)");
     exec(engine, "SELECT create_graph('default_drop_restrict')");
     assert_eq!(

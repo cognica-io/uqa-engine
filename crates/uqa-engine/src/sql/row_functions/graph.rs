@@ -10,7 +10,6 @@ use super::{
     eval_scalar, expect_evaluated_string, Engine, OperatorTree, SQLError, SQLParam,
     ScalarEvalContext, ScalarExpr, ScoredEntry, Value,
 };
-use uqa_sql::expr::quote_ident;
 
 fn default_graph_name(engine: &Engine, function_name: &str) -> Result<String, SQLError> {
     let graphs = engine
@@ -466,9 +465,8 @@ pub(in crate::sql) fn run_age_drop_label_with_evaluator(
             "force option is not supported yet",
         ));
     }
-    let relation_name = format!("{}.{}", quote_ident(&graph), quote_ident(&label));
     let dependent_views = engine
-        .views_depending_on_relation(&relation_name)
+        .graph_label_relation_dependents(&graph, &label)
         .map_err(|error| SQLError::Internal(format!("inspect label dependencies: {error}")))?;
     if !dependent_views.is_empty() {
         return Err(age_error(

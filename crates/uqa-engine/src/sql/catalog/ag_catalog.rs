@@ -73,16 +73,18 @@ pub(super) fn resolve_age_label_relation(
     let (schema, label_name) = RelationIdentity::parse_reference(name).map_err(|error| {
         SQLError::Internal(format!("invalid AGE label relation `{name}`: {error}"))
     })?;
-    let entries = graph_catalog_entries(engine)?;
     let graph_names = schema.map_or_else(|| engine.search_path(), |schema| vec![schema]);
     for graph_name in graph_names {
-        let Some(entry) = entries.iter().find(|entry| entry.name == graph_name) else {
+        let Some(labels) = engine
+            .list_graph_labels(&graph_name)
+            .map_err(|err| SQLError::Internal(format!("read graph labels: {err}")))?
+        else {
             continue;
         };
-        if let Some(label) = entry.labels.iter().find(|label| label.name == label_name) {
+        if let Some(label) = labels.into_iter().find(|label| label.name == label_name) {
             return Ok(Some(AgeLabelRelation {
-                graph: entry.name.clone(),
-                label: label.clone(),
+                graph: graph_name,
+                label,
             }));
         }
     }
