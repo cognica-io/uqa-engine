@@ -307,6 +307,8 @@ pub(super) fn routine_variadic_element_oid(type_name: &str) -> Result<i64, SQLEr
     match canonical.as_str() {
         "anyarray" => return Ok(2283),
         "anycompatiblearray" => return Ok(5077),
+        "int2vector" => return Ok(21),
+        "oidvector" => return Ok(26),
         _ => {}
     }
     let mut element = canonical.as_str();
@@ -359,6 +361,8 @@ mod routine_type_oid_tests {
             ("integer[][]", 23),
             ("anyarray", 2283),
             ("anycompatiblearray", 5077),
+            ("int2vector", 21),
+            ("oidvector", 26),
         ] {
             assert_eq!(
                 routine_variadic_element_oid(type_name).unwrap(),

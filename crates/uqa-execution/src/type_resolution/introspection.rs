@@ -354,26 +354,11 @@ fn bind_catalog_function(
     let Some(resolver) = resolver else {
         return;
     };
-    let Ok(call_arguments) = crate::scalar_call_arguments(args) else {
+    let Ok((argument_names, argument_types, explicit_variadic)) =
+        super::function_call_argument_signature(args, schema, params, Some(resolver))
+    else {
         return;
     };
-    let explicit_variadic = call_arguments
-        .iter()
-        .any(|argument| argument.explicit_variadic);
-    let mut argument_names = Vec::with_capacity(call_arguments.len());
-    let mut argument_types = Vec::with_capacity(call_arguments.len());
-    for argument in call_arguments {
-        let Ok(argument_type) = scalar_type_inner(argument.value, schema, params, Some(resolver))
-        else {
-            return;
-        };
-        argument_names.push(argument.name.map(str::to_string));
-        argument_types.push(super::effective_overload_argument_type_with_params(
-            argument.value,
-            argument_type,
-            params,
-        ));
-    }
     if let Ok(Some(selected)) = resolver.resolve_function_overload(
         name,
         None,

@@ -307,21 +307,8 @@ fn scalar_function_is_strict(
         return Ok(false);
     }
     let schema = RowSchema::join(side, other, std::iter::empty::<String>());
-    let call_arguments = uqa_execution::scalar_call_arguments(args)?;
-    let explicit_variadic = call_arguments
-        .iter()
-        .any(|argument| argument.explicit_variadic);
-    let mut argument_names = Vec::with_capacity(call_arguments.len());
-    let mut argument_types = Vec::with_capacity(call_arguments.len());
-    for argument in call_arguments {
-        argument_names.push(argument.name.map(str::to_string));
-        argument_types.push(uqa_execution::common_context_expression_type(
-            argument.value,
-            &schema,
-            params,
-            Some(engine),
-        )?);
-    }
+    let (argument_names, argument_types, explicit_variadic) =
+        uqa_execution::function_call_argument_signature(args, &schema, params, Some(engine))?;
     Ok(engine
         .resolve_static_sql_function(
             name,

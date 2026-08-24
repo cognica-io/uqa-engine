@@ -74,29 +74,42 @@ pub(super) fn execute_routine(
     invocation: &RoutineInvocationBinding,
 ) -> Result<RoutineOutcome, SQLError> {
     let _guard = DepthGuard::enter(engine)?;
-    let definition = specialized_definition(&function.def, invocation)?;
+    let specialized = specialized_definition(&function.def, invocation)?;
+    let definition = specialized.as_ref().unwrap_or(&function.def);
     match &function.compiled {
         CompiledFunctionBody::PLpgSQL(parsed) => {
-            let mut parsed = parsed.clone();
-            for (index, parameter) in definition.params.iter().enumerate() {
-                if let Some(PLpgSQLDatum::Var(variable)) = parsed.datums.get_mut(index) {
-                    variable.type_name.clone_from(&parameter.type_name);
+            if specialized.is_some() {
+                let mut parsed = parsed.clone();
+                for (index, parameter) in definition.params.iter().enumerate() {
+                    if let Some(PLpgSQLDatum::Var(variable)) = parsed.datums.get_mut(index) {
+                        variable.type_name.clone_from(&parameter.type_name);
+                    }
                 }
+                return execute_plpgsql_language(engine, definition, &parsed, bound);
             }
-            let mut interpreter = Interpreter::new(engine, &definition, &parsed, bound)?;
-            interpreter.run(&parsed.action)?;
-            Ok(interpreter.into_outcome())
+            execute_plpgsql_language(engine, definition, parsed, bound)
         }
         CompiledFunctionBody::SQL(statements) => {
-            execute_sql_language(engine, &definition, statements, &bound)
+            execute_sql_language(engine, definition, statements, &bound)
         }
     }
+}
+
+fn execute_plpgsql_language(
+    engine: &Engine,
+    definition: &CreateFunction,
+    parsed: &uqa_sql::plpgsql::PLpgSQLFunction,
+    bound: Vec<Value>,
+) -> Result<RoutineOutcome, SQLError> {
+    let mut interpreter = Interpreter::new(engine, definition, parsed, bound)?;
+    interpreter.run(&parsed.action)?;
+    Ok(interpreter.into_outcome())
 }
 
 fn specialized_definition(
     definition: &CreateFunction,
     invocation: &RoutineInvocationBinding,
-) -> Result<CreateFunction, SQLError> {
+) -> Result<Option<CreateFunction>, SQLError> {
     if invocation.parameter_types.len() != definition.params.len() {
         return Err(SQLError::Internal(format!(
             "routine `{}` has {} concrete parameter types for {} parameters",
@@ -104,6 +117,19 @@ fn specialized_definition(
             invocation.parameter_types.len(),
             definition.params.len()
         )));
+    }
+    let parameters_match = definition
+        .params
+        .iter()
+        .zip(&invocation.parameter_types)
+        .all(|(parameter, type_name)| parameter.type_name == *type_name);
+    let return_type_matches = match (&invocation.return_type, &definition.returns) {
+        (Some(concrete), FunctionReturns::Scalar { type_name })
+        | (Some(concrete), FunctionReturns::SetOf { type_name }) => concrete == type_name,
+        (None, _) | (Some(_), FunctionReturns::None | FunctionReturns::Table) => true,
+    };
+    if parameters_match && return_type_matches {
+        return Ok(None);
     }
     let mut specialized = definition.clone();
     for (parameter, type_name) in specialized
@@ -121,7 +147,7 @@ fn specialized_definition(
             FunctionReturns::None | FunctionReturns::Table => {}
         }
     }
-    Ok(specialized)
+    Ok(Some(specialized))
 }
 
 /// `LANGUAGE sql` body: run every statement; the last statement's
@@ -146,8 +172,9 @@ fn execute_sql_language(
         .cloned()
         .zip(call_params)
         .map(|(value, parameter)| {
-            let ty = crate::sql::resolve_catalog_column_type(engine, &parameter.type_name)
-                .or_else(|| uqa_sql::ast::ColumnType::from_sql_name(&parameter.type_name).ok())
+            let ty = uqa_sql::ast::ColumnType::from_sql_name(&parameter.type_name)
+                .ok()
+                .or_else(|| crate::sql::resolve_catalog_column_type(engine, &parameter.type_name))
                 .ok_or_else(|| {
                     SQLError::TypeMismatch(format!("unknown type `{}`", parameter.type_name))
                 })?;

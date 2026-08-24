@@ -962,6 +962,19 @@ fn explicit_variadic_marker_is_transparent_and_validates_call_position() {
         scalar_type(&call, &RowSchema::default(), &[]),
         Err(SQLError::Internal(message)) if message.contains("final call argument")
     ));
+
+    let malformed = ScalarExpr::Func {
+        name: uqa_sql::expr::VARIADIC_ARG_FUNCTION.into(),
+        binding: None,
+        args: vec![ScalarExpr::Array(vec![ScalarExpr::Literal(Value::Int(1))])],
+        distinct: true,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    assert!(matches!(
+        scalar_type(&malformed, &RowSchema::default(), &[]),
+        Err(SQLError::Internal(message)) if message.contains("syntax marker contains function-call metadata")
+    ));
 }
 
 #[test]

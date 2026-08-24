@@ -24,8 +24,6 @@ pub(in crate::sql) struct ResolvedUserTableFunction {
     pub(in crate::sql) binding: FunctionBinding,
 }
 
-type TableFunctionArgumentSignature = (Vec<Option<String>>, Vec<Option<ColumnType>>, bool);
-
 pub(in crate::sql) fn user_function_output_columns_for(
     function: &SQLUserFunction,
 ) -> Option<Vec<String>> {
@@ -130,7 +128,12 @@ pub(in crate::sql) fn resolve_user_table_function(
         return Ok(None);
     }
     let (argument_names, argument_types, explicit_variadic) =
-        table_function_argument_signature(args, input_schema, params, resolver)?;
+        uqa_execution::function_call_argument_signature(
+            args,
+            input_schema,
+            params,
+            Some(resolver),
+        )?;
     let Some(matched) = engine.resolve_static_sql_function_match(
         name,
         Some(&binding),
@@ -162,7 +165,12 @@ pub(in crate::sql) fn resolve_table_function_binding(
     let identity = name.to_ascii_lowercase();
     let builtin = crate::sql::builtin_function_dispatch_name(&identity);
     let (argument_names, argument_types, explicit_variadic) =
-        table_function_argument_signature(args, input_schema, params, resolver)?;
+        uqa_execution::function_call_argument_signature(
+            args,
+            input_schema,
+            params,
+            Some(resolver),
+        )?;
     let builtins = builtin_table_function_overloads(&builtin, &argument_types);
     if !builtins.is_empty() || has_builtin_table_function_overloads(&builtin) {
         return engine
@@ -214,35 +222,6 @@ fn has_builtin_table_function_overloads(name: &str) -> bool {
             | "json_each_text"
             | "jsonb_each_text"
     )
-}
-
-fn table_function_argument_signature(
-    args: &[ScalarExpr],
-    input_schema: &RowSchema,
-    params: &[SQLParam],
-    resolver: &dyn FunctionTypeResolver,
-) -> Result<TableFunctionArgumentSignature, SQLError> {
-    let call_arguments = uqa_execution::scalar_call_arguments(args)?;
-    let explicit_variadic = call_arguments
-        .iter()
-        .any(|argument| argument.explicit_variadic);
-    let mut argument_names = Vec::with_capacity(call_arguments.len());
-    let mut argument_types = Vec::with_capacity(call_arguments.len());
-    for argument in call_arguments {
-        argument_names.push(argument.name.map(str::to_string));
-        let argument_type = uqa_execution::common_context_expression_type(
-            argument.value,
-            input_schema,
-            params,
-            Some(resolver),
-        )?;
-        argument_types.push(uqa_execution::effective_overload_argument_type_with_params(
-            argument.value,
-            argument_type,
-            params,
-        ));
-    }
-    Ok((argument_names, argument_types, explicit_variadic))
 }
 
 fn builtin_table_function_overloads(
@@ -769,7 +748,7 @@ fn user_table_function_column_types(
     resolver: &dyn FunctionTypeResolver,
 ) -> Vec<Option<ColumnType>> {
     let Ok((argument_names, argument_types, explicit_variadic)) =
-        table_function_argument_signature(args, input_schema, params, resolver)
+        uqa_execution::function_call_argument_signature(args, input_schema, params, Some(resolver))
     else {
         return Vec::new();
     };

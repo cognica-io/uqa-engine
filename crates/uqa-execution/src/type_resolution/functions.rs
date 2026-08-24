@@ -73,32 +73,6 @@ pub(super) fn builtin_function_type_inner(
     let original_name = name;
     let lower = name.to_ascii_lowercase();
     let name = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
-    if name == uqa_sql::expr::NAMED_ARG_FUNCTION {
-        let [ScalarExpr::Literal(Value::Str(_)), expression] = args else {
-            return Err(SQLError::Internal(
-                "malformed call argument: named argument marker must contain a string name and one value"
-                    .into(),
-            ));
-        };
-        if matches!(
-            expression,
-            ScalarExpr::Func { name, .. } if name == uqa_sql::expr::NAMED_ARG_FUNCTION
-        ) {
-            return Err(SQLError::Internal(
-                "malformed call argument: call argument contains nested syntax markers".into(),
-            ));
-        }
-        return scalar_type_inner(expression, schema, params, resolver);
-    }
-    if name == uqa_sql::expr::VARIADIC_ARG_FUNCTION {
-        let [expression] = args else {
-            return Err(SQLError::Internal(
-                "malformed call argument: VARIADIC argument marker must contain exactly one value"
-                    .into(),
-            ));
-        };
-        return scalar_type_inner(expression, schema, params, resolver);
-    }
     if binding.is_none()
         && resolver.is_some_and(|resolver| resolver.has_untyped_function(original_name))
     {

@@ -439,26 +439,8 @@ impl SchemaScope {
         let resolver = resolver
             .as_ref()
             .map_or(engine as &dyn FunctionTypeResolver, |resolver| resolver);
-        let call_arguments = uqa_execution::scalar_call_arguments(args)?;
-        let explicit_variadic = call_arguments
-            .iter()
-            .any(|argument| argument.explicit_variadic);
-        let mut argument_names = Vec::with_capacity(call_arguments.len());
-        let mut argument_types = Vec::with_capacity(call_arguments.len());
-        for argument in call_arguments {
-            let argument_type = uqa_execution::common_context_expression_type(
-                argument.value,
-                schema,
-                params,
-                Some(resolver),
-            )?;
-            argument_names.push(argument.name.map(str::to_string));
-            argument_types.push(uqa_execution::effective_overload_argument_type_with_params(
-                argument.value,
-                argument_type,
-                params,
-            ));
-        }
+        let (argument_names, argument_types, explicit_variadic) =
+            uqa_execution::function_call_argument_signature(args, schema, params, Some(resolver))?;
         let selected = if uqa_execution::is_fixed_builtin(name) {
             uqa_execution::resolve_fixed_builtin_call(
                 name,

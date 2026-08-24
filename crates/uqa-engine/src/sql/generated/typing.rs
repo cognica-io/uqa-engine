@@ -641,7 +641,7 @@ fn generated_call_argument(expression: &Expr) -> Result<GeneratedCallArgument<'_
             ));
         }
         return Ok(GeneratedCallArgument {
-            name: Some(argument_name.to_ascii_lowercase()),
+            name: Some(argument_name.clone()),
             value,
             explicit_variadic,
         });
@@ -1217,7 +1217,7 @@ mod tests {
         )];
 
         let decoded = generated_call_arguments(&arguments).unwrap();
-        assert_eq!(decoded[0].name.as_deref(), Some("items"));
+        assert_eq!(decoded[0].name.as_deref(), Some("ITEMS"));
         assert!(decoded[0].explicit_variadic);
         assert!(matches!(decoded[0].value, Expr::Literal(Value::Int(42))));
     }

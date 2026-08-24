@@ -45,7 +45,8 @@ mod string_binary;
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
 pub use common::{
     common_context_expression_type, common_type, effective_overload_argument_type,
-    effective_overload_argument_type_with_params, values_column_types,
+    effective_overload_argument_type_with_params, function_call_argument_signature,
+    values_column_types, FunctionCallArgumentSignature,
 };
 pub use equality::equality_operand_type;
 pub(crate) use fixed_builtin::runtime_dispatch_name;
@@ -208,6 +209,17 @@ pub(super) fn scalar_type_inner(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {
+    if matches!(
+        expression,
+        ScalarExpr::Func { name, .. }
+            if matches!(
+                name.as_str(),
+                uqa_sql::expr::NAMED_ARG_FUNCTION | uqa_sql::expr::VARIADIC_ARG_FUNCTION
+            )
+    ) {
+        let argument = crate::scalar_call_argument(expression)?;
+        return scalar_type_inner(argument.value, schema, params, resolver);
+    }
     match expression {
         ScalarExpr::Column(column) => Ok(schema.type_of(column).cloned()),
         ScalarExpr::Position(position) => Ok(schema.column_type(*position).cloned()),

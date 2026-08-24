@@ -998,6 +998,26 @@ fn assert_polymorphic_variadic_user_routine_catalog(result: &SQLResult) {
     }
 }
 
+fn assert_legacy_vector_variadic_user_routine_catalog(result: &SQLResult) {
+    for (name, vector_oid, element_oid) in [("cat_int2vector", 22, 21), ("cat_oidvector", 30, 26)] {
+        let variadic = user_routine_catalog_row(result, name);
+        assert_eq!(variadic["provariadic"], Value::Int(element_oid));
+        assert_eq!(variadic["pronargs"], Value::Int(1));
+        assert_eq!(variadic["pronargdefaults"], Value::Int(0));
+        assert_eq!(variadic["prorettype"], Value::Int(vector_oid));
+        assert_eq!(
+            variadic["proargtypes"],
+            Value::List(vec![Value::Int(vector_oid)])
+        );
+        assert_eq!(
+            variadic["proallargtypes"],
+            array(vec![Value::Int(vector_oid)])
+        );
+        assert_eq!(variadic["proargmodes"], array(vec![Value::Str("v".into())]));
+        assert_eq!(variadic["proargdefaults"], Value::Null);
+    }
+}
+
 #[test]
 fn postgresql_18_user_routine_catalog_preserves_argument_modes_and_type_oids() {
     let engine = Engine::new();
@@ -1010,6 +1030,8 @@ fn postgresql_18_user_routine_catalog_preserves_argument_modes_and_type_oids() {
         "CREATE FUNCTION cat_variadic(prefix integer, VARIADIC items integer[] DEFAULT ARRAY[1,2], OUT total bigint) LANGUAGE SQL AS 'SELECT 1::bigint'",
         "CREATE FUNCTION cat_poly_simple(VARIADIC items anyarray) RETURNS anyelement LANGUAGE SQL AS 'SELECT NULL'",
         "CREATE FUNCTION cat_poly_common(VARIADIC items anycompatiblearray) RETURNS anycompatible LANGUAGE SQL AS 'SELECT NULL'",
+        "CREATE FUNCTION cat_int2vector(VARIADIC items int2vector) RETURNS int2vector LANGUAGE SQL AS 'SELECT $1'",
+        "CREATE FUNCTION cat_oidvector(VARIADIC items oidvector) RETURNS oidvector LANGUAGE SQL AS 'SELECT $1'",
         "CREATE PROCEDURE cat_proc(OUT y text, IN a integer DEFAULT 7) AS $$ BEGIN y := 'x'; END; $$ LANGUAGE plpgsql",
     ] {
         engine
@@ -1023,17 +1045,19 @@ fn postgresql_18_user_routine_catalog_preserves_argument_modes_and_type_oids() {
                     proretset, proargtypes, proallargtypes, proargmodes, proargnames, proargdefaults \
              FROM pg_catalog.pg_proc \
              WHERE proname IN ('cat_plain', 'cat_out', 'cat_table', 'cat_table_one', 'cat_arrays', \
-                               'cat_variadic', 'cat_poly_simple', 'cat_poly_common', 'cat_proc')",
+                               'cat_variadic', 'cat_poly_simple', 'cat_poly_common', 'cat_int2vector', \
+                               'cat_oidvector', 'cat_proc')",
             &[],
         )
         .unwrap();
-    assert_eq!(result.rows.len(), 9);
+    assert_eq!(result.rows.len(), 11);
     assert_plain_and_array_user_routine_catalog(&result);
     assert_output_user_routine_catalog(&result);
     assert_table_user_routine_catalog(&result);
     assert_procedure_user_routine_catalog(&result);
     assert_variadic_user_routine_catalog(&result);
     assert_polymorphic_variadic_user_routine_catalog(&result);
+    assert_legacy_vector_variadic_user_routine_catalog(&result);
 }
 
 #[test]

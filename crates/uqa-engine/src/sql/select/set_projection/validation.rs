@@ -8,9 +8,7 @@
 
 use uqa_execution::{FunctionTypeResolver, RowSchema, ScalarExpr, ScalarFrameBound};
 use uqa_planner::{ProjectionPlan, QueryBlockPlan, SourcePlan};
-use uqa_sql::ast::{ColumnType, FunctionBinding};
-
-type SetFunctionArgumentSignature = (Vec<Option<String>>, Vec<Option<ColumnType>>, bool);
+use uqa_sql::ast::FunctionBinding;
 use uqa_sql::{SQLError, SQLParam};
 
 use super::{CteScope, Engine, PhysicalProjection};
@@ -56,7 +54,7 @@ pub(super) fn function_may_return_set(
     }
     if binding.is_some_and(|binding| !binding.builtin) {
         let (argument_names, argument_types, explicit_variadic) =
-            set_function_argument_types(resolver, args, schema, params)?;
+            uqa_execution::function_call_argument_signature(args, schema, params, Some(resolver))?;
         let function = engine.resolve_static_sql_function(
             name,
             binding,
@@ -86,7 +84,7 @@ pub(super) fn function_may_return_set(
         }
     }
     let (argument_names, argument_types, explicit_variadic) =
-        set_function_argument_types(resolver, args, schema, params)?;
+        uqa_execution::function_call_argument_signature(args, schema, params, Some(resolver))?;
     if let Some(resolved) = uqa_execution::resolve_fixed_builtin_call(
         name,
         binding,
@@ -144,7 +142,7 @@ pub(super) fn resolve_set_function_binding(
         return Ok(binding.cloned());
     }
     let (argument_names, argument_types, explicit_variadic) =
-        set_function_argument_types(resolver, args, schema, params)?;
+        uqa_execution::function_call_argument_signature(args, schema, params, Some(resolver))?;
     if let Some(resolved) = uqa_execution::resolve_fixed_builtin_call(
         name,
         binding,
@@ -166,35 +164,6 @@ pub(super) fn resolve_set_function_binding(
         return Ok(binding.cloned());
     };
     Ok(Some(function.binding()))
-}
-
-fn set_function_argument_types(
-    resolver: &dyn FunctionTypeResolver,
-    args: &[ScalarExpr],
-    schema: &RowSchema,
-    params: &[SQLParam],
-) -> Result<SetFunctionArgumentSignature, SQLError> {
-    let call_arguments = uqa_execution::scalar_call_arguments(args)?;
-    let explicit_variadic = call_arguments
-        .iter()
-        .any(|argument| argument.explicit_variadic);
-    let mut argument_names = Vec::with_capacity(call_arguments.len());
-    let mut argument_types = Vec::with_capacity(call_arguments.len());
-    for argument in call_arguments {
-        argument_names.push(argument.name.map(str::to_string));
-        let argument_type = uqa_execution::common_context_expression_type(
-            argument.value,
-            schema,
-            params,
-            Some(resolver),
-        )?;
-        argument_types.push(uqa_execution::effective_overload_argument_type_with_params(
-            argument.value,
-            argument_type,
-            params,
-        ));
-    }
-    Ok((argument_names, argument_types, explicit_variadic))
 }
 
 pub(in crate::sql) fn projections_may_return_set(

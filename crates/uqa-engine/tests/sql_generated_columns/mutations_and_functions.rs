@@ -121,6 +121,57 @@ fn immutable_user_functions_are_stored_only_generation_expressions() {
 }
 
 #[test]
+fn scalar_and_generated_calls_preserve_quoted_named_argument_case() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE FUNCTION generated_quoted_name(\"Items\" INTEGER) RETURNS INTEGER LANGUAGE SQL IMMUTABLE AS 'SELECT $1 + 1'",
+            &[],
+        )
+        .unwrap();
+
+    let direct = engine
+        .sql("SELECT generated_quoted_name(\"Items\" => 4) AS value", &[])
+        .unwrap();
+    assert_eq!(int(&direct.rows[0], "value"), 5);
+
+    engine
+        .sql(
+            "CREATE TABLE generated_quoted_values (
+                 source INTEGER,
+                 derived INTEGER GENERATED ALWAYS AS (
+                     generated_quoted_name(\"Items\" => source)
+                 ) STORED
+             )",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO generated_quoted_values(source) VALUES (4)",
+            &[],
+        )
+        .unwrap();
+    let generated = engine
+        .sql("SELECT derived FROM generated_quoted_values", &[])
+        .unwrap();
+    assert_eq!(int(&generated.rows[0], "derived"), 5);
+
+    for sql in [
+        "SELECT generated_quoted_name(items => 4)",
+        "CREATE TABLE generated_wrong_case (
+             source INTEGER,
+             derived INTEGER GENERATED ALWAYS AS (
+                 generated_quoted_name(items => source)
+             ) STORED
+         )",
+    ] {
+        let error = engine.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42883"), "{sql}: {error}");
+    }
+}
+
+#[test]
 fn generated_function_bindings_select_and_depend_on_exact_overloads() {
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("generated-function-bindings.sqlite");

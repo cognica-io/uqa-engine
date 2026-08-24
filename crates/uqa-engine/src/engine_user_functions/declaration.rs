@@ -181,11 +181,7 @@ fn resolve_routine_type_name_with_reference(
                     message: format!("type `{type_name}` does not exist"),
                 });
             }
-            let mut resolved = canonical;
-            for _ in 0..array_dimensions {
-                resolved.push_str("[]");
-            }
-            return Ok(resolved);
+            return Ok(canonical);
         }
         ColumnType::from_sql_name(base).map_err(|error| match error {
             SQLError::Unsupported(_) => {
