@@ -716,6 +716,23 @@ pub(in crate::sql) fn bind_query_plan_schema(
     SchemaScope::from_execution_scope(ctes).bind_query(engine, plan, params, outer)
 }
 
+/// Derive the declared SQL type of a standalone expression plan without executing it. The plan-owned subquery arena participates in type resolution so scalar subqueries retain their projected type at command boundaries such as `CALL`.
+pub(in crate::sql) fn bind_expression_plan_type(
+    engine: &Engine,
+    plan: &uqa_planner::ExpressionPlan,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<Option<ColumnType>, SQLError> {
+    SchemaScope::from_execution_scope(ctes).bind_expression_type(
+        engine,
+        &plan.scalar,
+        &RowSchema::default(),
+        &plan.subqueries,
+        params,
+        None,
+    )
+}
+
 /// Analyze every catalog and scalar reference and derive the exact output row type without executing the query.
 pub(in crate::sql) fn analyze_query_plan_schema(
     engine: &Engine,

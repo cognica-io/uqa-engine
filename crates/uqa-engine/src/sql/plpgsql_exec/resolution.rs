@@ -7,10 +7,12 @@
 //! Routine overload resolution, argument binding, and coercion.
 
 use super::{
-    canonical_routine_type_name, cast_value, eval_lowered_expression, routine_signature_types,
-    value_type_name, Arc, CreateFunction, Engine, FunctionBinding, SQLError, SQLUserFunction,
-    Value,
+    canonical_routine_type_name, cast_value, eval_lowered_expression, value_type_name, Arc,
+    CreateFunction, Engine, FunctionBinding, SQLError, SQLUserFunction, Value,
 };
+use crate::engine_user_functions::RoutineCallKind;
+use uqa_execution::{match_function_signature, FunctionParameterDescriptor};
+use uqa_sql::ast::ColumnType;
 use uqa_sql::expr::coercion_type_name;
 
 pub(super) fn output_column_names(def: &CreateFunction) -> Vec<String> {
@@ -61,46 +63,6 @@ enum ArgSlot {
     NeedsDefault(usize),
 }
 
-fn argument_type_cost(engine: &Engine, value: &Value, declared_type: &str) -> Option<u32> {
-    if matches!(value, Value::Null) {
-        // NULL has no concrete input type, so it cannot prefer one overload
-        // over another but remains coercible to every declared type.
-        return Some(1);
-    }
-    let actual = canonical_routine_type_name(value_type_name(value));
-    let declared = canonical_routine_type_name(declared_type);
-    if actual == declared {
-        return Some(0);
-    }
-    let actual_is_numeric = matches!(
-        actual.as_str(),
-        "int2" | "int4" | "int8" | "float4" | "float8" | "numeric"
-    );
-    let declared_is_numeric = matches!(
-        declared.as_str(),
-        "int2" | "int4" | "int8" | "float4" | "float8" | "numeric"
-    );
-    if actual_is_numeric && declared_is_numeric {
-        return coerce_routine_value(engine, value, declared_type)
-            .ok()
-            .map(|_| 1);
-    }
-    coerce_routine_value(engine, value, declared_type)
-        .ok()
-        .map(|_| 2)
-}
-
-fn overload_match_cost(engine: &Engine, def: &CreateFunction, slots: &[ArgSlot]) -> Option<u32> {
-    let signature = def.signature_params();
-    let mut cost = 0_u32;
-    for (parameter, slot) in signature.iter().zip(slots) {
-        if let ArgSlot::Filled(value) = slot {
-            cost = cost.checked_add(argument_type_cost(engine, value, &parameter.type_name)?)?;
-        }
-    }
-    Some(cost)
-}
-
 /// Match a call's argument list against a routine signature without
 /// evaluating defaults. `None` = not a candidate.
 fn try_match_arguments(
@@ -108,30 +70,29 @@ fn try_match_arguments(
     args: &[(Option<String>, Value)],
 ) -> Option<Vec<ArgSlot>> {
     let signature = def.signature_params();
+    let parameters = signature
+        .iter()
+        .map(|parameter| FunctionParameterDescriptor {
+            name: Some(parameter.name.clone()),
+            type_name: canonical_routine_type_name(&parameter.type_name),
+            has_default: parameter.default.is_some(),
+        })
+        .collect::<Vec<_>>();
+    let argument_names = args
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    let argument_types = vec![None; args.len()];
+    let matched = match_function_signature(&parameters, &argument_names, &argument_types)?;
     if args.len() > signature.len() {
         return None;
     }
     let mut slots: Vec<Option<ArgSlot>> = (0..signature.len()).map(|_| None).collect();
-    let mut position = 0usize;
-    let mut seen_named = false;
-    for (arg_name, value) in args {
-        match arg_name {
-            None => {
-                if seen_named || position >= signature.len() {
-                    return None;
-                }
-                slots[position] = Some(ArgSlot::Filled(value.clone()));
-                position += 1;
-            }
-            Some(arg_name) => {
-                seen_named = true;
-                let idx = signature.iter().position(|p| p.name == *arg_name)?;
-                if slots[idx].is_some() {
-                    return None;
-                }
-                slots[idx] = Some(ArgSlot::Filled(value.clone()));
-            }
+    for ((_, value), position) in args.iter().zip(matched.argument_positions) {
+        if slots[position].is_some() {
+            return None;
         }
+        slots[position] = Some(ArgSlot::Filled(value.clone()));
     }
     let mut out = Vec::with_capacity(slots.len());
     for (idx, slot) in slots.into_iter().enumerate() {
@@ -155,41 +116,42 @@ pub(super) fn resolve_routine(
     engine: &Engine,
     name: &str,
     args: &[(Option<String>, Value)],
+    declared_argument_types: Option<&[Option<ColumnType>]>,
     kind: &str,
 ) -> Result<Option<ResolvedRoutine>, SQLError> {
-    let Some(overloads) = engine.lookup_sql_functions(name) else {
+    if engine.lookup_sql_functions(name).is_none() {
         return Ok(None);
-    };
-    let requested_is_procedure = kind == "procedure";
-    let mut candidates: Vec<(Arc<SQLUserFunction>, Vec<ArgSlot>, u32)> = Vec::new();
-    for function in overloads {
-        if let Some(slots) = try_match_arguments(&function.def, args) {
-            if let Some(cost) = overload_match_cost(engine, &function.def, &slots) {
-                candidates.push((function, slots, cost));
-            }
+    }
+    let argument_names = args
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    let inferred_argument_types: Vec<Option<ColumnType>>;
+    let argument_types = match declared_argument_types {
+        Some(types) if types.len() == args.len() => types,
+        Some(types) => {
+            return Err(SQLError::Internal(format!(
+                "routine argument type count {} does not match value count {}",
+                types.len(),
+                args.len()
+            )));
         }
-    }
-    if candidates.is_empty() {
-        return Err(routine_resolution_error(kind, name, args, "does not exist"));
-    }
-    let has_requested_kind = candidates
-        .iter()
-        .any(|(function, _, _)| function.def.is_procedure == requested_is_procedure);
-    if has_requested_kind {
-        candidates.retain(|(function, _, _)| function.def.is_procedure == requested_is_procedure);
-    }
-    let best_cost = candidates
-        .iter()
-        .map(|(_, _, cost)| *cost)
-        .min()
-        .ok_or_else(|| SQLError::Internal("routine candidate set lost its score".into()))?;
-    candidates.retain(|(_, _, cost)| *cost == best_cost);
-    if candidates.len() != 1 {
-        return Err(routine_resolution_error(kind, name, args, "is not unique"));
-    }
-    let (function, slots, _) = candidates
-        .pop()
-        .ok_or_else(|| SQLError::Internal("winning routine candidate disappeared".into()))?;
+        None => {
+            inferred_argument_types = runtime_argument_types(args)?;
+            &inferred_argument_types
+        }
+    };
+    let call_kind = if kind == "procedure" {
+        RoutineCallKind::Procedure
+    } else {
+        RoutineCallKind::Function
+    };
+    let function = engine
+        .resolve_static_sql_routine(name, None, &argument_names, argument_types, call_kind)?
+        .ok_or_else(|| routine_resolution_error(kind, name, args, "does not exist"))?;
+    let slots = try_match_arguments(&function.def, args).ok_or_else(|| {
+        SQLError::Internal("resolved routine no longer matches its runtime arguments".into())
+    })?;
     let bound = materialize_arguments(engine, &function.def, slots)?;
     Ok(Some((function, bound)))
 }
@@ -199,12 +161,19 @@ pub(super) fn resolve_bound_routine(
     binding: &FunctionBinding,
     args: &[(Option<String>, Value)],
 ) -> Result<Option<ResolvedRoutine>, SQLError> {
-    let Some(overloads) = engine.lookup_sql_functions(&binding.name) else {
-        return Ok(None);
-    };
-    let function = overloads
-        .into_iter()
-        .find(|function| routine_signature_types(&function.def) == binding.argument_types)
+    let argument_names = args
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    let argument_types = runtime_argument_types(args)?;
+    let function = engine
+        .resolve_static_sql_routine(
+            &binding.name,
+            Some(binding),
+            &argument_names,
+            &argument_types,
+            RoutineCallKind::Function,
+        )?
         .ok_or_else(|| SQLError::Routine {
             sqlstate: "42883".into(),
             message: format!(
@@ -218,6 +187,20 @@ pub(super) fn resolve_bound_routine(
     })?;
     let bound = materialize_arguments(engine, &function.def, slots)?;
     Ok(Some((function, bound)))
+}
+
+fn runtime_argument_types(
+    args: &[(Option<String>, Value)],
+) -> Result<Vec<Option<ColumnType>>, SQLError> {
+    args.iter()
+        .map(|(_, value)| {
+            if matches!(value, Value::Null) {
+                Ok(None)
+            } else {
+                ColumnType::from_sql_name(value_type_name(value)).map(Some)
+            }
+        })
+        .collect()
 }
 
 /// Evaluate defaults and apply declared-type casts for the winning

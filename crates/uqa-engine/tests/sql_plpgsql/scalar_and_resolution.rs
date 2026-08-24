@@ -254,6 +254,28 @@ fn overload_resolution_by_arity() {
 }
 
 #[test]
+fn runtime_overload_resolution_prefers_float8_for_integer_input() {
+    let eng = engine();
+    exec(
+        &eng,
+        "CREATE FUNCTION runtime_pick(value double precision) RETURNS text AS $$
+         BEGIN RETURN 'float8'; END;
+         $$ LANGUAGE plpgsql",
+    );
+    exec(
+        &eng,
+        "CREATE FUNCTION runtime_pick(value numeric) RETURNS text AS $$
+         BEGIN RETURN 'numeric'; END;
+         $$ LANGUAGE plpgsql",
+    );
+
+    assert_eq!(
+        scalar(&eng, "SELECT runtime_pick(1) AS selected"),
+        Value::Str("float8".into())
+    );
+}
+
+#[test]
 fn quoted_named_arguments_preserve_identifier_case() {
     let eng = engine();
     exec(

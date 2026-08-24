@@ -12,6 +12,7 @@ use uqa_planner::{
     UpdatePlan,
 };
 use uqa_sql::ast::{CreateForeignServer, CreateForeignTable};
+use uqa_sql::expr::NAMED_ARG_FUNCTION;
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 
 use super::scalar::{eval_physical, eval_physical_call_arguments, PhysicalEvalContext};
@@ -310,13 +311,44 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         name: &str,
         arguments: &[ExpressionPlan],
     ) -> Result<SQLResult, SQLError> {
+        if arguments
+            .iter()
+            .any(|argument| !argument.subqueries.is_empty())
+        {
+            return Err(SQLError::Unsupported(
+                "cannot use subquery in CALL argument".into(),
+            ));
+        }
         let scope = select::CteScope::new();
+        let argument_types = arguments
+            .iter()
+            .map(|argument| {
+                let value = match &argument.scalar {
+                    uqa_execution::ScalarExpr::Func {
+                        name,
+                        args: marker_args,
+                        ..
+                    } if name == NAMED_ARG_FUNCTION => marker_args.get(1).ok_or_else(|| {
+                        SQLError::Internal("named argument without a value".into())
+                    })?,
+                    value => value,
+                };
+                if matches!(
+                    value,
+                    uqa_execution::ScalarExpr::Literal(Value::Str(_) | Value::Null)
+                ) {
+                    Ok(None)
+                } else {
+                    select::bind_expression_plan_type(self.engine, argument, self.params, &scope)
+                }
+            })
+            .collect::<Result<Vec<_>, SQLError>>()?;
         let hook = select::ScopedEngineHook::new(self.engine, &scope);
         let context = PhysicalEvalContext::new(None, self.params)
             .with_function_hook(&hook)
             .with_subquery_runner(&hook);
         let args = eval_physical_call_arguments(arguments, &context)?;
-        plpgsql_exec::run_call(self.engine, name, &args)
+        plpgsql_exec::run_call(self.engine, name, &args, &argument_types)
     }
 
     fn execute_command(&self, command: &CommandPlan) -> Result<SQLResult, SQLError> {

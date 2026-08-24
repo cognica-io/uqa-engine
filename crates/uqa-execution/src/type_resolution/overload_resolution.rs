@@ -72,11 +72,34 @@ pub fn match_function_signature(
         .iter()
         .take_while(|name| name.is_none())
         .count();
-    for argument_index in 0..positional_count {
-        if argument_index >= parameters.len() || reserved[argument_index] {
-            return None;
+    let mut parameter_index = 0usize;
+    for (argument_index, argument_position) in argument_positions
+        .iter_mut()
+        .take(positional_count)
+        .enumerate()
+    {
+        let remaining_arguments = positional_count - argument_index;
+        loop {
+            if parameter_index >= parameters.len() || reserved[parameter_index] {
+                return None;
+            }
+            let required_remaining = parameters[parameter_index..]
+                .iter()
+                .enumerate()
+                .filter(|(offset, parameter)| {
+                    !reserved[parameter_index + offset] && !parameter.has_default
+                })
+                .count();
+            // PostgreSQL reserves required OUT/TABLE slots after defaulted inputs, so a positional placeholder binds the output slot when exactly the required arguments remain.
+            if parameters[parameter_index].has_default && remaining_arguments == required_remaining
+            {
+                parameter_index += 1;
+                continue;
+            }
+            *argument_position = parameter_index;
+            parameter_index += 1;
+            break;
         }
-        argument_positions[argument_index] = argument_index;
     }
 
     for (argument_index, argument_type) in argument_types.iter().enumerate() {
@@ -654,6 +677,35 @@ mod tests {
         )
         .is_none());
         assert!(match_function_signature(&parameters, &[], &[]).is_none());
+    }
+
+    #[test]
+    fn signature_matcher_reserves_required_outputs_after_defaulted_inputs() {
+        let parameters = [
+            parameter("input", "integer", false),
+            parameter("optional", "integer", true),
+            parameter("output", "integer", false),
+        ];
+        let matched = match_function_signature(
+            &parameters,
+            &[None, None],
+            &[Some(ColumnType::Integer), None],
+        )
+        .expect("the second positional argument is the required output placeholder");
+        assert_eq!(matched.argument_positions, [0, 2]);
+        assert_eq!(matched.argument_types, ["int4", "int4"]);
+
+        let full = match_function_signature(
+            &parameters,
+            &[None, None, None],
+            &[Some(ColumnType::Integer), Some(ColumnType::Integer), None],
+        )
+        .expect("all declared slots remain callable positionally");
+        assert_eq!(full.argument_positions, [0, 1, 2]);
+
+        assert!(
+            match_function_signature(&parameters, &[None], &[Some(ColumnType::Integer)],).is_none()
+        );
     }
 
     #[test]

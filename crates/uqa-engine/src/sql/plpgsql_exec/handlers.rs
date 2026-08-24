@@ -65,18 +65,20 @@ pub(in crate::sql) fn run_call(
     engine: &Engine,
     name: &str,
     call_args: &[(Option<String>, Value)],
+    argument_types: &[Option<uqa_sql::ast::ColumnType>],
 ) -> Result<SQLResult, SQLError> {
-    let function = match resolve_routine(engine, name, call_args, "procedure")? {
-        Some(resolved) => resolved,
-        None => {
-            return Err(routine_resolution_error(
-                "procedure",
-                name,
-                call_args,
-                "does not exist",
-            ));
-        }
-    };
+    let function =
+        match resolve_routine(engine, name, call_args, Some(argument_types), "procedure")? {
+            Some(resolved) => resolved,
+            None => {
+                return Err(routine_resolution_error(
+                    "procedure",
+                    name,
+                    call_args,
+                    "does not exist",
+                ));
+            }
+        };
     let (function, bound) = function;
     if !function.def.is_procedure {
         return Err(SQLError::Routine {
@@ -114,7 +116,7 @@ pub(crate) fn call_user_scalar_function(
     name: &str,
     args: &[(Option<String>, Value)],
 ) -> Option<Result<Value, SQLError>> {
-    let resolved = match resolve_routine(engine, name, args, "function") {
+    let resolved = match resolve_routine(engine, name, args, None, "function") {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(e) => return Some(Err(e)),
@@ -206,7 +208,7 @@ pub(crate) fn resolved_user_function_returns_set(
     name: &str,
     args: &[(Option<String>, Value)],
 ) -> Option<Result<bool, SQLError>> {
-    let resolved = match resolve_routine(engine, name, args, "function") {
+    let resolved = match resolve_routine(engine, name, args, None, "function") {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(error) => return Some(Err(error)),
@@ -229,7 +231,7 @@ pub(crate) fn call_user_table_function(
     name: &str,
     args: &[(Option<String>, Value)],
 ) -> Option<Result<SQLTableFunctionResult, SQLError>> {
-    let resolved = match resolve_routine(engine, name, args, "function") {
+    let resolved = match resolve_routine(engine, name, args, None, "function") {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(e) => return Some(Err(e)),

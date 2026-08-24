@@ -8,16 +8,47 @@
 
 use super::{Expr, FromClause, MergeWhen, Projection, Result, SelectStmt, Statement, Value, CTE};
 
+/// Runtime datum value together with the concrete SQL type declared by PL/pgSQL. The type is optional for composite fields and pseudo-types whose runtime carrier already identifies their category.
+#[derive(Debug, Clone)]
+pub struct ResolvedVariable {
+    pub value: Value,
+    pub declared_type: Option<String>,
+}
+
+impl ResolvedVariable {
+    #[must_use]
+    pub fn untyped(value: Value) -> Self {
+        Self {
+            value,
+            declared_type: None,
+        }
+    }
+
+    fn into_expression(self) -> Expr {
+        match self.declared_type {
+            Some(ty) => Expr::Cast {
+                expr: Box::new(Expr::Literal(self.value)),
+                ty,
+            },
+            None => Expr::Literal(self.value),
+        }
+    }
+}
+
 /// Resolves routine variables while a compiled expression / statement
 /// is being specialized for one execution.
 pub trait VariableResolver {
     /// Current value of an unqualified name. `Ok(None)` leaves the
     /// column reference for the engine to resolve.
-    fn resolve_name(&mut self, name: &str) -> Result<Option<Value>>;
+    fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>>;
     /// Current value of `qualifier.column` (record field access).
-    fn resolve_qualified(&mut self, qualifier: &str, column: &str) -> Result<Option<Value>>;
+    fn resolve_qualified(
+        &mut self,
+        qualifier: &str,
+        column: &str,
+    ) -> Result<Option<ResolvedVariable>>;
     /// Value of a positional `$n` reference (function arguments).
-    fn resolve_param(&mut self, index: usize) -> Result<Option<Value>>;
+    fn resolve_param(&mut self, index: usize) -> Result<Option<ResolvedVariable>>;
 }
 
 /// Rewrite an expression, substituting resolvable variable references
@@ -25,17 +56,17 @@ pub trait VariableResolver {
 pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
     Ok(match expr {
         Expr::Column(name) => match r.resolve_name(name)? {
-            Some(value) => Expr::Literal(value),
+            Some(value) => value.into_expression(),
             None => expr.clone(),
         },
         Expr::QualifiedColumn {
             qualifier, column, ..
         } => match r.resolve_qualified(qualifier, column)? {
-            Some(value) => Expr::Literal(value),
+            Some(value) => value.into_expression(),
             None => expr.clone(),
         },
         Expr::Param(index) => match r.resolve_param(*index)? {
-            Some(value) => Expr::Literal(value),
+            Some(value) => value.into_expression(),
             None => expr.clone(),
         },
         Expr::Default | Expr::Literal(_) | Expr::Star | Expr::QualifiedStar(_) => expr.clone(),
