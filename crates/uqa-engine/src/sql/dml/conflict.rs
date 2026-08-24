@@ -891,13 +891,6 @@ pub(in crate::sql) fn dml_returning_result(
     rows: Vec<OwnedPhysicalRow>,
     affected_rows: u64,
 ) -> Result<SQLResult, SQLError> {
-    let star_schema = returning_target_schema(engine, shape.table)?;
-    let expression_schema = returning_expression_schema(
-        &star_schema,
-        shape.target_qualifier,
-        shape.aliases,
-        shape.supplemental_schema,
-    );
     let projections = expanded_returning_projections(
         engine,
         shape.table,
@@ -905,9 +898,26 @@ pub(in crate::sql) fn dml_returning_result(
         shape.aliases,
         shape.returning,
     )?;
+    dml_returning_result_with_projections(engine, shape, &projections, rows, affected_rows)
+}
+
+pub(in crate::sql) fn dml_returning_result_with_projections(
+    engine: &Engine,
+    shape: DmlReturningShape<'_>,
+    projections: &[ProjectionPlan],
+    rows: Vec<OwnedPhysicalRow>,
+    affected_rows: u64,
+) -> Result<SQLResult, SQLError> {
+    let star_schema = returning_target_schema(engine, shape.table)?;
+    let expression_schema = returning_expression_schema(
+        &star_schema,
+        shape.target_qualifier,
+        shape.aliases,
+        shape.supplemental_schema,
+    );
     let output = bind_projection_output_schema(
         engine,
-        &projections,
+        projections,
         &expression_schema,
         &star_schema,
         &shape.ctes.scalar_subqueries,

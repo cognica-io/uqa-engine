@@ -43,6 +43,9 @@ pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crat
     let join_condition = compile_expr(join_condition_node)?;
 
     let mut when_clauses: Vec<MergeWhen> = Vec::with_capacity(stmt.merge_when_clauses.len());
+    let mut final_matched = false;
+    let mut final_not_matched_by_source = false;
+    let mut final_not_matched_by_target = false;
     for clause in &stmt.merge_when_clauses {
         let Some(NodeEnum::MergeWhenClause(w)) = clause.node.as_ref() else {
             return Err(SQLError::Internal(
@@ -54,26 +57,32 @@ pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crat
             .as_deref()
             .map(|c| compile_expr(c))
             .transpose()?;
-        let matched = match w.match_kind() {
-            MergeMatchKind::MergeWhenMatched => true,
-            MergeMatchKind::MergeWhenNotMatchedByTarget => false,
-            MergeMatchKind::MergeWhenNotMatchedBySource => {
-                return Err(SQLError::Unsupported(
-                    "MERGE WHEN NOT MATCHED BY SOURCE is not supported".into(),
-                ));
-            }
+        let match_kind = w.match_kind();
+        let final_clause = match match_kind {
+            MergeMatchKind::MergeWhenMatched => &mut final_matched,
+            MergeMatchKind::MergeWhenNotMatchedBySource => &mut final_not_matched_by_source,
+            MergeMatchKind::MergeWhenNotMatchedByTarget => &mut final_not_matched_by_target,
             MergeMatchKind::Undefined => {
                 return Err(SQLError::Internal(
                     "MERGE WHEN clause has no match kind".into(),
                 ));
             }
         };
+        if *final_clause {
+            return Err(SQLError::Routine {
+                sqlstate: "42601".into(),
+                message: "unreachable WHEN clause specified after unconditional WHEN clause".into(),
+            });
+        }
+        if condition.is_none() {
+            *final_clause = true;
+        }
         let cmd = w.command_type();
         match cmd {
             CmdType::CmdUpdate => {
-                if !matched {
+                if matches!(match_kind, MergeMatchKind::MergeWhenNotMatchedByTarget) {
                     return Err(SQLError::Internal(
-                        "MERGE UPDATE is only valid for WHEN MATCHED".into(),
+                        "MERGE UPDATE is not valid for WHEN NOT MATCHED BY TARGET".into(),
                     ));
                 }
                 let mut assignments: Vec<(String, Expr)> = Vec::new();
@@ -89,23 +98,42 @@ pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crat
                         .ok_or_else(|| SQLError::Internal("MERGE UPDATE without value".into()))?;
                     assignments.push((rt.name.clone(), compile_expr(val)?));
                 }
-                when_clauses.push(MergeWhen::UpdateMatched {
-                    condition,
-                    assignments,
+                when_clauses.push(match match_kind {
+                    MergeMatchKind::MergeWhenMatched => MergeWhen::UpdateMatched {
+                        condition,
+                        assignments,
+                    },
+                    MergeMatchKind::MergeWhenNotMatchedBySource => {
+                        MergeWhen::UpdateNotMatchedBySource {
+                            condition,
+                            assignments,
+                        }
+                    }
+                    MergeMatchKind::MergeWhenNotMatchedByTarget | MergeMatchKind::Undefined => {
+                        unreachable!()
+                    }
                 });
             }
             CmdType::CmdDelete => {
-                if !matched {
+                if matches!(match_kind, MergeMatchKind::MergeWhenNotMatchedByTarget) {
                     return Err(SQLError::Internal(
-                        "MERGE DELETE is only valid for WHEN MATCHED".into(),
+                        "MERGE DELETE is not valid for WHEN NOT MATCHED BY TARGET".into(),
                     ));
                 }
-                when_clauses.push(MergeWhen::DeleteMatched { condition });
+                when_clauses.push(match match_kind {
+                    MergeMatchKind::MergeWhenMatched => MergeWhen::DeleteMatched { condition },
+                    MergeMatchKind::MergeWhenNotMatchedBySource => {
+                        MergeWhen::DeleteNotMatchedBySource { condition }
+                    }
+                    MergeMatchKind::MergeWhenNotMatchedByTarget | MergeMatchKind::Undefined => {
+                        unreachable!()
+                    }
+                });
             }
             CmdType::CmdInsert => {
-                if matched {
+                if !matches!(match_kind, MergeMatchKind::MergeWhenNotMatchedByTarget) {
                     return Err(SQLError::Internal(
-                        "MERGE INSERT is only valid for WHEN NOT MATCHED".into(),
+                        "MERGE INSERT is only valid for WHEN NOT MATCHED BY TARGET".into(),
                     ));
                 }
                 let mut columns: Vec<String> = Vec::with_capacity(w.target_list.len());
@@ -129,11 +157,16 @@ pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crat
                 });
             }
             CmdType::CmdNothing => {
-                if matched {
-                    when_clauses.push(MergeWhen::NothingMatched { condition });
-                } else {
-                    when_clauses.push(MergeWhen::NothingNotMatched { condition });
-                }
+                when_clauses.push(match match_kind {
+                    MergeMatchKind::MergeWhenMatched => MergeWhen::NothingMatched { condition },
+                    MergeMatchKind::MergeWhenNotMatchedBySource => {
+                        MergeWhen::NothingNotMatchedBySource { condition }
+                    }
+                    MergeMatchKind::MergeWhenNotMatchedByTarget => {
+                        MergeWhen::NothingNotMatched { condition }
+                    }
+                    MergeMatchKind::Undefined => unreachable!(),
+                });
             }
             other => {
                 return Err(SQLError::Unsupported(format!(

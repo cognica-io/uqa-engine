@@ -119,15 +119,36 @@ fn insert_set_operation_is_compiled_as_one_select_source() {
 }
 
 #[test]
-fn merge_not_matched_by_source_fails_explicitly() {
+fn merge_not_matched_by_source_preserves_all_actions() {
+    let Statement::Merge(merge) = first(
+        "MERGE INTO target USING source ON target.id = source.id \
+         WHEN NOT MATCHED BY SOURCE AND target.retired THEN UPDATE SET value = value + 1 \
+         WHEN NOT MATCHED BY SOURCE AND target.expired THEN DELETE \
+         WHEN NOT MATCHED BY SOURCE THEN DO NOTHING",
+    ) else {
+        panic!("expected MERGE");
+    };
+
+    assert!(matches!(
+        merge.when_clauses.as_slice(),
+        [
+            crate::ast::MergeWhen::UpdateNotMatchedBySource { .. },
+            crate::ast::MergeWhen::DeleteNotMatchedBySource { .. },
+            crate::ast::MergeWhen::NothingNotMatchedBySource { .. }
+        ]
+    ));
+}
+
+#[test]
+fn merge_rejects_a_clause_after_an_unconditional_clause_of_the_same_kind() {
     let error = compile(
         "MERGE INTO target USING source ON target.id = source.id \
-         WHEN NOT MATCHED BY SOURCE THEN DELETE",
+         WHEN NOT MATCHED BY SOURCE THEN DO NOTHING \
+         WHEN MATCHED THEN DO NOTHING \
+         WHEN NOT MATCHED BY SOURCE AND target.retired THEN DELETE",
     )
     .unwrap_err();
 
-    assert!(matches!(
-        error,
-        SQLError::Unsupported(message) if message.contains("MERGE WHEN NOT MATCHED BY SOURCE")
-    ));
+    assert_eq!(error.sqlstate(), Some("42601"));
+    assert!(error.to_string().contains("unreachable WHEN clause"));
 }

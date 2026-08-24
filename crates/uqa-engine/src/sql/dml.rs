@@ -657,29 +657,75 @@ fn eval_mutation_assignment(
 }
 
 const MERGE_PAIR_DOC_ID: &str = "__uqa_merge_pair_doc_id";
+const MERGE_PAIR_KIND: &str = "__uqa_merge_pair_kind";
+const MERGE_PAIR_TARGET_DOCUMENT: &str = "__uqa_merge_pair_target_document";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MergePairKind {
+    Matched,
+    NotMatchedBySource,
+    NotMatchedByTarget,
+}
+
+impl MergePairKind {
+    fn encode(self) -> i64 {
+        match self {
+            Self::Matched => 0,
+            Self::NotMatchedBySource => 1,
+            Self::NotMatchedByTarget => 2,
+        }
+    }
+
+    fn decode(value: &Value) -> Result<Self, SQLError> {
+        match value {
+            Value::Int(0) => Ok(Self::Matched),
+            Value::Int(1) => Ok(Self::NotMatchedBySource),
+            Value::Int(2) => Ok(Self::NotMatchedByTarget),
+            other => Err(SQLError::Internal(format!(
+                "invalid spilled MERGE pairing kind {other:?}"
+            ))),
+        }
+    }
+}
 
 struct MergePairing {
+    kind: MergePairKind,
     doc_id: Option<DocId>,
+    target_document: Option<Document>,
     source_row: OwnedPhysicalRow,
 }
 
 fn merge_pair_schema(source: &RowSchema) -> RowSchema {
-    let header =
-        RowSchema::with_types(vec![MERGE_PAIR_DOC_ID.into()], vec![Some(ColumnType::Text)]);
+    let header = RowSchema::with_types(
+        vec![
+            MERGE_PAIR_KIND.into(),
+            MERGE_PAIR_DOC_ID.into(),
+            MERGE_PAIR_TARGET_DOCUMENT.into(),
+        ],
+        vec![Some(ColumnType::BigInteger), Some(ColumnType::Text), None],
+    );
     RowSchema::join(&header, source, std::iter::empty())
 }
 
 fn encode_merge_pair(
+    kind: MergePairKind,
     doc_id: Option<DocId>,
+    target_document: Option<&Document>,
     source_row: &OwnedPhysicalRow,
 ) -> uqa_execution::PhysicalRow {
     let header = PhysicalRow::from_values(vec![
-        doc_id.map_or(Value::Null, |doc_id| Value::Str(doc_id.to_string()))
+        Value::Int(kind.encode()),
+        doc_id.map_or(Value::Null, |doc_id| Value::Str(doc_id.to_string())),
+        target_document.map_or(Value::Null, |document| Value::Map(document.clone())),
     ]);
     PhysicalRow::concat(&header, &source_row.row)
 }
 
 fn decode_merge_pair(encoded: OwnedPhysicalRow) -> Result<MergePairing, SQLError> {
+    let kind =
+        MergePairKind::decode(encoded.get(MERGE_PAIR_KIND).ok_or_else(|| {
+            SQLError::Internal("spilled MERGE pairing lost its match kind".into())
+        })?)?;
     let doc_id = match encoded.get(MERGE_PAIR_DOC_ID) {
         Some(Value::Null) | None => None,
         Some(Value::Str(doc_id)) => Some(doc_id.parse::<DocId>().map_err(|error| {
@@ -693,8 +739,34 @@ fn decode_merge_pair(encoded: OwnedPhysicalRow) -> Result<MergePairing, SQLError
             )))
         }
     };
+    let target_document = match encoded.get(MERGE_PAIR_TARGET_DOCUMENT) {
+        Some(Value::Map(document)) => Some(document.clone()),
+        Some(Value::Null) | None => None,
+        Some(value) => {
+            return Err(SQLError::Internal(format!(
+                "invalid spilled MERGE target document value {value:?}"
+            )))
+        }
+    };
+    match kind {
+        MergePairKind::Matched | MergePairKind::NotMatchedBySource
+            if doc_id.is_none() || target_document.is_none() =>
+        {
+            return Err(SQLError::Internal(
+                "target-bearing MERGE pairing lost its target row".into(),
+            ));
+        }
+        MergePairKind::NotMatchedByTarget if doc_id.is_some() || target_document.is_some() => {
+            return Err(SQLError::Internal(
+                "target-missing MERGE pairing unexpectedly retained a target row".into(),
+            ));
+        }
+        _ => {}
+    }
     Ok(MergePairing {
+        kind,
         doc_id,
+        target_document,
         source_row: encoded,
     })
 }
