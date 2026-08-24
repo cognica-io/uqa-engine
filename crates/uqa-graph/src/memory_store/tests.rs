@@ -416,10 +416,11 @@ fn drop_label_removes_entities_and_releases_the_label() {
         Some((3, LabelKind::Vertex))
     );
     assert_eq!(store.vertex_ids_in_graph("g").unwrap().len(), 1);
-    // The incident LIVES_IN edge left with its Person endpoint.
-    assert!(store.edges_in_graph("g").unwrap().is_empty());
+    // AGE drops the vertex table without deleting incident edge-table rows.
+    let dangling = store.edges_in_graph("g").unwrap();
+    assert_eq!(dangling.len(), 1);
+    assert_eq!(dangling[0].edge_id, lives);
     assert_eq!(store.drop_label("g", "Person").unwrap(), None);
-    assert_eq!(store.drop_label("g", "_ag_label_vertex").unwrap(), None);
     assert!(matches!(
         store.drop_label("missing", "Person"),
         Err(GraphStoreError::UnknownGraph(_))
@@ -439,6 +440,112 @@ fn drop_label_removes_entities_and_releases_the_label() {
         store.allocate_vertex_id("Person", "g").unwrap(),
         make_graphid(7, 1).unwrap()
     );
+}
+
+#[test]
+fn default_label_drop_restrict_state_survives_round_trip_and_graph_lifecycle() {
+    let mut store = MemoryGraphStore::new();
+    store.create_graph("g");
+    let a = store.allocate_vertex_id("", "g").unwrap();
+    let b = store.allocate_vertex_id("", "g").unwrap();
+    store.add_vertex(Vertex::new(a, ""), "g").unwrap();
+    store.add_vertex(Vertex::new(b, ""), "g").unwrap();
+    let edge = store.allocate_edge_id("", "g").unwrap();
+    store.add_edge(Edge::new(edge, a, b, ""), "g").unwrap();
+    assert_eq!(
+        store.create_label("g", "KNOWS", LabelKind::Edge).unwrap(),
+        Some(3)
+    );
+
+    assert_eq!(
+        store.drop_label("g", "_ag_label_vertex").unwrap(),
+        Some((VERTEX_DEFAULT_LABEL_ID, LabelKind::Vertex))
+    );
+    assert_eq!(
+        store.graph_label_kind("g", "_ag_label_vertex").unwrap(),
+        None
+    );
+    assert_eq!(store.drop_label("g", "_ag_label_vertex").unwrap(), None);
+    let names: Vec<String> = store
+        .graph_labels("g")
+        .unwrap()
+        .into_iter()
+        .map(|label| label.name)
+        .collect();
+    assert_eq!(names, vec!["_ag_label_edge", "KNOWS"]);
+    assert!(store.vertex_ids_in_graph("g").unwrap().is_empty());
+    let dangling = store.edges_in_graph("g").unwrap();
+    assert_eq!(dangling.len(), 1);
+    assert_eq!((dangling[0].source_id, dangling[0].target_id), (a, b));
+
+    for result in [
+        store.allocate_vertex_id("", "g").map(|_| ()),
+        store.allocate_vertex_id("Person", "g").map(|_| ()),
+        store
+            .create_label("g", "City", LabelKind::Vertex)
+            .map(|_| ()),
+    ] {
+        let error = result.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("default label _ag_label_vertex does not exist"),
+            "{error}"
+        );
+    }
+    assert_eq!(
+        store.allocate_edge_id("KNOWS", "g").unwrap(),
+        make_graphid(3, 1).unwrap()
+    );
+
+    let registry = store.label_registry("g");
+    let json = serde_json::to_string(&registry).unwrap();
+    let restored: GraphLabelRegistry = serde_json::from_str(&json).unwrap();
+    let mut reopened = MemoryGraphStore::new();
+    reopened.create_graph("g");
+    reopened.import_label_registry("g", &restored);
+    assert_eq!(
+        reopened.graph_label_kind("g", "_ag_label_vertex").unwrap(),
+        None
+    );
+    reopened.rename_graph("g", "renamed").unwrap();
+    assert_eq!(
+        reopened
+            .graph_label_kind("renamed", "_ag_label_vertex")
+            .unwrap(),
+        None
+    );
+    reopened.drop_graph("renamed");
+    reopened.create_graph("renamed");
+    assert_eq!(
+        reopened
+            .graph_label_kind("renamed", "_ag_label_vertex")
+            .unwrap(),
+        Some(LabelKind::Vertex)
+    );
+}
+
+#[test]
+fn default_label_drop_is_restricted_by_same_kind_user_labels_only() {
+    for (kind, default_label, child_label) in [
+        (LabelKind::Vertex, "_ag_label_vertex", "Person"),
+        (LabelKind::Edge, "_ag_label_edge", "KNOWS"),
+    ] {
+        let mut store = MemoryGraphStore::new();
+        store.create_graph("g");
+        store.create_label("g", child_label, kind).unwrap();
+        let error = store.drop_label("g", default_label).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("label {child_label} depends on it")),
+            "{error}"
+        );
+        assert_eq!(
+            store.graph_label_kind("g", default_label).unwrap(),
+            Some(kind)
+        );
+    }
 }
 
 #[test]

@@ -28,12 +28,33 @@ impl Engine {
             }
         }
 
+        // Label tombstones must be installed before edge memberships: AGE
+        // keeps edge rows whose endpoints belonged to a dropped vertex-label
+        // relation, and those dangling endpoints are valid broken-graph state.
+        Self::import_graph_label_registries(&mut graphs, catalog)?;
+
         // Step 2: load every entity into side tables. Memberships, rather
         // than the global entity rows, determine each graph partition.
         let (vertex_by_id, edge_by_id) = Self::load_graph_entities(catalog)?;
         let memberships = catalog.load_graph_memberships()?;
         Self::restore_graph_memberships(&mut graphs, &memberships, &vertex_by_id, &edge_by_id)?;
-        Self::restore_graph_label_registries(&mut graphs, catalog)
+        Self::restore_graph_label_registries(&mut graphs)
+    }
+
+    fn import_graph_label_registries(
+        graphs: &mut BTreeMap<String, uqa_graph::MemoryGraphStore>,
+        catalog: &dyn CatalogFacade,
+    ) -> StorageBackendResult<()> {
+        for (graph_name, store) in graphs.iter_mut() {
+            let key = format!("{}{graph_name}", super::GRAPH_LABELS_METADATA_PREFIX);
+            if let Some(json) = catalog.get_metadata(&key)? {
+                if !json.is_empty() {
+                    let registry = serde_json::from_str::<uqa_graph::GraphLabelRegistry>(&json)?;
+                    store.import_label_registry(graph_name, &registry);
+                }
+            }
+        }
+        Ok(())
     }
 
     fn load_graph_entities(
@@ -80,13 +101,11 @@ impl Engine {
         vertex_by_id: &BTreeMap<u64, uqa_core::Vertex>,
         edge_by_id: &BTreeMap<u64, uqa_core::Edge>,
     ) -> StorageBackendResult<()> {
-        use uqa_graph::GraphStore as _;
-
         // Validate every membership before mutating a graph, then
-        // replay all vertex memberships before any edge membership. Catalog
-        // ordering is not part of the persistence contract, and add_edge
-        // correctly requires both endpoints to already belong to the target
-        // graph.
+        // hydrate all vertex memberships before edge memberships. Catalog row
+        // order is not part of the persistence contract; edge attachment uses
+        // the imported label tombstones to admit AGE's persisted dangling
+        // endpoints without weakening normal add_edge validation.
         for (entity_type, entity_id, graph_name) in memberships {
             if !graphs.contains_key(graph_name) {
                 return Err(StorageBackendError::Other(format!(
@@ -128,7 +147,10 @@ impl Engine {
                 ))
             })?;
             store
-                .add_vertex(vertex.clone(), graph_name)
+                .insert_raw_vertex(vertex.clone())
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            store
+                .attach_vertex(*entity_id, graph_name)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         }
         for (entity_type, entity_id, graph_name) in memberships {
@@ -146,7 +168,10 @@ impl Engine {
                 ))
             })?;
             store
-                .add_edge(edge.clone(), graph_name)
+                .insert_raw_edge(edge.clone())
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            store
+                .attach_edge(*entity_id, graph_name)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         }
         Ok(())
@@ -154,36 +179,19 @@ impl Engine {
 
     fn restore_graph_label_registries(
         graphs: &mut BTreeMap<String, uqa_graph::MemoryGraphStore>,
-        catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
         use uqa_graph::GraphStore as _;
 
-        // Restore the per-graph AGE label registries. The
-        // persisted metadata is authoritative (it survives deletion of
-        // every entity of a label); deriving label ids from existing
-        // entity ids (`id >> 48`) self-heals missing metadata.
+        // Persisted metadata was imported before memberships. Validate the
+        // resulting partitions, then derive any labels missing from legacy
+        // metadata from entity ids (`id >> 48`).
         for (graph_name, store) in graphs.iter_mut() {
-            let vertices = store
+            store
                 .vertex_ids_in_graph(graph_name)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            for edge in store
+            store
                 .edges_in_graph(graph_name)
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?
-            {
-                if !vertices.contains(&edge.source_id) || !vertices.contains(&edge.target_id) {
-                    return Err(StorageBackendError::Other(format!(
-                        "graph `{graph_name}` edge {} references missing endpoint {} -> {}",
-                        edge.edge_id, edge.source_id, edge.target_id
-                    )));
-                }
-            }
-            let key = format!("{}{graph_name}", super::GRAPH_LABELS_METADATA_PREFIX);
-            if let Some(json) = catalog.get_metadata(&key)? {
-                if !json.is_empty() {
-                    let registry = serde_json::from_str::<uqa_graph::GraphLabelRegistry>(&json)?;
-                    store.import_label_registry(graph_name, &registry);
-                }
-            }
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
             store.rebuild_label_registry_from_ids(graph_name);
         }
         Ok(())

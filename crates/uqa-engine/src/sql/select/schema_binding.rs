@@ -663,7 +663,7 @@ impl SchemaScope {
                     let types = typed_columns.into_iter().map(|(_, ty)| Some(ty)).collect();
                     return Ok(RowSchema::with_qualified_types(qualifier, columns, types));
                 }
-                if let Some(schema) = virtual_relation_schema(engine, name) {
+                if let Some(schema) = virtual_relation_schema(engine, name)? {
                     let (columns, types): (Vec<_>, Vec<_>) = schema
                         .into_iter()
                         .map(|(column, ty)| (column, Some(ty)))

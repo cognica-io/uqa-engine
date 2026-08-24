@@ -23,7 +23,7 @@ pub(super) fn build_info_schema_rows(
     name: &str,
 ) -> Result<Option<Vec<ResultRow>>, SQLError> {
     let Some(relation) = resolve_virtual_relation(engine, name) else {
-        return Ok(None);
+        return ag_catalog::build_age_label_relation_rows(engine, name);
     };
     Ok(Some(match relation {
         VirtualRelation::InformationSchemaCatalogName => build_info_catalog_name(),
@@ -65,6 +65,7 @@ mod information_schema;
 mod pg_catalog;
 mod schema;
 
+pub(crate) use ag_catalog::resolve_age_label_relation_name;
 use ag_catalog::{build_ag_graph, build_ag_label};
 use information_schema::{
     build_info_catalog_name, build_info_columns, build_info_key_column_usage, build_info_routines,

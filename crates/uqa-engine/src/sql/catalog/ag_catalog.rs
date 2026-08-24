@@ -16,7 +16,8 @@
 //! from the graph registry instead of physical tables.
 
 use uqa_core::Value;
-use uqa_graph::{GraphLabelInfo, LabelKind};
+use uqa_graph::{GraphLabelInfo, GraphStore as _, LabelKind};
+use uqa_sql::ast::ColumnType;
 use uqa_sql::expr::quote_ident;
 use uqa_sql::{ResultRow, SQLError};
 
@@ -25,8 +26,8 @@ use super::helpers::{
     schema_oid, stable_oid, str_value,
 };
 use super::pg_catalog::pg_class_row;
-use super::schema::{ag_catalog_type_oid, AG_CATALOG_SCHEMA};
-use crate::Engine;
+use super::schema::{ag_catalog_type_oid, age_agtype, age_graphid, AG_CATALOG_SCHEMA};
+use crate::{Engine, RelationIdentity};
 
 /// AGE `_label_id_seq`: the per-graph label id allocator.
 const LABEL_ID_SEQUENCE: &str = "_label_id_seq";
@@ -41,6 +42,18 @@ pub(super) struct GraphCatalogEntry {
     pub(super) labels: Vec<GraphLabelInfo>,
 }
 
+#[derive(Clone)]
+pub(super) struct AgeLabelRelation {
+    graph: String,
+    label: GraphLabelInfo,
+}
+
+impl AgeLabelRelation {
+    fn canonical_name(&self) -> String {
+        label_relation_regclass(&self.graph, &self.label.name)
+    }
+}
+
 pub(super) fn graph_catalog_entries(engine: &Engine) -> Result<Vec<GraphCatalogEntry>, SQLError> {
     Ok(engine
         .graph_label_catalog()
@@ -48,6 +61,133 @@ pub(super) fn graph_catalog_entries(engine: &Engine) -> Result<Vec<GraphCatalogE
         .into_iter()
         .map(|(name, labels)| GraphCatalogEntry { name, labels })
         .collect())
+}
+
+/// Resolve a graph-label relation through an explicit graph schema or the
+/// current `search_path`. Only surviving `ag_label` entries are relations;
+/// dropped default and user labels remain absent across reopen.
+pub(super) fn resolve_age_label_relation(
+    engine: &Engine,
+    name: &str,
+) -> Result<Option<AgeLabelRelation>, SQLError> {
+    let (schema, label_name) = RelationIdentity::parse_reference(name).map_err(|error| {
+        SQLError::Internal(format!("invalid AGE label relation `{name}`: {error}"))
+    })?;
+    let entries = graph_catalog_entries(engine)?;
+    let graph_names = schema.map_or_else(|| engine.search_path(), |schema| vec![schema]);
+    for graph_name in graph_names {
+        let Some(entry) = entries.iter().find(|entry| entry.name == graph_name) else {
+            continue;
+        };
+        if let Some(label) = entry.labels.iter().find(|label| label.name == label_name) {
+            return Ok(Some(AgeLabelRelation {
+                graph: entry.name.clone(),
+                label: label.clone(),
+            }));
+        }
+    }
+    Ok(None)
+}
+
+pub(crate) fn resolve_age_label_relation_name(
+    engine: &Engine,
+    name: &str,
+) -> Result<Option<String>, SQLError> {
+    Ok(resolve_age_label_relation(engine, name)?.map(|relation| relation.canonical_name()))
+}
+
+pub(super) fn age_label_relation_schema(
+    engine: &Engine,
+    name: &str,
+) -> Result<Option<Vec<(String, ColumnType)>>, SQLError> {
+    let Some(relation) = resolve_age_label_relation(engine, name)? else {
+        return Ok(None);
+    };
+    let columns = match relation.label.kind {
+        LabelKind::Vertex => vec![
+            ("id".into(), age_graphid()),
+            ("properties".into(), age_agtype()),
+        ],
+        LabelKind::Edge => vec![
+            ("id".into(), age_graphid()),
+            ("start_id".into(), age_graphid()),
+            ("end_id".into(), age_graphid()),
+            ("properties".into(), age_agtype()),
+        ],
+    };
+    Ok(Some(columns))
+}
+
+pub(super) fn build_age_label_relation_rows(
+    engine: &Engine,
+    name: &str,
+) -> Result<Option<Vec<ResultRow>>, SQLError> {
+    let Some(relation) = resolve_age_label_relation(engine, name)? else {
+        return Ok(None);
+    };
+    let rows = engine
+        .graph_with(&relation.graph, |store| match relation.label.kind {
+            LabelKind::Vertex => store.vertices_in_graph(&relation.graph).map(|vertices| {
+                vertices
+                    .into_iter()
+                    .filter(|vertex| relation.includes_graphid(vertex.vertex_id))
+                    .map(|vertex| {
+                        Ok(row([
+                            ("id", graphid_value(vertex.vertex_id)?),
+                            (
+                                "properties",
+                                Value::Str(uqa_graph::agtype::render(&Value::Map(
+                                    vertex.properties,
+                                ))),
+                            ),
+                        ]))
+                    })
+                    .collect::<Result<Vec<_>, SQLError>>()
+            }),
+            LabelKind::Edge => store.edges_in_graph(&relation.graph).map(|edges| {
+                edges
+                    .into_iter()
+                    .filter(|edge| relation.includes_graphid(edge.edge_id))
+                    .map(|edge| {
+                        Ok(row([
+                            ("id", graphid_value(edge.edge_id)?),
+                            ("start_id", graphid_value(edge.source_id)?),
+                            ("end_id", graphid_value(edge.target_id)?),
+                            (
+                                "properties",
+                                Value::Str(uqa_graph::agtype::render(&Value::Map(edge.properties))),
+                            ),
+                        ]))
+                    })
+                    .collect::<Result<Vec<_>, SQLError>>()
+            }),
+        })
+        .map_err(|error| SQLError::Internal(format!("read AGE label relation `{name}`: {error}")))?
+        .ok_or_else(|| {
+            SQLError::Internal(format!(
+                "AGE label relation `{name}` resolved after graph `{}` disappeared",
+                relation.graph
+            ))
+        })?
+        .map_err(|error| {
+            SQLError::Internal(format!("scan AGE label relation `{name}`: {error}"))
+        })??;
+    Ok(Some(rows))
+}
+
+impl AgeLabelRelation {
+    fn includes_graphid(&self, graphid: u64) -> bool {
+        self.label.id == self.label.kind.default_label_id()
+            || uqa_graph::graphid_label_id(graphid) == self.label.id
+    }
+}
+
+fn graphid_value(graphid: u64) -> Result<Value, SQLError> {
+    i64::try_from(graphid).map(Value::Int).map_err(|_| {
+        SQLError::Internal(format!(
+            "AGE graphid {graphid} exceeds the signed 64-bit graphid range"
+        ))
+    })
 }
 
 /// `ag_graph.graphid` of a named graph.

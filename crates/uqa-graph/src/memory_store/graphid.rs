@@ -6,7 +6,7 @@
 
 //! AGE graphid composition and per-graph label allocation state.
 
-use super::{BTreeMap, Deserialize, GraphStoreError, GraphStoreResult, Serialize};
+use super::{BTreeMap, BTreeSet, Deserialize, GraphStoreError, GraphStoreResult, Serialize};
 
 use crate::age_names::{EDGE_DEFAULT_LABEL_NAME, VERTEX_DEFAULT_LABEL_NAME};
 
@@ -144,6 +144,11 @@ pub struct GraphLabelRegistry {
     pub kinds: BTreeMap<String, LabelKind>,
     /// Label id -> last allocated per-label sequence value.
     pub sequences: BTreeMap<u32, u64>,
+    /// AGE label ids whose relations were removed through `drop_label`.
+    /// Tombstones are persisted because edge rows can outlive the vertex
+    /// label relations that owned their endpoints. Registries written before
+    /// this field existed deserialize as an empty set.
+    pub dropped_label_ids: BTreeSet<u32>,
     /// Next label id handed to a previously unseen label.
     pub next_label_id: u32,
 }
@@ -154,6 +159,7 @@ impl Default for GraphLabelRegistry {
             labels: BTreeMap::new(),
             kinds: BTreeMap::new(),
             sequences: BTreeMap::new(),
+            dropped_label_ids: BTreeSet::new(),
             next_label_id: FIRST_USER_LABEL_ID,
         }
     }
@@ -166,6 +172,7 @@ impl GraphLabelRegistry {
     /// other kind fails exactly like AGE's `CREATE` transform.
     pub(super) fn label_id(&mut self, label: &str, kind: LabelKind) -> GraphStoreResult<u32> {
         if label.is_empty() {
+            self.require_default_label(kind)?;
             return Ok(kind.default_label_id());
         }
         // The reserved AGE names always denote the default labels, so they
@@ -173,6 +180,7 @@ impl GraphLabelRegistry {
         for reserved in [LabelKind::Vertex, LabelKind::Edge] {
             if label == reserved.default_label_name() {
                 Self::require_kind(label, reserved, kind)?;
+                self.require_default_label(reserved)?;
                 return Ok(reserved.default_label_id());
             }
         }
@@ -188,10 +196,21 @@ impl GraphLabelRegistry {
             self.kinds.entry(label.to_string()).or_insert(kind);
             return Ok(*id);
         }
+        self.require_default_label(kind)?;
         let id = self.allocate_label_id()?;
         self.labels.insert(label.to_string(), id);
         self.kinds.insert(label.to_string(), kind);
         Ok(id)
+    }
+
+    fn require_default_label(&self, kind: LabelKind) -> GraphStoreResult<()> {
+        if self.dropped_label_ids.contains(&kind.default_label_id()) {
+            return Err(GraphStoreError::InvalidMutation(format!(
+                "default label {} does not exist",
+                kind.default_label_name()
+            )));
+        }
+        Ok(())
     }
 
     fn require_kind(
@@ -226,9 +245,17 @@ impl GraphLabelRegistry {
     /// default label.
     #[must_use]
     pub fn contains_label(&self, label: &str) -> bool {
-        label == VERTEX_DEFAULT_LABEL_NAME
-            || label == EDGE_DEFAULT_LABEL_NAME
-            || self.labels.contains_key(label)
+        if label == VERTEX_DEFAULT_LABEL_NAME {
+            return !self
+                .dropped_label_ids
+                .contains(&LabelKind::Vertex.default_label_id());
+        }
+        if label == EDGE_DEFAULT_LABEL_NAME {
+            return !self
+                .dropped_label_ids
+                .contains(&LabelKind::Edge.default_label_id());
+        }
+        self.labels.contains_key(label)
     }
 
     /// The kind of a registered or default label. A user label persisted
@@ -237,10 +264,10 @@ impl GraphLabelRegistry {
     #[must_use]
     pub fn label_kind(&self, label: &str) -> Option<LabelKind> {
         if label == VERTEX_DEFAULT_LABEL_NAME {
-            return Some(LabelKind::Vertex);
+            return self.contains_label(label).then_some(LabelKind::Vertex);
         }
         if label == EDGE_DEFAULT_LABEL_NAME {
-            return Some(LabelKind::Edge);
+            return self.contains_label(label).then_some(LabelKind::Edge);
         }
         if !self.labels.contains_key(label) {
             return None;
@@ -259,47 +286,57 @@ impl GraphLabelRegistry {
         if self.contains_label(label) {
             return Ok(None);
         }
+        self.require_default_label(kind)?;
+        if label == VERTEX_DEFAULT_LABEL_NAME || label == EDGE_DEFAULT_LABEL_NAME {
+            return Err(GraphStoreError::InvalidMutation(format!(
+                "default label {label} cannot be recreated without recreating the graph"
+            )));
+        }
         let id = self.allocate_label_id()?;
         self.labels.insert(label.to_string(), id);
         self.kinds.insert(label.to_string(), kind);
         Ok(Some(id))
     }
 
-    /// Forget a user label. Returns the released label id; `None` when
-    /// the label is not registered. Default labels are never removed.
+    /// Forget a label. Default labels leave a durable tombstone so the graph
+    /// can continue to exist without their AGE relations. Returns the
+    /// released label id, or `None` when the label is not registered.
     pub fn remove_label(&mut self, label: &str) -> Option<u32> {
+        for kind in [LabelKind::Vertex, LabelKind::Edge] {
+            if label == kind.default_label_name() {
+                if !self.dropped_label_ids.insert(kind.default_label_id()) {
+                    return None;
+                }
+                self.sequences.remove(&kind.default_label_id());
+                return Some(kind.default_label_id());
+            }
+        }
         let id = self.labels.remove(label)?;
         self.kinds.remove(label);
         self.sequences.remove(&id);
+        self.dropped_label_ids.insert(id);
         Some(id)
     }
 
-    /// Every label of the graph in `ag_label` order: the two default
-    /// labels first, then user labels by ascending label id.
+    /// Every present label of the graph in `ag_label` order: surviving
+    /// defaults first, then user labels by ascending label id.
     #[must_use]
     pub fn labels(&self) -> Vec<GraphLabelInfo> {
-        let mut out = vec![
-            GraphLabelInfo {
-                name: VERTEX_DEFAULT_LABEL_NAME.to_string(),
-                id: VERTEX_DEFAULT_LABEL_ID,
-                kind: LabelKind::Vertex,
-                last_sequence: self
-                    .sequences
-                    .get(&VERTEX_DEFAULT_LABEL_ID)
-                    .copied()
-                    .unwrap_or(0),
-            },
-            GraphLabelInfo {
-                name: EDGE_DEFAULT_LABEL_NAME.to_string(),
-                id: EDGE_DEFAULT_LABEL_ID,
-                kind: LabelKind::Edge,
-                last_sequence: self
-                    .sequences
-                    .get(&EDGE_DEFAULT_LABEL_ID)
-                    .copied()
-                    .unwrap_or(0),
-            },
-        ];
+        let mut out = Vec::new();
+        for kind in [LabelKind::Vertex, LabelKind::Edge] {
+            if !self.dropped_label_ids.contains(&kind.default_label_id()) {
+                out.push(GraphLabelInfo {
+                    name: kind.default_label_name().to_string(),
+                    id: kind.default_label_id(),
+                    kind,
+                    last_sequence: self
+                        .sequences
+                        .get(&kind.default_label_id())
+                        .copied()
+                        .unwrap_or(0),
+                });
+            }
+        }
         let mut user: Vec<GraphLabelInfo> = self
             .labels
             .iter()
@@ -343,6 +380,7 @@ impl GraphLabelRegistry {
             self.labels.entry(label.to_string()).or_insert(label_id);
             self.kinds.entry(label.to_string()).or_insert(kind);
         }
+        self.dropped_label_ids.remove(&label_id);
         let seq = graphid_sequence(id);
         let entry = self.sequences.entry(label_id).or_insert(0);
         if seq > *entry {
@@ -368,6 +406,8 @@ impl GraphLabelRegistry {
                 *entry = *seq;
             }
         }
+        self.dropped_label_ids
+            .extend(other.dropped_label_ids.iter().copied());
         if other.next_label_id > self.next_label_id {
             self.next_label_id = other.next_label_id;
         }
