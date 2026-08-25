@@ -22,6 +22,18 @@ pub(in crate::sql) fn run_create_table(
 }
 
 fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResult, SQLError> {
+    if c.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+        engine.prepare_explicit_transaction_writer()?;
+    }
+    c.name = if c.persistence == uqa_sql::ast::RelationPersistence::Temporary {
+        engine
+            .try_temporary_relation_name_for_create(&c.name)
+            .map_err(SQLError::Unsupported)?
+    } else {
+        engine
+            .try_relation_name_for_create(&c.name)
+            .map_err(SQLError::Unsupported)?
+    };
     if engine
         .try_has_table(&c.name)
         .map_err(|err| ddl_storage_error("CREATE TABLE", err))?
@@ -89,7 +101,13 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
         }
     }
     engine
-        .create_default_table(c.name.clone(), Vec::new())
+        .create_table_with_lifecycle(
+            &c.name,
+            uqa_analysis::analyzer::standard_analyzer("english"),
+            Vec::new(),
+            c.persistence,
+            c.on_commit,
+        )
         .map_err(|err| ddl_storage_error("CREATE TABLE", err))?;
     for (field, dim) in vector_fields {
         engine
@@ -144,6 +162,8 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
             &c.name,
             registered_columns,
             uqa_sql::ast::TableConstraintSet {
+                persistence: c.persistence,
+                on_commit: c.on_commit,
                 checks: c.checks.clone(),
                 foreign_keys: c.foreign_keys.clone(),
                 key_constraints: c.key_constraints.clone(),

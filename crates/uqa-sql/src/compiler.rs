@@ -12,8 +12,9 @@
 //! in the private `types` module.
 
 use crate::ast::{
-    AlterTableAction, AlterTableStmt, ColumnDef, DeleteStmt, DropKind, DropStmt, Expr, Statement,
-    TableKeyConstraint, TableKeyConstraintKind, TransactionStmt, UpdateStmt,
+    AlterTableAction, AlterTableStmt, AlterViewKind, AlterViewOptionsAction, AlterViewOptionsStmt,
+    ColumnDef, DeleteStmt, DropKind, DropStmt, Expr, Statement, TableKeyConstraint,
+    TableKeyConstraintKind, TransactionStmt, UpdateStmt,
 };
 use crate::error::{Result, SQLError};
 use pg_query::protobuf::{Node, RangeVar};
@@ -45,8 +46,8 @@ pub(crate) fn compile_pg_projections(nodes: &[Node]) -> Result<Vec<crate::ast::P
 
 use names::render_relation_component;
 pub(super) use names::{
-    compile_qualified_name, range_var_name, validate_create_table_envelope,
-    validate_durable_create_relation,
+    compile_on_commit, compile_qualified_name, range_var_name, relation_persistence,
+    validate_create_table_envelope,
 };
 pub(in crate::compiler) use returning::compile_returning_clause;
 

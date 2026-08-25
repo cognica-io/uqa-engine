@@ -139,6 +139,16 @@ impl Engine {
                 Self::load_session_table(catalog.as_ref(), backend.as_ref(), schema)?,
             );
         }
+        rebound.extend(
+            self.storage
+                .tables
+                .read()
+                .iter()
+                .filter(|(_, table)| {
+                    table.persistence == uqa_sql::ast::RelationPersistence::Temporary
+                })
+                .map(|(relation, table)| (relation.clone(), table.clone())),
+        );
         *self.storage.tables.write() = rebound;
 
         // Restore per-field analyzers and IVF/HNSW bindings on the newly
@@ -152,6 +162,9 @@ impl Engine {
             .map(|(name, table)| (name.clone(), table.clone()))
             .collect::<Vec<_>>();
         for (name, table) in tables {
+            if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
+                continue;
+            }
             self.rebind_persistent_table_stores(&name.qualified_name(), &table)?;
         }
         self.epochs
@@ -245,8 +258,16 @@ impl Engine {
             return Ok(());
         };
 
+        let temporary_views = self
+            .durable
+            .views
+            .read()
+            .iter()
+            .filter(|(_, view)| view.persistence == uqa_sql::ast::RelationPersistence::Temporary)
+            .map(|(relation, view)| (relation.clone(), view.clone()))
+            .collect::<BTreeMap<_, _>>();
         self.durable.graphs.write().clear();
-        self.durable.views.write().clear();
+        *self.durable.views.write() = temporary_views;
         self.durable.catalog_indexes.write().clear();
         self.durable.schemas.write().clear();
         self.durable.path_indexes.write().clear();
@@ -284,6 +305,9 @@ impl Engine {
             .map(|(relation, table)| (relation.qualified_name(), table.clone()))
             .collect::<Vec<_>>();
         for (name, table) in tables {
+            if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
+                continue;
+            }
             self.rebind_persistent_table_stores(&name, &table)?;
         }
         self.epochs

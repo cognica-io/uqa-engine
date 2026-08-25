@@ -914,16 +914,16 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         crate::sql::resolve_regclass_oid(self.engine, name)
     }
 
-    fn nextval(&self, name: &str) -> std::result::Result<i64, String> {
-        self.engine.nextval(name)
+    fn nextval(&self, name: &str) -> std::result::Result<i64, SQLError> {
+        self.engine.nextval_sql(name)
     }
 
-    fn currval(&self, name: &str) -> std::result::Result<i64, String> {
-        self.engine.currval(name)
+    fn currval(&self, name: &str) -> std::result::Result<i64, SQLError> {
+        self.engine.currval_sql(name)
     }
 
-    fn setval(&self, name: &str, value: i64) -> std::result::Result<i64, String> {
-        self.engine.setval(name, value)
+    fn setval(&self, name: &str, value: i64) -> std::result::Result<i64, SQLError> {
+        self.engine.setval_sql(name, value)
     }
 
     fn call_scalar_function(

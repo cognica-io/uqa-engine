@@ -14,6 +14,8 @@ use uqa_planner::{
 use uqa_sql::ast::{CreateForeignServer, CreateForeignTable};
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 
+use crate::engine_session::{MaterializedViewRegistration, ViewRegistration};
+
 use super::scalar::{
     analyze_physical_call_arguments, eval_physical, eval_physical_call_arguments,
     PhysicalEvalContext,
@@ -21,7 +23,7 @@ use super::scalar::{
 use super::{
     plpgsql_exec, run_alter_sequence, run_alter_table, run_create_index, run_create_sequence,
     run_create_table, run_create_table_as, run_delete, run_drop, run_explain, run_insert,
-    run_merge, run_update, select, Engine,
+    run_merge, run_update, select, CreateTableAsExecution, Engine,
 };
 
 /// Owns top-level plan orchestration. Relational, mutation, DDL, procedural,
@@ -88,14 +90,18 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         column_names: &[String],
         query: &QueryPlan,
         or_replace: bool,
+        persistence: uqa_sql::ast::RelationPersistence,
+        options: &[(String, String)],
     ) -> Result<SQLResult, SQLError> {
-        self.engine.register_view_plan(
+        self.engine.register_view_plan(ViewRegistration {
             name,
             column_names,
-            query.clone(),
+            plan: query.clone(),
             or_replace,
-            self.params,
-        )?;
+            persistence,
+            options,
+            params: self.params,
+        })?;
         Ok(SQLResult::empty())
     }
 
@@ -357,12 +363,54 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             CommandPlan::AlterTable(statement) => {
                 run_alter_table(self.engine, (**statement).clone())
             }
+            CommandPlan::AlterViewOptions(statement) => {
+                self.engine.alter_view_options(statement)?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::CreateView {
                 name,
                 column_names,
                 query,
                 or_replace,
-            } => self.execute_create_view(name, column_names, query, *or_replace),
+                persistence,
+                options,
+            } => self.execute_create_view(
+                name,
+                column_names,
+                query,
+                *or_replace,
+                *persistence,
+                options,
+            ),
+            CommandPlan::CreateMaterializedView {
+                name,
+                column_names,
+                if_not_exists,
+                with_no_data,
+                options,
+                query,
+            } => {
+                self.engine
+                    .register_materialized_view_plan(MaterializedViewRegistration {
+                        name,
+                        column_names,
+                        plan: (**query).clone(),
+                        if_not_exists: *if_not_exists,
+                        with_no_data: *with_no_data,
+                        options,
+                        params: self.params,
+                    })?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::RefreshMaterializedView {
+                name,
+                concurrently,
+                with_no_data,
+            } => {
+                self.engine
+                    .refresh_materialized_view(name, *concurrently, *with_no_data)?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::CreateSchema {
                 name,
                 if_not_exists,
@@ -415,15 +463,21 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 if_not_exists,
                 column_names,
                 with_no_data,
+                persistence,
+                on_commit,
                 query,
             } => run_create_table_as(
                 self.engine,
-                name.clone(),
-                *if_not_exists,
-                column_names,
-                *with_no_data,
-                query,
-                self.params,
+                CreateTableAsExecution {
+                    name,
+                    if_not_exists: *if_not_exists,
+                    column_names,
+                    with_no_data: *with_no_data,
+                    persistence: *persistence,
+                    on_commit: *on_commit,
+                    query,
+                    params: self.params,
+                },
             ),
             CommandPlan::Prepare { name, body } => self.execute_prepare(name, body),
             CommandPlan::Execute { name, params } => self.execute_prepared(name, params),

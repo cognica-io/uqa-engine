@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{ColumnType, Expr, GeneratedColumn};
+use super::{ColumnType, Expr, GeneratedColumn, OnCommitAction, RelationPersistence};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
@@ -118,6 +118,12 @@ pub struct CreateTable {
     /// DISTINCT` semantics through planning and catalog persistence.
     #[serde(default)]
     pub key_constraints: Vec<TableKeyConstraint>,
+    /// `PostgreSQL` relation persistence selected by `TEMPORARY` or `UNLOGGED`.
+    #[serde(default)]
+    pub persistence: RelationPersistence,
+    /// Transaction-end behavior for temporary tables.
+    #[serde(default)]
+    pub on_commit: OnCommitAction,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -153,6 +159,12 @@ pub struct TableConstraintSet {
     pub foreign_keys: Vec<ForeignKey>,
     #[serde(default)]
     pub key_constraints: Vec<TableKeyConstraint>,
+    /// Stored alongside the table definition so reopen preserves `pg_class.relpersistence` for unlogged tables.
+    #[serde(default)]
+    pub persistence: RelationPersistence,
+    /// Permanent and unlogged tables always use the default. Temporary tables are session-local and therefore never write this field to disk.
+    #[serde(default)]
+    pub on_commit: OnCommitAction,
 }
 
 /// `CHECK (expr)` constraint with an optional name (`CONSTRAINT <name>

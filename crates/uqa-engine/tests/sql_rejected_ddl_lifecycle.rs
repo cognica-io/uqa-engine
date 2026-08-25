@@ -13,17 +13,12 @@ fn rejected_create_syntax_has_no_current_or_reopened_catalog_side_effects() {
     let dir = tempfile::tempdir().unwrap();
     let database = dir.path().join("rejected_ddl.db");
     let rejected = [
-        "CREATE TEMP TABLE temp_t (id INTEGER)",
-        "CREATE UNLOGGED TABLE unlogged_t (id INTEGER)",
         "CREATE TABLE inherited (id INTEGER) INHERITS (parent)",
         "CREATE TABLE optioned (id INTEGER) WITH (fillfactor = 70)",
         "CREATE SCHEMA owned AUTHORIZATION CURRENT_USER",
         "CREATE SCHEMA bundled CREATE TABLE bundled.child (id INTEGER)",
-        "CREATE TEMP VIEW temp_v AS SELECT 1",
-        "CREATE VIEW checked AS SELECT 1 WITH LOCAL CHECK OPTION",
-        "CREATE MATERIALIZED VIEW materialized AS SELECT 1",
-        "CREATE TEMP TABLE temp_as AS SELECT 1",
-        "CREATE TEMP SEQUENCE temp_sequence",
+        "CREATE UNLOGGED VIEW unlogged_v AS SELECT 1",
+        "CREATE TEMP MATERIALIZED VIEW temp_materialized AS SELECT 1",
     ];
 
     {
@@ -36,24 +31,13 @@ fn rejected_create_syntax_has_no_current_or_reopened_catalog_side_effects() {
         }
         assert!(!engine.has_schema("owned").unwrap());
         assert!(!engine.has_schema("bundled").unwrap());
-        for relation in [
-            "temp_t",
-            "unlogged_t",
-            "inherited",
-            "optioned",
-            "child",
-            "materialized",
-            "temp_as",
-        ] {
+        for relation in ["inherited", "optioned", "child", "temp_materialized"] {
             assert!(
                 !engine.has_table(relation).unwrap(),
                 "table leaked: {relation}"
             );
         }
-        for view in ["temp_v", "checked"] {
-            assert!(engine.view(view).unwrap().is_none(), "view leaked: {view}");
-        }
-        assert!(engine.sequence_state("temp_sequence").unwrap().is_none());
+        assert!(engine.view("unlogged_v").unwrap().is_none());
     }
 
     let reopened = Engine::open(&database).unwrap();

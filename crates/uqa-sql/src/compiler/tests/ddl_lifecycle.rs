@@ -208,6 +208,7 @@ fn select_into_lowers_to_the_create_table_as_contract() {
         column_names,
         with_no_data,
         body,
+        ..
     } = first("SELECT 1::smallint AS value INTO app.\"Copied\"")
     else {
         panic!("expected SELECT INTO to lower as CREATE TABLE AS");
@@ -263,10 +264,89 @@ fn direct_unknown_literal_casts_are_validated_during_analysis() {
 }
 
 #[test]
-fn unsupported_create_ddl_never_loses_lifecycle_semantics() {
+fn relation_forms_and_options_preserve_lifecycle_semantics() {
+    let Statement::CreateTable(temporary) =
+        first("CREATE TEMP TABLE temp_t (id INTEGER) ON COMMIT DELETE ROWS")
+    else {
+        panic!("expected CREATE TEMP TABLE");
+    };
+    assert_eq!(
+        temporary.persistence,
+        crate::ast::RelationPersistence::Temporary
+    );
+    assert_eq!(temporary.on_commit, crate::ast::OnCommitAction::DeleteRows);
+
+    let Statement::CreateTable(unlogged) = first("CREATE UNLOGGED TABLE unlogged_t (id INTEGER)")
+    else {
+        panic!("expected CREATE UNLOGGED TABLE");
+    };
+    assert_eq!(
+        unlogged.persistence,
+        crate::ast::RelationPersistence::Unlogged
+    );
+
+    let Statement::CreateView {
+        persistence,
+        options,
+        ..
+    } = first(
+        "CREATE TEMP VIEW temp_v WITH (security_barrier=true) AS SELECT 1 WITH LOCAL CHECK OPTION",
+    )
+    else {
+        panic!("expected CREATE TEMP VIEW");
+    };
+    assert_eq!(persistence, crate::ast::RelationPersistence::Temporary);
+    assert_eq!(
+        options,
+        [
+            ("security_barrier".into(), "true".into()),
+            ("check_option".into(), "local".into()),
+        ]
+    );
+
+    assert!(matches!(
+        first("CREATE MATERIALIZED VIEW materialized WITH (fillfactor=80) AS SELECT 1 WITH NO DATA"),
+        Statement::CreateMaterializedView { with_no_data: true, options, .. }
+            if options == [("fillfactor".into(), "80".into())]
+    ));
+    assert!(matches!(
+        first("CREATE TEMP TABLE temp_as AS SELECT 1"),
+        Statement::CreateTableAs {
+            persistence: crate::ast::RelationPersistence::Temporary,
+            ..
+        }
+    ));
+    assert!(matches!(
+        first("CREATE TEMP SEQUENCE temp_sequence"),
+        Statement::CreateSequence(crate::ast::CreateSequence {
+            persistence: crate::ast::RelationPersistence::Temporary,
+            ..
+        })
+    ));
+    assert!(matches!(
+        first("ALTER VIEW temp_v SET (security_invoker=on)"),
+        Statement::AlterViewOptions(crate::ast::AlterViewOptionsStmt {
+            kind: crate::ast::AlterViewKind::View,
+            action: crate::ast::AlterViewOptionsAction::Set(options),
+            ..
+        }) if options == [("security_invoker".into(), "on".into())]
+    ));
+    assert!(matches!(
+        first("ALTER VIEW temp_v RESET (security_barrier)"),
+        Statement::AlterViewOptions(crate::ast::AlterViewOptionsStmt {
+            action: crate::ast::AlterViewOptionsAction::Reset(options),
+            ..
+        }) if options == ["security_barrier"]
+    ));
+    assert!(matches!(
+        compile("ALTER VIEW temp_v RENAME TO renamed").unwrap_err(),
+        SQLError::Unsupported(_)
+    ));
+}
+
+#[test]
+fn unsupported_create_ddl_never_loses_remaining_envelope_semantics() {
     for (sql, expected) in [
-        ("CREATE TEMP TABLE temp_t (id INTEGER)", "TEMPORARY"),
-        ("CREATE UNLOGGED TABLE unlogged_t (id INTEGER)", "UNLOGGED"),
         (
             "CREATE TABLE inherited (id INTEGER) INHERITS (parent)",
             "INHERITS",
@@ -291,25 +371,18 @@ fn unsupported_create_ddl_never_loses_lifecycle_semantics() {
             "CREATE SCHEMA bundled CREATE TABLE child (id INTEGER)",
             "schema elements",
         ),
-        ("CREATE TEMP VIEW temp_v AS SELECT 1", "TEMPORARY"),
         (
-            "CREATE VIEW checked AS SELECT 1 WITH LOCAL CHECK OPTION",
-            "CHECK OPTION",
+            "CREATE UNLOGGED VIEW unlogged_v AS SELECT 1",
+            "cannot be unlogged",
         ),
         (
-            "CREATE VIEW optioned_v WITH (security_barrier = true) AS SELECT 1",
-            "options",
+            "CREATE TEMP MATERIALIZED VIEW materialized AS SELECT 1",
+            "syntax error",
         ),
-        (
-            "CREATE MATERIALIZED VIEW materialized AS SELECT 1",
-            "MATERIALIZED VIEW",
-        ),
-        ("CREATE TEMP TABLE temp_as AS SELECT 1", "TEMPORARY"),
-        ("CREATE TEMP SEQUENCE temp_sequence", "TEMPORARY"),
     ] {
         let error = compile(sql).expect_err(sql);
         assert!(
-            matches!(&error, SQLError::Unsupported(message) if message.contains(expected)),
+            error.to_string().contains(expected),
             "unexpected error for {sql}: {error}"
         );
     }

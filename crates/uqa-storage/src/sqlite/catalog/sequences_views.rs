@@ -30,15 +30,16 @@ impl Catalog {
             Self::claim_relation(&tx, &sequence.relation, RelationKind::Sequence)?;
             tx.execute(
                 "INSERT INTO _sequences
-                    (schema_name, relation_name, kind, start, increment, current, called)
-                 VALUES (?1, ?2, 'sequence', ?3, ?4, ?5, ?6)",
+                    (schema_name, relation_name, kind, start, increment, current, called, persistence)
+                 VALUES (?1, ?2, 'sequence', ?3, ?4, ?5, ?6, ?7)",
                 params![
                     sequence.relation.schema,
                     sequence.relation.name,
                     sequence.start,
                     sequence.increment,
                     sequence.current,
-                    sequence.called
+                    sequence.called,
+                    sequence.persistence
                 ],
             )?;
             tx.commit()?;
@@ -50,7 +51,7 @@ impl Catalog {
         self.conn.with(|connection| {
             Ok(connection.execute(
                 "UPDATE _sequences
-                    SET start = ?3, increment = ?4, current = ?5, called = ?6
+                    SET start = ?3, increment = ?4, current = ?5, called = ?6, persistence = ?7
                   WHERE schema_name = ?1 AND relation_name = ?2",
                 params![
                     sequence.relation.schema,
@@ -58,7 +59,8 @@ impl Catalog {
                     sequence.start,
                     sequence.increment,
                     sequence.current,
-                    sequence.called
+                    sequence.called,
+                    sequence.persistence
                 ],
             )? != 0)
         })
@@ -84,7 +86,7 @@ impl Catalog {
     pub fn load_sequence_rows(&self) -> Result<Vec<SequenceRow>> {
         self.conn.with(|connection| {
             let mut statement = connection.prepare(
-                "SELECT schema_name, relation_name, start, increment, current, called
+                "SELECT schema_name, relation_name, start, increment, current, called, persistence
                        FROM _sequences ORDER BY schema_name, relation_name",
             )?;
             let rows = statement.query_map([], |row| {
@@ -97,6 +99,7 @@ impl Catalog {
                     increment: row.get(3)?,
                     current: row.get(4)?,
                     called: row.get(5)?,
+                    persistence: row.get(6)?,
                 })
             })?;
             let mut sequences = Vec::new();

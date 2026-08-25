@@ -12,12 +12,29 @@ use super::{ddl_storage_error, ColumnType, Document, Engine, SQLError, SQLParam,
 
 const POSTGRES_SYSTEM_COLUMNS: [&str; 6] = ["tableoid", "xmin", "cmin", "xmax", "cmax", "ctid"];
 
+pub(in crate::sql) struct CreateTableAsExecution<'a> {
+    pub name: &'a str,
+    pub if_not_exists: bool,
+    pub column_names: &'a [String],
+    pub with_no_data: bool,
+    pub persistence: uqa_sql::ast::RelationPersistence,
+    pub on_commit: uqa_sql::ast::OnCommitAction,
+    pub query: &'a uqa_planner::QueryPlan,
+    pub params: &'a [SQLParam],
+}
+
 pub(in crate::sql) fn run_create_sequence(
     engine: &Engine,
     s: uqa_sql::ast::CreateSequence,
 ) -> Result<SQLResult, SQLError> {
     engine
-        .create_sequence(&s.name, s.start, s.increment, s.if_not_exists)
+        .create_sequence_with_persistence(
+            &s.name,
+            s.start,
+            s.increment,
+            s.if_not_exists,
+            s.persistence,
+        )
         .map_err(SQLError::Unsupported)?;
     Ok(SQLResult::empty())
 }
@@ -34,67 +51,86 @@ pub(in crate::sql) fn run_alter_sequence(
 
 pub(in crate::sql) fn run_create_table_as(
     engine: &Engine,
-    name: String,
-    if_not_exists: bool,
-    column_names: &[String],
-    with_no_data: bool,
-    query: &uqa_planner::QueryPlan,
-    params: &[SQLParam],
+    execution: CreateTableAsExecution<'_>,
 ) -> Result<SQLResult, SQLError> {
     if engine.transaction_depth() != 0 {
-        run_create_table_as_inner(
-            engine,
-            name,
-            if_not_exists,
-            column_names,
-            with_no_data,
-            query,
-            params,
-        )
+        run_create_table_as_inner(engine, &execution)
     } else {
-        engine.transaction(move |engine| {
-            run_create_table_as_inner(
-                engine,
-                name,
-                if_not_exists,
-                column_names,
-                with_no_data,
-                query,
-                params,
-            )
-        })
+        engine.transaction(move |engine| run_create_table_as_inner(engine, &execution))
     }
 }
 
 fn run_create_table_as_inner(
     engine: &Engine,
-    name: String,
-    if_not_exists: bool,
-    column_names: &[String],
-    with_no_data: bool,
-    query: &uqa_planner::QueryPlan,
-    params: &[SQLParam],
+    execution: &CreateTableAsExecution<'_>,
 ) -> Result<SQLResult, SQLError> {
     let ctes = crate::sql::select::CteScope::new();
-    let query_schema =
-        crate::sql::select::analyze_query_plan_schema(engine, query, params, &ctes, None)?;
-    if engine
-        .try_has_table(&name)
-        .map_err(|err| ddl_storage_error("CREATE TABLE AS", err))?
-    {
-        if if_not_exists {
+    let mut query_schema = execution
+        .with_no_data
+        .then(|| {
+            crate::sql::select::analyze_query_plan_schema(
+                engine,
+                execution.query,
+                execution.params,
+                &ctes,
+                None,
+            )
+        })
+        .transpose()?;
+    let preliminary_name = create_table_as_target_name(engine, execution);
+    if let Ok(name) = &preliminary_name {
+        if should_skip_existing_create_table_as(engine, name, execution.if_not_exists)? {
             return Ok(SQLResult::empty());
         }
-        return Err(SQLError::Routine {
-            sqlstate: "42P07".into(),
-            message: format!("relation \"{name}\" already exists"),
-        });
     }
-    let columns = create_table_as_columns(&query_schema, column_names)?;
-    let result = if with_no_data {
+    // A locking source must acquire and recheck every tuple before this session promotes its deferred backend transaction. Promoting first would invert the global writer and tuple-lock order against a concurrent updater. The target is checked again after promotion so a concurrent relation create still wins atomically.
+    let locking_result =
+        if !execution.with_no_data && crate::sql::select::query_has_row_locks(execution.query) {
+            query_schema = Some(crate::sql::select::analyze_query_plan_schema(
+                engine,
+                execution.query,
+                execution.params,
+                &ctes,
+                None,
+            )?);
+            Some(crate::sql::select::execute_query_plan(
+                engine,
+                execution.query,
+                execution.params,
+            )?)
+        } else {
+            None
+        };
+    if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+        engine.prepare_explicit_transaction_writer()?;
+    }
+    let name = create_table_as_target_name(engine, execution)?;
+    if should_skip_existing_create_table_as(engine, &name, execution.if_not_exists)? {
+        return Ok(SQLResult::empty());
+    }
+    let query_schema = match query_schema {
+        Some(schema) => schema,
+        None => crate::sql::select::analyze_query_plan_schema(
+            engine,
+            execution.query,
+            execution.params,
+            &ctes,
+            None,
+        )?,
+    };
+    let columns = create_table_as_columns(&query_schema, execution.column_names)?;
+    let result = if execution.with_no_data {
         None
+    } else if let Some(result) = locking_result {
+        Some(result)
     } else {
-        let result = crate::sql::select::execute_query_plan(engine, query, params)?;
+        Some(crate::sql::select::execute_query_plan(
+            engine,
+            execution.query,
+            execution.params,
+        )?)
+    };
+    if let Some(result) = &result {
         if result.columns.len() != columns.len() {
             return Err(SQLError::Internal(format!(
                 "CREATE TABLE AS query schema width {} changed to {} during execution",
@@ -102,23 +138,66 @@ fn run_create_table_as_inner(
                 result.columns.len()
             )));
         }
-        Some(result)
-    };
-    create_table_as_relation(engine, &name, &columns)?;
+    }
+    create_table_as_relation(
+        engine,
+        &name,
+        &columns,
+        execution.persistence,
+        execution.on_commit,
+    )?;
     let affected = result.as_ref().map_or(Ok(0), |result| {
         materialize_create_table_as_rows(engine, &name, &columns, result)
     })?;
     Ok(SQLResult::from_affected(affected))
 }
 
+fn create_table_as_target_name(
+    engine: &Engine,
+    execution: &CreateTableAsExecution<'_>,
+) -> Result<String, SQLError> {
+    if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {
+        engine
+            .try_temporary_relation_name_for_create(execution.name)
+            .map_err(SQLError::Unsupported)
+    } else {
+        engine
+            .try_relation_name_for_create(execution.name)
+            .map_err(SQLError::Unsupported)
+    }
+}
+
+fn should_skip_existing_create_table_as(
+    engine: &Engine,
+    name: &str,
+    if_not_exists: bool,
+) -> Result<bool, SQLError> {
+    if engine
+        .relation_kind_at(name)
+        .map_err(|err| ddl_storage_error("CREATE TABLE AS", err))?
+        .is_none()
+    {
+        return Ok(false);
+    }
+    if if_not_exists {
+        return Ok(true);
+    }
+    Err(SQLError::Routine {
+        sqlstate: "42P07".into(),
+        message: format!("relation \"{name}\" already exists"),
+    })
+}
+
 fn create_table_as_relation(
     engine: &Engine,
     name: &str,
     columns: &[uqa_sql::ast::ColumnDef],
+    persistence: uqa_sql::ast::RelationPersistence,
+    on_commit: uqa_sql::ast::OnCommitAction,
 ) -> Result<(), SQLError> {
     let analyzer = uqa_analysis::analyzer::standard_analyzer("english");
     engine
-        .create_table(name.to_owned(), analyzer, Vec::new())
+        .create_table_with_lifecycle(name, analyzer, Vec::new(), persistence, on_commit)
         .map_err(|err| ddl_storage_error("CREATE TABLE AS", err))?;
     for column in columns {
         if let ColumnType::Vector(dimensions) | ColumnType::Tensor(dimensions) = column.ty {

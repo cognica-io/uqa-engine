@@ -107,7 +107,9 @@ fn reorder_command_joins(
                 reorder_query_joins(subquery, statistics)?;
             }
         }
-        CommandPlan::CreateView { query, .. } | CommandPlan::CreateTableAs { query, .. } => {
+        CommandPlan::CreateView { query, .. }
+        | CommandPlan::CreateMaterializedView { query, .. }
+        | CommandPlan::CreateTableAs { query, .. } => {
             reorder_query_joins(query, statistics)?;
         }
         CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
@@ -123,7 +125,9 @@ fn reorder_command_joins(
         CommandPlan::CreateTable(_)
         | CommandPlan::CreateIndex(_)
         | CommandPlan::Drop(_)
+        | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::AlterTable(_)
+        | CommandPlan::AlterViewOptions(_)
         | CommandPlan::CreateSchema { .. }
         | CommandPlan::SetVariable { .. }
         | CommandPlan::ShowVariable { .. }

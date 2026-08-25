@@ -142,6 +142,9 @@ pub(super) fn all_schema_names(engine: &Engine) -> Result<Vec<String>, SQLError>
             .map_err(|err| SQLError::Internal(format!("read schema catalog: {err}")))?,
     );
     schemas.extend(super::ag_catalog::age_namespace_names(engine)?);
+    if engine.has_temporary_relations() {
+        schemas.push(engine.temporary_schema_name());
+    }
     schemas.sort();
     schemas.dedup();
     Ok(schemas)

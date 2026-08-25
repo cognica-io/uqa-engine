@@ -7,6 +7,7 @@
 //! Qualified-name rendering and durable relation-envelope validation.
 
 use super::{extract_string, Node, RangeVar, Result, SQLError};
+use crate::ast::{OnCommitAction, RelationPersistence};
 
 pub(crate) fn range_var_name(r: &RangeVar) -> String {
     if r.schemaname.is_empty() {
@@ -24,37 +25,61 @@ pub(crate) fn range_var_name(r: &RangeVar) -> String {
 /// represent.  `PostgreSQL` records temporary/unlogged persistence separately;
 /// silently storing either as a permanent relation would change restart
 /// semantics.
-pub(crate) fn validate_durable_create_relation(relation: &RangeVar, statement: &str) -> Result<()> {
+pub(crate) fn relation_persistence(
+    relation: &RangeVar,
+    statement: &str,
+) -> Result<RelationPersistence> {
     if !relation.catalogname.is_empty() {
         return Err(SQLError::Unsupported(format!(
             "{statement}: cross-database relation names are not supported"
         )));
     }
     match relation.relpersistence.as_str() {
-        "" | "p" => Ok(()),
-        "t" => Err(SQLError::Unsupported(format!(
-            "{statement}: TEMPORARY relations are not supported"
-        ))),
-        "u" => Err(SQLError::Unsupported(format!(
-            "{statement}: UNLOGGED relations are not supported"
-        ))),
+        "" | "p" => Ok(RelationPersistence::Permanent),
+        "t" => Ok(RelationPersistence::Temporary),
+        "u" => Ok(RelationPersistence::Unlogged),
         other => Err(SQLError::Unsupported(format!(
             "{statement}: relation persistence `{other}` is not supported"
         ))),
     }
 }
 
+pub(crate) fn compile_on_commit(
+    action: pg_query::protobuf::OnCommitAction,
+    persistence: RelationPersistence,
+    statement: &str,
+) -> Result<OnCommitAction> {
+    use pg_query::protobuf::OnCommitAction as PgOnCommitAction;
+
+    if persistence != RelationPersistence::Temporary
+        && !matches!(
+            action,
+            PgOnCommitAction::Undefined | PgOnCommitAction::OncommitNoop
+        )
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "42P16".into(),
+            message: format!("ON COMMIT can only be used on temporary tables in {statement}"),
+        });
+    }
+    Ok(match action {
+        PgOnCommitAction::Undefined
+        | PgOnCommitAction::OncommitNoop
+        | PgOnCommitAction::OncommitPreserveRows => OnCommitAction::PreserveRows,
+        PgOnCommitAction::OncommitDeleteRows => OnCommitAction::DeleteRows,
+        PgOnCommitAction::OncommitDrop => OnCommitAction::Drop,
+    })
+}
+
 pub(crate) fn validate_create_table_envelope(
     stmt: &pg_query::protobuf::CreateStmt,
     statement: &str,
 ) -> Result<()> {
-    use pg_query::protobuf::OnCommitAction;
-
     let relation = stmt
         .relation
         .as_ref()
         .ok_or_else(|| SQLError::Internal(format!("{statement} without relation")))?;
-    validate_durable_create_relation(relation, statement)?;
+    let persistence = relation_persistence(relation, statement)?;
     if !stmt.inh_relations.is_empty() {
         return Err(SQLError::Unsupported(format!(
             "{statement}: INHERITS is not supported"
@@ -80,14 +105,7 @@ pub(crate) fn validate_create_table_envelope(
             "{statement}: table storage options are not supported"
         )));
     }
-    if !matches!(
-        stmt.oncommit(),
-        OnCommitAction::Undefined | OnCommitAction::OncommitNoop
-    ) {
-        return Err(SQLError::Unsupported(format!(
-            "{statement}: ON COMMIT is not supported"
-        )));
-    }
+    compile_on_commit(stmt.oncommit(), persistence, statement)?;
     if !stmt.tablespacename.is_empty() {
         return Err(SQLError::Unsupported(format!(
             "{statement}: TABLESPACE is not supported"

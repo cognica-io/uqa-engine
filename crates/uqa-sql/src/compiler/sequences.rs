@@ -6,7 +6,7 @@
 
 //! CREATE/ALTER SEQUENCE lowering and option validation.
 
-use super::{range_var_name, validate_durable_create_relation, NodeEnum, Result, SQLError};
+use super::{range_var_name, relation_persistence, NodeEnum, Result, SQLError};
 
 pub(super) fn compile_create_sequence(
     stmt: &pg_query::protobuf::CreateSeqStmt,
@@ -16,7 +16,7 @@ pub(super) fn compile_create_sequence(
         .sequence
         .as_ref()
         .ok_or_else(|| SQLError::Internal("CREATE SEQUENCE without name".into()))?;
-    validate_durable_create_relation(relation, "CREATE SEQUENCE")?;
+    let persistence = relation_persistence(relation, "CREATE SEQUENCE")?;
     if stmt.owner_id != 0 || stmt.for_identity {
         return Err(SQLError::Unsupported(
             "CREATE SEQUENCE: identity-owned sequences are not supported".into(),
@@ -51,6 +51,7 @@ pub(super) fn compile_create_sequence(
         // descending sequences.
         start: start.unwrap_or(if increment > 0 { 1 } else { -1 }),
         increment,
+        persistence,
     })
 }
 

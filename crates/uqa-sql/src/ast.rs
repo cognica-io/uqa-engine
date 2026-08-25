@@ -17,6 +17,7 @@ mod expressions;
 mod from;
 mod locking;
 mod ranges;
+mod relation_lifecycle;
 
 pub use constraints::*;
 pub use cte::*;
@@ -24,6 +25,7 @@ pub use expressions::*;
 pub use from::*;
 pub use locking::*;
 pub use ranges::*;
+pub use relation_lifecycle::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ColumnType {
@@ -504,6 +506,7 @@ pub enum DropKind {
     Table,
     Index,
     View,
+    MaterializedView,
     Schema,
 }
 
@@ -1092,6 +1095,7 @@ pub enum Statement {
     Delete(DeleteStmt),
     Drop(DropStmt),
     AlterTable(AlterTableStmt),
+    AlterViewOptions(AlterViewOptionsStmt),
     /// `CREATE [OR REPLACE] VIEW name [(column_name, ...)] AS SELECT ...`. The body is the underlying `SelectStmt`; views are materialised lazily on every reference (no row caching).
     CreateView {
         name: String,
@@ -1099,6 +1103,30 @@ pub enum Statement {
         column_names: Vec<String>,
         body: Box<SelectStmt>,
         or_replace: bool,
+        #[serde(default)]
+        persistence: RelationPersistence,
+        /// Validated `PostgreSQL` view reloptions in declaration order.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        options: Vec<(String, String)>,
+    },
+    /// `CREATE MATERIALIZED VIEW ... AS SELECT ... [WITH [NO] DATA]`.
+    CreateMaterializedView {
+        name: String,
+        #[serde(default)]
+        column_names: Vec<String>,
+        #[serde(default)]
+        if_not_exists: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        with_no_data: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        options: Vec<(String, String)>,
+        body: Box<SelectStmt>,
+    },
+    /// `REFRESH MATERIALIZED VIEW [CONCURRENTLY] name [WITH [NO] DATA]`.
+    RefreshMaterializedView {
+        name: String,
+        concurrently: bool,
+        with_no_data: bool,
     },
     /// `CREATE SCHEMA [IF NOT EXISTS] name`. This AST entry records the
     /// command for the engine's durable schema catalog and namespace
@@ -1120,9 +1148,7 @@ pub enum Statement {
         name: String,
     },
     /// `DISCARD [ALL|PLANS|SEQUENCES|TEMP|TEMPORARY]` - clear session state.
-    /// The engine resets
-    /// session vars, prepared statements and sequences. `TEMP` is rejected
-    /// until temporary tables are supported instead of being silently ignored.
+    /// The engine resets session variables, prepared statements, sequence state, and the current session's temporary relations as requested.
     Discard {
         target: DiscardTarget,
     },
@@ -1166,6 +1192,10 @@ pub enum Statement {
         column_names: Vec<String>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         with_no_data: bool,
+        #[serde(default)]
+        persistence: RelationPersistence,
+        #[serde(default)]
+        on_commit: OnCommitAction,
         body: Box<SelectStmt>,
     },
     /// `PREPARE name AS <inner>`.
@@ -1272,70 +1302,6 @@ pub struct CreateForeignTable {
     pub columns: Vec<ColumnDef>,
     pub options: Vec<(String, String)>,
     pub if_not_exists: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateSequence {
-    pub name: String,
-    pub if_not_exists: bool,
-    pub start: i64,
-    pub increment: i64,
-}
-
-/// Physical restart action carried by `ALTER SEQUENCE`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SequenceRestart {
-    /// No `RESTART` clause was specified.
-    #[default]
-    Unchanged,
-    /// Bare `RESTART`; allocate the configured start value next.
-    FromStart,
-    /// `RESTART WITH value`; allocate the supplied value next.
-    With(i64),
-}
-
-fn deserialize_sequence_restart<'de, D>(deserializer: D) -> Result<SequenceRestart, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    enum Current {
-        Unchanged,
-        FromStart,
-        With(i64),
-    }
-
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Representation {
-        Current(Current),
-        // Before SequenceRestart existed this field was
-        // Option<Option<i64>>, serialized as null or an integer.
-        Legacy(Option<i64>),
-    }
-
-    Ok(match Representation::deserialize(deserializer)? {
-        Representation::Current(Current::Unchanged) | Representation::Legacy(None) => {
-            SequenceRestart::Unchanged
-        }
-        Representation::Current(Current::FromStart) => SequenceRestart::FromStart,
-        Representation::Current(Current::With(value)) | Representation::Legacy(Some(value)) => {
-            SequenceRestart::With(value)
-        }
-    })
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct AlterSequence {
-    pub name: String,
-    /// `ALTER SEQUENCE IF EXISTS` suppresses only a missing sequence.
-    #[serde(default)]
-    pub if_exists: bool,
-    /// `RESTART [WITH n]`, preserving omitted, bare, and explicit forms.
-    #[serde(default, deserialize_with = "deserialize_sequence_restart")]
-    pub restart: SequenceRestart,
-    pub increment: Option<i64>,
-    pub start: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

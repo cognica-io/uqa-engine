@@ -30,17 +30,18 @@ Relational operators keep static row schemas until the final consumer. Spill for
 
 ## Open PostgreSQL 18 relation-feature bugs
 
-- Temporary and unlogged tables, views, and sequences
+Temporary tables, views, sequences, CTAS, `SELECT INTO`, temporary-relation name resolution through `pg_temp`, automatic temporary views over temporary relations, all three temporary-table `ON COMMIT` actions, `DISCARD TEMP`, unlogged tables and sequences across clean reopen, ordinary materialized views and refresh, and validated view/materialized-view reloptions are implemented. Their catalog identity is exposed through `pg_namespace`, `pg_class`, `pg_attribute`, and the applicable `pg_views`, `pg_matviews`, or `pg_sequences` view.
+
+- Unlogged-relation reset after crash recovery
 - Table inheritance and partitioning
 - Typed tables
 - Table storage parameters and tablespaces
 - Table `USING` access methods
-- `ON COMMIT` table behavior
 - Cross-database relation or routine names
-- Materialized views
-- View options and `WITH CHECK OPTION`
+- Temporary and unlogged materialized views, concurrent refresh, materialized-view indexes, access methods, and tablespaces
+- Complete privilege and optimizer effects for `security_invoker` and `security_barrier`, and updatable-view enforcement for `WITH CHECK OPTION`
 
-These forms currently fail during compilation without creating a partial object. That failure is fail-safe behavior while implementation is incomplete, not a compatibility exemption.
+Unsupported forms fail before catalog mutation. That failure is fail-safe behavior while implementation is incomplete, not a compatibility exemption.
 
 ## Open PostgreSQL 18 query-clause bugs
 
@@ -83,7 +84,7 @@ The virtual catalogs expose engine metadata needed by supported clients and test
 
 Known mutable settings are `search_path`, `client_encoding`, `datestyle`, `timezone`, and `work_mem`. Unknown or unsupported settings return an error rather than becoming ignored server configuration.
 
-`DISCARD TEMP` is rejected because temporary relations are unavailable.
+`DISCARD TEMP` removes the current session's temporary tables, views, sequences, and sequence state, and is rejected inside a transaction as PostgreSQL requires.
 
 `LOAD` accepts the Apache AGE library names (`age`, `age.so`, `$libdir/age`, `$libdir/age.so`) as no-ops because the AGE surface is embedded; every other library fails as a missing `$libdir` file because the engine loads no shared objects.
 

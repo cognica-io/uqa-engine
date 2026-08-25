@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 ```
 
-Implemented table properties include columns, defaults, generated serial values, virtual and stored generated columns, nullability, key constraints, checks, foreign keys, and vector or tensor dimensions. Temporary, unlogged, inherited, partitioned, typed, or tablespace-bound relations are not implemented.
+Implemented table properties include columns, defaults, generated serial values, virtual and stored generated columns, nullability, key constraints, checks, foreign keys, and vector or tensor dimensions. `TEMP` and `TEMPORARY` tables live in the session's `pg_temp` namespace, are omitted from durable storage, and support `ON COMMIT PRESERVE ROWS`, `ON COMMIT DELETE ROWS`, and `ON COMMIT DROP`; the drop action removes dependent temporary views and foreign-key links with PostgreSQL's internal cascade semantics. `DISCARD TEMP` removes the session's temporary tables, views, and sequences outside a transaction. `UNLOGGED` tables retain their catalog identity and rows across a clean reopen, although PostgreSQL crash-recovery truncation semantics remain unimplemented. Inherited, partitioned, typed, storage-parameterized, access-method-selected, or tablespace-bound tables are not implemented.
 
 ## Generated columns
 
@@ -250,7 +250,9 @@ WHERE state = 'pending';
 DROP VIEW open_orders;
 ```
 
-An optional view column-name list renames query outputs positionally and may name only a leading subset. It cannot contain more names than the query returns, the final names must be unique, and quoted names retain their exact spelling. `CREATE OR REPLACE VIEW` must preserve the name and declared type of every existing column in order, but it may append columns at the end. Creation analyzes the query without executing it, then validates the column list and target relation; the durable definition retains the fixed public names across nested views, transactions, and reopen. Materialized views, view storage options, and `WITH CHECK OPTION` are not implemented.
+An optional view column-name list renames query outputs positionally and may name only a leading subset. It cannot contain more names than the query returns, the final names must be unique, and quoted names retain their exact spelling. `CREATE OR REPLACE VIEW` must preserve the name and declared type of every existing column in order, but it may append columns at the end. Creation analyzes the query without executing it, then validates the column list and target relation; the durable definition retains the fixed public names across nested views, transactions, and reopen. `TEMP` and `TEMPORARY` views are session-local, and a view over a temporary table or view becomes temporary as in PostgreSQL. View options `security_barrier`, `security_invoker`, and `check_option`, including `WITH [LOCAL | CASCADED] CHECK OPTION`, are validated, retained in `pg_class.reloptions`, and may be changed with `ALTER VIEW ... SET/RESET`; complete privilege, optimizer-security-barrier, and updatable-view check enforcement remain open.
+
+`CREATE MATERIALIZED VIEW` stores a query snapshot, supports `WITH [NO] DATA`, persists its rows and static schema across reopen, and remains stale until `REFRESH MATERIALIZED VIEW [WITH [NO] DATA]`. `pg_class` exposes relation kind `m`, population state, persistence, and reloptions, while `pg_matviews` exposes the implemented materialized-view metadata. The supported materialized-view option is `fillfactor`, including `ALTER MATERIALIZED VIEW ... SET/RESET`; temporary and unlogged materialized views, concurrent refresh, materialized-view indexes, access methods, tablespaces, and dependencies on temporary relations are not implemented.
 
 ## CREATE TABLE AS
 
@@ -261,7 +263,7 @@ FROM orders
 WHERE state = 'pending';
 ```
 
-CTAS creates and populates a table from a query, preserves the query's declared output types for implemented SQL types, and creates nullable columns without copying source constraints. An optional column-name list replaces output names positionally and may be shorter than the query output, in which case remaining names come from the query; quoted case is preserved. More names than output columns raise `42601`, while duplicate names and PostgreSQL system-column names raise `42701`, before the query is executed. `WITH NO DATA` creates and durably persists the same typed schema, including vector and tensor field metadata, without evaluating row-producing expressions or volatile functions; relation, column, function, type-input, and column-name-list analysis still occurs in PostgreSQL order. Top-level `SELECT ... INTO [TABLE] name` creates the same ordinary durable table and executes the query; PL/pgSQL `SELECT ... INTO` remains variable assignment. Temporary persistence, storage options, access methods, `ON COMMIT`, and tablespaces are not implemented.
+CTAS creates and populates a table from a query, preserves the query's declared output types for implemented SQL types, and creates nullable columns without copying source constraints. An optional column-name list replaces output names positionally and may be shorter than the query output, in which case remaining names come from the query; quoted case is preserved. More names than output columns raise `42601`, while duplicate names and PostgreSQL system-column names raise `42701`, before the query is executed. `WITH NO DATA` creates and durably persists the same typed schema, including vector and tensor field metadata, without evaluating row-producing expressions or volatile functions; relation, column, function, type-input, and column-name-list analysis still occurs in PostgreSQL order. CTAS supports ordinary, temporary, and unlogged targets, and temporary targets support all three `ON COMMIT` actions. Top-level `SELECT ... INTO [TEMPORARY | TEMP | UNLOGGED] [TABLE] name` creates the same corresponding table and executes the query; PL/pgSQL `SELECT ... INTO` remains variable assignment. Storage options, access methods, and tablespaces are not implemented.
 
 ## Sequences
 
@@ -273,7 +275,7 @@ SELECT setval('ticket_ids', 2000);
 ALTER SEQUENCE ticket_ids RESTART WITH 3000;
 ```
 
-`CREATE SEQUENCE` supports start and increment. `ALTER SEQUENCE` supports restart, increment, and start. SQL `DROP SEQUENCE` is not implemented; the Rust engine API provides `Engine::drop_sequence`. Minimum, maximum, cache, cycle, ownership, identity ownership, and temporary sequence clauses are not implemented.
+`CREATE SEQUENCE` supports start and increment for ordinary, temporary, and unlogged sequences. Temporary sequences live in `pg_temp`, participate in `DISCARD TEMP`, and do not survive a reopen; unlogged sequence state survives a clean reopen, while crash-recovery reset semantics remain open. `ALTER SEQUENCE` supports restart, increment, and start. SQL `DROP SEQUENCE` is not implemented; the Rust engine API provides `Engine::drop_sequence`. Minimum, maximum, cache, cycle, ownership, and identity ownership are not implemented.
 
 ## Foreign servers and tables
 
@@ -299,4 +301,4 @@ TRUNCATE TABLE staging_a, staging_b;
 DROP TABLE IF EXISTS staging_a;
 ```
 
-`TRUNCATE` removes all rows from its listed tables under a transaction boundary. SQL drop supports implemented table, index, view, schema, function, and procedure targets. Dependency-sensitive `CASCADE` forms fail rather than partially changing the catalog.
+`TRUNCATE` removes all rows from its listed tables under a transaction boundary. SQL drop supports implemented table, index, view, materialized-view, schema, function, and procedure targets. Relation-kind mismatches return PostgreSQL-compatible errors. Dependency-sensitive `CASCADE` forms fail rather than partially changing the catalog.

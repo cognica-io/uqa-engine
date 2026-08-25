@@ -740,6 +740,8 @@ impl Catalog {
                         Self::migrate_legacy_hnsw_aliases_v20(&tx)?;
                     } else if *version == 22 {
                         Self::migrate_clustered_postings_v22(&tx)?;
+                    } else if *version == 23 {
+                        Self::migrate_sequence_persistence_v23(&tx, sql)?;
                     } else if !schema_change_already_present && !sequence_called_already_present {
                         tx.execute_batch(sql)?;
                     }
@@ -755,6 +757,22 @@ impl Catalog {
             let fts_storage_was_reset = Self::ensure_fts_storage_shape(conn)?;
             Ok(fts_storage_was_reset)
         })
+    }
+
+    fn migrate_sequence_persistence_v23(
+        tx: &rusqlite::Transaction<'_>,
+        data_migration_sql: &str,
+    ) -> Result<()> {
+        let persistence_already_present = Self::table_columns(tx, "_sequences")?
+            .is_some_and(|columns| columns.contains_key("persistence"));
+        if !persistence_already_present {
+            tx.execute_batch(
+                "ALTER TABLE _sequences
+                    ADD COLUMN persistence TEXT NOT NULL DEFAULT 'p'
+                    CHECK (persistence IN ('p', 'u'));",
+            )?;
+        }
+        Ok(tx.execute_batch(data_migration_sql)?)
     }
 
     pub(super) fn migrate_relation_namespace_v17(tx: &rusqlite::Transaction<'_>) -> Result<()> {

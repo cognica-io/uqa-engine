@@ -16,7 +16,7 @@ use super::merge::compile_merge;
 use super::relations::{
     compile_create_foreign_server, compile_create_foreign_table, compile_create_schema,
     compile_create_table_as, compile_create_view, compile_deallocate, compile_execute,
-    compile_prepare, compile_top_level_select,
+    compile_prepare, compile_refresh_materialized_view, compile_top_level_select,
 };
 use super::routines::{compile_alter_routine, compile_call, compile_create_function, compile_do};
 use super::sequences::{compile_alter_sequence, compile_create_sequence};
@@ -64,7 +64,7 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::UpdateStmt(stmt) => compile_update(stmt).map(Statement::Update),
         NodeEnum::DeleteStmt(stmt) => compile_delete(stmt).map(Statement::Delete),
         NodeEnum::DropStmt(stmt) => compile_drop(stmt),
-        NodeEnum::AlterTableStmt(stmt) => compile_alter_table(stmt).map(Statement::AlterTable),
+        NodeEnum::AlterTableStmt(stmt) => compile_alter_table(stmt),
         NodeEnum::RenameStmt(stmt) => compile_rename(stmt).map(Statement::AlterTable),
         NodeEnum::ViewStmt(stmt) => compile_create_view(stmt),
         NodeEnum::CreateSchemaStmt(stmt) => compile_create_schema(stmt),
@@ -77,6 +77,7 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         }
         NodeEnum::AlterSeqStmt(stmt) => compile_alter_sequence(stmt).map(Statement::AlterSequence),
         NodeEnum::CreateTableAsStmt(stmt) => compile_create_table_as(stmt),
+        NodeEnum::RefreshMatViewStmt(stmt) => compile_refresh_materialized_view(stmt),
         NodeEnum::PrepareStmt(stmt) => compile_prepare(stmt),
         NodeEnum::ExecuteStmt(stmt) => compile_execute(stmt),
         NodeEnum::DeallocateStmt(stmt) => compile_deallocate(stmt),

@@ -28,7 +28,9 @@ pub(super) use alter_table::run_alter_table;
 pub(super) use create_index::run_create_index;
 pub(super) use create_table::run_create_table;
 pub(super) use drop::run_drop;
-pub(super) use sequence_ctas::{run_alter_sequence, run_create_sequence, run_create_table_as};
+pub(super) use sequence_ctas::{
+    run_alter_sequence, run_create_sequence, run_create_table_as, CreateTableAsExecution,
+};
 pub(super) use value_conversion::{
     coerce_to_column_type, column_type_name, core_value_to_json, json_table_arg,
     json_table_value_to_text, json_to_core_value, value_to_text,

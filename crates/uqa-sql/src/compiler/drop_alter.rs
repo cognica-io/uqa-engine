@@ -6,14 +6,18 @@
 
 //! DROP, ALTER TABLE, and RENAME lowering.
 
+use super::relations::{
+    collect_def_elem_options, validate_materialized_view_options, validate_view_options,
+};
 use super::routines::compile_drop_function;
 use super::types::{
     compile_foreign_key_action, compile_foreign_key_match, validate_foreign_key_set_columns,
 };
 use super::{
     compile_column_def, compile_expr, compile_pg_type_name, extract_string, range_var_name,
-    render_relation_component, AlterTableAction, AlterTableStmt, DropKind, DropStmt, NodeEnum,
-    Result, SQLError, Statement, TableKeyConstraint, TableKeyConstraintKind,
+    render_relation_component, AlterTableAction, AlterTableStmt, AlterViewKind,
+    AlterViewOptionsAction, AlterViewOptionsStmt, DropKind, DropStmt, Node, NodeEnum, Result,
+    SQLError, Statement, TableKeyConstraint, TableKeyConstraintKind,
 };
 use crate::ast::{ForeignKey, TableCheck};
 
@@ -27,6 +31,7 @@ pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statem
         ObjectType::ObjectTable => DropKind::Table,
         ObjectType::ObjectIndex => DropKind::Index,
         ObjectType::ObjectView => DropKind::View,
+        ObjectType::ObjectMatview => DropKind::MaterializedView,
         ObjectType::ObjectSchema => DropKind::Schema,
         ObjectType::ObjectFunction => return compile_drop_function(stmt, false),
         ObjectType::ObjectProcedure => return compile_drop_function(stmt, true),
@@ -52,7 +57,10 @@ pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statem
                 if parts.is_empty() {
                     return Err(SQLError::Internal("DROP target has no name".into()));
                 }
-                if matches!(kind, DropKind::Table | DropKind::View) {
+                if matches!(
+                    kind,
+                    DropKind::Table | DropKind::View | DropKind::MaterializedView
+                ) {
                     if parts.len() > 2 {
                         return Err(SQLError::Unsupported(
                             "cross-database DROP targets are not supported".into(),
@@ -93,10 +101,8 @@ pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statem
 // ALTER TABLE { ADD COLUMN | DROP COLUMN | RENAME COLUMN | RENAME TO }
 // -------------------------------------------------------------------------
 
-pub(super) fn compile_alter_table(
-    stmt: &pg_query::protobuf::AlterTableStmt,
-) -> Result<AlterTableStmt> {
-    use pg_query::protobuf::{AlterTableType, DropBehavior};
+pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> Result<Statement> {
+    use pg_query::protobuf::{AlterTableType, DropBehavior, ObjectType};
     let relation = stmt
         .relation
         .as_ref()
@@ -106,6 +112,69 @@ pub(super) fn compile_alter_table(
     let if_exists = stmt.missing_ok;
     if stmt.cmds.is_empty() {
         return Err(SQLError::Internal("ALTER TABLE without command".into()));
+    }
+    if matches!(
+        stmt.objtype(),
+        ObjectType::ObjectView | ObjectType::ObjectMatview
+    ) {
+        let [command] = stmt.cmds.as_slice() else {
+            return Err(SQLError::Unsupported(
+                "ALTER VIEW accepts one relation-options action at a time".into(),
+            ));
+        };
+        let inner = command
+            .node
+            .as_ref()
+            .ok_or_else(|| SQLError::Internal("ALTER VIEW command body empty".into()))?;
+        let NodeEnum::AlterTableCmd(cmd) = inner else {
+            return Err(SQLError::Unsupported(format!(
+                "ALTER VIEW command {inner:?}"
+            )));
+        };
+        let kind = match stmt.objtype() {
+            ObjectType::ObjectView => AlterViewKind::View,
+            ObjectType::ObjectMatview => AlterViewKind::MaterializedView,
+            _ => unreachable!("view kinds were checked above"),
+        };
+        let action = match cmd.subtype() {
+            AlterTableType::AtSetRelOptions => {
+                let nodes = alter_reloption_nodes(cmd)?;
+                let options = collect_def_elem_options(nodes)?;
+                let options = match kind {
+                    AlterViewKind::View => validate_view_options(
+                        options,
+                        pg_query::protobuf::ViewCheckOption::NoCheckOption,
+                    )?,
+                    AlterViewKind::MaterializedView => validate_materialized_view_options(options)?,
+                };
+                AlterViewOptionsAction::Set(options)
+            }
+            AlterTableType::AtResetRelOptions => {
+                let nodes = alter_reloption_nodes(cmd)?;
+                AlterViewOptionsAction::Reset(collect_reset_reloption_names(nodes, kind)?)
+            }
+            other => {
+                return Err(SQLError::Unsupported(format!(
+                    "ALTER {} action {other:?} is not supported",
+                    match kind {
+                        AlterViewKind::View => "VIEW",
+                        AlterViewKind::MaterializedView => "MATERIALIZED VIEW",
+                    }
+                )));
+            }
+        };
+        return Ok(Statement::AlterViewOptions(AlterViewOptionsStmt {
+            name: table,
+            kind,
+            if_exists,
+            action,
+        }));
+    }
+    if stmt.objtype() != ObjectType::ObjectTable {
+        return Err(SQLError::Unsupported(format!(
+            "ALTER target {:?} is not supported",
+            stmt.objtype()
+        )));
     }
     let mut actions = Vec::with_capacity(stmt.cmds.len());
     for command in &stmt.cmds {
@@ -397,12 +466,61 @@ pub(super) fn compile_alter_table(
         };
         actions.push(action);
     }
-    Ok(AlterTableStmt {
+    Ok(Statement::AlterTable(AlterTableStmt {
         table,
         qualifier,
         if_exists,
         actions,
-    })
+    }))
+}
+
+fn alter_reloption_nodes(cmd: &pg_query::protobuf::AlterTableCmd) -> Result<&[Node]> {
+    match cmd
+        .def
+        .as_deref()
+        .and_then(|definition| definition.node.as_ref())
+    {
+        Some(NodeEnum::List(list)) => Ok(&list.items),
+        other => Err(SQLError::Internal(format!(
+            "ALTER relation options expected a list, got {other:?}"
+        ))),
+    }
+}
+
+fn collect_reset_reloption_names(nodes: &[Node], kind: AlterViewKind) -> Result<Vec<String>> {
+    let mut names = Vec::with_capacity(nodes.len());
+    let mut seen = std::collections::BTreeSet::new();
+    for node in nodes {
+        let Some(NodeEnum::DefElem(option)) = node.node.as_ref() else {
+            return Err(SQLError::Internal(
+                "ALTER relation RESET contains a malformed option".into(),
+            ));
+        };
+        let name = option.defname.to_ascii_lowercase();
+        let recognized = match kind {
+            AlterViewKind::View => {
+                matches!(
+                    name.as_str(),
+                    "security_barrier" | "security_invoker" | "check_option"
+                )
+            }
+            AlterViewKind::MaterializedView => name == "fillfactor",
+        };
+        if !recognized {
+            return Err(SQLError::Routine {
+                sqlstate: "22023".into(),
+                message: format!("unrecognized parameter \"{name}\""),
+            });
+        }
+        if !seen.insert(name.clone()) {
+            return Err(SQLError::Routine {
+                sqlstate: "22023".into(),
+                message: format!("parameter \"{name}\" specified more than once"),
+            });
+        }
+        names.push(name);
+    }
+    Ok(names)
 }
 
 pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<AlterTableStmt> {

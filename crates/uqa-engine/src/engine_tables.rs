@@ -36,6 +36,8 @@ impl Engine {
             checks: table.table_checks.read().clone(),
             foreign_keys: table.foreign_keys.read().clone(),
             key_constraints: table.key_constraints.read().clone(),
+            persistence: table.persistence,
+            on_commit: table.on_commit,
         };
         self.try_save_table_schema_with_components(name, table, columns, &constraints)
     }
@@ -47,6 +49,9 @@ impl Engine {
         columns: &[uqa_sql::ast::ColumnDef],
         constraints: &uqa_sql::ast::TableConstraintSet,
     ) -> StorageBackendResult<()> {
+        if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
+            return Ok(());
+        }
         let Some(catalog) = self.storage.catalog.as_ref() else {
             return Ok(());
         };
@@ -100,7 +105,30 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         let raw_name = name.into();
         self.with_implicit_storage_transaction(move |engine| {
-            engine.create_table_inner(&raw_name, analyzer, fts_fields)
+            engine.create_table_inner(
+                &raw_name,
+                analyzer,
+                fts_fields,
+                uqa_sql::ast::RelationPersistence::Permanent,
+                uqa_sql::ast::OnCommitAction::PreserveRows,
+            )
+        })
+    }
+
+    pub(crate) fn create_table_with_lifecycle(
+        &self,
+        name: &str,
+        analyzer: Analyzer,
+        fts_fields: Vec<FieldName>,
+        persistence: uqa_sql::ast::RelationPersistence,
+        on_commit: uqa_sql::ast::OnCommitAction,
+    ) -> StorageBackendResult<()> {
+        if persistence == uqa_sql::ast::RelationPersistence::Temporary {
+            return self.create_table_inner(name, analyzer, fts_fields, persistence, on_commit);
+        }
+        let name = name.to_string();
+        self.with_implicit_storage_transaction(move |engine| {
+            engine.create_table_inner(&name, analyzer, fts_fields, persistence, on_commit)
         })
     }
 
@@ -109,10 +137,16 @@ impl Engine {
         raw_name: &str,
         analyzer: Analyzer,
         fts_fields: Vec<FieldName>,
+        persistence: uqa_sql::ast::RelationPersistence,
+        on_commit: uqa_sql::ast::OnCommitAction,
     ) -> StorageBackendResult<()> {
-        let name = self
-            .try_relation_name_for_create(raw_name)
-            .map_err(StorageBackendError::Other)?;
+        let name = if persistence == uqa_sql::ast::RelationPersistence::Temporary {
+            self.try_temporary_relation_name_for_create(raw_name)
+                .map_err(StorageBackendError::Other)?
+        } else {
+            self.try_relation_name_for_create(raw_name)
+                .map_err(StorageBackendError::Other)?
+        };
         let relation = Self::resolved_relation_identity(&name)?;
         if let Some(kind) = self.relation_kind_at(&name)? {
             return Err(StorageBackendError::Other(format!(
@@ -120,7 +154,12 @@ impl Engine {
             )));
         }
         let (docs, inv): (Box<dyn DocumentStore>, Box<dyn InvertedIndex>) =
-            if let Some(backend) = self.storage.backend.as_ref() {
+            if persistence == uqa_sql::ast::RelationPersistence::Temporary {
+                (
+                    Box::new(MemoryDocumentStore::new()),
+                    Box::new(MemoryInvertedIndex::new(analyzer.clone())),
+                )
+            } else if let Some(backend) = self.storage.backend.as_ref() {
                 (
                     backend.document_store(&name),
                     backend.inverted_index(&name, analyzer.clone()),
@@ -148,12 +187,17 @@ impl Engine {
             value_indexes: RwLock::new(BTreeMap::new()),
             doc_count_cache: std::sync::atomic::AtomicU64::new(0),
             doc_count_dirty: AtomicBool::new(true),
+            persistence,
+            on_commit,
         };
         let table_arc = Arc::new(table);
-        if self.is_persistent() {
+        if self.is_persistent() && persistence != uqa_sql::ast::RelationPersistence::Temporary {
             self.try_save_table_schema(&name, &table_arc)?;
         }
         self.storage.tables.write().insert(relation, table_arc);
+        if persistence == uqa_sql::ast::RelationPersistence::Temporary {
+            self.note_table_catalog_changed();
+        }
         Ok(())
     }
 
@@ -358,23 +402,42 @@ impl Engine {
         spec: VectorIndexSpec,
         mode: VectorIndexOpenMode,
     ) -> StorageBackendResult<Box<dyn VectorIndex>> {
-        if let Some(backend) = self.storage.backend.as_ref() {
+        // Callers pass the canonical name after resolving the table. Looking
+        // it up in the already-loaded registry is essential during catalog
+        // restoration: a normal `try_table` lookup would recursively enter
+        // catalog synchronization while its mutex is already held.
+        let relation =
+            RelationIdentity::from_legacy_name(table).map_err(StorageBackendError::Other)?;
+        let temporary = self
+            .storage
+            .tables
+            .read()
+            .get(&relation)
+            .is_some_and(|table| table.persistence == uqa_sql::ast::RelationPersistence::Temporary);
+        if temporary {
+            Self::memory_vector_index(dimensions, spec)
+        } else if let Some(backend) = self.storage.backend.as_ref() {
             backend.vector_index(table, field, dimensions, spec, mode)
         } else {
-            let index: Box<dyn VectorIndex> = match spec {
-                VectorIndexSpec::BruteForce => Box::new(MemoryVectorIndex::new(dimensions)),
-                VectorIndexSpec::IVF(params) => Box::new(IVFIndex::with_params(
-                    dimensions,
-                    params.nlist,
-                    params.nprobe,
-                    params.train_threshold,
-                )),
-                VectorIndexSpec::HNSW(params) => {
-                    Box::new(HNSWIndex::with_params(dimensions, params)?)
-                }
-            };
-            Ok(index)
+            Self::memory_vector_index(dimensions, spec)
         }
+    }
+
+    fn memory_vector_index(
+        dimensions: u32,
+        spec: VectorIndexSpec,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        let index: Box<dyn VectorIndex> = match spec {
+            VectorIndexSpec::BruteForce => Box::new(MemoryVectorIndex::new(dimensions)),
+            VectorIndexSpec::IVF(params) => Box::new(IVFIndex::with_params(
+                dimensions,
+                params.nlist,
+                params.nprobe,
+                params.train_threshold,
+            )),
+            VectorIndexSpec::HNSW(params) => Box::new(HNSWIndex::with_params(dimensions, params)?),
+        };
+        Ok(index)
     }
 
     fn backfill_vector_index(

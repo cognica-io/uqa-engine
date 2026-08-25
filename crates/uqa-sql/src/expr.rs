@@ -99,9 +99,9 @@ pub fn coercion_type_name(ty: &ColumnType) -> String {
 /// accepted here: lowering assigns them physical query-plan slots executed by
 /// `uqa-execution::ScalarSubqueryRunner`.
 pub trait EngineHook {
-    fn nextval(&self, name: &str) -> std::result::Result<i64, String>;
-    fn currval(&self, name: &str) -> std::result::Result<i64, String>;
-    fn setval(&self, name: &str, value: i64) -> std::result::Result<i64, String>;
+    fn nextval(&self, name: &str) -> Result<i64>;
+    fn currval(&self, name: &str) -> Result<i64>;
+    fn setval(&self, name: &str, value: i64) -> Result<i64>;
 
     fn call_scalar_function(&self, _name: &str, _args: &[Value]) -> Option<Result<Value>> {
         None

@@ -1,0 +1,124 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Relation persistence, view options, and sequence lifecycle nodes.
+
+use serde::{Deserialize, Serialize};
+
+/// `PostgreSQL`'s `pg_class.relpersistence` contract.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RelationPersistence {
+    #[default]
+    Permanent,
+    Unlogged,
+    Temporary,
+}
+
+impl RelationPersistence {
+    #[must_use]
+    pub const fn catalog_code(self) -> &'static str {
+        match self {
+            Self::Permanent => "p",
+            Self::Unlogged => "u",
+            Self::Temporary => "t",
+        }
+    }
+}
+
+/// `ON COMMIT` behavior retained with a temporary table definition.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OnCommitAction {
+    #[default]
+    PreserveRows,
+    DeleteRows,
+    Drop,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AlterViewKind {
+    View,
+    MaterializedView,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AlterViewOptionsAction {
+    Set(Vec<(String, String)>),
+    Reset(Vec<String>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AlterViewOptionsStmt {
+    pub name: String,
+    pub kind: AlterViewKind,
+    pub if_exists: bool,
+    pub action: AlterViewOptionsAction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateSequence {
+    pub name: String,
+    pub if_not_exists: bool,
+    pub start: i64,
+    pub increment: i64,
+    #[serde(default)]
+    pub persistence: RelationPersistence,
+}
+
+/// Physical restart action carried by `ALTER SEQUENCE`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SequenceRestart {
+    /// No `RESTART` clause was specified.
+    #[default]
+    Unchanged,
+    /// Bare `RESTART`; allocate the configured start value next.
+    FromStart,
+    /// `RESTART WITH value`; allocate the supplied value next.
+    With(i64),
+}
+
+fn deserialize_sequence_restart<'de, D>(deserializer: D) -> Result<SequenceRestart, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    enum Current {
+        Unchanged,
+        FromStart,
+        With(i64),
+    }
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Representation {
+        Current(Current),
+        // Before SequenceRestart existed this field was
+        // Option<Option<i64>>, serialized as null or an integer.
+        Legacy(Option<i64>),
+    }
+
+    Ok(match Representation::deserialize(deserializer)? {
+        Representation::Current(Current::Unchanged) | Representation::Legacy(None) => {
+            SequenceRestart::Unchanged
+        }
+        Representation::Current(Current::FromStart) => SequenceRestart::FromStart,
+        Representation::Current(Current::With(value)) | Representation::Legacy(Some(value)) => {
+            SequenceRestart::With(value)
+        }
+    })
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AlterSequence {
+    pub name: String,
+    /// `ALTER SEQUENCE IF EXISTS` suppresses only a missing sequence.
+    #[serde(default)]
+    pub if_exists: bool,
+    /// `RESTART [WITH n]`, preserving omitted, bare, and explicit forms.
+    #[serde(default, deserialize_with = "deserialize_sequence_restart")]
+    pub restart: SequenceRestart,
+    pub increment: Option<i64>,
+    pub start: Option<i64>,
+}

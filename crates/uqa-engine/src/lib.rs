@@ -136,7 +136,7 @@ pub use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions, SQLiteError}
 
 use engine_state::{
     DurableCatalogSnapshot, DurableCatalogState, EpochCoordinator, QueryRuntime, RuntimeExtensions,
-    SessionContext, StorageContext, StoredView,
+    SessionContext, StorageContext, StoredView, StoredViewKind,
 };
 use functions::RegisteredSQLFunction;
 pub use functions::{
@@ -494,6 +494,9 @@ pub(crate) struct TableState {
     /// by every write and recomputed on demand.
     doc_count_cache: std::sync::atomic::AtomicU64,
     doc_count_dirty: AtomicBool,
+    /// Immutable relation lifecycle attributes captured at creation.
+    persistence: uqa_sql::ast::RelationPersistence,
+    on_commit: uqa_sql::ast::OnCommitAction,
 }
 
 impl TableState {
@@ -701,14 +704,14 @@ impl uqa_sql::expr::EngineHook for Engine {
         crate::sql::resolve_regclass_oid(self, name)
     }
 
-    fn nextval(&self, name: &str) -> std::result::Result<i64, String> {
-        Engine::nextval(self, name)
+    fn nextval(&self, name: &str) -> std::result::Result<i64, SQLError> {
+        self.nextval_sql(name)
     }
-    fn currval(&self, name: &str) -> std::result::Result<i64, String> {
-        Engine::currval(self, name)
+    fn currval(&self, name: &str) -> std::result::Result<i64, SQLError> {
+        self.currval_sql(name)
     }
-    fn setval(&self, name: &str, value: i64) -> std::result::Result<i64, String> {
-        Engine::setval(self, name, value)
+    fn setval(&self, name: &str, value: i64) -> std::result::Result<i64, SQLError> {
+        self.setval_sql(name, value)
     }
     fn call_scalar_function(
         &self,

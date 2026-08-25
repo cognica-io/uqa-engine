@@ -63,6 +63,8 @@ impl Engine {
         }
         columns.push(column);
         let mut constraints = uqa_sql::ast::TableConstraintSet {
+            persistence: t.persistence,
+            on_commit: t.on_commit,
             checks: t.table_checks.read().clone(),
             foreign_keys: t.foreign_keys.read().clone(),
             key_constraints: t.key_constraints.read().clone(),

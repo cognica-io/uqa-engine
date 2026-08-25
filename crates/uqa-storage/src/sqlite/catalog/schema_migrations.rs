@@ -574,4 +574,17 @@ pub(super) const MIGRATIONS: &[(u32, &str)] = &[
     // shared binary format used by SQLite and redb without a temporary SQL
     // scalar function.
     (22, ""),
+    (
+        23,
+        r"
+    UPDATE _sequences
+       SET persistence = COALESCE(
+           (SELECT NULLIF(value, '')
+              FROM _metadata
+             WHERE key = 'sequence-persistence:' || _sequences.schema_name || '.' || _sequences.relation_name),
+           'p'
+       );
+    DELETE FROM _metadata WHERE key LIKE 'sequence-persistence:%';
+    ",
+    ),
 ];

@@ -11,15 +11,15 @@ use crate::ast::Expr;
 struct DomainCastHook;
 
 impl EngineHook for DomainCastHook {
-    fn nextval(&self, _name: &str) -> std::result::Result<i64, String> {
+    fn nextval(&self, _name: &str) -> Result<i64> {
         unreachable!("domain cast test does not call sequence functions")
     }
 
-    fn currval(&self, _name: &str) -> std::result::Result<i64, String> {
+    fn currval(&self, _name: &str) -> Result<i64> {
         unreachable!("domain cast test does not call sequence functions")
     }
 
-    fn setval(&self, _name: &str, _value: i64) -> std::result::Result<i64, String> {
+    fn setval(&self, _name: &str, _value: i64) -> Result<i64> {
         unreachable!("domain cast test does not call sequence functions")
     }
 
