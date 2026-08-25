@@ -43,7 +43,7 @@ pub(super) fn eval_sequence_function(
         });
     }
     let seq_name = value_to_string(&args[0]);
-    let result: std::result::Result<i64, String> = match name {
+    let value = match name {
         "nextval" => engine.nextval(&seq_name),
         "currval" => engine.currval(&seq_name),
         "setval" => {
@@ -51,9 +51,8 @@ pub(super) fn eval_sequence_function(
             engine.setval(&seq_name, n)
         }
         _ => unreachable!("sequence function name was validated above"),
-    };
-    let v = result.map_err(SQLError::Unsupported)?;
-    Ok(Value::Int(v))
+    }?;
+    Ok(Value::Int(value))
 }
 
 pub(super) fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {

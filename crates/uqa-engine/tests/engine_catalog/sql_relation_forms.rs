@@ -142,6 +142,55 @@ fn temporary_tables_apply_on_commit_actions_and_rollback_creation() {
     );
 }
 
+fn assert_temporary_catalog_identity(engine: &Engine) {
+    let persistence = engine
+        .sql(
+            "SELECT relname, relpersistence FROM pg_catalog.pg_class WHERE relname IN ('source', 'copied', 'visible', 'implicitly_temporary', 'local_ids') ORDER BY relname",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(persistence.rows.len(), 5);
+    assert!(persistence
+        .rows
+        .iter()
+        .all(|row| row["relpersistence"] == Value::Str("t".into())));
+    for sql in [
+        "SELECT count(*) AS n FROM pg_catalog.pg_namespace WHERE nspname LIKE 'pg_temp_%'",
+        "SELECT count(*) AS n FROM pg_catalog.pg_attribute AS a JOIN pg_catalog.pg_class AS c ON c.oid = a.attrelid WHERE c.relname = 'source' AND a.attname = 'id'",
+        "SELECT count(*) AS n FROM pg_catalog.pg_sequences WHERE sequencename = 'local_ids'",
+    ] {
+        assert_eq!(scalar(engine, sql, "n"), Value::Int(1), "{sql}");
+    }
+}
+
+fn assert_temporary_relations_are_session_local(database: &std::path::Path) {
+    let observer = Engine::open(database).unwrap();
+    for relation in ["source", "copied", "visible", "implicitly_temporary"] {
+        assert_eq!(
+            observer
+                .sql(&format!("SELECT * FROM {relation}"), &[])
+                .unwrap_err()
+                .sqlstate(),
+            Some("42P01")
+        );
+    }
+    assert_eq!(
+        observer
+            .sql("SELECT nextval('local_ids')", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("42P01")
+    );
+    assert_eq!(
+        scalar(
+            &observer,
+            "SELECT count(*) AS n FROM pg_catalog.pg_class WHERE relname IN ('source', 'copied', 'visible', 'implicitly_temporary', 'local_ids')",
+            "n",
+        ),
+        Value::Int(0)
+    );
+}
+
 #[test]
 fn temporary_table_view_sequence_and_ctas_are_session_local_and_discardable() {
     let directory = tempfile::tempdir().unwrap();
@@ -175,17 +224,8 @@ fn temporary_table_view_sequence_and_ctas_are_session_local_and_discardable() {
             scalar(&engine, "SELECT nextval('local_ids') AS id", "id"),
             Value::Int(9)
         );
-        let persistence = engine
-            .sql(
-                "SELECT relname, relpersistence FROM pg_catalog.pg_class WHERE relname IN ('source', 'copied', 'visible', 'implicitly_temporary', 'local_ids') ORDER BY relname",
-                &[],
-            )
-            .unwrap();
-        assert_eq!(persistence.rows.len(), 5);
-        assert!(persistence
-            .rows
-            .iter()
-            .all(|row| row["relpersistence"] == Value::Str("t".into())));
+        assert_temporary_catalog_identity(&engine);
+        assert_temporary_relations_are_session_local(&database);
         exec(&engine, "DISCARD TEMP");
         for relation in ["source", "copied", "visible", "implicitly_temporary"] {
             assert!(engine
@@ -375,6 +415,7 @@ fn relation_form_wrong_kind_and_option_errors_use_postgresql_states() {
         &engine,
         "CREATE MATERIALIZED VIEW materialized AS SELECT id FROM ordinary",
     );
+    exec(&engine, "CREATE SEQUENCE occupied_sequence");
     for (sql, state) in [
         ("REFRESH MATERIALIZED VIEW ordinary", "0A000"),
         ("DROP MATERIALIZED VIEW ordinary", "42809"),
@@ -382,10 +423,22 @@ fn relation_form_wrong_kind_and_option_errors_use_postgresql_states() {
         ("ALTER VIEW ordinary SET (security_barrier=true)", "42809"),
         ("ALTER VIEW plain SET (unknown_option=true)", "22023"),
         ("ALTER VIEW plain SET (security_barrier=maybe)", "22023"),
+        (
+            "CREATE TABLE plain AS SELECT * FROM relation_that_does_not_exist",
+            "42P07",
+        ),
+        (
+            "CREATE TABLE occupied_sequence AS SELECT * FROM relation_that_does_not_exist",
+            "42P07",
+        ),
     ] {
         let error = engine.sql(sql, &[]).unwrap_err();
         assert_eq!(error.sqlstate(), Some(state), "{sql}: {error}");
     }
+    exec(
+        &engine,
+        "CREATE TABLE IF NOT EXISTS plain AS SELECT * FROM relation_that_does_not_exist",
+    );
     exec(&engine, "DROP MATERIALIZED VIEW materialized");
     exec(&engine, "DROP VIEW plain");
 }

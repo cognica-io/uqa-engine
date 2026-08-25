@@ -114,13 +114,12 @@ pub(super) fn build_table_source_operator<'a>(
                             message: format!("materialized view \"{name}\" has not been populated"),
                         });
                     }
-                    let columns = view.output_columns.clone().unwrap_or_default();
-                    let scan: Box<dyn PhysicalOperator + 'a> =
-                        Box::new(uqa_execution::TableScan::from_typed_rows(
-                            columns.clone(),
-                            view.materialized_column_types.clone(),
-                            view.materialized_rows.clone(),
-                        ));
+                    let columns = view.output_columns.unwrap_or_default();
+                    let types = view.materialized_column_types;
+                    let rows = view.materialized_rows;
+                    let scan: Box<dyn PhysicalOperator + 'a> = Box::new(
+                        uqa_execution::TableScan::from_typed_rows(columns.clone(), types, rows),
+                    );
                     let operator = qualify_source_operator_with_columns(
                         scan,
                         &columns,

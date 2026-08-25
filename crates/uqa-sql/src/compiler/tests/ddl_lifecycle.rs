@@ -201,6 +201,10 @@ fn relation_forms_and_options_preserve_lifecycle_semantics() {
             ..
         }) if options == ["security_barrier"]
     ));
+    assert!(matches!(
+        compile("ALTER VIEW temp_v RENAME TO renamed").unwrap_err(),
+        SQLError::Unsupported(_)
+    ));
 }
 
 #[test]

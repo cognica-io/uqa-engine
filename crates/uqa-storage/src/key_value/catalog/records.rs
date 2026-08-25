@@ -94,8 +94,14 @@ pub(super) struct StoredSequence {
     pub(super) current: i64,
     #[serde(default = "legacy_sequence_called")]
     pub(super) called: bool,
+    #[serde(default = "legacy_sequence_persistence")]
+    pub(super) persistence: String,
 }
 
 pub(super) const fn legacy_sequence_called() -> bool {
     true
+}
+
+pub(super) fn legacy_sequence_persistence() -> String {
+    "p".into()
 }

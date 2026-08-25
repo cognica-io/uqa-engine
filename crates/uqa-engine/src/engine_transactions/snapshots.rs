@@ -86,7 +86,11 @@ impl Engine {
         self.clear_bayesian_params_cache();
         {
             let mut tables = self.storage.tables.write();
-            tables.retain(|name, _| snapshot.tables.contains_key(name));
+            tables.retain(|name, table| {
+                snapshot.tables.contains_key(name)
+                    || (self.storage.backend.is_some()
+                        && table.persistence != uqa_sql::ast::RelationPersistence::Temporary)
+            });
             for (name, table_snapshot) in &snapshot.tables {
                 tables
                     .entry(name.clone())

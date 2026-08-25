@@ -629,11 +629,18 @@ impl SchemaScope {
                 }
                 if let Some(view) = engine.view_definition(name)? {
                     if view.kind == crate::StoredViewKind::Materialized {
-                        let columns = view.output_columns.clone().unwrap_or_default();
+                        let columns = view.output_columns.unwrap_or_default();
+                        if columns.len() != view.materialized_column_types.len() {
+                            return Err(SQLError::Internal(format!(
+                                "materialized view `{name}` has {} columns but {} stored column types",
+                                columns.len(),
+                                view.materialized_column_types.len()
+                            )));
+                        }
                         let schema = RowSchema::with_qualified_types(
                             qualifier,
                             columns,
-                            view.materialized_column_types.clone(),
+                            view.materialized_column_types,
                         );
                         return Ok(schema);
                     }

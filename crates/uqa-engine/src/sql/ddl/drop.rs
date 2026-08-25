@@ -178,7 +178,7 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
             for name in &stmt.names {
                 match engine
                     .try_resolve_relation_kind(name)
-                    .map_err(|err| ddl_storage_error("DROP VIEW", err))?
+                    .map_err(|err| ddl_storage_error(command, err))?
                 {
                     Some((canonical, kind)) if kind == expected_kind => views.push(canonical),
                     Some((canonical, kind)) => {
@@ -205,7 +205,7 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
             for view in &views {
                 let dependents = engine
                     .views_depending_on_relation(view)
-                    .map_err(|err| ddl_storage_error("DROP VIEW", err))?
+                    .map_err(|err| ddl_storage_error(command, err))?
                     .into_iter()
                     .filter(|dependent| !drop_set.contains(dependent))
                     .collect::<Vec<_>>();

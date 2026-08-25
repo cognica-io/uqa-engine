@@ -54,6 +54,40 @@ fn sequence_currval_via_sql() {
 }
 
 #[test]
+fn sequence_function_errors_use_postgres_sqlstates() {
+    let eng = Engine::new();
+    for sql in [
+        "SELECT nextval('missing_sequence')",
+        "SELECT currval('missing_sequence')",
+        "SELECT setval('missing_sequence', 1)",
+    ] {
+        assert_eq!(eng.sql(sql, &[]).unwrap_err().sqlstate(), Some("42P01"));
+    }
+
+    eng.sql("CREATE SEQUENCE untouched_sequence", &[]).unwrap();
+    assert_eq!(
+        eng.sql("SELECT currval('untouched_sequence')", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("55000")
+    );
+
+    eng.sql(
+        "CREATE SEQUENCE exhausted_sequence START WITH 9223372036854775807",
+        &[],
+    )
+    .unwrap();
+    eng.sql("SELECT nextval('exhausted_sequence')", &[])
+        .unwrap();
+    assert_eq!(
+        eng.sql("SELECT nextval('exhausted_sequence')", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("2200H")
+    );
+}
+
+#[test]
 fn sequence_setval_via_sql_updates_currval() {
     let eng = Engine::new();
     eng.sql("CREATE SEQUENCE s3 START 1", &[]).unwrap();

@@ -30,7 +30,7 @@ Relational operators keep static row schemas until the final consumer. Spill for
 
 ## Open PostgreSQL 18 relation-feature bugs
 
-Temporary tables, views, sequences, CTAS, and `SELECT INTO`, temporary-relation name resolution through `pg_temp`, automatic temporary views over temporary relations, all three temporary-table `ON COMMIT` actions, `DISCARD TEMP`, unlogged tables and sequences across clean reopen, ordinary materialized views and refresh, and validated view/materialized-view reloptions are implemented. Their catalog identity is exposed through `pg_namespace`, `pg_class`, `pg_attribute`, and the applicable `pg_views`, `pg_matviews`, or `pg_sequences` view.
+Temporary tables, views, sequences, CTAS, `SELECT INTO`, temporary-relation name resolution through `pg_temp`, automatic temporary views over temporary relations, all three temporary-table `ON COMMIT` actions, `DISCARD TEMP`, unlogged tables and sequences across clean reopen, ordinary materialized views and refresh, and validated view/materialized-view reloptions are implemented. Their catalog identity is exposed through `pg_namespace`, `pg_class`, `pg_attribute`, and the applicable `pg_views`, `pg_matviews`, or `pg_sequences` view.
 
 - Unlogged-relation reset after crash recovery
 - Table inheritance and partitioning

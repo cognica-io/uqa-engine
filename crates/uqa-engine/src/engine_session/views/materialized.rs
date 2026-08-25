@@ -169,10 +169,12 @@ impl Engine {
                 Vec::new()
             } else {
                 let result = crate::sql::execute_query_plan(engine, &view.query, &[])?;
-                materialized_rows(
+                let rows = materialized_rows(
                     &result,
                     view.output_columns.as_deref().unwrap_or(&result.columns),
-                )?
+                )?;
+                view.materialized_column_types = result.column_types;
+                rows
             };
             view.populated = !with_no_data;
             if let Some(catalog) = engine.storage.catalog.as_ref() {

@@ -127,9 +127,9 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
             ObjectType::ObjectMatview => AlterViewKind::MaterializedView,
             _ => unreachable!("view kinds were checked above"),
         };
-        let nodes = alter_reloption_nodes(cmd)?;
         let action = match cmd.subtype() {
             AlterTableType::AtSetRelOptions => {
+                let nodes = alter_reloption_nodes(cmd)?;
                 let options = collect_def_elem_options(nodes)?;
                 let options = match kind {
                     AlterViewKind::View => validate_view_options(
@@ -141,6 +141,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                 AlterViewOptionsAction::Set(options)
             }
             AlterTableType::AtResetRelOptions => {
+                let nodes = alter_reloption_nodes(cmd)?;
                 let names = collect_reset_reloption_names(nodes, kind)?;
                 AlterViewOptionsAction::Reset(names)
             }

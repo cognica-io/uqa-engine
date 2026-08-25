@@ -5,11 +5,52 @@
 //
 
 use super::{
-    BTreeMap, CatalogFacade, Engine, RelationIdentity, SequenceRestart, SequenceRow, SequenceState,
-    StorageBackendError, StorageBackendResult, SEQUENCES_METADATA_KEY,
+    BTreeMap, CatalogFacade, Engine, RelationIdentity, SQLError, SequenceRestart, SequenceRow,
+    SequenceState, StorageBackendError, StorageBackendResult, SEQUENCES_METADATA_KEY,
 };
 
-const SEQUENCE_PERSISTENCE_METADATA_PREFIX: &str = "sequence-persistence:";
+#[derive(Debug, thiserror::Error)]
+enum SequenceValueError {
+    #[error("relation \"{0}\" does not exist")]
+    Undefined(String),
+    #[error("currval of sequence \"{0}\" is not yet defined in this session")]
+    CurrvalUndefined(String),
+    #[error("nextval: reached {bound} value of sequence \"{name}\" ({value})")]
+    Exhausted {
+        name: String,
+        bound: &'static str,
+        value: i64,
+    },
+    #[error("{0}")]
+    Internal(String),
+}
+
+impl SequenceValueError {
+    fn exhausted(name: &str, state: SequenceState) -> Self {
+        Self::Exhausted {
+            name: name.to_string(),
+            bound: if state.increment > 0 {
+                "maximum"
+            } else {
+                "minimum"
+            },
+            value: state.current,
+        }
+    }
+
+    fn into_sql_error(self) -> SQLError {
+        let sqlstate = match self {
+            Self::Undefined(_) => "42P01",
+            Self::CurrvalUndefined(_) => "55000",
+            Self::Exhausted { .. } => "2200H",
+            Self::Internal(message) => return SQLError::Internal(message),
+        };
+        SQLError::Routine {
+            sqlstate: sqlstate.into(),
+            message: self.to_string(),
+        }
+    }
+}
 
 impl Engine {
     /// Resolve a sequence reference at DDL binding time using the current
@@ -148,7 +189,7 @@ impl Engine {
         } else if let Some(catalog) = self.storage.catalog.as_ref() {
             let created = catalog
                 .create_sequence_row(
-                    &Self::sequence_row(&name, state)
+                    &Self::sequence_row(&name, state, persistence)
                         .map_err(|err| format!("build sequence catalog row: {err}"))?,
                 )
                 .map_err(|err| format!("persist sequence catalog: {err}"))?;
@@ -159,12 +200,6 @@ impl Engine {
                     Err(format!("Sequence `{name}` already exists"))
                 };
             }
-            catalog
-                .set_metadata(
-                    &format!("{SEQUENCE_PERSISTENCE_METADATA_PREFIX}{name}"),
-                    persistence.catalog_code(),
-                )
-                .map_err(|err| format!("persist sequence lifecycle: {err}"))?;
         } else {
             let seqs = self.durable.sequences.read();
             if seqs.contains_key(&relation) {
@@ -245,14 +280,14 @@ impl Engine {
         }
         let relation = Self::resolved_relation_identity(&name)
             .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
-        let temporary = self
+        let persistence = self
             .durable
             .sequence_persistence
             .read()
             .get(&relation)
-            .is_some_and(|persistence| {
-                *persistence == uqa_sql::ast::RelationPersistence::Temporary
-            });
+            .copied()
+            .unwrap_or_default();
+        let temporary = persistence == uqa_sql::ast::RelationPersistence::Temporary;
         let mut state = self
             .durable
             .sequences
@@ -279,7 +314,7 @@ impl Engine {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 if !catalog
                     .replace_sequence_row(
-                        &Self::sequence_row(&name, state)
+                        &Self::sequence_row(&name, state, persistence)
                             .map_err(|err| format!("build sequence catalog row: {err}"))?,
                     )
                     .map_err(|err| format!("persist sequence catalog: {err}"))?
@@ -355,13 +390,40 @@ impl Engine {
         Ok(removed)
     }
 
-    pub fn nextval(&self, name: &str) -> Result<i64, String> {
+    fn resolve_sequence_value_target(
+        &self,
+        reference: &str,
+    ) -> Result<(String, RelationIdentity), SequenceValueError> {
         let name = self
-            .try_resolve_sequence_name(name)
-            .map_err(|err| format!("load sequence catalog: {err}"))?
-            .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
-        let relation = Self::resolved_relation_identity(&name)
-            .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
+            .try_resolve_sequence_name(reference)
+            .map_err(|error| {
+                SequenceValueError::Internal(format!("load sequence catalog: {error}"))
+            })?
+            .ok_or_else(|| SequenceValueError::Undefined(reference.to_string()))?;
+        let relation = Self::resolved_relation_identity(&name).map_err(|error| {
+            SequenceValueError::Internal(format!("resolve sequence `{name}`: {error}"))
+        })?;
+        Ok((name, relation))
+    }
+
+    pub fn nextval(&self, name: &str) -> Result<i64, String> {
+        self.nextval_inner(name).map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn nextval_sql(&self, name: &str) -> Result<i64, SQLError> {
+        self.nextval_inner(name)
+            .map_err(SequenceValueError::into_sql_error)
+    }
+
+    fn nextval_inner(&self, name: &str) -> Result<i64, SequenceValueError> {
+        let (name, relation) = self.resolve_sequence_value_target(name)?;
+        let previous = self
+            .durable
+            .sequences
+            .read()
+            .get(&relation)
+            .copied()
+            .ok_or_else(|| SequenceValueError::Undefined(name.clone()))?;
         let temporary = self
             .durable
             .sequence_persistence
@@ -374,11 +436,15 @@ impl Engine {
             None
         } else {
             self.open_nontransactional_sequence_session()
-                .map_err(|error| format!("open sequence session: {error}"))?
+                .map_err(|error| {
+                    SequenceValueError::Internal(format!("open sequence session: {error}"))
+                })?
         };
         if !temporary && sequence_session.is_none() {
             self.prepare_explicit_transaction_writer()
-                .map_err(|error| format!("prepare sequence writer: {error}"))?;
+                .map_err(|error| {
+                    SequenceValueError::Internal(format!("prepare sequence writer: {error}"))
+                })?;
         }
         let catalog = (!temporary)
             .then(|| {
@@ -389,20 +455,31 @@ impl Engine {
             })
             .flatten();
         let current = if let Some(catalog) = catalog {
-            catalog
-                .next_sequence_value(&name)
-                .map_err(|err| format!("allocate sequence value: {err}"))?
-                .ok_or_else(|| format!("Sequence `{name}` does not exist"))?
+            match catalog.next_sequence_value(&name) {
+                Ok(Some(current)) => current,
+                Ok(None) => return Err(SequenceValueError::Undefined(name)),
+                Err(_)
+                    if previous.called
+                        && previous.current.checked_add(previous.increment).is_none() =>
+                {
+                    return Err(SequenceValueError::exhausted(&name, previous));
+                }
+                Err(error) => {
+                    return Err(SequenceValueError::Internal(format!(
+                        "allocate sequence value: {error}"
+                    )));
+                }
+            }
         } else {
             let mut seqs = self.durable.sequences.write();
             let seq = seqs
                 .get_mut(&relation)
-                .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
+                .ok_or_else(|| SequenceValueError::Undefined(name.clone()))?;
             if seq.called {
                 seq.current = seq
                     .current
                     .checked_add(seq.increment)
-                    .ok_or_else(|| format!("Sequence `{name}` value overflows BIGINT"))?;
+                    .ok_or_else(|| SequenceValueError::exhausted(&name, *seq))?;
             } else {
                 seq.called = true;
             }
@@ -421,30 +498,37 @@ impl Engine {
     }
 
     pub fn currval(&self, name: &str) -> Result<i64, String> {
-        let name = self
-            .try_resolve_sequence_name(name)
-            .map_err(|err| format!("load sequence catalog: {err}"))?
-            .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
-        let relation = Self::resolved_relation_identity(&name)
-            .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
+        self.currval_inner(name).map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn currval_sql(&self, name: &str) -> Result<i64, SQLError> {
+        self.currval_inner(name)
+            .map_err(SequenceValueError::into_sql_error)
+    }
+
+    fn currval_inner(&self, name: &str) -> Result<i64, SequenceValueError> {
+        let (name, relation) = self.resolve_sequence_value_target(name)?;
         self.session
             .state
             .read()
             .sequence_currvals
             .get(&relation)
             .copied()
-            .ok_or_else(|| {
-                format!("currval of sequence `{name}` is not yet defined in this session")
-            })
+            .ok_or(SequenceValueError::CurrvalUndefined(name))
     }
 
     pub fn setval(&self, name: &str, value: i64) -> Result<i64, String> {
-        let name = self
-            .try_resolve_sequence_name(name)
-            .map_err(|err| format!("load sequence catalog: {err}"))?
-            .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
-        let relation = Self::resolved_relation_identity(&name)
-            .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
+        self.setval_inner(name, value)
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn setval_sql(&self, name: &str, value: i64) -> Result<i64, SQLError> {
+        self.setval_inner(name, value)
+            .map_err(SequenceValueError::into_sql_error)
+    }
+
+    fn setval_inner(&self, name: &str, value: i64) -> Result<i64, SequenceValueError> {
+        let (name, relation) = self.resolve_sequence_value_target(name)?;
         let temporary = self
             .durable
             .sequence_persistence
@@ -457,11 +541,15 @@ impl Engine {
             None
         } else {
             self.open_nontransactional_sequence_session()
-                .map_err(|error| format!("open sequence session: {error}"))?
+                .map_err(|error| {
+                    SequenceValueError::Internal(format!("open sequence session: {error}"))
+                })?
         };
         if !temporary && sequence_session.is_none() {
             self.prepare_explicit_transaction_writer()
-                .map_err(|error| format!("prepare sequence writer: {error}"))?;
+                .map_err(|error| {
+                    SequenceValueError::Internal(format!("prepare sequence writer: {error}"))
+                })?;
         }
         let catalog = if temporary {
             None
@@ -474,13 +562,15 @@ impl Engine {
         if let Some(catalog) = catalog {
             catalog
                 .set_sequence_value(&name, value)
-                .map_err(|err| format!("persist sequence value: {err}"))?
-                .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
+                .map_err(|error| {
+                    SequenceValueError::Internal(format!("persist sequence value: {error}"))
+                })?
+                .ok_or_else(|| SequenceValueError::Undefined(name.clone()))?;
         }
         let mut seqs = self.durable.sequences.write();
         let seq = seqs
             .get_mut(&relation)
-            .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
+            .ok_or(SequenceValueError::Undefined(name))?;
         seq.current = value;
         seq.called = true;
         drop(seqs);
@@ -522,7 +612,11 @@ impl Engine {
         Ok(seqs.get(&relation).copied().map(|state| (canonical, state)))
     }
 
-    fn sequence_row(name: &str, state: SequenceState) -> StorageBackendResult<SequenceRow> {
+    fn sequence_row(
+        name: &str,
+        state: SequenceState,
+        persistence: uqa_sql::ast::RelationPersistence,
+    ) -> StorageBackendResult<SequenceRow> {
         Ok(SequenceRow {
             relation: RelationIdentity::from_legacy_name(name)
                 .map_err(StorageBackendError::Other)?,
@@ -530,6 +624,7 @@ impl Engine {
             increment: state.increment,
             current: state.current,
             called: state.called,
+            persistence: persistence.catalog_code().into(),
         })
     }
 
@@ -543,7 +638,7 @@ impl Engine {
             return Ok(());
         };
         let rows = catalog.load_sequence_rows()?;
-        self.install_durable_sequence_rows(catalog, rows)?;
+        self.install_durable_sequence_rows(rows)?;
         Ok(())
     }
 
@@ -577,7 +672,11 @@ impl Engine {
             let legacy = serde_json::from_str::<BTreeMap<String, SequenceState>>(&json)?;
             if !legacy.is_empty() {
                 for (name, state) in legacy {
-                    catalog.create_sequence_row(&Self::sequence_row(&name, state)?)?;
+                    catalog.create_sequence_row(&Self::sequence_row(
+                        &name,
+                        state,
+                        uqa_sql::ast::RelationPersistence::Permanent,
+                    )?)?;
                 }
                 catalog.set_metadata(SEQUENCES_METADATA_KEY, "{}")?;
             }
@@ -593,15 +692,11 @@ impl Engine {
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
         let rows = catalog.load_sequence_rows()?;
-        self.install_durable_sequence_rows(catalog, rows)?;
+        self.install_durable_sequence_rows(rows)?;
         Ok(())
     }
 
-    fn install_durable_sequence_rows(
-        &self,
-        catalog: &dyn CatalogFacade,
-        rows: Vec<SequenceRow>,
-    ) -> StorageBackendResult<()> {
+    fn install_durable_sequence_rows(&self, rows: Vec<SequenceRow>) -> StorageBackendResult<()> {
         let temporary_persistence = self
             .durable
             .sequence_persistence
@@ -623,20 +718,16 @@ impl Engine {
         let mut persistence = temporary_persistence;
         for row in rows {
             let name = row.relation.qualified_name();
+            let stored = match row.persistence.as_str() {
+                "p" => uqa_sql::ast::RelationPersistence::Permanent,
+                "u" => uqa_sql::ast::RelationPersistence::Unlogged,
+                other => {
+                    return Err(StorageBackendError::Other(format!(
+                        "corrupt sequence `{name}` persistence `{other}`"
+                    )))
+                }
+            };
             let (relation, state) = Self::sequence_state_from_row(row)?;
-            let stored = catalog
-                .get_metadata(&format!("{SEQUENCE_PERSISTENCE_METADATA_PREFIX}{name}"))?
-                .as_deref()
-                .map_or(
-                    Ok(uqa_sql::ast::RelationPersistence::Permanent),
-                    |code| match code {
-                        "p" | "" => Ok(uqa_sql::ast::RelationPersistence::Permanent),
-                        "u" => Ok(uqa_sql::ast::RelationPersistence::Unlogged),
-                        other => Err(StorageBackendError::Other(format!(
-                            "corrupt sequence `{name}` persistence `{other}`"
-                        ))),
-                    },
-                )?;
             persistence.insert(relation.clone(), stored);
             sequences.insert(relation, state);
         }

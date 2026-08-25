@@ -64,14 +64,6 @@ fn run_create_table_as_inner(
     engine: &Engine,
     execution: &CreateTableAsExecution<'_>,
 ) -> Result<SQLResult, SQLError> {
-    let ctes = crate::sql::select::CteScope::new();
-    let query_schema = crate::sql::select::analyze_query_plan_schema(
-        engine,
-        execution.query,
-        execution.params,
-        &ctes,
-        None,
-    )?;
     let name = if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {
         engine
             .try_temporary_relation_name_for_create(execution.name)
@@ -82,8 +74,9 @@ fn run_create_table_as_inner(
             .map_err(SQLError::Unsupported)?
     };
     if engine
-        .try_has_table(&name)
+        .relation_kind_at(&name)
         .map_err(|err| ddl_storage_error("CREATE TABLE AS", err))?
+        .is_some()
     {
         if execution.if_not_exists {
             return Ok(SQLResult::empty());
@@ -93,6 +86,14 @@ fn run_create_table_as_inner(
             message: format!("relation \"{name}\" already exists"),
         });
     }
+    let ctes = crate::sql::select::CteScope::new();
+    let query_schema = crate::sql::select::analyze_query_plan_schema(
+        engine,
+        execution.query,
+        execution.params,
+        &ctes,
+        None,
+    )?;
     let columns = create_table_as_columns(&query_schema, execution.column_names)?;
     let result = if execution.with_no_data {
         None
