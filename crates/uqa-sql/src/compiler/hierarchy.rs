@@ -64,21 +64,7 @@ fn compile_partition_spec(raw: &pg_query::protobuf::PartitionSpec) -> Result<Par
     let keys = raw
         .part_params
         .iter()
-        .map(|node| match node.node.as_ref() {
-            Some(NodeEnum::PartitionElem(element)) if !element.name.is_empty() => {
-                Ok(crate::ast::Expr::Column(element.name.clone()))
-            }
-            Some(NodeEnum::PartitionElem(element)) => element
-                .expr
-                .as_deref()
-                .ok_or_else(|| {
-                    SQLError::Internal("partition key has neither a column nor expression".into())
-                })
-                .and_then(compile_expr),
-            other => Err(SQLError::Internal(format!(
-                "partition key has unexpected node {other:?}"
-            ))),
-        })
+        .map(compile_partition_key)
         .collect::<Result<Vec<_>>>()?;
     if keys.is_empty() {
         return Err(SQLError::Internal(
@@ -86,6 +72,49 @@ fn compile_partition_spec(raw: &pg_query::protobuf::PartitionSpec) -> Result<Par
         ));
     }
     Ok(PartitionSpec { strategy, keys })
+}
+
+fn compile_partition_key(node: &Node) -> Result<crate::ast::Expr> {
+    let Some(NodeEnum::PartitionElem(element)) = node.node.as_ref() else {
+        return Err(SQLError::Internal(format!(
+            "partition key has unexpected node {:?}",
+            node.node.as_ref()
+        )));
+    };
+    if !element.collation.is_empty() && !is_default_collation(&element.collation) {
+        return Err(SQLError::Unsupported(
+            "non-default partition key collations are not supported".into(),
+        ));
+    }
+    if !element.opclass.is_empty() {
+        return Err(SQLError::Unsupported(
+            "explicit partition key operator classes are not supported".into(),
+        ));
+    }
+    if !element.name.is_empty() {
+        return Ok(crate::ast::Expr::Column(element.name.clone()));
+    }
+    element
+        .expr
+        .as_deref()
+        .ok_or_else(|| {
+            SQLError::Internal("partition key has neither a column nor expression".into())
+        })
+        .and_then(compile_expr)
+}
+
+fn is_default_collation(nodes: &[Node]) -> bool {
+    let names = nodes
+        .iter()
+        .map(|node| match node.node.as_ref() {
+            Some(NodeEnum::String(value)) => Some(value.sval.as_str()),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>();
+    matches!(
+        names.as_deref(),
+        Some(["default"]) | Some(["pg_catalog", "default"])
+    )
 }
 
 fn compile_partition_bound(raw: &pg_query::protobuf::PartitionBoundSpec) -> Result<PartitionBound> {
@@ -112,11 +141,20 @@ fn compile_partition_bound(raw: &pg_query::protobuf::PartitionBoundSpec) -> Resu
                 .collect::<Result<Vec<_>>>()?,
         }),
         "h" => {
-            if raw.modulus <= 0 || raw.remainder < 0 || raw.remainder >= raw.modulus {
-                return Err(SQLError::Internal(format!(
-                    "invalid hash partition bound modulus {} remainder {}",
-                    raw.modulus, raw.remainder
-                )));
+            if raw.modulus <= 0 {
+                return Err(invalid_table_definition(
+                    "modulus for hash partition must be an integer value greater than zero",
+                ));
+            }
+            if raw.remainder < 0 {
+                return Err(invalid_table_definition(
+                    "remainder for hash partition must be an integer value greater than or equal to zero",
+                ));
+            }
+            if raw.remainder >= raw.modulus {
+                return Err(invalid_table_definition(
+                    "remainder for hash partition must be less than modulus",
+                ));
             }
             Ok(PartitionBound::Hash {
                 modulus: raw.modulus,
@@ -126,6 +164,13 @@ fn compile_partition_bound(raw: &pg_query::protobuf::PartitionBoundSpec) -> Resu
         other => Err(SQLError::Internal(format!(
             "partition bound has invalid strategy `{other}`"
         ))),
+    }
+}
+
+fn invalid_table_definition(message: impl Into<String>) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42P16".into(),
+        message: message.into(),
     }
 }
 

@@ -19,6 +19,7 @@ pub(super) fn prepare_create_table_hierarchy(
                 "partition bound has no parent relation".into(),
             ));
         }
+        validate_partition_keys(table)?;
         return Ok(());
     }
     let is_partition = table.hierarchy.partition_bound.is_some();
@@ -109,6 +110,15 @@ fn validate_partition_bound_strategy(
     bound: &uqa_sql::ast::PartitionBound,
 ) -> Result<(), SQLError> {
     use uqa_sql::ast::{PartitionBound, PartitionStrategy};
+    if matches!(
+        (strategy, bound),
+        (PartitionStrategy::Hash, PartitionBound::Default)
+    ) {
+        return Err(SQLError::Routine {
+            sqlstate: "42P16".into(),
+            message: "a hash-partitioned table may not have a default partition".into(),
+        });
+    }
     let matches = matches!(bound, PartitionBound::Default)
         || matches!(
             (strategy, bound),
@@ -216,5 +226,5 @@ fn validate_partition_keys(table: &CreateTable) -> Result<(), SQLError> {
             }
         }
     }
-    Ok(())
+    crate::sql::validate_hash_partition_spec(spec, &table.columns)
 }

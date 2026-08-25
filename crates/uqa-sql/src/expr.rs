@@ -42,6 +42,7 @@ use time::{
     age_between, coerce_temporal, date_trunc_value, extract_from_value, format_pg_number,
     format_temporal, hex_encode, make_timestamp, parse_timestamp, pg_to_chrono_fmt,
 };
+pub use uuid::parse_uuid_bytes;
 use uuid::{extract_uuid_timestamp, extract_uuid_version, generate_random_uuid, generate_uuid_v7};
 mod binary;
 mod casting;

@@ -92,7 +92,8 @@ pub(super) fn generate_uuid_v7(shift: Option<&TemporalValue>) -> Result<String> 
     generate_uuid_v7_at(unix_millis as u64, sub_millisecond_nanos)
 }
 
-fn parse_uuid_bytes(text: &str) -> Result<[u8; 16]> {
+/// Parse every UUID input spelling accepted by `PostgreSQL` into network-order bytes.
+pub fn parse_uuid_bytes(text: &str) -> Result<[u8; 16]> {
     let digits = text
         .strip_prefix('{')
         .and_then(|text| text.strip_suffix('}'))

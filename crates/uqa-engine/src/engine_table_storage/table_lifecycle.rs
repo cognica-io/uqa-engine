@@ -80,21 +80,13 @@ impl Engine {
         names: &[String],
         cascade: bool,
     ) -> StorageBackendResult<()> {
-        let canonical_names = self.canonical_drop_table_names(names)?;
-        let (canonical_names, hierarchy_dependents) =
-            self.hierarchy_drop_targets(&canonical_names, cascade);
-        if !hierarchy_dependents.is_empty() {
-            return Err(StorageBackendError::Other(format!(
-                "DROP TABLE rejected: table `{}` depends on the target through inheritance; use CASCADE",
-                hierarchy_dependents.join("`, `")
-            )));
-        }
+        let canonical_names = self.canonical_hierarchy_drop_targets(names, cascade)?;
         let (target_names, targets) = Self::drop_target_sets(&canonical_names)?;
 
         // Finish every dependency check before mutating a referrer or target.
         self.ensure_no_drop_view_dependencies(&canonical_names)?;
         let entries = self.table_entries();
-        self.ensure_drop_targets_unreferenced(&canonical_names, &target_names, &targets, &entries)?;
+        self.ensure_drop_targets_unreferenced(&target_names, &targets, &entries)?;
 
         let mut inbound = Vec::new();
         let mut updates = Vec::new();
@@ -168,15 +160,10 @@ impl Engine {
 
     fn ensure_drop_targets_unreferenced(
         &self,
-        canonical_names: &[String],
         target_names: &std::collections::BTreeSet<String>,
         targets: &[RelationIdentity],
         entries: &[(String, Arc<TableState>)],
     ) -> StorageBackendResult<()> {
-        // Finish every dependency check before mutating a referrer or target.
-        for name in canonical_names {
-            self.ensure_no_dependent_views("DROP TABLE", name)?;
-        }
         for (candidate_name, table) in entries {
             if target_names.contains(candidate_name) {
                 continue;
@@ -192,6 +179,23 @@ impl Engine {
             }
         }
         Ok(())
+    }
+
+    fn canonical_hierarchy_drop_targets(
+        &self,
+        names: &[String],
+        cascade: bool,
+    ) -> StorageBackendResult<Vec<String>> {
+        let canonical_names = self.canonical_drop_table_names(names)?;
+        let (canonical_names, hierarchy_dependents) =
+            self.hierarchy_drop_targets(&canonical_names, cascade);
+        if !hierarchy_dependents.is_empty() {
+            return Err(StorageBackendError::Other(format!(
+                "DROP TABLE rejected: table `{}` depends on the target through inheritance; use CASCADE",
+                hierarchy_dependents.join("`, `")
+            )));
+        }
+        Ok(canonical_names)
     }
 
     pub(crate) fn drop_table_state_inner(&self, name: &str) -> StorageBackendResult<()> {

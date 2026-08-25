@@ -9,6 +9,15 @@
 use super::{Document, Engine, SQLError, SQLParam, Value};
 use std::cmp::Ordering;
 
+mod hash;
+
+pub(in crate::sql) fn validate_hash_partition_spec(
+    spec: &uqa_sql::ast::PartitionSpec,
+    columns: &[uqa_sql::ast::ColumnDef],
+) -> Result<(), SQLError> {
+    hash::validate_partition_spec(spec, columns)
+}
+
 pub(in crate::sql) fn validate_new_partition_bound(
     engine: &Engine,
     parent: &str,
@@ -25,6 +34,33 @@ pub(in crate::sql) fn validate_new_partition_bound(
             message: format!("relation \"{parent}\" is not partitioned"),
         })?;
     validate_partition_bound_width(spec, bound)?;
+    if let uqa_sql::ast::PartitionBound::Hash { modulus, remainder } = bound {
+        hash::validate_bound(*modulus, *remainder)?;
+        let mut existing_moduli = Vec::new();
+        for sibling in engine.direct_hierarchy_children(parent)? {
+            let sibling_hierarchy = engine
+                .try_table_hierarchy(&sibling)
+                .map_err(|error| SQLError::Internal(format!("read sibling partition: {error}")))?;
+            match sibling_hierarchy.partition_bound.as_ref() {
+                Some(uqa_sql::ast::PartitionBound::Hash { modulus, remainder }) => {
+                    hash::validate_bound(*modulus, *remainder)?;
+                    existing_moduli.push(*modulus);
+                }
+                Some(uqa_sql::ast::PartitionBound::Default) => {
+                    return Err(SQLError::Internal(format!(
+                        "HASH-partitioned table `{parent}` has a default partition"
+                    )))
+                }
+                Some(_) => {
+                    return Err(SQLError::Internal(
+                        "partition siblings use different bound strategies".into(),
+                    ))
+                }
+                None => {}
+            }
+        }
+        hash::validate_modulus_chain(*modulus, existing_moduli)?;
+    }
     if let uqa_sql::ast::PartitionBound::Range { lower, upper } = bound {
         if compare_partition_points(engine, lower, upper)? != Ordering::Less {
             return Err(invalid_partition_bound(
@@ -104,9 +140,12 @@ fn partition_bounds_overlap(
                 modulus: right_modulus,
                 remainder: right_remainder,
             },
-        ) => Ok((left_remainder - right_remainder)
-            .rem_euclid(greatest_common_divisor(*left_modulus, *right_modulus))
-            == 0),
+        ) => hash::bounds_overlap(
+            *left_modulus,
+            *left_remainder,
+            *right_modulus,
+            *right_remainder,
+        ),
         _ => Err(SQLError::Internal(
             "partition siblings use different bound strategies".into(),
         )),
@@ -159,15 +198,6 @@ fn compare_partition_points(
         }
     }
     Ok(Ordering::Equal)
-}
-
-const fn greatest_common_divisor(mut left: i32, mut right: i32) -> i32 {
-    while right != 0 {
-        let remainder = left % right;
-        left = right;
-        right = remainder;
-    }
-    left.abs()
 }
 
 fn invalid_partition_bound(message: impl Into<String>) -> SQLError {
@@ -258,7 +288,11 @@ fn select_direct_partition_with_spec(
     document: &Document,
     params: &[SQLParam],
 ) -> Result<Option<String>, SQLError> {
-    let keys = evaluate_partition_keys(engine, parent, &spec.keys, document, params)?;
+    let (keys, definitions) =
+        evaluate_partition_keys(engine, parent, &spec.keys, document, params)?;
+    let row_hash = (spec.strategy == uqa_sql::ast::PartitionStrategy::Hash)
+        .then(|| hash::row_hash(spec, &definitions, &keys))
+        .transpose()?;
     let mut default = None;
     for child in engine.direct_hierarchy_children(parent)? {
         let child_hierarchy = engine
@@ -275,7 +309,7 @@ fn select_direct_partition_with_spec(
             }
             continue;
         }
-        if partition_bound_matches(engine, bound, &keys, params)? {
+        if partition_bound_matches(engine, bound, &keys, params, row_hash)? {
             return Ok(Some(child));
         }
     }
@@ -288,7 +322,7 @@ fn evaluate_partition_keys(
     expressions: &[uqa_sql::ast::Expr],
     document: &Document,
     params: &[SQLParam],
-) -> Result<Vec<Value>, SQLError> {
+) -> Result<(Vec<Value>, Vec<uqa_sql::ast::ColumnDef>), SQLError> {
     let definitions = engine
         .try_describe_table(table)
         .map_err(|error| SQLError::Internal(format!("read partition row type: {error}")))?
@@ -303,14 +337,15 @@ fn evaluate_partition_keys(
             .map(|definition| Some(definition.ty.clone()))
             .collect(),
     );
-    expressions
+    let values = expressions
         .iter()
         .map(|expression| {
             super::scalar::eval_lowered_expression_with_schema(
                 engine, expression, document, &schema, params,
             )
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((values, definitions))
 }
 
 fn partition_bound_matches(
@@ -318,6 +353,7 @@ fn partition_bound_matches(
     bound: &uqa_sql::ast::PartitionBound,
     keys: &[Value],
     params: &[SQLParam],
+    row_hash: Option<u64>,
 ) -> Result<bool, SQLError> {
     use uqa_sql::ast::PartitionBound;
     match bound {
@@ -345,9 +381,13 @@ fn partition_bound_matches(
                     && compare_key_to_bound(engine, keys, upper, params)? == Ordering::Less,
             )
         }
-        PartitionBound::Hash { .. } => Err(SQLError::Unsupported(
-            "HASH partition routing is not implemented".into(),
-        )),
+        PartitionBound::Hash { modulus, remainder } => hash::bound_matches(
+            row_hash.ok_or_else(|| {
+                SQLError::Internal("HASH partition bound has no computed row hash".into())
+            })?,
+            *modulus,
+            *remainder,
+        ),
     }
 }
 

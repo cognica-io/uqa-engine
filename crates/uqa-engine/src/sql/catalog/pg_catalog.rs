@@ -605,7 +605,7 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
                 )?,
                 None => Value::Null,
             };
-            let relation_oid = table_relation_oid(
+            let constrained_relation_oid = table_relation_oid(
                 engine,
                 &format!("{}.{}", constraint.schema, constraint.table),
             )?;
@@ -634,7 +634,7 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
                 ("condeferred", bool_value(false)),
                 ("conenforced", bool_value(constraint.enforced)),
                 ("convalidated", bool_value(constraint.enforced)),
-                ("conrelid", int_value(relation_oid)),
+                ("conrelid", int_value(constrained_relation_oid)),
                 ("contypid", int_value(0)),
                 ("conindid", int_value(0)),
                 ("conparentid", int_value(0)),
