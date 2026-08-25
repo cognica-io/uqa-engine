@@ -160,14 +160,25 @@ fn validate_document_non_key_constraints_with_old(
         if !constraint.enforced {
             continue;
         }
-        let result = crate::sql::scalar::eval_lowered_expression_with_schema(
-            engine,
-            &constraint.expr,
-            document,
-            &schema,
-            params,
-        )?;
-        if !matches!(result, Value::Null) && !uqa_sql::expr::truthy(&result) {
+        let accepted = if let Some(partition) = constraint.partition_constraint.as_ref() {
+            crate::sql::partition_constraint_accepts_document(
+                engine,
+                table,
+                &partition.spec,
+                &partition.bound,
+                document,
+            )?
+        } else {
+            let result = crate::sql::scalar::eval_lowered_expression_with_schema(
+                engine,
+                &constraint.expr,
+                document,
+                &schema,
+                params,
+            )?;
+            matches!(result, Value::Null) || uqa_sql::expr::truthy(&result)
+        };
+        if !accepted {
             let label = constraint.name.unwrap_or_else(|| "<unnamed>".into());
             let relation = crate::RelationIdentity::from_legacy_name(table)
                 .map_or_else(|_| table.to_string(), |identity| identity.name);

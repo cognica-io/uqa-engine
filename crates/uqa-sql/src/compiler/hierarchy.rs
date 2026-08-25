@@ -36,9 +36,11 @@ pub(in crate::compiler) fn compile_table_hierarchy(
     }
     Ok(TableHierarchy {
         parents,
+        parent_sequence_numbers: Vec::new(),
         partition_spec,
         partition_bound,
         local_columns: Vec::new(),
+        partition_identity_overrides: Vec::new(),
     })
 }
 
@@ -118,7 +120,9 @@ fn is_default_collation(nodes: &[Node]) -> bool {
     )
 }
 
-fn compile_partition_bound(raw: &pg_query::protobuf::PartitionBoundSpec) -> Result<PartitionBound> {
+pub(super) fn compile_partition_bound(
+    raw: &pg_query::protobuf::PartitionBoundSpec,
+) -> Result<PartitionBound> {
     if raw.is_default {
         return Ok(PartitionBound::Default);
     }

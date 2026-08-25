@@ -37,6 +37,10 @@ const fn default_include_descendants() -> bool {
     true
 }
 
+const fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ColumnType {
     SmallInteger,
@@ -821,12 +825,30 @@ pub struct AlterTableStmt {
     /// Local SQL relation identifier used while binding new or replaced generation expressions.
     pub qualifier: String,
     pub if_exists: bool,
+    /// Whether the target omitted `ONLY` and therefore allows recursive ALTER behavior.
+    #[serde(default = "default_true")]
+    pub recurse: bool,
     pub actions: Vec<AlterTableAction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum AlterTableAction {
+    AddInheritance {
+        parent: String,
+    },
+    DropInheritance {
+        parent: String,
+    },
+    AttachPartition {
+        partition: String,
+        bound: PartitionBound,
+    },
+    DetachPartition {
+        partition: String,
+        concurrently: bool,
+        finalize: bool,
+    },
     AddColumn {
         column: ColumnDef,
         if_not_exists: bool,

@@ -110,6 +110,7 @@ pub(in crate::compiler) fn compile_create_table(
                             enforced: cstr.is_enforced,
                             validated: cstr.initially_valid && cstr.is_enforced,
                             no_inherit: cstr.is_no_inherit,
+                            partition_constraint: None,
                         });
                     }
                     pg_query::protobuf::ConstrType::ConstrForeign => {

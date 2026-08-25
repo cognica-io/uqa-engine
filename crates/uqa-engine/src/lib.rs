@@ -362,6 +362,8 @@ enum TransactionStatus {
 }
 
 struct TransactionFrame {
+    /// Whether this outer frame is the SQL driver's per-statement autocommit boundary rather than a user-visible `BEGIN` block.
+    implicit_statement: bool,
     storage_savepoint: Option<String>,
     intent: TransactionIntent,
     backend_mode: BackendTransactionMode,

@@ -191,6 +191,71 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
             }
         };
         let action = match cmd.subtype() {
+            AlterTableType::AtAddInherit | AlterTableType::AtDropInherit => {
+                let parent = match cmd
+                    .def
+                    .as_deref()
+                    .and_then(|definition| definition.node.as_ref())
+                {
+                    Some(NodeEnum::RangeVar(parent)) => range_var_name(parent),
+                    other => {
+                        return Err(SQLError::Internal(format!(
+                            "ALTER TABLE inheritance parent has unexpected node {other:?}"
+                        )))
+                    }
+                };
+                if cmd.subtype() == AlterTableType::AtAddInherit {
+                    AlterTableAction::AddInheritance { parent }
+                } else {
+                    AlterTableAction::DropInheritance { parent }
+                }
+            }
+            AlterTableType::AtAttachPartition => {
+                let partition = match cmd
+                    .def
+                    .as_deref()
+                    .and_then(|definition| definition.node.as_ref())
+                {
+                    Some(NodeEnum::PartitionCmd(partition)) => partition,
+                    other => {
+                        return Err(SQLError::Internal(format!(
+                            "ATTACH PARTITION has unexpected command node {other:?}"
+                        )))
+                    }
+                };
+                let name = partition.name.as_ref().ok_or_else(|| {
+                    SQLError::Internal("ATTACH PARTITION without relation".into())
+                })?;
+                let bound = partition.bound.as_ref().ok_or_else(|| {
+                    SQLError::Internal("ATTACH PARTITION without FOR VALUES".into())
+                })?;
+                AlterTableAction::AttachPartition {
+                    partition: range_var_name(name),
+                    bound: super::hierarchy::compile_partition_bound(bound)?,
+                }
+            }
+            AlterTableType::AtDetachPartition | AlterTableType::AtDetachPartitionFinalize => {
+                let partition = match cmd
+                    .def
+                    .as_deref()
+                    .and_then(|definition| definition.node.as_ref())
+                {
+                    Some(NodeEnum::PartitionCmd(partition)) => partition,
+                    other => {
+                        return Err(SQLError::Internal(format!(
+                            "DETACH PARTITION has unexpected command node {other:?}"
+                        )))
+                    }
+                };
+                let name = partition.name.as_ref().ok_or_else(|| {
+                    SQLError::Internal("DETACH PARTITION without relation".into())
+                })?;
+                AlterTableAction::DetachPartition {
+                    partition: range_var_name(name),
+                    concurrently: partition.concurrent,
+                    finalize: cmd.subtype() == AlterTableType::AtDetachPartitionFinalize,
+                }
+            }
             AlterTableType::AtAddColumn => {
                 let def_inner = cmd
                     .def
@@ -273,6 +338,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                                 enforced: constraint.is_enforced,
                                 validated: constraint.initially_valid,
                                 no_inherit: constraint.is_no_inherit,
+                                partition_constraint: None,
                             },
                         }
                     }
@@ -470,6 +536,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
         table,
         qualifier,
         if_exists,
+        recurse: relation.inh,
         actions,
     }))
 }
@@ -548,6 +615,7 @@ pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Al
         table,
         qualifier: relation.relname.clone(),
         if_exists: stmt.missing_ok,
+        recurse: false,
         actions: vec![action],
     })
 }

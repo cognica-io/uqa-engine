@@ -545,6 +545,56 @@ impl Engine {
         Ok(())
     }
 
+    /// Atomically replace the schema components that ALTER hierarchy actions
+    /// may inherit. The candidate is fully named and persisted before the
+    /// in-memory table becomes visible with its new edge.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn replace_table_hierarchy_components(
+        &self,
+        table: &str,
+        mut columns: Vec<uqa_sql::ast::ColumnDef>,
+        checks: Vec<uqa_sql::ast::TableCheck>,
+        mut foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
+        key_constraints: Vec<uqa_sql::ast::TableKeyConstraint>,
+        hierarchy: uqa_sql::ast::TableHierarchy,
+    ) -> StorageBackendResult<()> {
+        let table_name = self
+            .try_resolve_table_name(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let state = self
+            .try_table(&table_name)?
+            .ok_or_else(|| table_not_found(&table_name))?;
+        for foreign_key in &mut foreign_keys {
+            foreign_key.ref_table = self.canonical_foreign_key_target(&foreign_key.ref_table)?;
+        }
+        let mut constraints = uqa_sql::ast::TableConstraintSet {
+            persistence: state.persistence,
+            on_commit: state.on_commit,
+            checks,
+            foreign_keys,
+            key_constraints,
+            hierarchy,
+        };
+        let relation =
+            RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
+        materialize_constraint_names(&relation, &mut columns, &mut constraints)?;
+        if self.is_persistent() {
+            self.try_save_table_schema_with_components(
+                &table_name,
+                &state,
+                &columns,
+                &constraints,
+            )?;
+        }
+        *state.columns.write() = columns;
+        *state.table_checks.write() = constraints.checks;
+        *state.foreign_keys.write() = constraints.foreign_keys;
+        *state.key_constraints.write() = constraints.key_constraints;
+        *state.hierarchy.write() = constraints.hierarchy;
+        self.refresh_value_indexes_for_table(&table_name)?;
+        Ok(())
+    }
+
     /// Append one validated PRIMARY KEY or UNIQUE tuple without replacing the
     /// table's existing CHECK, FOREIGN KEY, or key constraints. SQL DDL owns
     /// validation of existing rows before calling this storage mutation.
@@ -647,6 +697,7 @@ impl Engine {
                     enforced: col.check_enforced,
                     validated: col.check_validated,
                     no_inherit: col.check_no_inherit,
+                    partition_constraint: None,
                 });
             }
         }

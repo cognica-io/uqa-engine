@@ -7,8 +7,8 @@
 //! `pg_class` and `pg_inherits` rows for physical and virtual relations.
 
 use super::helpers::{
-    bool_value, catalog_ordinal, catalog_usize, int_value, row, split_schema_name, str_value,
-    table_columns_for, view_columns_for,
+    bool_value, catalog_usize, int_value, row, split_schema_name, str_value, table_columns_for,
+    view_columns_for,
 };
 use super::partitioning::partition_bound_node;
 use super::pg_catalog::{
@@ -199,7 +199,7 @@ pub(super) fn build_pg_inherits(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
                 ("inhparent", int_value(table_relation_oid(engine, parent)?)),
                 (
                     "inhseqno",
-                    int_value(catalog_ordinal(position, "pg_inherits parent")?),
+                    int_value(i64::from(hierarchy.parent_sequence_number(position))),
                 ),
                 ("inhdetachpending", bool_value(false)),
             ]));

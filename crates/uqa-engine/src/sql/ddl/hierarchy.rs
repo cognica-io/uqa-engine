@@ -94,7 +94,12 @@ pub(super) fn prepare_create_table_hierarchy(
         let constraints = engine
             .try_declared_table_constraints(&parent)
             .map_err(|error| SQLError::Internal(format!("read inherited constraints: {error}")))?;
-        inherited_checks.extend(constraints.checks);
+        inherited_checks.extend(
+            constraints
+                .checks
+                .into_iter()
+                .filter(|constraint| !constraint.no_inherit),
+        );
         if is_partition {
             inherited_foreign_keys.extend(constraints.foreign_keys);
             inherited_keys.extend(constraints.key_constraints);

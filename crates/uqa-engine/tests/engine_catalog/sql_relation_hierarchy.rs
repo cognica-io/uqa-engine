@@ -9,6 +9,8 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "sql_relation_hierarchy/alter_lifecycle.rs"]
+mod alter_lifecycle;
 #[path = "sql_relation_hierarchy/catalog.rs"]
 mod catalog;
 #[path = "sql_relation_hierarchy/copy_io.rs"]

@@ -757,11 +757,20 @@ pub(in crate::sql) fn apply_missing_column_defaults(
     document: &mut Document,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
-    for col in engine
-        .try_table_columns(table)
+    let columns = engine
+        .try_describe_table(table)
         .map_err(|err| dml_storage_error("INSERT defaults", err))?
-    {
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    for definition in columns {
+        let col = definition.name;
         if document.contains_key(&col) {
+            continue;
+        }
+        if definition
+            .auto_increment
+            .as_ref()
+            .is_some_and(uqa_sql::ast::AutoIncrement::is_identity)
+        {
             continue;
         }
         if let Some(default_expr) = engine

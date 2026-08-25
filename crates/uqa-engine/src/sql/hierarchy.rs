@@ -84,6 +84,73 @@ pub(in crate::sql) fn validate_new_partition_bound(
     Ok(())
 }
 
+/// Test one stored row against a prospective direct-child bound before the
+/// hierarchy edge is installed. DEFAULT means no existing non-default sibling
+/// accepts the row, matching the routing decision the new edge will expose.
+pub(in crate::sql) fn prospective_partition_bound_accepts_document(
+    engine: &Engine,
+    parent: &str,
+    bound: &uqa_sql::ast::PartitionBound,
+    document: &Document,
+) -> Result<bool, SQLError> {
+    let hierarchy = engine
+        .try_table_hierarchy(parent)
+        .map_err(|error| SQLError::Internal(format!("read parent partition metadata: {error}")))?;
+    let spec = hierarchy
+        .partition_spec
+        .as_ref()
+        .ok_or_else(|| SQLError::Routine {
+            sqlstate: "42809".into(),
+            message: format!("relation \"{parent}\" is not partitioned"),
+        })?;
+    let (keys, row_hash) = partition_key_values_and_hash(engine, parent, spec, document)?;
+    if !matches!(bound, uqa_sql::ast::PartitionBound::Default) {
+        return partition_bound_matches(engine, bound, &keys, &[], row_hash);
+    }
+    for sibling in engine.direct_hierarchy_children(parent)? {
+        let sibling_hierarchy = engine
+            .try_table_hierarchy(&sibling)
+            .map_err(|error| SQLError::Internal(format!("read child partition: {error}")))?;
+        let Some(sibling_bound) = sibling_hierarchy.partition_bound.as_ref() else {
+            continue;
+        };
+        if matches!(sibling_bound, uqa_sql::ast::PartitionBound::Default) {
+            continue;
+        }
+        if partition_bound_matches(engine, sibling_bound, &keys, &[], row_hash)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Evaluate a retained detached-partition CHECK without requiring a live
+/// parent edge. This is also the exact predicate used for prospective ATTACH
+/// row scans.
+pub(in crate::sql) fn partition_constraint_accepts_document(
+    engine: &Engine,
+    table: &str,
+    spec: &uqa_sql::ast::PartitionSpec,
+    bound: &uqa_sql::ast::PartitionBound,
+    document: &Document,
+) -> Result<bool, SQLError> {
+    let (keys, row_hash) = partition_key_values_and_hash(engine, table, spec, document)?;
+    partition_bound_matches(engine, bound, &keys, &[], row_hash)
+}
+
+fn partition_key_values_and_hash(
+    engine: &Engine,
+    table: &str,
+    spec: &uqa_sql::ast::PartitionSpec,
+    document: &Document,
+) -> Result<(Vec<Value>, Option<u64>), SQLError> {
+    let (keys, definitions) = evaluate_partition_keys(engine, table, &spec.keys, document, &[])?;
+    let row_hash = (spec.strategy == uqa_sql::ast::PartitionStrategy::Hash)
+        .then(|| hash::row_hash(spec, &definitions, &keys))
+        .transpose()?;
+    Ok((keys, row_hash))
+}
+
 fn validate_partition_bound_width(
     spec: &uqa_sql::ast::PartitionSpec,
     bound: &uqa_sql::ast::PartitionBound,

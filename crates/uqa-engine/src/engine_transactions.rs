@@ -66,7 +66,7 @@ impl Engine {
         {
             return Err(failed_transaction_error());
         }
-        self.begin_transaction_frame(&mut stack, false, true)
+        self.begin_transaction_frame(&mut stack, false, true, false)
     }
 
     /// Commit the topmost transaction frame.
@@ -348,6 +348,14 @@ impl Engine {
         self.session.transactions.lock().len()
     }
 
+    pub(crate) fn in_explicit_transaction(&self) -> bool {
+        self.session
+            .transactions
+            .lock()
+            .last()
+            .is_some_and(|frame| !frame.implicit_statement)
+    }
+
     /// Tear down engine state cleanly, rolling back open transaction frames
     /// and clearing registries.
     /// The engine value can no longer be used afterwards in a
@@ -398,9 +406,9 @@ impl Engine {
             }
             _ if failed => return Err(failed_transaction_error()),
             TransactionStmt::Begin if guard.is_empty() => {
-                self.begin_transaction_frame(&mut guard, false, true)
+                self.begin_transaction_frame(&mut guard, false, true, false)
             }
-            TransactionStmt::Begin => self.begin_transaction_frame(&mut guard, false, false),
+            TransactionStmt::Begin => self.begin_transaction_frame(&mut guard, false, false, false),
             TransactionStmt::Commit => self.commit_transaction_frame(&mut guard),
             TransactionStmt::Savepoint(name) => self.save_transaction_savepoint(&mut guard, name),
             TransactionStmt::ReleaseSavepoint(name) => {
@@ -478,7 +486,7 @@ impl Engine {
                 "implicit statement transaction started inside an explicit transaction".into(),
             ));
         }
-        self.begin_transaction_frame(&mut stack, read_only, true)
+        self.begin_transaction_frame(&mut stack, read_only, true, true)
     }
 
     fn begin_transaction_frame(
@@ -486,6 +494,7 @@ impl Engine {
         stack: &mut Vec<TransactionFrame>,
         read_only: bool,
         defer_write_lock: bool,
+        implicit_statement: bool,
     ) -> Result<(), SQLError> {
         let session_snapshot = self.snapshot_session_state();
         let (storage_savepoint, data_snapshot, snapshot_change_baseline) = if stack.is_empty() {
@@ -521,6 +530,7 @@ impl Engine {
             BackendTransactionMode::Writer
         };
         stack.push(TransactionFrame {
+            implicit_statement,
             storage_savepoint,
             intent: if read_only {
                 TransactionIntent::ReadOnly

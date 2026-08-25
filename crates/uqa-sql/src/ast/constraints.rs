@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     deserialize_auto_increment, AutoIncrement, ColumnType, Expr, GeneratedColumn, OnCommitAction,
-    RelationPersistence, TableHierarchy,
+    PartitionBound, PartitionSpec, RelationPersistence, TableHierarchy,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -193,6 +193,15 @@ pub struct TableCheck {
     pub validated: bool,
     #[serde(default)]
     pub no_inherit: bool,
+    /// Runtime form of the bound CHECK retained after `DETACH PARTITION ... CONCURRENTLY`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partition_constraint: Option<DetachedPartitionConstraint>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetachedPartitionConstraint {
+    pub spec: PartitionSpec,
+    pub bound: PartitionBound,
 }
 
 /// Table-level foreign key. Compilation preserves an omitted referenced column list as empty; validation fills it from the primary key before publication.
