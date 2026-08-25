@@ -66,7 +66,11 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
             .try_register_column(&c.name, col.clone())
             .map_err(|e| ddl_storage_error("CREATE TABLE column", e))?;
     }
-    for column in &mut c.columns {
+    let mut registered_columns = engine
+        .try_describe_table(&c.name)
+        .map_err(|err| ddl_storage_error("CREATE TABLE columns", err))?
+        .ok_or_else(|| SQLError::UnknownTable(c.name.clone()))?;
+    for column in &mut registered_columns {
         let Some(reference) = column.references.clone() else {
             continue;
         };
@@ -100,10 +104,6 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
             foreign_key,
         )?;
     }
-    let registered_columns = engine
-        .try_describe_table(&c.name)
-        .map_err(|err| ddl_storage_error("CREATE TABLE columns", err))?
-        .ok_or_else(|| SQLError::UnknownTable(c.name.clone()))?;
     engine
         .replace_constraint_state(
             &c.name,
