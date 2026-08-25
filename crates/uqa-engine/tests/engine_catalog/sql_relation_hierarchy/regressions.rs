@@ -96,3 +96,33 @@ fn truncate_hierarchy_honors_continue_and_restart_identity() {
         .unwrap();
     assert_eq!(restarted.rows[0]["id"], Value::Int(1));
 }
+
+#[test]
+fn parent_for_update_locks_the_physical_partition_tuple() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = Engine::open(&directory.path().join("hierarchy-row-lock.db")).unwrap();
+    exec(
+        &root,
+        "CREATE TABLE lock_parent (id INTEGER PRIMARY KEY) PARTITION BY RANGE (id)",
+    );
+    exec(
+        &root,
+        "CREATE TABLE lock_leaf PARTITION OF lock_parent FOR VALUES FROM (0) TO (10)",
+    );
+    exec(&root, "INSERT INTO lock_parent VALUES (1)");
+    let holder = root.new_session().unwrap();
+    let waiter = root.new_session().unwrap();
+
+    exec(&holder, "BEGIN");
+    holder
+        .sql("SELECT id FROM lock_parent WHERE id = 1 FOR UPDATE", &[])
+        .unwrap();
+    let error = waiter
+        .sql(
+            "SELECT id FROM lock_leaf WHERE id = 1 FOR UPDATE NOWAIT",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("55P03"));
+    exec(&holder, "ROLLBACK");
+}
