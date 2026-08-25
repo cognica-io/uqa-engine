@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "a3f572dc049f531ba6deab692df033075c566c7845d28d4a9e646305e73d1142",
+  "fixture_sha256": "0ddff5faa27bea1e792f07b8d5c6d3a728fb45cad693cb715e702d8cc7fff3a7",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -405,6 +405,11 @@
     },
     {
       "name": "inferred_fk_requires_matching_arity",
+      "kind": "error",
+      "sqlstate": "42830"
+    },
+    {
+      "name": "duplicate_referenced_columns_are_not_a_unique_key",
       "kind": "error",
       "sqlstate": "42830"
     },

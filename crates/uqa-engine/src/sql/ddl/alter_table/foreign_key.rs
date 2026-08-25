@@ -107,13 +107,19 @@ pub(in crate::sql::ddl) fn validate_foreign_key_definition_with_local_state(
             ));
         }
     }
-    let has_unique_key = referenced_keys.iter().any(|key| {
-        key.columns.len() == foreign_key.ref_columns.len()
-            && foreign_key
-                .ref_columns
-                .iter()
-                .all(|column| key.columns.contains(column))
-    });
+    let referenced_column_set = foreign_key
+        .ref_columns
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    let has_unique_key = referenced_column_set.len() == foreign_key.ref_columns.len()
+        && referenced_keys.iter().any(|key| {
+            key.columns.len() == foreign_key.ref_columns.len()
+                && key
+                    .columns
+                    .iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    == referenced_column_set
+        });
     if !has_unique_key {
         return Err(constraint_error(
             "42830",

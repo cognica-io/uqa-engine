@@ -281,6 +281,10 @@ CREATE TABLE composite_key_parent (tenant_id INTEGER, id INTEGER, PRIMARY KEY (t
 CREATE TABLE composite_key_child (parent_id INTEGER REFERENCES composite_key_parent);
 -- @end
 
+-- @case duplicate_referenced_columns_are_not_a_unique_key error
+CREATE TABLE duplicate_ref_child (tenant_id INTEGER, id INTEGER, FOREIGN KEY (tenant_id, id) REFERENCES composite_key_parent(tenant_id, tenant_id));
+-- @end
+
 -- @case create_incompatible_key_parent ok
 CREATE TABLE incompatible_key_parent (id TEXT PRIMARY KEY);
 -- @end

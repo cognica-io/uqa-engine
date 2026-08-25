@@ -226,6 +226,12 @@ fn omitted_foreign_key_columns_infer_primary_keys_and_check_types() {
         "42830",
         "number of referencing and referenced columns for foreign key disagree",
     );
+    error(
+        &engine,
+        "CREATE TABLE duplicate_ref_child (tenant_id INTEGER, id INTEGER, FOREIGN KEY (tenant_id, id) REFERENCES composite_parent(tenant_id, tenant_id))",
+        "42830",
+        "there is no unique constraint matching given keys",
+    );
 
     exec(
         &engine,
@@ -298,6 +304,25 @@ fn temporal_cross_type_foreign_keys_preserve_values_and_referential_actions() {
         )
         .unwrap();
     assert_eq!(row.rows[0]["updated"], Value::Bool(true));
+
+    exec(
+        &engine,
+        "CREATE TABLE deferred_date_parent (id DATE PRIMARY KEY)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE deferred_timestamp_child (id INTEGER PRIMARY KEY, parent_id TIMESTAMP, CONSTRAINT deferred_timestamp_child_fk FOREIGN KEY (parent_id) REFERENCES deferred_date_parent(id) DEFERRABLE INITIALLY DEFERRED)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO deferred_date_parent VALUES (DATE '2024-03-01'), (DATE '2024-03-02'), (DATE '2024-03-03')",
+    );
+    exec(&engine, "BEGIN");
+    exec(
+        &engine,
+        "INSERT INTO deferred_timestamp_child VALUES (1, TIMESTAMP '2024-03-01 00:00:00'), (2, TIMESTAMP '2024-03-02 00:00:00'), (3, TIMESTAMP '2024-03-03 00:00:00')",
+    );
+    exec(&engine, "COMMIT");
 }
 
 #[test]

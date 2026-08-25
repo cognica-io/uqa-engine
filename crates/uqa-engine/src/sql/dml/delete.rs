@@ -9,13 +9,13 @@
 use super::{
     apply_set_action_to_child, apply_validated_prepared_document_rewrite,
     build_join_spill_with_ctes, build_returning_row, dml_join_rows, dml_returning_result,
-    dml_target_row, eval_mutation_expr, lock_mutation_target, prepare_document_rewrite,
-    referencing_rows, referrers_to_for_actions, stage_prepared_document_rewrite,
-    validate_dml_expression_qualifiers, validate_returning_alias_relations, BTreeSet, CteScope,
-    DeletePlan, DmlCommandMutationOverlay, DmlReturningShape, DocId, Document, Engine, ForeignKey,
-    ForeignKeyAction, MutationLockTarget, PreparedDeleteAction, PreparedDocumentDelete,
-    ReturningProjectionRow, ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult,
-    Value,
+    dml_target_row, eval_mutation_expr, foreign_key_comparison_types, lock_mutation_target,
+    prepare_document_rewrite, referencing_rows, referrers_to_for_actions,
+    stage_prepared_document_rewrite, validate_dml_expression_qualifiers,
+    validate_returning_alias_relations, BTreeSet, CteScope, DeletePlan, DmlCommandMutationOverlay,
+    DmlReturningShape, DocId, Document, Engine, ForeignKey, ForeignKeyAction, MutationLockTarget,
+    PreparedDeleteAction, PreparedDocumentDelete, ReturningProjectionRow, ReturningRowImage,
+    ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
 };
 
 pub(in crate::sql) fn run_delete(
@@ -397,7 +397,9 @@ fn prepare_referenced_key_delete_actions(
             continue;
         }
         engine.lock_relation(&ref_table, crate::row_locks::RelationLockMode::RowExclusive)?;
-        let referencing = referencing_rows(engine, &ref_table, &fk, &key_values)?;
+        let comparison = foreign_key_comparison_types(engine, &ref_table, &fk)?;
+        let expected = comparison.normalize(key_values.clone())?;
+        let referencing = referencing_rows(engine, &ref_table, &fk, &comparison, &expected)?;
         for (child_id, _child_doc) in referencing {
             if root_deletes.contains(&(ref_table.clone(), child_id)) {
                 continue;
@@ -436,7 +438,8 @@ fn prepare_referenced_key_delete_actions(
                         child_id,
                         &columns,
                         &fk,
-                        &key_values,
+                        &comparison,
+                        &expected,
                     )?
                     else {
                         continue;
