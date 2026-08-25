@@ -29,7 +29,7 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
                 ("procost", Value::Float(1.0)),
                 ("prorows", Value::Float(0.0)),
                 ("provariadic", int_value(0)),
-                ("prosupport", str_value("-")),
+                ("prosupport", int_value(0)),
                 ("prokind", str_value(routine.kind)),
                 ("prosecdef", bool_value(false)),
                 ("proleakproof", bool_value(routine.leakproof)),
@@ -96,7 +96,7 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
             ("procost", Value::Float(1.0)),
             ("prorows", Value::Float(0.0)),
             ("provariadic", int_value(0)),
-            ("prosupport", str_value("-")),
+            ("prosupport", int_value(0)),
             ("prokind", str_value("f")),
             ("prosecdef", bool_value(false)),
             ("proleakproof", bool_value(false)),
@@ -255,15 +255,10 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
             ("provariadic", int_value(variadic_type_oid)),
             (
                 "prosupport",
-                def.support.as_deref().map_or_else(
-                    || str_value("-"),
-                    |support| {
-                        int_value(
-                            builtin_routine_support_oid(support)
-                                .unwrap_or_else(|| stable_oid("proc", support)),
-                        )
-                    },
-                ),
+                int_value(def.support.as_deref().map_or(0, |support| {
+                    builtin_routine_support_oid(support)
+                        .unwrap_or_else(|| stable_oid("proc", support))
+                })),
             ),
             (
                 "prokind",

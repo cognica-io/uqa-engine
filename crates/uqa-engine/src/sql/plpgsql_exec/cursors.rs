@@ -79,8 +79,9 @@ impl Interpreter<'_> {
         self.restore_cursor_arguments(&argument_fields, &saved_values);
         let result = result?;
 
-        self.values[cursor_index] = Value::Str(portal_name.clone());
-        self.engine.open_session_portal(portal_name, result)?;
+        self.engine
+            .open_session_portal(portal_name.clone(), result)?;
+        self.values[cursor_index] = Value::Str(portal_name);
         Ok(())
     }
 

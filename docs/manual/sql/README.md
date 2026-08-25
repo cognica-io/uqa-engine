@@ -30,7 +30,7 @@ UQA Engine parses PostgreSQL-oriented SQL with `libpg_query`, compiles it into U
 | Session and diagnostics | `SET`, `SHOW`, `DISCARD`, `LOAD`, `ANALYZE`, `EXPLAIN` |
 | Transactions | `BEGIN`, `START TRANSACTION`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`, `ROLLBACK TO SAVEPOINT` |
 | Prepared SQL | `PREPARE`, `EXECUTE`, `DEALLOCATE` |
-| Routines and roles | `CREATE FUNCTION`, `CREATE PROCEDURE`, `CREATE OR REPLACE`, implemented `ALTER FUNCTION`/`PROCEDURE`/`ROUTINE` attributes and ownership, routine `GRANT`/`REVOKE`, `CREATE`/`ALTER`/`DROP ROLE`, `SET ROLE`, `DROP FUNCTION`, `DROP PROCEDURE`, `DO`, `CALL` |
+| Routines and roles | `CREATE FUNCTION`, `CREATE PROCEDURE`, `CREATE OR REPLACE`, implemented `ALTER FUNCTION`/`PROCEDURE`/`ROUTINE` attributes and ownership, routine `GRANT`/`REVOKE`, `CREATE`/`ALTER`/`DROP ROLE`, `CREATE USER`, `SET ROLE`, `RESET ROLE`, `DROP FUNCTION`, `DROP PROCEDURE`, `DO`, `CALL` |
 
 Unsupported statement shapes fail with an error instead of silently discarding clauses.
 

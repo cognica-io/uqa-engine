@@ -90,6 +90,31 @@ fn pg18_routine_owner_acl_context_and_catalog_move_together() {
     assert_eq!(proc_row["prosupport"], Value::Int(1023));
     assert_ne!(proc_row["proconfig"], Value::Null);
     assert_ne!(proc_row["proacl"], Value::Null);
+
+    engine
+        .register_scalar_function("registered_supportless_probe", |_args: &[Value]| {
+            Ok(Value::Null)
+        })
+        .unwrap();
+    let support_values = engine
+        .sql(
+            "SELECT prosupport FROM pg_catalog.pg_proc WHERE proname IN ('random', 'registered_supportless_probe', 'secured_probe', 'strict_secured')",
+            &[],
+        )
+        .unwrap();
+    assert!(!support_values.rows.is_empty());
+    assert!(support_values
+        .rows
+        .iter()
+        .all(|row| matches!(row["prosupport"], Value::Int(_))));
+    assert!(support_values
+        .rows
+        .iter()
+        .any(|row| row["prosupport"] == Value::Int(0)));
+    assert!(support_values
+        .rows
+        .iter()
+        .any(|row| row["prosupport"] == Value::Int(1023)));
 }
 
 #[test]
@@ -180,6 +205,61 @@ fn pg18_alter_security_configuration_and_planner_metadata_are_atomic() {
         .rows[0]
         .clone();
     assert_eq!(after, before);
+
+    engine
+        .sql(
+            "ALTER FUNCTION attribute_probe() SET search_path TO DEFAULT",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        scalar(&engine, "SELECT attribute_probe() AS v"),
+        Value::Str("attribute_owner/public".into())
+    );
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT proconfig IS NULL AS v FROM pg_catalog.pg_proc WHERE proname = 'attribute_probe'",
+        ),
+        Value::Bool(true)
+    );
+}
+
+#[test]
+fn routine_context_restores_identity_and_settings_after_callback_panic() {
+    let engine = Engine::new();
+    engine
+        .register_scalar_function(
+            "routine_context_panic",
+            |_args: &[Value]| -> Result<Value, uqa_sql::SQLError> {
+                panic!("routine callback panic")
+            },
+        )
+        .unwrap();
+    for sql in [
+        "CREATE ROLE panic_owner",
+        "CREATE ROLE panic_caller LOGIN",
+        "CREATE FUNCTION panic_probe() RETURNS integer LANGUAGE SQL SECURITY DEFINER SET search_path TO pg_catalog AS 'SELECT routine_context_panic()'",
+        "ALTER FUNCTION panic_probe() OWNER TO panic_owner",
+        "SET ROLE panic_caller",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = engine.sql("SELECT panic_probe()", &[]);
+    }));
+    assert!(panic.is_err());
+    assert_eq!(
+        scalar(&engine, "SELECT current_user AS v"),
+        Value::Str("panic_caller".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT current_schema AS v"),
+        Value::Str("public".into())
+    );
 }
 
 #[test]

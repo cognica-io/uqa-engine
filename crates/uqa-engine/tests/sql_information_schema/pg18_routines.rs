@@ -197,7 +197,7 @@ fn assert_pg18_fixed_routine_metadata(routines: &SQLResult) {
         assert_eq!(row(oid)["procost"], Value::Float(1.0));
         assert_eq!(row(oid)["prorows"], Value::Float(0.0));
         assert_eq!(row(oid)["provariadic"], Value::Int(0));
-        assert_eq!(row(oid)["prosupport"], Value::Str("-".into()));
+        assert_eq!(row(oid)["prosupport"], Value::Int(0));
         assert_eq!(row(oid)["prokind"], Value::Str("f".into()));
         assert_eq!(row(oid)["prosecdef"], Value::Bool(false));
         assert_eq!(row(oid)["proleakproof"], Value::Bool(false));
@@ -275,7 +275,7 @@ fn assert_json_strip_routines(engine: &Engine, routines: &SQLResult) {
         assert_eq!(row(oid)["procost"], Value::Float(1.0));
         assert_eq!(row(oid)["prorows"], Value::Float(0.0));
         assert_eq!(row(oid)["provariadic"], Value::Int(0));
-        assert_eq!(row(oid)["prosupport"], Value::Str("-".into()));
+        assert_eq!(row(oid)["prosupport"], Value::Int(0));
         assert_eq!(row(oid)["prokind"], Value::Str("f".into()));
         assert_eq!(row(oid)["prosecdef"], Value::Bool(false));
         assert_eq!(row(oid)["proleakproof"], Value::Bool(false));
@@ -348,7 +348,7 @@ fn assert_gamma_routines(engine: &Engine, routines: &SQLResult) {
         assert_eq!(row(oid)["procost"], Value::Float(1.0));
         assert_eq!(row(oid)["prorows"], Value::Float(0.0));
         assert_eq!(row(oid)["provariadic"], Value::Int(0));
-        assert_eq!(row(oid)["prosupport"], Value::Str("-".into()));
+        assert_eq!(row(oid)["prosupport"], Value::Int(0));
         assert_eq!(row(oid)["prokind"], Value::Str("f".into()));
         assert_eq!(row(oid)["prosecdef"], Value::Bool(false));
         assert_eq!(row(oid)["proleakproof"], Value::Bool(false));

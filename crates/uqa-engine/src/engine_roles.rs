@@ -12,7 +12,43 @@ use serde::{Deserialize, Serialize};
 use uqa_sql::ast::{AlterRoleStmt, CreateFunction, CreateRoleStmt, DropRoleStmt, RoleAttribute};
 use uqa_sql::SQLError;
 
-use crate::{Engine, StorageBackendError, StorageBackendResult, ROLES_METADATA_KEY};
+use crate::{
+    Engine, SQLStatementCache, StorageBackendError, StorageBackendResult, ROLES_METADATA_KEY,
+};
+
+pub(crate) struct RoutineSessionStateGuard<'a> {
+    engine: &'a Engine,
+    search_path: Vec<String>,
+    session_vars: BTreeMap<String, String>,
+    sql_statement_cache: Option<SQLStatementCache>,
+    current_user: String,
+}
+
+impl RoutineSessionStateGuard<'_> {
+    fn capture(engine: &Engine, preserve_statement_cache: bool) -> RoutineSessionStateGuard<'_> {
+        let state = engine.session.state.read();
+        RoutineSessionStateGuard {
+            engine,
+            search_path: state.search_path.clone(),
+            session_vars: state.session_vars.clone(),
+            sql_statement_cache: preserve_statement_cache
+                .then(|| state.sql_statement_cache.clone()),
+            current_user: state.current_user.clone(),
+        }
+    }
+}
+
+impl Drop for RoutineSessionStateGuard<'_> {
+    fn drop(&mut self) {
+        let mut state = self.engine.session.state.write();
+        state.search_path = std::mem::take(&mut self.search_path);
+        state.session_vars = std::mem::take(&mut self.session_vars);
+        if let Some(cache) = self.sql_statement_cache.take() {
+            state.sql_statement_cache = cache;
+        }
+        state.current_user = std::mem::take(&mut self.current_user);
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct RoleDefinition {
@@ -202,11 +238,12 @@ impl Engine {
         self.require_role_administration("drop role")?;
         let current = self.current_user_name();
         let session = self.session_user_name();
-        let roles = self.durable.roles.read().clone();
+        let mut roles = self.durable.roles.write();
+        let snapshot = roles.clone();
         let mut names = Vec::new();
         for requested in &statement.names {
             let name = self.resolve_role_reference(requested);
-            if !roles.contains_key(&name) {
+            if !snapshot.contains_key(&name) {
                 if statement.if_exists {
                     self.push_sql_notice(
                         "NOTICE",
@@ -235,12 +272,13 @@ impl Engine {
                 });
             }
         }
-        let mut next = roles;
+        let mut next = snapshot;
         for name in names {
             next.remove(&name);
         }
         self.persist_roles_snapshot(&next)?;
-        *self.durable.roles.write() = next;
+        *roles = next;
+        drop(roles);
         self.note_catalog_registry_changed();
         Ok(())
     }
@@ -318,14 +356,7 @@ impl Engine {
         definition: &CreateFunction,
         execute: impl FnOnce() -> Result<T, SQLError>,
     ) -> Result<T, SQLError> {
-        let (search_path, session_vars, current_user) = {
-            let state = self.session.state.read();
-            (
-                state.search_path.clone(),
-                state.session_vars.clone(),
-                state.current_user.clone(),
-            )
-        };
+        let _guard = self.routine_session_state_guard();
         if definition.security.security_definer {
             self.session
                 .state
@@ -334,20 +365,17 @@ impl Engine {
                 .clone_from(&definition.owner);
         }
         for (name, value) in &definition.config {
-            if let Err(error) = self.set_variable(name, value) {
-                let mut state = self.session.state.write();
-                state.search_path = search_path;
-                state.session_vars = session_vars;
-                state.current_user = current_user;
-                return Err(error);
-            }
+            self.set_variable(name, value)?;
         }
-        let result = execute();
-        let mut state = self.session.state.write();
-        state.search_path = search_path;
-        state.session_vars = session_vars;
-        state.current_user = current_user;
-        result
+        execute()
+    }
+
+    pub(crate) fn routine_session_state_guard(&self) -> RoutineSessionStateGuard<'_> {
+        RoutineSessionStateGuard::capture(self, false)
+    }
+
+    pub(crate) fn routine_config_state_guard(&self) -> RoutineSessionStateGuard<'_> {
+        RoutineSessionStateGuard::capture(self, true)
     }
 }
 

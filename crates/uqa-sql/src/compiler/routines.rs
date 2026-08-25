@@ -136,7 +136,7 @@ fn compile_routine_config_action(
         )));
     };
     match setting.kind() {
-        VariableSetKind::VarSetValue | VariableSetKind::VarSetDefault => {
+        VariableSetKind::VarSetValue => {
             let Statement::SetVariable { name, value } =
                 super::administrative::compile_variable_set(setting)?
             else {
@@ -146,6 +146,9 @@ fn compile_routine_config_action(
             };
             Ok(RoutineConfigAction::Set { name, value })
         }
+        VariableSetKind::VarSetDefault => Ok(RoutineConfigAction::Reset {
+            name: setting.name.clone(),
+        }),
         VariableSetKind::VarSetCurrent => Ok(RoutineConfigAction::FromCurrent {
             name: setting.name.clone(),
         }),

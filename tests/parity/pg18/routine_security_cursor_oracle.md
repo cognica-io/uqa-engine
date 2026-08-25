@@ -1,6 +1,6 @@
 # PostgreSQL 18.4 routine security and cursor oracle
 
-This transcript was recorded on 2026-08-25 from the local `uqa-pg18-age:1.8.0` image `sha256:93e3ba7b4cde8eb1a2172e744623449357fb3cd85a0b88e6bf5910161d5902e3`, reporting PostgreSQL `18.4 (Debian 18.4-1.pgdg13+1)`, `server_version_num = 180004`, `aarch64-unknown-linux-gnu`, and Apache AGE `1.8.0`. The complete probe ran inside one transaction and ended with `ROLLBACK`, including its two temporary roles.
+This transcript was recorded on 2026-08-25 from the local `uqa-pg18-age:1.8.0` image `sha256:93e3ba7b4cde8eb1a2172e744623449357fb3cd85a0b88e6bf5910161d5902e3`, reporting PostgreSQL `18.4 (Debian 18.4-1.pgdg13+1)`, `server_version_num = 180004`, `aarch64-unknown-linux-gnu`, and Apache AGE `1.8.0`. The security and first portal probes ran inside one transaction that ended with `ROLLBACK`, which also removed the two temporary roles; the savepoint portal case ran in a second transaction.
 
 ## Owner, ACL, execution identity, and pg_proc
 

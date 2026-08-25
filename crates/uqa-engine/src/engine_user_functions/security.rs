@@ -199,10 +199,7 @@ impl Engine {
         if definition.config_actions.is_empty() {
             return Ok(());
         }
-        let (search_path, session_vars) = {
-            let state = self.session.state.read();
-            (state.search_path.clone(), state.session_vars.clone())
-        };
+        let _guard = self.routine_config_state_guard();
         let mut result = Ok(());
         for action in std::mem::take(&mut definition.config_actions) {
             let applied = match action {
@@ -243,9 +240,6 @@ impl Engine {
                 }
             }
         }
-        let mut state = self.session.state.write();
-        state.search_path = search_path;
-        state.session_vars = session_vars;
         result
     }
 }

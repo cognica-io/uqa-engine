@@ -198,6 +198,18 @@ fn routine_security_ownership_acl_role_and_refcursor_statements_compile() {
         }]
     );
 
+    let Statement::AlterRoutine(reset) =
+        first("ALTER FUNCTION app.open_cursor(refcursor) SET search_path TO DEFAULT")
+    else {
+        panic!("expected ALTER FUNCTION");
+    };
+    assert_eq!(
+        reset.config_actions,
+        [RoutineConfigAction::Reset {
+            name: "search_path".into(),
+        }]
+    );
+
     let Statement::AlterRoutineOwner(owner) =
         first("ALTER FUNCTION app.open_cursor(refcursor) OWNER TO routine_owner")
     else {
