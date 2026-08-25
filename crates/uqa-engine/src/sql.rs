@@ -43,6 +43,7 @@ use crate::{Engine, HNSWIndexParams, IVFIndexParams, ScoredEntry, VectorIndexSpe
 mod age_cypher;
 mod aggregates;
 mod catalog;
+mod copy;
 mod correlation;
 mod cursor;
 mod ddl;

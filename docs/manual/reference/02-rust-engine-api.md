@@ -74,6 +74,31 @@ flowchart TD
     B -->|Column batches| E[Engine::sql_columnar]
 ```
 
+## COPY streams
+
+`Engine::copy_from(statement, reader)` consumes a `COPY relation [(column, ...)] FROM STDIN` text or CSV stream and returns the inserted row count. `Engine::copy_to(statement, writer)` emits `COPY relation [(column, ...)] TO STDOUT` or `COPY (query) TO STDOUT` and returns the emitted row count. COPY options are parsed with the PostgreSQL 18 grammar; the embedded stream endpoints implement text and CSV with `DELIMITER`, `NULL`, `HEADER`, `QUOTE`, `ESCAPE`, and UTF-8 `ENCODING`.
+
+```rust
+let engine = uqa_engine::Engine::new();
+engine.sql(
+    "CREATE TABLE events (id INTEGER, payload TEXT DEFAULT 'pending')",
+    &[],
+)?;
+engine.copy_from(
+    "COPY events (id) FROM STDIN",
+    b"1\n2\n".as_slice(),
+)?;
+let mut output = Vec::new();
+engine.copy_to(
+    "COPY (SELECT id, payload FROM events ORDER BY id) TO STDOUT",
+    &mut output,
+)?;
+assert_eq!(output, b"1\tpending\n2\tpending\n");
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`COPY FROM` uses the ordinary INSERT path as one statement: declarative partition parents route each row after defaults, identity allocation, and stored generation; a direct partition validates every ancestor bound; ordinary inheritance writes only the named relation; and any format, conversion, or constraint error publishes no rows. Direct `COPY relation TO` reads only the named physical relation and omits generated columns, so a partitioned parent raises `42809`; use `COPY (SELECT ... FROM parent) TO STDOUT` to include descendants or put `ONLY` inside that query to exclude them. A generated column named in a direct COPY column list is `42P10`, duplicate and missing names are `42701` and `42703`, malformed row widths are `22P04`, invalid text conversion uses the target type's PostgreSQL SQLSTATE, and a COPY failure aborts the current explicit transaction.
+
 ## Transactions and batches
 
 The engine exposes explicit transaction primitives:
