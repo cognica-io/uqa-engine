@@ -5,7 +5,10 @@
 //
 
 use super::*;
-use crate::ast::{AlterRoutineKind, FromClause, FunctionParamMode, FunctionVolatility};
+use crate::ast::{
+    AlterRoutineKind, FromClause, FunctionParallel, FunctionParamMode, FunctionVolatility,
+    RoutineConfigAction,
+};
 
 fn variadic_value(expression: &Expr) -> &Expr {
     crate::expr::variadic_argument_value(expression)
@@ -157,11 +160,87 @@ fn alter_function_preserves_percent_type_identity_and_serde_defaults() {
 }
 
 #[test]
-fn alter_function_rejects_every_unsupported_action_explicitly() {
-    let error = compile("ALTER FUNCTION app.f(integer) SECURITY DEFINER").unwrap_err();
-    assert_eq!(error.sqlstate(), Some("0A000"));
-    assert!(error.to_string().contains("ALTER FUNCTION"));
-    assert!(error.to_string().contains("action `security`"));
+fn routine_security_ownership_acl_role_and_refcursor_statements_compile() {
+    let Statement::CreateFunction(function) = first(
+        "CREATE FUNCTION app.open_cursor(c refcursor) RETURNS refcursor LANGUAGE plpgsql SECURITY DEFINER LEAKPROOF PARALLEL SAFE SET search_path TO app, public AS $$ BEGIN RETURN c; END $$",
+    ) else {
+        panic!("expected CREATE FUNCTION");
+    };
+    assert_eq!(function.params[0].type_name, "refcursor");
+    assert!(matches!(
+        &function.returns,
+        crate::ast::FunctionReturns::Scalar { type_name } if type_name == "refcursor"
+    ));
+    assert!(function.security.security_definer);
+    assert!(function.security.leakproof);
+    assert_eq!(function.parallel, FunctionParallel::Safe);
+    assert_eq!(
+        function.config_actions,
+        [RoutineConfigAction::Set {
+            name: "search_path".into(),
+            value: "app,public".into(),
+        }]
+    );
+
+    let Statement::AlterRoutine(alter) = first(
+        "ALTER FUNCTION app.open_cursor(refcursor) SECURITY INVOKER NOT LEAKPROOF PARALLEL RESTRICTED SUPPORT app.support SET search_path FROM CURRENT",
+    ) else {
+        panic!("expected ALTER FUNCTION");
+    };
+    assert_eq!(alter.security_definer, Some(false));
+    assert_eq!(alter.leakproof, Some(false));
+    assert_eq!(alter.parallel, Some(FunctionParallel::Restricted));
+    assert_eq!(alter.support, Some("app.support".into()));
+    assert_eq!(
+        alter.config_actions,
+        [RoutineConfigAction::FromCurrent {
+            name: "search_path".into(),
+        }]
+    );
+
+    let Statement::AlterRoutine(reset) =
+        first("ALTER FUNCTION app.open_cursor(refcursor) SET search_path TO DEFAULT")
+    else {
+        panic!("expected ALTER FUNCTION");
+    };
+    assert_eq!(
+        reset.config_actions,
+        [RoutineConfigAction::Reset {
+            name: "search_path".into(),
+        }]
+    );
+
+    let Statement::AlterRoutineOwner(owner) =
+        first("ALTER FUNCTION app.open_cursor(refcursor) OWNER TO routine_owner")
+    else {
+        panic!("expected ALTER FUNCTION OWNER");
+    };
+    assert_eq!(owner.name, "app.open_cursor");
+    assert_eq!(owner.arg_types.as_deref().unwrap(), ["refcursor"]);
+    assert_eq!(owner.new_owner, "routine_owner");
+
+    let Statement::GrantRoutine(grant) = first(
+        "GRANT ALL PRIVILEGES ON FUNCTION app.open_cursor(refcursor) TO routine_caller, PUBLIC WITH GRANT OPTION",
+    ) else {
+        panic!("expected GRANT EXECUTE");
+    };
+    assert!(grant.is_grant);
+    assert!(grant.grant_option);
+    assert_eq!(grant.grantees, ["routine_caller", "PUBLIC"]);
+    assert_eq!(grant.items[0].arg_types.as_deref().unwrap(), ["refcursor"]);
+
+    assert!(matches!(
+        first("CREATE ROLE routine_caller LOGIN CREATEDB CONNECTION LIMIT 4"),
+        Statement::CreateRole(_)
+    ));
+    assert!(matches!(
+        first("ALTER ROLE routine_caller NOLOGIN NOCREATEDB"),
+        Statement::AlterRole(_)
+    ));
+    assert!(matches!(
+        first("DROP ROLE IF EXISTS routine_caller"),
+        Statement::DropRole(_)
+    ));
 }
 
 #[test]

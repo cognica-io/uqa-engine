@@ -71,8 +71,6 @@ impl<'a> Interpreter<'a> {
             found: parsed.found_datum,
             last_row_count: 0,
             is_set: def.returns_set(),
-            cursors: HashMap::new(),
-            next_cursor_id: 1,
         };
         // Bind call arguments onto the leading parameter datums.
         // Procedure OUT arguments start NULL (the placeholder value a
@@ -179,14 +177,7 @@ impl<'a> Interpreter<'a> {
             Flow::Continue(_) => Err(SQLError::Internal(
                 "CONTINUE escaped every enclosing loop".into(),
             )),
-        }?;
-        if !self.cursors.is_empty() {
-            return Err(SQLError::Unsupported(
-                "PL/pgSQL cursors that remain open after routine exit require session portal state"
-                    .into(),
-            ));
         }
-        Ok(())
     }
 
     // -- expression / query plumbing -----------------------------------

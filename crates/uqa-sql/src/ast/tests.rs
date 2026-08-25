@@ -5,9 +5,10 @@
 //
 
 use super::{
-    AlterSequence, ColumnType, CreateFunction, FunctionBinding, FunctionBody, FunctionParam,
-    FunctionParamMode, FunctionReturns, FunctionVolatility, RoutineInvocationBinding,
-    RoutineVariadicMode, SequenceRestart, Statement,
+    AlterSequence, ColumnType, CreateFunction, FunctionBinding, FunctionBody, FunctionParallel,
+    FunctionParam, FunctionParamMode, FunctionReturns, FunctionVolatility,
+    RoutineInvocationBinding, RoutineSecurityAttributes, RoutineVariadicMode, SequenceRestart,
+    Statement,
 };
 
 #[test]
@@ -170,6 +171,13 @@ fn routine_identity_and_call_parameters_are_distinct() {
         creation_search_path: Vec::new(),
         volatility: FunctionVolatility::Volatile,
         strict: false,
+        owner: String::new(),
+        security: RoutineSecurityAttributes::default(),
+        parallel: FunctionParallel::Unsafe,
+        support: None,
+        config: Vec::new(),
+        config_actions: Vec::new(),
+        execute_acl: None,
     };
 
     let identity_names = function

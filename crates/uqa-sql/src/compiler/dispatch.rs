@@ -18,7 +18,11 @@ use super::relations::{
     compile_create_table_as, compile_create_view, compile_deallocate, compile_execute,
     compile_prepare, compile_refresh_materialized_view, compile_top_level_select,
 };
-use super::routines::{compile_alter_routine, compile_call, compile_create_function, compile_do};
+use super::routines::{
+    compile_alter_role, compile_alter_routine, compile_alter_routine_owner, compile_call,
+    compile_create_function, compile_create_role, compile_do, compile_drop_role,
+    compile_grant_routine,
+};
 use super::sequences::{compile_alter_sequence, compile_create_sequence};
 use super::{
     compile_create_index, compile_create_table, compile_insert, compile_values_lists, Node,
@@ -96,6 +100,11 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::AlterFunctionStmt(stmt) => {
             compile_alter_routine(stmt).map(Statement::AlterRoutine)
         }
+        NodeEnum::AlterOwnerStmt(stmt) => compile_alter_routine_owner(stmt),
+        NodeEnum::GrantStmt(stmt) => compile_grant_routine(stmt),
+        NodeEnum::CreateRoleStmt(stmt) => compile_create_role(stmt),
+        NodeEnum::AlterRoleStmt(stmt) => compile_alter_role(stmt),
+        NodeEnum::DropRoleStmt(stmt) => compile_drop_role(stmt),
         NodeEnum::VariableSetStmt(stmt) => compile_variable_set(stmt),
         NodeEnum::VariableShowStmt(stmt) => Ok(Statement::ShowVariable {
             name: stmt.name.clone(),

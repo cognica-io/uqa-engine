@@ -163,6 +163,11 @@ pub(super) fn optimize_command(
         | CommandPlan::CreateFunction(_)
         | CommandPlan::DropFunction(_)
         | CommandPlan::AlterRoutine(_)
+        | CommandPlan::AlterRoutineOwner(_)
+        | CommandPlan::GrantRoutine(_)
+        | CommandPlan::CreateRole(_)
+        | CommandPlan::AlterRole(_)
+        | CommandPlan::DropRole(_)
         | CommandPlan::DoBlock { .. } => {}
     }
 }

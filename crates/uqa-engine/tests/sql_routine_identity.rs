@@ -20,6 +20,8 @@ mod polymorphic_variadic;
 mod routine_cascade;
 #[path = "sql_routine_identity/scalar_overloads.rs"]
 mod scalar_overloads;
+#[path = "sql_routine_identity/security_roles.rs"]
+mod security_roles;
 
 fn scalar(engine: &Engine, sql: &str) -> Value {
     engine

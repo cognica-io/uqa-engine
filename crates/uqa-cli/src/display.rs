@@ -123,6 +123,7 @@ pub(super) fn sql_type_name(ty: &ColumnType) -> String {
         ColumnType::Bytea => "bytea".into(),
         ColumnType::InternalChar => r#""char""#.into(),
         ColumnType::Regproc => "regproc".into(),
+        ColumnType::RefCursor => "refcursor".into(),
         ColumnType::Regclass => "regclass".into(),
         ColumnType::Regnamespace => "regnamespace".into(),
         ColumnType::Regtype => "regtype".into(),
@@ -172,6 +173,7 @@ pub(super) fn fdw_type_name(ty: &uqa_fdw::ColumnType) -> String {
         uqa_fdw::ColumnType::Bytes => "bytea".into(),
         uqa_fdw::ColumnType::InternalChar => r#""char""#.into(),
         uqa_fdw::ColumnType::Regproc => "regproc".into(),
+        uqa_fdw::ColumnType::RefCursor => "refcursor".into(),
         uqa_fdw::ColumnType::Regclass => "regclass".into(),
         uqa_fdw::ColumnType::Regnamespace => "regnamespace".into(),
         uqa_fdw::ColumnType::Regtype => "regtype".into(),
@@ -265,4 +267,16 @@ pub(super) fn foreign_table_options_display(options: &BTreeMap<String, String>) 
         out.push("hive".to_string());
     }
     out.join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fdw_type_name, sql_type_name};
+    use uqa_sql::ColumnType;
+
+    #[test]
+    fn refcursor_type_names_match_postgresql() {
+        assert_eq!(sql_type_name(&ColumnType::RefCursor), "refcursor");
+        assert_eq!(fdw_type_name(&uqa_fdw::ColumnType::RefCursor), "refcursor");
+    }
 }

@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_sql::ast::{
     AlterRoutineKind, AlterRoutineStmt, CreateFunction, DropFunctionItem, DropFunctionStmt,
-    FunctionBinding, FunctionBody,
+    FunctionBinding, FunctionBody, RoleAttribute,
 };
 use uqa_sql::SQLError;
 
@@ -73,7 +73,7 @@ impl RoutineDropTarget {
     }
 }
 
-fn routine_signature_label(name: &str, types: &[String]) -> String {
+pub(super) fn routine_signature_label(name: &str, types: &[String]) -> String {
     let display_types = types
         .iter()
         .map(|type_name| {
@@ -181,6 +181,13 @@ impl Engine {
                 message: error,
             })?;
         resolve_routine_type_references(self, &mut def)?;
+        if def.owner.is_empty() {
+            def.owner = self.current_user_name();
+        }
+        if let Some(support) = def.support.as_deref() {
+            self.validate_routine_support(support)?;
+        }
+        self.apply_routine_config_actions(&mut def)?;
         if matches!(def.body, FunctionBody::Statements(_)) {
             def.creation_search_path
                 .clone_from(&self.session.state.read().search_path);
@@ -191,6 +198,27 @@ impl Engine {
         let name = def.name.clone();
         let signature = routine_signature_types(&def);
         let kind = routine_kind(&def);
+        let current_user = self.current_user_name();
+        let roles = self.durable.roles.read();
+        if !roles.contains_key(&def.owner) {
+            return Err(SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("role \"{}\" does not exist", def.owner),
+            });
+        }
+        let current_user_is_superuser = roles
+            .get(&current_user)
+            .is_some_and(|role| role.has(RoleAttribute::Superuser));
+        if (def.security.leakproof || def.support.is_some()) && !current_user_is_superuser {
+            return Err(SQLError::Routine {
+                sqlstate: "42501".into(),
+                message: if def.security.leakproof {
+                    "only superuser can define a leakproof function".into()
+                } else {
+                    "must be superuser to specify a support function".into()
+                },
+            });
+        }
         let mut registry = self.durable.sql_user_functions.write();
         let mut next = registry.clone();
         {
@@ -220,6 +248,9 @@ impl Engine {
                         message: "cannot change return type of existing function".into(),
                     });
                 }
+                // CREATE OR REPLACE changes the definition but not object ownership or privileges.
+                def.owner.clone_from(&existing.owner);
+                def.execute_acl.clone_from(&existing.execute_acl);
                 overloads[pos] = Arc::new(SQLUserFunction { def, compiled });
             } else {
                 overloads.push(Arc::new(SQLUserFunction { def, compiled }));
@@ -233,6 +264,7 @@ impl Engine {
         self.persist_sql_functions_snapshot(&next)?;
         *registry = next;
         drop(registry);
+        drop(roles);
         self.note_catalog_registry_changed();
         Ok(())
     }
@@ -240,6 +272,11 @@ impl Engine {
     /// Change mutable routine attributes without replacing its identity or compiled body.
     pub(crate) fn alter_sql_routine(&self, stmt: &AlterRoutineStmt) -> Result<(), SQLError> {
         let requested_types = resolve_alter_routine_identity_types(self, stmt)?;
+        let current_user = self.current_user_name();
+        let roles = self.durable.roles.read();
+        let current_user_is_superuser = roles
+            .get(&current_user)
+            .is_some_and(|role| role.has(RoleAttribute::Superuser));
         let mut registry = self.durable.sql_user_functions.write();
         let (name, position) = self.resolve_sql_routine_alter_target(
             &registry,
@@ -256,7 +293,14 @@ impl Engine {
                     "resolved ALTER routine target `{name}` disappeared before mutation"
                 ))
             })?;
-        if existing.def.is_procedure && (stmt.volatility.is_some() || stmt.strict.is_some()) {
+        Self::ensure_routine_owner_as(&existing.def, &current_user, current_user_is_superuser)?;
+        if existing.def.is_procedure
+            && (stmt.volatility.is_some()
+                || stmt.strict.is_some()
+                || stmt.leakproof.is_some()
+                || stmt.parallel.is_some()
+                || stmt.support.is_some())
+        {
             return Err(SQLError::Routine {
                 sqlstate: "42P13".into(),
                 message: "invalid attribute in procedure definition".into(),
@@ -270,6 +314,27 @@ impl Engine {
         if let Some(strict) = stmt.strict {
             def.strict = strict;
         }
+        if let Some(security_definer) = stmt.security_definer {
+            def.security.security_definer = security_definer;
+        }
+        if let Some(leakproof) = stmt.leakproof {
+            if leakproof && !current_user_is_superuser {
+                return Err(SQLError::Routine {
+                    sqlstate: "42501".into(),
+                    message: "only superuser can define a leakproof function".into(),
+                });
+            }
+            def.security.leakproof = leakproof;
+        }
+        if let Some(parallel) = stmt.parallel {
+            def.parallel = parallel;
+        }
+        if let Some(support) = &stmt.support {
+            self.validate_routine_support(support)?;
+            def.support = Some(support.clone());
+        }
+        def.config_actions.clone_from(&stmt.config_actions);
+        self.apply_routine_config_actions(&mut def)?;
         let mut next = registry.clone();
         let overloads = next.get_mut(&name).ok_or_else(|| {
             SQLError::Internal(format!(
@@ -283,6 +348,7 @@ impl Engine {
         self.persist_sql_functions_snapshot(&next)?;
         *registry = next;
         drop(registry);
+        drop(roles);
         self.note_catalog_registry_changed();
         Ok(())
     }
@@ -681,7 +747,7 @@ impl Engine {
         Ok(None)
     }
 
-    fn resolve_sql_routine_alter_target(
+    pub(super) fn resolve_sql_routine_alter_target(
         &self,
         registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
         requested_name: &str,
@@ -858,7 +924,7 @@ impl Engine {
         std::mem::take(&mut *self.runtime.notices.lock())
     }
 
-    fn persist_sql_functions_snapshot(
+    pub(super) fn persist_sql_functions_snapshot(
         &self,
         registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
     ) -> Result<(), SQLError> {

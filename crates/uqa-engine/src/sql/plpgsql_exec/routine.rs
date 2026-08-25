@@ -76,7 +76,8 @@ pub(super) fn execute_routine(
     let _guard = DepthGuard::enter(engine)?;
     let specialized = specialized_definition(&function.def, invocation)?;
     let definition = specialized.as_ref().unwrap_or(&function.def);
-    match &function.compiled {
+    engine.ensure_routine_execute_privilege(definition)?;
+    engine.with_routine_context(definition, || match &function.compiled {
         CompiledFunctionBody::PLpgSQL(parsed) => {
             if specialized.is_some() {
                 let mut parsed = parsed.clone();
@@ -85,14 +86,15 @@ pub(super) fn execute_routine(
                         variable.type_name.clone_from(&parameter.type_name);
                     }
                 }
-                return execute_plpgsql_language(engine, definition, &parsed, bound);
+                execute_plpgsql_language(engine, definition, &parsed, bound)
+            } else {
+                execute_plpgsql_language(engine, definition, parsed, bound)
             }
-            execute_plpgsql_language(engine, definition, parsed, bound)
         }
         CompiledFunctionBody::SQL(statements) => {
             execute_sql_language(engine, definition, statements, &bound)
         }
-    }
+    })
 }
 
 fn execute_plpgsql_language(

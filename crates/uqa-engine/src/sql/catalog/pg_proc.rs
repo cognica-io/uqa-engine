@@ -13,6 +13,8 @@ use super::helpers::{
     split_schema_name, stable_oid, str_value,
 };
 use super::{canonical_routine_type_name, registered_names, Engine, ResultRow, SQLError, Value};
+use crate::engine_roles::role_oid;
+use crate::engine_user_functions::builtin_routine_support_oid;
 
 pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINES
@@ -27,7 +29,7 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
                 ("procost", Value::Float(1.0)),
                 ("prorows", Value::Float(0.0)),
                 ("provariadic", int_value(routine.variadic_type())),
-                ("prosupport", str_value("-")),
+                ("prosupport", int_value(0)),
                 ("prokind", str_value(routine.kind)),
                 ("prosecdef", bool_value(false)),
                 ("proleakproof", bool_value(routine.leakproof)),
@@ -94,7 +96,7 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
             ("procost", Value::Float(1.0)),
             ("prorows", Value::Float(0.0)),
             ("provariadic", int_value(0)),
-            ("prosupport", str_value("-")),
+            ("prosupport", int_value(0)),
             ("prokind", str_value("f")),
             ("prosecdef", bool_value(false)),
             ("proleakproof", bool_value(false)),
@@ -243,7 +245,7 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
             ("oid", int_value(stable_oid("proc", &identity))),
             ("proname", str_value(routine_name)),
             ("pronamespace", int_value(schema_oid(&routine_schema))),
-            ("proowner", int_value(current_user_oid())),
+            ("proowner", int_value(role_oid(&def.owner))),
             ("prolang", int_value(0)),
             ("procost", Value::Float(100.0)),
             (
@@ -251,17 +253,30 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
                 Value::Float(if def.returns_set() { 1000.0 } else { 0.0 }),
             ),
             ("provariadic", int_value(variadic_type_oid)),
-            ("prosupport", str_value("-")),
+            (
+                "prosupport",
+                int_value(def.support.as_deref().map_or(0, |support| {
+                    builtin_routine_support_oid(support)
+                        .unwrap_or_else(|| stable_oid("proc", support))
+                })),
+            ),
             (
                 "prokind",
                 str_value(if def.is_procedure { "p" } else { "f" }),
             ),
-            ("prosecdef", bool_value(false)),
-            ("proleakproof", bool_value(false)),
+            ("prosecdef", bool_value(def.security.security_definer)),
+            ("proleakproof", bool_value(def.security.leakproof)),
             ("proisstrict", bool_value(def.strict)),
             ("proretset", bool_value(def.returns_set())),
             ("provolatile", str_value(volatile)),
-            ("proparallel", str_value("u")),
+            (
+                "proparallel",
+                str_value(match def.parallel {
+                    uqa_sql::ast::FunctionParallel::Unsafe => "u",
+                    uqa_sql::ast::FunctionParallel::Restricted => "r",
+                    uqa_sql::ast::FunctionParallel::Safe => "s",
+                }),
+            ),
             (
                 "pronargs",
                 int_value(catalog_usize(input_params.len(), "pg_proc argument count")?),
@@ -280,9 +295,56 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
             ("prosrc", str_value(source)),
             ("probin", Value::Null),
             ("prosqlbody", Value::Null),
-            ("proconfig", Value::Null),
-            ("proacl", Value::Null),
+            ("proconfig", routine_config_catalog_value(def)?),
+            ("proacl", routine_acl_catalog_value(def)?),
         ]));
     }
     Ok(rows)
+}
+
+fn routine_config_catalog_value(def: &uqa_sql::ast::CreateFunction) -> Result<Value, SQLError> {
+    if def.config.is_empty() {
+        return Ok(Value::Null);
+    }
+    catalog_array(
+        def.config
+            .iter()
+            .map(|(name, value)| str_value(format!("{name}={value}")))
+            .collect(),
+        "pg_proc.proconfig",
+    )
+}
+
+fn routine_acl_catalog_value(def: &uqa_sql::ast::CreateFunction) -> Result<Value, SQLError> {
+    let Some(acl) = def.execute_acl.as_ref() else {
+        return Ok(Value::Null);
+    };
+    let grantor = acl_identifier(&def.owner);
+    let mut entries = vec![str_value(format!("{grantor}=X/{grantor}"))];
+    entries.extend(
+        acl.iter()
+            .filter(|entry| entry.role != def.owner)
+            .map(|entry| {
+                let grantee = if entry.role == "PUBLIC" {
+                    String::new()
+                } else {
+                    acl_identifier(&entry.role)
+                };
+                str_value(format!(
+                    "{grantee}=X{}/{grantor}",
+                    if entry.grant_option { "*" } else { "" }
+                ))
+            }),
+    );
+    catalog_array(entries, "pg_proc.proacl")
+}
+
+fn acl_identifier(name: &str) -> String {
+    if name.bytes().enumerate().all(|(index, byte)| {
+        byte == b'_' || byte.is_ascii_lowercase() || index > 0 && byte.is_ascii_digit()
+    }) {
+        name.to_string()
+    } else {
+        format!("\"{}\"", name.replace('"', "\"\""))
+    }
 }

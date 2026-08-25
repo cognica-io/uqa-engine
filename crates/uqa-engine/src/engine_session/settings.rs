@@ -271,6 +271,11 @@ impl Engine {
                 session.sequence_currvals.clear();
                 session.sql_statement_cache.clear();
                 session.search_path = vec!["public".to_string()];
+                let session_user = session.session_user.clone();
+                session.current_user = session_user;
+                drop(session);
+                self.session.portals.lock().clear();
+                return Ok(());
             }
             DiscardTarget::Plans => {
                 session.prepared.clear();

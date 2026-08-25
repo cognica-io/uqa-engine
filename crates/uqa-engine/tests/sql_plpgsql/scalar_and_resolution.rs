@@ -142,43 +142,69 @@ fn pg18_bound_cursor_tracks_position_and_found() {
 }
 
 #[test]
-fn cursor_contracts_requiring_session_portals_fail_explicitly() {
+fn refcursor_parameters_returns_and_open_portals_share_session_state() {
     let eng = engine();
-    let returns_cursor = exec_err(
-        &eng,
-        "CREATE FUNCTION cursor_return() RETURNS refcursor AS $$ BEGIN RETURN NULL; END; $$ LANGUAGE plpgsql",
-    );
-    assert!(
-        returns_cursor
-            .to_string()
-            .contains("refcursor returns require session portal state"),
-        "got: {returns_cursor}"
-    );
-    let cursor_parameter = exec_err(
-        &eng,
-        "CREATE FUNCTION cursor_input(c refcursor) RETURNS integer AS $$ BEGIN RETURN 1; END; $$ LANGUAGE plpgsql",
-    );
-    assert!(
-        cursor_parameter
-            .to_string()
-            .contains("refcursor parameters require session portal state"),
-        "got: {cursor_parameter}"
-    );
-
     exec(
         &eng,
-        "CREATE FUNCTION cursor_leak() RETURNS integer AS $$
-         DECLARE c CURSOR FOR SELECT 1 AS value;
-         BEGIN OPEN c; RETURN 1; END;
+        "CREATE FUNCTION cursor_return() RETURNS refcursor AS $$
+         DECLARE c CURSOR FOR SELECT 11 AS value UNION ALL SELECT 22;
+         BEGIN OPEN c; RETURN c; END;
          $$ LANGUAGE plpgsql",
     );
-    let open_cursor = exec_err(&eng, "SELECT cursor_leak()");
-    assert!(
-        open_cursor
-            .to_string()
-            .contains("cursors that remain open after routine exit require session portal state"),
-        "got: {open_cursor}"
+    exec(
+        &eng,
+        "CREATE FUNCTION cursor_input(c refcursor) RETURNS integer AS $$
+         DECLARE value integer;
+         BEGIN FETCH c INTO value; RETURN value; END;
+         $$ LANGUAGE plpgsql",
     );
+    assert_eq!(
+        scalar(&eng, "SELECT pg_typeof('named'::refcursor)::text AS v"),
+        Value::Str("refcursor".into())
+    );
+    exec(&eng, "BEGIN");
+    assert_eq!(
+        scalar(&eng, "SELECT cursor_input(cursor_return()) AS v"),
+        Value::Int(11)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT cursor_input('<unnamed portal 1>') AS v"),
+        Value::Int(22)
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT cursor_input('<unnamed portal 1>') IS NULL AS v",
+        ),
+        Value::Bool(true)
+    );
+    exec(&eng, "COMMIT");
+    let closed = exec_err(&eng, "SELECT cursor_input('<unnamed portal 1>')");
+    assert_eq!(closed.sqlstate(), Some("34000"), "{closed}");
+
+    exec(&eng, "BEGIN");
+    assert_eq!(
+        scalar(&eng, "SELECT cursor_return() AS v"),
+        Value::Str("<unnamed portal 2>".into())
+    );
+    exec(&eng, "SAVEPOINT cursor_position");
+    assert_eq!(
+        scalar(&eng, "SELECT cursor_input('<unnamed portal 2>') AS v"),
+        Value::Int(11)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT cursor_return() AS v"),
+        Value::Str("<unnamed portal 3>".into())
+    );
+    exec(&eng, "ROLLBACK TO SAVEPOINT cursor_position");
+    assert_eq!(
+        scalar(&eng, "SELECT cursor_input('<unnamed portal 2>') AS v"),
+        Value::Int(22),
+        "savepoint rollback closes newer portals without rewinding an existing cursor"
+    );
+    let rolled_back = exec_err(&eng, "SELECT cursor_input('<unnamed portal 3>')");
+    assert_eq!(rolled_back.sqlstate(), Some("34000"), "{rolled_back}");
+    exec(&eng, "ROLLBACK");
 }
 
 #[test]

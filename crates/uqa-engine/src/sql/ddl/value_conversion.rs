@@ -213,7 +213,7 @@ pub(crate) fn convert_value_to_column_type(
                 "cannot cast {other:?} to boolean"
             ))),
         },
-        ColumnType::Text => Ok(Value::Str(value_to_text(&value))),
+        ColumnType::Text | ColumnType::RefCursor => Ok(Value::Str(value_to_text(&value))),
         ColumnType::Name => uqa_sql::expr::cast_value(&value, "name"),
         ColumnType::Uuid => uqa_sql::expr::cast_value(&value, "uuid"),
         ColumnType::Varchar(None) => Ok(Value::Str(value_to_text(&value))),
@@ -490,6 +490,7 @@ pub(in crate::sql) fn column_type_name(ty: &ColumnType) -> &str {
         ColumnType::Xid => "xid",
         ColumnType::Boolean => "boolean",
         ColumnType::Text => "text",
+        ColumnType::RefCursor => "refcursor",
         ColumnType::Name => "name",
         ColumnType::Uuid => "uuid",
         ColumnType::Varchar(_) => "character varying",

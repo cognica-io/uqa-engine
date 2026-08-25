@@ -733,6 +733,7 @@ impl Engine {
             self.row_locks.release_session(self.session_id);
             self.publish_committed_transaction_epochs();
             publication_result?;
+            self.session.portals.lock().clear();
         }
         if let Some(parent) = stack.last_mut() {
             parent.next_lock_mark = parent.next_lock_mark.max(committed.next_lock_mark);
@@ -1331,11 +1332,17 @@ impl Engine {
     }
 
     fn snapshot_session_state(&self) -> SessionStateSnapshot {
-        self.session.state.read().clone()
+        let mut snapshot = self.session.state.read().clone();
+        snapshot.portal_names = self.session.portals.lock().keys().cloned().collect();
+        snapshot
     }
 
     fn restore_session_state(&self, snapshot: &SessionStateSnapshot) {
         *self.session.state.write() = snapshot.clone();
+        self.session
+            .portals
+            .lock()
+            .retain(|name, _| snapshot.portal_names.contains(name));
     }
 }
 

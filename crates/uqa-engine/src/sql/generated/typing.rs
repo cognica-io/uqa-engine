@@ -258,6 +258,7 @@ pub(super) fn column_generation_type(ty: &ColumnType) -> GenerationType {
         ColumnType::Xid => GenerationType::Xid,
         ColumnType::Boolean => GenerationType::Boolean,
         ColumnType::Text
+        | ColumnType::RefCursor
         | ColumnType::Name
         | ColumnType::Varchar(_)
         | ColumnType::Bpchar

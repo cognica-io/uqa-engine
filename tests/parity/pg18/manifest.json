@@ -406,11 +406,11 @@
     },
     {
       "id": "routines.extension-language-privilege-security",
-      "postgresql_reference": "PostgreSQL 18.4 CREATE, ALTER, execution, and catalog behavior for procedural and extension languages, ownership, roles, ACLs, SECURITY DEFINER and INVOKER, SET clauses, support functions, leakproofness, parallel safety, and routine configuration",
-      "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::; cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::",
-      "supported_version": "Implemented SQL and PL/pgSQL routines execute without a PostgreSQL server role or extension-language privilege model; unsupported declaration and ALTER actions fail explicitly",
+      "postgresql_reference": "PostgreSQL 18.4 CREATE, ALTER, execution, and catalog behavior for procedural and extension languages, ownership, roles, ACLs, SECURITY DEFINER and INVOKER, SET clauses, support functions, leakproofness, parallel safety, and routine configuration; tests/parity/pg18/routine_security_cursor_oracle.md",
+      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::routines::; cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::security_roles::; cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::; cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::",
+      "supported_version": "Durable logical role creation, supported role-attribute alteration and removal; SET and RESET ROLE with distinct current_user and session_user; routine ownership transfer and dependency checks; default PUBLIC EXECUTE plus exact routine GRANT and REVOKE including ALL and grant-option metadata; SECURITY DEFINER and INVOKER execution; routine-local SET configuration; superuser-gated leakproof and recognized PostgreSQL support-function metadata; parallel-safety metadata; pg_roles, pg_user, and pg_proc exposure; atomic persistence and reopen",
       "status": "partial",
-      "open_issue": "Extension languages, ownership changes, roles, ACLs, SECURITY DEFINER and INVOKER semantics, routine SET configuration, support functions, leakproofness, parallel safety, and their catalog and execution consequences remain."
+      "open_issue": "Role memberships, passwords, per-role settings, schema and database privileges, default privileges, non-owner grantor chains, row-level-security interactions, extension languages, and complete support-function, planner, and server-security consequences remain."
     },
     {
       "id": "functions.json-null-stripping",
@@ -503,8 +503,8 @@
     {
       "id": "types.declared-identity-casts-and-catalog",
       "postgresql_reference": "PostgreSQL 18.4 pg_cast, pg_type, pg_class, pg_attribute, scalar cast results, errors, and SQLSTATEs",
-      "uqa_test": "cargo test -p uqa-sql expr::casting::tests; cargo test -p uqa-engine --test integration engine_functions::pg18_semantics::; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::; cargo test -p uqa-engine --test integration engine_catalog::sql_type_migration_temporal::; python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal",
-      "supported_version": "Implemented scalar width identities, source-sensitive OID/XID/bytea casts, PostgreSQL space-separated int2vector/oidvector text and COPY output, built-in/domain/pseudo/composite pg_type metadata, information_schema_catalog_name identity, and all six PostgreSQL built-in range/multirange families with declared identity, canonical text I/O, constructors, accessors, overlap, containment, adjacency, range_merge, simple and compatible polymorphic routine substitution, pg_type, pg_range, and pg_proc metadata across storage, generated expressions, foreign tables, reopen, and supported schema rewrites",
+      "uqa_test": "cargo test -p uqa-sql expr::casting::tests; cargo test -p uqa-engine --test integration engine_functions::pg18_semantics::; cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::scalar_and_resolution::refcursor_parameters_returns_and_open_portals_share_session_state; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::; cargo test -p uqa-engine --test integration engine_catalog::sql_type_migration_temporal::; python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal",
+      "supported_version": "Implemented scalar width identities, source-sensitive OID/XID/bytea casts, PostgreSQL space-separated int2vector/oidvector text and COPY output, refcursor declared and catalog identity over its session-portal name carrier, built-in/domain/pseudo/composite pg_type metadata, information_schema_catalog_name identity, and all six PostgreSQL built-in range/multirange families with declared identity, canonical text I/O, constructors, accessors, overlap, containment, adjacency, range_merge, simple and compatible polymorphic routine substitution, pg_type, pg_range, and pg_proc metadata across storage, generated expressions, foreign tables, reopen, and supported schema rewrites",
       "status": "partial",
       "open_issue": "The full assignment-cast matrix, pg_proc rows for every type I/O routine, collations, user composites, enum carriers and polymorphism, user-defined ranges and their polymorphism, typmods, domain constraints, binary formats, and complete range ordering and arithmetic remain."
     },
@@ -526,11 +526,11 @@
     },
     {
       "id": "plpgsql.datum-slots-and-bound-cursors",
-      "postgresql_reference": "PostgreSQL 18 PL/pgSQL statements and cursor documentation",
+      "postgresql_reference": "PostgreSQL 18 PL/pgSQL statements and cursor documentation; PostgreSQL 18.4 with Apache AGE transcript in tests/parity/pg18/routine_security_cursor_oracle.md",
       "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::",
-      "supported_version": "PostgreSQL 18 datum slots, qualified named types, table-backed %TYPE resolution, strict scalar coercion, and bound cursor subset",
+      "supported_version": "PostgreSQL 18 datum slots, qualified named types, table-backed %TYPE resolution, strict scalar coercion, bound cursor declarations and arguments, refcursor parameters and returns, transaction-scoped session portals that survive routine exit, and savepoint rollback that closes newer portals without rewinding older cursor positions",
       "status": "partial",
-      "open_issue": "Session portal state is required for refcursor parameters, returns, and cursors surviving routine exit."
+      "open_issue": "Dynamic OPEN FOR forms, MOVE, fetch directions other than NEXT, holdable cursors, and top-level SQL portal control remain."
     },
     {
       "id": "protocol.frontend-backend-3.2",

@@ -17,6 +17,7 @@ use super::helpers::{
 };
 use super::{value_to_text, ColumnType, Engine, ResultRow, SQLColumnDef, SQLError, Value};
 use uqa_sql::ast::RangeSubtype;
+use uqa_sql::ast::RoleAttribute;
 
 pub(super) fn build_pg_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
@@ -733,6 +734,7 @@ pub(super) fn build_pg_type() -> Vec<ResultRow> {
         (ColumnType::Regproc, "N", false, "b"),
         (ColumnType::Regclass, "N", false, "b"),
         (ColumnType::Text, "S", true, "b"),
+        (ColumnType::RefCursor, "U", false, "b"),
         (ColumnType::Oid, "N", true, "b"),
         (ColumnType::Xid, "U", false, "b"),
         (ColumnType::OidVector, "A", false, "b"),
@@ -1182,36 +1184,61 @@ pub(super) fn build_pg_database() -> Vec<ResultRow> {
     ])]
 }
 
-pub(super) fn build_pg_roles() -> Vec<ResultRow> {
-    vec![row([
-        ("oid", int_value(current_user_oid())),
-        ("rolname", str_value(current_user_name())),
-        ("rolsuper", bool_value(true)),
-        ("rolinherit", bool_value(true)),
-        ("rolcreaterole", bool_value(true)),
-        ("rolcreatedb", bool_value(true)),
-        ("rolcanlogin", bool_value(true)),
-        ("rolreplication", bool_value(false)),
-        ("rolconnlimit", int_value(-1)),
-        ("rolpassword", str_value("********")),
-        ("rolvaliduntil", Value::Null),
-        ("rolbypassrls", bool_value(true)),
-        ("rolconfig", Value::Null),
-    ])]
+pub(super) fn build_pg_roles(engine: &Engine) -> Vec<ResultRow> {
+    engine
+        .roles_for_catalog()
+        .into_iter()
+        .map(|role| {
+            row([
+                ("oid", int_value(role.oid)),
+                ("rolname", str_value(role.name.clone())),
+                ("rolsuper", bool_value(role.has(RoleAttribute::Superuser))),
+                ("rolinherit", bool_value(role.has(RoleAttribute::Inherit))),
+                (
+                    "rolcreaterole",
+                    bool_value(role.has(RoleAttribute::CreateRole)),
+                ),
+                ("rolcreatedb", bool_value(role.has(RoleAttribute::CreateDb))),
+                ("rolcanlogin", bool_value(role.has(RoleAttribute::Login))),
+                (
+                    "rolreplication",
+                    bool_value(role.has(RoleAttribute::Replication)),
+                ),
+                ("rolconnlimit", int_value(i64::from(role.connection_limit))),
+                ("rolpassword", str_value("********")),
+                ("rolvaliduntil", Value::Null),
+                (
+                    "rolbypassrls",
+                    bool_value(role.has(RoleAttribute::BypassRls)),
+                ),
+                ("rolconfig", Value::Null),
+            ])
+        })
+        .collect()
 }
 
-pub(super) fn build_pg_user() -> Vec<ResultRow> {
-    vec![row([
-        ("usename", str_value(current_user_name())),
-        ("usesysid", int_value(current_user_oid())),
-        ("usecreatedb", bool_value(true)),
-        ("usesuper", bool_value(true)),
-        ("userepl", bool_value(false)),
-        ("usebypassrls", bool_value(true)),
-        ("passwd", str_value("********")),
-        ("valuntil", Value::Null),
-        ("useconfig", Value::Null),
-    ])]
+pub(super) fn build_pg_user(engine: &Engine) -> Vec<ResultRow> {
+    engine
+        .roles_for_catalog()
+        .into_iter()
+        .filter(|role| role.has(RoleAttribute::Login))
+        .map(|role| {
+            row([
+                ("usename", str_value(role.name.clone())),
+                ("usesysid", int_value(role.oid)),
+                ("usecreatedb", bool_value(role.has(RoleAttribute::CreateDb))),
+                ("usesuper", bool_value(role.has(RoleAttribute::Superuser))),
+                ("userepl", bool_value(role.has(RoleAttribute::Replication))),
+                (
+                    "usebypassrls",
+                    bool_value(role.has(RoleAttribute::BypassRls)),
+                ),
+                ("passwd", str_value("********")),
+                ("valuntil", Value::Null),
+                ("useconfig", Value::Null),
+            ])
+        })
+        .collect()
 }
 
 pub(super) fn build_pg_settings(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {

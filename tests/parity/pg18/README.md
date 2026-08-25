@@ -76,6 +76,10 @@ python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal --backe
 
 Every fixture case starts with `-- @case <name> <ok|rows|error>` and ends with `-- @end`; this explicit framing allows routine bodies to contain semicolons without making the runner guess SQL statement boundaries. The runner replaces `__UQA_STATEFUL_SCHEMA__` with an isolated generated schema name and rejects an expected transcript whose fixture SHA-256 or ordered case modes are stale.
 
+## Routine security and cursor oracle
+
+[`routine_security_cursor_oracle.md`](routine_security_cursor_oracle.md) records the PostgreSQL 18.4 with Apache AGE owner, EXECUTE ACL, `SECURITY DEFINER`, dynamic `current_user` versus stable `session_user`, routine configuration, planner-support metadata, `refcursor` type identity, and cross-call session-portal results used by the focused compiler and engine tests.
+
 ## Protocol client matrix
 
 `clients/run.sh` builds pinned psycopg, pgx, and node-postgres images, provisions a password-authenticated role in a running PostgreSQL 18.4 container, checks the deterministic operation/version evidence from each driver against `clients/expected.json`, and reruns the same operations against the server fixture assembled from `uqa-pg-wire`. The matrix covers prepared reuse, binary formats, COPY in and out, failed-transaction rollback recovery, and one-connection pool reuse; it also runs the existing PostgreSQL 18 psql/libpq protocol 3.0/3.2 suite.

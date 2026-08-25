@@ -128,6 +128,14 @@ pub trait EngineHook {
         Ok(None)
     }
 
+    fn current_user(&self) -> std::result::Result<Option<String>, String> {
+        Ok(None)
+    }
+
+    fn session_user(&self) -> std::result::Result<Option<String>, String> {
+        Ok(None)
+    }
+
     /// Resolve the existing schemas visible to the logical session.
     fn current_schemas(
         &self,
@@ -1000,6 +1008,27 @@ fn eval_function_call_inner(
         return ArrayValue::try_new(schemas.into_iter().map(Value::Str).collect())
             .map(Value::Array)
             .ok_or_else(|| SQLError::TypeMismatch("invalid current_schemas result".into()));
+    }
+    if matches!(lower, "current_user" | "session_user") {
+        if !evaluated.is_empty() {
+            return Err(SQLError::TypeMismatch(format!(
+                "{lower} takes no arguments"
+            )));
+        }
+        let user = ctx
+            .engine
+            .map(|engine| {
+                if lower == "current_user" {
+                    engine.current_user()
+                } else {
+                    engine.session_user()
+                }
+            })
+            .transpose()
+            .map_err(SQLError::Internal)?
+            .flatten()
+            .unwrap_or_else(|| "uqa".to_string());
+        return Ok(Value::Str(user));
     }
     if lower == "to_regclass" {
         let [value] = evaluated.as_slice() else {

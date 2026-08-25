@@ -73,6 +73,7 @@ pub enum ColumnType {
         scale: Option<i32>,
     },
     Text,
+    RefCursor,
     Name,
     Uuid,
     Varchar(Option<u32>),

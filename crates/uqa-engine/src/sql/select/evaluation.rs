@@ -732,6 +732,7 @@ impl<'a> EngineExpressionEvaluator<'a> {
         let view = schema.view(row);
         let hook = ScopedEngineHook::new(self.engine, &self.ctes);
         let context = PhysicalEvalContext::from_row_lookup(&view, self.params)
+            .with_row_schema(schema)
             .with_function_hook(&hook)
             .with_subquery_runner(&hook)
             .with_physical_outer_row(schema, row);
@@ -942,6 +943,14 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         self.engine
             .current_schema_name()
             .map_err(|error| error.to_string())
+    }
+
+    fn current_user(&self) -> std::result::Result<Option<String>, String> {
+        Ok(Some(self.engine.current_user_name()))
+    }
+
+    fn session_user(&self) -> std::result::Result<Option<String>, String> {
+        Ok(Some(self.engine.session_user_name()))
     }
 
     fn current_schemas(

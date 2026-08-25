@@ -25,6 +25,7 @@ UQA Engine has PostgreSQL-oriented type names mapped to the value carriers imple
 | `JSON` | Validated JSON value |
 | `JSONB` | Canonical JSON value with JSONB operations |
 | `BYTEA` | Byte string |
+| `REFCURSOR` | PostgreSQL cursor-name identity over a text-compatible carrier for PL/pgSQL session portals |
 | `type[]`, `ARRAY` | Homogeneous array of a supported element type |
 | `INT4RANGE`, `INT8RANGE`, `NUMRANGE`, `DATERANGE`, `TSRANGE`, `TSTZRANGE` | PostgreSQL built-in range identities with canonical text I/O over their scalar subtype |
 | `INT4MULTIRANGE`, `INT8MULTIRANGE`, `NUMMULTIRANGE`, `DATEMULTIRANGE`, `TSMULTIRANGE`, `TSTZMULTIRANGE` | PostgreSQL built-in multirange identities whose members are normalized, ordered, and merged |
@@ -112,6 +113,10 @@ Object key order and formatting are not an application contract for JSONB. Use J
 ## BYTEA
 
 `BYTEA` carries arbitrary bytes. `encode` and `decode` convert supported textual encodings, and bytea text input validates hexadecimal digit pairs and legacy escape/octal sequences. When an integer expression has an explicit `SMALLINT`, `INTEGER`, or `BIGINT` source type, its PostgreSQL 18 cast to `BYTEA` emits a signed two-, four-, or eight-byte network-order representation; an unannotated integer expression defaults to `INTEGER`, while boolean, numeric, and floating sources are rejected with PostgreSQL cast SQLSTATEs. `BYTEA`-to-integer casts zero-extend shorter inputs before interpreting the target-width sign bit. Language bindings map byte values to their native byte container, such as Python `bytes` or Node.js `Buffer` and `Uint8Array`.
+
+## REFCURSOR
+
+`REFCURSOR` retains PostgreSQL type identity while carrying a session portal name. PL/pgSQL routines can accept and return it, an explicit text-like cast can name an existing portal, and `pg_typeof(value)::text` reports `refcursor`. An open portal remains fetchable by later routine calls in the same session and transaction until it is closed or the outer transaction ends.
 
 ## Arrays
 
