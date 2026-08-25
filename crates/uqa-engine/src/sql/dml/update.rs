@@ -10,11 +10,12 @@ use super::{
     apply_validated_prepared_document_rewrite, build_returning_row, coerce_to_column_type,
     dml_returning_result, dml_storage_error, dml_target_row, eval_mutation_assignment,
     eval_mutation_expr, finalize_partition_rewrite, index_vectors_for_type, lock_mutation_target,
-    prepare_document_rewrite, referrers_to_for_actions, run_update_from,
-    stage_prepared_document_rewrite, update_lock_strength, validate_dml_expression_qualifiers,
-    validate_mutation_columns, validate_returning_alias_relations, BTreeMap, BTreeSet, BinaryOp,
-    ColumnType, CteScope, DmlCommandMutationOverlay, DmlReturningShape, Engine,
-    MutationAssignmentTarget, MutationLockTarget, PartitionRewritePolicy, ReturningProjectionRow,
+    lock_physical_mutation_target, prepare_document_rewrite, referrers_to_for_actions,
+    run_update_from, stage_prepared_document_rewrite, update_lock_strength,
+    validate_dml_expression_qualifiers, validate_mutation_columns,
+    validate_returning_alias_relations, BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope,
+    DmlCommandMutationOverlay, DmlReturningShape, Engine, MutationAssignmentTarget,
+    MutationLockTarget, PartitionRewritePolicy, PhysicalMutationLockTarget, ReturningProjectionRow,
     ReturningRowImage, ReturningRowImages, RowIndependentUpdateValues, SQLError, SQLParam,
     SQLResult, ScalarExpr, UpdatePlan, Value,
 };
@@ -156,16 +157,18 @@ pub(in crate::sql) fn run_update_inner(
                 }
             }
         }
-        let target = lock_mutation_target(
+        let target = lock_physical_mutation_target(
             engine,
             &storage_table,
             &stmt.target_qualifier,
             doc_id,
             update_lock_strength(engine, &storage_table, &assigned_columns),
         )?;
-        let MutationLockTarget::Present { doc_id, recheck } = target else {
+        let PhysicalMutationLockTarget::Present { identity, recheck } = target else {
             continue;
         };
+        let storage_table = identity.table;
+        let doc_id = identity.doc_id;
         if !locked_ids.insert((storage_table.clone(), doc_id)) {
             continue;
         }

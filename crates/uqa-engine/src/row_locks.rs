@@ -71,6 +71,20 @@ pub(crate) enum RowChangeTarget {
     Deleted,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PhysicalRowChangeTarget {
+    Unchanged,
+    Present { table_hash: u64, doc_id: DocId },
+    Deleted,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LocalPhysicalRowChangeTarget {
+    Unchanged,
+    Present(RowLockKey),
+    Deleted,
+}
+
 #[derive(Clone, Debug)]
 struct LockGrant {
     session_id: u64,
@@ -316,6 +330,10 @@ impl RowLockManager {
         tables.insert(table.to_string(), id);
         self.table_names.lock().insert(id, Arc::from(table));
         id
+    }
+
+    pub(crate) fn stable_table_hash(table: &str) -> u64 {
+        table_hash(table)
     }
 
     fn table_name(&self, table: u64) -> Arc<str> {
@@ -1075,6 +1093,44 @@ impl RowLockManager {
         ))
     }
 
+    /// Follow committed rewrites while retaining the physical relation as well as the document id. Partition movement changes both halves of the tuple identity, so DML rechecks must not collapse the successor back onto the source leaf.
+    pub(crate) fn physical_row_successor_after(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        baseline: RowChangeBaseline,
+    ) -> Result<PhysicalRowChangeTarget, SQLError> {
+        let key = RowLockKey {
+            table: self.table_key(table),
+            doc_id,
+        };
+        if let Some(CrossAttachment::Active(coordinator)) = self.cross.as_ref() {
+            return coordinator
+                .physical_change_target_after(
+                    table_hash(table),
+                    doc_id,
+                    baseline.cross_sequence,
+                    LockStrength::ForUpdate,
+                )
+                .map_err(SQLError::Internal);
+        }
+        Ok(
+            match resolve_local_physical_change_target(
+                &self.state.lock().changes,
+                key,
+                baseline.epoch,
+                LockStrength::ForUpdate,
+            ) {
+                LocalPhysicalRowChangeTarget::Unchanged => PhysicalRowChangeTarget::Unchanged,
+                LocalPhysicalRowChangeTarget::Deleted => PhysicalRowChangeTarget::Deleted,
+                LocalPhysicalRowChangeTarget::Present(target) => PhysicalRowChangeTarget::Present {
+                    table_hash: table_hash(self.table_name(target.table).as_ref()),
+                    doc_id: target.doc_id,
+                },
+            },
+        )
+    }
+
     pub(crate) fn publish_row_changes(
         &self,
         session_id: u64,
@@ -1129,7 +1185,14 @@ impl RowLockManager {
                                 cross_process::PublishedRowChangeKind::Delete
                             }
                             CommittedRowChangeKind::Rewrite(successor) => {
-                                cross_process::PublishedRowChangeKind::Rewrite(successor.doc_id)
+                                cross_process::PublishedRowChangeKind::Rewrite(
+                                    cross_process::PublishedRowIdentity {
+                                        table_hash: table_hash(
+                                            self.table_name(successor.table).as_ref(),
+                                        ),
+                                        doc_id: successor.doc_id,
+                                    },
+                                )
                             }
                         },
                         strength: change.strength,
@@ -1246,6 +1309,24 @@ fn resolve_local_change_target(
     baseline: u64,
     wanted: LockStrength,
 ) -> RowChangeTarget {
+    match resolve_local_physical_change_target(changes, key, baseline, wanted) {
+        LocalPhysicalRowChangeTarget::Unchanged => RowChangeTarget::Unchanged,
+        LocalPhysicalRowChangeTarget::Present(target) if target.table == key.table => {
+            RowChangeTarget::Present(target.doc_id)
+        }
+        // Callers of the legacy document-id-only API cannot safely follow a tuple into another physical relation. Treat it as absent instead of applying the successor id to an unrelated row in the source relation.
+        LocalPhysicalRowChangeTarget::Present(_) | LocalPhysicalRowChangeTarget::Deleted => {
+            RowChangeTarget::Deleted
+        }
+    }
+}
+
+fn resolve_local_physical_change_target(
+    changes: &[CommittedRowChange],
+    key: RowLockKey,
+    baseline: u64,
+    wanted: LockStrength,
+) -> LocalPhysicalRowChangeTarget {
     let mut current = key;
     let mut requires_recheck = false;
     for change in changes {
@@ -1258,7 +1339,7 @@ fn resolve_local_change_target(
             }
             CommittedRowChangeKind::Delete => {
                 if lock_strengths_conflict(change.strength, wanted) {
-                    return RowChangeTarget::Deleted;
+                    return LocalPhysicalRowChangeTarget::Deleted;
                 }
             }
             CommittedRowChangeKind::Rewrite(successor) => {
@@ -1270,9 +1351,9 @@ fn resolve_local_change_target(
         }
     }
     if requires_recheck {
-        RowChangeTarget::Present(current.doc_id)
+        LocalPhysicalRowChangeTarget::Present(current)
     } else {
-        RowChangeTarget::Unchanged
+        LocalPhysicalRowChangeTarget::Unchanged
     }
 }
 

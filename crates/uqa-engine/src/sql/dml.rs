@@ -70,6 +70,14 @@ pub(in crate::sql) enum MutationLockTarget {
     Deleted,
 }
 
+pub(in crate::sql) enum PhysicalMutationLockTarget {
+    Present {
+        identity: PhysicalDocumentIdentity,
+        recheck: bool,
+    },
+    Deleted,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(in crate::sql) struct PhysicalDocumentIdentity {
     pub table: String,
@@ -368,6 +376,59 @@ pub(in crate::sql) fn lock_mutation_target(
         }
         recheck = true;
         current = successor;
+    }
+}
+
+/// Lock a DML candidate and follow a committed update chain across physical relations. Declarative partition movement changes the leaf table as well as the document id, so callers that scan a hierarchy must retain the complete successor identity.
+pub(in crate::sql) fn lock_physical_mutation_target(
+    engine: &Engine,
+    table: &str,
+    display_name: &str,
+    doc_id: DocId,
+    strength: uqa_sql::ast::LockStrength,
+) -> Result<PhysicalMutationLockTarget, SQLError> {
+    let mut current = PhysicalDocumentIdentity {
+        table: table.to_string(),
+        doc_id,
+    };
+    let mut recheck = false;
+    let mut visited = BTreeSet::new();
+    loop {
+        if !visited.insert(current.clone()) {
+            return Err(SQLError::Internal(format!(
+                "physical rewrite chain for `{display_name}` row {table}:{doc_id} contains a cycle at {}:{}",
+                current.table, current.doc_id
+            )));
+        }
+        recheck |= lock_mutation_row(
+            engine,
+            &current.table,
+            display_name,
+            current.doc_id,
+            strength,
+        )?;
+        match engine.committed_physical_row_successor(&current.table, current.doc_id)? {
+            crate::row_locks::PhysicalRowChangeTarget::Unchanged => {
+                return Ok(PhysicalMutationLockTarget::Present {
+                    identity: current,
+                    recheck,
+                });
+            }
+            crate::row_locks::PhysicalRowChangeTarget::Deleted => {
+                return Ok(PhysicalMutationLockTarget::Deleted);
+            }
+            crate::row_locks::PhysicalRowChangeTarget::Present { table_hash, doc_id } => {
+                let table = engine.row_lock_table_for_hash(table_hash)?;
+                if table == current.table && doc_id == current.doc_id {
+                    return Ok(PhysicalMutationLockTarget::Present {
+                        identity: current,
+                        recheck: true,
+                    });
+                }
+                recheck = true;
+                current = PhysicalDocumentIdentity { table, doc_id };
+            }
+        }
     }
 }
 

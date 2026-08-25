@@ -648,6 +648,12 @@ pub(in crate::sql) fn apply_validated_prepared_document_rewrite(
         engine
             .advance_next_id(destination_table, *destination_doc_id)
             .map_err(|err| dml_storage_error("UPDATE partition movement", err))?;
+        engine.note_row_rewritten_between_tables(
+            &prepared.table,
+            prepared.doc_id,
+            destination_table,
+            *destination_doc_id,
+        )?;
         for action in &mut prepared.actions {
             apply_validated_prepared_document_rewrite(engine, action)?;
         }

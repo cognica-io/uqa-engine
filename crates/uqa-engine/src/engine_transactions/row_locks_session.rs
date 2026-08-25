@@ -182,6 +182,40 @@ impl Engine {
         )
     }
 
+    pub(crate) fn committed_physical_row_successor(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+    ) -> Result<crate::row_locks::PhysicalRowChangeTarget, SQLError> {
+        let canonical = self.row_lock_table_name(table)?;
+        self.row_locks.physical_row_successor_after(
+            &canonical,
+            doc_id,
+            self.row_lock_snapshot_change_baseline(),
+        )
+    }
+
+    pub(crate) fn row_lock_table_for_hash(&self, table_hash: u64) -> Result<String, SQLError> {
+        let tables = self.storage.tables.read();
+        let mut matches = tables
+            .keys()
+            .map(uqa_storage::RelationIdentity::qualified_name)
+            .filter(|table| {
+                crate::row_locks::RowLockManager::stable_table_hash(table) == table_hash
+            });
+        let table = matches.next().ok_or_else(|| {
+            SQLError::Internal(format!(
+                "row-change successor refers to unknown relation hash {table_hash}"
+            ))
+        })?;
+        if matches.next().is_some() {
+            return Err(SQLError::Internal(format!(
+                "row-change successor relation hash {table_hash} is ambiguous"
+            )));
+        }
+        Ok(table)
+    }
+
     fn note_row_change(
         &self,
         table: &str,
@@ -253,14 +287,24 @@ impl Engine {
         old_doc_id: uqa_core::DocId,
         new_doc_id: uqa_core::DocId,
     ) -> Result<(), SQLError> {
-        let canonical = self.row_lock_table_name(table)?;
-        let table = self.row_locks.table_key(&canonical);
+        self.note_row_rewritten_between_tables(table, old_doc_id, table, new_doc_id)
+    }
+
+    pub(crate) fn note_row_rewritten_between_tables(
+        &self,
+        old_table: &str,
+        old_doc_id: uqa_core::DocId,
+        new_table: &str,
+        new_doc_id: uqa_core::DocId,
+    ) -> Result<(), SQLError> {
+        let old_table = self.row_lock_table_name(old_table)?;
+        let new_table = self.row_lock_table_name(new_table)?;
         let old = crate::row_locks::RowLockKey {
-            table,
+            table: self.row_locks.table_key(&old_table),
             doc_id: old_doc_id,
         };
         let new = crate::row_locks::RowLockKey {
-            table,
+            table: self.row_locks.table_key(&new_table),
             doc_id: new_doc_id,
         };
         let mut stack = self.session.transactions.lock();
