@@ -246,9 +246,15 @@ impl UnifiedPlan {
                 body: Box::new(Self::lower_with(*body, aggregates)),
             })),
             Statement::Analyze { table } => Self::Command(Box::new(CommandPlan::Analyze { table })),
-            Statement::Truncate { tables, cascade } => {
-                Self::Command(Box::new(CommandPlan::Truncate { tables, cascade }))
-            }
+            Statement::Truncate {
+                tables,
+                cascade,
+                restart_identity,
+            } => Self::Command(Box::new(CommandPlan::Truncate {
+                tables,
+                cascade,
+                restart_identity,
+            })),
             Statement::Transaction(value) => {
                 Self::Command(Box::new(CommandPlan::Transaction(value)))
             }

@@ -52,17 +52,31 @@ fn table_commands_preserve_qualified_relation_names() {
     };
     assert_eq!(delete.table, "app.docs");
 
-    let Statement::Truncate { tables, .. } = first("TRUNCATE app.docs") else {
+    let Statement::Truncate {
+        tables,
+        restart_identity,
+        ..
+    } = first("TRUNCATE app.docs")
+    else {
         panic!("not TRUNCATE");
     };
     assert_eq!(tables.len(), 1);
     assert_eq!(tables[0].table, "app.docs");
     assert!(tables[0].include_descendants);
+    assert!(!restart_identity);
 
     let Statement::Truncate { tables, .. } = first("TRUNCATE ONLY app.docs") else {
         panic!("not TRUNCATE ONLY");
     };
     assert!(!tables[0].include_descendants);
+
+    let Statement::Truncate {
+        restart_identity, ..
+    } = first("TRUNCATE app.docs RESTART IDENTITY")
+    else {
+        panic!("not TRUNCATE RESTART IDENTITY");
+    };
+    assert!(restart_identity);
 
     let Statement::Insert(insert) = first("INSERT INTO app.docs (version) VALUES (1)") else {
         panic!("not INSERT");

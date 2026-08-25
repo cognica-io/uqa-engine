@@ -58,3 +58,41 @@ fn point_update_cannot_bypass_a_direct_partition_bound() {
         Value::Int(1)
     );
 }
+
+#[test]
+fn truncate_hierarchy_honors_continue_and_restart_identity() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE truncate_parent (id SERIAL, bucket INTEGER) PARTITION BY RANGE (bucket)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE truncate_leaf PARTITION OF truncate_parent FOR VALUES FROM (0) TO (10)",
+    );
+    let first = engine
+        .sql(
+            "INSERT INTO truncate_parent (bucket) VALUES (1) RETURNING id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(first.rows[0]["id"], Value::Int(1));
+
+    exec(&engine, "TRUNCATE truncate_parent CONTINUE IDENTITY");
+    let continued = engine
+        .sql(
+            "INSERT INTO truncate_parent (bucket) VALUES (1) RETURNING id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(continued.rows[0]["id"], Value::Int(2));
+
+    exec(&engine, "TRUNCATE truncate_parent RESTART IDENTITY");
+    let restarted = engine
+        .sql(
+            "INSERT INTO truncate_parent (bucket) VALUES (1) RETURNING id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(restarted.rows[0]["id"], Value::Int(1));
+}

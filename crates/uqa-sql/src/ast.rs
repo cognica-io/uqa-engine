@@ -1322,6 +1322,8 @@ pub enum Statement {
     Truncate {
         tables: Vec<TruncateTarget>,
         cascade: bool,
+        #[serde(default)]
+        restart_identity: bool,
     },
     /// `BEGIN` / `COMMIT` / `ROLLBACK` / `SAVEPOINT name`.
     Transaction(TransactionStmt),

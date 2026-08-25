@@ -147,6 +147,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         &self,
         tables: &[uqa_sql::ast::TruncateTarget],
         cascade: bool,
+        restart_identity: bool,
     ) -> Result<SQLResult, SQLError> {
         let mut targets = std::collections::BTreeSet::new();
         for requested in tables {
@@ -246,7 +247,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                     &mut ordered,
                 )?;
             }
-            engine.truncate_tables(&ordered)
+            engine.truncate_tables_with_identity(&ordered, restart_identity)
         };
         if self.engine.transaction_depth() == 0 {
             self.engine.transaction(truncate)?;
@@ -467,7 +468,11 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                     .map_err(|err| SQLError::Internal(format!("ANALYZE failed: {err}")))?;
                 Ok(SQLResult::empty())
             }
-            CommandPlan::Truncate { tables, cascade } => self.execute_truncate(tables, *cascade),
+            CommandPlan::Truncate {
+                tables,
+                cascade,
+                restart_identity,
+            } => self.execute_truncate(tables, *cascade, *restart_identity),
             CommandPlan::Transaction(statement) => {
                 self.engine.run_transaction_statement(statement.clone())?;
                 Ok(SQLResult::empty())

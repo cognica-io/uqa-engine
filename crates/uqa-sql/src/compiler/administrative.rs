@@ -244,7 +244,11 @@ pub(super) fn compile_truncate(stmt: &pg_query::protobuf::TruncateStmt) -> Resul
         stmt.behavior(),
         pg_query::protobuf::DropBehavior::DropCascade
     );
-    Ok(Statement::Truncate { tables, cascade })
+    Ok(Statement::Truncate {
+        tables,
+        cascade,
+        restart_identity: stmt.restart_seqs,
+    })
 }
 
 pub(super) fn compile_transaction(stmt: &pg_query::protobuf::TransactionStmt) -> Result<Statement> {

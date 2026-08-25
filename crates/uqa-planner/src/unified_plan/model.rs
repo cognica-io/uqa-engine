@@ -427,6 +427,7 @@ pub enum CommandPlan {
     Truncate {
         tables: Vec<uqa_sql::ast::TruncateTarget>,
         cascade: bool,
+        restart_identity: bool,
     },
     Transaction(uqa_sql::ast::TransactionStmt),
     CreateSequence(uqa_sql::ast::CreateSequence),
