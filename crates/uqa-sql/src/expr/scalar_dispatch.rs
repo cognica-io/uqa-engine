@@ -76,6 +76,7 @@ pub(super) fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> 
         super::scalar_json::eval_json_functions,
         super::scalar_array::eval_array_functions,
         super::scalar_postgres::eval_postgres_functions,
+        super::scalar_range::eval_range_functions,
         super::scalar_geospatial::eval_geospatial_functions,
     ];
     for dispatch in dispatchers {

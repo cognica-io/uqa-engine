@@ -14,7 +14,9 @@ use super::common::{
     base_type, common_context_expression_type, local_routine_name, merge_optional_types,
 };
 use super::operators::unary_minus_result_type;
-use super::{array_transform, containment, fixed_builtin, scalar_type_inner, FunctionTypeResolver};
+use super::{
+    array_transform, containment, fixed_builtin, range, scalar_type_inner, FunctionTypeResolver,
+};
 
 /// Bind polymorphic type-introspection calls and common-type coercions while the input schema still carries declared SQL types. Runtime values deliberately do not encode integer widths, varchar identity, or float widths, and selector expressions must return the common SQL type rather than the storage type of the branch selected at runtime.
 pub fn bind_type_introspection(
@@ -70,6 +72,7 @@ fn bind_type_introspection_inner(
             }
             let name =
                 array_transform::bind_call(name, &mut binding, &mut args, schema, params, resolver);
+            let name = range::bind_call(name, &args, schema, params, resolver);
             let name =
                 fixed_builtin::bind_call(name, &mut binding, &mut args, schema, params, resolver);
             bind_catalog_function(&name, &mut binding, &args, schema, params, resolver);

@@ -106,6 +106,30 @@ Implemented match modes are `MATCH SIMPLE` and `MATCH FULL`. Referential actions
 
 Referenced columns must satisfy the implemented unique-key requirements. Mutations validate referential actions as part of the same transaction.
 
+## Temporal keys and foreign keys
+
+PostgreSQL 18 temporal keys place `WITHOUT OVERLAPS` on the final range or multirange key column, and temporal foreign keys place `PERIOD` before the final local and referenced columns:
+
+```sql execute
+CREATE TABLE account_periods (
+    account_id INTEGER,
+    valid_at DATERANGE,
+    PRIMARY KEY (account_id, valid_at WITHOUT OVERLAPS)
+);
+
+CREATE TABLE account_events (
+    event_id INTEGER PRIMARY KEY,
+    account_id INTEGER,
+    valid_at DATERANGE,
+    FOREIGN KEY (account_id, PERIOD valid_at)
+        REFERENCES account_periods (account_id, PERIOD valid_at)
+);
+```
+
+A `PRIMARY KEY` or `UNIQUE` key with `WITHOUT OVERLAPS` rejects empty period values and rejects overlapping ranges for rows whose ordinary key prefix is equal; adjacent periods do not overlap. A `PERIOD` foreign key requires an exactly matching range or multirange type and a referenced `PRIMARY KEY` or `UNIQUE` constraint with `WITHOUT OVERLAPS` over the same columns. The referenced rows with one ordinary key prefix may cover the child period in aggregate, so adjacent parent ranges can jointly satisfy one child range.
+
+Temporal constraints are enforced on insert, update, and delete. A parent update or delete is rejected when the remaining parent periods no longer cover an existing child, and `ALTER TABLE ADD CONSTRAINT` validates all existing rows before publishing any catalog change. The temporal flags persist across reopen and appear as `conperiod` in `pg_constraint`. The implemented temporal foreign-key action is `NO ACTION`; other referential actions are rejected before mutation. Physical GiST and exclusion-index planning for these constraints remains an open compatibility bug.
+
 ## ALTER TABLE
 
 Implemented changes include:
@@ -131,7 +155,7 @@ ALTER TABLE orders ALTER COLUMN total TYPE NUMERIC(20, 2);
 ALTER TABLE generated_totals ALTER COLUMN line_total SET EXPRESSION AS (quantity * unit_price * 2);
 ```
 
-Type changes validate existing values before publishing the new schema. `DROP COLUMN CASCADE` is rejected without changing the table.
+Type changes evaluate an optional `USING` expression once for each old row, validate all rewritten rows, constraints, and generated dependencies, and publish the new schema and data atomically. Built-in ranges can be rewritten to their paired multirange with `USING multirange(column)` while retaining `WITHOUT OVERLAPS`; changing one side of an existing `PERIOD` relationship to an incompatible range identity is rejected with PostgreSQL 18 datatype-mismatch SQLSTATE `42804`. `DROP COLUMN CASCADE` is rejected without changing the table.
 
 ## Relational B-tree indexes
 

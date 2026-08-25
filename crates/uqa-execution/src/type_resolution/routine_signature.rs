@@ -7,7 +7,8 @@
 //! PostgreSQL-compatible routine signature matching, including polymorphic and variadic parameters.
 
 use uqa_sql::ast::{
-    ColumnType, RoutineInvocationBinding, RoutineVariadicMode as InvocationVariadicMode,
+    ColumnType, RangeSubtype, RoutineInvocationBinding,
+    RoutineVariadicMode as InvocationVariadicMode,
 };
 
 use super::common::{base_type, common_type};
@@ -53,14 +54,7 @@ impl RoutinePolymorphicType {
     /// Return whether the current [`ColumnType`] model can carry an actual value of this pseudo-type's constrained shape.
     #[must_use]
     pub const fn has_actual_carrier(self) -> bool {
-        !matches!(
-            self,
-            Self::AnyEnum
-                | Self::AnyRange
-                | Self::AnyMultirange
-                | Self::AnyCompatibleRange
-                | Self::AnyCompatibleMultirange
-        )
+        !matches!(self, Self::AnyEnum)
     }
 
     const fn family(self) -> RoutinePolymorphicFamily {
@@ -79,7 +73,7 @@ impl RoutinePolymorphicType {
         }
     }
 
-    const fn is_unsupported_range(self) -> bool {
+    const fn is_range_family(self) -> bool {
         matches!(
             self,
             Self::AnyRange
@@ -175,8 +169,12 @@ pub enum RoutineVariadicPlan {
 pub struct RoutineTypeSubstitutions {
     pub simple_element: Option<ColumnType>,
     pub simple_array: Option<ColumnType>,
+    pub simple_range: Option<ColumnType>,
+    pub simple_multirange: Option<ColumnType>,
     pub compatible_element: Option<ColumnType>,
     pub compatible_array: Option<ColumnType>,
+    pub compatible_range: Option<ColumnType>,
+    pub compatible_multirange: Option<ColumnType>,
 }
 
 impl RoutineTypeSubstitutions {
@@ -187,14 +185,14 @@ impl RoutineTypeSubstitutions {
                 self.simple_element.clone()
             }
             RoutinePolymorphicType::AnyArray => self.simple_array.clone(),
+            RoutinePolymorphicType::AnyRange => self.simple_range.clone(),
+            RoutinePolymorphicType::AnyMultirange => self.simple_multirange.clone(),
             RoutinePolymorphicType::AnyCompatible
             | RoutinePolymorphicType::AnyCompatibleNonArray => self.compatible_element.clone(),
             RoutinePolymorphicType::AnyCompatibleArray => self.compatible_array.clone(),
-            RoutinePolymorphicType::AnyEnum
-            | RoutinePolymorphicType::AnyRange
-            | RoutinePolymorphicType::AnyMultirange
-            | RoutinePolymorphicType::AnyCompatibleRange
-            | RoutinePolymorphicType::AnyCompatibleMultirange => None,
+            RoutinePolymorphicType::AnyCompatibleRange => self.compatible_range.clone(),
+            RoutinePolymorphicType::AnyCompatibleMultirange => self.compatible_multirange.clone(),
+            RoutinePolymorphicType::AnyEnum => None,
         }
     }
 }
@@ -332,32 +330,33 @@ pub fn match_routine_signature(
 
     let mut substitutions = RoutineTypeSubstitutions::default();
     let mut simple_used = false;
+    let mut simple_range_used = false;
     let mut compatible_used = false;
-    for (parameter_index, parameter) in parameters.iter().enumerate() {
+    let mut compatible_range_used = false;
+    for parameter in parameters {
         let Some(polymorphic) = routine_polymorphic_type(&parameter.type_name) else {
             continue;
         };
         if !polymorphic.has_actual_carrier() {
-            if polymorphic.is_unsupported_range()
-                && mapping.slots[parameter_index]
-                    .iter()
-                    .any(|argument_index| call.argument_types[*argument_index].is_none())
-            {
-                return Err(RoutineSignatureMatchError::IndeterminatePolymorphicType {
-                    family: polymorphic.family(),
-                });
-            }
             return Ok(None);
         }
         match polymorphic.family() {
-            RoutinePolymorphicFamily::Simple => simple_used = true,
-            RoutinePolymorphicFamily::Compatible => compatible_used = true,
+            RoutinePolymorphicFamily::Simple => {
+                simple_used = true;
+                simple_range_used |= polymorphic.is_range_family();
+            }
+            RoutinePolymorphicFamily::Compatible => {
+                compatible_used = true;
+                compatible_range_used |= polymorphic.is_range_family();
+            }
         }
     }
 
     let mut simple_element: Option<ColumnType> = None;
     let mut simple_array: Option<ColumnType> = None;
+    let mut simple_range_subtype: Option<RangeSubtype> = None;
     let mut compatible_element: Option<ColumnType> = None;
+    let mut compatible_range_seen = false;
     for (argument_index, parameter_index) in mapping.argument_positions.iter().copied().enumerate()
     {
         let effective_declared = effective_declared_type(
@@ -369,11 +368,6 @@ pub fn match_routine_signature(
             continue;
         };
         let Some(actual) = call.argument_types[argument_index].as_ref() else {
-            if !polymorphic.has_actual_carrier() && polymorphic.is_unsupported_range() {
-                return Err(RoutineSignatureMatchError::IndeterminatePolymorphicType {
-                    family: polymorphic.family(),
-                });
-            }
             if !polymorphic.has_actual_carrier() {
                 return Ok(None);
             }
@@ -384,7 +378,9 @@ pub fn match_routine_signature(
             actual,
             &mut simple_element,
             &mut simple_array,
+            &mut simple_range_subtype,
             &mut compatible_element,
+            &mut compatible_range_seen,
         ) {
             return Ok(None);
         }
@@ -399,10 +395,31 @@ pub fn match_routine_signature(
         substitutions.simple_array =
             Some(simple_array.unwrap_or_else(|| ColumnType::Array(Box::new(element.clone()))));
         substitutions.simple_element = Some(element);
+        if simple_range_used {
+            let Some(subtype) = simple_range_subtype else {
+                return Err(RoutineSignatureMatchError::IndeterminatePolymorphicType {
+                    family: RoutinePolymorphicFamily::Simple,
+                });
+            };
+            substitutions.simple_range = Some(ColumnType::Range(subtype));
+            substitutions.simple_multirange = Some(ColumnType::Multirange(subtype));
+        }
     }
     if compatible_used {
         let element = compatible_element.unwrap_or(ColumnType::Text);
         substitutions.compatible_array = Some(ColumnType::Array(Box::new(element.clone())));
+        if compatible_range_used {
+            if !compatible_range_seen {
+                return Err(RoutineSignatureMatchError::IndeterminatePolymorphicType {
+                    family: RoutinePolymorphicFamily::Compatible,
+                });
+            }
+            let Some(subtype) = range_subtype_for_scalar(&element) else {
+                return Ok(None);
+            };
+            substitutions.compatible_range = Some(ColumnType::Range(subtype));
+            substitutions.compatible_multirange = Some(ColumnType::Multirange(subtype));
+        }
         substitutions.compatible_element = Some(element);
     }
 
@@ -711,7 +728,9 @@ fn collect_polymorphic_actual(
     actual: &ColumnType,
     simple_element: &mut Option<ColumnType>,
     simple_array: &mut Option<ColumnType>,
+    simple_range_subtype: &mut Option<RangeSubtype>,
     compatible_element: &mut Option<ColumnType>,
+    compatible_range_seen: &mut bool,
 ) -> bool {
     match polymorphic {
         RoutinePolymorphicType::AnyElement => {
@@ -740,11 +759,65 @@ fn collect_polymorphic_actual(
             };
             merge_compatible(compatible_element, element)
         }
-        RoutinePolymorphicType::AnyEnum
-        | RoutinePolymorphicType::AnyRange
-        | RoutinePolymorphicType::AnyMultirange
-        | RoutinePolymorphicType::AnyCompatibleRange
-        | RoutinePolymorphicType::AnyCompatibleMultirange => false,
+        RoutinePolymorphicType::AnyRange => {
+            let Some(subtype) = range_actual(actual, false) else {
+                return false;
+            };
+            merge_range_subtype(simple_range_subtype, subtype)
+                && merge_same_identity(simple_element, subtype.scalar_type())
+        }
+        RoutinePolymorphicType::AnyMultirange => {
+            let Some(subtype) = range_actual(actual, true) else {
+                return false;
+            };
+            merge_range_subtype(simple_range_subtype, subtype)
+                && merge_same_identity(simple_element, subtype.scalar_type())
+        }
+        RoutinePolymorphicType::AnyCompatibleRange => {
+            let Some(subtype) = range_actual(actual, false) else {
+                return false;
+            };
+            *compatible_range_seen = true;
+            merge_compatible(compatible_element, subtype.scalar_type())
+        }
+        RoutinePolymorphicType::AnyCompatibleMultirange => {
+            let Some(subtype) = range_actual(actual, true) else {
+                return false;
+            };
+            *compatible_range_seen = true;
+            merge_compatible(compatible_element, subtype.scalar_type())
+        }
+        RoutinePolymorphicType::AnyEnum => false,
+    }
+}
+
+fn merge_range_subtype(slot: &mut Option<RangeSubtype>, candidate: RangeSubtype) -> bool {
+    if let Some(current) = slot {
+        *current == candidate
+    } else {
+        *slot = Some(candidate);
+        true
+    }
+}
+
+fn range_actual(actual: &ColumnType, multirange: bool) -> Option<RangeSubtype> {
+    match (base_type(actual), multirange) {
+        (ColumnType::Range(subtype), false) | (ColumnType::Multirange(subtype), true) => {
+            Some(*subtype)
+        }
+        _ => None,
+    }
+}
+
+fn range_subtype_for_scalar(actual: &ColumnType) -> Option<RangeSubtype> {
+    match base_type(actual) {
+        ColumnType::Integer => Some(RangeSubtype::Integer),
+        ColumnType::BigInteger => Some(RangeSubtype::BigInteger),
+        ColumnType::Numeric { .. } => Some(RangeSubtype::Numeric),
+        ColumnType::Date => Some(RangeSubtype::Date),
+        ColumnType::Timestamp => Some(RangeSubtype::Timestamp),
+        ColumnType::TimestampTz => Some(RangeSubtype::TimestampTz),
+        _ => None,
     }
 }
 
@@ -863,19 +936,19 @@ mod tests {
     }
 
     #[test]
-    fn parses_every_polymorphic_family_and_marks_missing_actual_carriers() {
+    fn parses_every_polymorphic_family_and_marks_available_actual_carriers() {
         let cases = [
             ("anyelement", true),
             ("anyarray", true),
             ("anynonarray", true),
             ("anyenum", false),
-            ("anyrange", false),
-            ("anymultirange", false),
+            ("anyrange", true),
+            ("anymultirange", true),
             ("anycompatible", true),
             ("anycompatiblearray", true),
             ("anycompatiblenonarray", true),
-            ("anycompatiblerange", false),
-            ("anycompatiblemultirange", false),
+            ("anycompatiblerange", true),
+            ("anycompatiblemultirange", true),
         ];
         for (type_name, has_actual_carrier) in cases {
             assert_eq!(
@@ -985,20 +1058,62 @@ mod tests {
     }
 
     #[test]
-    fn unavailable_enum_and_range_carriers_do_not_claim_concrete_actuals() {
-        for type_name in [
-            "anyenum",
-            "anyrange",
-            "anymultirange",
-            "anycompatiblerange",
-            "anycompatiblemultirange",
-        ] {
-            assert!(
-                match_types(&[parameter(type_name)], &[Some(ColumnType::Integer)])
-                    .unwrap()
-                    .is_none()
-            );
-        }
+    fn unavailable_enum_carrier_does_not_claim_concrete_actuals() {
+        assert!(
+            match_types(&[parameter("anyenum")], &[Some(ColumnType::Integer)])
+                .unwrap()
+                .is_none()
+        );
+        assert!(match_types(&[parameter("anyenum")], &[None])
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn simple_range_family_links_range_multirange_and_subtype() {
+        let matched = match_types(
+            &[parameter("anyrange"), parameter("anyelement")],
+            &[
+                Some(ColumnType::Range(RangeSubtype::Integer)),
+                Some(ColumnType::Integer),
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(matched.argument_targets, ["int4range", "int4"]);
+        assert_eq!(
+            matched.substitute_type("anyrange"),
+            Some(ColumnType::Range(RangeSubtype::Integer))
+        );
+        assert_eq!(
+            matched.substitute_type("anymultirange"),
+            Some(ColumnType::Multirange(RangeSubtype::Integer))
+        );
+        assert_eq!(
+            matched.substitute_type("anyelement"),
+            Some(ColumnType::Integer)
+        );
+
+        let multirange = match_types(
+            &[parameter("anymultirange")],
+            &[Some(ColumnType::Multirange(RangeSubtype::Date))],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            multirange.substitute_type("anyrange"),
+            Some(ColumnType::Range(RangeSubtype::Date))
+        );
+
+        assert!(match_types(
+            &[parameter("anyrange"), parameter("anyelement")],
+            &[
+                Some(ColumnType::Range(RangeSubtype::Integer)),
+                Some(ColumnType::BigInteger),
+            ],
+        )
+        .unwrap()
+        .is_none());
         for type_name in [
             "anyrange",
             "anymultirange",
@@ -1012,9 +1127,49 @@ mod tests {
                 "42804"
             );
         }
-        assert!(match_types(&[parameter("anyenum")], &[None])
-            .unwrap()
-            .is_none());
+    }
+
+    #[test]
+    fn compatible_range_family_promotes_the_subtype_without_inventing_range_casts() {
+        let matched = match_types(
+            &[parameter("anycompatiblerange"), parameter("anycompatible")],
+            &[
+                Some(ColumnType::Range(RangeSubtype::BigInteger)),
+                Some(ColumnType::Integer),
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(matched.argument_targets, ["int8range", "int8"]);
+        assert_eq!(
+            matched.substitute_type("anycompatiblemultirange"),
+            Some(ColumnType::Multirange(RangeSubtype::BigInteger))
+        );
+
+        assert!(match_types(
+            &[parameter("anycompatiblerange"), parameter("anycompatible")],
+            &[
+                Some(ColumnType::Range(RangeSubtype::Integer)),
+                Some(ColumnType::BigInteger),
+            ],
+        )
+        .unwrap()
+        .is_none());
+        assert_eq!(
+            match_types(
+                &[parameter("anycompatiblerange"), parameter("anycompatible")],
+                &[None, Some(ColumnType::Integer)],
+            )
+            .unwrap_err()
+            .sqlstate(),
+            "42804"
+        );
+        assert!(match_types(
+            &[parameter("anycompatiblerange")],
+            &[Some(ColumnType::Integer)],
+        )
+        .unwrap()
+        .is_none());
     }
 
     #[test]

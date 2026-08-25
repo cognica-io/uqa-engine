@@ -250,6 +250,8 @@ def execute_pg_case(case: Case, schema: str) -> dict:
 
 def run_postgres(cases: list[Case]) -> tuple[dict[str, str], list[dict]]:
     metadata = pg_oracle_metadata()
+    extension = pg_query("CREATE EXTENSION IF NOT EXISTS btree_gist")
+    require_success("PostgreSQL btree_gist setup", extension)
     schema = f"uqa_pg18_stateful_{os.getpid()}_{secrets.token_hex(4)}"
     entries: list[dict] = []
     try:
@@ -433,6 +435,7 @@ def validate_declared_modes(label: str, cases: list[Case], entries: list[dict]) 
 
 
 def main() -> int:
+    global FIXTURE, EXPECTED
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--backend",
@@ -445,10 +448,26 @@ def main() -> int:
         action="store_true",
         help="replace the checked-in transcript from the PostgreSQL 18.4 + AGE oracle",
     )
+    parser.add_argument(
+        "--fixture",
+        type=Path,
+        default=FIXTURE,
+        help="stateful SQL fixture (default: routines_stateful.sql)",
+    )
+    parser.add_argument(
+        "--expected",
+        type=Path,
+        default=EXPECTED,
+        help="expected JSON transcript (default: routines_stateful.expected.json)",
+    )
     args = parser.parse_args()
     if args.update_expected and args.backend != "postgres":
         parser.error("--update-expected requires --backend postgres")
 
+    FIXTURE = args.fixture.resolve()
+    EXPECTED = args.expected.resolve()
+    if FIXTURE.parent != HERE or EXPECTED.parent != HERE:
+        parser.error("--fixture and --expected must remain inside tests/parity/pg18")
     cases = parse_cases(FIXTURE.read_text())
     document: dict | None = None if args.update_expected else load_expected(cases)
     run_pg = args.backend in {"both", "postgres"}

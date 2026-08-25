@@ -8,9 +8,11 @@
 
 use super::routines::compile_drop_function;
 use super::{
-    compile_column_def, compile_expr, compile_pg_type_name, extract_string, range_var_name,
-    render_relation_component, AlterTableAction, AlterTableStmt, DropKind, DropStmt, NodeEnum,
-    Result, SQLError, Statement, TableKeyConstraint, TableKeyConstraintKind,
+    compile_column_def, compile_expr, compile_foreign_key_action, compile_foreign_key_match,
+    compile_pg_type_name, extract_string, extract_strings, range_var_name,
+    render_relation_component, validate_foreign_key_set_columns, AlterTableAction, AlterTableStmt,
+    DropKind, DropStmt, ForeignKey, NodeEnum, Result, SQLError, Statement, TableKeyConstraint,
+    TableKeyConstraintKind,
 };
 
 pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statement> {
@@ -146,40 +148,106 @@ pub(super) fn compile_alter_table(
                     )));
                 }
             };
-            let kind = match constraint.contype() {
-                pg_query::protobuf::ConstrType::ConstrPrimary => TableKeyConstraintKind::PrimaryKey,
-                pg_query::protobuf::ConstrType::ConstrUnique => TableKeyConstraintKind::Unique,
+            match constraint.contype() {
+                pg_query::protobuf::ConstrType::ConstrPrimary
+                | pg_query::protobuf::ConstrType::ConstrUnique => {
+                    let kind =
+                        if constraint.contype() == pg_query::protobuf::ConstrType::ConstrPrimary {
+                            TableKeyConstraintKind::PrimaryKey
+                        } else {
+                            TableKeyConstraintKind::Unique
+                        };
+                    let columns = constraint
+                        .keys
+                        .iter()
+                        .map(extract_string)
+                        .collect::<Result<Vec<_>>>()?;
+                    if columns.is_empty() {
+                        return Err(SQLError::TypeMismatch(
+                            "PRIMARY KEY / UNIQUE constraint must name at least one column".into(),
+                        ));
+                    }
+                    let mut seen = std::collections::BTreeSet::new();
+                    for column in &columns {
+                        if !seen.insert(column.as_str()) {
+                            return Err(SQLError::TypeMismatch(format!(
+                                "PRIMARY KEY / UNIQUE constraint names column `{column}` more than once"
+                            )));
+                        }
+                    }
+                    AlterTableAction::AddKeyConstraint {
+                        constraint: TableKeyConstraint {
+                            name: (!constraint.conname.is_empty())
+                                .then(|| constraint.conname.clone()),
+                            kind,
+                            columns,
+                            nulls_not_distinct: constraint.nulls_not_distinct,
+                            without_overlaps: constraint.without_overlaps,
+                        },
+                    }
+                }
+                pg_query::protobuf::ConstrType::ConstrForeign => {
+                    if constraint.fk_with_period != constraint.pk_with_period {
+                        return Err(SQLError::TypeMismatch(
+                            "FOREIGN KEY must use PERIOD on both the referencing and referenced key"
+                                .into(),
+                        ));
+                    }
+                    let local_columns = extract_strings(&constraint.fk_attrs)?;
+                    let ref_columns = extract_strings(&constraint.pk_attrs)?;
+                    if local_columns.is_empty() || local_columns.len() != ref_columns.len() {
+                        return Err(SQLError::TypeMismatch(
+                            "FOREIGN KEY must have the same non-zero number of local and referenced columns"
+                                .into(),
+                        ));
+                    }
+                    let ref_table =
+                        constraint
+                            .pktable
+                            .as_ref()
+                            .map(range_var_name)
+                            .ok_or_else(|| {
+                                SQLError::Internal("FOREIGN KEY without referenced table".into())
+                            })?;
+                    let on_delete_set_columns = extract_strings(&constraint.fk_del_set_cols)?;
+                    validate_foreign_key_set_columns(
+                        &local_columns,
+                        &on_delete_set_columns,
+                        &constraint.fk_del_action,
+                    )?;
+                    let foreign_key = ForeignKey {
+                        name: (!constraint.conname.is_empty()).then(|| constraint.conname.clone()),
+                        local_columns,
+                        ref_table,
+                        ref_columns,
+                        on_update: compile_foreign_key_action(&constraint.fk_upd_action)?,
+                        on_delete: compile_foreign_key_action(&constraint.fk_del_action)?,
+                        on_delete_set_columns,
+                        match_type: compile_foreign_key_match(&constraint.fk_matchtype)?,
+                        enforced: constraint.is_enforced,
+                        period: constraint.fk_with_period,
+                    };
+                    if foreign_key.period
+                        && (!matches!(
+                            foreign_key.on_update,
+                            crate::ast::ForeignKeyAction::NoAction
+                        ) || !matches!(
+                            foreign_key.on_delete,
+                            crate::ast::ForeignKeyAction::NoAction
+                        ))
+                    {
+                        return Err(SQLError::Unsupported(
+                            "unsupported referential action for foreign key constraint using PERIOD"
+                                .into(),
+                        ));
+                    }
+                    AlterTableAction::AddForeignKey { foreign_key }
+                }
                 other => {
                     return Err(SQLError::Unsupported(format!(
                         "ALTER TABLE ADD CONSTRAINT {other:?} is not supported"
                     )));
                 }
-            };
-            let columns = constraint
-                .keys
-                .iter()
-                .map(extract_string)
-                .collect::<Result<Vec<_>>>()?;
-            if columns.is_empty() {
-                return Err(SQLError::TypeMismatch(
-                    "PRIMARY KEY / UNIQUE constraint must name at least one column".into(),
-                ));
-            }
-            let mut seen = std::collections::BTreeSet::new();
-            for column in &columns {
-                if !seen.insert(column.as_str()) {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "PRIMARY KEY / UNIQUE constraint names column `{column}` more than once"
-                    )));
-                }
-            }
-            AlterTableAction::AddKeyConstraint {
-                constraint: TableKeyConstraint {
-                    name: (!constraint.conname.is_empty()).then(|| constraint.conname.clone()),
-                    kind,
-                    columns,
-                    nulls_not_distinct: constraint.nulls_not_distinct,
-                },
             }
         }
         AlterTableType::AtDropColumn => AlterTableAction::DropColumn {

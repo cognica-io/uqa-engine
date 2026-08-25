@@ -11,8 +11,9 @@ use super::{
     rewrite_column_values_to_type, AlterTableAction, AlterTableStmt, BTreeMap, ColumnType,
     Document, Engine, RowUpdateVectors, SQLError, SQLResult, Value,
 };
-use uqa_sql::ast::{GeneratedColumn, GeneratedColumnKind};
+use uqa_sql::ast::{ForeignKey, GeneratedColumn, GeneratedColumnKind};
 
+use super::constraint_validation::{resolve_foreign_key_parent, validate_foreign_key_definition};
 use super::defaults::validate_default_expression;
 
 pub(in crate::sql) fn run_alter_table(
@@ -162,6 +163,48 @@ fn run_alter_table_inner(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLRes
             validate_added_key_constraint(engine, &stmt.table, &constraint)?;
             engine
                 .add_key_constraint(&stmt.table, &constraint)
+                .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
+        }
+        AlterTableAction::AddForeignKey { mut foreign_key } => {
+            let mut columns = engine
+                .try_describe_table(&stmt.table)
+                .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
+                .ok_or_else(|| SQLError::UnknownTable(stmt.table.clone()))?;
+            let key_constraints = engine
+                .try_key_constraints(&stmt.table)
+                .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
+            let mut foreign_keys = engine
+                .try_foreign_keys(&stmt.table)
+                .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
+            validate_added_constraint_name(
+                engine,
+                &stmt.table,
+                foreign_key.name.as_deref(),
+                &key_constraints,
+                &foreign_keys,
+            )?;
+            let (canonical_parent, parent_columns, parent_keys) =
+                resolve_foreign_key_parent(engine, &foreign_key.ref_table)?;
+            validate_foreign_key_definition(
+                &stmt.table,
+                &columns,
+                &canonical_parent,
+                &parent_columns,
+                &parent_keys,
+                &foreign_key,
+            )?;
+            foreign_key.ref_table = canonical_parent;
+            validate_existing_foreign_key_rows(engine, &stmt.table, &foreign_key)?;
+            foreign_keys.push(foreign_key.clone());
+            crate::sql::generated::prepare_generated_columns(
+                engine,
+                &stmt.qualifier,
+                &mut columns,
+                &key_constraints,
+                &foreign_keys,
+            )?;
+            engine
+                .add_foreign_key(&stmt.table, &foreign_key)
                 .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
         }
         AlterTableAction::DropColumn {
@@ -384,6 +427,13 @@ fn run_alter_table_inner(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLRes
             let foreign_keys = engine
                 .try_foreign_keys(&stmt.table)
                 .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?;
+            validate_altered_constraint_column_types(
+                engine,
+                &stmt.table,
+                &candidate_columns,
+                &key_constraints,
+                &foreign_keys,
+            )?;
             crate::sql::generated::prepare_generated_columns(
                 engine,
                 &stmt.qualifier,
@@ -442,12 +492,91 @@ fn run_alter_table_inner(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLRes
                     kind == GeneratedColumnKind::Stored,
                 )?;
             }
+            validate_all_table_rows(engine)?;
             engine
                 .try_persist_table_schema(&stmt.table)
                 .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
         }
     }
     Ok(SQLResult::empty())
+}
+
+fn validate_altered_constraint_column_types(
+    engine: &Engine,
+    table: &str,
+    candidate_columns: &[uqa_sql::ast::ColumnDef],
+    key_constraints: &[uqa_sql::ast::TableKeyConstraint],
+    foreign_keys: &[ForeignKey],
+) -> Result<(), SQLError> {
+    for constraint in key_constraints
+        .iter()
+        .filter(|constraint| constraint.without_overlaps)
+    {
+        let Some(period_column) = constraint.columns.last() else {
+            return Err(SQLError::Internal(
+                "WITHOUT OVERLAPS constraint has no period column".into(),
+            ));
+        };
+        let period_type = candidate_columns
+            .iter()
+            .find(|column| column.name == *period_column)
+            .map(|column| &column.ty)
+            .ok_or_else(|| SQLError::UnknownColumn(format!("{table}.{period_column}")))?;
+        if !matches!(
+            period_type,
+            ColumnType::Range(_) | ColumnType::Multirange(_)
+        ) {
+            return Err(SQLError::Routine {
+                sqlstate: "42804".into(),
+                message: format!(
+                    "column \"{period_column}\" in WITHOUT OVERLAPS is not a range or multirange type"
+                ),
+            });
+        }
+    }
+
+    for foreign_key in foreign_keys.iter().filter(|foreign_key| foreign_key.period) {
+        let (parent_name, parent_columns, parent_keys) =
+            resolve_foreign_key_parent(engine, &foreign_key.ref_table)?;
+        let parent_columns = if parent_name == table {
+            candidate_columns
+        } else {
+            parent_columns.as_slice()
+        };
+        validate_foreign_key_definition(
+            table,
+            candidate_columns,
+            &parent_name,
+            parent_columns,
+            &parent_keys,
+            foreign_key,
+        )?;
+    }
+
+    for (child_table, foreign_key) in engine
+        .try_referrers_to(table)
+        .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?
+        .into_iter()
+        .filter(|(_, foreign_key)| foreign_key.period)
+    {
+        let child_columns = if child_table == table {
+            candidate_columns.to_vec()
+        } else {
+            engine
+                .try_describe_table(&child_table)
+                .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?
+                .ok_or_else(|| SQLError::UnknownTable(child_table.clone()))?
+        };
+        validate_foreign_key_definition(
+            &child_table,
+            &child_columns,
+            table,
+            candidate_columns,
+            key_constraints,
+            &foreign_key,
+        )?;
+    }
+    Ok(())
 }
 
 fn reject_default_change_on_generated_column(
@@ -632,6 +761,27 @@ fn validate_added_key_constraint(
             )));
         }
     }
+    if constraint.without_overlaps {
+        if constraint.columns.len() < 2 {
+            return Err(SQLError::TypeMismatch(
+                "constraint using WITHOUT OVERLAPS needs at least two columns".into(),
+            ));
+        }
+        let period_column = constraint.columns.last().expect("validated non-empty key");
+        let period_type = columns
+            .iter()
+            .find(|column| column.name == *period_column)
+            .map(|column| &column.ty)
+            .ok_or_else(|| SQLError::UnknownColumn(format!("{table}.{period_column}")))?;
+        if !matches!(
+            period_type,
+            ColumnType::Range(_) | ColumnType::Multirange(_)
+        ) {
+            return Err(SQLError::TypeMismatch(format!(
+                "column `{period_column}` in WITHOUT OVERLAPS is not a range or multirange type"
+            )));
+        }
+    }
 
     let existing_keys = engine
         .try_key_constraints(table)
@@ -688,6 +838,23 @@ fn validate_added_key_constraint(
         {
             continue;
         }
+        if constraint.without_overlaps {
+            if crate::sql::dml::without_overlaps_conflict(
+                engine,
+                table,
+                constraint,
+                &document,
+                Some(doc_id),
+            )? {
+                return Err(SQLError::Routine {
+                    sqlstate: "23P01".into(),
+                    message: format!(
+                        "could not create constraint because relation \"{table}\" contains overlapping key values"
+                    ),
+                });
+            }
+            continue;
+        }
         if !seen.insert(values) {
             return Err(SQLError::TypeMismatch(format!(
                 "{} constraint would be violated by duplicate values on table `{table}`",
@@ -696,6 +863,71 @@ fn validate_added_key_constraint(
                     uqa_sql::ast::TableKeyConstraintKind::Unique => "UNIQUE",
                 }
             )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_added_constraint_name(
+    engine: &Engine,
+    table: &str,
+    name: Option<&str>,
+    key_constraints: &[uqa_sql::ast::TableKeyConstraint],
+    foreign_keys: &[ForeignKey],
+) -> Result<(), SQLError> {
+    let Some(name) = name else {
+        return Ok(());
+    };
+    let check_name_exists = engine
+        .try_check_constraint_definitions(table)
+        .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
+        .iter()
+        .any(|existing| existing.name.as_deref() == Some(name));
+    let key_name_exists = key_constraints
+        .iter()
+        .any(|existing| existing.name.as_deref() == Some(name));
+    let foreign_name_exists = foreign_keys
+        .iter()
+        .any(|existing| existing.name.as_deref() == Some(name));
+    if check_name_exists || key_name_exists || foreign_name_exists {
+        return Err(SQLError::TypeMismatch(format!(
+            "constraint `{name}` already exists on table `{table}`"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_existing_foreign_key_rows(
+    engine: &Engine,
+    table: &str,
+    foreign_key: &ForeignKey,
+) -> Result<(), SQLError> {
+    if !foreign_key.enforced {
+        return Ok(());
+    }
+    for doc_id in engine.table_doc_ids(table)? {
+        let Some(document) = engine.get_document(table, doc_id)? else {
+            continue;
+        };
+        let Some(values) = crate::sql::dml::foreign_key_lookup_values(foreign_key, &document)?
+        else {
+            continue;
+        };
+        let covered = if foreign_key.period {
+            crate::sql::dml::period_foreign_key_coverage(engine, foreign_key, &values, &[], None)?.0
+        } else {
+            engine
+                .find_conflict(&foreign_key.ref_table, &foreign_key.ref_columns, &values)?
+                .is_some()
+        };
+        if !covered {
+            return Err(SQLError::Routine {
+                sqlstate: "23503".into(),
+                message: format!(
+                    "insert or update on table \"{table}\" violates foreign key constraint \"{}\"",
+                    foreign_key.name.as_deref().unwrap_or("<unnamed>")
+                ),
+            });
         }
     }
     Ok(())

@@ -532,6 +532,53 @@ impl Engine {
         Ok(())
     }
 
+    /// Append one validated table-level foreign key while preserving the
+    /// table's other durable constraints. SQL DDL validates both the target
+    /// key and every existing child row before entering this mutation.
+    pub(crate) fn add_foreign_key(
+        &self,
+        table: &str,
+        foreign_key: &uqa_sql::ast::ForeignKey,
+    ) -> StorageBackendResult<()> {
+        self.with_implicit_storage_transaction(|engine| {
+            engine.add_foreign_key_inner(table, foreign_key)
+        })
+    }
+
+    pub(super) fn add_foreign_key_inner(
+        &self,
+        table: &str,
+        foreign_key: &uqa_sql::ast::ForeignKey,
+    ) -> StorageBackendResult<()> {
+        let table_name = self
+            .try_resolve_table_name(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let t = self
+            .try_table(&table_name)?
+            .ok_or_else(|| table_not_found(&table_name))?;
+        let mut foreign_keys = t.foreign_keys.read().clone();
+        let mut foreign_key = foreign_key.clone();
+        foreign_key.ref_table = self.canonical_foreign_key_target(&foreign_key.ref_table)?;
+        foreign_keys.push(foreign_key);
+        let mut columns = t.columns.read().clone();
+        let mut constraints = uqa_sql::ast::TableConstraintSet {
+            checks: t.table_checks.read().clone(),
+            foreign_keys,
+            key_constraints: t.key_constraints.read().clone(),
+        };
+        let relation =
+            RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
+        materialize_constraint_names(&relation, &mut columns, &mut constraints)?;
+        if self.is_persistent() {
+            self.try_save_table_schema_with_components(&table_name, &t, &columns, &constraints)?;
+        }
+        *t.columns.write() = columns;
+        *t.table_checks.write() = constraints.checks;
+        *t.foreign_keys.write() = constraints.foreign_keys;
+        *t.key_constraints.write() = constraints.key_constraints;
+        Ok(())
+    }
+
     /// Snapshot of every CHECK constraint that applies to `table`, merging the
     /// column-level CHECKs into the table-level list. Returns `(name, expr)`
     /// pairs for backward API compatibility; use
@@ -632,6 +679,7 @@ impl Engine {
                     on_delete_set_columns: Vec::new(),
                     match_type: reference.match_type,
                     enforced: reference.enforced,
+                    period: false,
                 });
             }
         }
@@ -748,6 +796,7 @@ impl Engine {
                 kind,
                 columns: vec![column.name.clone()],
                 nulls_not_distinct: false,
+                without_overlaps: false,
             });
         }
         Ok(constraints)

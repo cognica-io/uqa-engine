@@ -11,15 +11,19 @@
 
 use serde::{Deserialize, Serialize};
 
+mod constraints;
 mod cte;
 mod expressions;
 mod from;
 mod locking;
+mod ranges;
 
+pub use constraints::*;
 pub use cte::*;
 pub use expressions::*;
 pub use from::*;
 pub use locking::*;
+pub use ranges::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ColumnType {
@@ -88,6 +92,12 @@ pub enum ColumnType {
     /// 1970-01-01 00:00:00Z.
     TimestampTz,
     Interval,
+    /// One of `PostgreSQL`'s six built-in range identities. Values use a
+    /// canonical textual carrier so bounds remain durable across every
+    /// storage backend while the declared subtype stays in row metadata.
+    Range(RangeSubtype),
+    /// The `PostgreSQL` multirange paired with one built-in range subtype.
+    Multirange(RangeSubtype),
     /// `VECTOR(N)` columns store an `N`-dimensional `f32` embedding.
     Vector(u32),
     /// `TENSOR(N)` columns store an array of `N`-dimensional `f32`
@@ -138,6 +148,18 @@ pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str
         "_regtype" => "regtype",
         "_xid" => "xid",
         "_pg_node_tree" => "pg_node_tree",
+        "_int4range" => "int4range",
+        "_int8range" => "int8range",
+        "_numrange" => "numrange",
+        "_daterange" => "daterange",
+        "_tsrange" => "tsrange",
+        "_tstzrange" => "tstzrange",
+        "_int4multirange" => "int4multirange",
+        "_int8multirange" => "int8multirange",
+        "_nummultirange" => "nummultirange",
+        "_datemultirange" => "datemultirange",
+        "_tsmultirange" => "tsmultirange",
+        "_tstzmultirange" => "tstzmultirange",
         _ => return None,
     })
 }
@@ -269,6 +291,18 @@ impl ColumnType {
             "timestamp" | "datetime" | "timestamp without time zone" => Ok(Self::Timestamp),
             "timestamptz" | "timestamp with time zone" => Ok(Self::TimestampTz),
             "interval" => Ok(Self::Interval),
+            "int4range" => Ok(Self::Range(RangeSubtype::Integer)),
+            "int8range" => Ok(Self::Range(RangeSubtype::BigInteger)),
+            "numrange" => Ok(Self::Range(RangeSubtype::Numeric)),
+            "daterange" => Ok(Self::Range(RangeSubtype::Date)),
+            "tsrange" => Ok(Self::Range(RangeSubtype::Timestamp)),
+            "tstzrange" => Ok(Self::Range(RangeSubtype::TimestampTz)),
+            "int4multirange" => Ok(Self::Multirange(RangeSubtype::Integer)),
+            "int8multirange" => Ok(Self::Multirange(RangeSubtype::BigInteger)),
+            "nummultirange" => Ok(Self::Multirange(RangeSubtype::Numeric)),
+            "datemultirange" => Ok(Self::Multirange(RangeSubtype::Date)),
+            "tsmultirange" => Ok(Self::Multirange(RangeSubtype::Timestamp)),
+            "tstzmultirange" => Ok(Self::Multirange(RangeSubtype::TimestampTz)),
             "vector" => modifier
                 .and_then(|value| value.parse::<u32>().ok())
                 .filter(|dimension| *dimension > 0)
@@ -329,6 +363,8 @@ impl ColumnType {
             Self::Timestamp => "timestamp without time zone".into(),
             Self::TimestampTz => "timestamp with time zone".into(),
             Self::Interval => "interval".into(),
+            Self::Range(subtype) => subtype.range_name().into(),
+            Self::Multirange(subtype) => subtype.multirange_name().into(),
             Self::Vector(dimension) => format!("vector({dimension})"),
             Self::Tensor(dimension) => format!("tensor({dimension})"),
             Self::Domain { schema, name, .. } => format!("{schema}.{name}"),
@@ -489,23 +525,6 @@ pub struct ColumnDef {
     pub references: Option<ForeignKeyRef>,
 }
 
-/// `REFERENCES table(column)` reference target.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForeignKeyRef {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    pub table: String,
-    pub column: String,
-    #[serde(default)]
-    pub on_update: ForeignKeyAction,
-    #[serde(default)]
-    pub on_delete: ForeignKeyAction,
-    #[serde(default)]
-    pub match_type: ForeignKeyMatch,
-    #[serde(default = "default_true")]
-    pub enforced: bool,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateTable {
     pub name: String,
@@ -529,91 +548,8 @@ pub struct CreateTable {
     pub key_constraints: Vec<TableKeyConstraint>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TableKeyConstraintKind {
-    PrimaryKey,
-    Unique,
-}
-
-/// A table key whose columns are compared as one tuple.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TableKeyConstraint {
-    pub name: Option<String>,
-    pub kind: TableKeyConstraintKind,
-    pub columns: Vec<String>,
-    /// `PostgreSQL` UNIQUE keys normally treat every NULL-containing tuple as
-    /// distinct. `UNIQUE NULLS NOT DISTINCT` opts into NULL equality.
-    #[serde(default)]
-    pub nulls_not_distinct: bool,
-}
-
-/// Durable table-level constraints that do not fit in `ColumnDef`.
-///
-/// `serde(default)` on the catalog field containing this structure keeps
-/// databases written before constraint persistence backward compatible.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct TableConstraintSet {
-    #[serde(default)]
-    pub checks: Vec<TableCheck>,
-    #[serde(default)]
-    pub foreign_keys: Vec<ForeignKey>,
-    #[serde(default)]
-    pub key_constraints: Vec<TableKeyConstraint>,
-}
-
-/// `CHECK (expr)` constraint with an optional name (`CONSTRAINT <name>
-/// CHECK (...)`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TableCheck {
-    pub name: Option<String>,
-    pub expr: Expr,
-    #[serde(default = "default_true")]
-    pub enforced: bool,
-}
-
-/// Table-level foreign key. `local_columns.len()` matches
-/// `ref_columns.len()`; the engine joins on the position-aligned
-/// pairs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForeignKey {
-    pub name: Option<String>,
-    pub local_columns: Vec<String>,
-    pub ref_table: String,
-    pub ref_columns: Vec<String>,
-    #[serde(default)]
-    pub on_update: ForeignKeyAction,
-    #[serde(default)]
-    pub on_delete: ForeignKeyAction,
-    /// Optional column subset for `ON DELETE SET NULL (...)` and
-    /// `ON DELETE SET DEFAULT (...)`. Empty means every local FK
-    /// column participates.
-    #[serde(default)]
-    pub on_delete_set_columns: Vec<String>,
-    #[serde(default)]
-    pub match_type: ForeignKeyMatch,
-    #[serde(default = "default_true")]
-    pub enforced: bool,
-}
-
 const fn default_true() -> bool {
     true
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum ForeignKeyAction {
-    #[default]
-    NoAction,
-    Restrict,
-    Cascade,
-    SetNull,
-    SetDefault,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum ForeignKeyMatch {
-    #[default]
-    Simple,
-    Full,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -961,6 +897,9 @@ pub enum AlterTableAction {
     },
     AddKeyConstraint {
         constraint: TableKeyConstraint,
+    },
+    AddForeignKey {
+        foreign_key: ForeignKey,
     },
     DropColumn {
         name: String,

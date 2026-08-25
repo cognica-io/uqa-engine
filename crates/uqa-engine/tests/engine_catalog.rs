@@ -48,6 +48,8 @@ mod sql_sequences;
 mod sql_set_search_path;
 #[path = "sql_show_discard.rs"]
 mod sql_show_discard;
+#[path = "engine_catalog/sql_type_migration_temporal.rs"]
+mod sql_type_migration_temporal;
 #[path = "sql_types.rs"]
 mod sql_types;
 #[path = "sql_unique_constraint.rs"]

@@ -37,7 +37,7 @@ pub(super) fn extract_string(node: &Node) -> Result<String> {
     }
 }
 
-fn extract_strings(nodes: &[Node]) -> Result<Vec<String>> {
+pub(super) fn extract_strings(nodes: &[Node]) -> Result<Vec<String>> {
     nodes.iter().map(extract_string).collect()
 }
 
