@@ -905,19 +905,42 @@ fn lower_where_bound(
     }
 }
 
-/// Return the candidate-pool bound when the complete predicate is one raw KNN
-/// leaf. A hierarchy scan applies that bound once after merging every physical
-/// relation rather than independently filling it from each child.
-pub(crate) fn direct_knn_support_limit(
+pub(crate) enum DirectVectorRetrieval {
+    Knn {
+        top_k: usize,
+    },
+    Calibrated {
+        field: String,
+        query_vector: Vec<f32>,
+        top_k: usize,
+        threshold: Option<f64>,
+    },
+}
+
+/// Describe a complete predicate that owns one bounded vector candidate pool.
+/// A hierarchy scan applies that pool and any query-local calibration once
+/// after merging every physical relation.
+pub(crate) fn direct_vector_retrieval(
     engine: &Engine,
     expression: &ScalarExpr,
     params: &[SQLParam],
-) -> Result<Option<usize>, SQLError> {
+) -> Result<Option<DirectVectorRetrieval>, SQLError> {
     let Some(tree) = lower_where_bound(engine, expression, params)? else {
         return Ok(None);
     };
     Ok(match tree {
-        OperatorTree::KNN { k, .. } => Some(k),
+        OperatorTree::KNN { k, .. } => Some(DirectVectorRetrieval::Knn { top_k: k }),
+        OperatorTree::CalibratedVectorMatch {
+            field,
+            query_vector,
+            k,
+            threshold,
+        } => Some(DirectVectorRetrieval::Calibrated {
+            field,
+            query_vector,
+            top_k: k,
+            threshold,
+        }),
         _ => None,
     })
 }

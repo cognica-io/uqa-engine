@@ -154,7 +154,9 @@ fn qualifier_filter_for_part(
             return Some((qualifier.clone(), part.clone()));
         }
     }
-    if qualifiers.is_empty() && has_unqualified {
+    if qualifiers.is_empty()
+        && (has_unqualified || uqa_planner::optimizer::contains_retrieval(part))
+    {
         if let Some(qualifier) = unique_unqualified_column_owner(part, column_owners) {
             if from_quals.contains(qualifier) {
                 return Some((

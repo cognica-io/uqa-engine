@@ -17,6 +17,7 @@ use super::{
 use crate::sql::select::RecheckDoc;
 use crate::ScoredEntry;
 use uqa_execution::PhysicalOperator;
+use uqa_operators::RelevantSampleSplit;
 
 struct PhysicalRetrieval {
     table_name: String,
@@ -44,6 +45,8 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
             "hierarchy retrieval requires a table source".into(),
         ));
     };
+    let direct_vector =
+        crate::operator_tree_bridge::direct_vector_retrieval(engine, predicate, params)?;
     let table_names = engine.hierarchy_scan_tables(logical_table, *include_descendants)?;
     let mut physical = Vec::with_capacity(table_names.len());
     for table_name in table_names {
@@ -54,21 +57,37 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
             .and_then(|(origin_qualifier, storage_name)| {
                 ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
             });
-        let entries = if recheck_pins.is_some() {
-            engine.committed_retrieval_entries(&table_name, predicate, params)?
+        let entries = if let Some(
+            crate::operator_tree_bridge::DirectVectorRetrieval::Calibrated {
+                field,
+                query_vector,
+                top_k,
+                ..
+            },
+        ) = &direct_vector
+        {
+            if recheck_pins.is_some() {
+                engine.committed_knn_entries(&table_name, field, query_vector, *top_k)?
+            } else {
+                engine.knn_search_leaf(&table_name, field, query_vector, *top_k)?
+            }
         } else {
-            crate::operator_tree_bridge::run_optimised(
-                engine,
-                &table_name,
-                Some(predicate),
-                params,
-            )?
-        }
-        .ok_or_else(|| {
-            SQLError::Unsupported(format!(
-                "JOIN filter retrieval predicate for `{qualifier}` cannot be represented by the shared operator IR"
-            ))
-        })?;
+            let entries = if recheck_pins.is_some() {
+                engine.committed_retrieval_entries(&table_name, predicate, params)?
+            } else {
+                crate::operator_tree_bridge::run_optimised(
+                    engine,
+                    &table_name,
+                    Some(predicate),
+                    params,
+                )?
+            };
+            entries.ok_or_else(|| {
+                SQLError::Unsupported(format!(
+                    "JOIN filter retrieval predicate for `{qualifier}` cannot be represented by the shared operator IR"
+                ))
+            })?
+        };
         physical.push(PhysicalRetrieval {
             table_name,
             entries,
@@ -77,10 +96,19 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
         });
     }
 
-    if let Some(top_k) =
-        crate::operator_tree_bridge::direct_knn_support_limit(engine, predicate, params)?
-    {
-        retain_global_top_k(&mut physical, top_k);
+    match direct_vector {
+        Some(crate::operator_tree_bridge::DirectVectorRetrieval::Knn { top_k }) => {
+            retain_global_top_k(&mut physical, top_k);
+        }
+        Some(crate::operator_tree_bridge::DirectVectorRetrieval::Calibrated {
+            top_k,
+            threshold,
+            ..
+        }) => {
+            retain_global_top_k(&mut physical, top_k);
+            calibrate_global_vector_pool(&mut physical, threshold)?;
+        }
+        None => {}
     }
 
     let columns = engine.try_table_columns(logical_table).map_err(|error| {
@@ -161,4 +189,45 @@ fn retain_global_top_k(physical: &mut [PhysicalRetrieval], top_k: usize) {
             keep
         });
     }
+}
+
+fn calibrate_global_vector_pool(
+    physical: &mut [PhysicalRetrieval],
+    threshold: Option<f64>,
+) -> Result<(), SQLError> {
+    let distances = physical
+        .iter()
+        .flat_map(|retrieval| retrieval.entries.iter())
+        .map(|entry| 1.0 - entry.score)
+        .collect::<Vec<_>>();
+    let transform =
+        uqa_operators::fit_pool_calibration(&distances, RelevantSampleSplit::default(), 0.5)
+            .map_err(|error| {
+                SQLError::Internal(format!("calibrate hierarchy vector pool: {error}"))
+            })?;
+    let mut distance = distances.into_iter();
+    for retrieval in physical {
+        for entry in &mut retrieval.entries {
+            let value = distance.next().ok_or_else(|| {
+                SQLError::Internal("hierarchy vector calibration lost a candidate".into())
+            })?;
+            entry.score = transform
+                .as_ref()
+                .map_or(Ok(0.5), |transform| {
+                    transform.calibrate_one(value).map_err(|error| {
+                        SQLError::Internal(format!("calibrate hierarchy vector candidate: {error}"))
+                    })
+                })?
+                .clamp(1e-6, 1.0 - 1e-6);
+        }
+        retrieval
+            .entries
+            .retain(|entry| threshold.is_none_or(|minimum| entry.score >= minimum));
+    }
+    if distance.next().is_some() {
+        return Err(SQLError::Internal(
+            "hierarchy vector calibration left an unmatched candidate".into(),
+        ));
+    }
+    Ok(())
 }

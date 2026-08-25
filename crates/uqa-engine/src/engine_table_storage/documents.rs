@@ -347,6 +347,25 @@ impl Engine {
         crate::operator_tree_bridge::run_optimised(&session, table, Some(predicate), params)
     }
 
+    /// Execute one raw KNN leaf against the latest committed vector-index state for a tuple-local hierarchy recheck.
+    pub(crate) fn committed_knn_entries(
+        &self,
+        table: &str,
+        field: &str,
+        query_vector: &[f32],
+        top_k: usize,
+    ) -> Result<Vec<crate::ScoredEntry>, SQLError> {
+        if self.storage.provider.is_none() {
+            return self.knn_search_leaf(table, field, query_vector, top_k);
+        }
+        let session = self.new_session().map_err(|error| {
+            SQLError::Internal(format!(
+                "open independent session to recheck vector retrieval on `{table}`: {error}"
+            ))
+        })?;
+        session.knn_search_leaf(table, field, query_vector, top_k)
+    }
+
     /// Fetch complete physical documents while materialising only the virtual
     /// generated columns named by `projection`. Callers that need full rows
     /// should use [`Engine::get_document`]; projected execution paths use this

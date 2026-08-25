@@ -102,6 +102,14 @@ fn partition_retrieval_keeps_table_local_doc_ids_and_global_knn_support() {
         &engine,
         "INSERT INTO vector_parent VALUES (1, 'needle low best', ARRAY[1.0, 0.0]), (2, 'needle low second', ARRAY[0.8, 0.2]), (11, 'needle high best', ARRAY[0.99, 0.01]), (12, 'needle high second', ARRAY[0.0, 1.0])",
     );
+    exec(
+        &engine,
+        "CREATE TABLE vector_flat (id INTEGER, body TEXT, embedding VECTOR(2))",
+    );
+    exec(
+        &engine,
+        "INSERT INTO vector_flat VALUES (1, 'needle low best', ARRAY[1.0, 0.0]), (2, 'needle low second', ARRAY[0.8, 0.2]), (11, 'needle high best', ARRAY[0.99, 0.01]), (12, 'needle high second', ARRAY[0.0, 1.0])",
+    );
 
     let rows = engine
         .sql(
@@ -109,9 +117,41 @@ fn partition_retrieval_keeps_table_local_doc_ids_and_global_knn_support() {
             &[],
         )
         .unwrap();
+    let flat_rows = engine
+        .sql(
+            "SELECT id, _score FROM vector_flat WHERE knn_match(embedding, ARRAY[1.0, 0.0], 2) ORDER BY _score DESC, id",
+            &[],
+        )
+        .unwrap();
     assert_eq!(rows.rows.len(), 2);
     assert_eq!(rows.rows[0]["id"], Value::Int(1));
     assert_eq!(rows.rows[1]["id"], Value::Int(11));
+    assert_eq!(rows.rows, flat_rows.rows);
+
+    let calibrated = engine
+        .sql(
+            "SELECT id, _score FROM vector_parent WHERE calibrated_vector_match('embedding', ARRAY[1.0, 0.0], 2) ORDER BY _score DESC, id",
+            &[],
+        )
+        .unwrap();
+    let flat_calibrated = engine
+        .sql(
+            "SELECT id, _score FROM vector_flat WHERE calibrated_vector_match('embedding', ARRAY[1.0, 0.0], 2) ORDER BY _score DESC, id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(calibrated.rows.len(), 2);
+    assert_eq!(calibrated.rows[0]["id"], Value::Int(1));
+    assert_eq!(calibrated.rows[1]["id"], Value::Int(11));
+    assert_eq!(calibrated.rows, flat_calibrated.rows);
+    assert!(engine
+        .sql(
+            "SELECT id FROM vector_parent WHERE calibrated_vector_match('embedding', ARRAY[1.0, 0.0], 2, 1.0)",
+            &[],
+        )
+        .unwrap()
+        .rows
+        .is_empty());
 
     assert_eq!(
         integer_column(
