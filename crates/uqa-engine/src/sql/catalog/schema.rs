@@ -34,6 +34,7 @@ pub(super) enum VirtualRelation {
     PgViews,
     PgIndexes,
     PgType,
+    PgRange,
     PgProc,
     PgDatabase,
     PgRoles,
@@ -95,6 +96,7 @@ pub(super) fn resolve_virtual_relation(engine: &Engine, name: &str) -> Option<Vi
         (_, true, "pg_views") | (false, false, "pg_views") => Some(VirtualRelation::PgViews),
         (_, true, "pg_indexes") | (false, false, "pg_indexes") => Some(VirtualRelation::PgIndexes),
         (_, true, "pg_type") | (false, false, "pg_type") => Some(VirtualRelation::PgType),
+        (_, true, "pg_range") | (false, false, "pg_range") => Some(VirtualRelation::PgRange),
         (_, true, "pg_proc") | (false, false, "pg_proc") => Some(VirtualRelation::PgProc),
         (_, true, "pg_database") | (false, false, "pg_database") => {
             Some(VirtualRelation::PgDatabase)
@@ -476,6 +478,15 @@ impl VirtualRelation {
                 "typdefaultbin" => ColumnType::PgNodeTree,
                 "typdefault" => ColumnType::Text,
                 "typacl" => array(ColumnType::AclItem),
+            ],
+            Self::PgRange => columns![
+                "rngtypid" => ColumnType::Oid,
+                "rngsubtype" => ColumnType::Oid,
+                "rngmultitypid" => ColumnType::Oid,
+                "rngcollation" => ColumnType::Oid,
+                "rngsubopc" => ColumnType::Oid,
+                "rngcanonical" => ColumnType::Regproc,
+                "rngsubdiff" => ColumnType::Regproc,
             ],
             Self::PgProc => columns![
                 "oid" => ColumnType::Oid,

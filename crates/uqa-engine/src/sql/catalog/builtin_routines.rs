@@ -48,6 +48,38 @@ impl BuiltinRoutineCatalogEntry {
         body.push_str(BIT_LENGTH_SQL_BODY_SUFFIX);
         Some(body)
     }
+
+    pub(super) const fn variadic_type(self) -> i64 {
+        match self.oid {
+            4282 => 3904,
+            4285 => 3906,
+            4288 => 3908,
+            4291 => 3910,
+            4294 => 3912,
+            4297 => 3926,
+            _ => 0,
+        }
+    }
+}
+
+macro_rules! range_routine {
+    ($oid:literal, $name:literal, $strict:literal, $return_type:literal, [$($argument_type:literal),*], $source:literal) => {
+        BuiltinRoutineCatalogEntry {
+            oid: $oid,
+            name: $name,
+            kind: "f",
+            strict: $strict,
+            volatility: "i",
+            parallel: "s",
+            leakproof: false,
+            return_type: $return_type,
+            argument_types: &[$($argument_type),*],
+            argument_names: &[],
+            default_arguments: 0,
+            argument_defaults: None,
+            source: $source,
+        }
+    };
 }
 
 const BIT_LENGTH_SQL_BODY_PREFIX: &str = concat!(
@@ -817,4 +849,275 @@ pub(super) const PG18_BUILTIN_ROUTINES: &[BuiltinRoutineCatalogEntry] = &[
         argument_defaults: None,
         source: "uuidv7_interval",
     },
+    range_routine!(
+        3840,
+        "int4range",
+        false,
+        3904,
+        [23, 23],
+        "range_constructor2"
+    ),
+    range_routine!(
+        3841,
+        "int4range",
+        false,
+        3904,
+        [23, 23, 25],
+        "range_constructor3"
+    ),
+    range_routine!(
+        3844,
+        "numrange",
+        false,
+        3906,
+        [1700, 1700],
+        "range_constructor2"
+    ),
+    range_routine!(
+        3845,
+        "numrange",
+        false,
+        3906,
+        [1700, 1700, 25],
+        "range_constructor3"
+    ),
+    range_routine!(
+        3933,
+        "tsrange",
+        false,
+        3908,
+        [1114, 1114],
+        "range_constructor2"
+    ),
+    range_routine!(
+        3934,
+        "tsrange",
+        false,
+        3908,
+        [1114, 1114, 25],
+        "range_constructor3"
+    ),
+    range_routine!(
+        3937,
+        "tstzrange",
+        false,
+        3910,
+        [1184, 1184],
+        "range_constructor2"
+    ),
+    range_routine!(
+        3938,
+        "tstzrange",
+        false,
+        3910,
+        [1184, 1184, 25],
+        "range_constructor3"
+    ),
+    range_routine!(
+        3941,
+        "daterange",
+        false,
+        3912,
+        [1082, 1082],
+        "range_constructor2"
+    ),
+    range_routine!(
+        3942,
+        "daterange",
+        false,
+        3912,
+        [1082, 1082, 25],
+        "range_constructor3"
+    ),
+    range_routine!(
+        3945,
+        "int8range",
+        false,
+        3926,
+        [20, 20],
+        "range_constructor2"
+    ),
+    range_routine!(
+        3946,
+        "int8range",
+        false,
+        3926,
+        [20, 20, 25],
+        "range_constructor3"
+    ),
+    range_routine!(3848, "lower", true, 2283, [3831], "range_lower"),
+    range_routine!(3849, "upper", true, 2283, [3831], "range_upper"),
+    range_routine!(3850, "isempty", true, 16, [3831], "range_empty"),
+    range_routine!(3851, "lower_inc", true, 16, [3831], "range_lower_inc"),
+    range_routine!(3852, "upper_inc", true, 16, [3831], "range_upper_inc"),
+    range_routine!(3853, "lower_inf", true, 16, [3831], "range_lower_inf"),
+    range_routine!(3854, "upper_inf", true, 16, [3831], "range_upper_inf"),
+    range_routine!(4057, "range_merge", true, 3831, [3831, 3831], "range_merge"),
+    range_routine!(
+        4228,
+        "range_merge",
+        true,
+        3831,
+        [4537],
+        "range_merge_from_multirange"
+    ),
+    range_routine!(4235, "lower", true, 2283, [4537], "multirange_lower"),
+    range_routine!(4236, "upper", true, 2283, [4537], "multirange_upper"),
+    range_routine!(4237, "isempty", true, 16, [4537], "multirange_empty"),
+    range_routine!(4238, "lower_inc", true, 16, [4537], "multirange_lower_inc"),
+    range_routine!(4239, "upper_inc", true, 16, [4537], "multirange_upper_inc"),
+    range_routine!(4240, "lower_inf", true, 16, [4537], "multirange_lower_inf"),
+    range_routine!(4241, "upper_inf", true, 16, [4537], "multirange_upper_inf"),
+    range_routine!(
+        4280,
+        "int4multirange",
+        true,
+        4451,
+        [],
+        "multirange_constructor0"
+    ),
+    range_routine!(
+        4281,
+        "int4multirange",
+        true,
+        4451,
+        [3904],
+        "multirange_constructor1"
+    ),
+    range_routine!(
+        4282,
+        "int4multirange",
+        true,
+        4451,
+        [3905],
+        "multirange_constructor2"
+    ),
+    range_routine!(
+        4283,
+        "nummultirange",
+        true,
+        4532,
+        [],
+        "multirange_constructor0"
+    ),
+    range_routine!(
+        4284,
+        "nummultirange",
+        true,
+        4532,
+        [3906],
+        "multirange_constructor1"
+    ),
+    range_routine!(
+        4285,
+        "nummultirange",
+        true,
+        4532,
+        [3907],
+        "multirange_constructor2"
+    ),
+    range_routine!(
+        4286,
+        "tsmultirange",
+        true,
+        4533,
+        [],
+        "multirange_constructor0"
+    ),
+    range_routine!(
+        4287,
+        "tsmultirange",
+        true,
+        4533,
+        [3908],
+        "multirange_constructor1"
+    ),
+    range_routine!(
+        4288,
+        "tsmultirange",
+        true,
+        4533,
+        [3909],
+        "multirange_constructor2"
+    ),
+    range_routine!(
+        4289,
+        "tstzmultirange",
+        true,
+        4534,
+        [],
+        "multirange_constructor0"
+    ),
+    range_routine!(
+        4290,
+        "tstzmultirange",
+        true,
+        4534,
+        [3910],
+        "multirange_constructor1"
+    ),
+    range_routine!(
+        4291,
+        "tstzmultirange",
+        true,
+        4534,
+        [3911],
+        "multirange_constructor2"
+    ),
+    range_routine!(
+        4292,
+        "datemultirange",
+        true,
+        4535,
+        [],
+        "multirange_constructor0"
+    ),
+    range_routine!(
+        4293,
+        "datemultirange",
+        true,
+        4535,
+        [3912],
+        "multirange_constructor1"
+    ),
+    range_routine!(
+        4294,
+        "datemultirange",
+        true,
+        4535,
+        [3913],
+        "multirange_constructor2"
+    ),
+    range_routine!(
+        4295,
+        "int8multirange",
+        true,
+        4536,
+        [],
+        "multirange_constructor0"
+    ),
+    range_routine!(
+        4296,
+        "int8multirange",
+        true,
+        4536,
+        [3926],
+        "multirange_constructor1"
+    ),
+    range_routine!(
+        4297,
+        "int8multirange",
+        true,
+        4536,
+        [3927],
+        "multirange_constructor2"
+    ),
+    range_routine!(
+        4298,
+        "multirange",
+        true,
+        4537,
+        [3831],
+        "multirange_constructor1"
+    ),
 ];

@@ -1,0 +1,488 @@
+{
+  "schema_version": 1,
+  "fixture_sha256": "781c6917a3dd59c2bcfee0c0ad0d859f2d00d7ee0e232f89d1b49a4ca5ae7e58",
+  "oracle": {
+    "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
+    "server_version_num": "180004",
+    "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "age_version": "1.8.0"
+  },
+  "cases": [
+    {
+      "name": "create_schema",
+      "kind": "ok"
+    },
+    {
+      "name": "canonical_range_literals",
+      "kind": "rows",
+      "rows": [
+        [
+          "[1,5)",
+          "[2,5)",
+          "[2024-01-01,2024-01-03)",
+          "{[1,5),[10,12)}"
+        ]
+      ]
+    },
+    {
+      "name": "range_functions_and_operators",
+      "kind": "rows",
+      "rows": [
+        [
+          "[1,5)",
+          "1",
+          "5",
+          "t",
+          "f",
+          "t",
+          "t",
+          "t",
+          "t",
+          "{[1,5)}",
+          "[1,10)"
+        ]
+      ]
+    },
+    {
+      "name": "create_range_polymorphic_routines",
+      "kind": "ok"
+    },
+    {
+      "name": "range_polymorphic_routine_results",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "integer",
+          "{[1,5)}",
+          "int4multirange",
+          "[1,5)",
+          "int4range",
+          "2",
+          "bigint"
+        ]
+      ]
+    },
+    {
+      "name": "simple_range_polymorphic_mismatch",
+      "kind": "error",
+      "sqlstate": "42883"
+    },
+    {
+      "name": "compatible_range_polymorphic_mismatch",
+      "kind": "error",
+      "sqlstate": "42883"
+    },
+    {
+      "name": "indeterminate_range_polymorphic_call",
+      "kind": "error",
+      "sqlstate": "42804"
+    },
+    {
+      "name": "create_temporal_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "create_temporal_child",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_adjacent_parent_ranges",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_aggregate_covered_child",
+      "kind": "ok"
+    },
+    {
+      "name": "overlapping_parent_rejected",
+      "kind": "error",
+      "sqlstate": "23P01"
+    },
+    {
+      "name": "empty_temporal_key_rejected",
+      "kind": "error",
+      "sqlstate": "23514"
+    },
+    {
+      "name": "uncovered_child_rejected",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "parent_delete_breaking_coverage_rejected",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "parent_update_breaking_coverage_rejected",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "temporal_constraint_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "temporal_child_fk",
+          "f",
+          "t"
+        ],
+        [
+          "temporal_parent_pk",
+          "p",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "create_alter_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_alter_parent_rows",
+      "kind": "ok"
+    },
+    {
+      "name": "add_without_overlaps",
+      "kind": "ok"
+    },
+    {
+      "name": "alter_range_to_multirange",
+      "kind": "ok"
+    },
+    {
+      "name": "altered_range_identity",
+      "kind": "rows",
+      "rows": [
+        [
+          "{[1,5)}",
+          "int4multirange"
+        ],
+        [
+          "{[5,10)}",
+          "int4multirange"
+        ]
+      ]
+    },
+    {
+      "name": "create_existing_child",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_existing_child",
+      "kind": "ok"
+    },
+    {
+      "name": "add_period_foreign_key",
+      "kind": "ok"
+    },
+    {
+      "name": "added_constraint_survives_reopen",
+      "kind": "rows",
+      "rows": [
+        [
+          "alter_child_fk",
+          "t"
+        ],
+        [
+          "alter_parent_uq",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "incompatible_parent_type_rewrite_rejected",
+      "kind": "error",
+      "sqlstate": "42804"
+    },
+    {
+      "name": "create_overlapping_existing_rows",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_overlapping_existing_rows",
+      "kind": "ok"
+    },
+    {
+      "name": "add_without_overlaps_to_overlapping_rows_rejected",
+      "kind": "error",
+      "sqlstate": "23P01"
+    },
+    {
+      "name": "failed_without_overlaps_add_is_atomic",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "overlapping_insert_still_allowed_after_failed_add",
+      "kind": "ok"
+    },
+    {
+      "name": "create_coverage_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_coverage_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "create_uncovered_existing_child",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_uncovered_existing_child",
+      "kind": "ok"
+    },
+    {
+      "name": "add_period_to_uncovered_rows_rejected",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "failed_period_add_is_atomic",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "uncovered_insert_still_allowed_after_failed_add",
+      "kind": "ok"
+    },
+    {
+      "name": "create_ordinary_range_target",
+      "kind": "ok"
+    },
+    {
+      "name": "period_requires_temporal_target_key",
+      "kind": "error",
+      "sqlstate": "42830"
+    },
+    {
+      "name": "period_requires_matching_range_type",
+      "kind": "error",
+      "sqlstate": "42804"
+    },
+    {
+      "name": "failed_period_create_is_atomic",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "create_durable_range_generated",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_durable_range_generated",
+      "kind": "ok"
+    },
+    {
+      "name": "durable_range_generated_binding_after_reopen",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "{[1,5)}",
+          "int4multirange"
+        ]
+      ]
+    },
+    {
+      "name": "pg_range_identity",
+      "kind": "rows",
+      "rows": [
+        [
+          "3904",
+          "23",
+          "4451",
+          "0",
+          "1978",
+          "3914",
+          "3922"
+        ],
+        [
+          "3906",
+          "1700",
+          "4532",
+          "0",
+          "3125",
+          "0",
+          "3924"
+        ],
+        [
+          "3908",
+          "1114",
+          "4533",
+          "0",
+          "3128",
+          "0",
+          "3929"
+        ],
+        [
+          "3910",
+          "1184",
+          "4534",
+          "0",
+          "3127",
+          "0",
+          "3930"
+        ],
+        [
+          "3912",
+          "1082",
+          "4535",
+          "0",
+          "3122",
+          "3915",
+          "3925"
+        ],
+        [
+          "3926",
+          "20",
+          "4536",
+          "0",
+          "3124",
+          "3928",
+          "3923"
+        ]
+      ]
+    },
+    {
+      "name": "pg_proc_range_identity",
+      "kind": "rows",
+      "rows": [
+        [
+          "3840",
+          "int4range",
+          "0",
+          "f",
+          "i",
+          "s",
+          "3904",
+          "23 23",
+          "range_constructor2"
+        ],
+        [
+          "3841",
+          "int4range",
+          "0",
+          "f",
+          "i",
+          "s",
+          "3904",
+          "23 23 25",
+          "range_constructor3"
+        ],
+        [
+          "3848",
+          "lower",
+          "0",
+          "t",
+          "i",
+          "s",
+          "2283",
+          "3831",
+          "range_lower"
+        ],
+        [
+          "3850",
+          "isempty",
+          "0",
+          "t",
+          "i",
+          "s",
+          "16",
+          "3831",
+          "range_empty"
+        ],
+        [
+          "4057",
+          "range_merge",
+          "0",
+          "t",
+          "i",
+          "s",
+          "3831",
+          "3831 3831",
+          "range_merge"
+        ],
+        [
+          "4228",
+          "range_merge",
+          "0",
+          "t",
+          "i",
+          "s",
+          "3831",
+          "4537",
+          "range_merge_from_multirange"
+        ],
+        [
+          "4235",
+          "lower",
+          "0",
+          "t",
+          "i",
+          "s",
+          "2283",
+          "4537",
+          "multirange_lower"
+        ],
+        [
+          "4237",
+          "isempty",
+          "0",
+          "t",
+          "i",
+          "s",
+          "16",
+          "4537",
+          "multirange_empty"
+        ],
+        [
+          "4280",
+          "int4multirange",
+          "0",
+          "t",
+          "i",
+          "s",
+          "4451",
+          "",
+          "multirange_constructor0"
+        ],
+        [
+          "4281",
+          "int4multirange",
+          "0",
+          "t",
+          "i",
+          "s",
+          "4451",
+          "3904",
+          "multirange_constructor1"
+        ],
+        [
+          "4282",
+          "int4multirange",
+          "3904",
+          "t",
+          "i",
+          "s",
+          "4451",
+          "3905",
+          "multirange_constructor2"
+        ],
+        [
+          "4298",
+          "multirange",
+          "0",
+          "t",
+          "i",
+          "s",
+          "4537",
+          "3831",
+          "multirange_constructor1"
+        ]
+      ]
+    }
+  ]
+}

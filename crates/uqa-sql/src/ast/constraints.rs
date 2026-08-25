@@ -92,6 +92,9 @@ pub struct ForeignKeyRef {
     pub deferrable: bool,
     #[serde(default)]
     pub initially_deferred: bool,
+    /// `REFERENCES table (..., PERIOD column)` temporal coverage semantics.
+    #[serde(default)]
+    pub period: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,6 +142,9 @@ pub struct TableKeyConstraint {
     /// distinct. `UNIQUE NULLS NOT DISTINCT` opts into NULL equality.
     #[serde(default)]
     pub nulls_not_distinct: bool,
+    /// The final key column is a range or multirange compared by overlap.
+    #[serde(default)]
+    pub without_overlaps: bool,
 }
 
 /// Durable table-level constraints that do not fit in `ColumnDef`.
@@ -202,6 +208,9 @@ pub struct ForeignKey {
     pub deferrable: bool,
     #[serde(default)]
     pub initially_deferred: bool,
+    /// The final local and referenced columns use `PostgreSQL` PERIOD coverage.
+    #[serde(default)]
+    pub period: bool,
 }
 
 const fn default_true() -> bool {

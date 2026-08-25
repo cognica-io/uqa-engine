@@ -159,6 +159,31 @@ SELECT json_strip_nulls(strip_in_arrays => true, target => '{"keep":1,"drop":nul
 | Arithmetic and construction | `age`, `make_timestamp`, `make_date`, `make_interval`, `justify_hours` |
 | Validation | `isfinite` |
 
+## Range and multirange functions
+
+Each built-in range family has a two- or three-argument constructor such as `int4range(lower, upper [, bounds])`, and each paired multirange family has a variadic constructor such as `int4multirange(range, ...)`. The generic `multirange(range)` constructor returns the paired multirange identity. Constructor results and generated-column bindings retain the declared subtype across storage and reopen.
+
+User SQL and PL/pgSQL routines may declare `anyrange`, `anymultirange`, `anycompatiblerange`, and `anycompatiblemultirange`. Simple-family calls require one exact built-in range family and link `anyelement` to its subtype; compatible-family calls select a common subtype and its paired range identities without inventing unavailable range-to-range casts. Concrete parameter and return bindings survive nested execution, stored expressions, and reopen, while an unknown call that cannot identify a range family reports SQLSTATE `42804`.
+
+| Functions | Purpose |
+| --- | --- |
+| `lower`, `upper` | Return the outer lower or upper subtype value, or NULL for an empty or unbounded side |
+| `isempty` | Test for an empty range or multirange |
+| `lower_inc`, `upper_inc` | Test whether the corresponding finite bound is inclusive |
+| `lower_inf`, `upper_inf` | Test whether the corresponding bound is unbounded |
+| `range_merge(range, range)` | Return the smallest range covering both inputs |
+| `range_merge(multirange)` | Return the smallest range covering every member |
+| `multirange(range)`, family multirange constructors | Construct the paired normalized multirange |
+
+The implemented range and multirange operators are `&&` for overlap, `@>` for range-set containment, `<@` for contained-by, and `-|-` for adjacency. These operators require range or multirange operands from the same built-in subtype family; scalar-element containment, complete ordering and arithmetic operators, user-defined range families, and index-backed operator classes remain open compatibility bugs.
+
+```sql execute
+SELECT lower('[1,5)'::int4range) AS lower_bound,
+       '[1,5)'::int4range && '[4,8)'::int4range AS overlaps,
+       '[1,5)'::int4range -|- '[5,8)'::int4range AS adjacent,
+       range_merge('{[1,3),[8,10)}'::int4multirange) AS covering_range;
+```
+
 ## Session and identity functions
 
 Implemented helpers include `current_database`, `current_catalog`, `current_user`, `session_user`, `current_schema`, `current_schemas`, `typeof`, and `pg_typeof`. `current_schema` and `current_schemas` follow the session `search_path`.

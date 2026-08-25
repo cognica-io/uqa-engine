@@ -701,6 +701,7 @@ impl Engine {
                     validated: reference.validated,
                     deferrable: reference.deferrable,
                     initially_deferred: reference.initially_deferred,
+                    period: reference.period,
                 });
             }
         }
@@ -817,6 +818,7 @@ impl Engine {
                 kind,
                 columns: vec![column.name.clone()],
                 nulls_not_distinct: false,
+                without_overlaps: false,
             });
         }
         Ok(constraints)

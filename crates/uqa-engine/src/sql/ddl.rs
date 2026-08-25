@@ -16,6 +16,7 @@ use super::{
 use crate::CatalogIndexRow;
 
 mod alter_table;
+mod constraint_validation;
 mod create_index;
 mod create_table;
 mod defaults;

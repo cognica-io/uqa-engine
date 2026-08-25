@@ -14,8 +14,8 @@ use super::common::{
     base_type, common_numeric_type, common_type, merge_optional_types, numeric_type,
 };
 use super::{
-    array_transform, containment, fixed_builtin, integer_base, random_range, scalar_type_inner,
-    FunctionTypeResolver,
+    array_transform, containment, fixed_builtin, integer_base, random_range, range,
+    scalar_type_inner, FunctionTypeResolver,
 };
 
 pub fn builtin_function_type(
@@ -107,6 +107,9 @@ pub(super) fn builtin_function_type_inner(
     let argument = |position: usize| argument_types.get(position).cloned().flatten();
     let ordered_argument = || ordered_argument_types.first().cloned().flatten();
     let first = || argument(0);
+    if let Some(ty) = range::function_type(name, &argument_types) {
+        return Ok(Some(ty));
+    }
     if fixed_builtin::is_function(name) {
         return fixed_builtin::resolve_type(
             original_name,

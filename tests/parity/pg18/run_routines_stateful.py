@@ -26,6 +26,10 @@ SUITES = {
         HERE / "constraints_stateful.sql",
         HERE / "constraints_stateful.expected.json",
     ),
+    "type-temporal": (
+        HERE / "type_temporal_stateful.sql",
+        HERE / "type_temporal_stateful.expected.json",
+    ),
 }
 USQL = os.environ.get("UQA_USQL", str(REPO_ROOT / "target" / "release" / "usql"))
 PG_CONTAINER = os.environ.get("UQA_PG_CONTAINER", "uqa-pg18-age")
@@ -257,6 +261,8 @@ def execute_pg_case(case: Case, schema: str) -> dict:
 
 def run_postgres(cases: list[Case]) -> tuple[dict[str, str], list[dict]]:
     metadata = pg_oracle_metadata()
+    extension = pg_query("CREATE EXTENSION IF NOT EXISTS btree_gist")
+    require_success("PostgreSQL btree_gist setup", extension)
     schema = f"uqa_pg18_stateful_{os.getpid()}_{secrets.token_hex(4)}"
     entries: list[dict] = []
     try:

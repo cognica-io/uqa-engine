@@ -10,6 +10,8 @@ use super::defaults::validate_default_expression;
 use super::{ddl_storage_error, ColumnType, CreateTable, Engine, SQLError, SQLResult};
 use crate::sql::generated::prepare_generated_columns;
 
+use super::constraint_validation::{resolve_foreign_key_parent, validate_foreign_key_definition};
+
 // -------------------------------------------------------------------------
 
 pub(in crate::sql) fn run_create_table(
@@ -47,6 +49,39 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
     for column in &c.columns {
         if let Some(default) = &column.default {
             validate_default_expression(engine, default)?;
+        }
+    }
+    for foreign_key in &mut c.foreign_keys {
+        if !foreign_key.period {
+            continue;
+        }
+        let self_reference = foreign_key.ref_table == c.name
+            || foreign_key.ref_table == c.qualifier
+            || c.name
+                .rsplit_once('.')
+                .is_some_and(|(_, local_name)| local_name == foreign_key.ref_table);
+        if self_reference {
+            validate_foreign_key_definition(
+                &c.name,
+                &c.columns,
+                &c.name,
+                &c.columns,
+                &c.key_constraints,
+                foreign_key,
+            )?;
+            foreign_key.ref_table.clone_from(&c.name);
+        } else {
+            let (canonical, parent_columns, parent_keys) =
+                resolve_foreign_key_parent(engine, &foreign_key.ref_table)?;
+            validate_foreign_key_definition(
+                &c.name,
+                &c.columns,
+                &canonical,
+                &parent_columns,
+                &parent_keys,
+                foreign_key,
+            )?;
+            foreign_key.ref_table = canonical;
         }
     }
     prepare_generated_columns(

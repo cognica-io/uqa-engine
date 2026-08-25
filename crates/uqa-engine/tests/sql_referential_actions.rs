@@ -25,6 +25,11 @@ fn assert_err_contains(engine: &Engine, sql: &str, needle: &str) {
     );
 }
 
+fn assert_sqlstate(engine: &Engine, sql: &str, expected: &str) {
+    let error = engine.sql(sql, &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some(expected), "{sql}: {error}");
+}
+
 #[test]
 fn on_delete_cascade_removes_child_rows() {
     let engine = Engine::new();
@@ -323,10 +328,10 @@ fn insert_select_rejects_missing_foreign_key_and_rolls_back() {
         "INSERT INTO source (id, parent_id) VALUES (10, 1), (11, 99)",
     );
 
-    assert_err_contains(
+    assert_sqlstate(
         &engine,
         "INSERT INTO child (id, parent_id) SELECT id, parent_id FROM source",
-        "foreign key constraint",
+        "23503",
     );
 
     assert!(query(&engine, "SELECT id FROM child").rows.is_empty());
@@ -431,11 +436,11 @@ fn merge_insert_rejects_missing_foreign_key_and_rolls_back() {
         "INSERT INTO source (id, parent_id) VALUES (10, 1), (11, 99)",
     );
 
-    assert_err_contains(
+    assert_sqlstate(
         &engine,
         "MERGE INTO child AS c USING source AS s ON c.id = s.id
          WHEN NOT MATCHED THEN INSERT (id, parent_id) VALUES (s.id, s.parent_id)",
-        "foreign key constraint",
+        "23503",
     );
 
     assert!(query(&engine, "SELECT id FROM child").rows.is_empty());
