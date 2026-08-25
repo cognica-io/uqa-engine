@@ -232,7 +232,10 @@ pub(super) fn compile_truncate(stmt: &pg_query::protobuf::TruncateStmt) -> Resul
                 "TRUNCATE contains a malformed table target".into(),
             ));
         };
-        tables.push(range_var_name(range));
+        tables.push(crate::ast::TruncateTarget {
+            table: range_var_name(range),
+            include_descendants: range.inh,
+        });
     }
     if tables.is_empty() {
         return Err(SQLError::Internal("TRUNCATE without a table".into()));

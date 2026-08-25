@@ -317,12 +317,35 @@ impl Engine {
         foreign_keys: &[uqa_sql::ast::ForeignKey],
         key_constraints: &[uqa_sql::ast::TableKeyConstraint],
     ) -> StorageBackendResult<()> {
+        self.persist_constraint_candidate_with_hierarchy(
+            name,
+            table,
+            columns,
+            checks,
+            foreign_keys,
+            key_constraints,
+            &table.hierarchy.read(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn persist_constraint_candidate_with_hierarchy(
+        &self,
+        name: &str,
+        table: &TableState,
+        columns: &[uqa_sql::ast::ColumnDef],
+        checks: &[uqa_sql::ast::TableCheck],
+        foreign_keys: &[uqa_sql::ast::ForeignKey],
+        key_constraints: &[uqa_sql::ast::TableKeyConstraint],
+        hierarchy: &uqa_sql::ast::TableHierarchy,
+    ) -> StorageBackendResult<()> {
         let constraints = uqa_sql::ast::TableConstraintSet {
             persistence: table.persistence,
             on_commit: table.on_commit,
             checks: checks.to_vec(),
             foreign_keys: foreign_keys.to_vec(),
             key_constraints: key_constraints.to_vec(),
+            hierarchy: hierarchy.clone(),
         };
         self.try_save_table_schema_with_components(name, table, columns, &constraints)
     }
@@ -340,6 +363,7 @@ impl Engine {
             let mut checks = table.table_checks.read().clone();
             let mut foreign_keys = table.foreign_keys.read().clone();
             let key_constraints = table.key_constraints.read().clone();
+            let mut hierarchy = table.hierarchy.read().clone();
             let mut changed = false;
 
             for column in &mut columns {
@@ -377,22 +401,30 @@ impl Engine {
                     changed = true;
                 }
             }
+            for parent in &mut hierarchy.parents {
+                if stored_relation_reference_matches(parent, &from_relation) {
+                    *parent = to.to_string();
+                    changed = true;
+                }
+            }
             if changed {
-                self.persist_constraint_candidate(
+                self.persist_constraint_candidate_with_hierarchy(
                     &table_name,
                     &table,
                     &columns,
                     &checks,
                     &foreign_keys,
                     &key_constraints,
+                    &hierarchy,
                 )?;
-                updates.push((table, columns, checks, foreign_keys));
+                updates.push((table, columns, checks, foreign_keys, hierarchy));
             }
         }
-        for (table, columns, checks, foreign_keys) in updates {
+        for (table, columns, checks, foreign_keys, hierarchy) in updates {
             *table.columns.write() = columns;
             *table.table_checks.write() = checks;
             *table.foreign_keys.write() = foreign_keys;
+            *table.hierarchy.write() = hierarchy;
         }
         Ok(())
     }

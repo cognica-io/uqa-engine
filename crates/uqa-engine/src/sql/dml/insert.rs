@@ -16,12 +16,13 @@ use super::{
     document_supplied_id, encode_prepared_insert_conflict, eval_lowered_expression,
     eval_mutation_assignment, index_vectors_for_type, insert_identity_columns,
     lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
-    stage_prepared_document_rewrite, validate_document_non_key_constraints,
-    validate_key_constraints, validate_mutation_columns, validate_returning_alias_relations,
-    BTreeMap, ColumnType, ConflictActionPlan, ConflictPlan, CteScope, DmlCommandMutationOverlay,
-    DmlReturningShape, DocId, Document, Engine, InsertConflictLocks, InsertConflictPreparation,
-    InsertPlan, MutationAssignmentTarget, PreparedInsertConflict, ReturningProjectionRow,
-    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult,
+    partition_insert_target, stage_prepared_document_rewrite,
+    validate_document_non_key_constraints, validate_key_constraints, validate_mutation_columns,
+    validate_returning_alias_relations, BTreeMap, ColumnType, ConflictActionPlan, ConflictPlan,
+    CteScope, DmlCommandMutationOverlay, DmlReturningShape, DocId, Document, Engine,
+    InsertConflictLocks, InsertConflictPreparation, InsertPlan, MutationAssignmentTarget,
+    PreparedInsertConflict, ReturningProjectionRow, ReturningRowImage, ReturningRowImages,
+    SQLError, SQLParam, SQLResult,
 };
 
 struct InsertSelectConsumer {
@@ -62,6 +63,7 @@ impl InsertSelectConsumer {
         id_column: String,
     ) -> Result<Self, SQLError> {
         let prepared_schema = uqa_execution::RowSchema::new(vec![
+            "__uqa_insert_table".into(),
             "__uqa_insert_document".into(),
             "__uqa_insert_conflict".into(),
         ]);
@@ -208,14 +210,25 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
             &stmt.table,
             &mut document,
         )?;
-        let insert_identity = prepare_insert_identity(
+        let target_table = partition_insert_target(
             engine,
             &stmt.table,
+            &document,
+            params,
+            stmt.include_descendants,
+        )?;
+        engine.lock_relation(
+            &target_table,
+            crate::row_locks::RelationLockMode::RowExclusive,
+        )?;
+        let insert_identity = prepare_insert_identity(
+            engine,
+            &target_table,
             id_column,
             auto_id_column.as_deref(),
             &mut document,
         )?;
-        lock_existing_document_foreign_key_dependencies(engine, &stmt.table, &document)?;
+        lock_existing_document_foreign_key_dependencies(engine, &target_table, &document)?;
         let prepared_conflict = if let Some(on_conflict) = stmt.on_conflict.as_ref() {
             conflict_locks
                 .as_mut()
@@ -224,7 +237,7 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
                 })?
                 .prepare_document(InsertConflictPreparation {
                     engine,
-                    table: &stmt.table,
+                    table: &target_table,
                     target_qualifier: &stmt.target_qualifier,
                     on_conflict,
                     document: &document,
@@ -232,7 +245,8 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
                     scope: snapshot_scope,
                 })?
         } else {
-            let _key_locks = lock_document_key_dependencies(engine, &stmt.table, &document, None)?;
+            let _key_locks =
+                lock_document_key_dependencies(engine, &target_table, &document, None)?;
             PreparedInsertConflict::Unresolved
         };
         let mut prepared_conflict =
@@ -241,6 +255,7 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
         if let Some(row) = stage_prepared_insert_row(
             engine,
             stmt,
+            &target_table,
             &document,
             None,
             &mut prepared_conflict,
@@ -257,6 +272,7 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
             .push(uqa_execution::Batch::from_physical_rows(
                 prepared_schema.clone(),
                 vec![uqa_execution::PhysicalRow::from_values(vec![
+                    super::Value::Str(target_table),
                     super::Value::Map(document),
                     encode_prepared_insert_conflict(prepared_conflict),
                 ])],
@@ -358,19 +374,25 @@ pub(in crate::sql) fn run_insert_inner(
         for prepared_row in apply_reader {
             cancel.check()?;
             let prepared_row = prepared_row.map_err(crate::sql::select::physical_exec_error)?;
-            let Some(super::Value::Map(document)) = prepared_row.view().value_at(0).cloned() else {
+            let Some(super::Value::Str(target_table)) = prepared_row.view().value_at(0).cloned()
+            else {
+                return Err(SQLError::Internal(
+                    "INSERT SELECT prepared spill lost its table payload".into(),
+                ));
+            };
+            let Some(super::Value::Map(document)) = prepared_row.view().value_at(1).cloned() else {
                 return Err(SQLError::Internal(
                     "INSERT SELECT prepared spill lost its document payload".into(),
                 ));
             };
             let mut prepared = decode_prepared_insert_conflict(
-                prepared_row.view().value_at(1).cloned().ok_or_else(|| {
+                prepared_row.view().value_at(2).cloned().ok_or_else(|| {
                     SQLError::Internal(
                         "INSERT SELECT prepared spill lost its conflict payload".into(),
                     )
                 })?,
             )?;
-            apply_validated_prepared_insert(engine, &stmt.table, document, &mut prepared, false)?;
+            apply_validated_prepared_insert(engine, &target_table, document, &mut prepared, false)?;
         }
         if !stmt.returning.is_empty() {
             return dml_returning_result(
@@ -390,15 +412,6 @@ pub(in crate::sql) fn run_insert_inner(
         }
         return Ok(SQLResult::from_affected(affected));
     }
-
-    // Whether a user-supplied id value is covered by the strict UNIQUE
-    // pre-check below. The legacy bare-`id` fallback maps a plain
-    // column onto the doc id without any uniqueness guarantee, so
-    // writes through it may replace an existing document.
-    let id_column_is_unique_key = engine
-        .try_unique_columns(&stmt.table)
-        .map_err(|err| dml_storage_error("INSERT", err))?
-        .contains(&id_column);
 
     let implicit_columns = stmt.columns.is_empty();
     let columns: Vec<String> = if implicit_columns {
@@ -434,6 +447,7 @@ pub(in crate::sql) fn run_insert_inner(
     let overlay = DmlCommandMutationOverlay::new(engine);
     let mut conflict_locks = InsertConflictLocks::new(engine);
     let mut documents = Vec::with_capacity(stmt.rows.len());
+    let mut target_tables = Vec::with_capacity(stmt.rows.len());
     let mut prepared_conflicts = Vec::with_capacity(stmt.rows.len());
     let mut has_prepared_effect = false;
     for row in &stmt.rows {
@@ -468,18 +482,29 @@ pub(in crate::sql) fn run_insert_inner(
             &stmt.table,
             &mut document,
         )?;
-        let insert_identity = prepare_insert_identity(
+        let target_table = partition_insert_target(
             engine,
             &stmt.table,
+            &document,
+            params,
+            stmt.include_descendants,
+        )?;
+        engine.lock_relation(
+            &target_table,
+            crate::row_locks::RelationLockMode::RowExclusive,
+        )?;
+        let insert_identity = prepare_insert_identity(
+            engine,
+            &target_table,
             &id_column,
             auto_id_col.as_deref(),
             &mut document,
         )?;
-        lock_existing_document_foreign_key_dependencies(engine, &stmt.table, &document)?;
+        lock_existing_document_foreign_key_dependencies(engine, &target_table, &document)?;
         let prepared = if let Some(on_conflict) = stmt.on_conflict.as_ref() {
             conflict_locks.prepare_document(InsertConflictPreparation {
                 engine,
-                table: &stmt.table,
+                table: &target_table,
                 target_qualifier: &stmt.target_qualifier,
                 on_conflict,
                 document: &document,
@@ -487,7 +512,8 @@ pub(in crate::sql) fn run_insert_inner(
                 scope: &snapshot_scope,
             })?
         } else {
-            let _key_locks = lock_document_key_dependencies(engine, &stmt.table, &document, None)?;
+            let _key_locks =
+                lock_document_key_dependencies(engine, &target_table, &document, None)?;
             PreparedInsertConflict::Unresolved
         };
         let mut prepared = attach_prepared_insert_identity(prepared, insert_identity);
@@ -496,6 +522,7 @@ pub(in crate::sql) fn run_insert_inner(
         if let Some(returning) = stage_prepared_insert_row(
             engine,
             stmt,
+            &target_table,
             document.as_ref(),
             Some(&document),
             &mut prepared,
@@ -509,6 +536,7 @@ pub(in crate::sql) fn run_insert_inner(
             has_prepared_effect = true;
         }
         documents.push(document);
+        target_tables.push(target_table);
         prepared_conflicts.push(prepared);
     }
     drop(overlay);
@@ -516,17 +544,25 @@ pub(in crate::sql) fn run_insert_inner(
         engine.prepare_explicit_transaction_writer()?;
     }
     drop(conflict_locks);
-    for (document, prepared) in documents.into_iter().zip(&mut prepared_conflicts) {
+    for ((target_table, document), prepared) in target_tables
+        .into_iter()
+        .zip(documents)
+        .zip(&mut prepared_conflicts)
+    {
         cancel.check()?;
         let supplied = matches!(
             prepared,
             PreparedInsertConflict::Insert { supplied: true, .. }
         );
+        let id_column_is_unique_key = engine
+            .try_unique_columns(&target_table)
+            .map_err(|err| dml_storage_error("INSERT", err))?
+            .contains(&id_column);
         let known_new = stmt.on_conflict.is_none() && (!supplied || id_column_is_unique_key);
         let document = Arc::try_unwrap(document).map_err(|_| {
             SQLError::Internal("INSERT command overlay retained a staged document".into())
         })?;
-        apply_validated_prepared_insert(engine, &stmt.table, document, prepared, known_new)?;
+        apply_validated_prepared_insert(engine, &target_table, document, prepared, known_new)?;
     }
     if !stmt.returning.is_empty() {
         return dml_returning_result(
@@ -582,24 +618,25 @@ fn attach_prepared_insert_identity(
 fn stage_prepared_insert_row(
     engine: &Engine,
     stmt: &InsertPlan,
+    storage_table: &str,
     document: &Document,
     shared_document: Option<&Arc<Document>>,
     prepared: &mut PreparedInsertConflict,
     params: &[SQLParam],
     scope: &CteScope,
 ) -> Result<Option<uqa_execution::OwnedPhysicalRow>, SQLError> {
-    validate_document_non_key_constraints(engine, &stmt.table, document, params)?;
+    validate_document_non_key_constraints(engine, storage_table, document, params)?;
     let images = match prepared {
         PreparedInsertConflict::Insert { doc_id, .. } => {
-            validate_key_constraints(engine, &stmt.table, document, None)?;
+            validate_key_constraints(engine, storage_table, document, None)?;
             if let Some(shared_document) = shared_document {
                 engine.stage_shared_command_document(
-                    &stmt.table,
+                    storage_table,
                     *doc_id,
                     Some(Arc::clone(shared_document)),
                 )?;
             } else {
-                engine.stage_command_document(&stmt.table, *doc_id, Some(document.clone()))?;
+                engine.stage_command_document(storage_table, *doc_id, Some(document.clone()))?;
             }
             ReturningRowImages {
                 old: None,

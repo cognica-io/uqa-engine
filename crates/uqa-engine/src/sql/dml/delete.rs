@@ -43,6 +43,7 @@ pub(in crate::sql) fn run_delete_inner(
     let mut affected = 0u64;
     let cancel = engine.cancellation_token();
     let mut qualified_targets: Vec<(
+        String,
         uqa_core::DocId,
         Document,
         Option<uqa_execution::OwnedPhysicalRow>,
@@ -81,25 +82,43 @@ pub(in crate::sql) fn run_delete_inner(
         && stmt.source.is_none()
         && stmt.predicate.is_some()
         && !predicate_is_volatile;
-    let doc_ids: Vec<uqa_core::DocId> = if preselected {
+    let target_tables = engine.hierarchy_scan_tables(&stmt.table, stmt.include_descendants)?;
+    let candidates: Vec<(String, uqa_core::DocId)> = if preselected {
         let filter = stmt.predicate.as_ref().ok_or_else(|| {
             SQLError::Internal("DELETE preselection is missing its predicate".into())
         })?;
-        crate::sql::where_eval::collect_where_doc_ids(
-            engine,
-            &stmt.table,
-            &stmt.target_qualifier,
-            filter,
-            params,
-            &ctes,
-        )?
+        let mut candidates = Vec::new();
+        for table in &target_tables {
+            candidates.extend(
+                crate::sql::where_eval::collect_where_doc_ids(
+                    engine,
+                    table,
+                    &stmt.target_qualifier,
+                    filter,
+                    params,
+                    &ctes,
+                )?
+                .into_iter()
+                .map(|doc_id| (table.clone(), doc_id)),
+            );
+        }
+        candidates
     } else {
-        engine.table_doc_ids(&stmt.table)?
+        let mut candidates = Vec::new();
+        for table in &target_tables {
+            candidates.extend(
+                engine
+                    .table_doc_ids(table)?
+                    .into_iter()
+                    .map(|doc_id| (table.clone(), doc_id)),
+            );
+        }
+        candidates
     };
     let snapshot_ctes = ctes.returning_statement_snapshot_scope();
     let qualification_overlay = DmlCommandMutationOverlay::new(engine);
     let mut qualified_ids = BTreeSet::new();
-    for doc_id in doc_ids {
+    for (storage_table, doc_id) in candidates {
         cancel.check()?;
         let candidate = if preselected {
             None
@@ -107,6 +126,7 @@ pub(in crate::sql) fn run_delete_inner(
             let Some(candidate) = qualified_delete_candidate(
                 engine,
                 stmt,
+                &storage_table,
                 params,
                 &snapshot_ctes,
                 using_rows.as_ref(),
@@ -119,7 +139,7 @@ pub(in crate::sql) fn run_delete_inner(
         };
         let target = lock_mutation_target(
             engine,
-            &stmt.table,
+            &storage_table,
             &stmt.target_qualifier,
             doc_id,
             uqa_sql::ast::LockStrength::ForUpdate,
@@ -133,44 +153,53 @@ pub(in crate::sql) fn run_delete_inner(
                 recheck_delete_candidate(
                     engine,
                     stmt,
+                    &storage_table,
                     params,
                     &snapshot_ctes,
                     doc_id,
                     Some(source_context),
                 )?
             } else {
-                recheck_delete_candidate(engine, stmt, params, &snapshot_ctes, doc_id, None)?
+                recheck_delete_candidate(
+                    engine,
+                    stmt,
+                    &storage_table,
+                    params,
+                    &snapshot_ctes,
+                    doc_id,
+                    None,
+                )?
             }
         } else if let Some(candidate) = candidate {
             Some(candidate)
         } else {
             engine
-                .get_document(&stmt.table, doc_id)?
+                .get_document(&storage_table, doc_id)?
                 .map(|document| (document, None))
         };
         let Some((doc, returning_context)) = qualified else {
             continue;
         };
-        if !qualified_ids.insert(doc_id) {
+        if !qualified_ids.insert((storage_table.clone(), doc_id)) {
             continue;
         }
-        engine.stage_command_document(&stmt.table, doc_id, None)?;
-        qualified_targets.push((doc_id, doc, returning_context));
+        engine.stage_command_document(&storage_table, doc_id, None)?;
+        qualified_targets.push((storage_table, doc_id, doc, returning_context));
     }
     drop(qualification_overlay);
     let to_delete = qualified_targets;
     let root_deletes: BTreeSet<(String, DocId)> = to_delete
         .iter()
-        .map(|(doc_id, _, _)| (stmt.table.clone(), *doc_id))
+        .map(|(table, doc_id, _, _)| (table.clone(), *doc_id))
         .collect();
     let mut delete_stack = Vec::new();
     let mut rewrite_stack = Vec::new();
     let mut prepared_deletes = Vec::with_capacity(to_delete.len());
     let overlay = DmlCommandMutationOverlay::new(engine);
-    for (doc_id, _doc, returning_context) in to_delete {
+    for (storage_table, doc_id, _doc, returning_context) in to_delete {
         if let Some(mut prepared) = prepare_document_delete(
             engine,
-            &stmt.table,
+            &storage_table,
             doc_id,
             params,
             &root_deletes,
@@ -234,12 +263,13 @@ pub(in crate::sql) fn run_delete_inner(
 fn recheck_delete_candidate(
     engine: &Engine,
     stmt: &DeletePlan,
+    storage_table: &str,
     params: &[SQLParam],
     ctes: &CteScope,
     doc_id: DocId,
     source_context: Option<&uqa_execution::OwnedPhysicalRow>,
 ) -> Result<Option<(Document, Option<uqa_execution::OwnedPhysicalRow>)>, SQLError> {
-    let Some(doc) = engine.get_document(&stmt.table, doc_id)? else {
+    let Some(doc) = engine.get_document(storage_table, doc_id)? else {
         return Ok(None);
     };
     let target_row = dml_target_row(engine, &stmt.table, &stmt.target_qualifier, doc_id, &doc)?;
@@ -256,12 +286,13 @@ fn recheck_delete_candidate(
 fn qualified_delete_candidate(
     engine: &Engine,
     stmt: &DeletePlan,
+    storage_table: &str,
     params: &[SQLParam],
     ctes: &CteScope,
     using_rows: Option<&uqa_execution::SharedSpill>,
     doc_id: DocId,
 ) -> Result<Option<(Document, Option<uqa_execution::OwnedPhysicalRow>)>, SQLError> {
-    let Some(doc) = engine.get_document(&stmt.table, doc_id)? else {
+    let Some(doc) = engine.get_document(storage_table, doc_id)? else {
         return Ok(None);
     };
     let target_row = dml_target_row(engine, &stmt.table, &stmt.target_qualifier, doc_id, &doc)?;

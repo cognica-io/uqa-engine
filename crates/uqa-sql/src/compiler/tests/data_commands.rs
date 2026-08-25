@@ -55,7 +55,14 @@ fn table_commands_preserve_qualified_relation_names() {
     let Statement::Truncate { tables, .. } = first("TRUNCATE app.docs") else {
         panic!("not TRUNCATE");
     };
-    assert_eq!(tables, vec!["app.docs"]);
+    assert_eq!(tables.len(), 1);
+    assert_eq!(tables[0].table, "app.docs");
+    assert!(tables[0].include_descendants);
+
+    let Statement::Truncate { tables, .. } = first("TRUNCATE ONLY app.docs") else {
+        panic!("not TRUNCATE ONLY");
+    };
+    assert!(!tables[0].include_descendants);
 
     let Statement::Insert(insert) = first("INSERT INTO app.docs (version) VALUES (1)") else {
         panic!("not INSERT");

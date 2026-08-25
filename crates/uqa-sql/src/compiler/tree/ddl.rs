@@ -27,6 +27,7 @@ pub(in crate::compiler) fn compile_create_table(
     let persistence = crate::compiler::relation_persistence(relation, "CREATE TABLE")?;
     let on_commit =
         crate::compiler::compile_on_commit(stmt.oncommit(), persistence, "CREATE TABLE")?;
+    let hierarchy = crate::compiler::compile_table_hierarchy(stmt)?;
     let name = range_var_name(relation);
     if name.is_empty() {
         return Err(SQLError::Internal("CREATE TABLE without name".into()));
@@ -257,6 +258,7 @@ pub(in crate::compiler) fn compile_create_table(
         key_constraints,
         persistence,
         on_commit,
+        hierarchy,
     })
 }
 

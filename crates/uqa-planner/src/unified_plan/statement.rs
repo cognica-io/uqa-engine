@@ -98,6 +98,7 @@ impl UnifiedPlan {
                 Self::Command(Box::new(CommandPlan::Insert(Box::new(InsertPlan {
                     table: statement.table,
                     target_qualifier: statement.target_qualifier,
+                    include_descendants: statement.include_descendants,
                     columns: statement.columns,
                     ctes,
                     rows,
@@ -129,6 +130,7 @@ impl UnifiedPlan {
                 Self::Command(Box::new(CommandPlan::Update(Box::new(UpdatePlan {
                     table: statement.table,
                     target_qualifier: statement.target_qualifier,
+                    include_descendants: statement.include_descendants,
                     assignments,
                     predicate,
                     ctes,
@@ -157,6 +159,7 @@ impl UnifiedPlan {
                 Self::Command(Box::new(CommandPlan::Delete(Box::new(DeletePlan {
                     table: statement.table,
                     target_qualifier: statement.target_qualifier,
+                    include_descendants: statement.include_descendants,
                     predicate,
                     ctes,
                     source: source.map(Box::new),

@@ -125,6 +125,7 @@ impl Engine {
             table_checks: RwLock::new(constraints.checks),
             foreign_keys: RwLock::new(constraints.foreign_keys),
             key_constraints: RwLock::new(constraints.key_constraints),
+            hierarchy: RwLock::new(constraints.hierarchy),
             value_indexes: RwLock::new(BTreeMap::new()),
             doc_count_cache: std::sync::atomic::AtomicU64::new(0),
             doc_count_dirty: AtomicBool::new(true),

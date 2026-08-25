@@ -288,6 +288,7 @@ fn collect_source_leaves(
             name,
             qualifier,
             alias,
+            ..
         } => {
             let visible = alias.as_deref().unwrap_or(qualifier);
             let mut names = vec![visible.to_string()];

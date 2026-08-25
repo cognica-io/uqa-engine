@@ -139,10 +139,13 @@ fn validate_document_non_key_constraints_with_old(
         )?;
         if !uqa_sql::expr::truthy(&result) {
             let label = constraint.name.unwrap_or_else(|| "<unnamed>".into());
+            let relation = crate::RelationIdentity::from_legacy_name(table)
+                .map(|identity| identity.name)
+                .unwrap_or_else(|_| table.to_string());
             return Err(SQLError::Routine {
                 sqlstate: "23514".into(),
                 message: format!(
-                    "new row for relation \"{table}\" violates check constraint \"{label}\""
+                    "new row for relation \"{relation}\" violates check constraint \"{label}\""
                 ),
             });
         }
@@ -469,10 +472,37 @@ pub(in crate::sql) fn prepare_document_rewrite(
     Ok(Some(PreparedDocumentRewrite {
         table: table.to_string(),
         doc_id,
+        destination: None,
         old_document,
         new_document,
         actions: actions?,
     }))
+}
+
+pub(in crate::sql) fn retarget_prepared_document_rewrite(
+    engine: &Engine,
+    prepared: &mut PreparedDocumentRewrite,
+    destination_table: &str,
+) -> Result<(), SQLError> {
+    if prepared.table == destination_table {
+        return Ok(());
+    }
+    engine.lock_relation(
+        destination_table,
+        crate::row_locks::RelationLockMode::RowExclusive,
+    )?;
+    let _key_locks =
+        lock_document_key_dependencies(engine, destination_table, &prepared.new_document, None)?;
+    lock_existing_document_foreign_key_dependencies(
+        engine,
+        destination_table,
+        &prepared.new_document,
+    )?;
+    let destination_doc_id =
+        integer_primary_key_doc_id(engine, destination_table, &prepared.new_document)?
+            .unwrap_or(engine.allocate_next_id(destination_table)?);
+    prepared.destination = Some((destination_table.to_string(), destination_doc_id));
+    Ok(())
 }
 
 pub(in crate::sql) fn stage_prepared_document_rewrite(
@@ -480,6 +510,25 @@ pub(in crate::sql) fn stage_prepared_document_rewrite(
     prepared: &mut PreparedDocumentRewrite,
     params: &[SQLParam],
 ) -> Result<DocId, SQLError> {
+    if let Some((destination_table, destination_doc_id)) = prepared.destination.as_ref() {
+        validate_document_non_key_constraints(
+            engine,
+            destination_table,
+            &prepared.new_document,
+            params,
+        )?;
+        validate_key_constraints(engine, destination_table, &prepared.new_document, None)?;
+        engine.stage_command_document(&prepared.table, prepared.doc_id, None)?;
+        engine.stage_command_document(
+            destination_table,
+            *destination_doc_id,
+            Some(prepared.new_document.clone()),
+        )?;
+        for action in &mut prepared.actions {
+            stage_prepared_document_rewrite(engine, action, params)?;
+        }
+        return Ok(*destination_doc_id);
+    }
     validate_document_rewrite_constraints(
         engine,
         &prepared.table,
@@ -509,6 +558,23 @@ pub(in crate::sql) fn apply_validated_prepared_document_rewrite(
     engine: &Engine,
     prepared: &mut PreparedDocumentRewrite,
 ) -> Result<DocId, SQLError> {
+    if let Some((destination_table, destination_doc_id)) = prepared.destination.as_ref() {
+        engine.delete_document(&prepared.table, prepared.doc_id)?;
+        engine.add_prepared_document_with_vector_values(
+            destination_table,
+            *destination_doc_id,
+            prepared.new_document.clone(),
+            document_vectors(engine, destination_table, &prepared.new_document)?,
+            true,
+        )?;
+        engine
+            .advance_next_id(destination_table, *destination_doc_id)
+            .map_err(|err| dml_storage_error("UPDATE partition movement", err))?;
+        for action in &mut prepared.actions {
+            apply_validated_prepared_document_rewrite(engine, action)?;
+        }
+        return Ok(*destination_doc_id);
+    }
     let rewritten_doc_id =
         match integer_primary_key_doc_id(engine, &prepared.table, &prepared.new_document)? {
             // An integer primary key names the row's doc_id slot; keep that invariant when the key itself changes, or value -> doc_id lookups (the unique fast path and FOREIGN KEY validation) read the stale slot and miss the row.

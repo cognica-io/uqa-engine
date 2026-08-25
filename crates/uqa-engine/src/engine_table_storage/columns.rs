@@ -68,6 +68,7 @@ impl Engine {
             checks: t.table_checks.read().clone(),
             foreign_keys: t.foreign_keys.read().clone(),
             key_constraints: t.key_constraints.read().clone(),
+            hierarchy: t.hierarchy.read().clone(),
         };
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;

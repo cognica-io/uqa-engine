@@ -667,6 +667,7 @@ fn collect_source_column_owners(engine: &Engine, source: &SourcePlan, owners: &m
             name,
             qualifier,
             alias,
+            ..
         } => {
             let qualifier = alias.as_deref().unwrap_or(qualifier);
             let mut columns = engine.try_table_columns(name).unwrap_or_default();
@@ -783,6 +784,7 @@ pub(in crate::sql) fn collect_cte_source_references(
             name,
             qualifier,
             alias,
+            ..
         } if cte_names.contains(name.as_str()) => {
             references
                 .entry(name.clone())
@@ -1152,11 +1154,13 @@ mod tests {
                 name: "left_table".into(),
                 qualifier: "left_table".into(),
                 alias: Some("l".into()),
+                include_descendants: true,
             }),
             right: Box::new(SourcePlan::Table {
                 name: "right_table".into(),
                 qualifier: "right_table".into(),
                 alias: Some("r".into()),
+                include_descendants: true,
             }),
             kind,
             on: Some(on),

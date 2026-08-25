@@ -87,10 +87,18 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
     {
         let (schema, table) = split_schema_name(&name)?;
         let columns = table_columns_for(engine, &name)?;
-        out.push(pg_class_row_with_lifecycle(
+        let hierarchy = engine
+            .try_table_hierarchy(&name)
+            .map_err(|error| SQLError::Internal(format!("read table hierarchy: {error}")))?;
+        let relkind = if hierarchy.partition_spec.is_some() {
+            "p"
+        } else {
+            "r"
+        };
+        let mut row = pg_class_row_with_lifecycle(
             &schema,
             &table,
-            "r",
+            relkind,
             catalog_usize(columns.len(), "pg_class column count")?,
             engine.document_count(&name)? as f64,
             engine
@@ -104,7 +112,19 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
                 .unwrap_or_default(),
             true,
             &[],
-        ));
+        );
+        row.insert(
+            "relispartition".into(),
+            bool_value(hierarchy.partition_bound.is_some()),
+        );
+        row.insert(
+            "relhassubclass".into(),
+            bool_value(!engine.direct_hierarchy_children(&name)?.is_empty()),
+        );
+        if let Some(bound) = hierarchy.partition_bound {
+            row.insert("relpartbound".into(), str_value(format!("{bound:?}")));
+        }
+        out.push(row);
     }
     for name in engine.list_views()? {
         let (schema, view) = split_schema_name(&name)?;
@@ -191,6 +211,54 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
     }
     out.extend(super::ag_catalog::age_pg_class_rows(engine)?);
     Ok(out)
+}
+
+pub(super) fn build_pg_inherits(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+    let mut out = Vec::new();
+    for child in engine
+        .table_names()
+        .map_err(|error| SQLError::Internal(format!("read inheritance catalog: {error}")))?
+    {
+        let hierarchy = engine
+            .try_table_hierarchy(&child)
+            .map_err(|error| SQLError::Internal(format!("read inheritance metadata: {error}")))?;
+        for (position, parent) in hierarchy.parents.iter().enumerate() {
+            out.push(row([
+                ("inhrelid", int_value(table_relation_oid(engine, &child)?)),
+                ("inhparent", int_value(table_relation_oid(engine, parent)?)),
+                (
+                    "inhseqno",
+                    int_value(catalog_ordinal(position, "pg_inherits parent")?),
+                ),
+                ("inhdetachpending", bool_value(false)),
+            ]));
+        }
+    }
+    Ok(out)
+}
+
+fn table_relkind(engine: &Engine, table: &str) -> Result<&'static str, SQLError> {
+    let hierarchy = engine
+        .try_table_hierarchy(table)
+        .map_err(|error| SQLError::Internal(format!("read table hierarchy: {error}")))?;
+    Ok(if hierarchy.partition_spec.is_some() {
+        "p"
+    } else {
+        "r"
+    })
+}
+
+fn table_relation_oid(engine: &Engine, table: &str) -> Result<i64, SQLError> {
+    let canonical = engine
+        .try_resolve_table_name(table)
+        .map_err(|error| SQLError::Internal(format!("resolve catalog table `{table}`: {error}")))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let (schema, local) = split_schema_name(&canonical)?;
+    Ok(relation_oid(
+        table_relkind(engine, &canonical)?,
+        &schema,
+        &local,
+    ))
 }
 
 pub(super) fn pg_class_row(
@@ -341,14 +409,30 @@ pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
         .table_names()
         .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
     {
-        let (schema, table) = split_schema_name(&table_name)?;
-        let relid = relation_oid("r", &schema, &table);
+        let relid = table_relation_oid(engine, &table_name)?;
+        let hierarchy = engine
+            .try_table_hierarchy(&table_name)
+            .map_err(|error| SQLError::Internal(format!("read table hierarchy: {error}")))?;
+        let mut inherited_columns = Vec::new();
+        for parent in &hierarchy.parents {
+            inherited_columns.push(table_columns_for(engine, parent)?);
+        }
         for (idx, col) in table_columns_for(engine, &table_name)?.iter().enumerate() {
-            out.push(pg_attribute_row(
-                relid,
-                catalog_ordinal(idx, "pg_attribute column")?,
-                col,
-            ));
+            let inheritance_count = inherited_columns
+                .iter()
+                .filter(|columns| columns.iter().any(|parent| parent.name == col.name))
+                .count();
+            let mut attribute =
+                pg_attribute_row(relid, catalog_ordinal(idx, "pg_attribute column")?, col);
+            attribute.insert(
+                "attinhcount".into(),
+                int_value(catalog_usize(
+                    inheritance_count,
+                    "pg_attribute inheritance count",
+                )?),
+            );
+            attribute.insert("attislocal".into(), bool_value(inheritance_count == 0));
+            out.push(attribute);
         }
     }
     for view_name in engine.list_views()? {
@@ -461,8 +545,8 @@ pub(super) fn build_pg_attrdef(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
         .table_names()
         .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
     {
-        let (schema, table) = split_schema_name(&table_name)?;
-        let relid = relation_oid("r", &schema, &table);
+        let (_, table) = split_schema_name(&table_name)?;
+        let relid = table_relation_oid(engine, &table_name)?;
         for (idx, col) in table_columns_for(engine, &table_name)?.iter().enumerate() {
             if col.default.is_none() && !col.auto_increment && col.generated.is_none() {
                 continue;
@@ -521,6 +605,17 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
                 )?,
                 None => Value::Null,
             };
+            let conrelid = table_relation_oid(
+                engine,
+                &format!("{}.{}", constraint.schema, constraint.table),
+            )?;
+            let confrelid = match foreign_key {
+                Some(foreign_key) => table_relation_oid(
+                    engine,
+                    &format!("{}.{}", foreign_key.schema, foreign_key.table),
+                )?,
+                None => 0,
+            };
             Ok(row([
                 (
                     "oid",
@@ -539,19 +634,11 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
                 ("condeferred", bool_value(false)),
                 ("conenforced", bool_value(constraint.enforced)),
                 ("convalidated", bool_value(constraint.enforced)),
-                (
-                    "conrelid",
-                    int_value(relation_oid("r", &constraint.schema, &constraint.table)),
-                ),
+                ("conrelid", int_value(conrelid)),
                 ("contypid", int_value(0)),
                 ("conindid", int_value(0)),
                 ("conparentid", int_value(0)),
-                (
-                    "confrelid",
-                    int_value(foreign_key.map_or(0, |foreign_key| {
-                        relation_oid("r", &foreign_key.schema, &foreign_key.table)
-                    })),
-                ),
+                ("confrelid", int_value(confrelid)),
                 (
                     "confupdtype",
                     str_value(foreign_key.map_or(" ", |foreign_key| {
@@ -610,7 +697,7 @@ pub(super) fn build_pg_index(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
         .map_err(|err| SQLError::Internal(format!("read index catalog: {err}")))?
     {
         let columns = index_columns(&idx.columns_json)?;
-        let (schema, table) = split_schema_name(&idx.table_name)?;
+        let (schema, _) = split_schema_name(&idx.table_name)?;
         let (index_schema, index_name) = split_index_name(&idx.name, &schema)?;
         let table_cols = engine
             .table_columns(&idx.table_name)
@@ -627,7 +714,10 @@ pub(super) fn build_pg_index(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
                 "indexrelid",
                 int_value(relation_oid("i", &index_schema, &index_name)),
             ),
-            ("indrelid", int_value(relation_oid("r", &schema, &table))),
+            (
+                "indrelid",
+                int_value(table_relation_oid(engine, &idx.table_name)?),
+            ),
             ("indnatts", int_value(column_count)),
             ("indnkeyatts", int_value(column_count)),
             ("indisunique", bool_value(false)),

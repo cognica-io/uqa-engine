@@ -44,6 +44,8 @@ mod sql_referential_actions;
 mod sql_rejected_ddl_lifecycle;
 #[path = "engine_catalog/sql_relation_forms.rs"]
 mod sql_relation_forms;
+#[path = "engine_catalog/sql_relation_hierarchy.rs"]
+mod sql_relation_hierarchy;
 #[path = "sql_sequences.rs"]
 mod sql_sequences;
 #[path = "sql_set_search_path.rs"]

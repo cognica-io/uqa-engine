@@ -373,6 +373,7 @@ impl Engine {
             checks: t.table_checks.read().clone(),
             foreign_keys: t.foreign_keys.read().clone(),
             key_constraints: t.key_constraints.read().clone(),
+            hierarchy: t.hierarchy.read().clone(),
         };
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
@@ -466,6 +467,7 @@ impl Engine {
             checks,
             foreign_keys,
             key_constraints,
+            hierarchy: t.hierarchy.read().clone(),
         };
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
@@ -523,6 +525,7 @@ impl Engine {
             checks: t.table_checks.read().clone(),
             foreign_keys: t.foreign_keys.read().clone(),
             key_constraints,
+            hierarchy: t.hierarchy.read().clone(),
         };
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
@@ -601,12 +604,14 @@ impl Engine {
         let checks = t.table_checks.read().clone();
         let foreign_keys = t.foreign_keys.read().clone();
         let key_constraints = t.key_constraints.read().clone();
+        let hierarchy = t.hierarchy.read().clone();
         Ok(uqa_sql::ast::TableConstraintSet {
             persistence: t.persistence,
             on_commit: t.on_commit,
             checks,
             foreign_keys,
             key_constraints,
+            hierarchy,
         })
     }
 

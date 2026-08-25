@@ -49,13 +49,22 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
     let mut lock_targets = std::collections::BTreeSet::new();
     match stmt.kind {
         DropKind::Table | DropKind::View | DropKind::MaterializedView => {
+            let mut table_targets = Vec::new();
             for name in &stmt.names {
-                if let Some((canonical, _)) = engine
+                if let Some((canonical, kind)) = engine
                     .try_resolve_relation_kind(name)
                     .map_err(|err| ddl_storage_error("DROP relation lock", err))?
                 {
+                    if stmt.kind == DropKind::Table && kind == "table" {
+                        table_targets.push(canonical.clone());
+                    }
                     lock_targets.insert(canonical);
                 }
+            }
+            if stmt.kind == DropKind::Table {
+                let (hierarchy_targets, _) =
+                    engine.hierarchy_drop_targets(&table_targets, stmt.cascade);
+                lock_targets.extend(hierarchy_targets);
             }
         }
         DropKind::Index => {
@@ -135,6 +144,16 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                         )));
                     }
                 }
+            }
+            let (tables, dependents) = engine.hierarchy_drop_targets(&tables, stmt.cascade);
+            if !dependents.is_empty() {
+                return Err(SQLError::Routine {
+                    sqlstate: "2BP01".into(),
+                    message: format!(
+                        "cannot drop table {} because other objects depend on it",
+                        tables.join(", ")
+                    ),
+                });
             }
             engine
                 .try_drop_tables(&tables, stmt.cascade)

@@ -32,6 +32,7 @@ pub(super) fn build_table_source_operator<'a>(
             name,
             qualifier,
             alias,
+            ..
         } => {
             let qualifier = qualifier_for(qualifier, alias.as_deref());
             if let Some(materialized) = ctes.rows.get(name).cloned() {

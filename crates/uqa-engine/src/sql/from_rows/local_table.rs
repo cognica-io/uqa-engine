@@ -69,6 +69,81 @@ pub(in crate::sql) struct EngineTableRowSource {
     command_base_exhausted: bool,
 }
 
+/// One logical inheritance scan over independently stored physical tables.
+/// Each child source retains its own lock origin and command overlay while the
+/// SQL-visible row type remains the selected ancestor's row type.
+pub(in crate::sql) struct EngineHierarchyRowSource {
+    sources: std::collections::VecDeque<EngineTableRowSource>,
+    schema: Vec<String>,
+    physical_schema: uqa_execution::RowSchema,
+    estimated_cardinality: u64,
+}
+
+impl EngineHierarchyRowSource {
+    fn new(sources: Vec<EngineTableRowSource>) -> Result<Self, SQLError> {
+        let first = sources.first().ok_or_else(|| {
+            SQLError::Internal("inheritance scan was built without a physical table".into())
+        })?;
+        let schema = first.schema.clone();
+        let physical_schema = first.physical_schema.clone();
+        let estimated_cardinality = sources
+            .iter()
+            .map(|source| source.estimated_cardinality)
+            .sum();
+        Ok(Self {
+            sources: sources.into(),
+            schema,
+            physical_schema,
+            estimated_cardinality,
+        })
+    }
+}
+
+impl uqa_execution::RowSource for EngineHierarchyRowSource {
+    fn schema(&self) -> &[String] {
+        &self.schema
+    }
+
+    fn physical_schema(&self) -> Option<&uqa_execution::RowSchema> {
+        Some(&self.physical_schema)
+    }
+
+    fn estimated_cardinality(&self) -> Option<u64> {
+        Some(self.estimated_cardinality)
+    }
+
+    fn next_row(&mut self) -> uqa_execution::ExecResult<Option<ResultRow>> {
+        Ok(self.next_batch(1)?.pop())
+    }
+
+    fn next_batch(&mut self, max_rows: usize) -> uqa_execution::ExecResult<Vec<ResultRow>> {
+        let rows = self.next_physical_batch(max_rows)?;
+        Ok(rows
+            .iter()
+            .map(|row| self.physical_schema.view(row).to_result_row())
+            .collect())
+    }
+
+    fn next_physical_batch(
+        &mut self,
+        max_rows: usize,
+    ) -> uqa_execution::ExecResult<Vec<uqa_execution::PhysicalRow>> {
+        let mut rows = Vec::with_capacity(max_rows);
+        while rows.len() < max_rows {
+            let Some(source) = self.sources.front_mut() else {
+                break;
+            };
+            let mut batch = source.next_physical_rows_batch(max_rows - rows.len())?;
+            if batch.is_empty() {
+                self.sources.pop_front();
+            } else {
+                rows.append(&mut batch);
+            }
+        }
+        Ok(rows)
+    }
+}
+
 #[path = "local_table/function_source.rs"]
 mod function_source;
 #[path = "local_table/join_source.rs"]

@@ -15,12 +15,14 @@ mod cte;
 mod expressions;
 mod from;
 mod locking;
+mod relation_hierarchy;
 mod relation_lifecycle;
 
 pub use cte::*;
 pub use expressions::*;
 pub use from::*;
 pub use locking::*;
+pub use relation_hierarchy::*;
 pub use relation_lifecycle::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -535,6 +537,11 @@ pub struct CreateTable {
     /// Transaction-end behavior for temporary tables.
     #[serde(default)]
     pub on_commit: OnCommitAction,
+    /// Direct inheritance and declarative-partitioning metadata. The engine
+    /// resolves parent names and merges their row types atomically at create
+    /// time, then persists the canonical hierarchy with the table schema.
+    #[serde(default)]
+    pub hierarchy: TableHierarchy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -575,6 +582,9 @@ pub struct TableConstraintSet {
     /// are session-local and therefore never write this field to disk.
     #[serde(default)]
     pub on_commit: OnCommitAction,
+    /// Durable relation hierarchy and partition-bound metadata.
+    #[serde(default)]
+    pub hierarchy: TableHierarchy,
 }
 
 /// `CHECK (expr)` constraint with an optional name (`CONSTRAINT <name>
@@ -1024,6 +1034,8 @@ pub struct InsertStmt {
     pub table: String,
     /// SQL-visible target relation name: explicit alias, otherwise the local relation name.
     pub target_qualifier: String,
+    #[serde(default = "default_true")]
+    pub include_descendants: bool,
     pub columns: Vec<String>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
     pub with: Vec<CTE>,
@@ -1182,6 +1194,8 @@ pub enum DiscardTarget {
 pub struct UpdateStmt {
     pub table: String,
     pub target_qualifier: String,
+    #[serde(default = "default_true")]
+    pub include_descendants: bool,
     pub assignments: Vec<(String, Expr)>,
     pub r#where: Option<Expr>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
@@ -1198,6 +1212,8 @@ pub struct UpdateStmt {
 pub struct DeleteStmt {
     pub table: String,
     pub target_qualifier: String,
+    #[serde(default = "default_true")]
+    pub include_descendants: bool,
     pub r#where: Option<Expr>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
     pub with: Vec<CTE>,
@@ -1301,9 +1317,10 @@ pub enum Statement {
     Analyze {
         table: Option<String>,
     },
-    /// `TRUNCATE TABLE t1, t2 ...`. Wipes the listed tables.
+    /// `TRUNCATE TABLE t1, t2 ...`. Wipes the listed table hierarchies unless
+    /// a target uses `ONLY`.
     Truncate {
-        tables: Vec<String>,
+        tables: Vec<TruncateTarget>,
         cascade: bool,
     },
     /// `BEGIN` / `COMMIT` / `ROLLBACK` / `SAVEPOINT name`.
@@ -1371,6 +1388,13 @@ pub enum Statement {
         name: String,
         args: Vec<Expr>,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TruncateTarget {
+    pub table: String,
+    #[serde(default = "default_true")]
+    pub include_descendants: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

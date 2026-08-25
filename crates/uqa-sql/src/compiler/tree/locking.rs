@@ -294,6 +294,7 @@ fn collect_lock_sources_matching<'a>(
             name,
             qualifier,
             alias,
+            ..
         } => {
             if let Some(alias) = alias {
                 let mut names = Vec::new();

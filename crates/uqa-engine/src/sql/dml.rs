@@ -11,10 +11,10 @@ use super::ScopedEngineHook;
 use super::{
     bind_projection_output_schema, build_join_spill_with_ctes,
     build_projection_physical_row_with_ctes, coerce_to_column_type, column_type_name, doc_id_value,
-    validate_vector_dimensions, value_to_tensor, value_to_vector, BTreeMap, BTreeSet, BinaryOp,
-    ColumnType, CteScope, DocId, Document, Engine, ForeignKey, ForeignKeyAction, ForeignKeyMatch,
-    RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN,
-    MERGE_ACTION_COLUMN,
+    partition_insert_target, validate_vector_dimensions, value_to_tensor, value_to_vector,
+    BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope, DocId, Document, Engine, ForeignKey,
+    ForeignKeyAction, ForeignKeyMatch, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult,
+    Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
 };
 use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema, ScalarExpr};
 use uqa_planner::{
@@ -73,6 +73,7 @@ pub(in crate::sql) enum MutationLockTarget {
 pub(in crate::sql) struct PreparedDocumentRewrite {
     pub table: String,
     pub doc_id: DocId,
+    pub destination: Option<(String, DocId)>,
     pub old_document: Document,
     pub new_document: Document,
     pub actions: Vec<PreparedDocumentRewrite>,
@@ -113,6 +114,15 @@ pub(in crate::sql) fn encode_prepared_document_rewrite(prepared: PreparedDocumen
     Value::Map(BTreeMap::from([
         ("table".into(), Value::Str(prepared.table)),
         ("doc_id".into(), encode_prepared_doc_id(prepared.doc_id)),
+        (
+            "destination".into(),
+            prepared.destination.map_or(Value::Null, |(table, doc_id)| {
+                Value::Map(BTreeMap::from([
+                    ("table".into(), Value::Str(table)),
+                    ("doc_id".into(), encode_prepared_doc_id(doc_id)),
+                ]))
+            }),
+        ),
         ("old".into(), Value::Map(prepared.old_document)),
         ("new".into(), Value::Map(prepared.new_document)),
         (
@@ -150,6 +160,31 @@ pub(in crate::sql) fn decode_prepared_document_rewrite(
         })?,
         "prepared rewrite spill payload",
     )?;
+    let destination = match fields.remove("destination") {
+        Some(Value::Null) | None => None,
+        Some(Value::Map(mut destination)) => {
+            let table = match destination.remove("table") {
+                Some(Value::Str(table)) => table,
+                _ => {
+                    return Err(SQLError::Internal(
+                        "prepared rewrite destination has no table".into(),
+                    ))
+                }
+            };
+            let doc_id = decode_prepared_doc_id(
+                destination.remove("doc_id").ok_or_else(|| {
+                    SQLError::Internal("prepared rewrite destination has no document id".into())
+                })?,
+                "prepared rewrite destination",
+            )?;
+            Some((table, doc_id))
+        }
+        Some(_) => {
+            return Err(SQLError::Internal(
+                "prepared rewrite destination is not a map".into(),
+            ))
+        }
+    };
     let old_document = match fields.remove("old") {
         Some(Value::Map(document)) => document,
         _ => {
@@ -180,6 +215,7 @@ pub(in crate::sql) fn decode_prepared_document_rewrite(
     Ok(PreparedDocumentRewrite {
         table,
         doc_id,
+        destination,
         old_document,
         new_document,
         actions,

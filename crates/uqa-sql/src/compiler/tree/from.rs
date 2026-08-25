@@ -171,6 +171,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                         Some(a.aliasname.clone())
                     }
                 }),
+                include_descendants: r.inh,
             })
         }
         NodeEnum::JoinExpr(j) => {

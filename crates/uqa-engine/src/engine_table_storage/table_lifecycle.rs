@@ -60,14 +60,22 @@ impl Engine {
         cascade: bool,
     ) -> StorageBackendResult<()> {
         let canonical_names = self.canonical_drop_table_names(names)?;
-        let targets = canonical_names
-            .iter()
-            .map(|name| Self::resolved_relation_identity(name))
-            .collect::<StorageBackendResult<Vec<_>>>()?;
+        let (canonical_names, hierarchy_dependents) =
+            self.hierarchy_drop_targets(&canonical_names, cascade);
+        if !hierarchy_dependents.is_empty() {
+            return Err(StorageBackendError::Other(format!(
+                "DROP TABLE rejected: table `{}` depends on the target through inheritance; use CASCADE",
+                hierarchy_dependents.join("`, `")
+            )));
+        }
         let target_names = canonical_names
             .iter()
             .cloned()
             .collect::<std::collections::BTreeSet<_>>();
+        let targets = canonical_names
+            .iter()
+            .map(|name| Self::resolved_relation_identity(name))
+            .collect::<StorageBackendResult<Vec<_>>>()?;
 
         // Finish every dependency check before mutating a referrer or target.
         for name in &canonical_names {

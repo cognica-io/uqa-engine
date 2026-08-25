@@ -9,11 +9,11 @@
 use super::{
     apply_validated_prepared_document_rewrite, build_join_spill_with_ctes, build_returning_row,
     dml_join_rows, dml_returning_result, dml_target_row, eval_mutation_assignment,
-    eval_mutation_expr, lock_mutation_target, prepare_document_rewrite,
-    stage_prepared_document_rewrite, update_lock_strength, validate_returning_alias_relations,
-    CteScope, DmlCommandMutationOverlay, DmlReturningShape, Engine, MutationAssignmentTarget,
-    MutationLockTarget, ReturningProjectionRow, ReturningRowImage, ReturningRowImages, SQLError,
-    SQLParam, SQLResult, SourcePlan, UpdatePlan,
+    eval_mutation_expr, lock_mutation_target, partition_insert_target, prepare_document_rewrite,
+    retarget_prepared_document_rewrite, stage_prepared_document_rewrite, update_lock_strength,
+    validate_returning_alias_relations, CteScope, DmlCommandMutationOverlay, DmlReturningShape,
+    Engine, MutationAssignmentTarget, MutationLockTarget, ReturningProjectionRow,
+    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, SourcePlan, UpdatePlan,
 };
 
 pub(in crate::sql) fn run_update_from(
@@ -33,24 +33,34 @@ pub(in crate::sql) fn run_update_from(
     let mut affected = 0u64;
     let mut returning_rows = Vec::new();
     let target = stmt.table.clone();
-    let strength = update_lock_strength(
-        engine,
-        &target,
-        &stmt
-            .assignments
-            .iter()
-            .map(|assignment| assignment.column.clone())
-            .collect::<Vec<_>>(),
-    );
-    let target_doc_ids = engine.table_doc_ids(&target)?;
+    let assigned_columns = stmt
+        .assignments
+        .iter()
+        .map(|assignment| assignment.column.clone())
+        .collect::<Vec<_>>();
+    let target_tables = engine.hierarchy_scan_tables(&target, stmt.include_descendants)?;
+    let target_hierarchy = engine
+        .try_table_hierarchy(&target)
+        .map_err(|error| SQLError::Internal(format!("read UPDATE hierarchy: {error}")))?;
+    let target_is_partitioned =
+        target_hierarchy.partition_spec.is_some() || target_hierarchy.partition_bound.is_some();
+    let mut target_rows = Vec::new();
+    for table in target_tables {
+        target_rows.extend(
+            engine
+                .table_doc_ids(&table)?
+                .into_iter()
+                .map(|doc_id| (table.clone(), doc_id)),
+        );
+    }
     let snapshot_ctes = ctes.returning_statement_snapshot_scope();
     let overlay = DmlCommandMutationOverlay::new(engine);
     let mut prepared_updates = Vec::new();
     let mut rewrite_stack = Vec::new();
     let mut locked_ids = std::collections::BTreeSet::new();
-    for doc_id in target_doc_ids {
+    for (storage_table, doc_id) in target_rows {
         cancel.check()?;
-        let Some(candidate) = engine.get_document(&target, doc_id)? else {
+        let Some(candidate) = engine.get_document(&storage_table, doc_id)? else {
             continue;
         };
         let candidate_row =
@@ -66,18 +76,23 @@ pub(in crate::sql) fn run_update_from(
         else {
             continue;
         };
-        let MutationLockTarget::Present { doc_id, recheck } =
-            lock_mutation_target(engine, &target, &stmt.target_qualifier, doc_id, strength)?
+        let MutationLockTarget::Present { doc_id, recheck } = lock_mutation_target(
+            engine,
+            &storage_table,
+            &stmt.target_qualifier,
+            doc_id,
+            update_lock_strength(engine, &storage_table, &assigned_columns),
+        )?
         else {
             continue;
         };
-        if !locked_ids.insert(doc_id) {
+        if !locked_ids.insert((storage_table.clone(), doc_id)) {
             continue;
         }
         if recheck {
             engine.refresh_explicit_statement_snapshot()?;
         }
-        let Some(mut doc) = engine.get_document(&target, doc_id)? else {
+        let Some(mut doc) = engine.get_document(&storage_table, doc_id)? else {
             continue;
         };
         let original_doc = doc.clone();
@@ -125,15 +140,21 @@ pub(in crate::sql) fn run_update_from(
                 doc.remove(&assignment.column);
             }
         }
+        let destination_table = if target_is_partitioned {
+            partition_insert_target(engine, &target, &doc, params, stmt.include_descendants)?
+        } else {
+            storage_table.clone()
+        };
         if let Some(mut prepared) = prepare_document_rewrite(
             engine,
-            &target,
+            &storage_table,
             doc_id,
             original_doc,
             doc,
             params,
             &mut rewrite_stack,
         )? {
+            retarget_prepared_document_rewrite(engine, &mut prepared, &destination_table)?;
             let rewritten_doc_id = stage_prepared_document_rewrite(engine, &mut prepared, params)?;
             if !stmt.returning.is_empty() {
                 returning_rows.push(build_returning_row(

@@ -8,6 +8,10 @@
 
 use super::{NullsOrder, ScalarExpr, SetOpKind};
 
+const fn default_include_descendants() -> bool {
+    true
+}
+
 /// One fully lowered SQL statement.
 ///
 /// There is deliberately no `Legacy`, `Opaque`, or raw-`Statement` variant:
@@ -170,6 +174,8 @@ pub enum SourcePlan {
         #[serde(default)]
         qualifier: String,
         alias: Option<String>,
+        #[serde(default = "default_include_descendants")]
+        include_descendants: bool,
     },
     Join {
         left: Box<SourcePlan>,
@@ -260,6 +266,7 @@ pub struct AssignmentPlan {
 pub struct InsertPlan {
     pub table: String,
     pub target_qualifier: String,
+    pub include_descendants: bool,
     pub columns: Vec<String>,
     pub ctes: Vec<CtePlan>,
     pub rows: Vec<Vec<ScalarExpr>>,
@@ -289,6 +296,7 @@ pub enum ConflictActionPlan {
 pub struct UpdatePlan {
     pub table: String,
     pub target_qualifier: String,
+    pub include_descendants: bool,
     pub assignments: Vec<AssignmentPlan>,
     pub predicate: Option<ScalarExpr>,
     pub ctes: Vec<CtePlan>,
@@ -302,6 +310,7 @@ pub struct UpdatePlan {
 pub struct DeletePlan {
     pub table: String,
     pub target_qualifier: String,
+    pub include_descendants: bool,
     pub predicate: Option<ScalarExpr>,
     pub ctes: Vec<CtePlan>,
     pub source: Option<Box<SourcePlan>>,
@@ -416,7 +425,7 @@ pub enum CommandPlan {
         table: Option<String>,
     },
     Truncate {
-        tables: Vec<String>,
+        tables: Vec<uqa_sql::ast::TruncateTarget>,
         cascade: bool,
     },
     Transaction(uqa_sql::ast::TransactionStmt),
