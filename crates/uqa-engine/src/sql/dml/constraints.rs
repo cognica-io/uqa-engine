@@ -8,13 +8,29 @@
 
 use super::{
     coerce_to_column_type, dml_storage_error, document_vectors, eval_lowered_expression,
-    lock_mutation_row, lock_mutation_target, missing_document_error, update_lock_strength, DocId,
-    Document, Engine, ForeignKey, ForeignKeyAction, ForeignKeyMatch, MutationLockTarget,
-    PreparedDocumentRewrite, SQLError, SQLParam, Value,
+    lock_mutation_row, lock_mutation_target, missing_document_error, update_lock_strength,
+    ColumnType, DocId, Document, Engine, ForeignKey, ForeignKeyAction, ForeignKeyMatch,
+    MutationLockTarget, PreparedDocumentRewrite, SQLError, SQLParam, Value,
 };
 use sha2::{Digest, Sha256};
-use uqa_sql::ast::{ColumnType, RangeSubtype, TableKeyConstraint};
+use uqa_sql::ast::{RangeSubtype, TableKeyConstraint};
 use uqa_sql::expr::{multirange_from_ranges, parse_multirange, parse_range, CanonicalRange};
+
+pub(in crate::sql) struct ForeignKeyLookup {
+    pub(in crate::sql) values: Vec<Value>,
+    comparison: ForeignKeyComparison,
+}
+
+pub(in crate::sql) struct ForeignKeyComparison {
+    comparison_types: Vec<ColumnType>,
+    exact_reference_lookup: bool,
+}
+
+impl ForeignKeyComparison {
+    pub(in crate::sql) fn normalize(&self, values: Vec<Value>) -> Result<Vec<Value>, SQLError> {
+        normalize_foreign_key_values(values, &self.comparison_types)
+    }
+}
 
 pub(in crate::sql) fn validate_document_constraints(
     engine: &Engine,
@@ -119,10 +135,13 @@ fn validate_document_non_key_constraints_with_old(
         }
         match document.get(&col_def.name) {
             Some(Value::Null) | None => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "NOT NULL constraint violated: column `{}` in table `{table}`",
-                    col_def.name
-                )));
+                return Err(SQLError::Routine {
+                    sqlstate: "23502".into(),
+                    message: format!(
+                        "null value in column \"{}\" of relation \"{table}\" violates not-null constraint",
+                        col_def.name
+                    ),
+                });
             }
             _ => {}
         }
@@ -139,7 +158,7 @@ fn validate_document_non_key_constraints_with_old(
             &schema,
             params,
         )?;
-        if !uqa_sql::expr::truthy(&result) {
+        if !matches!(result, Value::Null) && !uqa_sql::expr::truthy(&result) {
             let label = constraint.name.unwrap_or_else(|| "<unnamed>".into());
             return Err(SQLError::Routine {
                 sqlstate: "23514".into(),
@@ -185,6 +204,9 @@ fn lock_document_foreign_key_dependencies(
         if !fk.enforced {
             continue;
         }
+        if !allow_missing && fk.deferrable && fk.initially_deferred {
+            continue;
+        }
         if old_document.is_some_and(|old_document| {
             fk.local_columns.iter().all(|column| {
                 old_document.get(column).cloned().unwrap_or(Value::Null)
@@ -193,24 +215,19 @@ fn lock_document_foreign_key_dependencies(
         }) {
             continue;
         }
-        let Some(local_values) = foreign_key_lookup_values(&fk, document)? else {
+        let Some(local_values) = foreign_key_lookup_values(engine, table, &fk, document)? else {
             continue;
         };
-        let violation = || {
-            let cols = fk.local_columns.join(", ");
-            SQLError::Routine {
-                sqlstate: "23503".into(),
-                message: format!(
-                    "insert or update on table \"{table}\" violates foreign key constraint \"{}\": ({cols}) -> {}({}) has no matching row",
-                    fk.name.as_deref().unwrap_or("<unnamed>"),
-                    fk.ref_table,
-                    fk.ref_columns.join(", ")
-                ),
-            }
+        let violation = || SQLError::Routine {
+            sqlstate: "23503".into(),
+            message: format!(
+                "insert or update on table \"{table}\" violates foreign key constraint \"{}\"",
+                fk.name.as_deref().unwrap_or("<unnamed>")
+            ),
         };
         if fk.period {
             let (covered, parent_ids) =
-                period_foreign_key_coverage(engine, &fk, &local_values, &[], None)?;
+                period_foreign_key_coverage(engine, &fk, &local_values.values, &[], None)?;
             if !covered {
                 if allow_missing {
                     continue;
@@ -230,9 +247,7 @@ fn lock_document_foreign_key_dependencies(
         }
         let mut hops = 0usize;
         loop {
-            let Some(parent_id) =
-                engine.find_conflict(&fk.ref_table, &fk.ref_columns, &local_values)?
-            else {
+            let Some(parent_id) = find_foreign_key_parent(engine, &fk, &local_values)? else {
                 if allow_missing {
                     break;
                 }
@@ -263,8 +278,10 @@ fn lock_document_foreign_key_dependencies(
             if recheck {
                 engine.refresh_explicit_statement_snapshot()?;
             }
-            match engine.find_conflict(&fk.ref_table, &fk.ref_columns, &local_values)? {
-                Some(current_parent) if current_parent == locked_parent => break,
+            if foreign_key_parent_matches(engine, &fk, &local_values, locked_parent)? {
+                break;
+            }
+            match find_foreign_key_parent(engine, &fk, &local_values)? {
                 None if allow_missing => break,
                 None => return Err(violation()),
                 Some(_) => {
@@ -331,7 +348,7 @@ pub(in crate::sql) fn period_foreign_key_coverage(
                     "PERIOD foreign-key parent scan",
                     &foreign_key.ref_table,
                     doc_id,
-                ))
+                ));
             }
         };
         if !ordinary_columns
@@ -361,6 +378,92 @@ pub(in crate::sql) fn period_foreign_key_coverage(
             .all(|range| coverage.contains_range(range)),
         parent_ids,
     ))
+}
+
+pub(crate) fn validate_deferred_foreign_key_rows(
+    engine: &Engine,
+    rows: &std::collections::BTreeSet<crate::row_locks::RowLockKey>,
+) -> Result<(), SQLError> {
+    let mut rows_by_table = std::collections::BTreeMap::<String, Vec<DocId>>::new();
+    for row in rows {
+        rows_by_table
+            .entry(engine.row_lock_manager().table_name(row.table).to_string())
+            .or_default()
+            .push(row.doc_id);
+    }
+    for (table, doc_ids) in rows_by_table {
+        for foreign_key in engine
+            .try_foreign_keys(&table)
+            .map_err(|error| dml_storage_error("deferred constraint validation", error))?
+        {
+            if !foreign_key.enforced || !foreign_key.deferrable || !foreign_key.initially_deferred {
+                continue;
+            }
+            if foreign_key.period {
+                for doc_id in &doc_ids {
+                    let Some(document) = engine.get_document(&table, *doc_id)? else {
+                        continue;
+                    };
+                    let Some(lookup) =
+                        foreign_key_lookup_values(engine, &table, &foreign_key, &document)?
+                    else {
+                        continue;
+                    };
+                    if !period_foreign_key_coverage(
+                        engine,
+                        &foreign_key,
+                        &lookup.values,
+                        &[],
+                        None,
+                    )?
+                    .0
+                    {
+                        return Err(SQLError::Routine {
+                            sqlstate: "23503".into(),
+                            message: format!(
+                                "insert or update on table \"{table}\" violates foreign key constraint \"{}\"",
+                                foreign_key.name.as_deref().unwrap_or("<unnamed>")
+                            ),
+                        });
+                    }
+                }
+                continue;
+            }
+            let comparison = foreign_key_comparison_types(engine, &table, &foreign_key)?;
+            let cross_type_parent_keys = if comparison.exact_reference_lookup {
+                None
+            } else {
+                Some(foreign_key_parent_index(engine, &foreign_key, &comparison)?)
+            };
+            for doc_id in &doc_ids {
+                let Some(document) = engine.get_document(&table, *doc_id)? else {
+                    continue;
+                };
+                let Some(values) = foreign_key_values(&foreign_key, &document, &comparison)? else {
+                    continue;
+                };
+                let parent_exists = if comparison.exact_reference_lookup {
+                    engine
+                        .find_conflict(&foreign_key.ref_table, &foreign_key.ref_columns, &values)?
+                        .is_some()
+                } else {
+                    cross_type_parent_keys
+                        .as_ref()
+                        .is_some_and(|keys| keys.contains(&values))
+                };
+                if !parent_exists {
+                    return Err(SQLError::Routine {
+                        sqlstate: "23503".into(),
+                        message: format!(
+                            "insert or update on table \"{table}\" violates foreign key constraint \"{}\"",
+                            foreign_key.name.as_deref().unwrap_or("<unnamed>")
+                        ),
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(in crate::sql) fn key_constraint_values(
@@ -613,8 +716,20 @@ pub(in crate::sql) fn validate_key_constraints(
 }
 
 pub(in crate::sql) fn foreign_key_lookup_values(
+    engine: &Engine,
+    table: &str,
     fk: &ForeignKey,
     document: &Document,
+) -> Result<Option<ForeignKeyLookup>, SQLError> {
+    let comparison = foreign_key_comparison_types(engine, table, fk)?;
+    Ok(foreign_key_values(fk, document, &comparison)?
+        .map(|values| ForeignKeyLookup { values, comparison }))
+}
+
+fn foreign_key_values(
+    fk: &ForeignKey,
+    document: &Document,
+    comparison: &ForeignKeyComparison,
 ) -> Result<Option<Vec<Value>>, SQLError> {
     let local_values: Vec<Value> = fk
         .local_columns
@@ -626,18 +741,154 @@ pub(in crate::sql) fn foreign_key_lookup_values(
         .filter(|value| matches!(value, Value::Null))
         .count();
     if null_count == 0 {
-        return Ok(Some(local_values));
+        if local_values.len() != fk.ref_columns.len() {
+            return Err(SQLError::Internal(
+                "FOREIGN KEY local and referenced column counts diverged after validation".into(),
+            ));
+        }
+        return comparison.normalize(local_values).map(Some);
     }
     match fk.match_type {
         ForeignKeyMatch::Simple => Ok(None),
         ForeignKeyMatch::Full if null_count == local_values.len() => Ok(None),
         ForeignKeyMatch::Full => {
-            let cols = fk.local_columns.join(", ");
-            Err(SQLError::TypeMismatch(format!(
-                "FOREIGN KEY MATCH FULL constraint violated: ({cols}) must be all NULL or all non-NULL"
-            )))
+            Err(SQLError::Routine {
+                sqlstate: "23503".into(),
+                message: format!(
+                    "insert or update on table violates foreign key constraint \"{}\": MATCH FULL does not allow mixing of null and nonnull key values",
+                    fk.name.as_deref().unwrap_or("<unnamed>")
+                ),
+            })
         }
     }
+}
+
+pub(in crate::sql) fn find_foreign_key_parent(
+    engine: &Engine,
+    fk: &ForeignKey,
+    lookup: &ForeignKeyLookup,
+) -> Result<Option<DocId>, SQLError> {
+    if lookup.comparison.exact_reference_lookup {
+        return engine.find_conflict(&fk.ref_table, &fk.ref_columns, &lookup.values);
+    }
+    for doc_id in engine.table_doc_ids(&fk.ref_table)? {
+        let Some(document) = engine.get_document(&fk.ref_table, doc_id)? else {
+            continue;
+        };
+        if foreign_key_parent_values(fk, &document, &lookup.comparison)? == lookup.values {
+            return Ok(Some(doc_id));
+        }
+    }
+    Ok(None)
+}
+
+pub(in crate::sql) fn foreign_key_comparison_types(
+    engine: &Engine,
+    table: &str,
+    fk: &ForeignKey,
+) -> Result<ForeignKeyComparison, SQLError> {
+    if fk.local_columns.len() != fk.ref_columns.len() {
+        return Err(SQLError::Internal(
+            "FOREIGN KEY local and referenced column counts diverged after validation".into(),
+        ));
+    }
+    let local_columns = engine
+        .try_describe_table(table)
+        .map_err(|error| dml_storage_error("FOREIGN KEY local columns", error))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let referenced_columns = engine
+        .try_describe_table(&fk.ref_table)
+        .map_err(|error| dml_storage_error("FOREIGN KEY referenced columns", error))?
+        .ok_or_else(|| SQLError::UnknownTable(fk.ref_table.clone()))?;
+    let mut comparison_types = Vec::with_capacity(fk.local_columns.len());
+    let mut exact_reference_lookup = true;
+    for (local_column, referenced_column) in fk.local_columns.iter().zip(&fk.ref_columns) {
+        let local_type = local_columns
+            .iter()
+            .find(|definition| definition.name == *local_column)
+            .map(|definition| &definition.ty)
+            .ok_or_else(|| SQLError::UnknownColumn(format!("{table}.{local_column}")))?;
+        let referenced_type = referenced_columns
+            .iter()
+            .find(|definition| definition.name == *referenced_column)
+            .map(|definition| &definition.ty)
+            .ok_or_else(|| {
+                SQLError::UnknownColumn(format!("{}.{referenced_column}", fk.ref_table))
+            })?;
+        let comparison_type =
+            uqa_execution::foreign_key_operand_type(local_type, referenced_type).map_err(|_| {
+                SQLError::Routine {
+                    sqlstate: "42804".into(),
+                    message: format!(
+                        "foreign key constraint cannot be implemented: key columns \"{local_column}\" and \"{referenced_column}\" are of incompatible types: {} and {}",
+                        local_type.sql_name(),
+                        referenced_type.sql_name()
+                    ),
+                }
+            })?;
+        exact_reference_lookup &= comparison_type == *referenced_type;
+        comparison_types.push(comparison_type);
+    }
+    Ok(ForeignKeyComparison {
+        comparison_types,
+        exact_reference_lookup,
+    })
+}
+
+fn foreign_key_parent_values(
+    fk: &ForeignKey,
+    document: &Document,
+    comparison: &ForeignKeyComparison,
+) -> Result<Vec<Value>, SQLError> {
+    comparison.normalize(
+        fk.ref_columns
+            .iter()
+            .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
+            .collect(),
+    )
+}
+
+fn foreign_key_parent_matches(
+    engine: &Engine,
+    fk: &ForeignKey,
+    lookup: &ForeignKeyLookup,
+    doc_id: DocId,
+) -> Result<bool, SQLError> {
+    let Some(document) = engine.get_document(&fk.ref_table, doc_id)? else {
+        return Ok(false);
+    };
+    Ok(foreign_key_parent_values(fk, &document, &lookup.comparison)? == lookup.values)
+}
+
+fn foreign_key_parent_index(
+    engine: &Engine,
+    fk: &ForeignKey,
+    comparison: &ForeignKeyComparison,
+) -> Result<std::collections::BTreeSet<Vec<Value>>, SQLError> {
+    let mut keys = std::collections::BTreeSet::new();
+    for doc_id in engine.table_doc_ids(&fk.ref_table)? {
+        let Some(document) = engine.get_document(&fk.ref_table, doc_id)? else {
+            continue;
+        };
+        keys.insert(foreign_key_parent_values(fk, &document, comparison)?);
+    }
+    Ok(keys)
+}
+
+fn normalize_foreign_key_values(
+    values: Vec<Value>,
+    comparison_types: &[ColumnType],
+) -> Result<Vec<Value>, SQLError> {
+    if values.len() != comparison_types.len() {
+        return Err(SQLError::Internal(
+            "FOREIGN KEY value and comparison-type counts diverged after validation".into(),
+        ));
+    }
+    values
+        .into_iter()
+        .zip(comparison_types)
+        .map(|(value, ty)| crate::sql::ddl::convert_value_to_column_type(value, ty))
+        .collect()
 }
 
 /// Build the complete tuple-lock dependency tree for one rewrite while the backend transaction is still deferred. The prepared documents retain volatile SET DEFAULT results so the apply phase never re-evaluates them.
@@ -811,43 +1062,60 @@ fn prepare_referenced_key_update_actions(
             continue;
         }
         engine.lock_relation(&ref_table, crate::row_locks::RelationLockMode::RowExclusive)?;
+        let comparison = foreign_key_comparison_types(engine, &ref_table, &fk)?;
+        let expected = comparison.normalize(old_values.clone())?;
         if fk.period {
-            let ordinary_values = &old_values[..old_values.len().saturating_sub(1)];
-            let ordinary_columns = &fk.local_columns[..fk.local_columns.len().saturating_sub(1)];
-            let referencing =
-                referencing_rows(engine, &ref_table, ordinary_columns, ordinary_values)?;
-            for (_child_id, child_doc) in referencing {
-                let Some(child_values) = foreign_key_lookup_values(&fk, &child_doc)? else {
+            let ordinary_len = expected.len().saturating_sub(1);
+            for child_id in engine.table_doc_ids(&ref_table)? {
+                let Some(child_doc) = engine.get_document(&ref_table, child_id)? else {
                     continue;
                 };
+                let Some(child_lookup) =
+                    foreign_key_lookup_values(engine, &ref_table, &fk, &child_doc)?
+                else {
+                    continue;
+                };
+                if child_lookup.values[..ordinary_len] != expected[..ordinary_len] {
+                    continue;
+                }
                 let (covered, _) = period_foreign_key_coverage(
                     engine,
                     &fk,
-                    &child_values,
+                    &child_lookup.values,
                     &[parent_doc_id],
                     Some((parent_doc_id, new_doc)),
                 )?;
-                if !covered {
-                    return Err(SQLError::Routine {
-                        sqlstate: "23503".into(),
-                        message: format!(
-                            "update on table \"{table}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
-                            fk.name.as_deref().unwrap_or("<unnamed>")
-                        ),
-                    });
+                if covered {
+                    continue;
                 }
+                if fk.deferrable && fk.initially_deferred {
+                    engine.defer_foreign_key_row(&ref_table, child_id)?;
+                    continue;
+                }
+                return Err(SQLError::Routine {
+                    sqlstate: "23503".into(),
+                    message: format!(
+                        "update on table \"{table}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                        fk.name.as_deref().unwrap_or("<unnamed>")
+                    ),
+                });
             }
             continue;
         }
-        let referencing = referencing_rows(engine, &ref_table, &fk.local_columns, &old_values)?;
+        let referencing = referencing_rows(engine, &ref_table, &fk, &comparison, &expected)?;
         for (child_id, _child_doc) in referencing {
             match fk.on_update {
+                ForeignKeyAction::NoAction if fk.deferrable && fk.initially_deferred => {
+                    engine.defer_foreign_key_row(&ref_table, child_id)?;
+                }
                 ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "FOREIGN KEY constraint violated: UPDATE on `{table}` is referenced by `{ref_table}` ({} -> {})",
-                        fk.local_columns.join(", "),
-                        fk.ref_columns.join(", "),
-                    )));
+                    return Err(SQLError::Routine {
+                        sqlstate: "23503".into(),
+                        message: format!(
+                            "update or delete on table \"{table}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                            fk.name.as_deref().unwrap_or("<unnamed>")
+                        ),
+                    });
                 }
                 ForeignKeyAction::Cascade => {
                     let Some((child_id, child_doc)) = lock_referencing_child(
@@ -855,15 +1123,19 @@ fn prepare_referenced_key_update_actions(
                         &ref_table,
                         child_id,
                         &fk.local_columns,
-                        &fk.local_columns,
-                        &old_values,
+                        &fk,
+                        &comparison,
+                        &expected,
                     )?
                     else {
                         continue;
                     };
                     let mut updated = child_doc.clone();
                     for (col, value) in fk.local_columns.iter().zip(new_values.iter()) {
-                        updated.insert(col.clone(), value.clone());
+                        updated.insert(
+                            col.clone(),
+                            coerce_to_column_type(engine, &ref_table, col, value.clone())?,
+                        );
                     }
                     if let Some(prepared) = prepare_document_rewrite(
                         engine,
@@ -883,8 +1155,9 @@ fn prepare_referenced_key_update_actions(
                         &ref_table,
                         child_id,
                         &fk.local_columns,
-                        &fk.local_columns,
-                        &old_values,
+                        &fk,
+                        &comparison,
+                        &expected,
                     )?
                     else {
                         continue;
@@ -932,8 +1205,9 @@ pub(in crate::sql) fn lock_referencing_child(
     ref_table: &str,
     child_id: DocId,
     lock_columns: &[String],
-    key_columns: &[String],
-    key_values: &[Value],
+    fk: &ForeignKey,
+    comparison: &ForeignKeyComparison,
+    expected: &[Value],
 ) -> Result<Option<(DocId, Document)>, SQLError> {
     let target = lock_mutation_target(
         engine,
@@ -955,22 +1229,22 @@ pub(in crate::sql) fn lock_referencing_child(
     let Some(child_doc) = engine.get_document(ref_table, child_id)? else {
         return Ok(None);
     };
-    let still_references = key_columns
+    let actual = fk
+        .local_columns
         .iter()
-        .zip(key_values)
-        .all(|(column, value)| child_doc.get(column).cloned().unwrap_or(Value::Null) == *value);
-    Ok(still_references.then_some((child_id, child_doc)))
+        .map(|column| child_doc.get(column).cloned().unwrap_or(Value::Null))
+        .collect();
+    let actual = comparison.normalize(actual)?;
+    Ok((actual == expected).then_some((child_id, child_doc)))
 }
 
 pub(in crate::sql) fn referencing_rows(
     engine: &Engine,
     table: &str,
-    local_columns: &[String],
-    key_values: &[Value],
+    fk: &ForeignKey,
+    comparison: &ForeignKeyComparison,
+    expected: &[Value],
 ) -> Result<Vec<(DocId, Document)>, SQLError> {
-    if local_columns.is_empty() || local_columns.len() != key_values.len() {
-        return Ok(Vec::new());
-    }
     let mut out = Vec::new();
     for doc_id in engine.table_doc_ids(table)? {
         let Some(doc) = engine.get_document(table, doc_id)? else {
@@ -980,11 +1254,12 @@ pub(in crate::sql) fn referencing_rows(
                 doc_id,
             ));
         };
-        let matches = local_columns
+        let values = fk
+            .local_columns
             .iter()
-            .zip(key_values.iter())
-            .all(|(col, want)| doc.get(col).cloned().unwrap_or(Value::Null) == *want);
-        if matches {
+            .map(|column| doc.get(column).cloned().unwrap_or(Value::Null))
+            .collect();
+        if comparison.normalize(values)? == expected {
             out.push((doc_id, doc));
         }
     }

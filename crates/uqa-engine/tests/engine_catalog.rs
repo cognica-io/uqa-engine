@@ -6,6 +6,8 @@
 
 //! Consolidated catalog, DDL, and mutation integration tests.
 
+#[path = "engine_catalog/pg18_constraint_lifecycle.rs"]
+mod pg18_constraint_lifecycle;
 #[path = "sql_analyze_persistence.rs"]
 mod sql_analyze_persistence;
 #[path = "sql_analyzer_ddl.rs"]

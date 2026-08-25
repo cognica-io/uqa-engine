@@ -128,3 +128,22 @@ pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> O
     }
     resolved
 }
+
+pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, String> {
+    let Some((canonical, kind)) = engine
+        .try_resolve_relation_kind(name)
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
+    let (schema, relation) =
+        helpers::split_schema_name(&canonical).map_err(|error| error.to_string())?;
+    let relkind = match kind {
+        "table" => "r",
+        "view" => "v",
+        "sequence" => "S",
+        "foreign table" => "f",
+        other => return Err(format!("unknown relation kind `{other}` for `{canonical}`")),
+    };
+    Ok(Some(helpers::relation_oid(relkind, &schema, &relation)))
+}

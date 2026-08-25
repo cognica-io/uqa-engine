@@ -402,8 +402,8 @@ fn quoted_dots_preserve_range_var_component_boundaries() {
         panic!("expected ALTER TABLE");
     };
     assert!(matches!(
-        alter.action,
-        AlterTableAction::RenameTable { to } if to == "\"d.e\""
+        alter.actions.as_slice(),
+        [AlterTableAction::RenameTable { to }] if to == "\"d.e\""
     ));
 
     let Statement::Drop(drop) = first("DROP TABLE \"a.b\".\"d.e\"") else {

@@ -145,6 +145,8 @@ fn direct_schema_mutations_reject_missing_relations_columns_and_duplicates() {
         not_null: false,
         not_null_explicit: false,
         not_null_name: None,
+        not_null_validated: true,
+        not_null_no_inherit: false,
         auto_increment: false,
         unique: false,
         default: None,
@@ -152,6 +154,8 @@ fn direct_schema_mutations_reject_missing_relations_columns_and_duplicates() {
         check: None,
         check_name: None,
         check_enforced: true,
+        check_validated: true,
+        check_no_inherit: false,
         references: None,
     };
 
@@ -280,6 +284,8 @@ fn tensor_backfill_reports_inner_dimension_mismatch_and_allows_null() {
         not_null: false,
         not_null_explicit: false,
         not_null_name: None,
+        not_null_validated: true,
+        not_null_no_inherit: false,
         auto_increment: false,
         unique: false,
         default: None,
@@ -287,6 +293,8 @@ fn tensor_backfill_reports_inner_dimension_mismatch_and_allows_null() {
         check: None,
         check_name: None,
         check_enforced: true,
+        check_validated: true,
+        check_no_inherit: false,
         references: None,
     };
 

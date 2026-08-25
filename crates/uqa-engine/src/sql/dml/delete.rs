@@ -9,8 +9,8 @@
 use super::{
     apply_set_action_to_child, apply_validated_prepared_document_rewrite,
     build_join_spill_with_ctes, build_returning_row, dml_join_rows, dml_returning_result,
-    dml_target_row, eval_mutation_expr, foreign_key_lookup_values, lock_mutation_target,
-    period_foreign_key_coverage, prepare_document_rewrite, referencing_rows,
+    dml_target_row, eval_mutation_expr, foreign_key_comparison_types, foreign_key_lookup_values,
+    lock_mutation_target, period_foreign_key_coverage, prepare_document_rewrite, referencing_rows,
     referrers_to_for_actions, stage_prepared_document_rewrite, validate_dml_expression_qualifiers,
     validate_returning_alias_relations, BTreeSet, CteScope, DeletePlan, DmlCommandMutationOverlay,
     DmlReturningShape, DocId, Document, Engine, ForeignKey, ForeignKeyAction, MutationLockTarget,
@@ -405,57 +405,75 @@ fn prepare_referenced_key_delete_actions(
             continue;
         }
         engine.lock_relation(&ref_table, crate::row_locks::RelationLockMode::RowExclusive)?;
+        let comparison = foreign_key_comparison_types(engine, &ref_table, &fk)?;
+        let expected = comparison.normalize(key_values.clone())?;
         if fk.period {
-            let ordinary_values = &key_values[..key_values.len().saturating_sub(1)];
-            let ordinary_columns = &fk.local_columns[..fk.local_columns.len().saturating_sub(1)];
-            let referencing =
-                referencing_rows(engine, &ref_table, ordinary_columns, ordinary_values)?;
+            let ordinary_len = expected.len().saturating_sub(1);
             let mut excluded_parents = root_deletes
                 .iter()
                 .filter_map(|(root_table, doc_id)| (root_table == parent.table).then_some(*doc_id))
                 .collect::<BTreeSet<_>>();
             excluded_parents.insert(parent.doc_id);
             let excluded_parents = excluded_parents.into_iter().collect::<Vec<_>>();
-            for (child_id, child_doc) in referencing {
+            for child_id in engine.table_doc_ids(&ref_table)? {
                 if root_deletes.contains(&(ref_table.clone(), child_id)) {
                     continue;
                 }
-                let Some(child_values) = foreign_key_lookup_values(&fk, &child_doc)? else {
+                let Some(child_doc) = engine.get_document(&ref_table, child_id)? else {
                     continue;
                 };
-                let (covered, _) = period_foreign_key_coverage(
+                let Some(child_lookup) =
+                    foreign_key_lookup_values(engine, &ref_table, &fk, &child_doc)?
+                else {
+                    continue;
+                };
+                if child_lookup.values[..ordinary_len] != expected[..ordinary_len] {
+                    continue;
+                }
+                if period_foreign_key_coverage(
                     engine,
                     &fk,
-                    &child_values,
+                    &child_lookup.values,
                     &excluded_parents,
                     None,
-                )?;
-                if !covered {
-                    return Err(SQLError::Routine {
-                        sqlstate: "23503".into(),
-                        message: format!(
-                            "delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
-                            parent.table,
-                            fk.name.as_deref().unwrap_or("<unnamed>")
-                        ),
-                    });
+                )?
+                .0
+                {
+                    continue;
                 }
+                if fk.deferrable && fk.initially_deferred {
+                    engine.defer_foreign_key_row(&ref_table, child_id)?;
+                    continue;
+                }
+                return Err(SQLError::Routine {
+                    sqlstate: "23503".into(),
+                    message: format!(
+                        "delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                        parent.table,
+                        fk.name.as_deref().unwrap_or("<unnamed>")
+                    ),
+                });
             }
             continue;
         }
-        let referencing = referencing_rows(engine, &ref_table, &fk.local_columns, &key_values)?;
+        let referencing = referencing_rows(engine, &ref_table, &fk, &comparison, &expected)?;
         for (child_id, _child_doc) in referencing {
             if root_deletes.contains(&(ref_table.clone(), child_id)) {
                 continue;
             }
             match fk.on_delete {
+                ForeignKeyAction::NoAction if fk.deferrable && fk.initially_deferred => {
+                    engine.defer_foreign_key_row(&ref_table, child_id)?;
+                }
                 ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "FOREIGN KEY constraint violated: DELETE on `{}` is referenced by `{ref_table}` ({} -> {})",
-                        parent.table,
-                        fk.local_columns.join(", "),
-                        fk.ref_columns.join(", "),
-                    )));
+                    return Err(SQLError::Routine {
+                        sqlstate: "23503".into(),
+                        message: format!(
+                            "update or delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                            parent.table,
+                            fk.name.as_deref().unwrap_or("<unnamed>")
+                        ),
+                    });
                 }
                 ForeignKeyAction::Cascade => {
                     if let Some(prepared) = prepare_document_delete(
@@ -477,8 +495,9 @@ fn prepare_referenced_key_delete_actions(
                         &ref_table,
                         child_id,
                         &columns,
-                        &fk.local_columns,
-                        &key_values,
+                        &fk,
+                        &comparison,
+                        &expected,
                     )?
                     else {
                         continue;

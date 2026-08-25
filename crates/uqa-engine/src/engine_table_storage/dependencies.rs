@@ -443,9 +443,9 @@ impl Engine {
                 }
                 if let Some(reference) = &mut column.references {
                     if stored_relation_reference_matches(&reference.table, &target)
-                        && reference.column == from
+                        && reference.column.as_deref() == Some(from)
                     {
-                        reference.column = to.to_string();
+                        reference.column = Some(to.to_string());
                         changed = true;
                     }
                 }
@@ -525,29 +525,15 @@ impl Engine {
                 .default
                 .as_ref()
                 .is_some_and(|expr| schema_expr_references_column(expr, column))
-                || candidate
-                    .check
-                    .as_ref()
-                    .is_some_and(|expr| schema_expr_references_column(expr, column))
                 || candidate.generated.as_ref().is_some_and(|generated| {
                     schema_expr_references_column(&generated.expression, column)
                 })
             {
                 return Err(StorageBackendError::Other(format!(
-                    "ALTER TABLE DROP COLUMN `{table_name}`.`{column}` rejected: column `{}` has a dependent DEFAULT/CHECK/generation expression",
+                    "ALTER TABLE DROP COLUMN `{table_name}`.`{column}` rejected: column `{}` has a dependent DEFAULT/generation expression",
                     candidate.name
                 )));
             }
-        }
-        if target_state
-            .table_checks
-            .read()
-            .iter()
-            .any(|check| schema_expr_references_column(&check.expr, column))
-        {
-            return Err(StorageBackendError::Other(format!(
-                "ALTER TABLE DROP COLUMN `{table_name}`.`{column}` rejected: a CHECK constraint depends on the column"
-            )));
         }
 
         let mut inbound = Vec::new();
@@ -571,7 +557,7 @@ impl Engine {
                 }
                 if candidate.references.as_ref().is_some_and(|reference| {
                     stored_relation_reference_matches(&reference.table, &target)
-                        && reference.column == column
+                        && reference.column.as_deref() == Some(column)
                 }) {
                     inbound.push(candidate_name.clone());
                 }

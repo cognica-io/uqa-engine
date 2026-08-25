@@ -219,6 +219,8 @@ fn create_table_as_columns(
             not_null: false,
             not_null_explicit: false,
             not_null_name: None,
+            not_null_validated: true,
+            not_null_no_inherit: false,
             auto_increment: false,
             unique: false,
             default: None,
@@ -226,6 +228,8 @@ fn create_table_as_columns(
             check: None,
             check_name: None,
             check_enforced: true,
+            check_validated: true,
+            check_no_inherit: false,
             references: None,
         })
         .collect())

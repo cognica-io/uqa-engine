@@ -70,11 +70,13 @@ fn alter_column_type_preserves_the_using_expression() {
     else {
         panic!("not ALTER TABLE ALTER COLUMN TYPE");
     };
-    let crate::ast::AlterTableAction::AlterColumnType { name, ty, using } = alter.action else {
+    let [crate::ast::AlterTableAction::AlterColumnType { name, ty, using }] =
+        alter.actions.as_slice()
+    else {
         panic!("not ALTER COLUMN TYPE");
     };
     assert_eq!(name, "value");
-    assert_eq!(ty, ColumnType::Text);
+    assert_eq!(*ty, ColumnType::Text);
     assert!(matches!(using, Some(Expr::Cast { ty, .. }) if ty == "text"));
 }
 

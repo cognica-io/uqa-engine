@@ -45,6 +45,18 @@ fn assert_sql_error_contains(engine: &Engine, sql: &str, needle: &str) {
     );
 }
 
+fn assert_sql_error_state(engine: &Engine, sql: &str, sqlstate: &str) {
+    let error = match engine.sql(sql, &[]) {
+        Ok(result) => panic!("SQL unexpectedly succeeded:\n{sql}\n{result:?}"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error.sqlstate(),
+        Some(sqlstate),
+        "unexpected error: {error}"
+    );
+}
+
 #[test]
 fn postgresql_sql_compatibility_matrix() {
     let eng = Engine::new();
@@ -135,11 +147,7 @@ fn postgresql_schema_constraints_and_account_dml(eng: &Engine) {
         "INSERT INTO accounts (owner, balance) VALUES ('erin', -1)",
         "check",
     );
-    assert_sql_error_contains(
-        eng,
-        "INSERT INTO accounts (balance) VALUES (50)",
-        "not null",
-    );
+    assert_sql_error_state(eng, "INSERT INTO accounts (balance) VALUES (50)", "23502");
     assert_check(
         eng,
         "constraint_rejections_do_not_mutate",

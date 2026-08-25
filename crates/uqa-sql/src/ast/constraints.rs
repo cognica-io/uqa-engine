@@ -4,19 +4,80 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Durable table constraints, including `PostgreSQL` 18 temporal flags.
+//! Column and table constraint nodes shared by CREATE and ALTER TABLE.
 
 use serde::{Deserialize, Serialize};
 
-use super::Expr;
+use super::{ColumnType, Expr, GeneratedColumn};
 
-/// `REFERENCES table(column)` reference target.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct ColumnDef {
+    pub name: String,
+    pub ty: ColumnType,
+    pub primary_key: bool,
+    pub not_null: bool,
+    /// Whether `NOT NULL` was declared as its own constraint instead of being
+    /// implied by `PRIMARY KEY` or an auto-incrementing identity.
+    #[serde(default)]
+    pub not_null_explicit: bool,
+    /// Durable `PostgreSQL` 18 `NOT NULL` constraint name. Parsing leaves an
+    /// unnamed declaration as `None`; table registration assigns and persists
+    /// `PostgreSQL`'s generated name before the constraint becomes visible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_null_name: Option<String>,
+    /// Whether the named `NOT NULL` constraint has been validated against
+    /// every pre-existing row. `NOT VALID` still enforces future writes.
+    #[serde(default = "default_true")]
+    pub not_null_validated: bool,
+    /// Durable `NO INHERIT` state for `PostgreSQL` 18 named `NOT NULL`
+    /// constraints.
+    #[serde(default)]
+    pub not_null_no_inherit: bool,
+    /// `SERIAL` / `BIGSERIAL` columns auto-allocate from a per-table
+    /// monotonic counter when the value is omitted from `INSERT`.
+    #[serde(default)]
+    pub auto_increment: bool,
+    /// `UNIQUE` column constraint -- the engine rejects an INSERT
+    /// whose value for this column already exists in another row.
+    #[serde(default)]
+    pub unique: bool,
+    /// `DEFAULT <expr>`. Evaluated at INSERT time when the column is
+    /// not present in the row tuple. Persisted in catalog metadata so
+    /// reopened engines keep the same INSERT semantics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<Expr>,
+    /// `PostgreSQL` 18 generated-column definition. Stored values are refreshed
+    /// on every row write; virtual values are evaluated from the physical row
+    /// only when a logical row is read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated: Option<GeneratedColumn>,
+    /// `CHECK (<expr>)` column-level constraint. Evaluated at INSERT
+    /// (and UPDATE-replace) time against the row being written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_name: Option<String>,
+    #[serde(default = "default_true")]
+    pub check_enforced: bool,
+    #[serde(default = "default_true")]
+    pub check_validated: bool,
+    #[serde(default)]
+    pub check_no_inherit: bool,
+    /// Column-level `REFERENCES parent[(col)]` foreign key. An omitted column is resolved to the referenced primary key before publication.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub references: Option<ForeignKeyRef>,
+}
+
+/// `REFERENCES table[(column)]` reference target.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ForeignKeyRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub table: String,
-    pub column: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<String>,
     #[serde(default)]
     pub on_update: ForeignKeyAction,
     #[serde(default)]
@@ -25,9 +86,38 @@ pub struct ForeignKeyRef {
     pub match_type: ForeignKeyMatch,
     #[serde(default = "default_true")]
     pub enforced: bool,
+    #[serde(default = "default_true")]
+    pub validated: bool,
+    #[serde(default)]
+    pub deferrable: bool,
+    #[serde(default)]
+    pub initially_deferred: bool,
     /// `REFERENCES table (..., PERIOD column)` temporal coverage semantics.
     #[serde(default)]
     pub period: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateTable {
+    pub name: String,
+    /// Local SQL relation identifier used while binding expressions declared inside the table definition.
+    pub qualifier: String,
+    pub columns: Vec<ColumnDef>,
+    /// `CREATE TABLE IF NOT EXISTS` - silently ignore the statement
+    /// when a table with this name already exists.
+    pub if_not_exists: bool,
+    /// Table-level `CHECK (...)` constraints. Each entry is an
+    /// expression that must evaluate truthy against every row.
+    #[allow(dead_code)]
+    pub checks: Vec<TableCheck>,
+    /// Table-level `FOREIGN KEY (col, ...) REFERENCES parent(col, ...)`.
+    pub foreign_keys: Vec<ForeignKey>,
+    /// Every declared `PRIMARY KEY` / `UNIQUE` constraint, including
+    /// column-level declarations. Keeping the typed key (rather than only
+    /// setting per-column flags) preserves composite-key and `NULLS NOT
+    /// DISTINCT` semantics through planning and catalog persistence.
+    #[serde(default)]
+    pub key_constraints: Vec<TableKeyConstraint>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,11 +163,15 @@ pub struct TableCheck {
     pub expr: Expr,
     #[serde(default = "default_true")]
     pub enforced: bool,
+    #[serde(default = "default_true")]
+    pub validated: bool,
+    #[serde(default)]
+    pub no_inherit: bool,
 }
 
-/// Table-level foreign key. `local_columns.len()` matches
-/// `ref_columns.len()`; the engine joins on the position-aligned pairs.
+/// Table-level foreign key. Compilation preserves an omitted referenced column list as empty; validation fills it from the primary key before publication.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ForeignKey {
     pub name: Option<String>,
     pub local_columns: Vec<String>,
@@ -96,6 +190,12 @@ pub struct ForeignKey {
     pub match_type: ForeignKeyMatch,
     #[serde(default = "default_true")]
     pub enforced: bool,
+    #[serde(default = "default_true")]
+    pub validated: bool,
+    #[serde(default)]
+    pub deferrable: bool,
+    #[serde(default)]
+    pub initially_deferred: bool,
     /// The final local and referenced columns use `PostgreSQL` PERIOD coverage.
     #[serde(default)]
     pub period: bool,

@@ -38,6 +38,10 @@ The differential summary line reports `total/match/diff`, and any difference mak
 
 `run_routines_stateful.py` executes the delimited cases in `routines_stateful.sql` against PostgreSQL 18.4 with Apache AGE and UQA, then compares both results with `routines_stateful.expected.json`. It covers polymorphic and variadic resolution, pseudo-type declaration validation, user `pg_proc` identity, ALTER lifecycle, persisted concrete bindings, bounded function `DROP CASCADE` effects, and no-dependent procedure CASCADE removal.
 
+The same runner's `--suite constraints` mode executes `constraints_stateful.sql` and compares it with `constraints_stateful.expected.json`. The 84-case transcript covers named CHECK, foreign-key, and `NOT NULL` `NOT VALID` state, validation and enforcement failure atomicity, supported ALTER forms, inferred primary-key references, exact referenced-key identity, directional and temporal cross-type keys, initially-deferred outer-commit and savepoint behavior, dependency-aware drops, multi-action rollback, catalog flags, and exact SQLSTATEs.
+
+The `--suite type-temporal` mode executes `type_temporal_stateful.sql` and compares it with `type_temporal_stateful.expected.json`. It covers built-in range and multirange identity, canonical values and operators, polymorphic range routine resolution, failure-atomic type rewrites, `WITHOUT OVERLAPS`, aggregate `PERIOD` coverage, catalog persistence, and exact SQLSTATEs.
+
 The PostgreSQL side keeps one generated schema across case-specific `psql` connections. The UQA side keeps one temporary database file and deliberately reopens it for every case, so the same comparison also verifies durable routine, view, generated-column, catalog, and ALTER state. Successful observation cases use COPY text rows; type-sensitive cases project `pg_typeof(...)`; expected failures compare SQLSTATE exactly.
 
 Build the pinned PostgreSQL 18.4 and Apache AGE 1.8.0 oracle from AGE commit `b570cf7c1486863f77c14e9c0e07b0e9bfd01bf4`; `Dockerfile.pg18-age` also pins the PostgreSQL multi-platform image digest used for the checked-in transcript:
@@ -58,12 +62,26 @@ Build the current CLI before running the oracle:
 ```sh
 cargo build --release -p uqa-cli --bin usql
 python3 tests/parity/pg18/run_routines_stateful.py
+python3 tests/parity/pg18/run_routines_stateful.py --suite constraints
+python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal
 ```
 
 The runner executes PostgreSQL and UQA concurrently by default. `--backend postgres` and `--backend uqa` select one side for diagnosis. Canonical transcript updates require the PostgreSQL-only backend and use an atomic file replacement; regenerate only from the pinned PostgreSQL 18.4 + AGE oracle, then review the checked-in JSON diff:
 
 ```sh
 python3 tests/parity/pg18/run_routines_stateful.py --backend postgres --update-expected
+python3 tests/parity/pg18/run_routines_stateful.py --suite constraints --backend postgres --update-expected
+python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal --backend postgres --update-expected
 ```
 
 Every fixture case starts with `-- @case <name> <ok|rows|error>` and ends with `-- @end`; this explicit framing allows routine bodies to contain semicolons without making the runner guess SQL statement boundaries. The runner replaces `__UQA_STATEFUL_SCHEMA__` with an isolated generated schema name and rejects an expected transcript whose fixture SHA-256 or ordered case modes are stale.
+
+## Protocol client matrix
+
+`clients/run.sh` builds pinned psycopg, pgx, and node-postgres images, provisions a password-authenticated role in a running PostgreSQL 18.4 container, checks the deterministic operation/version evidence from each driver against `clients/expected.json`, and reruns the same operations against the server fixture assembled from `uqa-pg-wire`. The matrix covers prepared reuse, binary formats, COPY in and out, failed-transaction rollback recovery, and one-connection pool reuse; it also runs the existing PostgreSQL 18 psql/libpq protocol 3.0/3.2 suite.
+
+The default container name is `pg-parity`, the default published PostgreSQL port is `15432`, and the runner uses the Docker runtime's host-gateway alias. Override `UQA_PG18_WIRE_CONTAINER`, `UQA_PG18_ORACLE_PORT`, or `UQA_PG18_DOCKER_HOST` for another local runtime, then run:
+
+```sh
+bash tests/parity/pg18/clients/run.sh
+```

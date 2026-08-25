@@ -236,9 +236,9 @@ pub(super) fn column_constraints(col: &ColumnDef) -> String {
         flags.push(format!("CHECK ({})", expr_display(check)));
     }
     if let Some(reference) = &col.references {
-        flags.push(format!(
-            "REFERENCES {}({})",
-            reference.table, reference.column
+        flags.push(reference.column.as_ref().map_or_else(
+            || format!("REFERENCES {}", reference.table),
+            |column| format!("REFERENCES {}({column})", reference.table),
         ));
     }
     flags.join(" ")

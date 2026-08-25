@@ -12,16 +12,13 @@
 //! in the private `types` module.
 
 use crate::ast::{
-    AlterTableAction, AlterTableStmt, ColumnDef, DeleteStmt, DropKind, DropStmt, Expr, ForeignKey,
-    Statement, TableKeyConstraint, TableKeyConstraintKind, TransactionStmt, UpdateStmt,
+    AlterTableAction, AlterTableStmt, ColumnDef, DeleteStmt, DropKind, DropStmt, Expr, Statement,
+    TableKeyConstraint, TableKeyConstraintKind, TransactionStmt, UpdateStmt,
 };
 use crate::error::{Result, SQLError};
 use pg_query::protobuf::{Node, RangeVar};
 use pg_query::NodeEnum;
-use types::{
-    compile_foreign_key_action, compile_foreign_key_match, compile_pg_type_name,
-    validate_foreign_key_set_columns,
-};
+use types::compile_pg_type_name;
 
 mod administrative;
 mod dispatch;
@@ -56,7 +53,7 @@ pub(in crate::compiler) use returning::compile_returning_clause;
 use tree::{
     compile_column_def, compile_create_index, compile_create_table, compile_expr,
     compile_from_node, compile_insert, compile_projections, compile_select, compile_values_lists,
-    compile_with_clause, extract_string, extract_strings,
+    compile_with_clause, extract_string,
 };
 
 #[cfg(test)]

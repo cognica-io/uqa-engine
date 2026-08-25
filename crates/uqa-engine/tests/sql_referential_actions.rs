@@ -160,7 +160,7 @@ fn on_delete_set_null_column_list_only_rewrites_named_columns() {
     let engine = Engine::new();
     exec(
         &engine,
-        "CREATE TABLE users (tenant_id INTEGER, id INTEGER, name TEXT)",
+        "CREATE TABLE users (tenant_id INTEGER, id INTEGER, name TEXT, PRIMARY KEY (tenant_id, id))",
     );
     exec(
         &engine,
@@ -197,7 +197,7 @@ fn on_delete_set_default_column_list_only_rewrites_named_columns() {
     let engine = Engine::new();
     exec(
         &engine,
-        "CREATE TABLE users (tenant_id INTEGER, id INTEGER, name TEXT)",
+        "CREATE TABLE users (tenant_id INTEGER, id INTEGER, name TEXT, PRIMARY KEY (tenant_id, id))",
     );
     exec(
         &engine,
@@ -266,7 +266,7 @@ fn set_null_failure_rolls_back_parent_delete() {
     assert_err_contains(
         &engine,
         "DELETE FROM parent WHERE id = 1",
-        "NOT NULL constraint",
+        "not-null constraint",
     );
 
     assert_eq!(query(&engine, "SELECT id FROM parent").rows.len(), 1);
@@ -277,7 +277,10 @@ fn set_null_failure_rolls_back_parent_delete() {
 #[test]
 fn match_full_rejects_partially_null_composite_key() {
     let engine = Engine::new();
-    exec(&engine, "CREATE TABLE parent (a INTEGER, b INTEGER)");
+    exec(
+        &engine,
+        "CREATE TABLE parent (a INTEGER, b INTEGER, PRIMARY KEY (a, b))",
+    );
     exec(
         &engine,
         "CREATE TABLE child (

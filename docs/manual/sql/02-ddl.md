@@ -95,6 +95,7 @@ CREATE TABLE parent (
 CREATE TABLE child (
     id INTEGER PRIMARY KEY,
     parent_id INTEGER,
+    score INTEGER,
     FOREIGN KEY (parent_id) REFERENCES parent(id)
         MATCH SIMPLE
         ON UPDATE CASCADE
@@ -104,7 +105,32 @@ CREATE TABLE child (
 
 Implemented match modes are `MATCH SIMPLE` and `MATCH FULL`. Referential actions are `NO ACTION`, `RESTRICT`, `CASCADE`, `SET NULL`, and `SET DEFAULT`. Column subsets are supported for `ON DELETE SET NULL` and `ON DELETE SET DEFAULT`. `MATCH PARTIAL` is not implemented.
 
-Referenced columns must satisfy the implemented unique-key requirements. Mutations validate referential actions as part of the same transaction.
+When the referenced column list is omitted, as in `REFERENCES parent`, the referenced table's primary-key columns are inferred in declaration order. Explicit or inferred referenced columns must form a primary-key or unique key, the referencing and referenced column counts must match, and each aligned type pair must support equality comparison. Mutations validate referential actions as part of the same transaction.
+
+## Constraint lifecycle
+
+PostgreSQL 18 named `CHECK`, foreign-key, and `NOT NULL` constraints support creation with `NOT VALID`, later validation, catalog inspection, alteration where PostgreSQL permits it, and removal:
+
+```sql
+ALTER TABLE child
+    ADD CONSTRAINT score_positive CHECK (score > 0) NOT VALID,
+    ADD CONSTRAINT child_parent_fk FOREIGN KEY (parent_id) REFERENCES parent(id) NOT VALID;
+
+ALTER TABLE child VALIDATE CONSTRAINT score_positive;
+ALTER TABLE child VALIDATE CONSTRAINT child_parent_fk;
+ALTER TABLE child ALTER CONSTRAINT child_parent_fk NOT ENFORCED;
+ALTER TABLE child ALTER CONSTRAINT child_parent_fk ENFORCED;
+ALTER TABLE child ALTER CONSTRAINT child_parent_fk DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE child DROP CONSTRAINT score_positive;
+```
+
+`NOT VALID` skips the existing-row scan while an enforced constraint still checks every new or changed row. `VALIDATE CONSTRAINT` scans existing rows and publishes `convalidated = true` only after the complete scan succeeds. Changing a foreign key from `NOT ENFORCED` to `ENFORCED` performs the same failure-atomic scan. PostgreSQL does not permit changing CHECK or named `NOT NULL` enforceability, and UQA Engine returns the corresponding error instead of approximating that operation.
+
+A named `NOT NULL` constraint can be declared inline, in table-constraint form, or through `ALTER TABLE ... ADD CONSTRAINT name NOT NULL column [NOT VALID] [NO INHERIT]`. Its `pg_constraint` row uses `contype = 'n'`, its validation and inheritance flags survive reopen, and dropping it clears `pg_attribute.attnotnull` unless the column remains part of a primary key.
+
+An `INITIALLY DEFERRED` foreign key is checked at the outer transaction commit. The final transaction state may therefore insert the child before its parent or temporarily delete a referenced parent, and savepoint rollback removes pending checks introduced after that savepoint. Per-transaction `SET CONSTRAINTS` mode changes are not yet implemented.
+
+Comma-separated `ALTER TABLE` actions execute in one transaction, so a later validation or duplicate-name failure rolls back every earlier action. Dropping a CHECK, foreign key, or named `NOT NULL` constraint removes only that owned constraint. Dropping a referenced primary-key or unique constraint uses PostgreSQL dependency behavior: `RESTRICT` reports dependent foreign keys and `CASCADE` removes those foreign keys without dropping their tables, including self-referencing foreign keys.
 
 ## Temporal keys and foreign keys
 
@@ -136,7 +162,8 @@ Implemented changes include:
 
 - Add a column
 - Add a primary-key, unique, check, or foreign-key constraint
-- Drop a column without `CASCADE`
+- Validate, alter, or drop a named constraint on the implemented lifecycle surface
+- Drop a column and its owned constraints, with `CASCADE` removal of inbound foreign keys
 - Rename a column
 - Rename a table
 - Set or drop a column default
@@ -155,7 +182,7 @@ ALTER TABLE orders ALTER COLUMN total TYPE NUMERIC(20, 2);
 ALTER TABLE generated_totals ALTER COLUMN line_total SET EXPRESSION AS (quantity * unit_price * 2);
 ```
 
-Type changes evaluate an optional `USING` expression once for each old row, validate all rewritten rows, constraints, and generated dependencies, and publish the new schema and data atomically. Built-in ranges can be rewritten to their paired multirange with `USING multirange(column)` while retaining `WITHOUT OVERLAPS`; changing one side of an existing `PERIOD` relationship to an incompatible range identity is rejected with PostgreSQL 18 datatype-mismatch SQLSTATE `42804`. `DROP COLUMN CASCADE` is rejected without changing the table.
+Type changes evaluate an optional `USING` expression once for each old row, validate all rewritten rows, constraints, and generated dependencies, and publish the new schema and data atomically. Built-in ranges can be rewritten to their paired multirange with `USING multirange(column)` while retaining `WITHOUT OVERLAPS`; changing one side of an existing `PERIOD` relationship to an incompatible range identity is rejected with PostgreSQL 18 datatype-mismatch SQLSTATE `42804`. `DROP COLUMN CASCADE` removes inbound foreign keys before dropping the column; other dependency kinds that are not yet modeled for cascade still reject the operation atomically.
 
 ## Relational B-tree indexes
 

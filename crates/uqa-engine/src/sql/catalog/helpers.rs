@@ -177,6 +177,8 @@ pub(super) fn view_columns_for(engine: &Engine, view: &str) -> Result<Vec<SQLCol
             not_null: false,
             not_null_explicit: false,
             not_null_name: None,
+            not_null_validated: true,
+            not_null_no_inherit: false,
             auto_increment: false,
             unique: false,
             default: None,
@@ -184,6 +186,8 @@ pub(super) fn view_columns_for(engine: &Engine, view: &str) -> Result<Vec<SQLCol
             check: None,
             check_name: None,
             check_enforced: true,
+            check_validated: true,
+            check_no_inherit: false,
             references: None,
         })
         .collect())
@@ -892,13 +896,6 @@ impl ConstraintCatalogKind {
             _ => None,
         }
     }
-
-    pub(super) const fn no_inherit(self) -> bool {
-        matches!(
-            self,
-            Self::PrimaryKey | Self::Unique { .. } | Self::ForeignKey
-        )
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -925,9 +922,100 @@ pub(super) struct ConstraintCatalogRow {
     pub(super) name: String,
     pub(super) kind: ConstraintCatalogKind,
     pub(super) columns: Vec<ConstraintCatalogColumn>,
-    pub(super) enforced: bool,
+    pub(super) state: ConstraintCatalogState,
     pub(super) period: bool,
     pub(super) foreign_key: Option<ForeignKeyCatalogData>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ConstraintCatalogState {
+    validation: ConstraintValidationState,
+    deferral: ConstraintDeferralState,
+    inheritance: ConstraintInheritanceState,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ConstraintValidationState {
+    enforced: bool,
+    validated: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ConstraintDeferralState {
+    NotDeferrable,
+    InitiallyImmediate,
+    InitiallyDeferred,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ConstraintInheritanceState {
+    Inheritable,
+    NoInherit,
+}
+
+impl ConstraintCatalogState {
+    const fn new(
+        validation: ConstraintValidationState,
+        deferral: ConstraintDeferralState,
+        inheritance: ConstraintInheritanceState,
+    ) -> Self {
+        Self {
+            validation,
+            deferral,
+            inheritance,
+        }
+    }
+
+    pub(super) const fn enforced(self) -> bool {
+        self.validation.enforced
+    }
+
+    pub(super) const fn validated(self) -> bool {
+        self.validation.validated
+    }
+
+    pub(super) const fn deferrable(self) -> bool {
+        !matches!(self.deferral, ConstraintDeferralState::NotDeferrable)
+    }
+
+    pub(super) const fn initially_deferred(self) -> bool {
+        matches!(self.deferral, ConstraintDeferralState::InitiallyDeferred)
+    }
+
+    pub(super) const fn no_inherit(self) -> bool {
+        matches!(self.inheritance, ConstraintInheritanceState::NoInherit)
+    }
+}
+
+impl ConstraintValidationState {
+    const fn new(enforced: bool, validated: bool) -> Self {
+        Self {
+            enforced,
+            validated,
+        }
+    }
+}
+
+impl ConstraintDeferralState {
+    const fn new(deferrable: bool, initially_deferred: bool) -> Self {
+        if !deferrable {
+            ConstraintDeferralState::NotDeferrable
+        } else if initially_deferred {
+            ConstraintDeferralState::InitiallyDeferred
+        } else {
+            ConstraintDeferralState::InitiallyImmediate
+        }
+    }
+}
+
+impl ConstraintInheritanceState {
+    const fn new(no_inherit: bool) -> Self {
+        if no_inherit {
+            ConstraintInheritanceState::NoInherit
+        } else {
+            ConstraintInheritanceState::Inheritable
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -937,7 +1025,7 @@ struct PendingConstraintCatalogRow {
     requested_name: Option<String>,
     kind: ConstraintCatalogKind,
     columns: Vec<ConstraintCatalogColumn>,
-    enforced: bool,
+    state: ConstraintCatalogState,
     period: bool,
     foreign_key: Option<ForeignKeyCatalogData>,
 }
@@ -969,7 +1057,11 @@ pub(super) fn constraint_catalog_rows(
                         name: col.name.clone(),
                         table_ordinal: ordinal,
                     }],
-                    enforced: true,
+                    state: ConstraintCatalogState::new(
+                        ConstraintValidationState::new(true, col.not_null_validated),
+                        ConstraintDeferralState::new(false, false),
+                        ConstraintInheritanceState::new(col.not_null_no_inherit),
+                    ),
                     period: false,
                     foreign_key: None,
                 });
@@ -981,7 +1073,11 @@ pub(super) fn constraint_catalog_rows(
                     requested_name: col.check_name.clone(),
                     kind: ConstraintCatalogKind::Check,
                     columns: check_constraint_columns(expr, &columns, &table_name)?,
-                    enforced: col.check_enforced,
+                    state: ConstraintCatalogState::new(
+                        ConstraintValidationState::new(col.check_enforced, col.check_validated),
+                        ConstraintDeferralState::new(false, false),
+                        ConstraintInheritanceState::new(col.check_no_inherit),
+                    ),
                     period: false,
                     foreign_key: None,
                 });
@@ -991,13 +1087,16 @@ pub(super) fn constraint_catalog_rows(
                     name: reference.name.clone(),
                     local_columns: vec![col.name.clone()],
                     ref_table: reference.table.clone(),
-                    ref_columns: vec![reference.column.clone()],
+                    ref_columns: reference.column.iter().cloned().collect(),
                     on_update: reference.on_update,
                     on_delete: reference.on_delete,
                     on_delete_set_columns: Vec::new(),
                     match_type: reference.match_type,
                     enforced: reference.enforced,
-                    period: false,
+                    validated: reference.validated,
+                    deferrable: reference.deferrable,
+                    initially_deferred: reference.initially_deferred,
+                    period: reference.period,
                 };
                 pending.push(foreign_key_catalog_row(
                     engine,
@@ -1014,7 +1113,6 @@ pub(super) fn constraint_catalog_rows(
             .try_key_constraints(&table_name)
             .map_err(|err| SQLError::Internal(format!("read key constraints: {err}")))?
         {
-            let period = constraint.without_overlaps;
             pending.push(PendingConstraintCatalogRow {
                 schema: schema.clone(),
                 table: table.clone(),
@@ -1026,8 +1124,12 @@ pub(super) fn constraint_catalog_rows(
                     },
                 },
                 columns: named_constraint_columns(&constraint.columns, &columns, &table_name)?,
-                enforced: true,
-                period,
+                state: ConstraintCatalogState::new(
+                    ConstraintValidationState::new(true, true),
+                    ConstraintDeferralState::new(false, false),
+                    ConstraintInheritanceState::new(true),
+                ),
+                period: constraint.without_overlaps,
                 foreign_key: None,
             });
         }
@@ -1039,7 +1141,11 @@ pub(super) fn constraint_catalog_rows(
                 requested_name: constraint.name,
                 kind: ConstraintCatalogKind::Check,
                 columns: check_constraint_columns(&constraint.expr, &columns, &table_name)?,
-                enforced: constraint.enforced,
+                state: ConstraintCatalogState::new(
+                    ConstraintValidationState::new(constraint.enforced, constraint.validated),
+                    ConstraintDeferralState::new(false, false),
+                    ConstraintInheritanceState::new(constraint.no_inherit),
+                ),
                 period: false,
                 foreign_key: None,
             });
@@ -1069,7 +1175,7 @@ pub(super) fn constraint_catalog_rows(
                 name,
                 kind: constraint.kind,
                 columns: constraint.columns,
-                enforced: constraint.enforced,
+                state: constraint.state,
                 period: constraint.period,
                 foreign_key: constraint.foreign_key,
             });
@@ -1271,7 +1377,11 @@ fn foreign_key_catalog_row(
         requested_name: foreign_key.name.clone(),
         kind: ConstraintCatalogKind::ForeignKey,
         columns: local_columns,
-        enforced: foreign_key.enforced,
+        state: ConstraintCatalogState::new(
+            ConstraintValidationState::new(foreign_key.enforced, foreign_key.validated),
+            ConstraintDeferralState::new(foreign_key.deferrable, foreign_key.initially_deferred),
+            ConstraintInheritanceState::new(true),
+        ),
         period: foreign_key.period,
         foreign_key: Some(ForeignKeyCatalogData {
             schema: referenced_schema,
