@@ -50,7 +50,8 @@ impl Engine {
         }
         let mut output = Vec::new();
         let mut visiting = BTreeSet::new();
-        self.collect_hierarchy_descendants(&root, &mut visiting, &mut output)?;
+        let mut visited = BTreeSet::new();
+        self.collect_hierarchy_descendants(&root, &mut visiting, &mut visited, &mut output)?;
         Ok(output)
     }
 
@@ -58,13 +59,18 @@ impl Engine {
         &self,
         parent: &str,
         visiting: &mut BTreeSet<String>,
+        visited: &mut BTreeSet<String>,
         output: &mut Vec<String>,
     ) -> Result<(), SQLError> {
-        if !visiting.insert(parent.to_string()) {
+        if visiting.contains(parent) {
             return Err(SQLError::Internal(format!(
                 "table inheritance cycle reaches `{parent}`"
             )));
         }
+        if !visited.insert(parent.to_string()) {
+            return Ok(());
+        }
+        visiting.insert(parent.to_string());
         output.push(parent.to_string());
         let tables = self.storage.tables.read();
         let children = tables
@@ -81,7 +87,7 @@ impl Engine {
             .collect::<Vec<_>>();
         drop(tables);
         for child in children {
-            self.collect_hierarchy_descendants(&child, visiting, output)?;
+            self.collect_hierarchy_descendants(&child, visiting, visited, output)?;
         }
         visiting.remove(parent);
         Ok(())

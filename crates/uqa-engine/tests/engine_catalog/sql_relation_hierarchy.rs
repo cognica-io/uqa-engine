@@ -9,6 +9,9 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "sql_relation_hierarchy/regressions.rs"]
+mod regressions;
+
 fn exec(engine: &Engine, sql: &str) {
     engine.sql(sql, &[]).unwrap();
 }

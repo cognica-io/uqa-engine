@@ -76,7 +76,7 @@ pub(in crate::sql) fn run_update_inner(
     let target_is_partitioned =
         target_hierarchy.partition_spec.is_some() || target_hierarchy.partition_bound.is_some();
     let has_runtime_scope = !ctes.rows.is_empty() || !ctes.scalar_subqueries.is_empty();
-    if !has_runtime_scope && target_tables.len() == 1 {
+    if !has_runtime_scope && target_tables.len() == 1 && !target_is_partitioned {
         if let Some(result) = try_run_point_update(engine, stmt, params)? {
             return Ok(result);
         }
