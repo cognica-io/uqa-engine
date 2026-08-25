@@ -155,7 +155,7 @@ fn on_delete_set_null_column_list_only_rewrites_named_columns() {
     let engine = Engine::new();
     exec(
         &engine,
-        "CREATE TABLE users (tenant_id INTEGER, id INTEGER, name TEXT)",
+        "CREATE TABLE users (tenant_id INTEGER, id INTEGER, name TEXT, PRIMARY KEY (tenant_id, id))",
     );
     exec(
         &engine,
@@ -192,7 +192,7 @@ fn on_delete_set_default_column_list_only_rewrites_named_columns() {
     let engine = Engine::new();
     exec(
         &engine,
-        "CREATE TABLE users (tenant_id INTEGER, id INTEGER, name TEXT)",
+        "CREATE TABLE users (tenant_id INTEGER, id INTEGER, name TEXT, PRIMARY KEY (tenant_id, id))",
     );
     exec(
         &engine,
@@ -261,7 +261,7 @@ fn set_null_failure_rolls_back_parent_delete() {
     assert_err_contains(
         &engine,
         "DELETE FROM parent WHERE id = 1",
-        "NOT NULL constraint",
+        "not-null constraint",
     );
 
     assert_eq!(query(&engine, "SELECT id FROM parent").rows.len(), 1);
@@ -272,7 +272,10 @@ fn set_null_failure_rolls_back_parent_delete() {
 #[test]
 fn match_full_rejects_partially_null_composite_key() {
     let engine = Engine::new();
-    exec(&engine, "CREATE TABLE parent (a INTEGER, b INTEGER)");
+    exec(
+        &engine,
+        "CREATE TABLE parent (a INTEGER, b INTEGER, PRIMARY KEY (a, b))",
+    );
     exec(
         &engine,
         "CREATE TABLE child (
@@ -323,7 +326,7 @@ fn insert_select_rejects_missing_foreign_key_and_rolls_back() {
     assert_err_contains(
         &engine,
         "INSERT INTO child (id, parent_id) SELECT id, parent_id FROM source",
-        "FOREIGN KEY constraint",
+        "foreign key constraint",
     );
 
     assert!(query(&engine, "SELECT id FROM child").rows.is_empty());
@@ -432,7 +435,7 @@ fn merge_insert_rejects_missing_foreign_key_and_rolls_back() {
         &engine,
         "MERGE INTO child AS c USING source AS s ON c.id = s.id
          WHEN NOT MATCHED THEN INSERT (id, parent_id) VALUES (s.id, s.parent_id)",
-        "FOREIGN KEY constraint",
+        "foreign key constraint",
     );
 
     assert!(query(&engine, "SELECT id FROM child").rows.is_empty());

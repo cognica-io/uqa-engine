@@ -74,7 +74,7 @@ A model extension must version input schema, layer specification, parameter enco
 
 ## PostgreSQL wire codec
 
-`uqa-pg-wire` decodes frontend and encodes backend PostgreSQL v3 messages. It deliberately does not own sockets, TLS, authentication storage, scheduling, SQL planning, or transaction policy. An embedding server maps protocol messages to independent engine sessions.
+`uqa-pg-wire` decodes frontend and encodes backend PostgreSQL v3 messages. Its shared format-code resolver expands extended-query and function-call zero, one, or one-per-value text/binary formats; its authentication exchange decodes the context-dependent password, MD5, GSS, SSPI, and SASL response shapes while enforcing message order; and its cancellation-key API preserves opaque downstream secrets through bounded middleware prefixes. It deliberately does not own sockets, TLS, credential verification or storage, scheduling, SQL planning, transaction policy, pooling, or process recovery. An embedding server maps protocol messages to independent engine sessions and closes malformed peers.
 
 ## Language bindings
 

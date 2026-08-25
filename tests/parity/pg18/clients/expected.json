@@ -1,0 +1,37 @@
+{
+  "node-postgres": {
+    "driver": "node-postgres",
+    "operations": [
+      "binary-result",
+      "prepared-reuse",
+      "copy-in-out",
+      "transaction-error-recovery",
+      "pool-reuse"
+    ],
+    "pg": "8.23.0",
+    "pgCopyStreams": "7.0.0"
+  },
+  "pgx": {
+    "driver": "pgx",
+    "operations": [
+      "binary-bind-result",
+      "prepared-reuse",
+      "copy-in-out",
+      "transaction-error-recovery",
+      "pool-reuse"
+    ],
+    "pgx": "v5.10.0"
+  },
+  "psycopg": {
+    "driver": "psycopg",
+    "operations": [
+      "binary-bind-result",
+      "prepared-reuse",
+      "copy-in-out",
+      "transaction-error-recovery",
+      "pool-reuse"
+    ],
+    "psycopg": "3.3.4",
+    "psycopg_pool": "3.3.1"
+  }
+}

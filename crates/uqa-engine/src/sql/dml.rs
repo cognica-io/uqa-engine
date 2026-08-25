@@ -785,7 +785,7 @@ mod update_from;
 mod vectors;
 
 pub(in crate::sql) use conflict::*;
-pub(in crate::sql) use constraints::*;
+pub(crate) use constraints::*;
 pub(in crate::sql) use delete::*;
 pub(in crate::sql) use insert::*;
 pub(in crate::sql) use merge::*;

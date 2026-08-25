@@ -62,6 +62,15 @@ pub enum PgWireError {
     InvalidTransactionStatus(u8),
     #[error("embedded nul byte in {context}")]
     EmbeddedNul { context: &'static str },
+    #[error("SASL mechanism names cannot be empty")]
+    EmptySaslMechanism,
+    #[error("AuthenticationSASL must advertise at least one mechanism")]
+    EmptySaslMechanismList,
+    #[error("invalid authentication sequence: cannot process {message} while {state}")]
+    InvalidAuthenticationSequence {
+        state: &'static str,
+        message: &'static str,
+    },
     #[error("invalid SQLSTATE {code:?}; expected exactly five ASCII letters or digits")]
     InvalidSqlState { code: String },
     #[error(
@@ -77,6 +86,26 @@ pub enum PgWireError {
     FunctionArgumentFormatCountMismatch {
         format_count: usize,
         argument_count: usize,
+    },
+    #[error(
+        "Bind result format count {format_count} must be zero, one, or match result column count {column_count}"
+    )]
+    ResultFormatCountMismatch {
+        format_count: usize,
+        column_count: usize,
+    },
+    #[error("{context} index {index} is out of range for {count} value(s)")]
+    FormatIndexOutOfRange {
+        context: &'static str,
+        index: usize,
+        count: usize,
+    },
+    #[error(
+        "cannot remove a {layer_length}-byte middleware cancellation-key prefix from a {key_length}-byte key"
+    )]
+    InvalidCancelKeyLayerLength {
+        layer_length: usize,
+        key_length: usize,
     },
     #[error("text COPY response column {column} uses the binary format")]
     BinaryColumnInTextCopy { column: usize },
@@ -189,6 +218,49 @@ impl CancelKey {
         self.0
     }
 
+    /// Prefix middleware-owned routing data while retaining the complete
+    /// downstream cancellation secret.
+    ///
+    /// `PostgreSQL` does not prescribe a framing format for middleware data.
+    /// Each layer therefore owns the prefix length it adds and passes that
+    /// same length to [`Self::remove_middleware_prefix`] on the return path.
+    pub fn with_middleware_prefix(&self, prefix: &[u8]) -> Result<Self, PgWireError> {
+        let length = prefix
+            .len()
+            .checked_add(self.0.len())
+            .ok_or(PgWireError::LengthTooLarge {
+                context: "middleware cancellation key",
+                length: prefix.len(),
+            })?;
+        if length > MAX_CANCEL_KEY_LEN {
+            return Err(PgWireError::InvalidCancelKeyLength {
+                length,
+                minimum: MIN_CANCEL_REQUEST_KEY_LEN,
+                maximum: MAX_CANCEL_KEY_LEN,
+            });
+        }
+        let mut bytes = Vec::with_capacity(length);
+        bytes.extend_from_slice(prefix);
+        bytes.extend_from_slice(&self.0);
+        Self::new(bytes)
+    }
+
+    /// Remove one middleware prefix and return both the layer data and the
+    /// downstream cancellation secret.
+    pub fn remove_middleware_prefix(
+        &self,
+        prefix_length: usize,
+    ) -> Result<(Vec<u8>, Self), PgWireError> {
+        if prefix_length >= self.0.len() {
+            return Err(PgWireError::InvalidCancelKeyLayerLength {
+                layer_length: prefix_length,
+                key_length: self.0.len(),
+            });
+        }
+        let (prefix, downstream) = self.0.split_at(prefix_length);
+        Ok((prefix.to_vec(), Self::new(downstream.to_vec())?))
+    }
+
     pub fn validate_for_backend_key_data(
         &self,
         version: ProtocolVersion,
@@ -244,6 +316,41 @@ impl FormatCode {
             Self::Text => 0,
             Self::Binary => 1,
         }
+    }
+}
+
+pub(crate) fn resolve_format_codes(
+    formats: &[FormatCode],
+    value_count: usize,
+    mismatch: impl FnOnce(usize, usize) -> PgWireError,
+) -> Result<Vec<FormatCode>, PgWireError> {
+    match formats {
+        [] => Ok(vec![FormatCode::Text; value_count]),
+        [format] => Ok(vec![*format; value_count]),
+        formats if formats.len() == value_count => Ok(formats.to_vec()),
+        formats => Err(mismatch(formats.len(), value_count)),
+    }
+}
+
+pub(crate) fn resolve_format_code(
+    formats: &[FormatCode],
+    value_count: usize,
+    index: usize,
+    context: &'static str,
+    mismatch: impl FnOnce(usize, usize) -> PgWireError,
+) -> Result<FormatCode, PgWireError> {
+    if index >= value_count {
+        return Err(PgWireError::FormatIndexOutOfRange {
+            context,
+            index,
+            count: value_count,
+        });
+    }
+    match formats {
+        [] => Ok(FormatCode::Text),
+        [format] => Ok(*format),
+        formats if formats.len() == value_count => Ok(formats[index]),
+        formats => Err(mismatch(formats.len(), value_count)),
     }
 }
 

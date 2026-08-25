@@ -5,7 +5,7 @@
 //
 
 use super::{
-    BackendTransactionMode, Engine, EngineDataSnapshot, SQLError, SQLParam, SQLResult,
+    BTreeSet, BackendTransactionMode, Engine, EngineDataSnapshot, SQLError, SQLParam, SQLResult,
     SessionStateSnapshot, StorageBackendError, StorageBackendResult, TransactionDirtyState,
     TransactionFrame, TransactionIntent, TransactionSavepoint, TransactionStatus,
 };
@@ -538,6 +538,7 @@ impl Engine {
             next_lock_mark,
             snapshot_change_baseline,
             row_changes: Vec::new(),
+            deferred_foreign_key_rows: BTreeSet::new(),
         });
         self.update_statement_row_lock_baseline(snapshot_change_baseline);
         Ok(())
@@ -659,10 +660,15 @@ impl Engine {
     }
 
     fn commit_transaction_frame(&self, stack: &mut Vec<TransactionFrame>) -> Result<(), SQLError> {
+        let storage_savepoint = stack
+            .last()
+            .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?
+            .storage_savepoint
+            .clone();
+        self.validate_deferred_constraints_before_commit(stack, storage_savepoint.is_some())?;
         let frame = stack
             .last()
             .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?;
-        let storage_savepoint = frame.storage_savepoint.clone();
         let read_only = frame.intent == TransactionIntent::ReadOnly;
         if read_only && storage_savepoint.is_none() {
             if let Some(backend) = self.storage.backend.as_ref() {
@@ -725,35 +731,15 @@ impl Engine {
                 .publish_row_changes(self.session_id, committed.row_changes.iter().copied());
             drop(change_publication);
             self.row_locks.release_session(self.session_id);
-            if self
-                .epochs
-                .table_catalog
-                .dirty
-                .load(std::sync::atomic::Ordering::Acquire)
-            {
-                self.publish_table_catalog_changes();
-            }
-            if self
-                .epochs
-                .catalog_registry
-                .dirty
-                .load(std::sync::atomic::Ordering::Acquire)
-            {
-                self.publish_catalog_registry_changes();
-            }
-            if self
-                .epochs
-                .table_data
-                .dirty
-                .load(std::sync::atomic::Ordering::Acquire)
-            {
-                self.publish_table_data_changes();
-            }
+            self.publish_committed_transaction_epochs();
             publication_result?;
         }
         if let Some(parent) = stack.last_mut() {
             parent.next_lock_mark = parent.next_lock_mark.max(committed.next_lock_mark);
             parent.row_changes.extend(committed.row_changes);
+            parent
+                .deferred_foreign_key_rows
+                .extend(committed.deferred_foreign_key_rows);
         }
         Ok(())
     }
@@ -916,6 +902,7 @@ impl Engine {
                 savepoint.dirty,
                 savepoint.lock_mark,
                 savepoint.row_changes.clone(),
+                savepoint.deferred_foreign_key_rows.clone(),
             )
         });
         let transaction_snapshot = (
@@ -951,20 +938,27 @@ impl Engine {
             }
         }
 
-        let (session_snapshot, data_snapshot, dirty, keep_mark, row_changes) =
-            if let Some((_, session, data, dirty, mark, row_changes)) = savepoint {
-                (session, data, dirty, Some(mark), row_changes)
-            } else {
-                (
-                    transaction_snapshot.0,
-                    transaction_snapshot.1,
-                    transaction_snapshot.2,
-                    frame_storage_savepoint
-                        .as_ref()
-                        .map(|_| frame_begin_lock_mark.saturating_sub(1)),
-                    Vec::new(),
-                )
-            };
+        let (
+            session_snapshot,
+            data_snapshot,
+            dirty,
+            keep_mark,
+            row_changes,
+            deferred_foreign_key_rows,
+        ) = if let Some((_, session, data, dirty, mark, row_changes, deferred_rows)) = savepoint {
+            (session, data, dirty, Some(mark), row_changes, deferred_rows)
+        } else {
+            (
+                transaction_snapshot.0,
+                transaction_snapshot.1,
+                transaction_snapshot.2,
+                frame_storage_savepoint
+                    .as_ref()
+                    .map(|_| frame_begin_lock_mark.saturating_sub(1)),
+                Vec::new(),
+                BTreeSet::new(),
+            )
+        };
         if let Some(snapshot) = data_snapshot.as_ref() {
             if let Err(restore_error) = self.restore_transaction_data(snapshot) {
                 cleanup_errors.push(format!("memory restore: {restore_error}"));
@@ -983,11 +977,7 @@ impl Engine {
             }
         }
         self.restore_session_state(&session_snapshot);
-        if let Some(mark) = keep_mark {
-            self.row_locks.release_mark_above(self.session_id, mark);
-        } else {
-            self.row_locks.release_session(self.session_id);
-        }
+        self.release_aborted_statement_locks(keep_mark);
         if let Some(frame) = stack.last_mut() {
             frame.status = if backend_aborted {
                 TransactionStatus::FailedBackendAborted
@@ -995,8 +985,17 @@ impl Engine {
                 TransactionStatus::Failed
             };
             frame.row_changes = row_changes;
+            frame.deferred_foreign_key_rows = deferred_foreign_key_rows;
         }
         transaction_abort_result(error, &cleanup_errors)
+    }
+
+    fn release_aborted_statement_locks(&self, keep_mark: Option<u32>) {
+        if let Some(mark) = keep_mark {
+            self.row_locks.release_mark_above(self.session_id, mark);
+        } else {
+            self.row_locks.release_session(self.session_id);
+        }
     }
 
     /// A deferred outer frame still runs a backend read transaction, which cannot carry backend savepoints. Savepoints are then recorded on the frame only; promotion to a writer recreates every recorded savepoint on the write transaction, so `PostgreSQL`'s fresh READ COMMITTED snapshot per statement survives `SAVEPOINT` and nested `BEGIN`.
@@ -1029,6 +1028,7 @@ impl Engine {
         frame.lock_mark = frame.next_lock_mark;
         frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
         let row_changes = frame.row_changes.clone();
+        let deferred_foreign_key_rows = frame.deferred_foreign_key_rows.clone();
         frame.savepoints.push(TransactionSavepoint {
             name,
             session_snapshot,
@@ -1036,6 +1036,7 @@ impl Engine {
             dirty: self.transaction_dirty_state(),
             lock_mark: keep_mark,
             row_changes,
+            deferred_foreign_key_rows,
         });
         Ok(())
     }
@@ -1104,6 +1105,9 @@ impl Engine {
         self.restore_session_state(&savepoint.session_snapshot);
         let keep_mark = savepoint.lock_mark;
         frame.row_changes.clone_from(&savepoint.row_changes);
+        frame
+            .deferred_foreign_key_rows
+            .clone_from(&savepoint.deferred_foreign_key_rows);
         frame.savepoints.truncate(position + 1);
         self.row_locks
             .release_mark_above(self.session_id, keep_mark);
@@ -1354,6 +1358,8 @@ fn transaction_abort_result(error: SQLError, cleanup_errors: &[String]) -> SQLEr
     }
 }
 
+mod completion;
+mod constraints;
 mod row_locks_session;
 
 #[cfg(test)]

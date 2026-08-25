@@ -64,45 +64,73 @@ fn run_create_table_as_inner(
     engine: &Engine,
     execution: &CreateTableAsExecution<'_>,
 ) -> Result<SQLResult, SQLError> {
+    let ctes = crate::sql::select::CteScope::new();
+    let mut query_schema = execution
+        .with_no_data
+        .then(|| {
+            crate::sql::select::analyze_query_plan_schema(
+                engine,
+                execution.query,
+                execution.params,
+                &ctes,
+                None,
+            )
+        })
+        .transpose()?;
+    let preliminary_name = create_table_as_target_name(engine, execution);
+    if let Ok(name) = &preliminary_name {
+        if should_skip_existing_create_table_as(engine, name, execution.if_not_exists)? {
+            return Ok(SQLResult::empty());
+        }
+    }
+    // A locking source must acquire and recheck every tuple before this session promotes its deferred backend transaction. Promoting first would invert the global writer and tuple-lock order against a concurrent updater. The target is checked again after promotion so a concurrent relation create still wins atomically.
+    let locking_result =
+        if !execution.with_no_data && crate::sql::select::query_has_row_locks(execution.query) {
+            query_schema = Some(crate::sql::select::analyze_query_plan_schema(
+                engine,
+                execution.query,
+                execution.params,
+                &ctes,
+                None,
+            )?);
+            Some(crate::sql::select::execute_query_plan(
+                engine,
+                execution.query,
+                execution.params,
+            )?)
+        } else {
+            None
+        };
     if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
         engine.prepare_explicit_transaction_writer()?;
     }
-    let name = if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {
-        engine
-            .try_temporary_relation_name_for_create(execution.name)
-            .map_err(SQLError::Unsupported)?
-    } else {
-        engine
-            .try_relation_name_for_create(execution.name)
-            .map_err(SQLError::Unsupported)?
-    };
-    if engine
-        .relation_kind_at(&name)
-        .map_err(|err| ddl_storage_error("CREATE TABLE AS", err))?
-        .is_some()
-    {
-        if execution.if_not_exists {
-            return Ok(SQLResult::empty());
-        }
-        return Err(SQLError::Routine {
-            sqlstate: "42P07".into(),
-            message: format!("relation \"{name}\" already exists"),
-        });
+    let name = create_table_as_target_name(engine, execution)?;
+    if should_skip_existing_create_table_as(engine, &name, execution.if_not_exists)? {
+        return Ok(SQLResult::empty());
     }
-    let ctes = crate::sql::select::CteScope::new();
-    let query_schema = crate::sql::select::analyze_query_plan_schema(
-        engine,
-        execution.query,
-        execution.params,
-        &ctes,
-        None,
-    )?;
+    let query_schema = match query_schema {
+        Some(schema) => schema,
+        None => crate::sql::select::analyze_query_plan_schema(
+            engine,
+            execution.query,
+            execution.params,
+            &ctes,
+            None,
+        )?,
+    };
     let columns = create_table_as_columns(&query_schema, execution.column_names)?;
     let result = if execution.with_no_data {
         None
+    } else if let Some(result) = locking_result {
+        Some(result)
     } else {
-        let result =
-            crate::sql::select::execute_query_plan(engine, execution.query, execution.params)?;
+        Some(crate::sql::select::execute_query_plan(
+            engine,
+            execution.query,
+            execution.params,
+        )?)
+    };
+    if let Some(result) = &result {
         if result.columns.len() != columns.len() {
             return Err(SQLError::Internal(format!(
                 "CREATE TABLE AS query schema width {} changed to {} during execution",
@@ -110,8 +138,7 @@ fn run_create_table_as_inner(
                 result.columns.len()
             )));
         }
-        Some(result)
-    };
+    }
     create_table_as_relation(
         engine,
         &name,
@@ -123,6 +150,42 @@ fn run_create_table_as_inner(
         materialize_create_table_as_rows(engine, &name, &columns, result)
     })?;
     Ok(SQLResult::from_affected(affected))
+}
+
+fn create_table_as_target_name(
+    engine: &Engine,
+    execution: &CreateTableAsExecution<'_>,
+) -> Result<String, SQLError> {
+    if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {
+        engine
+            .try_temporary_relation_name_for_create(execution.name)
+            .map_err(SQLError::Unsupported)
+    } else {
+        engine
+            .try_relation_name_for_create(execution.name)
+            .map_err(SQLError::Unsupported)
+    }
+}
+
+fn should_skip_existing_create_table_as(
+    engine: &Engine,
+    name: &str,
+    if_not_exists: bool,
+) -> Result<bool, SQLError> {
+    if engine
+        .relation_kind_at(name)
+        .map_err(|err| ddl_storage_error("CREATE TABLE AS", err))?
+        .is_none()
+    {
+        return Ok(false);
+    }
+    if if_not_exists {
+        return Ok(true);
+    }
+    Err(SQLError::Routine {
+        sqlstate: "42P07".into(),
+        message: format!("relation \"{name}\" already exists"),
+    })
 }
 
 fn create_table_as_relation(
@@ -235,6 +298,8 @@ fn create_table_as_columns(
             not_null: false,
             not_null_explicit: false,
             not_null_name: None,
+            not_null_validated: true,
+            not_null_no_inherit: false,
             auto_increment: false,
             unique: false,
             default: None,
@@ -242,6 +307,8 @@ fn create_table_as_columns(
             check: None,
             check_name: None,
             check_enforced: true,
+            check_validated: true,
+            check_no_inherit: false,
             references: None,
         })
         .collect())

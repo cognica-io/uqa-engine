@@ -629,7 +629,10 @@ fn reopen_migrates_valid_v21_postings_without_rebuilding_from_documents() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, "22");
+    assert_eq!(
+        version,
+        uqa_storage::sqlite::CURRENT_SCHEMA_VERSION.to_string()
+    );
     let migrated_rows: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM _posting_clusters

@@ -14,6 +14,13 @@ use super::{
 };
 use crate::ast::{GeneratedColumn, GeneratedColumnKind};
 
+struct TableNotNullConstraint {
+    name: Option<String>,
+    column: String,
+    validated: bool,
+    no_inherit: bool,
+}
+
 pub(in crate::compiler) fn compile_create_table(
     stmt: &pg_query::protobuf::CreateStmt,
 ) -> Result<CreateTable> {
@@ -35,6 +42,7 @@ pub(in crate::compiler) fn compile_create_table(
     let mut checks: Vec<TableCheck> = Vec::new();
     let mut foreign_keys: Vec<ForeignKey> = Vec::new();
     let mut key_constraints: Vec<TableKeyConstraint> = Vec::new();
+    let mut table_not_nulls = Vec::new();
     let mut named_constraints = BTreeSet::new();
     let mut primary_key_seen = false;
     for elt in &stmt.table_elts {
@@ -108,6 +116,8 @@ pub(in crate::compiler) fn compile_create_table(
                             name: cname,
                             expr,
                             enforced: cstr.is_enforced,
+                            validated: cstr.initially_valid && cstr.is_enforced,
+                            no_inherit: cstr.is_no_inherit,
                         });
                     }
                     pg_query::protobuf::ConstrType::ConstrForeign => {
@@ -123,12 +133,12 @@ pub(in crate::compiler) fn compile_create_table(
                                 SQLError::Internal("FOREIGN KEY without referenced table".into())
                             })?;
                         let ref_columns = extract_strings(&cstr.pk_attrs)?;
-                        if local_columns.is_empty() || ref_columns.is_empty() {
+                        if local_columns.is_empty() {
                             return Err(SQLError::Internal(
-                                "FOREIGN KEY without local or referenced columns".into(),
+                                "FOREIGN KEY without local columns".into(),
                             ));
                         }
-                        if local_columns.len() != ref_columns.len() {
+                        if !ref_columns.is_empty() && local_columns.len() != ref_columns.len() {
                             return Err(SQLError::TypeMismatch(format!(
                                 "FOREIGN KEY has {} local columns but {} referenced columns",
                                 local_columns.len(),
@@ -156,6 +166,9 @@ pub(in crate::compiler) fn compile_create_table(
                             on_delete_set_columns,
                             match_type: compile_foreign_key_match(&cstr.fk_matchtype)?,
                             enforced: cstr.is_enforced,
+                            validated: cstr.initially_valid && cstr.is_enforced,
+                            deferrable: cstr.deferrable,
+                            initially_deferred: cstr.initdeferred,
                         });
                     }
                     pg_query::protobuf::ConstrType::ConstrPrimary
@@ -186,6 +199,20 @@ pub(in crate::compiler) fn compile_create_table(
                             nulls_not_distinct: cstr.nulls_not_distinct,
                         });
                     }
+                    pg_query::protobuf::ConstrType::ConstrNotnull => {
+                        let key_columns = extract_strings(&cstr.keys)?;
+                        let [column] = key_columns.as_slice() else {
+                            return Err(SQLError::TypeMismatch(
+                                "NOT NULL constraint must name exactly one column".into(),
+                            ));
+                        };
+                        table_not_nulls.push(TableNotNullConstraint {
+                            name: constraint_name(&cstr.conname),
+                            column: column.clone(),
+                            validated: cstr.initially_valid,
+                            no_inherit: cstr.is_no_inherit,
+                        });
+                    }
                     other => {
                         return Err(SQLError::Unsupported(format!(
                             "table constraint {other:?} is not supported"
@@ -199,6 +226,31 @@ pub(in crate::compiler) fn compile_create_table(
                 )));
             }
         }
+    }
+    for constraint in table_not_nulls {
+        let column = columns
+            .iter_mut()
+            .find(|column| column.name == constraint.column)
+            .ok_or_else(|| {
+                SQLError::TypeMismatch(format!(
+                    "NOT NULL constraint references unknown column `{}`",
+                    constraint.column
+                ))
+            })?;
+        if column.not_null_explicit {
+            return Err(SQLError::Routine {
+                sqlstate: "55000".into(),
+                message: format!(
+                    "cannot create not-null constraint on column \"{}\": a not-null constraint already exists",
+                    constraint.column
+                ),
+            });
+        }
+        column.not_null = true;
+        column.not_null_explicit = true;
+        column.not_null_name = constraint.name;
+        column.not_null_validated = constraint.validated;
+        column.not_null_no_inherit = constraint.no_inherit;
     }
     let column_names: BTreeSet<&str> = columns.iter().map(|column| column.name.as_str()).collect();
     for constraint in &key_constraints {
@@ -297,12 +349,16 @@ pub(in crate::compiler) fn compile_column_def(
     let mut not_null = false;
     let mut not_null_explicit = false;
     let mut not_null_name = None;
+    let mut not_null_validated = true;
+    let mut not_null_no_inherit = false;
     let mut unique = false;
     let mut default: Option<Expr> = None;
     let mut generated: Option<GeneratedColumn> = None;
     let mut check: Option<Expr> = None;
     let mut check_name = None;
     let mut check_enforced = true;
+    let mut check_validated = true;
+    let mut check_no_inherit = false;
     let mut references: Option<crate::ast::ForeignKeyRef> = None;
     #[derive(Clone, Copy)]
     enum EnforceableConstraint {
@@ -326,6 +382,8 @@ pub(in crate::compiler) fn compile_column_def(
                     not_null = true;
                     not_null_explicit = true;
                     not_null_name = constraint_name(&cstr.conname);
+                    not_null_validated = cstr.initially_valid;
+                    not_null_no_inherit = cstr.is_no_inherit;
                     last_enforceable = None;
                 }
                 pg_query::protobuf::ConstrType::ConstrUnique => {
@@ -371,6 +429,8 @@ pub(in crate::compiler) fn compile_column_def(
                     check = Some(compile_expr(raw)?);
                     check_name = constraint_name(&cstr.conname);
                     check_enforced = cstr.is_enforced;
+                    check_validated = cstr.initially_valid && cstr.is_enforced;
+                    check_no_inherit = cstr.is_no_inherit;
                     last_enforceable = Some(EnforceableConstraint::Check);
                 }
                 pg_query::protobuf::ConstrType::ConstrForeign => {
@@ -384,19 +444,22 @@ pub(in crate::compiler) fn compile_column_def(
                             SQLError::Internal("REFERENCES without a table".into())
                         })?;
                     let columns = extract_strings(&cstr.pk_attrs)?;
-                    let [column] = columns.as_slice() else {
-                        return Err(SQLError::Internal(
-                            "column REFERENCES must name exactly one referenced column".into(),
+                    if columns.len() > 1 {
+                        return Err(SQLError::TypeMismatch(
+                            "column REFERENCES must name at most one referenced column".into(),
                         ));
-                    };
+                    }
                     references = Some(crate::ast::ForeignKeyRef {
                         name: constraint_name(&cstr.conname),
                         table,
-                        column: column.clone(),
+                        column: columns.into_iter().next(),
                         on_update: compile_foreign_key_action(&cstr.fk_upd_action)?,
                         on_delete: compile_foreign_key_action(&cstr.fk_del_action)?,
                         match_type: compile_foreign_key_match(&cstr.fk_matchtype)?,
                         enforced: cstr.is_enforced,
+                        validated: cstr.initially_valid && cstr.is_enforced,
+                        deferrable: cstr.deferrable,
+                        initially_deferred: cstr.initdeferred,
                     });
                     last_enforceable = Some(EnforceableConstraint::ForeignKey);
                 }
@@ -405,17 +468,22 @@ pub(in crate::compiler) fn compile_column_def(
                     let enforced =
                         cstr.contype() == pg_query::protobuf::ConstrType::ConstrAttrEnforced;
                     match last_enforceable {
-                        Some(EnforceableConstraint::Check) => check_enforced = enforced,
+                        Some(EnforceableConstraint::Check) => {
+                            check_enforced = enforced;
+                            if !enforced {
+                                check_validated = false;
+                            }
+                        }
                         Some(EnforceableConstraint::ForeignKey) => {
-                            references
-                                .as_mut()
-                                .ok_or_else(|| {
-                                    SQLError::Internal(
-                                        "REFERENCES enforcement attribute lost its constraint"
-                                            .into(),
-                                    )
-                                })?
-                                .enforced = enforced;
+                            let reference = references.as_mut().ok_or_else(|| {
+                                SQLError::Internal(
+                                    "REFERENCES enforcement attribute lost its constraint".into(),
+                                )
+                            })?;
+                            reference.enforced = enforced;
+                            if !enforced {
+                                reference.validated = false;
+                            }
                         }
                         None => {
                             return Err(SQLError::Unsupported(
@@ -450,6 +518,8 @@ pub(in crate::compiler) fn compile_column_def(
         not_null,
         not_null_explicit,
         not_null_name,
+        not_null_validated,
+        not_null_no_inherit,
         auto_increment,
         unique,
         default,
@@ -457,6 +527,8 @@ pub(in crate::compiler) fn compile_column_def(
         check,
         check_name,
         check_enforced,
+        check_validated,
+        check_no_inherit,
         references,
     })
 }

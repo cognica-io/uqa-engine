@@ -80,6 +80,14 @@ impl From<pg_query::Error> for SQLError {
                     message,
                 }
             }
+            pg_query::Error::Parse(message)
+                if message.contains("constraints cannot be altered to be NOT VALID") =>
+            {
+                SQLError::Routine {
+                    sqlstate: "0A000".into(),
+                    message,
+                }
+            }
             other => SQLError::Parse(other.to_string()),
         }
     }

@@ -517,7 +517,7 @@ fn alter_table_add_composite_primary_key_enforces_nullability_and_uniqueness() {
             &[],
         )
         .unwrap_err();
-    assert!(null.to_string().to_ascii_lowercase().contains("not null"));
+    assert_eq!(null.sqlstate(), Some("23502"), "{null}");
 }
 
 #[test]
