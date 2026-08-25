@@ -12,7 +12,7 @@ use super::{
     CreateIndex, CreateTable, Expr, NodeEnum, Result, SQLError, TableKeyConstraint,
     TableKeyConstraintKind,
 };
-use crate::ast::{ColumnType, GeneratedColumn, GeneratedColumnKind};
+use crate::ast::{AutoIncrement, ColumnType, GeneratedColumn, GeneratedColumnKind};
 
 struct TableNotNullConstraint {
     name: Option<String>,
@@ -34,6 +34,7 @@ pub(in crate::compiler) fn compile_create_table(
     let persistence = crate::compiler::relation_persistence(relation, "CREATE TABLE")?;
     let on_commit =
         crate::compiler::compile_on_commit(stmt.oncommit(), persistence, "CREATE TABLE")?;
+    let hierarchy = crate::compiler::compile_table_hierarchy(stmt)?;
     let name = range_var_name(relation);
     if name.is_empty() {
         return Err(SQLError::Internal("CREATE TABLE without name".into()));
@@ -109,6 +110,7 @@ pub(in crate::compiler) fn compile_create_table(
                             enforced: cstr.is_enforced,
                             validated: cstr.initially_valid && cstr.is_enforced,
                             no_inherit: cstr.is_no_inherit,
+                            partition_constraint: None,
                         });
                     }
                     pg_query::protobuf::ConstrType::ConstrForeign => {
@@ -355,6 +357,7 @@ pub(in crate::compiler) fn compile_create_table(
         key_constraints,
         persistence,
         on_commit,
+        hierarchy,
     })
 }
 
@@ -390,7 +393,8 @@ pub(in crate::compiler) fn compile_column_def(
     let mut auto_increment = matches!(
         raw_type.as_deref(),
         Some("smallserial" | "serial2" | "serial" | "serial4" | "bigserial" | "serial8")
-    );
+    )
+    .then_some(AutoIncrement::serial());
     let mut primary_key = false;
     let mut not_null = false;
     let mut not_null_explicit = false;
@@ -437,7 +441,15 @@ pub(in crate::compiler) fn compile_column_def(
                     last_enforceable = None;
                 }
                 pg_query::protobuf::ConstrType::ConstrIdentity => {
-                    auto_increment = true;
+                    auto_increment = Some(match cstr.generated_when.as_str() {
+                        "a" => AutoIncrement::identity_always(),
+                        "d" => AutoIncrement::identity_by_default(),
+                        other => {
+                            return Err(SQLError::Internal(format!(
+                                "identity constraint has unknown generation {other:?}"
+                            )));
+                        }
+                    });
                     last_enforceable = None;
                 }
                 pg_query::protobuf::ConstrType::ConstrDefault => {
@@ -556,7 +568,7 @@ pub(in crate::compiler) fn compile_column_def(
         }
     }
     // Postgres treats `SERIAL` / `BIGSERIAL` as `NOT NULL` by definition.
-    if auto_increment {
+    if auto_increment.is_some() {
         not_null = true;
     }
     Ok(ColumnDef {

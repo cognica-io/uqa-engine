@@ -27,7 +27,7 @@ pub(super) fn table_lock_origin(
 }
 
 impl EngineTableRowSource {
-    fn next_physical_rows_batch(
+    pub(super) fn next_physical_rows_batch(
         &mut self,
         max_rows: usize,
     ) -> uqa_execution::ExecResult<Vec<uqa_execution::PhysicalRow>> {
@@ -309,9 +309,12 @@ impl EngineTableRowSource {
 
     pub(super) fn with_lock_identity(
         &self,
-        row: uqa_execution::PhysicalRow,
+        mut row: uqa_execution::PhysicalRow,
         doc_id: uqa_core::DocId,
     ) -> Result<uqa_execution::PhysicalRow, SQLError> {
+        if let Some(table_oid) = self.table_oid.as_ref() {
+            row = row.append_values(vec![table_oid.clone()]);
+        }
         let Some((qualifier, storage_name)) = self.lock_origin.as_ref() else {
             return Ok(row);
         };

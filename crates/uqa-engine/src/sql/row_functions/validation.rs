@@ -209,6 +209,7 @@ fn collect_from_tables(
             name,
             qualifier,
             alias,
+            ..
         } => out.push((
             Some(alias.as_ref().unwrap_or(qualifier).clone()),
             name.clone(),

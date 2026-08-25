@@ -36,6 +36,26 @@ pub(in crate::sql) fn engine_func_intercept(
             args,
             evaluate,
         )?)),
+        "pg_get_expr" => {
+            let values = args
+                .iter()
+                .map(evaluate)
+                .collect::<Result<Vec<_>, SQLError>>()?;
+            Ok(Some(crate::sql::catalog::pg_get_expr_value(
+                require_projection_engine(engine, "pg_get_expr")?,
+                &values,
+            )?))
+        }
+        "pg_get_partkeydef" => {
+            let values = args
+                .iter()
+                .map(evaluate)
+                .collect::<Result<Vec<_>, SQLError>>()?;
+            Ok(Some(crate::sql::catalog::pg_get_partkeydef_value(
+                require_projection_engine(engine, "pg_get_partkeydef")?,
+                &values,
+            )?))
+        }
         "merge_action" => {
             if !args.is_empty() {
                 return Err(SQLError::BadArity {

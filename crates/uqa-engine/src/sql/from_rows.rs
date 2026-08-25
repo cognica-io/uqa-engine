@@ -22,8 +22,8 @@ use crate::{Engine, SQLTableFunctionResult, SQLTableFunctionStream};
 use super::scalar::{PhysicalSubqueryRunner, PlanSubqueryArena};
 use super::select::{
     execute_query_plan_output, physical_work_mem_bytes, push_output_filter_into_query_plan,
-    CteScope, EngineExpressionEvaluator, QueryOutput, QueryOutputMode, QueryRows, ScopedEngineHook,
-    ScoredDocumentSource, ScoredInput,
+    CteScope, EngineExpressionEvaluator, HierarchyScoredDocumentSource, QueryOutput,
+    QueryOutputMode, QueryRows, ScopedEngineHook, ScoredDocumentSource, ScoredInput,
 };
 use super::volatility::query_contains_volatile_function;
 use super::{
@@ -34,7 +34,7 @@ use super::{
     run_age_create_graph_with_evaluator, run_age_create_vlabel_with_evaluator,
     run_age_drop_graph_with_evaluator, run_age_drop_label_with_evaluator,
     run_age_graph_exists_with_evaluator, run_graph_create_with_evaluator,
-    run_graph_drop_with_evaluator, MERGE_ACTION_COLUMN, SCORE_PROVENANCE_COLUMN,
+    run_graph_drop_with_evaluator, MERGE_ACTION_COLUMN, SCORE_PROVENANCE_COLUMN, TABLE_OID_COLUMN,
 };
 
 pub(super) type ColumnPrune = BTreeMap<String, BTreeSet<String>>;

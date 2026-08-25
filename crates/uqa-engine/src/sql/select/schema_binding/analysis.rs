@@ -264,6 +264,10 @@ pub(super) fn with_table_pseudo_columns(schema: &RowSchema, qualifier: &str) -> 
             ColumnIdentity::qualified(qualifier, "_score"),
             Some(ColumnType::DoublePrecision),
         ),
+        (
+            ColumnIdentity::qualified(qualifier, "tableoid"),
+            Some(ColumnType::Oid),
+        ),
     ];
     RowSchema::with_typed_virtual_identities(schema, &columns)
 }
@@ -280,6 +284,10 @@ pub(super) fn with_unqualified_table_pseudo_columns(schema: &RowSchema) -> RowSc
         (
             ColumnIdentity::unqualified("_score"),
             schema.qualified_type(&qualifier, "_score").cloned(),
+        ),
+        (
+            ColumnIdentity::unqualified("tableoid"),
+            schema.qualified_type(&qualifier, "tableoid").cloned(),
         ),
     ];
     RowSchema::with_typed_virtual_identities(schema, &columns)

@@ -615,6 +615,7 @@ impl SchemaScope {
                 name,
                 qualifier,
                 alias,
+                ..
             } => {
                 let qualifier = alias.as_deref().unwrap_or(qualifier);
                 if let Some(schema) = self.ctes.get(name) {
@@ -675,11 +676,7 @@ impl SchemaScope {
                         .map(|column| Some(column.ty.clone()))
                         .collect();
                     let schema = RowSchema::with_qualified_types(qualifier, columns, types);
-                    return Ok(if self.validate_references {
-                        analysis::with_table_pseudo_columns(&schema, qualifier)
-                    } else {
-                        schema
-                    });
+                    return Ok(analysis::with_table_pseudo_columns(&schema, qualifier));
                 }
                 if engine
                     .foreign_table(name)

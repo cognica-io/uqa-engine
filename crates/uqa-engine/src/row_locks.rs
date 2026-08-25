@@ -9,6 +9,7 @@
 //! Locks follow `PostgreSQL` 18 tuple-lock conflict rules and are held until the owning session's transaction ends or a savepoint rolls back the acquisition. Sessions inside one process arbitrate through the in-memory lock table; engines in separate OS processes over the same durable database additionally coordinate through native byte-range locks on a sidecar file next to the database.
 
 mod cross_process;
+mod physical_changes;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -24,6 +25,8 @@ use cross_process::{
     change_gate_claim, relation_byte_claims, row_byte_claims, table_hash, ByteClaim,
     FileLockCoordinator,
 };
+pub(crate) use physical_changes::PhysicalRowChangeTarget;
+use physical_changes::{resolve_local_physical_change_target, LocalPhysicalRowChangeTarget};
 
 const WAIT_SLICE: Duration = Duration::from_millis(50);
 const CHANGE_GATE_WAIT_LIMIT: Duration = Duration::from_secs(30);
@@ -316,6 +319,10 @@ impl RowLockManager {
         tables.insert(table.to_string(), id);
         self.table_names.lock().insert(id, Arc::from(table));
         id
+    }
+
+    pub(crate) fn stable_table_hash(table: &str) -> u64 {
+        table_hash(table)
     }
 
     pub(crate) fn table_name(&self, table: u64) -> Arc<str> {
@@ -1129,7 +1136,14 @@ impl RowLockManager {
                                 cross_process::PublishedRowChangeKind::Delete
                             }
                             CommittedRowChangeKind::Rewrite(successor) => {
-                                cross_process::PublishedRowChangeKind::Rewrite(successor.doc_id)
+                                cross_process::PublishedRowChangeKind::Rewrite(
+                                    cross_process::PublishedRowIdentity {
+                                        table_hash: table_hash(
+                                            self.table_name(successor.table).as_ref(),
+                                        ),
+                                        doc_id: successor.doc_id,
+                                    },
+                                )
                             }
                         },
                         strength: change.strength,
@@ -1246,33 +1260,15 @@ fn resolve_local_change_target(
     baseline: u64,
     wanted: LockStrength,
 ) -> RowChangeTarget {
-    let mut current = key;
-    let mut requires_recheck = false;
-    for change in changes {
-        if !epoch_is_after(change.epoch, baseline) || change.key != current {
-            continue;
+    match resolve_local_physical_change_target(changes, key, baseline, wanted) {
+        LocalPhysicalRowChangeTarget::Unchanged => RowChangeTarget::Unchanged,
+        LocalPhysicalRowChangeTarget::Present(target) if target.table == key.table => {
+            RowChangeTarget::Present(target.doc_id)
         }
-        match change.kind {
-            CommittedRowChangeKind::Update => {
-                requires_recheck |= lock_strengths_conflict(change.strength, wanted);
-            }
-            CommittedRowChangeKind::Delete => {
-                if lock_strengths_conflict(change.strength, wanted) {
-                    return RowChangeTarget::Deleted;
-                }
-            }
-            CommittedRowChangeKind::Rewrite(successor) => {
-                if lock_strengths_conflict(change.strength, wanted) {
-                    requires_recheck = true;
-                    current = successor;
-                }
-            }
+        // Callers of the legacy document-id-only API cannot safely follow a tuple into another physical relation. Treat it as absent instead of applying the successor id to an unrelated row in the source relation.
+        LocalPhysicalRowChangeTarget::Present(_) | LocalPhysicalRowChangeTarget::Deleted => {
+            RowChangeTarget::Deleted
         }
-    }
-    if requires_recheck {
-        RowChangeTarget::Present(current.doc_id)
-    } else {
-        RowChangeTarget::Unchanged
     }
 }
 

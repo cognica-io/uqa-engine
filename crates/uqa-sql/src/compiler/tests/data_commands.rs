@@ -52,10 +52,31 @@ fn table_commands_preserve_qualified_relation_names() {
     };
     assert_eq!(delete.table, "app.docs");
 
-    let Statement::Truncate { tables, .. } = first("TRUNCATE app.docs") else {
+    let Statement::Truncate {
+        tables,
+        restart_identity,
+        ..
+    } = first("TRUNCATE app.docs")
+    else {
         panic!("not TRUNCATE");
     };
-    assert_eq!(tables, vec!["app.docs"]);
+    assert_eq!(tables.len(), 1);
+    assert_eq!(tables[0].table, "app.docs");
+    assert!(tables[0].include_descendants);
+    assert!(!restart_identity);
+
+    let Statement::Truncate { tables, .. } = first("TRUNCATE ONLY app.docs") else {
+        panic!("not TRUNCATE ONLY");
+    };
+    assert!(!tables[0].include_descendants);
+
+    let Statement::Truncate {
+        restart_identity, ..
+    } = first("TRUNCATE app.docs RESTART IDENTITY")
+    else {
+        panic!("not TRUNCATE RESTART IDENTITY");
+    };
+    assert!(restart_identity);
 
     let Statement::Insert(insert) = first("INSERT INTO app.docs (version) VALUES (1)") else {
         panic!("not INSERT");
@@ -139,6 +160,25 @@ fn merge_not_matched_by_source_preserves_all_actions() {
             crate::ast::MergeWhen::NothingNotMatchedBySource { .. }
         ]
     ));
+}
+
+#[test]
+fn merge_preserves_only_target_scope() {
+    let Statement::Merge(merge) = first(
+        "MERGE INTO ONLY target USING source ON target.id = source.id \
+         WHEN MATCHED THEN DO NOTHING",
+    ) else {
+        panic!("expected MERGE");
+    };
+    assert!(!merge.include_descendants);
+
+    let Statement::Merge(merge) = first(
+        "MERGE INTO target USING source ON target.id = source.id \
+         WHEN MATCHED THEN DO NOTHING",
+    ) else {
+        panic!("expected MERGE");
+    };
+    assert!(merge.include_descendants);
 }
 
 #[test]

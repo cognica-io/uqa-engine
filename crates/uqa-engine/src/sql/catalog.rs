@@ -37,6 +37,8 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::InformationKeyColumnUsage => build_info_key_column_usage(engine)?,
         VirtualRelation::PgNamespace => build_pg_namespace(engine)?,
         VirtualRelation::PgClass => build_pg_class(engine)?,
+        VirtualRelation::PgInherits => build_pg_inherits(engine)?,
+        VirtualRelation::PgPartitionedTable => build_pg_partitioned_table(engine)?,
         VirtualRelation::PgAttribute => build_pg_attribute(engine)?,
         VirtualRelation::PgAttrdef => build_pg_attrdef(engine)?,
         VirtualRelation::PgConstraint => build_pg_constraint(engine)?,
@@ -64,8 +66,10 @@ mod builtin_routines;
 mod expression_text;
 mod helpers;
 mod information_schema;
+mod partitioning;
 mod pg_catalog;
 mod pg_proc;
+mod relation_catalog;
 mod schema;
 
 pub(crate) use ag_catalog::resolve_age_label_relation_name;
@@ -75,13 +79,17 @@ use information_schema::{
     build_info_schemata, build_info_sequences, build_info_table_constraints, build_info_tables,
     build_info_views,
 };
+use partitioning::build_pg_partitioned_table;
+pub(in crate::sql) use partitioning::{pg_get_expr_value, pg_get_partkeydef_value};
+pub(in crate::sql) use pg_catalog::table_relation_oid;
 use pg_catalog::{
-    build_pg_attrdef, build_pg_attribute, build_pg_class, build_pg_constraint, build_pg_database,
-    build_pg_index, build_pg_indexes, build_pg_matviews, build_pg_namespace, build_pg_range,
-    build_pg_roles, build_pg_sequences, build_pg_settings, build_pg_tables, build_pg_type,
-    build_pg_user, build_pg_views,
+    build_pg_attrdef, build_pg_attribute, build_pg_constraint, build_pg_database, build_pg_index,
+    build_pg_indexes, build_pg_matviews, build_pg_namespace, build_pg_range, build_pg_roles,
+    build_pg_sequences, build_pg_settings, build_pg_tables, build_pg_type, build_pg_user,
+    build_pg_views,
 };
 use pg_proc::build_pg_proc;
+use relation_catalog::{build_pg_class, build_pg_inherits};
 use schema::{resolve_virtual_relation, VirtualRelation};
 pub(in crate::sql) use schema::{virtual_relation_accepts_row_lock, virtual_relation_schema};
 

@@ -6,15 +6,20 @@
 
 //! Row, key, foreign-key, and referential-action validation.
 
+mod period;
+
 use super::{
     coerce_to_column_type, dml_storage_error, document_vectors, eval_lowered_expression,
-    lock_mutation_row, lock_mutation_target, missing_document_error, update_lock_strength,
-    ColumnType, DocId, Document, Engine, ForeignKey, ForeignKeyAction, ForeignKeyMatch,
-    MutationLockTarget, PreparedDocumentRewrite, SQLError, SQLParam, Value,
+    lock_mutation_row, lock_mutation_target, lock_physical_mutation_target, missing_document_error,
+    partition_insert_target, update_lock_strength, ColumnType, DocId, Document, Engine, ForeignKey,
+    ForeignKeyAction, ForeignKeyMatch, MutationLockTarget, PhysicalDocumentIdentity,
+    PhysicalMutationLockTarget, PreparedDocumentRewrite, SQLError, SQLParam, Value,
 };
 use sha2::{Digest, Sha256};
-use uqa_sql::ast::{RangeSubtype, TableKeyConstraint};
-use uqa_sql::expr::{multirange_from_ranges, parse_multirange, parse_range, CanonicalRange};
+use uqa_sql::ast::TableKeyConstraint;
+
+pub(in crate::sql) use period::period_foreign_key_coverage;
+use period::period_ranges;
 
 pub(in crate::sql) struct ForeignKeyLookup {
     pub(in crate::sql) values: Vec<Value>,
@@ -130,7 +135,11 @@ fn validate_document_non_key_constraints_with_old(
     let document = logical_document.as_ref().unwrap_or(document);
 
     for col_def in &definitions {
-        if !col_def.not_null || col_def.auto_increment {
+        if !col_def.not_null
+            || col_def.auto_increment.as_ref().is_some_and(|provenance| {
+                provenance.kind == uqa_sql::ast::AutoIncrementKind::Legacy
+            })
+        {
             continue;
         }
         match document.get(&col_def.name) {
@@ -151,19 +160,32 @@ fn validate_document_non_key_constraints_with_old(
         if !constraint.enforced {
             continue;
         }
-        let result = crate::sql::scalar::eval_lowered_expression_with_schema(
-            engine,
-            &constraint.expr,
-            document,
-            &schema,
-            params,
-        )?;
-        if !matches!(result, Value::Null) && !uqa_sql::expr::truthy(&result) {
+        let accepted = if let Some(partition) = constraint.partition_constraint.as_ref() {
+            crate::sql::partition_constraint_accepts_document(
+                engine,
+                table,
+                &partition.spec,
+                &partition.bound,
+                document,
+            )?
+        } else {
+            let result = crate::sql::scalar::eval_lowered_expression_with_schema(
+                engine,
+                &constraint.expr,
+                document,
+                &schema,
+                params,
+            )?;
+            matches!(result, Value::Null) || uqa_sql::expr::truthy(&result)
+        };
+        if !accepted {
             let label = constraint.name.unwrap_or_else(|| "<unnamed>".into());
+            let relation = crate::RelationIdentity::from_legacy_name(table)
+                .map_or_else(|_| table.to_string(), |identity| identity.name);
             return Err(SQLError::Routine {
                 sqlstate: "23514".into(),
                 message: format!(
-                    "new row for relation \"{table}\" violates check constraint \"{label}\""
+                    "new row for relation \"{relation}\" violates check constraint \"{label}\""
                 ),
             });
         }
@@ -234,12 +256,12 @@ fn lock_document_foreign_key_dependencies(
                 }
                 return Err(violation());
             }
-            for parent_id in parent_ids {
+            for parent in parent_ids {
                 let _target = lock_mutation_target(
                     engine,
+                    &parent.table,
                     &fk.ref_table,
-                    &fk.ref_table,
-                    parent_id,
+                    parent.doc_id,
                     uqa_sql::ast::LockStrength::ForKeyShare,
                 )?;
             }
@@ -247,7 +269,7 @@ fn lock_document_foreign_key_dependencies(
         }
         let mut hops = 0usize;
         loop {
-            let Some(parent_id) = find_foreign_key_parent(engine, &fk, &local_values)? else {
+            let Some(parent) = find_foreign_key_parent(engine, &fk, &local_values)? else {
                 if allow_missing {
                     break;
                 }
@@ -256,9 +278,9 @@ fn lock_document_foreign_key_dependencies(
             // PostgreSQL 18 holds FOR KEY SHARE on the referenced row until the referencing transaction ends. If the lookup waits, refresh the READ COMMITTED snapshot and follow a delete/reinsert or key rewrite until the tuple carrying the requested key is locked.
             let target = lock_mutation_target(
                 engine,
+                &parent.table,
                 &fk.ref_table,
-                &fk.ref_table,
-                parent_id,
+                parent.doc_id,
                 uqa_sql::ast::LockStrength::ForKeyShare,
             )?;
             let MutationLockTarget::Present {
@@ -278,10 +300,12 @@ fn lock_document_foreign_key_dependencies(
             if recheck {
                 engine.refresh_explicit_statement_snapshot()?;
             }
-            if foreign_key_parent_matches(engine, &fk, &local_values, locked_parent)? {
-                break;
-            }
+            let locked_parent = PhysicalDocumentIdentity {
+                table: parent.table,
+                doc_id: locked_parent,
+            };
             match find_foreign_key_parent(engine, &fk, &local_values)? {
+                Some(current_parent) if current_parent == locked_parent => break,
                 None if allow_missing => break,
                 None => return Err(violation()),
                 Some(_) => {
@@ -296,88 +320,6 @@ fn lock_document_foreign_key_dependencies(
         }
     }
     Ok(())
-}
-
-pub(in crate::sql) fn period_foreign_key_coverage(
-    engine: &Engine,
-    foreign_key: &ForeignKey,
-    local_values: &[Value],
-    excluded_parents: &[DocId],
-    replacement_parent: Option<(DocId, &Document)>,
-) -> Result<(bool, Vec<DocId>), SQLError> {
-    let Some(period_column) = foreign_key.ref_columns.last() else {
-        return Err(SQLError::Internal(
-            "PERIOD foreign key has no referenced period column".into(),
-        ));
-    };
-    let parent_type = engine
-        .column_type(&foreign_key.ref_table, period_column)
-        .map_err(|error| dml_storage_error("PERIOD foreign-key type lookup", error))?
-        .ok_or_else(|| {
-            SQLError::UnknownColumn(format!("{}.{period_column}", foreign_key.ref_table))
-        })?;
-    let Some(child_period) = local_values.last() else {
-        return Err(SQLError::Internal(
-            "PERIOD foreign key has no local period value".into(),
-        ));
-    };
-    let (child_subtype, child_ranges) = period_ranges(child_period, &parent_type)?;
-    if child_ranges.is_empty() {
-        return Ok((false, Vec::new()));
-    }
-    let ordinary_values = &local_values[..local_values.len() - 1];
-    let ordinary_columns = &foreign_key.ref_columns[..foreign_key.ref_columns.len() - 1];
-    let mut parent_ranges = Vec::new();
-    let mut parent_ids = Vec::new();
-    for doc_id in engine.table_doc_ids(&foreign_key.ref_table)? {
-        let replacement = replacement_parent
-            .filter(|(replacement_id, _)| *replacement_id == doc_id)
-            .map(|(_, document)| document);
-        if replacement.is_none() && excluded_parents.contains(&doc_id) {
-            continue;
-        }
-        let owned_parent = if replacement.is_some() {
-            None
-        } else {
-            Some(engine.get_document(&foreign_key.ref_table, doc_id)?)
-        };
-        let parent = match replacement.or_else(|| owned_parent.as_ref().and_then(Option::as_ref)) {
-            Some(parent) => parent,
-            None => {
-                return Err(missing_document_error(
-                    "PERIOD foreign-key parent scan",
-                    &foreign_key.ref_table,
-                    doc_id,
-                ));
-            }
-        };
-        if !ordinary_columns
-            .iter()
-            .zip(ordinary_values)
-            .all(|(column, value)| parent.get(column).cloned().unwrap_or(Value::Null) == *value)
-        {
-            continue;
-        }
-        let parent_period = parent.get(period_column).cloned().unwrap_or(Value::Null);
-        if matches!(parent_period, Value::Null) {
-            continue;
-        }
-        let (parent_subtype, mut ranges) = period_ranges(&parent_period, &parent_type)?;
-        if parent_subtype != child_subtype {
-            return Err(SQLError::TypeMismatch(
-                "PERIOD foreign-key range subtypes do not match".into(),
-            ));
-        }
-        parent_ranges.append(&mut ranges);
-        parent_ids.push(doc_id);
-    }
-    let coverage = multirange_from_ranges(child_subtype, parent_ranges);
-    Ok((
-        child_ranges
-            .iter()
-            .all(|range| coverage.contains_range(range)),
-        parent_ids,
-    ))
 }
 
 pub(crate) fn validate_deferred_foreign_key_rows(
@@ -443,9 +385,7 @@ pub(crate) fn validate_deferred_foreign_key_rows(
                     continue;
                 };
                 let parent_exists = if comparison.exact_reference_lookup {
-                    engine
-                        .find_conflict(&foreign_key.ref_table, &foreign_key.ref_columns, &values)?
-                        .is_some()
+                    find_exact_foreign_key_parent(engine, &foreign_key, &values)?.is_some()
                 } else {
                     cross_type_parent_keys
                         .as_ref()
@@ -482,34 +422,6 @@ pub(in crate::sql) fn key_constraint_values(
         return None;
     }
     Some(values)
-}
-
-fn period_ranges(
-    value: &Value,
-    column_type: &ColumnType,
-) -> Result<(RangeSubtype, Vec<CanonicalRange>), SQLError> {
-    let (Value::Str(text) | Value::FixedChar(text)) = value else {
-        return Err(SQLError::TypeMismatch(format!(
-            "PERIOD value has incompatible runtime carrier {value:?}"
-        )));
-    };
-    match column_type {
-        ColumnType::Range(subtype) => {
-            let range = parse_range(text, *subtype)?;
-            Ok((
-                *subtype,
-                (!range.is_empty()).then_some(range).into_iter().collect(),
-            ))
-        }
-        ColumnType::Multirange(subtype) => Ok((
-            *subtype,
-            parse_multirange(text, *subtype)?.ranges().to_vec(),
-        )),
-        other => Err(SQLError::TypeMismatch(format!(
-            "PERIOD column must be a range or multirange, got {}",
-            other.sql_name()
-        ))),
-    }
 }
 
 fn period_values_overlap(
@@ -707,10 +619,13 @@ pub(in crate::sql) fn validate_key_constraints(
             .name
             .as_deref()
             .map_or_else(String::new, |name| format!(" `{name}`"));
-        return Err(SQLError::TypeMismatch(format!(
-            "{kind} constraint{name} violated: duplicate value for columns ({}) in table `{table}`",
-            constraint.columns.join(", ")
-        )));
+        return Err(SQLError::Routine {
+            sqlstate: "23505".into(),
+            message: format!(
+                "{kind} constraint{name} violated: duplicate value for columns ({}) in table `{table}`",
+                constraint.columns.join(", ")
+            ),
+        });
     }
     Ok(())
 }
@@ -767,16 +682,37 @@ pub(in crate::sql) fn find_foreign_key_parent(
     engine: &Engine,
     fk: &ForeignKey,
     lookup: &ForeignKeyLookup,
-) -> Result<Option<DocId>, SQLError> {
+) -> Result<Option<PhysicalDocumentIdentity>, SQLError> {
     if lookup.comparison.exact_reference_lookup {
-        return engine.find_conflict(&fk.ref_table, &fk.ref_columns, &lookup.values);
+        return find_exact_foreign_key_parent(engine, fk, &lookup.values);
     }
-    for doc_id in engine.table_doc_ids(&fk.ref_table)? {
-        let Some(document) = engine.get_document(&fk.ref_table, doc_id)? else {
-            continue;
-        };
-        if foreign_key_parent_values(fk, &document, &lookup.comparison)? == lookup.values {
-            return Ok(Some(doc_id));
+    for physical_table in engine.hierarchy_scan_tables(&fk.ref_table, true)? {
+        for doc_id in engine.table_doc_ids(&physical_table)? {
+            let Some(document) = engine.get_document(&physical_table, doc_id)? else {
+                continue;
+            };
+            if foreign_key_parent_values(fk, &document, &lookup.comparison)? == lookup.values {
+                return Ok(Some(PhysicalDocumentIdentity {
+                    table: physical_table.clone(),
+                    doc_id,
+                }));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn find_exact_foreign_key_parent(
+    engine: &Engine,
+    fk: &ForeignKey,
+    values: &[Value],
+) -> Result<Option<PhysicalDocumentIdentity>, SQLError> {
+    for physical_table in engine.hierarchy_scan_tables(&fk.ref_table, true)? {
+        if let Some(doc_id) = engine.find_conflict(&physical_table, &fk.ref_columns, values)? {
+            return Ok(Some(PhysicalDocumentIdentity {
+                table: physical_table,
+                doc_id,
+            }));
         }
     }
     Ok(None)
@@ -848,29 +784,19 @@ fn foreign_key_parent_values(
     )
 }
 
-fn foreign_key_parent_matches(
-    engine: &Engine,
-    fk: &ForeignKey,
-    lookup: &ForeignKeyLookup,
-    doc_id: DocId,
-) -> Result<bool, SQLError> {
-    let Some(document) = engine.get_document(&fk.ref_table, doc_id)? else {
-        return Ok(false);
-    };
-    Ok(foreign_key_parent_values(fk, &document, &lookup.comparison)? == lookup.values)
-}
-
 fn foreign_key_parent_index(
     engine: &Engine,
     fk: &ForeignKey,
     comparison: &ForeignKeyComparison,
 ) -> Result<std::collections::BTreeSet<Vec<Value>>, SQLError> {
     let mut keys = std::collections::BTreeSet::new();
-    for doc_id in engine.table_doc_ids(&fk.ref_table)? {
-        let Some(document) = engine.get_document(&fk.ref_table, doc_id)? else {
-            continue;
-        };
-        keys.insert(foreign_key_parent_values(fk, &document, comparison)?);
+    for physical_table in engine.hierarchy_scan_tables(&fk.ref_table, true)? {
+        for doc_id in engine.table_doc_ids(&physical_table)? {
+            let Some(document) = engine.get_document(&physical_table, doc_id)? else {
+                continue;
+            };
+            keys.insert(foreign_key_parent_values(fk, &document, comparison)?);
+        }
     }
     Ok(keys)
 }
@@ -944,10 +870,94 @@ pub(in crate::sql) fn prepare_document_rewrite(
     Ok(Some(PreparedDocumentRewrite {
         table: table.to_string(),
         doc_id,
+        destination: None,
         old_document,
         new_document,
         actions: actions?,
     }))
+}
+
+pub(in crate::sql) fn retarget_prepared_document_rewrite(
+    engine: &Engine,
+    prepared: &mut PreparedDocumentRewrite,
+    destination_table: &str,
+) -> Result<(), SQLError> {
+    if prepared.table == destination_table {
+        return Ok(());
+    }
+    engine.lock_relation(
+        destination_table,
+        crate::row_locks::RelationLockMode::RowExclusive,
+    )?;
+    let _key_locks =
+        lock_document_key_dependencies(engine, destination_table, &prepared.new_document, None)?;
+    lock_existing_document_foreign_key_dependencies(
+        engine,
+        destination_table,
+        &prepared.new_document,
+    )?;
+    let destination_doc_id =
+        integer_primary_key_doc_id(engine, destination_table, &prepared.new_document)?
+            .unwrap_or(engine.allocate_next_id(destination_table)?);
+    prepared.destination = Some((destination_table.to_string(), destination_doc_id));
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::sql) enum PartitionRewritePolicy {
+    Move,
+    RejectOnConflict,
+}
+
+pub(in crate::sql) fn finalize_partition_rewrite(
+    engine: &Engine,
+    prepared: &mut PreparedDocumentRewrite,
+    routing_table: &str,
+    params: &[SQLParam],
+    include_descendants: bool,
+    policy: PartitionRewritePolicy,
+) -> Result<(), SQLError> {
+    let hierarchy = engine
+        .try_table_hierarchy(routing_table)
+        .map_err(|error| SQLError::Internal(format!("read rewrite hierarchy: {error}")))?;
+    if hierarchy.partition_spec.is_none() && !hierarchy.is_partition() {
+        return Ok(());
+    }
+    let destination = partition_insert_target(
+        engine,
+        routing_table,
+        &prepared.new_document,
+        params,
+        include_descendants,
+    )?;
+    if destination == prepared.table {
+        return Ok(());
+    }
+    if policy == PartitionRewritePolicy::RejectOnConflict {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "invalid ON UPDATE specification\nDETAIL: The result tuple would appear in a different partition than the original tuple.".into(),
+        });
+    }
+    retarget_prepared_document_rewrite(engine, prepared, &destination)
+}
+
+pub(in crate::sql) fn finalize_referential_partition_rewrite(
+    engine: &Engine,
+    prepared: &mut PreparedDocumentRewrite,
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
+    let Some(root) = engine.partition_hierarchy_root(&prepared.table)? else {
+        return Ok(());
+    };
+    finalize_partition_rewrite(
+        engine,
+        prepared,
+        &root,
+        params,
+        true,
+        PartitionRewritePolicy::Move,
+    )
 }
 
 pub(in crate::sql) fn stage_prepared_document_rewrite(
@@ -955,6 +965,25 @@ pub(in crate::sql) fn stage_prepared_document_rewrite(
     prepared: &mut PreparedDocumentRewrite,
     params: &[SQLParam],
 ) -> Result<DocId, SQLError> {
+    if let Some((destination_table, destination_doc_id)) = prepared.destination.as_ref() {
+        validate_document_non_key_constraints(
+            engine,
+            destination_table,
+            &prepared.new_document,
+            params,
+        )?;
+        validate_key_constraints(engine, destination_table, &prepared.new_document, None)?;
+        engine.stage_command_document(&prepared.table, prepared.doc_id, None)?;
+        engine.stage_command_document(
+            destination_table,
+            *destination_doc_id,
+            Some(prepared.new_document.clone()),
+        )?;
+        for action in &mut prepared.actions {
+            stage_prepared_document_rewrite(engine, action, params)?;
+        }
+        return Ok(*destination_doc_id);
+    }
     validate_document_rewrite_constraints(
         engine,
         &prepared.table,
@@ -984,6 +1013,29 @@ pub(in crate::sql) fn apply_validated_prepared_document_rewrite(
     engine: &Engine,
     prepared: &mut PreparedDocumentRewrite,
 ) -> Result<DocId, SQLError> {
+    if let Some((destination_table, destination_doc_id)) = prepared.destination.as_ref() {
+        engine.delete_document(&prepared.table, prepared.doc_id)?;
+        engine.add_prepared_document_with_vector_values(
+            destination_table,
+            *destination_doc_id,
+            prepared.new_document.clone(),
+            document_vectors(engine, destination_table, &prepared.new_document)?,
+            true,
+        )?;
+        engine
+            .advance_next_id(destination_table, *destination_doc_id)
+            .map_err(|err| dml_storage_error("UPDATE partition movement", err))?;
+        engine.note_row_rewritten_between_tables(
+            &prepared.table,
+            prepared.doc_id,
+            destination_table,
+            *destination_doc_id,
+        )?;
+        for action in &mut prepared.actions {
+            apply_validated_prepared_document_rewrite(engine, action)?;
+        }
+        return Ok(*destination_doc_id);
+    }
     let rewritten_doc_id =
         match integer_primary_key_doc_id(engine, &prepared.table, &prepared.new_document)? {
             // An integer primary key names the row's doc_id slot; keep that invariant when the key itself changes, or value -> doc_id lookups (the unique fast path and FOREIGN KEY validation) read the stale slot and miss the row.
@@ -1066,47 +1118,53 @@ fn prepare_referenced_key_update_actions(
         let expected = comparison.normalize(old_values.clone())?;
         if fk.period {
             let ordinary_len = expected.len().saturating_sub(1);
-            for child_id in engine.table_doc_ids(&ref_table)? {
-                let Some(child_doc) = engine.get_document(&ref_table, child_id)? else {
-                    continue;
-                };
-                let Some(child_lookup) =
-                    foreign_key_lookup_values(engine, &ref_table, &fk, &child_doc)?
-                else {
-                    continue;
-                };
-                if child_lookup.values[..ordinary_len] != expected[..ordinary_len] {
-                    continue;
+            let parent = PhysicalDocumentIdentity {
+                table: table.to_string(),
+                doc_id: parent_doc_id,
+            };
+            for physical_table in engine.hierarchy_scan_tables(&ref_table, true)? {
+                for child_id in engine.table_doc_ids(&physical_table)? {
+                    let Some(child_doc) = engine.get_document(&physical_table, child_id)? else {
+                        continue;
+                    };
+                    let Some(child_lookup) =
+                        foreign_key_lookup_values(engine, &physical_table, &fk, &child_doc)?
+                    else {
+                        continue;
+                    };
+                    if child_lookup.values[..ordinary_len] != expected[..ordinary_len] {
+                        continue;
+                    }
+                    let (covered, _) = period_foreign_key_coverage(
+                        engine,
+                        &fk,
+                        &child_lookup.values,
+                        std::slice::from_ref(&parent),
+                        Some((&parent, new_doc)),
+                    )?;
+                    if covered {
+                        continue;
+                    }
+                    if fk.deferrable && fk.initially_deferred {
+                        engine.defer_foreign_key_row(&physical_table, child_id)?;
+                        continue;
+                    }
+                    return Err(SQLError::Routine {
+                        sqlstate: "23503".into(),
+                        message: format!(
+                            "update on table \"{table}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                            fk.name.as_deref().unwrap_or("<unnamed>")
+                        ),
+                    });
                 }
-                let (covered, _) = period_foreign_key_coverage(
-                    engine,
-                    &fk,
-                    &child_lookup.values,
-                    &[parent_doc_id],
-                    Some((parent_doc_id, new_doc)),
-                )?;
-                if covered {
-                    continue;
-                }
-                if fk.deferrable && fk.initially_deferred {
-                    engine.defer_foreign_key_row(&ref_table, child_id)?;
-                    continue;
-                }
-                return Err(SQLError::Routine {
-                    sqlstate: "23503".into(),
-                    message: format!(
-                        "update on table \"{table}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
-                        fk.name.as_deref().unwrap_or("<unnamed>")
-                    ),
-                });
             }
             continue;
         }
         let referencing = referencing_rows(engine, &ref_table, &fk, &comparison, &expected)?;
-        for (child_id, _child_doc) in referencing {
+        for (child, _child_doc) in referencing {
             match fk.on_update {
                 ForeignKeyAction::NoAction if fk.deferrable && fk.initially_deferred => {
-                    engine.defer_foreign_key_row(&ref_table, child_id)?;
+                    engine.defer_foreign_key_row(&child.table, child.doc_id)?;
                 }
                 ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
                     return Err(SQLError::Routine {
@@ -1118,10 +1176,10 @@ fn prepare_referenced_key_update_actions(
                     });
                 }
                 ForeignKeyAction::Cascade => {
-                    let Some((child_id, child_doc)) = lock_referencing_child(
+                    let Some((child, child_doc)) = lock_referencing_child(
                         engine,
                         &ref_table,
-                        child_id,
+                        &child,
                         &fk.local_columns,
                         &fk,
                         &comparison,
@@ -1134,26 +1192,27 @@ fn prepare_referenced_key_update_actions(
                     for (col, value) in fk.local_columns.iter().zip(new_values.iter()) {
                         updated.insert(
                             col.clone(),
-                            coerce_to_column_type(engine, &ref_table, col, value.clone())?,
+                            coerce_to_column_type(engine, &child.table, col, value.clone())?,
                         );
                     }
-                    if let Some(prepared) = prepare_document_rewrite(
+                    if let Some(mut prepared) = prepare_document_rewrite(
                         engine,
-                        &ref_table,
-                        child_id,
+                        &child.table,
+                        child.doc_id,
                         child_doc,
                         updated,
                         params,
                         rewrite_stack,
                     )? {
+                        finalize_referential_partition_rewrite(engine, &mut prepared, params)?;
                         actions.push(prepared);
                     }
                 }
                 ForeignKeyAction::SetNull | ForeignKeyAction::SetDefault => {
-                    let Some((child_id, child_doc)) = lock_referencing_child(
+                    let Some((child, child_doc)) = lock_referencing_child(
                         engine,
                         &ref_table,
-                        child_id,
+                        &child,
                         &fk.local_columns,
                         &fk,
                         &comparison,
@@ -1165,22 +1224,23 @@ fn prepare_referenced_key_update_actions(
                     let mut updated = child_doc.clone();
                     apply_set_action_to_child(
                         engine,
-                        &ref_table,
+                        &child.table,
                         &child_doc,
                         &mut updated,
                         &fk.local_columns,
                         fk.on_update,
                         params,
                     )?;
-                    if let Some(prepared) = prepare_document_rewrite(
+                    if let Some(mut prepared) = prepare_document_rewrite(
                         engine,
-                        &ref_table,
-                        child_id,
+                        &child.table,
+                        child.doc_id,
                         child_doc,
                         updated,
                         params,
                         rewrite_stack,
                     )? {
+                        finalize_referential_partition_rewrite(engine, &mut prepared, params)?;
                         actions.push(prepared);
                     }
                 }
@@ -1194,39 +1254,63 @@ pub(in crate::sql) fn referrers_to_for_actions(
     engine: &Engine,
     table: &str,
 ) -> Result<Vec<(String, ForeignKey)>, SQLError> {
-    engine
-        .try_referrers_to(table)
-        .map_err(|err| dml_storage_error("foreign-key lookup", err))
+    let mut output = Vec::new();
+    for target in engine.hierarchy_ancestor_tables(table)? {
+        let referrers = engine
+            .try_referrers_to(&target)
+            .map_err(|err| dml_storage_error("foreign-key lookup", err))?;
+        for (declaring_table, foreign_key) in referrers {
+            let referencing_table = engine
+                .partition_hierarchy_root(&declaring_table)?
+                .unwrap_or(declaring_table);
+            if output.iter().any(|(existing_table, existing_key)| {
+                existing_table == &referencing_table
+                    && foreign_keys_equivalent(existing_key, &foreign_key)
+            }) {
+                continue;
+            }
+            output.push((referencing_table, foreign_key));
+        }
+    }
+    Ok(output)
+}
+
+fn foreign_keys_equivalent(left: &ForeignKey, right: &ForeignKey) -> bool {
+    left.name == right.name
+        && left.local_columns == right.local_columns
+        && left.ref_table == right.ref_table
+        && left.ref_columns == right.ref_columns
+        && left.on_update == right.on_update
+        && left.on_delete == right.on_delete
+        && left.on_delete_set_columns == right.on_delete_set_columns
+        && left.match_type == right.match_type
+        && left.enforced == right.enforced
 }
 
 /// Lock one referencing child row for a referential action and refetch it after the wait. Returns `None` when the child vanished or its foreign-key columns no longer reference the parent key that triggered the action, so the action skips it exactly like `PostgreSQL` after an `EvalPlanQual` recheck of the referencing row.
 pub(in crate::sql) fn lock_referencing_child(
     engine: &Engine,
     ref_table: &str,
-    child_id: DocId,
+    child: &PhysicalDocumentIdentity,
     lock_columns: &[String],
     fk: &ForeignKey,
     comparison: &ForeignKeyComparison,
     expected: &[Value],
-) -> Result<Option<(DocId, Document)>, SQLError> {
-    let target = lock_mutation_target(
+) -> Result<Option<(PhysicalDocumentIdentity, Document)>, SQLError> {
+    let target = lock_physical_mutation_target(
         engine,
+        &child.table,
         ref_table,
-        ref_table,
-        child_id,
-        update_lock_strength(engine, ref_table, lock_columns),
+        child.doc_id,
+        update_lock_strength(engine, &child.table, lock_columns),
     )?;
-    let MutationLockTarget::Present {
-        doc_id: child_id,
-        recheck,
-    } = target
-    else {
+    let PhysicalMutationLockTarget::Present { identity, recheck } = target else {
         return Ok(None);
     };
     if recheck {
         engine.refresh_explicit_statement_snapshot()?;
     }
-    let Some(child_doc) = engine.get_document(ref_table, child_id)? else {
+    let Some(child_doc) = engine.get_document(&identity.table, identity.doc_id)? else {
         return Ok(None);
     };
     let actual = fk
@@ -1235,7 +1319,7 @@ pub(in crate::sql) fn lock_referencing_child(
         .map(|column| child_doc.get(column).cloned().unwrap_or(Value::Null))
         .collect();
     let actual = comparison.normalize(actual)?;
-    Ok((actual == expected).then_some((child_id, child_doc)))
+    Ok((actual == expected).then_some((identity, child_doc)))
 }
 
 pub(in crate::sql) fn referencing_rows(
@@ -1244,23 +1328,31 @@ pub(in crate::sql) fn referencing_rows(
     fk: &ForeignKey,
     comparison: &ForeignKeyComparison,
     expected: &[Value],
-) -> Result<Vec<(DocId, Document)>, SQLError> {
+) -> Result<Vec<(PhysicalDocumentIdentity, Document)>, SQLError> {
     let mut out = Vec::new();
-    for doc_id in engine.table_doc_ids(table)? {
-        let Some(doc) = engine.get_document(table, doc_id)? else {
-            return Err(missing_document_error(
-                "foreign-key reference scan",
-                table,
-                doc_id,
-            ));
-        };
-        let values = fk
-            .local_columns
-            .iter()
-            .map(|column| doc.get(column).cloned().unwrap_or(Value::Null))
-            .collect();
-        if comparison.normalize(values)? == expected {
-            out.push((doc_id, doc));
+    for physical_table in engine.hierarchy_scan_tables(table, true)? {
+        for doc_id in engine.table_doc_ids(&physical_table)? {
+            let Some(doc) = engine.get_document(&physical_table, doc_id)? else {
+                return Err(missing_document_error(
+                    "foreign-key reference scan",
+                    &physical_table,
+                    doc_id,
+                ));
+            };
+            let values = fk
+                .local_columns
+                .iter()
+                .map(|column| doc.get(column).cloned().unwrap_or(Value::Null))
+                .collect();
+            if comparison.normalize(values)? == expected {
+                out.push((
+                    PhysicalDocumentIdentity {
+                        table: physical_table.clone(),
+                        doc_id,
+                    },
+                    doc,
+                ));
+            }
         }
     }
     Ok(out)

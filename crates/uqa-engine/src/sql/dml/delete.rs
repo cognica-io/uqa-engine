@@ -9,13 +9,15 @@
 use super::{
     apply_set_action_to_child, apply_validated_prepared_document_rewrite,
     build_join_spill_with_ctes, build_returning_row, dml_join_rows, dml_returning_result,
-    dml_target_row, eval_mutation_expr, foreign_key_comparison_types, foreign_key_lookup_values,
-    lock_mutation_target, period_foreign_key_coverage, prepare_document_rewrite, referencing_rows,
-    referrers_to_for_actions, stage_prepared_document_rewrite, validate_dml_expression_qualifiers,
-    validate_returning_alias_relations, BTreeSet, CteScope, DeletePlan, DmlCommandMutationOverlay,
-    DmlReturningShape, DocId, Document, Engine, ForeignKey, ForeignKeyAction, MutationLockTarget,
-    PreparedDeleteAction, PreparedDocumentDelete, ReturningProjectionRow, ReturningRowImage,
-    ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
+    dml_target_row, eval_mutation_expr, finalize_referential_partition_rewrite,
+    foreign_key_comparison_types, foreign_key_lookup_values, lock_mutation_target,
+    lock_physical_mutation_target, period_foreign_key_coverage, prepare_document_rewrite,
+    referencing_rows, referrers_to_for_actions, stage_prepared_document_rewrite,
+    validate_dml_expression_qualifiers, validate_returning_alias_relations, BTreeSet, CteScope,
+    DeletePlan, DmlCommandMutationOverlay, DmlReturningShape, DocId, Document, Engine, ForeignKey,
+    ForeignKeyAction, MutationLockTarget, PhysicalMutationLockTarget, PreparedDeleteAction,
+    PreparedDocumentDelete, ReturningProjectionRow, ReturningRowImage, ReturningRowImages,
+    SQLError, SQLParam, SQLResult, Value,
 };
 
 pub(in crate::sql) fn run_delete(
@@ -43,6 +45,7 @@ pub(in crate::sql) fn run_delete_inner(
     let mut affected = 0u64;
     let cancel = engine.cancellation_token();
     let mut qualified_targets: Vec<(
+        String,
         uqa_core::DocId,
         Document,
         Option<uqa_execution::OwnedPhysicalRow>,
@@ -81,25 +84,43 @@ pub(in crate::sql) fn run_delete_inner(
         && stmt.source.is_none()
         && stmt.predicate.is_some()
         && !predicate_is_volatile;
-    let doc_ids: Vec<uqa_core::DocId> = if preselected {
+    let target_tables = engine.hierarchy_scan_tables(&stmt.table, stmt.include_descendants)?;
+    let candidates: Vec<(String, uqa_core::DocId)> = if preselected {
         let filter = stmt.predicate.as_ref().ok_or_else(|| {
             SQLError::Internal("DELETE preselection is missing its predicate".into())
         })?;
-        crate::sql::where_eval::collect_where_doc_ids(
-            engine,
-            &stmt.table,
-            &stmt.target_qualifier,
-            filter,
-            params,
-            &ctes,
-        )?
+        let mut candidates = Vec::new();
+        for table in &target_tables {
+            candidates.extend(
+                crate::sql::where_eval::collect_where_doc_ids(
+                    engine,
+                    table,
+                    &stmt.target_qualifier,
+                    filter,
+                    params,
+                    &ctes,
+                )?
+                .into_iter()
+                .map(|doc_id| (table.clone(), doc_id)),
+            );
+        }
+        candidates
     } else {
-        engine.table_doc_ids(&stmt.table)?
+        let mut candidates = Vec::new();
+        for table in &target_tables {
+            candidates.extend(
+                engine
+                    .table_doc_ids(table)?
+                    .into_iter()
+                    .map(|doc_id| (table.clone(), doc_id)),
+            );
+        }
+        candidates
     };
     let snapshot_ctes = ctes.returning_statement_snapshot_scope();
     let qualification_overlay = DmlCommandMutationOverlay::new(engine);
     let mut qualified_ids = BTreeSet::new();
-    for doc_id in doc_ids {
+    for (storage_table, doc_id) in candidates {
         cancel.check()?;
         let candidate = if preselected {
             None
@@ -107,6 +128,7 @@ pub(in crate::sql) fn run_delete_inner(
             let Some(candidate) = qualified_delete_candidate(
                 engine,
                 stmt,
+                &storage_table,
                 params,
                 &snapshot_ctes,
                 using_rows.as_ref(),
@@ -117,60 +139,71 @@ pub(in crate::sql) fn run_delete_inner(
             };
             Some(candidate)
         };
-        let target = lock_mutation_target(
+        let target = lock_physical_mutation_target(
             engine,
-            &stmt.table,
+            &storage_table,
             &stmt.target_qualifier,
             doc_id,
             uqa_sql::ast::LockStrength::ForUpdate,
         )?;
-        let MutationLockTarget::Present { doc_id, recheck } = target else {
+        let PhysicalMutationLockTarget::Present { identity, recheck } = target else {
             continue;
         };
+        let storage_table = identity.table;
+        let doc_id = identity.doc_id;
         let qualified = if recheck {
             engine.refresh_explicit_statement_snapshot()?;
             if let Some((_, Some(source_context))) = candidate.as_ref() {
                 recheck_delete_candidate(
                     engine,
                     stmt,
+                    &storage_table,
                     params,
                     &snapshot_ctes,
                     doc_id,
                     Some(source_context),
                 )?
             } else {
-                recheck_delete_candidate(engine, stmt, params, &snapshot_ctes, doc_id, None)?
+                recheck_delete_candidate(
+                    engine,
+                    stmt,
+                    &storage_table,
+                    params,
+                    &snapshot_ctes,
+                    doc_id,
+                    None,
+                )?
             }
         } else if let Some(candidate) = candidate {
             Some(candidate)
         } else {
             engine
-                .get_document(&stmt.table, doc_id)?
+                .get_document(&storage_table, doc_id)?
                 .map(|document| (document, None))
         };
         let Some((doc, returning_context)) = qualified else {
             continue;
         };
-        if !qualified_ids.insert(doc_id) {
+        if !qualified_ids.insert((storage_table.clone(), doc_id)) {
             continue;
         }
-        engine.stage_command_document(&stmt.table, doc_id, None)?;
-        qualified_targets.push((doc_id, doc, returning_context));
+        engine.stage_command_document(&storage_table, doc_id, None)?;
+        qualified_targets.push((storage_table, doc_id, doc, returning_context));
     }
     drop(qualification_overlay);
     let to_delete = qualified_targets;
     let root_deletes: BTreeSet<(String, DocId)> = to_delete
         .iter()
-        .map(|(doc_id, _, _)| (stmt.table.clone(), *doc_id))
+        .map(|(table, doc_id, _, _)| (table.clone(), *doc_id))
         .collect();
     let mut delete_stack = Vec::new();
     let mut rewrite_stack = Vec::new();
     let mut prepared_deletes = Vec::with_capacity(to_delete.len());
     let overlay = DmlCommandMutationOverlay::new(engine);
-    for (doc_id, _doc, returning_context) in to_delete {
+    for (storage_table, doc_id, _doc, returning_context) in to_delete {
         if let Some(mut prepared) = prepare_document_delete(
             engine,
-            &stmt.table,
+            &storage_table,
             doc_id,
             params,
             &root_deletes,
@@ -234,12 +267,13 @@ pub(in crate::sql) fn run_delete_inner(
 fn recheck_delete_candidate(
     engine: &Engine,
     stmt: &DeletePlan,
+    storage_table: &str,
     params: &[SQLParam],
     ctes: &CteScope,
     doc_id: DocId,
     source_context: Option<&uqa_execution::OwnedPhysicalRow>,
 ) -> Result<Option<(Document, Option<uqa_execution::OwnedPhysicalRow>)>, SQLError> {
-    let Some(doc) = engine.get_document(&stmt.table, doc_id)? else {
+    let Some(doc) = engine.get_document(storage_table, doc_id)? else {
         return Ok(None);
     };
     let target_row = dml_target_row(engine, &stmt.table, &stmt.target_qualifier, doc_id, &doc)?;
@@ -256,12 +290,13 @@ fn recheck_delete_candidate(
 fn qualified_delete_candidate(
     engine: &Engine,
     stmt: &DeletePlan,
+    storage_table: &str,
     params: &[SQLParam],
     ctes: &CteScope,
     using_rows: Option<&uqa_execution::SharedSpill>,
     doc_id: DocId,
 ) -> Result<Option<(Document, Option<uqa_execution::OwnedPhysicalRow>)>, SQLError> {
-    let Some(doc) = engine.get_document(&stmt.table, doc_id)? else {
+    let Some(doc) = engine.get_document(storage_table, doc_id)? else {
         return Ok(None);
     };
     let target_row = dml_target_row(engine, &stmt.table, &stmt.target_qualifier, doc_id, &doc)?;
@@ -411,59 +446,69 @@ fn prepare_referenced_key_delete_actions(
             let ordinary_len = expected.len().saturating_sub(1);
             let mut excluded_parents = root_deletes
                 .iter()
-                .filter_map(|(root_table, doc_id)| (root_table == parent.table).then_some(*doc_id))
-                .collect::<BTreeSet<_>>();
-            excluded_parents.insert(parent.doc_id);
-            let excluded_parents = excluded_parents.into_iter().collect::<Vec<_>>();
-            for child_id in engine.table_doc_ids(&ref_table)? {
-                if root_deletes.contains(&(ref_table.clone(), child_id)) {
-                    continue;
+                .map(|(table, doc_id)| super::PhysicalDocumentIdentity {
+                    table: table.clone(),
+                    doc_id: *doc_id,
+                })
+                .collect::<Vec<_>>();
+            let parent_identity = super::PhysicalDocumentIdentity {
+                table: parent.table.to_string(),
+                doc_id: parent.doc_id,
+            };
+            if !excluded_parents.contains(&parent_identity) {
+                excluded_parents.push(parent_identity);
+            }
+            for physical_table in engine.hierarchy_scan_tables(&ref_table, true)? {
+                for child_id in engine.table_doc_ids(&physical_table)? {
+                    if root_deletes.contains(&(physical_table.clone(), child_id)) {
+                        continue;
+                    }
+                    let Some(child_doc) = engine.get_document(&physical_table, child_id)? else {
+                        continue;
+                    };
+                    let Some(child_lookup) =
+                        foreign_key_lookup_values(engine, &physical_table, &fk, &child_doc)?
+                    else {
+                        continue;
+                    };
+                    if child_lookup.values[..ordinary_len] != expected[..ordinary_len] {
+                        continue;
+                    }
+                    if period_foreign_key_coverage(
+                        engine,
+                        &fk,
+                        &child_lookup.values,
+                        &excluded_parents,
+                        None,
+                    )?
+                    .0
+                    {
+                        continue;
+                    }
+                    if fk.deferrable && fk.initially_deferred {
+                        engine.defer_foreign_key_row(&physical_table, child_id)?;
+                        continue;
+                    }
+                    return Err(SQLError::Routine {
+                        sqlstate: "23503".into(),
+                        message: format!(
+                            "delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                            parent.table,
+                            fk.name.as_deref().unwrap_or("<unnamed>")
+                        ),
+                    });
                 }
-                let Some(child_doc) = engine.get_document(&ref_table, child_id)? else {
-                    continue;
-                };
-                let Some(child_lookup) =
-                    foreign_key_lookup_values(engine, &ref_table, &fk, &child_doc)?
-                else {
-                    continue;
-                };
-                if child_lookup.values[..ordinary_len] != expected[..ordinary_len] {
-                    continue;
-                }
-                if period_foreign_key_coverage(
-                    engine,
-                    &fk,
-                    &child_lookup.values,
-                    &excluded_parents,
-                    None,
-                )?
-                .0
-                {
-                    continue;
-                }
-                if fk.deferrable && fk.initially_deferred {
-                    engine.defer_foreign_key_row(&ref_table, child_id)?;
-                    continue;
-                }
-                return Err(SQLError::Routine {
-                    sqlstate: "23503".into(),
-                    message: format!(
-                        "delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
-                        parent.table,
-                        fk.name.as_deref().unwrap_or("<unnamed>")
-                    ),
-                });
             }
             continue;
         }
         let referencing = referencing_rows(engine, &ref_table, &fk, &comparison, &expected)?;
-        for (child_id, _child_doc) in referencing {
-            if root_deletes.contains(&(ref_table.clone(), child_id)) {
+        for (child, _child_doc) in referencing {
+            if root_deletes.contains(&(child.table.clone(), child.doc_id)) {
                 continue;
             }
             match fk.on_delete {
                 ForeignKeyAction::NoAction if fk.deferrable && fk.initially_deferred => {
-                    engine.defer_foreign_key_row(&ref_table, child_id)?;
+                    engine.defer_foreign_key_row(&child.table, child.doc_id)?;
                 }
                 ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
                     return Err(SQLError::Routine {
@@ -478,8 +523,8 @@ fn prepare_referenced_key_delete_actions(
                 ForeignKeyAction::Cascade => {
                     if let Some(prepared) = prepare_document_delete(
                         engine,
-                        &ref_table,
-                        child_id,
+                        &child.table,
+                        child.doc_id,
                         params,
                         root_deletes,
                         delete_stack,
@@ -490,10 +535,10 @@ fn prepare_referenced_key_delete_actions(
                 }
                 ForeignKeyAction::SetNull | ForeignKeyAction::SetDefault => {
                     let columns = delete_set_columns(&fk);
-                    let Some((child_id, child_doc)) = super::lock_referencing_child(
+                    let Some((child, child_doc)) = super::lock_referencing_child(
                         engine,
                         &ref_table,
-                        child_id,
+                        &child,
                         &columns,
                         &fk,
                         &comparison,
@@ -505,22 +550,23 @@ fn prepare_referenced_key_delete_actions(
                     let mut updated = child_doc.clone();
                     apply_set_action_to_child(
                         engine,
-                        &ref_table,
+                        &child.table,
                         &child_doc,
                         &mut updated,
                         &columns,
                         fk.on_delete,
                         params,
                     )?;
-                    if let Some(prepared) = prepare_document_rewrite(
+                    if let Some(mut prepared) = prepare_document_rewrite(
                         engine,
-                        &ref_table,
-                        child_id,
+                        &child.table,
+                        child.doc_id,
                         child_doc,
                         updated,
                         params,
                         rewrite_stack,
                     )? {
+                        finalize_referential_partition_rewrite(engine, &mut prepared, params)?;
                         actions.push(PreparedDeleteAction::Rewrite(Box::new(prepared)));
                     }
                 }

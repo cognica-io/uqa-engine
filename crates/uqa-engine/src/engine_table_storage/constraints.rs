@@ -8,9 +8,15 @@
 
 use super::{
     column_not_found, table_not_found, DocId, Engine, RelationIdentity, SQLError,
-    StorageBackendError, StorageBackendResult,
+    StorageBackendError, StorageBackendResult, TableState,
 };
 use std::collections::BTreeSet;
+
+const TABLE_NEXT_ID_METADATA_PREFIX: &str = "uqa.table_next_id.v1:";
+
+pub(crate) fn table_next_id_metadata_key(table: &str) -> String {
+    format!("{TABLE_NEXT_ID_METADATA_PREFIX}{table}")
+}
 
 pub(crate) fn materialize_constraint_names(
     relation: &RelationIdentity,
@@ -429,6 +435,7 @@ impl Engine {
             checks: t.table_checks.read().clone(),
             foreign_keys: t.foreign_keys.read().clone(),
             key_constraints: t.key_constraints.read().clone(),
+            hierarchy: t.hierarchy.read().clone(),
         };
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
@@ -522,6 +529,7 @@ impl Engine {
             checks,
             foreign_keys,
             key_constraints,
+            hierarchy: t.hierarchy.read().clone(),
         };
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
@@ -534,6 +542,56 @@ impl Engine {
         *t.table_checks.write() = constraints.checks;
         *t.foreign_keys.write() = constraints.foreign_keys;
         *t.key_constraints.write() = constraints.key_constraints;
+        Ok(())
+    }
+
+    /// Atomically replace the schema components that ALTER hierarchy actions
+    /// may inherit. The candidate is fully named and persisted before the
+    /// in-memory table becomes visible with its new edge.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn replace_table_hierarchy_components(
+        &self,
+        table: &str,
+        mut columns: Vec<uqa_sql::ast::ColumnDef>,
+        checks: Vec<uqa_sql::ast::TableCheck>,
+        mut foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
+        key_constraints: Vec<uqa_sql::ast::TableKeyConstraint>,
+        hierarchy: uqa_sql::ast::TableHierarchy,
+    ) -> StorageBackendResult<()> {
+        let table_name = self
+            .try_resolve_table_name(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let state = self
+            .try_table(&table_name)?
+            .ok_or_else(|| table_not_found(&table_name))?;
+        for foreign_key in &mut foreign_keys {
+            foreign_key.ref_table = self.canonical_foreign_key_target(&foreign_key.ref_table)?;
+        }
+        let mut constraints = uqa_sql::ast::TableConstraintSet {
+            persistence: state.persistence,
+            on_commit: state.on_commit,
+            checks,
+            foreign_keys,
+            key_constraints,
+            hierarchy,
+        };
+        let relation =
+            RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
+        materialize_constraint_names(&relation, &mut columns, &mut constraints)?;
+        if self.is_persistent() {
+            self.try_save_table_schema_with_components(
+                &table_name,
+                &state,
+                &columns,
+                &constraints,
+            )?;
+        }
+        *state.columns.write() = columns;
+        *state.table_checks.write() = constraints.checks;
+        *state.foreign_keys.write() = constraints.foreign_keys;
+        *state.key_constraints.write() = constraints.key_constraints;
+        *state.hierarchy.write() = constraints.hierarchy;
+        self.refresh_value_indexes_for_table(&table_name)?;
         Ok(())
     }
 
@@ -579,6 +637,7 @@ impl Engine {
             checks: t.table_checks.read().clone(),
             foreign_keys: t.foreign_keys.read().clone(),
             key_constraints,
+            hierarchy: t.hierarchy.read().clone(),
         };
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
@@ -638,6 +697,7 @@ impl Engine {
                     enforced: col.check_enforced,
                     validated: col.check_validated,
                     no_inherit: col.check_no_inherit,
+                    partition_constraint: None,
                 });
             }
         }
@@ -659,12 +719,14 @@ impl Engine {
         let checks = t.table_checks.read().clone();
         let foreign_keys = t.foreign_keys.read().clone();
         let key_constraints = t.key_constraints.read().clone();
+        let hierarchy = t.hierarchy.read().clone();
         Ok(uqa_sql::ast::TableConstraintSet {
             persistence: t.persistence,
             on_commit: t.on_commit,
             checks,
             foreign_keys,
             key_constraints,
+            hierarchy,
         })
     }
 
@@ -765,7 +827,7 @@ impl Engine {
         let cols = t.columns.read();
         let auto_increment: std::collections::BTreeSet<String> = cols
             .iter()
-            .filter(|column| column.auto_increment)
+            .filter(|column| column.auto_increment.is_some())
             .map(|column| column.name.clone())
             .collect();
         drop(cols);
@@ -852,6 +914,66 @@ impl Engine {
         if next > *g {
             *g = next;
         }
+        Ok(())
+    }
+
+    pub(crate) fn persist_next_id(&self, table: &str) -> StorageBackendResult<()> {
+        let t = self
+            .try_table(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        if t.persistence == uqa_sql::ast::RelationPersistence::Temporary {
+            return Ok(());
+        }
+        let Some(catalog) = self.storage.catalog.as_ref() else {
+            return Ok(());
+        };
+        let next_id = t.next_id.lock().to_string();
+        catalog.set_metadata(&table_next_id_metadata_key(table), &next_id)
+    }
+
+    pub(crate) fn load_persisted_next_id(
+        catalog: &dyn uqa_storage::CatalogFacade,
+        table: &str,
+    ) -> StorageBackendResult<Option<u128>> {
+        let Some(value) = catalog.get_metadata(&table_next_id_metadata_key(table))? else {
+            return Ok(None);
+        };
+        if value.is_empty() {
+            return Ok(None);
+        }
+        value.parse::<u128>().map(Some).map_err(|error| {
+            StorageBackendError::Other(format!(
+                "invalid persisted next id for table `{table}`: {error}"
+            ))
+        })
+    }
+
+    pub(crate) fn refresh_table_next_id(
+        &self,
+        table: &str,
+        state: &TableState,
+    ) -> StorageBackendResult<()> {
+        let persisted = if state.columns.read().iter().any(|column| {
+            column
+                .auto_increment
+                .as_ref()
+                .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy)
+        }) {
+            self.storage
+                .catalog
+                .as_ref()
+                .map(|catalog| Self::load_persisted_next_id(catalog.as_ref(), table))
+                .transpose()?
+                .flatten()
+        } else {
+            None
+        };
+        let physical = u128::from(state.document_store.read().max_doc_id()?) + 1;
+        let mut current = state.next_id.lock();
+        *current = persisted.map_or_else(
+            || (*current).max(physical),
+            |persisted| persisted.max(physical),
+        );
         Ok(())
     }
 }

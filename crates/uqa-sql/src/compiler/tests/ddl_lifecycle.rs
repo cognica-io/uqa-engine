@@ -25,6 +25,68 @@ fn alter_table_add_key_constraint_preserves_tuple_shape() {
 }
 
 #[test]
+fn alter_table_hierarchy_preserves_every_parser_field_and_subcommand() {
+    let Statement::AlterTable(alter) =
+        first("ALTER TABLE ONLY child INHERIT parent_one, NO INHERIT parent_two")
+    else {
+        panic!("expected ALTER TABLE");
+    };
+    assert!(!alter.recurse);
+    assert!(matches!(
+        alter.actions.as_slice(),
+        [
+            AlterTableAction::AddInheritance { parent: first_parent },
+            AlterTableAction::DropInheritance {
+                parent: second_parent
+            }
+        ] if first_parent == "parent_one" && second_parent == "parent_two"
+    ));
+
+    let Statement::AlterTable(attach) = first(
+        "ALTER TABLE parent ATTACH PARTITION child FOR VALUES FROM (MINVALUE, 1) TO (10, MAXVALUE)",
+    ) else {
+        panic!("expected ALTER TABLE");
+    };
+    assert!(attach.recurse);
+    assert!(matches!(
+        attach.actions.as_slice(),
+        [AlterTableAction::AttachPartition {
+            partition,
+            bound: crate::ast::PartitionBound::Range { lower, upper },
+        }] if partition == "child"
+            && matches!(lower.as_slice(), [crate::ast::PartitionRangeDatum::MinValue, crate::ast::PartitionRangeDatum::Value(Expr::Literal(uqa_core::Value::Int(1)))])
+            && matches!(upper.as_slice(), [crate::ast::PartitionRangeDatum::Value(Expr::Literal(uqa_core::Value::Int(10))), crate::ast::PartitionRangeDatum::MaxValue])
+    ));
+
+    for (sql, concurrently, finalize) in [
+        (
+            "ALTER TABLE parent DETACH PARTITION child CONCURRENTLY",
+            true,
+            false,
+        ),
+        (
+            "ALTER TABLE parent DETACH PARTITION child FINALIZE",
+            false,
+            true,
+        ),
+    ] {
+        let Statement::AlterTable(detach) = first(sql) else {
+            panic!("expected ALTER TABLE");
+        };
+        assert!(matches!(
+            detach.actions.as_slice(),
+            [AlterTableAction::DetachPartition {
+                partition,
+                concurrently: actual_concurrently,
+                finalize: actual_finalize,
+            }] if partition == "child"
+                && *actual_concurrently == concurrently
+                && *actual_finalize == finalize
+        ));
+    }
+}
+
+#[test]
 fn alter_table_constraint_lifecycle_preserves_every_ordered_action() {
     let Statement::AlterTable(alter) = first(
         "ALTER TABLE child \
@@ -347,10 +409,6 @@ fn relation_forms_and_options_preserve_lifecycle_semantics() {
 #[test]
 fn unsupported_create_ddl_never_loses_remaining_envelope_semantics() {
     for (sql, expected) in [
-        (
-            "CREATE TABLE inherited (id INTEGER) INHERITS (parent)",
-            "INHERITS",
-        ),
         (
             "CREATE TABLE optioned (id INTEGER) WITH (fillfactor = 70)",
             "storage options",

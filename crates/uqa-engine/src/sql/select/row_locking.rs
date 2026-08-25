@@ -288,6 +288,7 @@ fn collect_source_leaves(
             name,
             qualifier,
             alias,
+            include_descendants,
         } => {
             let visible = alias.as_deref().unwrap_or(qualifier);
             let mut names = vec![visible.to_string()];
@@ -298,6 +299,20 @@ fn collect_source_leaves(
                 }
             }
             let kind = classify_table_leaf(engine, name, ctes)?;
+            if matches!(kind, LockLeafKind::Base) {
+                return Ok(engine
+                    .hierarchy_scan_tables(name, *include_descendants)?
+                    .into_iter()
+                    .map(|storage_name| LockLeaf {
+                        names: names.clone(),
+                        qualifier: visible.to_string(),
+                        storage_name,
+                        display_name: visible.to_string(),
+                        kind: LockLeafKind::Base,
+                        nullable,
+                    })
+                    .collect());
+            }
             Ok(vec![LockLeaf {
                 names,
                 qualifier: visible.to_string(),

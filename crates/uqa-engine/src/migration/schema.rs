@@ -172,7 +172,9 @@ pub(super) fn column_to_rust(col: &PythonColumnDef) -> Result<ColumnDef, PythonM
         not_null_name: None,
         not_null_validated: true,
         not_null_no_inherit: false,
-        auto_increment: col.auto_increment,
+        auto_increment: col
+            .auto_increment
+            .then_some(uqa_sql::ast::AutoIncrement::legacy()),
         unique: col.unique,
         default: col
             .default

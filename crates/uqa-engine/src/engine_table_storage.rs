@@ -271,7 +271,7 @@ fn rename_schema_expr_qualified_column(
 
 mod columns;
 mod constraints;
-pub(crate) use constraints::materialize_constraint_names;
+pub(crate) use constraints::{materialize_constraint_names, table_next_id_metadata_key};
 mod dependencies;
 mod documents;
 mod fts;

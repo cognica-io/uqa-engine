@@ -8,7 +8,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{ColumnType, Expr, GeneratedColumn, OnCommitAction, RelationPersistence};
+use super::{
+    deserialize_auto_increment, AutoIncrement, ColumnType, Expr, GeneratedColumn, OnCommitAction,
+    PartitionBound, PartitionSpec, RelationPersistence, TableHierarchy,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
@@ -34,10 +37,13 @@ pub struct ColumnDef {
     /// constraints.
     #[serde(default)]
     pub not_null_no_inherit: bool,
-    /// `SERIAL` / `BIGSERIAL` columns auto-allocate from a per-table
-    /// monotonic counter when the value is omitted from `INSERT`.
-    #[serde(default)]
-    pub auto_increment: bool,
+    /// Sequence provenance for `SERIAL` / `BIGSERIAL` and identity columns. The custom decoder accepts the legacy boolean representation written by releases that merged both SQL features into one table counter.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_auto_increment",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub auto_increment: Option<AutoIncrement>,
     /// `UNIQUE` column constraint -- the engine rejects an INSERT
     /// whose value for this column already exists in another row.
     #[serde(default)]
@@ -124,6 +130,11 @@ pub struct CreateTable {
     /// Transaction-end behavior for temporary tables.
     #[serde(default)]
     pub on_commit: OnCommitAction,
+    /// Direct inheritance and declarative-partitioning metadata. The engine
+    /// resolves parent names and merges their row types atomically at create
+    /// time, then persists the canonical hierarchy with the table schema.
+    #[serde(default)]
+    pub hierarchy: TableHierarchy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,6 +176,9 @@ pub struct TableConstraintSet {
     /// Permanent and unlogged tables always use the default. Temporary tables are session-local and therefore never write this field to disk.
     #[serde(default)]
     pub on_commit: OnCommitAction,
+    /// Durable relation hierarchy and partition-bound metadata.
+    #[serde(default)]
+    pub hierarchy: TableHierarchy,
 }
 
 /// `CHECK (expr)` constraint with an optional name (`CONSTRAINT <name>
@@ -179,10 +193,19 @@ pub struct TableCheck {
     pub validated: bool,
     #[serde(default)]
     pub no_inherit: bool,
+    /// Runtime form of the bound CHECK retained after `DETACH PARTITION ... CONCURRENTLY`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partition_constraint: Option<DetachedPartitionConstraint>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetachedPartitionConstraint {
+    pub spec: PartitionSpec,
+    pub bound: PartitionBound,
 }
 
 /// Table-level foreign key. Compilation preserves an omitted referenced column list as empty; validation fills it from the primary key before publication.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ForeignKey {
     pub name: Option<String>,

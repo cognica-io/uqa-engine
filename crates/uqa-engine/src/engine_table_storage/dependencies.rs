@@ -258,9 +258,12 @@ impl Engine {
         let mut dependents = Vec::new();
         for (table_name, table) in self.table_entries() {
             for column in table.columns.read().iter() {
-                let mut depends = false;
+                let mut depends = column
+                    .auto_increment
+                    .as_ref()
+                    .is_some_and(|provenance| provenance.sequence.as_deref() == Some(sequence));
                 if let Some(default) = &column.default {
-                    depends = self
+                    depends |= self
                         .stored_sequence_targets_in_expr(default)?
                         .contains(sequence);
                 }
@@ -317,12 +320,35 @@ impl Engine {
         foreign_keys: &[uqa_sql::ast::ForeignKey],
         key_constraints: &[uqa_sql::ast::TableKeyConstraint],
     ) -> StorageBackendResult<()> {
+        self.persist_constraint_candidate_with_hierarchy(
+            name,
+            table,
+            columns,
+            checks,
+            foreign_keys,
+            key_constraints,
+            &table.hierarchy.read(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn persist_constraint_candidate_with_hierarchy(
+        &self,
+        name: &str,
+        table: &TableState,
+        columns: &[uqa_sql::ast::ColumnDef],
+        checks: &[uqa_sql::ast::TableCheck],
+        foreign_keys: &[uqa_sql::ast::ForeignKey],
+        key_constraints: &[uqa_sql::ast::TableKeyConstraint],
+        hierarchy: &uqa_sql::ast::TableHierarchy,
+    ) -> StorageBackendResult<()> {
         let constraints = uqa_sql::ast::TableConstraintSet {
             persistence: table.persistence,
             on_commit: table.on_commit,
             checks: checks.to_vec(),
             foreign_keys: foreign_keys.to_vec(),
             key_constraints: key_constraints.to_vec(),
+            hierarchy: hierarchy.clone(),
         };
         self.try_save_table_schema_with_components(name, table, columns, &constraints)
     }
@@ -340,9 +366,20 @@ impl Engine {
             let mut checks = table.table_checks.read().clone();
             let mut foreign_keys = table.foreign_keys.read().clone();
             let key_constraints = table.key_constraints.read().clone();
+            let mut hierarchy = table.hierarchy.read().clone();
             let mut changed = false;
 
             for column in &mut columns {
+                if let Some(owner) = column
+                    .auto_increment
+                    .as_mut()
+                    .and_then(|provenance| provenance.owner.as_mut())
+                {
+                    if stored_relation_reference_matches(&owner.table, &from_relation) {
+                        owner.table = to.to_string();
+                        changed = true;
+                    }
+                }
                 for expression in [&mut column.default, &mut column.check]
                     .into_iter()
                     .flatten()
@@ -377,22 +414,30 @@ impl Engine {
                     changed = true;
                 }
             }
+            for parent in &mut hierarchy.parents {
+                if stored_relation_reference_matches(parent, &from_relation) {
+                    *parent = to.to_string();
+                    changed = true;
+                }
+            }
             if changed {
-                self.persist_constraint_candidate(
+                self.persist_constraint_candidate_with_hierarchy(
                     &table_name,
                     &table,
                     &columns,
                     &checks,
                     &foreign_keys,
                     &key_constraints,
+                    &hierarchy,
                 )?;
-                updates.push((table, columns, checks, foreign_keys));
+                updates.push((table, columns, checks, foreign_keys, hierarchy));
             }
         }
-        for (table, columns, checks, foreign_keys) in updates {
+        for (table, columns, checks, foreign_keys, hierarchy) in updates {
             *table.columns.write() = columns;
             *table.table_checks.write() = checks;
             *table.foreign_keys.write() = foreign_keys;
+            *table.hierarchy.write() = hierarchy;
         }
         Ok(())
     }
@@ -415,6 +460,7 @@ impl Engine {
             let mut changed = false;
 
             for column in &mut columns {
+                changed |= Self::rewrite_auto_increment_owner_column(column, &target, from, to);
                 for expression in [&mut column.default, &mut column.check]
                     .into_iter()
                     .flatten()
@@ -503,6 +549,26 @@ impl Engine {
             *table.foreign_keys.write() = foreign_keys;
         }
         Ok(())
+    }
+
+    fn rewrite_auto_increment_owner_column(
+        column: &mut uqa_sql::ast::ColumnDef,
+        target: &RelationIdentity,
+        from: &str,
+        to: &str,
+    ) -> bool {
+        let Some(owner) = column
+            .auto_increment
+            .as_mut()
+            .and_then(|provenance| provenance.owner.as_mut())
+        else {
+            return false;
+        };
+        if !stored_relation_reference_matches(&owner.table, target) || owner.column != from {
+            return false;
+        }
+        owner.column = to.to_string();
+        true
     }
 
     pub(super) fn preflight_drop_column_dependencies(

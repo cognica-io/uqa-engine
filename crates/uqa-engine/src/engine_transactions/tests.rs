@@ -190,7 +190,7 @@ fn pinned_reader_defers_sibling_catalog_epochs_until_transaction_end() {
     {
         let mut stack = reader.session.transactions.lock();
         reader
-            .begin_transaction_frame(&mut stack, true, true)
+            .begin_transaction_frame(&mut stack, true, true, false)
             .unwrap();
     }
     assert!(!reader.has_schema("later").unwrap());

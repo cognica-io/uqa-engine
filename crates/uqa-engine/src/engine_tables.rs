@@ -38,6 +38,7 @@ impl Engine {
             key_constraints: table.key_constraints.read().clone(),
             persistence: table.persistence,
             on_commit: table.on_commit,
+            hierarchy: table.hierarchy.read().clone(),
         };
         self.try_save_table_schema_with_components(name, table, columns, &constraints)
     }
@@ -184,6 +185,7 @@ impl Engine {
             table_checks: RwLock::new(Vec::new()),
             foreign_keys: RwLock::new(Vec::new()),
             key_constraints: RwLock::new(Vec::new()),
+            hierarchy: RwLock::new(uqa_sql::ast::TableHierarchy::default()),
             value_indexes: RwLock::new(BTreeMap::new()),
             doc_count_cache: std::sync::atomic::AtomicU64::new(0),
             doc_count_dirty: AtomicBool::new(true),

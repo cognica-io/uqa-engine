@@ -7,8 +7,8 @@
 //! Table drop, lookup, description, and default inspection.
 
 use super::{
-    stored_relation_reference_matches, table_not_found, Engine, RelationIdentity,
-    StorageBackendError, StorageBackendResult,
+    stored_relation_reference_matches, table_not_found, Arc, Engine, RelationIdentity,
+    StorageBackendError, StorageBackendResult, TableState,
 };
 
 impl Engine {
@@ -54,40 +54,59 @@ impl Engine {
         Ok(canonical_names)
     }
 
+    fn drop_target_sets(
+        canonical_names: &[String],
+    ) -> StorageBackendResult<(std::collections::BTreeSet<String>, Vec<RelationIdentity>)> {
+        let target_names = canonical_names.iter().cloned().collect();
+        let targets = canonical_names
+            .iter()
+            .map(|name| Self::resolved_relation_identity(name))
+            .collect::<StorageBackendResult<Vec<_>>>()?;
+        Ok((target_names, targets))
+    }
+
+    fn ensure_no_drop_view_dependencies(
+        &self,
+        canonical_names: &[String],
+    ) -> StorageBackendResult<()> {
+        for name in canonical_names {
+            self.ensure_no_dependent_views("DROP TABLE", name)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn try_drop_tables_inner(
         &self,
         names: &[String],
         cascade: bool,
     ) -> StorageBackendResult<()> {
-        let canonical_names = self.canonical_drop_table_names(names)?;
-        let targets = canonical_names
-            .iter()
-            .map(|name| Self::resolved_relation_identity(name))
-            .collect::<StorageBackendResult<Vec<_>>>()?;
-        let target_names = canonical_names
-            .iter()
-            .cloned()
-            .collect::<std::collections::BTreeSet<_>>();
+        let canonical_names = self.canonical_hierarchy_drop_targets(names, cascade)?;
+        let (target_names, targets) = Self::drop_target_sets(&canonical_names)?;
 
         // Finish every dependency check before mutating a referrer or target.
-        for name in &canonical_names {
-            self.ensure_no_dependent_views("DROP TABLE", name)?;
-        }
+        self.ensure_no_drop_view_dependencies(&canonical_names)?;
         let entries = self.table_entries();
-        for (candidate_name, table) in &entries {
-            if target_names.contains(candidate_name) {
-                continue;
-            }
-            if let Some(target) = targets
-                .iter()
-                .find(|target| Self::table_schema_references_relation(table, target))
-            {
-                return Err(StorageBackendError::Other(format!(
-                    "DROP TABLE `{}` rejected: schema expression on `{candidate_name}` may depend on it and cannot be rewritten safely",
-                    target.qualified_name()
-                )));
-            }
-        }
+        Self::ensure_drop_targets_unreferenced(&target_names, &targets, &entries)?;
+        let owned_sequences = entries
+            .iter()
+            .filter(|(table, _)| target_names.contains(table))
+            .flat_map(|(table, state)| {
+                state
+                    .columns
+                    .read()
+                    .iter()
+                    .filter_map(|column| {
+                        let provenance = column.auto_increment.as_ref()?;
+                        let owner = provenance.owner.as_ref()?;
+                        if owner.table == *table && owner.column == column.name {
+                            provenance.sequence.clone()
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<std::collections::BTreeSet<_>>();
 
         let mut inbound = Vec::new();
         let mut updates = Vec::new();
@@ -156,7 +175,49 @@ impl Engine {
         for name in canonical_names {
             self.drop_table_state_inner(&name)?;
         }
+        for sequence in owned_sequences {
+            self.drop_owned_sequence(&sequence)?;
+        }
         Ok(())
+    }
+
+    fn ensure_drop_targets_unreferenced(
+        target_names: &std::collections::BTreeSet<String>,
+        targets: &[RelationIdentity],
+        entries: &[(String, Arc<TableState>)],
+    ) -> StorageBackendResult<()> {
+        for (candidate_name, table) in entries {
+            if target_names.contains(candidate_name) {
+                continue;
+            }
+            if let Some(target) = targets
+                .iter()
+                .find(|target| Self::table_schema_references_relation(table, target))
+            {
+                return Err(StorageBackendError::Other(format!(
+                    "DROP TABLE `{}` rejected: schema expression on `{candidate_name}` may depend on it and cannot be rewritten safely",
+                    target.qualified_name()
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn canonical_hierarchy_drop_targets(
+        &self,
+        names: &[String],
+        cascade: bool,
+    ) -> StorageBackendResult<Vec<String>> {
+        let canonical_names = self.canonical_drop_table_names(names)?;
+        let (canonical_names, hierarchy_dependents) =
+            self.hierarchy_drop_targets(&canonical_names, cascade);
+        if !hierarchy_dependents.is_empty() {
+            return Err(StorageBackendError::Other(format!(
+                "DROP TABLE rejected: table `{}` depends on the target through inheritance; use CASCADE",
+                hierarchy_dependents.join("`, `")
+            )));
+        }
+        Ok(canonical_names)
     }
 
     pub(crate) fn drop_table_state_inner(&self, name: &str) -> StorageBackendResult<()> {
@@ -251,7 +312,7 @@ impl Engine {
         Ok(cols.iter().find(|c| c.name == column).map(|c| c.ty.clone()))
     }
 
-    /// Return the SERIAL/BIGSERIAL column name for `table`, if any.
+    /// Return the first SERIAL or identity column name for `table`, if any.
     pub(crate) fn auto_increment_column(
         &self,
         table: &str,
@@ -262,8 +323,30 @@ impl Engine {
         let cols = t.columns.read();
         Ok(cols
             .iter()
-            .find(|c| c.auto_increment)
+            .find(|c| c.auto_increment.is_some())
             .map(|c| c.name.clone()))
+    }
+
+    /// Sequence-generating columns and their durable provenance, in schema order. More than one `SERIAL`/identity column may exist on a table even though only the first one is used as the engine's physical document id.
+    pub(crate) fn auto_increment_columns(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Vec<(String, uqa_sql::ast::AutoIncrement)>> {
+        let t = self
+            .try_table(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let columns = t
+            .columns
+            .read()
+            .iter()
+            .filter_map(|column| {
+                column
+                    .auto_increment
+                    .clone()
+                    .map(|provenance| (column.name.clone(), provenance))
+            })
+            .collect();
+        Ok(columns)
     }
 
     /// Sorted list of every registered table name.

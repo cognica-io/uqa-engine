@@ -17,8 +17,10 @@ mod expressions;
 mod from;
 mod locking;
 mod ranges;
+mod relation_hierarchy;
 mod relation_lifecycle;
 mod routine_security;
+mod sequence;
 
 pub use constraints::*;
 pub use cte::*;
@@ -26,8 +28,18 @@ pub use expressions::*;
 pub use from::*;
 pub use locking::*;
 pub use ranges::*;
+pub use relation_hierarchy::*;
 pub use relation_lifecycle::*;
 pub use routine_security::*;
+pub use sequence::*;
+
+const fn default_include_descendants() -> bool {
+    true
+}
+
+const fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ColumnType {
@@ -813,12 +825,30 @@ pub struct AlterTableStmt {
     /// Local SQL relation identifier used while binding new or replaced generation expressions.
     pub qualifier: String,
     pub if_exists: bool,
+    /// Whether the target omitted `ONLY` and therefore allows recursive ALTER behavior.
+    #[serde(default = "default_true")]
+    pub recurse: bool,
     pub actions: Vec<AlterTableAction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum AlterTableAction {
+    AddInheritance {
+        parent: String,
+    },
+    DropInheritance {
+        parent: String,
+    },
+    AttachPartition {
+        partition: String,
+        bound: PartitionBound,
+    },
+    DetachPartition {
+        partition: String,
+        concurrently: bool,
+        finalize: bool,
+    },
     AddColumn {
         column: ColumnDef,
         if_not_exists: bool,
@@ -897,6 +927,8 @@ pub struct InsertStmt {
     pub table: String,
     /// SQL-visible target relation name: explicit alias, otherwise the local relation name.
     pub target_qualifier: String,
+    #[serde(default = "default_include_descendants")]
+    pub include_descendants: bool,
     pub columns: Vec<String>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
     pub with: Vec<CTE>,
@@ -1055,6 +1087,8 @@ pub enum DiscardTarget {
 pub struct UpdateStmt {
     pub table: String,
     pub target_qualifier: String,
+    #[serde(default = "default_include_descendants")]
+    pub include_descendants: bool,
     pub assignments: Vec<(String, Expr)>,
     pub r#where: Option<Expr>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
@@ -1071,6 +1105,8 @@ pub struct UpdateStmt {
 pub struct DeleteStmt {
     pub table: String,
     pub target_qualifier: String,
+    #[serde(default = "default_include_descendants")]
+    pub include_descendants: bool,
     pub r#where: Option<Expr>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
     pub with: Vec<CTE>,
@@ -1173,10 +1209,13 @@ pub enum Statement {
     Analyze {
         table: Option<String>,
     },
-    /// `TRUNCATE TABLE t1, t2 ...`. Wipes the listed tables.
+    /// `TRUNCATE TABLE t1, t2 ...`. Wipes the listed table hierarchies unless
+    /// a target uses `ONLY`.
     Truncate {
-        tables: Vec<String>,
+        tables: Vec<TruncateTarget>,
         cascade: bool,
+        #[serde(default)]
+        restart_identity: bool,
     },
     /// `BEGIN` / `COMMIT` / `ROLLBACK` / `SAVEPOINT name`.
     Transaction(TransactionStmt),
@@ -1251,10 +1290,19 @@ pub enum Statement {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TruncateTarget {
+    pub table: String,
+    #[serde(default = "default_include_descendants")]
+    pub include_descendants: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeStmt {
     pub target: String,
     pub target_qualifier: String,
     pub target_alias: Option<String>,
+    #[serde(default = "default_include_descendants")]
+    pub include_descendants: bool,
     pub source: FromClause,
     pub join_condition: Expr,
     pub when_clauses: Vec<MergeWhen>,

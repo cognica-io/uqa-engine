@@ -349,6 +349,7 @@ fn recursive_reference_qualifier(source: &SourcePlan, cte_name: &str) -> Option<
             name,
             qualifier,
             alias,
+            ..
         } if name == cte_name => Some(alias.as_deref().unwrap_or(qualifier).to_string()),
         SourcePlan::Join { left, right, .. } => recursive_reference_qualifier(left, cte_name)
             .or_else(|| recursive_reference_qualifier(right, cte_name)),

@@ -43,6 +43,7 @@ use crate::{Engine, HNSWIndexParams, IVFIndexParams, ScoredEntry, VectorIndexSpe
 mod age_cypher;
 mod aggregates;
 mod catalog;
+mod copy;
 mod correlation;
 mod cursor;
 mod ddl;
@@ -51,6 +52,7 @@ mod driver;
 mod engine_api;
 mod from_rows;
 mod generated;
+mod hierarchy;
 mod mutability;
 mod plan_executor;
 mod planning;
@@ -92,6 +94,11 @@ pub(crate) use ddl::{convert_value_to_column_type, validate_vector_dimensions};
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
 use from_rows::{build_join_spill_with_ctes, engine_func_intercept, ColumnPrune, QualifierFilters};
 pub(crate) use generated::refresh_stored_generated_columns;
+pub(in crate::sql) use hierarchy::{
+    partition_constraint_accepts_document, partition_insert_target,
+    prospective_partition_bound_accepts_document, validate_hash_partition_spec,
+    validate_new_partition_bound,
+};
 use plan_executor::UnifiedPlanExecutor;
 use row_functions::{
     execute_function, execute_function_with_top_k, execute_tree_entries, expect_column_name,
@@ -157,6 +164,7 @@ pub(crate) fn bind_catalog_query_routines_with_outer(
 
 const SCORE_COLUMN: &str = "_score";
 pub(in crate::sql) const DOC_ID_COLUMN: &str = "_doc_id";
+pub(in crate::sql) const TABLE_OID_COLUMN: &str = "tableoid";
 const MERGE_ACTION_COLUMN: &str = "_merge_action";
 // NUL cannot occur in a SQL identifier, so this row-carried field cannot
 // collide with a user column. Its value is the score emitted by an executed
@@ -225,6 +233,8 @@ pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
                         | "setval"
                         | "current_schema"
                         | "current_schemas"
+                        | "pg_get_expr"
+                        | "pg_get_partkeydef"
                 )
         }
         _ => false,

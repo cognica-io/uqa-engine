@@ -177,11 +177,53 @@ fn information_schema_column_row(
         ),
         (
             "is_identity",
-            str_value(if column.auto_increment { "YES" } else { "NO" }),
+            str_value(
+                if column
+                    .auto_increment
+                    .as_ref()
+                    .is_some_and(|provenance| provenance.is_identity() || provenance.is_legacy())
+                {
+                    "YES"
+                } else {
+                    "NO"
+                },
+            ),
         ),
-        ("identity_generation", Value::Null),
-        ("identity_start", Value::Null),
-        ("identity_increment", Value::Null),
+        (
+            "identity_generation",
+            match column.auto_increment.as_ref().map(|value| value.kind) {
+                Some(uqa_sql::ast::AutoIncrementKind::IdentityAlways) => str_value("ALWAYS"),
+                Some(
+                    uqa_sql::ast::AutoIncrementKind::IdentityByDefault
+                    | uqa_sql::ast::AutoIncrementKind::Legacy,
+                ) => str_value("BY DEFAULT"),
+                _ => Value::Null,
+            },
+        ),
+        (
+            "identity_start",
+            if column
+                .auto_increment
+                .as_ref()
+                .is_some_and(|provenance| provenance.is_identity() || provenance.is_legacy())
+            {
+                str_value("1")
+            } else {
+                Value::Null
+            },
+        ),
+        (
+            "identity_increment",
+            if column
+                .auto_increment
+                .as_ref()
+                .is_some_and(|provenance| provenance.is_identity() || provenance.is_legacy())
+            {
+                str_value("1")
+            } else {
+                Value::Null
+            },
+        ),
         ("identity_maximum", Value::Null),
         ("identity_minimum", Value::Null),
         ("identity_cycle", str_value("NO")),

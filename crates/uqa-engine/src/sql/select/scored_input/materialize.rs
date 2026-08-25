@@ -63,6 +63,7 @@ impl ScoredDocumentSource {
                         metadata.doc_id()?,
                         metadata.score(),
                         metadata.score_provenance(),
+                        metadata.table_oid(),
                     ];
                     let row = uqa_execution::ProjectedRow::new(
                         &self.schema,
@@ -190,6 +191,7 @@ impl ScoredDocumentSource {
             metadata.doc_id()?,
             metadata.score(),
             metadata.score_provenance(),
+            metadata.table_oid(),
         ];
         Ok(
             source.project_with_values(self.projected_slots.iter().map(|slot| {
@@ -254,6 +256,7 @@ impl ScoredDocumentSource {
                 metadata.doc_id()?,
                 metadata.score(),
                 metadata.score_provenance(),
+                metadata.table_oid(),
             ];
             let row = uqa_execution::ProjectedRow::new(
                 &self.schema,
@@ -281,6 +284,7 @@ impl ScoredDocumentSource {
                 metadata.doc_id()?,
                 metadata.score(),
                 metadata.score_provenance(),
+                metadata.table_oid(),
             ];
             let row = uqa_execution::ProjectedRow::new(
                 &self.schema,
@@ -513,6 +517,7 @@ impl ScoredDocumentSource {
                 metadata.doc_id()?,
                 metadata.score(),
                 metadata.score_provenance(),
+                metadata.table_oid(),
             ];
             let row = uqa_execution::ProjectedRow::new(
                 &self.schema,

@@ -19,7 +19,7 @@
 
 use uqa_sql::ast::LockStrength;
 
-use super::{RelationLockMode, RowChangeTarget};
+use super::{PhysicalRowChangeTarget, RelationLockMode, RowChangeTarget};
 
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(
@@ -38,10 +38,20 @@ pub(super) struct PublishedRowChange {
     not(any(windows, all(unix, not(target_os = "emscripten")))),
     allow(dead_code)
 )]
+pub(super) struct PublishedRowIdentity {
+    pub table_hash: u64,
+    pub doc_id: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(
+    not(any(windows, all(unix, not(target_os = "emscripten")))),
+    allow(dead_code)
+)]
 pub(super) enum PublishedRowChangeKind {
     Update,
     Delete,
-    Rewrite(u64),
+    Rewrite(PublishedRowIdentity),
 }
 
 /// Sidecar layout. Coordination bytes and wait/holder slots occupy the low addresses; record-lock byte ranges for relations and rows start above them so lock offsets never alias structured data offsets.
@@ -160,7 +170,7 @@ mod file {
     use parking_lot::Mutex;
     use uqa_sql::ast::LockStrength;
 
-    use super::{ByteClaim, RowChangeTarget};
+    use super::{ByteClaim, PhysicalRowChangeTarget, RowChangeTarget};
 
     const CHANGE_JOURNAL_LOCK_BYTE: u64 = 10;
     const SLOT_METADATA_LOCK_BYTE: u64 = 11;
@@ -588,11 +598,32 @@ mod file {
             baseline: u64,
             wanted: LockStrength,
         ) -> Result<RowChangeTarget, String> {
+            Ok(
+                match self.physical_change_target_after(table_hash, doc_id, baseline, wanted)? {
+                    PhysicalRowChangeTarget::Unchanged => RowChangeTarget::Unchanged,
+                    PhysicalRowChangeTarget::Present {
+                        table_hash: target_table_hash,
+                        doc_id,
+                    } if target_table_hash == table_hash => RowChangeTarget::Present(doc_id),
+                    PhysicalRowChangeTarget::Present { .. } | PhysicalRowChangeTarget::Deleted => {
+                        RowChangeTarget::Deleted
+                    }
+                },
+            )
+        }
+
+        pub(in crate::row_locks) fn physical_change_target_after(
+            &self,
+            table_hash: u64,
+            doc_id: u64,
+            baseline: u64,
+            wanted: LockStrength,
+        ) -> Result<PhysicalRowChangeTarget, String> {
             let next = self.change_sequence()?;
             if baseline >= next {
-                return Ok(RowChangeTarget::Unchanged);
+                return Ok(PhysicalRowChangeTarget::Unchanged);
             }
-            let mut current = doc_id;
+            let mut current = super::PublishedRowIdentity { table_hash, doc_id };
             let mut changed = false;
             for sequence in baseline..next {
                 let offset = sequence.saturating_mul(CHANGE_ENTRY_SIZE);
@@ -601,7 +632,7 @@ mod file {
                     format!("read row-change journal entry {sequence} failed: {error}")
                 })?;
                 let event = decode_change_entry(sequence, &entry)?;
-                if event.table_hash != table_hash || event.doc_id != current {
+                if event.table_hash != current.table_hash || event.doc_id != current.doc_id {
                     continue;
                 }
                 match event.kind {
@@ -610,7 +641,7 @@ mod file {
                     }
                     super::PublishedRowChangeKind::Delete => {
                         if super::super::lock_strengths_conflict(event.strength, wanted) {
-                            return Ok(RowChangeTarget::Deleted);
+                            return Ok(PhysicalRowChangeTarget::Deleted);
                         }
                     }
                     super::PublishedRowChangeKind::Rewrite(successor) => {
@@ -622,9 +653,12 @@ mod file {
                 }
             }
             Ok(if changed {
-                RowChangeTarget::Present(current)
+                PhysicalRowChangeTarget::Present {
+                    table_hash: current.table_hash,
+                    doc_id: current.doc_id,
+                }
             } else {
-                RowChangeTarget::Unchanged
+                PhysicalRowChangeTarget::Unchanged
             })
         }
 
@@ -882,8 +916,20 @@ mod file {
         let mut entry = [0_u8; CHANGE_ENTRY_SIZE as usize];
         entry[0..4].copy_from_slice(&CHANGE_ENTRY_MAGIC.to_be_bytes());
         let (kind, successor) = match change.kind {
-            super::PublishedRowChangeKind::Update => (1, 0),
-            super::PublishedRowChangeKind::Delete => (2, 0),
+            super::PublishedRowChangeKind::Update => (
+                1,
+                super::PublishedRowIdentity {
+                    table_hash: 0,
+                    doc_id: 0,
+                },
+            ),
+            super::PublishedRowChangeKind::Delete => (
+                2,
+                super::PublishedRowIdentity {
+                    table_hash: 0,
+                    doc_id: 0,
+                },
+            ),
             super::PublishedRowChangeKind::Rewrite(successor) => (3, successor),
         };
         entry[4] = kind;
@@ -891,7 +937,8 @@ mod file {
         entry[8..16].copy_from_slice(&sequence.wrapping_add(1).to_be_bytes());
         entry[16..24].copy_from_slice(&change.table_hash.to_be_bytes());
         entry[24..32].copy_from_slice(&change.doc_id.to_be_bytes());
-        entry[32..40].copy_from_slice(&successor.to_be_bytes());
+        entry[32..40].copy_from_slice(&successor.doc_id.to_be_bytes());
+        entry[40..48].copy_from_slice(&successor.table_hash.to_be_bytes());
         entry
     }
 
@@ -924,15 +971,28 @@ mod file {
                 .try_into()
                 .map_err(|_| format!("decode row-change id for entry {sequence}"))?,
         );
-        let successor = u64::from_be_bytes(
+        let successor_doc_id = u64::from_be_bytes(
             entry[32..40]
                 .try_into()
                 .map_err(|_| format!("decode row-change successor for entry {sequence}"))?,
         );
+        let successor_table_hash = u64::from_be_bytes(
+            entry[40..48]
+                .try_into()
+                .map_err(|_| format!("decode row-change successor table for entry {sequence}"))?,
+        );
         let kind = match entry[4] {
             1 => super::PublishedRowChangeKind::Update,
             2 => super::PublishedRowChangeKind::Delete,
-            3 => super::PublishedRowChangeKind::Rewrite(successor),
+            3 => super::PublishedRowChangeKind::Rewrite(super::PublishedRowIdentity {
+                // Journals created before cross-partition successor tracking left these reserved bytes zeroed; such rewrites were necessarily within the source table.
+                table_hash: if successor_table_hash == 0 {
+                    table_hash
+                } else {
+                    successor_table_hash
+                },
+                doc_id: successor_doc_id,
+            }),
             kind => {
                 return Err(format!(
                     "row-change journal entry {sequence} has invalid kind {kind}"
@@ -1138,6 +1198,16 @@ mod fallback {
             _wanted: uqa_sql::ast::LockStrength,
         ) -> Result<super::RowChangeTarget, String> {
             Ok(super::RowChangeTarget::Unchanged)
+        }
+
+        pub(in crate::row_locks) fn physical_change_target_after(
+            &self,
+            _table_hash: u64,
+            _doc_id: u64,
+            _baseline: u64,
+            _wanted: uqa_sql::ast::LockStrength,
+        ) -> Result<super::PhysicalRowChangeTarget, String> {
+            Ok(super::PhysicalRowChangeTarget::Unchanged)
         }
     }
 }

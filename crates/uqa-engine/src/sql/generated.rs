@@ -30,7 +30,7 @@ pub(in crate::sql) fn prepare_generated_columns(
                 column.name
             )));
         }
-        if column.auto_increment {
+        if column.auto_increment.is_some() {
             return Err(SQLError::TypeMismatch(format!(
                 "both identity and generation expression specified for column `{}`",
                 column.name

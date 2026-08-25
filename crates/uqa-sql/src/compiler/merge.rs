@@ -14,23 +14,20 @@ use super::{
 pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crate::ast::MergeStmt> {
     use crate::ast::{MergeStmt, MergeWhen};
     use pg_query::protobuf::{CmdType, MergeMatchKind};
-    let target = stmt
+    let relation = stmt
         .relation
         .as_ref()
-        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("MERGE without target".into()))?;
-    let target_alias = stmt
-        .relation
+    let target = range_var_name(relation);
+    let include_descendants = relation.inh;
+    let target_alias = relation
+        .alias
         .as_ref()
-        .and_then(|r| r.alias.as_ref())
         .map(|a| a.aliasname.clone())
         .filter(|s| !s.is_empty());
-    let target_qualifier = target_alias.clone().unwrap_or_else(|| {
-        stmt.relation
-            .as_ref()
-            .map(|relation| relation.relname.clone())
-            .unwrap_or_default()
-    });
+    let target_qualifier = target_alias
+        .clone()
+        .unwrap_or_else(|| relation.relname.clone());
     let source_node = stmt
         .source_relation
         .as_deref()
@@ -181,6 +178,7 @@ pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crat
         target,
         target_qualifier,
         target_alias,
+        include_descendants,
         source,
         join_condition,
         when_clauses,

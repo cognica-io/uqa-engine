@@ -84,6 +84,7 @@ mod engine_fdw;
 mod engine_fts;
 mod engine_generated;
 mod engine_graphs;
+mod engine_hierarchy;
 mod engine_models;
 mod engine_open;
 mod engine_relations;
@@ -361,6 +362,8 @@ enum TransactionStatus {
 }
 
 struct TransactionFrame {
+    /// Whether this outer frame is the SQL driver's per-statement autocommit boundary rather than a user-visible `BEGIN` block.
+    implicit_statement: bool,
     storage_savepoint: Option<String>,
     intent: TransactionIntent,
     backend_mode: BackendTransactionMode,
@@ -463,6 +466,7 @@ struct TableDataSnapshot {
     table_checks: Vec<uqa_sql::ast::TableCheck>,
     foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
     key_constraints: Vec<uqa_sql::ast::TableKeyConstraint>,
+    hierarchy: uqa_sql::ast::TableHierarchy,
     doc_count_cache: u64,
     doc_count_dirty: bool,
 }
@@ -496,6 +500,9 @@ pub(crate) struct TableState {
     /// Typed PRIMARY KEY / UNIQUE tuples, including composite keys and
     /// their SQL NULL-equality policy.
     key_constraints: RwLock<Vec<uqa_sql::ast::TableKeyConstraint>>,
+    /// Direct parents, an optional partition key, and an optional child bound.
+    /// The complete object is persisted with the table's constraint envelope.
+    hierarchy: RwLock<uqa_sql::ast::TableHierarchy>,
     /// Lazily built per-column value indexes for PRIMARY KEY / UNIQUE
     /// / `CREATE INDEX` btree columns. Maintained incrementally by the
     /// document write paths; cleared on bulk reloads.

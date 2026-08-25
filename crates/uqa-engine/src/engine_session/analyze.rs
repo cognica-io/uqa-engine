@@ -12,6 +12,12 @@ use super::{
     StorageBackendError, StorageBackendResult, TableState, Value,
 };
 
+struct HierarchyAnalyzeInputs {
+    row_count: u64,
+    values: BTreeMap<String, Vec<Value>>,
+    null_counts: BTreeMap<String, u64>,
+}
+
 impl Engine {
     /// Refresh per-column statistics for one table, or every table when
     /// `table` is `None`. The analysis scans each document and collects per-
@@ -67,15 +73,29 @@ impl Engine {
         canonical_table_name: &str,
         table: &Arc<TableState>,
     ) -> StorageBackendResult<()> {
-        if table.persistence != uqa_sql::ast::RelationPersistence::Temporary
-            && !table.column_stats_dirty.load(Ordering::Acquire)
-        {
-            if let Some(catalog) = self.storage.catalog.as_ref() {
-                catalog.delete_column_stats(canonical_table_name)?;
+        let ancestors = self
+            .hierarchy_ancestor_tables(canonical_table_name)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        for name in ancestors {
+            let state = if name == canonical_table_name {
+                Arc::clone(table)
+            } else {
+                self.try_table(&name)?.ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "statistics ancestor table `{name}` does not exist"
+                    ))
+                })?
+            };
+            if state.persistence != uqa_sql::ast::RelationPersistence::Temporary
+                && !state.column_stats_dirty.load(Ordering::Acquire)
+            {
+                if let Some(catalog) = self.storage.catalog.as_ref() {
+                    catalog.delete_column_stats(&name)?;
+                }
             }
+            state.doc_count_dirty.store(true, Ordering::Release);
+            state.column_stats_dirty.store(true, Ordering::Release);
         }
-        table.doc_count_dirty.store(true, Ordering::Release);
-        table.column_stats_dirty.store(true, Ordering::Release);
         self.note_table_data_changed();
         Ok(())
     }
@@ -86,14 +106,6 @@ impl Engine {
         t: &Arc<TableState>,
         persist: bool,
     ) -> StorageBackendResult<()> {
-        let snapshot = t.document_store.read().snapshot()?;
-        let doc_ids: Vec<DocId> = {
-            let mut v = snapshot.doc_ids()?;
-            v.sort_unstable();
-            v
-        };
-        let n = u64::try_from(doc_ids.len())
-            .map_err(|_| StorageBackendError::Other("ANALYZE document count exceeds u64".into()))?;
         let columns: Vec<String> = t
             .columns
             .read()
@@ -105,9 +117,11 @@ impl Engine {
             })
             .map(|column| column.name.clone())
             .collect();
-
-        let (mut col_values, mut col_nulls) =
-            collect_analyze_values(snapshot.as_ref(), &doc_ids, &columns)?;
+        let HierarchyAnalyzeInputs {
+            row_count: n,
+            values: mut col_values,
+            null_counts: mut col_nulls,
+        } = self.collect_hierarchy_analyze_inputs(canonical_table_name, &columns)?;
 
         let mut stats_out: BTreeMap<String, uqa_planner::ColumnStats> = BTreeMap::new();
         for col in &columns {
@@ -161,6 +175,72 @@ impl Engine {
         t.column_stats_loaded.store(true, Ordering::Release);
         t.column_stats_dirty.store(false, Ordering::Release);
         Ok(())
+    }
+
+    fn collect_hierarchy_analyze_inputs(
+        &self,
+        canonical_table_name: &str,
+        columns: &[String],
+    ) -> StorageBackendResult<HierarchyAnalyzeInputs> {
+        let mut col_values = columns
+            .iter()
+            .map(|column| (column.clone(), Vec::new()))
+            .collect::<BTreeMap<_, _>>();
+        let mut col_nulls = columns
+            .iter()
+            .map(|column| (column.clone(), 0_u64))
+            .collect::<BTreeMap<_, _>>();
+        let members = self
+            .hierarchy_scan_tables(canonical_table_name, true)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        let mut n = 0_u64;
+        for member_name in members {
+            let member = self.try_table(&member_name)?.ok_or_else(|| {
+                StorageBackendError::Other(format!(
+                    "ANALYZE hierarchy member `{member_name}` does not exist"
+                ))
+            })?;
+            let snapshot = member.document_store.read().snapshot()?;
+            let mut doc_ids: Vec<DocId> = snapshot.doc_ids()?;
+            doc_ids.sort_unstable();
+            n = n
+                .checked_add(u64::try_from(doc_ids.len()).map_err(|_| {
+                    StorageBackendError::Other("ANALYZE document count exceeds u64".into())
+                })?)
+                .ok_or_else(|| {
+                    StorageBackendError::Other("ANALYZE hierarchy row count overflow".into())
+                })?;
+            let (member_values, member_nulls) =
+                collect_analyze_values(snapshot.as_ref(), &doc_ids, columns)?;
+            for column in columns {
+                col_values
+                    .get_mut(column)
+                    .ok_or_else(|| {
+                        StorageBackendError::Other(format!(
+                            "ANALYZE lost the value buffer for column `{column}`"
+                        ))
+                    })?
+                    .extend(member_values.get(column).cloned().unwrap_or_default());
+                let null_count = member_nulls.get(column).copied().ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "ANALYZE lost the null counter for column `{column}`"
+                    ))
+                })?;
+                let total = col_nulls.get_mut(column).ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "ANALYZE lost the null counter for column `{column}`"
+                    ))
+                })?;
+                *total = total.checked_add(null_count).ok_or_else(|| {
+                    StorageBackendError::Other("ANALYZE null count overflow".into())
+                })?;
+            }
+        }
+        Ok(HierarchyAnalyzeInputs {
+            row_count: n,
+            values: col_values,
+            null_counts: col_nulls,
+        })
     }
 
     fn persist_column_stats(

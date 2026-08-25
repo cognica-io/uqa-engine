@@ -334,6 +334,20 @@ fn canonical_default_dependency_survives_reopen_and_blocks_only_its_sequence_dro
 }
 
 #[test]
+fn serial_ownership_still_blocks_sequence_drop_after_default_replacement() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE serial_owner (id SERIAL)", &[])
+        .unwrap();
+    eng.sql(
+        "ALTER TABLE serial_owner ALTER COLUMN id SET DEFAULT 42",
+        &[],
+    )
+    .unwrap();
+    let error = eng.drop_sequence("public.serial_owner_id_seq").unwrap_err();
+    assert!(error.contains("public.serial_owner.id"), "{error}");
+}
+
+#[test]
 fn sequence_drop_rejects_a_bound_view_dependency() {
     let eng = Engine::new();
     eng.sql("CREATE SEQUENCE ids", &[]).unwrap();

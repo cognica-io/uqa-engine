@@ -13,7 +13,7 @@ use super::{
     facet_projection_fields, flatten_and_filter_parts, post_retrieval_score_top_k,
     projection_columns, score_limited_text_filter, score_order_top_k, AccessPathPlan, CteScope,
     Engine, FacetExecution, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam,
-    ScalarExpr, ScoredDocumentSource, ScoredInput, SingleRelation,
+    ScalarExpr, ScoredDocumentSource, ScoredInput, SingleRelation, TABLE_OID_COLUMN,
 };
 
 pub(in crate::sql) fn run_single_table_select_output(
@@ -195,6 +195,7 @@ pub(in crate::sql) fn run_single_table_select_output(
         ordered_primary_key,
         pushed_predicate,
     )
+    .with_table_oid(crate::sql::catalog::table_relation_oid(engine, table)?)
     .with_qualifier(qualifier)
     .with_lock_origin(lock_origin)
     .with_recheck_pins(recheck_pins);
@@ -235,6 +236,9 @@ fn split_projected_filter(
     let Some(predicate) = predicate else {
         return Ok((None, None));
     };
+    if expression_references_tableoid(&predicate) {
+        return Ok((None, Some(predicate)));
+    }
     if let Some(compiled) =
         uqa_execution::ProjectedPredicate::compile_with_schema(&predicate, source_schema, params)?
     {
@@ -247,7 +251,12 @@ fn split_projected_filter(
     let mut projected = Vec::new();
     let mut residual = Vec::new();
     for conjunct in flatten_and_filter_parts(&predicate) {
-        if uqa_execution::ProjectedPredicate::compile_with_schema(conjunct, source_schema, params)?
+        if !expression_references_tableoid(conjunct)
+            && uqa_execution::ProjectedPredicate::compile_with_schema(
+                conjunct,
+                source_schema,
+                params,
+            )?
             .is_some()
         {
             projected.push(conjunct.clone());
@@ -271,6 +280,11 @@ fn split_projected_filter(
         None => None,
     };
     Ok((projected, combine_filter_parts(residual)))
+}
+
+fn expression_references_tableoid(expression: &ScalarExpr) -> bool {
+    let mut columns = std::collections::BTreeSet::new();
+    expression.collect_columns(&mut columns) && columns.contains(TABLE_OID_COLUMN)
 }
 
 #[cfg(test)]

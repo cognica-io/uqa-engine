@@ -18,6 +18,7 @@ use super::{
     PhysicalProjection, PhysicalWindowExecutor, ProjectionPlan, QueryBlockPlan, QueryOutput,
     QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
     SharedExpressionEvaluator, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN, SCORE_COLUMN,
+    TABLE_OID_COLUMN,
 };
 use uqa_execution::ScalarFrameBound;
 
@@ -229,8 +230,10 @@ pub(in crate::sql) fn append_score_provenance_mappings(
 }
 
 pub(in crate::sql) fn visible_projection_source_column(column: &str) -> bool {
-    !matches!(column, SCORE_COLUMN | DOC_ID_COLUMN | MERGE_ACTION_COLUMN)
-        && !is_score_provenance_column(column)
+    !matches!(
+        column,
+        SCORE_COLUMN | DOC_ID_COLUMN | TABLE_OID_COLUMN | MERGE_ACTION_COLUMN
+    ) && !is_score_provenance_column(column)
 }
 
 /// Build collision-free physical target columns for a plain SELECT whose

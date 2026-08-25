@@ -7,8 +7,9 @@
 
 use super::{
     has_filters_for_qualifier, is_score_provenance_column, qualifier_filter, qualifier_for,
-    table_lock_origin, Arc, ColumnPrune, CteScope, Engine, EngineTableRowSource, QualifierFilters,
-    SQLError, SQLParam, SourcePlan, StreamingLocalTableScan,
+    table_lock_origin, Arc, ColumnPrune, CteScope, Engine, EngineHierarchyRowSource,
+    EngineTableRowSource, QualifierFilters, SQLError, SQLParam, SourcePlan,
+    StreamingLocalTableScan, Value, TABLE_OID_COLUMN,
 };
 
 pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
@@ -23,6 +24,7 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         name,
         qualifier,
         alias,
+        include_descendants,
     } = source
     else {
         return Ok(None);
@@ -68,7 +70,7 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
     {
         return Ok(None);
     }
-    let Some(table) = engine
+    let Some(root_table) = engine
         .try_table(name)
         .map_err(|error| SQLError::Internal(format!("resolve table `{name}`: {error}")))?
     else {
@@ -86,63 +88,106 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
             .collect(),
         None => table_columns,
     };
-    let schema = columns.clone();
-    let column_definitions = table.columns.read().clone();
-    let column_types = columns
+    let include_table_oid = wanted
+        .as_ref()
+        .is_some_and(|wanted| wanted.contains(TABLE_OID_COLUMN));
+    let mut schema = columns.clone();
+    if include_table_oid {
+        schema.push(TABLE_OID_COLUMN.into());
+    }
+    let root_column_definitions = root_table.columns.read().clone();
+    let mut column_types = columns
         .iter()
         .map(|column| {
-            column_definitions
+            root_column_definitions
                 .iter()
                 .find(|definition| definition.name == *column)
                 .map(|definition| definition.ty.clone())
         })
         .collect::<Vec<_>>();
-    let lock_origin = table_lock_origin(engine, name, &qualifier, ctes.lock_identities.emit)?;
+    if include_table_oid {
+        column_types.push(Some(uqa_sql::ast::ColumnType::Oid));
+    }
     let physical_schema =
         uqa_execution::RowSchema::with_qualified_types(&qualifier, schema.clone(), column_types);
-    let predicate = qualifier_filter(filters, &qualifier)
-        .map(|predicate| {
-            uqa_execution::ProjectedPredicate::compile_with_schema(
-                &predicate,
-                &physical_schema,
-                params,
-            )
-        })
-        .transpose()?
-        .flatten();
-    let filter_pushed = predicate.is_some();
-    let recheck_pins = lock_origin
-        .as_ref()
-        .and_then(|(origin_qualifier, storage_name)| {
-            ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
+    let table_names = engine.hierarchy_scan_tables(name, *include_descendants)?;
+    let mut sources = Vec::with_capacity(table_names.len());
+    let mut filter_pushed = false;
+    for table_name in table_names {
+        let table = engine
+            .try_table(&table_name)
+            .map_err(|error| {
+                SQLError::Internal(format!("resolve inherited table `{table_name}`: {error}"))
+            })?
+            .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
+        let column_definitions = table.columns.read().clone();
+        let lock_origin =
+            table_lock_origin(engine, &table_name, &qualifier, ctes.lock_identities.emit)?;
+        let predicate_expression = qualifier_filter(filters, &qualifier);
+        let predicate = predicate_expression
+            .filter(|predicate| !expression_references_tableoid(predicate))
+            .map(|predicate| {
+                uqa_execution::ProjectedPredicate::compile_with_schema(
+                    &predicate,
+                    &physical_schema,
+                    params,
+                )
+            })
+            .transpose()?
+            .flatten();
+        filter_pushed |= predicate.is_some();
+        let recheck_pins = lock_origin
+            .as_ref()
+            .and_then(|(origin_qualifier, storage_name)| {
+                ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
+            });
+        let command_changes = if ctes.reads_command_overlay() {
+            engine.command_overlay_changes(&table_name)?.map(Arc::new)
+        } else {
+            None
+        };
+        let estimated_cardinality = engine.table_doc_count(&table_name)?;
+        let table_oid = include_table_oid
+            .then(|| crate::sql::catalog::table_relation_oid(engine, &table_name))
+            .transpose()?
+            .map(Value::Int);
+        sources.push(EngineTableRowSource {
+            table_name,
+            table,
+            column_definitions,
+            columns: columns.clone(),
+            schema: schema.clone(),
+            physical_schema: physical_schema.clone(),
+            table_oid,
+            predicate,
+            estimated_cardinality,
+            after: None,
+            lock_origin,
+            recheck_pins,
+            recheck_cursor: 0,
+            command_changes,
+            command_change_after: None,
+            command_base_after: None,
+            command_base_ids: std::collections::VecDeque::new(),
+            command_base_exhausted: false,
         });
-    let command_changes = if ctes.reads_command_overlay() {
-        engine.command_overlay_changes(name)?.map(Arc::new)
+    }
+    let source: Box<dyn uqa_execution::RowSource> = if sources.len() == 1 {
+        Box::new(
+            sources
+                .pop()
+                .ok_or_else(|| SQLError::Internal("single-table scan lost its source".into()))?,
+        )
     } else {
-        None
-    };
-    let estimated_cardinality = engine.table_doc_count(name)?;
-    let source = EngineTableRowSource {
-        table_name: name.clone(),
-        table,
-        column_definitions,
-        columns,
-        schema,
-        physical_schema,
-        predicate,
-        estimated_cardinality,
-        after: None,
-        lock_origin,
-        recheck_pins,
-        recheck_cursor: 0,
-        command_changes,
-        command_change_after: None,
-        command_base_after: None,
-        command_base_ids: std::collections::VecDeque::new(),
-        command_base_exhausted: false,
+        Box::new(EngineHierarchyRowSource::new(sources)?)
     };
     Ok(Some((
-        Box::new(uqa_execution::TableScan::new(Box::new(source))),
+        Box::new(uqa_execution::TableScan::new(source)),
         filter_pushed,
     )))
+}
+
+fn expression_references_tableoid(expression: &uqa_execution::ScalarExpr) -> bool {
+    let mut columns = std::collections::BTreeSet::new();
+    expression.collect_columns(&mut columns) && columns.contains(TABLE_OID_COLUMN)
 }

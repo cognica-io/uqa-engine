@@ -67,127 +67,210 @@ pub(super) fn build_pg_namespace(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
         .collect())
 }
 
-pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    let mut out = vec![pg_class_catalog_row(
-        13_313,
-        13_315,
-        "information_schema",
-        "information_schema_catalog_name",
-        "v",
-        1,
-        -1.0,
-        false,
-    )];
-    for name in engine
-        .table_names()
-        .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
-    {
-        let (schema, table) = split_schema_name(&name)?;
-        let columns = table_columns_for(engine, &name)?;
-        out.push(pg_class_row_with_lifecycle(
-            &schema,
-            &table,
-            "r",
-            catalog_usize(columns.len(), "pg_class column count")?,
-            engine.document_count(&name)? as f64,
-            engine
-                .list_catalog_indexes()
-                .map_err(|err| SQLError::Internal(format!("read index catalog: {err}")))?
-                .iter()
-                .any(|idx| idx.table_name == name),
-            engine
-                .table_persistence(&name)
-                .map_err(|error| SQLError::Internal(format!("read table persistence: {error}")))?
-                .unwrap_or_default(),
-            true,
-            &[],
-        ));
+fn table_relkind(engine: &Engine, table: &str) -> Result<&'static str, SQLError> {
+    let hierarchy = engine
+        .try_table_hierarchy(table)
+        .map_err(|error| SQLError::Internal(format!("read table hierarchy: {error}")))?;
+    Ok(if hierarchy.partition_spec.is_some() {
+        "p"
+    } else {
+        "r"
+    })
+}
+
+pub(in crate::sql) fn table_relation_oid(engine: &Engine, table: &str) -> Result<i64, SQLError> {
+    let canonical = engine
+        .try_resolve_table_name(table)
+        .map_err(|error| SQLError::Internal(format!("resolve catalog table `{table}`: {error}")))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let (schema, local) = split_schema_name(&canonical)?;
+    Ok(relation_oid(
+        table_relkind(engine, &canonical)?,
+        &schema,
+        &local,
+    ))
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct CatalogIndexRelation {
+    pub(super) schema: String,
+    pub(super) name: String,
+    pub(super) table_name: String,
+    pub(super) index_type: String,
+    pub(super) columns: Vec<String>,
+    pub(super) relkind: &'static str,
+    pub(super) is_partition: bool,
+    pub(super) has_children: bool,
+    pub(super) parent_index_oid: Option<i64>,
+}
+
+impl CatalogIndexRelation {
+    pub(super) fn oid(&self) -> i64 {
+        relation_oid(self.relkind, &self.schema, &self.name)
     }
-    for name in engine.list_views()? {
-        let (schema, view) = split_schema_name(&name)?;
-        let columns = view_columns_for(engine, &name)?;
-        let definition = engine.view_definition(&name)?.ok_or_else(|| {
-            SQLError::Internal(format!("view `{name}` disappeared during catalog scan"))
-        })?;
-        out.push(pg_class_row_with_lifecycle(
-            &schema,
-            &view,
-            "v",
-            catalog_usize(columns.len(), "pg_class view column count")?,
-            0.0,
-            false,
-            definition.persistence,
-            true,
-            &definition.options,
-        ));
-    }
-    for name in engine.list_materialized_views()? {
-        let (schema, view) = split_schema_name(&name)?;
-        let definition = engine.view_definition(&name)?.ok_or_else(|| {
-            SQLError::Internal(format!(
-                "materialized view `{name}` disappeared during catalog scan"
-            ))
-        })?;
-        let columns = view_columns_for(engine, &name)?;
-        out.push(pg_class_row_with_lifecycle(
-            &schema,
-            &view,
-            "m",
-            catalog_usize(columns.len(), "pg_class materialized-view column count")?,
-            definition.materialized_rows.len() as f64,
-            false,
-            definition.persistence,
-            definition.populated,
-            &definition.options,
-        ));
-    }
-    for name in engine.list_foreign_tables().map_err(SQLError::Internal)? {
-        let (schema, table) = split_schema_name(&name)?;
-        out.push(pg_class_row(
-            &schema,
-            &table,
-            "f",
-            catalog_usize(
-                engine
-                    .foreign_table_columns(&name)
-                    .map_err(SQLError::Internal)?
-                    .len(),
-                "pg_class foreign-table column count",
-            )?,
-            0.0,
-            false,
-        ));
-    }
-    for sequence in engine
-        .list_sequences()
-        .map_err(|err| SQLError::Internal(format!("read sequence catalog: {err}")))?
-    {
-        let (schema, name) = split_schema_name(&sequence)?;
-        out.push(pg_class_row_with_lifecycle(
-            &schema,
-            &name,
-            "S",
-            0,
-            0.0,
-            false,
-            engine
-                .sequence_persistence(&sequence)
-                .map_err(|error| SQLError::Internal(format!("read sequence persistence: {error}")))?
-                .unwrap_or_default(),
-            true,
-            &[],
-        ));
-    }
-    for idx in engine
+}
+
+pub(super) fn catalog_index_relations(
+    engine: &Engine,
+) -> Result<Vec<CatalogIndexRelation>, SQLError> {
+    let registered = engine
         .list_catalog_indexes()
-        .map_err(|err| SQLError::Internal(format!("read index catalog: {err}")))?
-    {
-        let (table_schema, _) = split_schema_name(&idx.table_name)?;
-        let (schema, index_name) = split_index_name(&idx.name, &table_schema)?;
-        out.push(pg_class_row(&schema, &index_name, "i", 0, 0.0, false));
+        .map_err(|error| SQLError::Internal(format!("read index catalog: {error}")))?;
+    let mut used = registered
+        .iter()
+        .map(|index| index.name.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut output = Vec::new();
+    for index in registered {
+        let (table_schema, _) = split_schema_name(&index.table_name)?;
+        let (schema, name) = split_index_name(&index.name, &table_schema)?;
+        let columns = index_columns(&index.columns_json)?;
+        let hierarchy = engine
+            .try_table_hierarchy(&index.table_name)
+            .map_err(|error| {
+                SQLError::Internal(format!("read indexed table hierarchy: {error}"))
+            })?;
+        let relkind = if hierarchy.partition_spec.is_some() {
+            "I"
+        } else {
+            "i"
+        };
+        let has_children = relkind == "I"
+            && !engine
+                .direct_hierarchy_children(&index.table_name)?
+                .is_empty();
+        let root = CatalogIndexRelation {
+            schema,
+            name,
+            table_name: index.table_name.clone(),
+            index_type: index.index_type.clone(),
+            columns: columns.clone(),
+            relkind,
+            is_partition: false,
+            has_children,
+            parent_index_oid: None,
+        };
+        let root_oid = root.oid();
+        output.push(root);
+        if relkind == "I" {
+            append_partition_index_children(
+                engine,
+                &index.table_name,
+                root_oid,
+                &index.index_type,
+                &columns,
+                &mut used,
+                &mut output,
+            )?;
+        }
     }
-    out.extend(super::ag_catalog::age_pg_class_rows(engine)?);
-    Ok(out)
+    Ok(output)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_partition_index_children(
+    engine: &Engine,
+    parent_table: &str,
+    parent_index_oid: i64,
+    index_type: &str,
+    columns: &[String],
+    used: &mut std::collections::BTreeSet<String>,
+    output: &mut Vec<CatalogIndexRelation>,
+) -> Result<(), SQLError> {
+    for child in engine.direct_hierarchy_children(parent_table)? {
+        let (schema, table) = split_schema_name(&child)?;
+        let hierarchy = engine
+            .try_table_hierarchy(&child)
+            .map_err(|error| SQLError::Internal(format!("read partition hierarchy: {error}")))?;
+        let relkind = if hierarchy.partition_spec.is_some() {
+            "I"
+        } else {
+            "i"
+        };
+        let children = engine.direct_hierarchy_children(&child)?;
+        let name = allocate_derived_index_name(&table, columns, used);
+        let relation = CatalogIndexRelation {
+            schema,
+            name,
+            table_name: child.clone(),
+            index_type: index_type.to_string(),
+            columns: columns.to_vec(),
+            relkind,
+            is_partition: true,
+            has_children: !children.is_empty(),
+            parent_index_oid: Some(parent_index_oid),
+        };
+        let relation_oid = relation.oid();
+        output.push(relation);
+        if relkind == "I" {
+            append_partition_index_children(
+                engine,
+                &child,
+                relation_oid,
+                index_type,
+                columns,
+                used,
+                output,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn allocate_derived_index_name(
+    table: &str,
+    columns: &[String],
+    used: &mut std::collections::BTreeSet<String>,
+) -> String {
+    fn component(raw: &str) -> String {
+        let mut output = String::with_capacity(raw.len());
+        let mut separator = false;
+        for character in raw.chars() {
+            if character.is_alphanumeric() || character == '_' {
+                output.extend(character.to_lowercase());
+                separator = false;
+            } else if !separator && !output.is_empty() {
+                output.push('_');
+                separator = true;
+            }
+        }
+        while output.ends_with('_') {
+            output.pop();
+        }
+        output
+    }
+
+    let mut parts = std::iter::once(table)
+        .chain(columns.iter().map(String::as_str))
+        .map(component)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        parts.push("index".into());
+    }
+    let base = format!("{}_idx", parts.join("_"));
+    if used.insert(base.clone()) {
+        return base;
+    }
+    for suffix in 1_u64.. {
+        let candidate = format!("{base}_{suffix}");
+        if used.insert(candidate.clone()) {
+            return candidate;
+        }
+    }
+    unreachable!("u64 index-name suffix space is non-empty")
+}
+
+pub(super) fn index_access_method_oid(method: &str) -> i64 {
+    match method.to_ascii_lowercase().as_str() {
+        "" | "btree" => 403,
+        "hash" => 405,
+        "gist" => 783,
+        "gin" => 2_742,
+        "spgist" => 4_000,
+        "brin" => 3_580,
+        _ => 0,
+    }
 }
 
 pub(super) fn pg_class_row(
@@ -212,7 +295,7 @@ pub(super) fn pg_class_row(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn pg_class_row_with_lifecycle(
+pub(super) fn pg_class_row_with_lifecycle(
     schema: &str,
     name: &str,
     relkind: &str,
@@ -251,7 +334,7 @@ fn pg_class_row_with_lifecycle(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn pg_class_catalog_row(
+pub(super) fn pg_class_catalog_row(
     oid: i64,
     reltype: i64,
     schema: &str,
@@ -338,14 +421,38 @@ pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
         .table_names()
         .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
     {
-        let (schema, table) = split_schema_name(&table_name)?;
-        let relid = relation_oid("r", &schema, &table);
+        let relid = table_relation_oid(engine, &table_name)?;
+        let hierarchy = engine
+            .try_table_hierarchy(&table_name)
+            .map_err(|error| SQLError::Internal(format!("read table hierarchy: {error}")))?;
+        let mut inherited_columns = Vec::new();
+        for parent in &hierarchy.parents {
+            inherited_columns.push(table_columns_for(engine, parent)?);
+        }
         for (idx, col) in table_columns_for(engine, &table_name)?.iter().enumerate() {
-            out.push(pg_attribute_row(
-                relid,
-                catalog_ordinal(idx, "pg_attribute column")?,
-                col,
-            ));
+            let inheritance_count = inherited_columns
+                .iter()
+                .filter(|columns| columns.iter().any(|parent| parent.name == col.name))
+                .count();
+            let mut attribute =
+                pg_attribute_row(relid, catalog_ordinal(idx, "pg_attribute column")?, col);
+            attribute.insert(
+                "attinhcount".into(),
+                int_value(catalog_usize(
+                    inheritance_count,
+                    "pg_attribute inheritance count",
+                )?),
+            );
+            let is_local = if hierarchy.local_columns.is_empty() {
+                inheritance_count == 0
+            } else {
+                hierarchy
+                    .local_columns
+                    .iter()
+                    .any(|local| local == &col.name)
+            };
+            attribute.insert("attislocal".into(), bool_value(is_local));
+            out.push(attribute);
         }
     }
     for view_name in engine.list_views()? {
@@ -388,7 +495,7 @@ pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
                 not_null_name: None,
                 not_null_validated: true,
                 not_null_no_inherit: false,
-                auto_increment: false,
+                auto_increment: None,
                 unique: false,
                 default: None,
                 generated: None,
@@ -427,12 +534,26 @@ pub(super) fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> R
         ("attnotnull", bool_value(col.not_null || col.primary_key)),
         (
             "atthasdef",
-            bool_value(col.default.is_some() || col.auto_increment || col.generated.is_some()),
+            bool_value(
+                col.default.is_some()
+                    || col.generated.is_some()
+                    || col
+                        .auto_increment
+                        .as_ref()
+                        .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy),
+            ),
         ),
         ("atthasmissing", bool_value(false)),
         (
             "attidentity",
-            str_value(if col.auto_increment { "d" } else { "" }),
+            str_value(match col.auto_increment.as_ref().map(|value| value.kind) {
+                Some(uqa_sql::ast::AutoIncrementKind::IdentityAlways) => "a",
+                Some(
+                    uqa_sql::ast::AutoIncrementKind::IdentityByDefault
+                    | uqa_sql::ast::AutoIncrementKind::Legacy,
+                ) => "d",
+                Some(uqa_sql::ast::AutoIncrementKind::Serial) | None => "",
+            }),
         ),
         (
             "attgenerated",
@@ -462,13 +583,17 @@ pub(super) fn build_pg_attrdef(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
         .table_names()
         .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
     {
-        let (schema, table) = split_schema_name(&table_name)?;
-        let relid = relation_oid("r", &schema, &table);
+        let (_, table) = split_schema_name(&table_name)?;
+        let relid = table_relation_oid(engine, &table_name)?;
         for (idx, col) in table_columns_for(engine, &table_name)?.iter().enumerate() {
-            if col.default.is_none() && !col.auto_increment && col.generated.is_none() {
+            let legacy_auto_increment = col
+                .auto_increment
+                .as_ref()
+                .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy);
+            if col.default.is_none() && !legacy_auto_increment && col.generated.is_none() {
                 continue;
             }
-            let default = if col.auto_increment {
+            let default = if legacy_auto_increment {
                 format!("nextval('{}_{}_seq')", table, col.name)
             } else if let Some(generated) = &col.generated {
                 super::helpers::schema_expr_text(&generated.expression)
@@ -522,6 +647,25 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
                 )?,
                 None => Value::Null,
             };
+            let constrained_relation_oid = table_relation_oid(
+                engine,
+                &format!(
+                    "{}.{}",
+                    uqa_sql::expr::quote_ident(&constraint.schema),
+                    uqa_sql::expr::quote_ident(&constraint.table)
+                ),
+            )?;
+            let referenced_relation_oid = match foreign_key {
+                Some(foreign_key) => table_relation_oid(
+                    engine,
+                    &format!(
+                        "{}.{}",
+                        uqa_sql::expr::quote_ident(&foreign_key.schema),
+                        uqa_sql::expr::quote_ident(&foreign_key.table)
+                    ),
+                )?,
+                None => 0,
+            };
             Ok(row([
                 (
                     "oid",
@@ -543,19 +687,11 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
                 ),
                 ("conenforced", bool_value(constraint.state.enforced())),
                 ("convalidated", bool_value(constraint.state.validated())),
-                (
-                    "conrelid",
-                    int_value(relation_oid("r", &constraint.schema, &constraint.table)),
-                ),
+                ("conrelid", int_value(constrained_relation_oid)),
                 ("contypid", int_value(0)),
                 ("conindid", int_value(0)),
                 ("conparentid", int_value(0)),
-                (
-                    "confrelid",
-                    int_value(foreign_key.map_or(0, |foreign_key| {
-                        relation_oid("r", &foreign_key.schema, &foreign_key.table)
-                    })),
-                ),
+                ("confrelid", int_value(referenced_relation_oid)),
                 (
                     "confupdtype",
                     str_value(foreign_key.map_or(" ", |foreign_key| {
@@ -609,29 +745,23 @@ const fn foreign_key_match_code(match_type: uqa_sql::ast::ForeignKeyMatch) -> &'
 
 pub(super) fn build_pg_index(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::new();
-    for idx in engine
-        .list_catalog_indexes()
-        .map_err(|err| SQLError::Internal(format!("read index catalog: {err}")))?
-    {
-        let columns = index_columns(&idx.columns_json)?;
-        let (schema, table) = split_schema_name(&idx.table_name)?;
-        let (index_schema, index_name) = split_index_name(&idx.name, &schema)?;
+    for index in catalog_index_relations(engine)? {
         let table_cols = engine
-            .table_columns(&idx.table_name)
+            .table_columns(&index.table_name)
             .map_err(|err| SQLError::Internal(format!("read table schema: {err}")))?;
-        let mut keys = Vec::with_capacity(columns.len());
-        for column in &columns {
+        let mut keys = Vec::with_capacity(index.columns.len());
+        for column in &index.columns {
             if let Some(position) = table_cols.iter().position(|name| name == column) {
                 keys.push(catalog_ordinal(position, "pg_index key column")?);
             }
         }
-        let column_count = catalog_usize(columns.len(), "pg_index column count")?;
+        let column_count = catalog_usize(index.columns.len(), "pg_index column count")?;
         rows.push(row([
+            ("indexrelid", int_value(index.oid())),
             (
-                "indexrelid",
-                int_value(relation_oid("i", &index_schema, &index_name)),
+                "indrelid",
+                int_value(table_relation_oid(engine, &index.table_name)?),
             ),
-            ("indrelid", int_value(relation_oid("r", &schema, &table))),
             ("indnatts", int_value(column_count)),
             ("indnkeyatts", int_value(column_count)),
             ("indisunique", bool_value(false)),
@@ -700,21 +830,31 @@ pub(super) fn build_pg_matviews(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
 
 pub(super) fn build_pg_indexes(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::new();
-    for idx in engine
-        .list_catalog_indexes()
-        .map_err(|err| SQLError::Internal(format!("read index catalog: {err}")))?
-    {
-        let columns = index_columns(&idx.columns_json)?;
-        let (schema, table) = split_schema_name(&idx.table_name)?;
-        let (_, index_name) = split_index_name(&idx.name, &schema)?;
+    for index in catalog_index_relations(engine)? {
+        let (schema, table) = split_schema_name(&index.table_name)?;
+        let qualified_table = format!(
+            "{}.{}",
+            uqa_sql::expr::quote_ident(&schema),
+            uqa_sql::expr::quote_ident(&table)
+        );
+        let index_target = if index.relkind == "I" {
+            format!("ONLY {qualified_table}")
+        } else {
+            qualified_table
+        };
         rows.push(row([
             ("schemaname", str_value(schema)),
             ("tablename", str_value(table.clone())),
-            ("indexname", str_value(index_name.clone())),
+            ("indexname", str_value(index.name.clone())),
             ("tablespace", Value::Null),
             (
                 "indexdef",
-                str_value(indexdef(&index_name, &idx.index_type, &table, &columns)),
+                str_value(indexdef(
+                    &index.name,
+                    &index.index_type,
+                    &index_target,
+                    &index.columns,
+                )),
             ),
         ]));
     }

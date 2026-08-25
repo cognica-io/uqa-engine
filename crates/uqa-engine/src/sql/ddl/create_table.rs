@@ -7,8 +7,12 @@
 //! CREATE TABLE execution.
 
 use super::defaults::validate_default_expression;
-use super::{ddl_storage_error, ColumnType, CreateTable, Engine, SQLError, SQLResult};
+use super::{
+    ddl_storage_error, prepare_create_table_hierarchy, ColumnType, CreateTable, Engine, SQLError,
+    SQLResult,
+};
 use crate::sql::generated::prepare_generated_columns;
+use uqa_sql::ast::{AutoIncrementKind, AutoIncrementOwner, Expr};
 
 use super::constraint_validation::{resolve_foreign_key_parent, validate_foreign_key_definition};
 
@@ -46,6 +50,8 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
             c.name
         )));
     }
+    prepare_create_table_hierarchy(engine, &mut c)?;
+    materialize_implicit_sequences(engine, &mut c)?;
     for column in &c.columns {
         if let Some(default) = &column.default {
             validate_default_expression(engine, default)?;
@@ -167,9 +173,13 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
                 checks: c.checks.clone(),
                 foreign_keys: c.foreign_keys.clone(),
                 key_constraints: c.key_constraints.clone(),
+                hierarchy: c.hierarchy.clone(),
             },
         )
         .map_err(|err| ddl_storage_error("CREATE TABLE constraints", err))?;
+    engine
+        .install_table_hierarchy(&c.name, c.hierarchy.clone())
+        .map_err(|err| ddl_storage_error("CREATE TABLE hierarchy", err))?;
     engine
         .try_persist_table_schema(&c.name)
         .map_err(|e| ddl_storage_error("CREATE TABLE", e))?;
@@ -177,4 +187,48 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
         .refresh_value_indexes_for_table(&c.name)
         .map_err(|e| ddl_storage_error("CREATE TABLE btree indexes", e))?;
     Ok(SQLResult::empty())
+}
+
+fn materialize_implicit_sequences(
+    engine: &Engine,
+    table: &mut CreateTable,
+) -> Result<(), SQLError> {
+    let relation = crate::RelationIdentity::from_legacy_name(&table.name)
+        .map_err(|error| SQLError::Internal(format!("resolve CREATE TABLE relation: {error}")))?;
+    for column in &mut table.columns {
+        let Some(auto_increment) = column.auto_increment.as_mut() else {
+            continue;
+        };
+        if auto_increment.kind == AutoIncrementKind::Legacy || auto_increment.sequence.is_some() {
+            continue;
+        }
+        let sequence = crate::RelationIdentity::new(
+            relation.schema.clone(),
+            format!("{}_{}_seq", relation.name, column.name),
+        )
+        .qualified_name();
+        engine
+            .create_sequence_with_persistence(&sequence, 1, 1, false, table.persistence)
+            .map_err(|error| {
+                SQLError::Unsupported(format!(
+                    "CREATE TABLE implicit sequence `{sequence}`: {error}"
+                ))
+            })?;
+        auto_increment.sequence = Some(sequence.clone());
+        auto_increment.owner = Some(AutoIncrementOwner {
+            table: table.name.clone(),
+            column: column.name.clone(),
+        });
+        if auto_increment.kind == AutoIncrementKind::Serial {
+            column.default = Some(Expr::Func {
+                name: "nextval".into(),
+                binding: None,
+                args: vec![Expr::Literal(uqa_core::Value::Str(sequence))],
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+            });
+        }
+    }
+    Ok(())
 }

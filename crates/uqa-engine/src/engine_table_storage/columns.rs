@@ -7,8 +7,8 @@
 //! Column registration, index rebuild, and table or column rename.
 
 use super::{
-    materialize_constraint_names, schema_expr_references_column, table_not_found, Engine,
-    RelationIdentity, StorageBackendError, StorageBackendResult,
+    materialize_constraint_names, schema_expr_references_column, table_next_id_metadata_key,
+    table_not_found, Engine, RelationIdentity, StorageBackendError, StorageBackendResult,
 };
 use crate::VectorIndexSpec;
 
@@ -39,6 +39,10 @@ impl Engine {
         table: &str,
         mut column: uqa_sql::ast::ColumnDef,
     ) -> StorageBackendResult<()> {
+        let legacy_auto_increment = column
+            .auto_increment
+            .as_ref()
+            .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy);
         let table_name = self
             .try_resolve_table_name(table)?
             .ok_or_else(|| table_not_found(table))?;
@@ -68,6 +72,7 @@ impl Engine {
             checks: t.table_checks.read().clone(),
             foreign_keys: t.foreign_keys.read().clone(),
             key_constraints: t.key_constraints.read().clone(),
+            hierarchy: t.hierarchy.read().clone(),
         };
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
@@ -80,6 +85,9 @@ impl Engine {
         *t.table_checks.write() = constraints.checks;
         *t.foreign_keys.write() = constraints.foreign_keys;
         *t.key_constraints.write() = constraints.key_constraints;
+        if legacy_auto_increment {
+            self.persist_next_id(&table_name)?;
+        }
         self.refresh_value_indexes_for_table(&table_name)?;
         Ok(())
     }
@@ -112,6 +120,18 @@ impl Engine {
         {
             return Ok(false);
         }
+        let owned_sequence = t.columns.read().iter().find_map(|candidate| {
+            if candidate.name != column {
+                return None;
+            }
+            let provenance = candidate.auto_increment.as_ref()?;
+            let owner = provenance.owner.as_ref()?;
+            if owner.table == table_name && owner.column == column {
+                provenance.sequence.clone()
+            } else {
+                None
+            }
+        });
         self.preflight_drop_column_dependencies(&table_name, column)?;
         Self::value_indexes_clear(&t);
         {
@@ -176,6 +196,9 @@ impl Engine {
                 catalog.drop_column_data(&table_name, column)?;
             }
             self.try_save_table_schema(&table_name, &t)?;
+        }
+        if let Some(sequence) = owned_sequence {
+            self.drop_owned_sequence(&sequence)?;
         }
         self.mark_column_stats_dirty(&table_name, &t)?;
         self.refresh_value_indexes_for_table(&table_name)?;
@@ -443,6 +466,17 @@ impl Engine {
         if self.is_persistent() {
             self.rebind_persistent_table_stores(&to, &state)?;
             self.try_save_table_schema(&to, &state)?;
+            if state.columns.read().iter().any(|column| {
+                column
+                    .auto_increment
+                    .as_ref()
+                    .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy)
+            }) {
+                self.persist_next_id(&to)?;
+            }
+            if let Some(catalog) = self.storage.catalog.as_ref() {
+                catalog.set_metadata(&table_next_id_metadata_key(&from), "")?;
+            }
         }
         self.mark_column_stats_dirty(&to, &state)?;
         self.refresh_value_indexes_for_table(&to)?;
