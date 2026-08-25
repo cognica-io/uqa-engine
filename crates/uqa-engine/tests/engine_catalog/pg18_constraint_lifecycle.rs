@@ -323,6 +323,21 @@ fn temporal_cross_type_foreign_keys_preserve_values_and_referential_actions() {
         "INSERT INTO deferred_timestamp_child VALUES (1, TIMESTAMP '2024-03-01 00:00:00'), (2, TIMESTAMP '2024-03-02 00:00:00'), (3, TIMESTAMP '2024-03-03 00:00:00')",
     );
     exec(&engine, "COMMIT");
+    exec(&engine, "BEGIN");
+    exec(
+        &engine,
+        "INSERT INTO deferred_timestamp_child VALUES (4, TIMESTAMP '2024-03-04 00:00:00')",
+    );
+    error(
+        &engine,
+        "COMMIT",
+        "23503",
+        "violates foreign key constraint",
+    );
+    let rolled_back = engine
+        .sql("SELECT id FROM deferred_timestamp_child WHERE id = 4", &[])
+        .unwrap();
+    assert!(rolled_back.rows.is_empty());
 }
 
 #[test]
