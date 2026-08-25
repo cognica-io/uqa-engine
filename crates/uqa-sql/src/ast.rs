@@ -11,16 +11,22 @@
 
 use serde::{Deserialize, Serialize};
 
+mod constraints;
 mod cte;
 mod expressions;
 mod from;
 mod locking;
+mod ranges;
+mod relation_lifecycle;
 mod routine_security;
 
+pub use constraints::*;
 pub use cte::*;
 pub use expressions::*;
 pub use from::*;
 pub use locking::*;
+pub use ranges::*;
+pub use relation_lifecycle::*;
 pub use routine_security::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,6 +98,12 @@ pub enum ColumnType {
     /// 1970-01-01 00:00:00Z.
     TimestampTz,
     Interval,
+    /// One of `PostgreSQL`'s six built-in range identities. Values use a
+    /// canonical textual carrier so bounds remain durable across every
+    /// storage backend while the declared subtype stays in row metadata.
+    Range(RangeSubtype),
+    /// The `PostgreSQL` multirange paired with one built-in range subtype.
+    Multirange(RangeSubtype),
     /// `VECTOR(N)` columns store an `N`-dimensional `f32` embedding.
     Vector(u32),
     /// `TENSOR(N)` columns store an array of `N`-dimensional `f32`
@@ -143,6 +155,18 @@ pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str
         "_regtype" => "regtype",
         "_xid" => "xid",
         "_pg_node_tree" => "pg_node_tree",
+        "_int4range" => "int4range",
+        "_int8range" => "int8range",
+        "_numrange" => "numrange",
+        "_daterange" => "daterange",
+        "_tsrange" => "tsrange",
+        "_tstzrange" => "tstzrange",
+        "_int4multirange" => "int4multirange",
+        "_int8multirange" => "int8multirange",
+        "_nummultirange" => "nummultirange",
+        "_datemultirange" => "datemultirange",
+        "_tsmultirange" => "tsmultirange",
+        "_tstzmultirange" => "tstzmultirange",
         _ => return None,
     })
 }
@@ -275,6 +299,18 @@ impl ColumnType {
             "timestamp" | "datetime" | "timestamp without time zone" => Ok(Self::Timestamp),
             "timestamptz" | "timestamp with time zone" => Ok(Self::TimestampTz),
             "interval" => Ok(Self::Interval),
+            "int4range" => Ok(Self::Range(RangeSubtype::Integer)),
+            "int8range" => Ok(Self::Range(RangeSubtype::BigInteger)),
+            "numrange" => Ok(Self::Range(RangeSubtype::Numeric)),
+            "daterange" => Ok(Self::Range(RangeSubtype::Date)),
+            "tsrange" => Ok(Self::Range(RangeSubtype::Timestamp)),
+            "tstzrange" => Ok(Self::Range(RangeSubtype::TimestampTz)),
+            "int4multirange" => Ok(Self::Multirange(RangeSubtype::Integer)),
+            "int8multirange" => Ok(Self::Multirange(RangeSubtype::BigInteger)),
+            "nummultirange" => Ok(Self::Multirange(RangeSubtype::Numeric)),
+            "datemultirange" => Ok(Self::Multirange(RangeSubtype::Date)),
+            "tsmultirange" => Ok(Self::Multirange(RangeSubtype::Timestamp)),
+            "tstzmultirange" => Ok(Self::Multirange(RangeSubtype::TimestampTz)),
             "vector" => modifier
                 .and_then(|value| value.parse::<u32>().ok())
                 .filter(|dimension| *dimension > 0)
@@ -336,6 +372,8 @@ impl ColumnType {
             Self::Timestamp => "timestamp without time zone".into(),
             Self::TimestampTz => "timestamp with time zone".into(),
             Self::Interval => "interval".into(),
+            Self::Range(subtype) => subtype.range_name().into(),
+            Self::Multirange(subtype) => subtype.multirange_name().into(),
             Self::Vector(dimension) => format!("vector({dimension})"),
             Self::Tensor(dimension) => format!("tensor({dimension})"),
             Self::Domain { schema, name, .. } => format!("{schema}.{name}"),
@@ -448,182 +486,6 @@ impl FunctionBinding {
 pub type GeneratedFunctionDependency = FunctionBinding;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(clippy::struct_excessive_bools)]
-pub struct ColumnDef {
-    pub name: String,
-    pub ty: ColumnType,
-    pub primary_key: bool,
-    pub not_null: bool,
-    /// Whether `NOT NULL` was declared as its own constraint instead of being
-    /// implied by `PRIMARY KEY` or an auto-incrementing identity.
-    #[serde(default)]
-    pub not_null_explicit: bool,
-    /// Durable `PostgreSQL` 18 `NOT NULL` constraint name. Parsing leaves an
-    /// unnamed declaration as `None`; table registration assigns and persists
-    /// `PostgreSQL`'s generated name before the constraint becomes visible.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub not_null_name: Option<String>,
-    /// `SERIAL` / `BIGSERIAL` columns auto-allocate from a per-table
-    /// monotonic counter when the value is omitted from `INSERT`.
-    #[serde(default)]
-    pub auto_increment: bool,
-    /// `UNIQUE` column constraint -- the engine rejects an INSERT
-    /// whose value for this column already exists in another row.
-    #[serde(default)]
-    pub unique: bool,
-    /// `DEFAULT <expr>`. Evaluated at INSERT time when the column is
-    /// not present in the row tuple. Persisted in catalog metadata so
-    /// reopened engines keep the same INSERT semantics.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default: Option<Expr>,
-    /// `PostgreSQL` 18 generated-column definition. Stored values are refreshed
-    /// on every row write; virtual values are evaluated from the physical row
-    /// only when a logical row is read.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generated: Option<GeneratedColumn>,
-    /// `CHECK (<expr>)` column-level constraint. Evaluated at INSERT
-    /// (and UPDATE-replace) time against the row being written.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub check: Option<Expr>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub check_name: Option<String>,
-    #[serde(default = "default_true")]
-    pub check_enforced: bool,
-    /// `REFERENCES parent(col)` column-level FOREIGN KEY. The engine
-    /// rejects INSERT / UPDATE whose value is not present in the
-    /// referenced (table, column) pair.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub references: Option<ForeignKeyRef>,
-}
-
-/// `REFERENCES table(column)` reference target.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForeignKeyRef {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    pub table: String,
-    pub column: String,
-    #[serde(default)]
-    pub on_update: ForeignKeyAction,
-    #[serde(default)]
-    pub on_delete: ForeignKeyAction,
-    #[serde(default)]
-    pub match_type: ForeignKeyMatch,
-    #[serde(default = "default_true")]
-    pub enforced: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateTable {
-    pub name: String,
-    /// Local SQL relation identifier used while binding expressions declared inside the table definition.
-    pub qualifier: String,
-    pub columns: Vec<ColumnDef>,
-    /// `CREATE TABLE IF NOT EXISTS` - silently ignore the statement
-    /// when a table with this name already exists.
-    pub if_not_exists: bool,
-    /// Table-level `CHECK (...)` constraints. Each entry is an
-    /// expression that must evaluate truthy against every row.
-    #[allow(dead_code)]
-    pub checks: Vec<TableCheck>,
-    /// Table-level `FOREIGN KEY (col, ...) REFERENCES parent(col, ...)`.
-    pub foreign_keys: Vec<ForeignKey>,
-    /// Every declared `PRIMARY KEY` / `UNIQUE` constraint, including
-    /// column-level declarations. Keeping the typed key (rather than only
-    /// setting per-column flags) preserves composite-key and `NULLS NOT
-    /// DISTINCT` semantics through planning and catalog persistence.
-    #[serde(default)]
-    pub key_constraints: Vec<TableKeyConstraint>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TableKeyConstraintKind {
-    PrimaryKey,
-    Unique,
-}
-
-/// A table key whose columns are compared as one tuple.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TableKeyConstraint {
-    pub name: Option<String>,
-    pub kind: TableKeyConstraintKind,
-    pub columns: Vec<String>,
-    /// `PostgreSQL` UNIQUE keys normally treat every NULL-containing tuple as
-    /// distinct. `UNIQUE NULLS NOT DISTINCT` opts into NULL equality.
-    #[serde(default)]
-    pub nulls_not_distinct: bool,
-}
-
-/// Durable table-level constraints that do not fit in `ColumnDef`.
-///
-/// `serde(default)` on the catalog field containing this structure keeps
-/// databases written before constraint persistence backward compatible.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct TableConstraintSet {
-    #[serde(default)]
-    pub checks: Vec<TableCheck>,
-    #[serde(default)]
-    pub foreign_keys: Vec<ForeignKey>,
-    #[serde(default)]
-    pub key_constraints: Vec<TableKeyConstraint>,
-}
-
-/// `CHECK (expr)` constraint with an optional name (`CONSTRAINT <name>
-/// CHECK (...)`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TableCheck {
-    pub name: Option<String>,
-    pub expr: Expr,
-    #[serde(default = "default_true")]
-    pub enforced: bool,
-}
-
-/// Table-level foreign key. `local_columns.len()` matches
-/// `ref_columns.len()`; the engine joins on the position-aligned
-/// pairs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForeignKey {
-    pub name: Option<String>,
-    pub local_columns: Vec<String>,
-    pub ref_table: String,
-    pub ref_columns: Vec<String>,
-    #[serde(default)]
-    pub on_update: ForeignKeyAction,
-    #[serde(default)]
-    pub on_delete: ForeignKeyAction,
-    /// Optional column subset for `ON DELETE SET NULL (...)` and
-    /// `ON DELETE SET DEFAULT (...)`. Empty means every local FK
-    /// column participates.
-    #[serde(default)]
-    pub on_delete_set_columns: Vec<String>,
-    #[serde(default)]
-    pub match_type: ForeignKeyMatch,
-    #[serde(default = "default_true")]
-    pub enforced: bool,
-}
-
-const fn default_true() -> bool {
-    true
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum ForeignKeyAction {
-    #[default]
-    NoAction,
-    Restrict,
-    Cascade,
-    SetNull,
-    SetDefault,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum ForeignKeyMatch {
-    #[default]
-    Simple,
-    Full,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateIndex {
     pub name: Option<String>,
     pub table: String,
@@ -651,6 +513,7 @@ pub enum DropKind {
     Table,
     Index,
     View,
+    MaterializedView,
     Schema,
 }
 
@@ -950,7 +813,7 @@ pub struct AlterTableStmt {
     /// Local SQL relation identifier used while binding new or replaced generation expressions.
     pub qualifier: String,
     pub if_exists: bool,
-    pub action: AlterTableAction,
+    pub actions: Vec<AlterTableAction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -962,6 +825,32 @@ pub enum AlterTableAction {
     },
     AddKeyConstraint {
         constraint: TableKeyConstraint,
+    },
+    AddCheckConstraint {
+        constraint: TableCheck,
+    },
+    AddForeignKeyConstraint {
+        constraint: ForeignKey,
+    },
+    AddNotNullConstraint {
+        name: Option<String>,
+        column: String,
+        validated: bool,
+        no_inherit: bool,
+    },
+    ValidateConstraint {
+        name: String,
+    },
+    AlterConstraint {
+        name: String,
+        enforceability: Option<bool>,
+        deferrability: Option<(bool, bool)>,
+        no_inherit: Option<bool>,
+    },
+    DropConstraint {
+        name: String,
+        if_exists: bool,
+        cascade: bool,
     },
     DropColumn {
         name: String,
@@ -1207,6 +1096,7 @@ pub enum Statement {
     Delete(DeleteStmt),
     Drop(DropStmt),
     AlterTable(AlterTableStmt),
+    AlterViewOptions(AlterViewOptionsStmt),
     /// `CREATE [OR REPLACE] VIEW name [(column_name, ...)] AS SELECT ...`. The body is the underlying `SelectStmt`; views are materialised lazily on every reference (no row caching).
     CreateView {
         name: String,
@@ -1214,6 +1104,30 @@ pub enum Statement {
         column_names: Vec<String>,
         body: Box<SelectStmt>,
         or_replace: bool,
+        #[serde(default)]
+        persistence: RelationPersistence,
+        /// Validated `PostgreSQL` view reloptions in declaration order.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        options: Vec<(String, String)>,
+    },
+    /// `CREATE MATERIALIZED VIEW ... AS SELECT ... [WITH [NO] DATA]`.
+    CreateMaterializedView {
+        name: String,
+        #[serde(default)]
+        column_names: Vec<String>,
+        #[serde(default)]
+        if_not_exists: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        with_no_data: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        options: Vec<(String, String)>,
+        body: Box<SelectStmt>,
+    },
+    /// `REFRESH MATERIALIZED VIEW [CONCURRENTLY] name [WITH [NO] DATA]`.
+    RefreshMaterializedView {
+        name: String,
+        concurrently: bool,
+        with_no_data: bool,
     },
     /// `CREATE SCHEMA [IF NOT EXISTS] name`. This AST entry records the
     /// command for the engine's durable schema catalog and namespace
@@ -1235,9 +1149,7 @@ pub enum Statement {
         name: String,
     },
     /// `DISCARD [ALL|PLANS|SEQUENCES|TEMP|TEMPORARY]` - clear session state.
-    /// The engine resets
-    /// session vars, prepared statements and sequences. `TEMP` is rejected
-    /// until temporary tables are supported instead of being silently ignored.
+    /// The engine resets session variables, prepared statements, sequence state, and the current session's temporary relations as requested.
     Discard {
         target: DiscardTarget,
     },
@@ -1281,6 +1193,10 @@ pub enum Statement {
         column_names: Vec<String>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         with_no_data: bool,
+        #[serde(default)]
+        persistence: RelationPersistence,
+        #[serde(default)]
+        on_commit: OnCommitAction,
         body: Box<SelectStmt>,
     },
     /// `PREPARE name AS <inner>`.
@@ -1392,70 +1308,6 @@ pub struct CreateForeignTable {
     pub columns: Vec<ColumnDef>,
     pub options: Vec<(String, String)>,
     pub if_not_exists: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateSequence {
-    pub name: String,
-    pub if_not_exists: bool,
-    pub start: i64,
-    pub increment: i64,
-}
-
-/// Physical restart action carried by `ALTER SEQUENCE`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SequenceRestart {
-    /// No `RESTART` clause was specified.
-    #[default]
-    Unchanged,
-    /// Bare `RESTART`; allocate the configured start value next.
-    FromStart,
-    /// `RESTART WITH value`; allocate the supplied value next.
-    With(i64),
-}
-
-fn deserialize_sequence_restart<'de, D>(deserializer: D) -> Result<SequenceRestart, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    enum Current {
-        Unchanged,
-        FromStart,
-        With(i64),
-    }
-
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Representation {
-        Current(Current),
-        // Before SequenceRestart existed this field was
-        // Option<Option<i64>>, serialized as null or an integer.
-        Legacy(Option<i64>),
-    }
-
-    Ok(match Representation::deserialize(deserializer)? {
-        Representation::Current(Current::Unchanged) | Representation::Legacy(None) => {
-            SequenceRestart::Unchanged
-        }
-        Representation::Current(Current::FromStart) => SequenceRestart::FromStart,
-        Representation::Current(Current::With(value)) | Representation::Legacy(Some(value)) => {
-            SequenceRestart::With(value)
-        }
-    })
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct AlterSequence {
-    pub name: String,
-    /// `ALTER SEQUENCE IF EXISTS` suppresses only a missing sequence.
-    #[serde(default)]
-    pub if_exists: bool,
-    /// `RESTART [WITH n]`, preserving omitted, bare, and explicit forms.
-    #[serde(default, deserialize_with = "deserialize_sequence_restart")]
-    pub restart: SequenceRestart,
-    pub increment: Option<i64>,
-    pub start: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

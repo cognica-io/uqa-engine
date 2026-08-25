@@ -6,11 +6,14 @@
 
 //! Durable view registration, binding, dependencies, and restoration.
 
+mod materialized;
+mod options;
+
 use super::{
     bind_query_plan_relations, bind_query_plan_sequence_references,
     canonical_virtual_relation_reference, query_plan_references_relation,
     query_plan_references_sequence, BTreeMap, CatalogFacade, Engine, QueryPlan, RelationIdentity,
-    SQLError, StorageBackendError, StorageBackendResult, StoredView, ViewRow,
+    SQLError, StorageBackendError, StorageBackendResult, StoredView, StoredViewKind, ViewRow,
 };
 use uqa_sql::ast::FunctionBinding;
 
@@ -19,6 +22,26 @@ use uqa_sql::ast::FunctionBinding;
 enum RestoredView {
     Current(StoredView),
     Legacy(QueryPlan),
+}
+
+pub(crate) struct ViewRegistration<'a> {
+    pub name: &'a str,
+    pub column_names: &'a [String],
+    pub plan: QueryPlan,
+    pub or_replace: bool,
+    pub persistence: uqa_sql::ast::RelationPersistence,
+    pub options: &'a [(String, String)],
+    pub params: &'a [uqa_sql::SQLParam],
+}
+
+pub(crate) struct MaterializedViewRegistration<'a> {
+    pub name: &'a str,
+    pub column_names: &'a [String],
+    pub plan: QueryPlan,
+    pub if_not_exists: bool,
+    pub with_no_data: bool,
+    pub options: &'a [(String, String)],
+    pub params: &'a [uqa_sql::SQLParam],
 }
 
 fn create_view_output_columns(
@@ -211,7 +234,9 @@ impl Engine {
             .map_err(|error| StorageBackendError::Other(error.to_string()))
     }
 
-    fn bind_view_plan_for_create(&self, plan: &mut QueryPlan) -> Result<(), SQLError> {
+    fn bind_view_plan_for_create(&self, plan: &mut QueryPlan) -> Result<bool, SQLError> {
+        let temporary_schema = self.temporary_schema_name();
+        let mut uses_temporary_relation = false;
         bind_query_plan_relations(plan, &std::collections::BTreeSet::new(), &mut |reference| {
             // Catalog relations win for their supported spellings just
             // as they do in FROM execution (notably unqualified
@@ -226,7 +251,11 @@ impl Engine {
             match self.try_resolve_relation_kind(reference).map_err(|error| {
                 SQLError::Internal(format!("resolve CREATE VIEW source `{reference}`: {error}"))
             })? {
-                Some((canonical, "table" | "view" | "foreign table")) => Ok(canonical),
+                Some((canonical, "table" | "view" | "materialized view" | "foreign table")) => {
+                    uses_temporary_relation |= RelationIdentity::from_legacy_name(&canonical)
+                        .is_ok_and(|relation| relation.schema == temporary_schema);
+                    Ok(canonical)
+                }
                 Some((canonical, kind)) => Err(SQLError::Routine {
                     sqlstate: "42809".into(),
                     message: format!(
@@ -243,7 +272,8 @@ impl Engine {
                         "CREATE VIEW sequence reference `{reference}`: {error}"
                     ))
                 })
-        })
+        })?;
+        Ok(uses_temporary_relation)
     }
 
     #[cfg(test)]
@@ -275,39 +305,52 @@ impl Engine {
                     "view lowering produced a non-query plan".into(),
                 ));
             };
-            engine.register_view_plan_inner(name, &[], *plan, true, &[])
+            engine.register_view_plan_inner(ViewRegistration {
+                name,
+                column_names: &[],
+                plan: *plan,
+                or_replace: true,
+                persistence: uqa_sql::ast::RelationPersistence::Permanent,
+                options: &[],
+                params: &[],
+            })
         })
     }
 
     pub(crate) fn register_view_plan(
         &self,
-        name: &str,
-        column_names: &[String],
-        plan: uqa_planner::QueryPlan,
-        or_replace: bool,
-        params: &[uqa_sql::SQLParam],
+        registration: ViewRegistration<'_>,
     ) -> Result<(), SQLError> {
-        self.with_implicit_transaction(move |engine| {
-            engine.register_view_plan_inner(name, column_names, plan, or_replace, params)
-        })
+        self.with_implicit_transaction(move |engine| engine.register_view_plan_inner(registration))
     }
 
-    fn register_view_plan_inner(
-        &self,
-        name: &str,
-        column_names: &[String],
-        mut plan: uqa_planner::QueryPlan,
-        or_replace: bool,
-        params: &[uqa_sql::SQLParam],
-    ) -> Result<(), SQLError> {
+    fn register_view_plan_inner(&self, registration: ViewRegistration<'_>) -> Result<(), SQLError> {
+        let ViewRegistration {
+            name,
+            column_names,
+            mut plan,
+            or_replace,
+            persistence,
+            options,
+            params,
+        } = registration;
         self.synchronize_catalog_registries()
             .map_err(|err| SQLError::Internal(format!("refresh view catalog: {err}")))?;
-        let name = self
-            .try_relation_name_for_create(name)
-            .map_err(SQLError::Unsupported)?;
+        let uses_temporary_relation = self.bind_view_plan_for_create(&mut plan)?;
+        let persistence = if uses_temporary_relation {
+            uqa_sql::ast::RelationPersistence::Temporary
+        } else {
+            persistence
+        };
+        let name = if persistence == uqa_sql::ast::RelationPersistence::Temporary {
+            self.try_temporary_relation_name_for_create(name)
+                .map_err(SQLError::Unsupported)?
+        } else {
+            self.try_relation_name_for_create(name)
+                .map_err(SQLError::Unsupported)?
+        };
         let relation = RelationIdentity::from_legacy_name(&name)
             .map_err(|err| SQLError::Internal(format!("invalid canonical view name: {err}")))?;
-        self.bind_view_plan_for_create(&mut plan)?;
         let query_schema = crate::sql::bind_catalog_query_routines(self, &mut plan, params)?;
         let output_columns = create_view_output_columns(&query_schema, column_names)?;
         let replacement_schema = named_view_schema(&query_schema, &output_columns)?;
@@ -347,17 +390,25 @@ impl Engine {
         let view = StoredView {
             query: plan,
             output_columns: Some(output_columns),
+            persistence,
+            options: options.to_vec(),
+            kind: StoredViewKind::View,
+            materialized_rows: Vec::new(),
+            materialized_column_types: Vec::new(),
+            populated: true,
         };
         let mut views = self.durable.views.write();
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            let definition_json = serde_json::to_string(&view)
-                .map_err(|err| SQLError::Internal(format!("serialize view `{name}`: {err}")))?;
-            catalog
-                .save_view(&ViewRow {
-                    relation: relation.clone(),
-                    definition_json,
-                })
-                .map_err(|err| SQLError::Internal(format!("persist view `{name}`: {err}")))?;
+        if persistence != uqa_sql::ast::RelationPersistence::Temporary {
+            if let Some(catalog) = self.storage.catalog.as_ref() {
+                let definition_json = serde_json::to_string(&view)
+                    .map_err(|err| SQLError::Internal(format!("serialize view `{name}`: {err}")))?;
+                catalog
+                    .save_view(&ViewRow {
+                        relation: relation.clone(),
+                        definition_json,
+                    })
+                    .map_err(|err| SQLError::Internal(format!("persist view `{name}`: {err}")))?;
+            }
         }
         views.insert(relation, view);
         drop(views);
@@ -412,11 +463,66 @@ impl Engine {
         Ok(())
     }
 
+    pub(crate) fn drop_temporary_views_depending_on_relation_inner(
+        &self,
+        canonical_name: &str,
+    ) -> StorageBackendResult<()> {
+        let target = RelationIdentity::from_legacy_name(canonical_name)
+            .map_err(StorageBackendError::Other)?;
+        let empty_ctes = std::collections::BTreeSet::new();
+        let views = self.durable.views.read();
+        let mut targets = std::collections::BTreeSet::from([target]);
+        let mut layers = Vec::new();
+        loop {
+            let layer = views
+                .iter()
+                .filter(|(relation, _)| !targets.contains(*relation))
+                .filter(|(_, view)| {
+                    targets.iter().any(|target| {
+                        query_plan_references_relation(&view.query, target, &empty_ctes)
+                    })
+                })
+                .map(|(relation, view)| {
+                    if view.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+                        return Err(StorageBackendError::Other(format!(
+                            "temporary relation `{canonical_name}` has non-temporary dependent view `{}`",
+                            relation.qualified_name()
+                        )));
+                    }
+                    Ok(relation.clone())
+                })
+                .collect::<StorageBackendResult<Vec<_>>>()?;
+            if layer.is_empty() {
+                break;
+            }
+            targets.extend(layer.iter().cloned());
+            layers.push(layer);
+        }
+        drop(views);
+
+        // PostgreSQL performs internal ON COMMIT deletion with CASCADE. Drop
+        // the outermost dependent views first so no temporary view survives
+        // with a binding to a relation that disappeared at commit.
+        for layer in layers.into_iter().rev() {
+            for relation in layer {
+                let name = relation.qualified_name();
+                self.drop_view_state_inner(&name)
+                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            }
+        }
+        Ok(())
+    }
+
     fn drop_view_state_inner(&self, name: &str) -> Result<(), SQLError> {
         let relation = RelationIdentity::from_legacy_name(name)
             .map_err(|err| SQLError::Internal(format!("invalid canonical view name: {err}")))?;
         let mut views = self.durable.views.write();
-        let removed = if let Some(catalog) = self.storage.catalog.as_ref() {
+        let temporary = views
+            .get(&relation)
+            .is_some_and(|view| view.persistence == uqa_sql::ast::RelationPersistence::Temporary);
+        let removed = if temporary {
+            views.contains_key(&relation)
+        } else if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .drop_view(&relation)
                 .map_err(|err| SQLError::Internal(format!("drop view `{name}`: {err}")))?
@@ -440,6 +546,18 @@ impl Engine {
     }
 
     fn stored_view_schema(&self, view: &StoredView) -> Result<uqa_execution::RowSchema, SQLError> {
+        if view.kind == StoredViewKind::Materialized {
+            let output_columns = view.output_columns.clone().unwrap_or_default();
+            if output_columns.len() != view.materialized_column_types.len() {
+                return Err(SQLError::Internal(
+                    "stored materialized view column metadata is inconsistent".into(),
+                ));
+            }
+            return Ok(uqa_execution::RowSchema::with_types(
+                output_columns,
+                view.materialized_column_types.clone(),
+            ));
+        }
         let query_schema = crate::sql::analyze_catalog_query_schema(self, &view.query, &[])?;
         let output_columns = match &view.output_columns {
             Some(columns) => columns.clone(),
@@ -470,9 +588,9 @@ impl Engine {
     }
 
     pub fn view(&self, name: &str) -> Result<Option<uqa_planner::QueryPlan>, SQLError> {
-        Ok(self
-            .view_definition(name)?
-            .map(|definition| definition.query))
+        Ok(self.view_definition(name)?.and_then(|definition| {
+            (definition.kind == StoredViewKind::View).then_some(definition.query)
+        }))
     }
 
     pub(crate) fn view_plan(&self, name: &str) -> Result<Option<uqa_planner::QueryPlan>, SQLError> {
@@ -486,9 +604,25 @@ impl Engine {
             .durable
             .views
             .read()
-            .keys()
-            .map(RelationIdentity::qualified_name)
+            .iter()
+            .filter(|(_, view)| view.kind == StoredViewKind::View)
+            .map(|(relation, _)| relation.qualified_name())
             .collect();
+        out.sort_unstable();
+        Ok(out)
+    }
+
+    pub(crate) fn list_materialized_views(&self) -> Result<Vec<String>, SQLError> {
+        self.synchronize_catalog_registries()
+            .map_err(|err| SQLError::Internal(format!("refresh view catalog: {err}")))?;
+        let mut out = self
+            .durable
+            .views
+            .read()
+            .iter()
+            .filter(|(_, view)| view.kind == StoredViewKind::Materialized)
+            .map(|(relation, _)| relation.qualified_name())
+            .collect::<Vec<_>>();
         out.sort_unstable();
         Ok(out)
     }
@@ -573,11 +707,82 @@ impl Engine {
         Ok(dependents)
     }
 
+    fn migrate_legacy_view_bindings(
+        &self,
+        catalog: &dyn CatalogFacade,
+        views: &mut BTreeMap<RelationIdentity, StoredView>,
+        legacy_views: &[RelationIdentity],
+    ) -> StorageBackendResult<()> {
+        if legacy_views.is_empty() {
+            return Ok(());
+        }
+        // Install the complete provisional registry so nested legacy views
+        // can derive each other's schemas while exact routine identities are
+        // bound and persisted in the current format.
+        let previous_views = {
+            let mut loaded = self.durable.views.write();
+            std::mem::replace(&mut *loaded, views.clone())
+        };
+        let migration = (|| -> StorageBackendResult<()> {
+            for relation in legacy_views {
+                let view_name = relation.qualified_name();
+                let view = views.get_mut(relation).ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "legacy view `{view_name}` disappeared during restoration"
+                    ))
+                })?;
+                crate::sql::bind_catalog_query_routines(self, &mut view.query, &[]).map_err(
+                    |error| {
+                        StorageBackendError::Other(format!(
+                            "restore view `{view_name}` routine bindings: {error}"
+                        ))
+                    },
+                )?;
+                self.durable
+                    .views
+                    .write()
+                    .insert(relation.clone(), view.clone());
+            }
+            for relation in legacy_views {
+                let view_name = relation.qualified_name();
+                let view = views.get(relation).ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "legacy view `{view_name}` disappeared during migration"
+                    ))
+                })?;
+                catalog
+                    .save_view(&ViewRow {
+                        relation: relation.clone(),
+                        definition_json: serde_json::to_string(view)?,
+                    })
+                    .map_err(|error| {
+                        StorageBackendError::Other(format!(
+                            "migrate legacy view `{view_name}` routine bindings: {error}"
+                        ))
+                    })?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = migration {
+            *self.durable.views.write() = previous_views;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     pub(crate) fn restore_views_from_catalog(
         &self,
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
         let rows = catalog.load_views()?;
+        let temporary_views = self
+            .durable
+            .views
+            .read()
+            .iter()
+            .filter(|(_, view)| view.persistence == uqa_sql::ast::RelationPersistence::Temporary)
+            .map(|(relation, view)| (relation.clone(), view.clone()))
+            .collect::<BTreeMap<_, _>>();
         let mut relations = self
             .storage
             .tables
@@ -599,6 +804,7 @@ impl Engine {
                     .map(|label| RelationIdentity::new(graph, label.name)),
             );
         }
+        relations.extend(temporary_views.keys().cloned());
 
         let mut views = BTreeMap::new();
         let mut legacy_views = Vec::new();
@@ -611,6 +817,12 @@ impl Engine {
                     StoredView {
                         query,
                         output_columns: None,
+                        persistence: uqa_sql::ast::RelationPersistence::Permanent,
+                        options: Vec::new(),
+                        kind: StoredViewKind::View,
+                        materialized_rows: Vec::new(),
+                        materialized_column_types: Vec::new(),
+                        populated: true,
                     }
                 }
             };
@@ -625,59 +837,8 @@ impl Engine {
             })?;
             views.insert(row.relation, view);
         }
-
-        if !legacy_views.is_empty() {
-            // Install the complete provisional registry so nested legacy views can derive each other's schemas, then persist the exact routine identities so later refreshes load the current format without repeating migration.
-            let previous_views = {
-                let mut loaded = self.durable.views.write();
-                std::mem::replace(&mut *loaded, views.clone())
-            };
-            let migration = (|| -> StorageBackendResult<()> {
-                for relation in &legacy_views {
-                    let view_name = relation.qualified_name();
-                    let view = views.get_mut(relation).ok_or_else(|| {
-                        StorageBackendError::Other(format!(
-                            "legacy view `{view_name}` disappeared during restoration"
-                        ))
-                    })?;
-                    crate::sql::bind_catalog_query_routines(self, &mut view.query, &[]).map_err(
-                        |error| {
-                            StorageBackendError::Other(format!(
-                                "restore view `{view_name}` routine bindings: {error}"
-                            ))
-                        },
-                    )?;
-                    self.durable
-                        .views
-                        .write()
-                        .insert(relation.clone(), view.clone());
-                }
-                for relation in &legacy_views {
-                    let view_name = relation.qualified_name();
-                    let view = views.get(relation).ok_or_else(|| {
-                        StorageBackendError::Other(format!(
-                            "legacy view `{view_name}` disappeared during migration"
-                        ))
-                    })?;
-                    let definition_json = serde_json::to_string(view)?;
-                    catalog
-                        .save_view(&ViewRow {
-                            relation: relation.clone(),
-                            definition_json,
-                        })
-                        .map_err(|error| {
-                            StorageBackendError::Other(format!(
-                                "migrate legacy view `{view_name}` routine bindings: {error}"
-                            ))
-                        })?;
-                }
-                Ok(())
-            })();
-            if let Err(error) = migration {
-                *self.durable.views.write() = previous_views;
-                return Err(error);
-            }
-        }
+        views.extend(temporary_views);
+        self.migrate_legacy_view_bindings(catalog, &mut views, &legacy_views)?;
         *self.durable.views.write() = views;
         Ok(())
     }

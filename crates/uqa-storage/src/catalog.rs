@@ -330,6 +330,8 @@ pub struct SequenceRow {
     pub current: i64,
     /// False until the first allocation returns `current` verbatim.
     pub called: bool,
+    /// `PostgreSQL` `pg_class.relpersistence` code. Durable sequence rows accept only permanent (`p`) and unlogged (`u`) values.
+    pub persistence: String,
 }
 
 /// Engine-facing catalog facade for persistent metadata.

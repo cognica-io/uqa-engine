@@ -38,6 +38,12 @@ pub(crate) fn sql_column_type_to_fdw(
         uqa_sql::ast::ColumnType::Timestamp => uqa_fdw::ColumnType::Timestamp,
         uqa_sql::ast::ColumnType::TimestampTz => uqa_fdw::ColumnType::TimestampTz,
         uqa_sql::ast::ColumnType::Interval => uqa_fdw::ColumnType::Interval,
+        uqa_sql::ast::ColumnType::Range(subtype) => {
+            uqa_fdw::ColumnType::Range(sql_range_subtype_to_fdw(*subtype))
+        }
+        uqa_sql::ast::ColumnType::Multirange(subtype) => {
+            uqa_fdw::ColumnType::Multirange(sql_range_subtype_to_fdw(*subtype))
+        }
         uqa_sql::ast::ColumnType::Bytea => uqa_fdw::ColumnType::Bytes,
         uqa_sql::ast::ColumnType::InternalChar => uqa_fdw::ColumnType::InternalChar,
         uqa_sql::ast::ColumnType::Regproc => uqa_fdw::ColumnType::Regproc,
@@ -112,6 +118,12 @@ pub(crate) fn fdw_column_type_to_sql(
         uqa_fdw::ColumnType::Timestamp => uqa_sql::ast::ColumnType::Timestamp,
         uqa_fdw::ColumnType::TimestampTz => uqa_sql::ast::ColumnType::TimestampTz,
         uqa_fdw::ColumnType::Interval => uqa_sql::ast::ColumnType::Interval,
+        uqa_fdw::ColumnType::Range(subtype) => {
+            uqa_sql::ast::ColumnType::Range(fdw_range_subtype_to_sql(subtype))
+        }
+        uqa_fdw::ColumnType::Multirange(subtype) => {
+            uqa_sql::ast::ColumnType::Multirange(fdw_range_subtype_to_sql(subtype))
+        }
         uqa_fdw::ColumnType::Vector(dimension) => uqa_sql::ast::ColumnType::Vector(*dimension),
         uqa_fdw::ColumnType::Tensor(dimension) => uqa_sql::ast::ColumnType::Tensor(*dimension),
         uqa_fdw::ColumnType::Array(element) => {
@@ -128,6 +140,28 @@ pub(crate) fn fdw_column_type_to_sql(
             oid: *oid,
             base: Box::new(fdw_column_type_to_sql(base)),
         },
+    }
+}
+
+fn sql_range_subtype_to_fdw(subtype: uqa_sql::ast::RangeSubtype) -> uqa_fdw::RangeSubtype {
+    match subtype {
+        uqa_sql::ast::RangeSubtype::Integer => uqa_fdw::RangeSubtype::Integer,
+        uqa_sql::ast::RangeSubtype::BigInteger => uqa_fdw::RangeSubtype::BigInteger,
+        uqa_sql::ast::RangeSubtype::Numeric => uqa_fdw::RangeSubtype::Numeric,
+        uqa_sql::ast::RangeSubtype::Date => uqa_fdw::RangeSubtype::Date,
+        uqa_sql::ast::RangeSubtype::Timestamp => uqa_fdw::RangeSubtype::Timestamp,
+        uqa_sql::ast::RangeSubtype::TimestampTz => uqa_fdw::RangeSubtype::TimestampTz,
+    }
+}
+
+fn fdw_range_subtype_to_sql(subtype: &uqa_fdw::RangeSubtype) -> uqa_sql::ast::RangeSubtype {
+    match subtype {
+        uqa_fdw::RangeSubtype::Integer => uqa_sql::ast::RangeSubtype::Integer,
+        uqa_fdw::RangeSubtype::BigInteger => uqa_sql::ast::RangeSubtype::BigInteger,
+        uqa_fdw::RangeSubtype::Numeric => uqa_sql::ast::RangeSubtype::Numeric,
+        uqa_fdw::RangeSubtype::Date => uqa_sql::ast::RangeSubtype::Date,
+        uqa_fdw::RangeSubtype::Timestamp => uqa_sql::ast::RangeSubtype::Timestamp,
+        uqa_fdw::RangeSubtype::TimestampTz => uqa_sql::ast::RangeSubtype::TimestampTz,
     }
 }
 

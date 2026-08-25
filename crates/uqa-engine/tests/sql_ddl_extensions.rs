@@ -220,7 +220,7 @@ fn pg18_virtual_generated_column_is_computed_on_read() {
 }
 
 #[test]
-fn unsupported_pg18_temporal_constraint_is_failure_atomic() {
+fn pg18_temporal_constraint_validation_order_is_failure_atomic() {
     let eng = Engine::new();
     let error = eng
         .sql(
@@ -230,10 +230,11 @@ fn unsupported_pg18_temporal_constraint_is_failure_atomic() {
              )",
             &[],
         )
-        .unwrap_err()
-        .to_string();
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42804"), "{error}");
+    let error = error.to_string();
     assert!(
-        error.contains("WITHOUT OVERLAPS is not implemented"),
+        error.contains("column \"valid_at\" in WITHOUT OVERLAPS is not a range or multirange type"),
         "{error}"
     );
     assert!(!eng.has_table("temporal_probe").unwrap());

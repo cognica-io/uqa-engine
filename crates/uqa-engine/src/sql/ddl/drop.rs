@@ -29,7 +29,10 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
         }
     }
     if stmt.cascade
-        && matches!(stmt.kind, DropKind::View | DropKind::Schema)
+        && matches!(
+            stmt.kind,
+            DropKind::View | DropKind::MaterializedView | DropKind::Schema
+        )
         && !(stmt.kind == DropKind::Schema
             && only_graph_namespaces(engine, &stmt.names, stmt.if_exists)?)
     {
@@ -37,6 +40,7 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
             "DROP {} CASCADE is not supported; no objects were changed",
             match stmt.kind {
                 DropKind::View => "VIEW",
+                DropKind::MaterializedView => "MATERIALIZED VIEW",
                 DropKind::Schema => "SCHEMA",
                 DropKind::Table | DropKind::Index => unreachable!(),
             }
@@ -44,7 +48,7 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
     }
     let mut lock_targets = std::collections::BTreeSet::new();
     match stmt.kind {
-        DropKind::Table | DropKind::View => {
+        DropKind::Table | DropKind::View | DropKind::MaterializedView => {
             for name in &stmt.names {
                 if let Some((canonical, _)) = engine
                     .try_resolve_relation_kind(name)
@@ -159,24 +163,38 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                     .map_err(|e| ddl_storage_error("DROP INDEX", e))?;
             }
         }
-        DropKind::View => {
+        DropKind::View | DropKind::MaterializedView => {
+            let expected_kind = if stmt.kind == DropKind::View {
+                "view"
+            } else {
+                "materialized view"
+            };
+            let command = if stmt.kind == DropKind::View {
+                "DROP VIEW"
+            } else {
+                "DROP MATERIALIZED VIEW"
+            };
             let mut views = Vec::new();
             for name in &stmt.names {
                 match engine
                     .try_resolve_relation_kind(name)
-                    .map_err(|err| ddl_storage_error("DROP VIEW", err))?
+                    .map_err(|err| ddl_storage_error(command, err))?
                 {
-                    Some((canonical, "view")) => views.push(canonical),
+                    Some((canonical, kind)) if kind == expected_kind => views.push(canonical),
                     Some((canonical, kind)) => {
-                        return Err(SQLError::Unsupported(format!(
-                            "DROP VIEW: relation `{canonical}` is a {kind}, not a view"
-                        )));
+                        return Err(SQLError::Routine {
+                            sqlstate: "42809".into(),
+                            message: format!(
+                                "{command}: relation `{canonical}` is a {kind}, not a {expected_kind}"
+                            ),
+                        });
                     }
                     None if stmt.if_exists => {}
                     None => {
-                        return Err(SQLError::Unsupported(format!(
-                            "DROP VIEW: relation `{name}` does not exist"
-                        )));
+                        return Err(SQLError::Routine {
+                            sqlstate: "42P01".into(),
+                            message: format!("{command}: relation `{name}` does not exist"),
+                        });
                     }
                 }
             }
@@ -187,13 +205,13 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
             for view in &views {
                 let dependents = engine
                     .views_depending_on_relation(view)
-                    .map_err(|err| ddl_storage_error("DROP VIEW", err))?
+                    .map_err(|err| ddl_storage_error(command, err))?
                     .into_iter()
                     .filter(|dependent| !drop_set.contains(dependent))
                     .collect::<Vec<_>>();
                 if !dependents.is_empty() {
                     return Err(SQLError::Unsupported(format!(
-                        "DROP VIEW `{view}` rejected: dependent view(s) `{}` still reference it",
+                        "{command} `{view}` rejected: dependent view(s) `{}` still reference it",
                         dependents.join("`, `")
                     )));
                 }

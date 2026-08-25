@@ -128,6 +128,7 @@ pub(super) fn collect_sequence_migrations(
                 increment: stored.increment,
                 current: stored.current,
                 called: stored.called,
+                persistence: stored.persistence,
             },
         });
     }
@@ -151,6 +152,7 @@ pub(super) fn collect_sequence_migrations(
                     increment: state.increment,
                     current: state.current,
                     called: true,
+                    persistence: "p".into(),
                 },
             });
         }
@@ -340,6 +342,7 @@ pub(super) fn put_sequence_migrations(
                 increment: sequence.row.increment,
                 current: sequence.row.current,
                 called: sequence.row.called,
+                persistence: sequence.row.persistence,
             })?,
         )?;
         if let Some(old_key) = sequence.old_key {

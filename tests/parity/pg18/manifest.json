@@ -7,6 +7,7 @@
     "verified_patch": "18.4",
     "differential_probes": "tests/parity/pg18/probes.sql",
     "stateful_routines": "tests/parity/pg18/routines_stateful.expected.json",
+    "stateful_constraints": "tests/parity/pg18/constraints_stateful.expected.json",
     "tpch_fixture": "benchmarks/tpch/expected/pg18.json"
   },
   "parser_chain": {
@@ -262,18 +263,18 @@
     {
       "id": "ddl.constraint-lifecycle",
       "postgresql_reference": "PostgreSQL 18.4 constraint validation, ALTER CONSTRAINT, dependency, dump, restore, and reopen behavior",
-      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_check_fk_default::; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::",
-      "supported_version": "The bounded PostgreSQL 18.4 constraint metadata recorded by ddl.constraint-metadata",
+      "uqa_test": "python3 tests/parity/pg18/run_routines_stateful.py --suite constraints; cargo test -p uqa-sql --lib compiler::tests::ddl_lifecycle::; cargo test -p uqa-engine --test integration engine_catalog::pg18_constraint_lifecycle::",
+      "supported_version": "PostgreSQL 18.4 named CHECK, foreign-key, and NOT NULL NOT VALID and validation lifecycle; supported ALTER CONSTRAINT enforcement, deferrability, and inheritance transitions; initially-deferred foreign-key outer-commit and savepoint behavior; multi-action ALTER atomicity; bounded dependency-aware drop; catalog flags; and durable reopen",
       "status": "partial",
-      "open_issue": "NOT VALID, ALTER CONSTRAINT, complete dependency behavior, and complete dump, restore, and reopen coverage remain."
+      "open_issue": "Per-transaction SET CONSTRAINTS, inheritance and partition propagation, the complete dependency graph, pg_dump/pg_restore, and the upstream constraint regression matrix remain."
     },
     {
       "id": "ddl.relation-forms-and-options",
       "postgresql_reference": "PostgreSQL 18.4 CREATE TABLE, CREATE VIEW, CREATE MATERIALIZED VIEW, CREATE SEQUENCE, inheritance, persistence, storage, and ON COMMIT documentation",
-      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_rejected_ddl_lifecycle::rejected_create_syntax_has_no_current_or_reopened_catalog_side_effects",
-      "supported_version": "Ordinary durable tables, views, and sequences on the implemented option surface; unsupported forms fail before catalog mutation",
-      "status": "explicitly_rejected",
-      "open_issue": "Temporary and unlogged relations, inheritance and partitioning, typed tables, storage parameters, tablespaces, table access methods, ON COMMIT behavior, materialized views, view options, and temporary sequences remain unimplemented."
+      "uqa_test": "cargo test -p uqa-sql --lib relation_forms_and_options_preserve_lifecycle_semantics; cargo test -p uqa-engine --test integration engine_catalog::sql_relation_forms::; cargo test -p uqa-engine --test integration engine_catalog::sql_rejected_ddl_lifecycle::",
+      "supported_version": "PostgreSQL 18.4 temporary tables, views, sequences, CTAS, and SELECT INTO; pg_temp lookup and automatic temporary-view persistence; ON COMMIT PRESERVE ROWS, DELETE ROWS, and DROP; DISCARD TEMP; unlogged tables and sequences across clean reopen; materialized snapshots, population state, and refresh; view and materialized-view reloptions; relation-kind errors; and pg_namespace, pg_class, pg_attribute, pg_matviews, and pg_sequences visibility",
+      "status": "partial",
+      "open_issue": "Unlogged crash-recovery reset, inheritance and partitioning, typed tables, table storage parameters, tablespaces, table access methods, temporary or unlogged materialized views, concurrent refresh, materialized-view indexes, and complete security-barrier, security-invoker, and updatable-view check-option semantics remain."
     },
     {
       "id": "ddl.ctas-column-names",
@@ -502,18 +503,18 @@
     {
       "id": "types.declared-identity-casts-and-catalog",
       "postgresql_reference": "PostgreSQL 18.4 pg_cast, pg_type, pg_class, pg_attribute, scalar cast results, errors, and SQLSTATEs",
-      "uqa_test": "cargo test -p uqa-sql expr::casting::tests; cargo test -p uqa-engine --test integration engine_functions::pg18_semantics::; cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::scalar_and_resolution::refcursor_parameters_returns_and_open_portals_share_session_state; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::",
-      "supported_version": "Implemented scalar width identities, source-sensitive OID/XID/bytea casts, PostgreSQL space-separated int2vector/oidvector text and COPY output, refcursor declared and catalog identity over its session-portal name carrier, built-in/domain/pseudo/composite pg_type metadata, and information_schema_catalog_name identity",
+      "uqa_test": "cargo test -p uqa-sql expr::casting::tests; cargo test -p uqa-engine --test integration engine_functions::pg18_semantics::; cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::scalar_and_resolution::refcursor_parameters_returns_and_open_portals_share_session_state; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::; cargo test -p uqa-engine --test integration engine_catalog::sql_type_migration_temporal::; python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal",
+      "supported_version": "Implemented scalar width identities, source-sensitive OID/XID/bytea casts, PostgreSQL space-separated int2vector/oidvector text and COPY output, refcursor declared and catalog identity over its session-portal name carrier, built-in/domain/pseudo/composite pg_type metadata, information_schema_catalog_name identity, and all six PostgreSQL built-in range/multirange families with declared identity, canonical text I/O, constructors, accessors, overlap, containment, adjacency, range_merge, simple and compatible polymorphic routine substitution, pg_type, pg_range, and pg_proc metadata across storage, generated expressions, foreign tables, reopen, and supported schema rewrites",
       "status": "partial",
-      "open_issue": "The full assignment-cast matrix, pg_proc rows for every type I/O routine, collations, user composites, enums, ranges, multiranges, typmods, domain constraints, binary formats, and the concrete carriers needed to execute anyenum, anyrange, anymultirange, anycompatiblerange, and anycompatiblemultirange substitutions remain."
+      "open_issue": "The full assignment-cast matrix, pg_proc rows for every type I/O routine, collations, user composites, enum carriers and polymorphism, user-defined ranges and their polymorphism, typmods, domain constraints, binary formats, and complete range ordering and arithmetic remain."
     },
     {
       "id": "ddl.alter-type-and-migration",
       "postgresql_reference": "PostgreSQL 18.4 ALTER TABLE ALTER COLUMN TYPE and type conversion behavior",
-      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::alter_column_type_preserves_the_using_expression; cargo test -p uqa-engine --test integration engine_catalog::sql_ddl::alter_column_type_; cargo test -p uqa-engine --lib migration::tests",
-      "supported_version": "Structural USING expressions evaluated per old row, atomic rollback, source-sensitive OID widths, supported migration type identity, and explicit rejection of unknown migration types",
+      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::alter_column_type_preserves_the_using_expression; cargo test -p uqa-engine --test integration engine_catalog::sql_ddl::alter_column_type_; cargo test -p uqa-engine --test integration engine_catalog::sql_type_migration_temporal::alter_column_type_rewrites_atomically_and_preserves_temporal_dependencies; cargo test -p uqa-engine --lib migration::tests; python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal",
+      "supported_version": "Structural USING expressions evaluated per old row, atomic schema-and-data rollback, source-sensitive OID widths, supported migration type identity, explicit rejection of unknown migration types, range-to-paired-multirange rewrites, preserved WITHOUT OVERLAPS dependencies, incompatible PERIOD relationship rejection with SQLSTATE 42804, generated-expression validation, and durable reopen behavior",
       "status": "partial",
-      "open_issue": "The complete PostgreSQL assignment-cast matrix, dependency and collation rewrites, domain checks, and upstream ALTER TYPE regression cases remain."
+      "open_issue": "The complete PostgreSQL assignment-cast matrix, every remaining dependency kind, collation rewrites, domain checks, and upstream ALTER TYPE regression cases remain."
     },
     {
       "id": "catalog.pg-database-locale",
@@ -542,10 +543,10 @@
     {
       "id": "protocol.frontend-backend-3.2-extended",
       "postgresql_reference": "PostgreSQL 18.4 frontend/backend protocol authentication, binary-format, middleware-key, malformed-peer, and operational behavior",
-      "uqa_test": "cargo test -p uqa-pg-wire --test protocol; UQA_PG18_DOCKER_HOST=container-reachable-host cargo test -p uqa-pg-wire --test protocol libpq_interop:: -- --ignored",
-      "supported_version": "The bounded byte-exact and live libpq PostgreSQL 18.4 protocol gate recorded by protocol.frontend-backend-3.2",
+      "uqa_test": "cargo test -p uqa-pg-wire --test protocol; bash tests/parity/pg18/clients/run.sh",
+      "supported_version": "PostgreSQL 18.4 context-aware cleartext, MD5, GSS, SSPI, and SASL response sequencing; zero, one, and per-value extended-query text/binary formats; layered 256-byte cancellation keys; malformed live-peer decoding; and pinned libpq, psycopg, pgx, and node-postgres flows",
       "status": "partial",
-      "open_issue": "Credentialed GSS, non-trust authentication, extended-query binary parameters and results, layered middleware keys, malformed live peers, and broader live-driver coverage remain."
+      "open_issue": "Credential verification remains an embedding-server responsibility; credentialed GSS/SSPI/OAuth environments, TLS channel binding, replication/pipeline modes, and the complete malformed-peer corpus remain."
     },
     {
       "id": "ddl.generated-columns",
@@ -558,10 +559,10 @@
     {
       "id": "ddl.temporal-constraints",
       "postgresql_reference": "PostgreSQL 18 CREATE TABLE WITHOUT OVERLAPS and PERIOD constraints",
-      "uqa_test": "crates/uqa-engine/tests/sql_ddl_extensions.rs",
-      "supported_version": "PostgreSQL 18",
-      "status": "explicitly_rejected",
-      "open_issue": "Range and multirange carriers, operators, indexes, and temporal constraint enforcement are not implemented."
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_type_migration_temporal::; python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal",
+      "supported_version": "PostgreSQL 18 PRIMARY KEY and UNIQUE WITHOUT OVERLAPS plus PERIOD foreign keys over matching built-in range or multirange identities, including empty and overlap rejection, aggregate adjacent-parent coverage, insert/update/delete enforcement, ALTER TABLE validation and atomic failure, pg_constraint conperiod metadata, and durable reopen behavior",
+      "status": "partial",
+      "open_issue": "Physical GiST and exclusion-index planning, temporal referential actions beyond NO ACTION, deferrable temporal enforcement, dump/restore, and the complete upstream temporal regression matrix remain."
     },
     {
       "id": "graph.age-default-label-drop",
@@ -590,10 +591,10 @@
     {
       "id": "clients.driver-and-operations-matrix",
       "postgresql_reference": "PostgreSQL 18 client-visible SQL, protocol, dump/restore, and operational behavior",
-      "uqa_test": "crates/uqa-pg-wire/tests/protocol/libpq_interop.rs",
-      "supported_version": "PostgreSQL 18.4 libpq subset",
+      "uqa_test": "bash tests/parity/pg18/clients/run.sh",
+      "supported_version": "PostgreSQL 18.4 psql/libpq plus pinned psycopg 3.3.4, pgx 5.10.0, and node-postgres 8.23.0 prepared reuse, text/binary Bind and results, COPY in/out, failed-transaction rollback recovery, and one-connection pool reuse against the PostgreSQL oracle and uqa-pg-wire fixture",
       "status": "partial",
-      "open_issue": "JDBC, Npgsql, psycopg, pgx, node-postgres, migration, introspection, dump/restore, pooling, recovery, and administration coverage remain."
+      "open_issue": "JDBC, Npgsql, SQLAlchemy, migration tools, complete schema introspection, pg_dump/pg_restore, real UQA SQL-server pooling, restart/crash recovery, backup/upgrade, and administration coverage remain."
     },
     {
       "id": "compatibility.complete-zero-exemption-audit",

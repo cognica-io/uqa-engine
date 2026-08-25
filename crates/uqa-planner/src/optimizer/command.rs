@@ -128,7 +128,9 @@ pub(super) fn optimize_command(
                 optimize_query(subquery, config, aggregates);
             }
         }
-        CommandPlan::CreateView { query, .. } | CommandPlan::CreateTableAs { query, .. } => {
+        CommandPlan::CreateView { query, .. }
+        | CommandPlan::CreateMaterializedView { query, .. }
+        | CommandPlan::CreateTableAs { query, .. } => {
             optimize_query(query, config, aggregates);
         }
         CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
@@ -143,6 +145,8 @@ pub(super) fn optimize_command(
         | CommandPlan::CreateIndex(_)
         | CommandPlan::Drop(_)
         | CommandPlan::AlterTable(_)
+        | CommandPlan::AlterViewOptions(_)
+        | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::CreateSchema { .. }
         | CommandPlan::SetVariable { .. }
         | CommandPlan::ShowVariable { .. }

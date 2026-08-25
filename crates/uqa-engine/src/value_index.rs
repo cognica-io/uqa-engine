@@ -215,6 +215,26 @@ fn posting_list_from_sorted_ids(ids: impl Iterator<Item = DocId>) -> PostingList
 }
 
 impl crate::Engine {
+    fn persistent_value_index_backend(
+        &self,
+        table: &TableState,
+    ) -> Option<&dyn uqa_storage::PersistentStorageBackend> {
+        if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
+            return None;
+        }
+        self.storage
+            .backend
+            .as_deref()
+            .filter(|backend| backend.persists_btree_indexes())
+    }
+
+    fn value_index_table_is_temporary(&self, table: &str) -> Result<bool, SQLError> {
+        self.try_table(table)
+            .map_err(|err| SQLError::Internal(format!("resolve value-index table: {err}")))?
+            .map(|table| table.persistence == uqa_sql::ast::RelationPersistence::Temporary)
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))
+    }
+
     /// Columns of `table` that qualify for a value index: PRIMARY KEY
     /// and UNIQUE columns plus the leading column of every btree
     /// `CREATE INDEX` on the table.
@@ -412,11 +432,7 @@ impl crate::Engine {
         }
 
         let store = t.document_store.read();
-        let persistent_backend = self
-            .storage
-            .backend
-            .as_ref()
-            .filter(|backend| backend.persists_btree_indexes());
+        let persistent_backend = self.persistent_value_index_backend(&t);
         let persisted = persistent_backend
             .map(|backend| backend.load_btree_index(&table_name, field))
             .transpose()?
@@ -511,11 +527,7 @@ impl crate::Engine {
             .filter(|field| !desired.contains(field))
             .cloned()
             .collect();
-        let persistent_backend = self
-            .storage
-            .backend
-            .as_ref()
-            .filter(|backend| backend.persists_btree_indexes());
+        let persistent_backend = self.persistent_value_index_backend(&t);
         let mut persisted_fields = BTreeSet::new();
         if let Some(backend) = persistent_backend {
             for field in backend.btree_index_fields(&table_name)? {
@@ -540,7 +552,7 @@ impl crate::Engine {
                 .filter(|field| !persisted_fields.contains(*field))
                 .cloned()
                 .collect::<Vec<_>>();
-            Self::rebuild_persistent_value_indexes(&table_name, &t, &missing, backend.as_ref())?;
+            Self::rebuild_persistent_value_indexes(&table_name, &t, &missing, backend)?;
             for field in desired
                 .iter()
                 .filter(|field| persisted_fields.contains(*field))
@@ -748,6 +760,9 @@ impl crate::Engine {
             .try_resolve_table_name(table)
             .map_err(|err| SQLError::Internal(format!("resolve value-index table: {err}")))?
             .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        if self.value_index_table_is_temporary(&table_name)? {
+            return Ok(None);
+        }
         let fields = self
             .value_indexable_fields(&table_name)
             .map_err(|err| SQLError::Internal(format!("read value-index policy: {err}")))?;
@@ -780,6 +795,9 @@ impl crate::Engine {
             .try_resolve_table_name(table)
             .map_err(|err| SQLError::Internal(format!("resolve value-index table: {err}")))?
             .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        if self.value_index_table_is_temporary(&table_name)? {
+            return Ok(());
+        }
         backend
             .apply_btree_index_write(&table_name, doc_id, new)
             .map_err(|err| SQLError::Internal(format!("btree index write failed: {err}")))
@@ -795,12 +813,7 @@ impl crate::Engine {
             .try_resolve_table_name(table)
             .map_err(|err| SQLError::Internal(format!("resolve value-index table: {err}")))?
             .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-        if let Some(backend) = self
-            .storage
-            .backend
-            .as_ref()
-            .filter(|backend| backend.persists_btree_indexes())
-        {
+        if let Some(backend) = self.persistent_value_index_backend(t) {
             backend
                 .clear_btree_indexes(&table_name)
                 .map_err(|err| SQLError::Internal(format!("btree truncate failed: {err}")))?;

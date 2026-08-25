@@ -67,7 +67,9 @@ impl Engine {
         canonical_table_name: &str,
         table: &Arc<TableState>,
     ) -> StorageBackendResult<()> {
-        if !table.column_stats_dirty.load(Ordering::Acquire) {
+        if table.persistence != uqa_sql::ast::RelationPersistence::Temporary
+            && !table.column_stats_dirty.load(Ordering::Acquire)
+        {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog.delete_column_stats(canonical_table_name)?;
             }
@@ -150,7 +152,7 @@ impl Engine {
             );
         }
 
-        if persist {
+        if persist && t.persistence != uqa_sql::ast::RelationPersistence::Temporary {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 Self::persist_column_stats(catalog.as_ref(), canonical_table_name, &stats_out)?;
             }

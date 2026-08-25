@@ -9,9 +9,11 @@
 mod legacy_vector;
 
 use super::{
-    out_of_range, parse_json, to_decimal, to_f64, typed_json_value, value_to_json, value_to_string,
-    vector_value_to_string, ArrayValue, Result, SQLError, TemporalValue, Value,
+    multirange_from_ranges, out_of_range, parse_json, parse_multirange, parse_range, to_decimal,
+    to_f64, typed_json_value, value_to_json, value_to_string, vector_value_to_string, ArrayValue,
+    Result, SQLError, TemporalValue, Value,
 };
+use crate::ast::RangeSubtype;
 
 /// Cast a value to the named SQL type, mirroring `CAST(expr AS ty)`.
 /// Types outside the engine's coercion surface return
@@ -80,6 +82,7 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
             }
             Ok(Value::Decimal(value))
         }
+        "regproc" | "regtype" if matches!(v, Value::Int(_)) => Ok(v.clone()),
         "text"
         | "refcursor"
         | "pg_catalog.refcursor"
@@ -186,6 +189,18 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
             TemporalValue::parse_interval,
             "interval",
         ),
+        "int4range" => cast_range(v, source_ty, RangeSubtype::Integer),
+        "int8range" => cast_range(v, source_ty, RangeSubtype::BigInteger),
+        "numrange" => cast_range(v, source_ty, RangeSubtype::Numeric),
+        "daterange" => cast_range(v, source_ty, RangeSubtype::Date),
+        "tsrange" => cast_range(v, source_ty, RangeSubtype::Timestamp),
+        "tstzrange" => cast_range(v, source_ty, RangeSubtype::TimestampTz),
+        "int4multirange" => cast_multirange(v, source_ty, RangeSubtype::Integer),
+        "int8multirange" => cast_multirange(v, source_ty, RangeSubtype::BigInteger),
+        "nummultirange" => cast_multirange(v, source_ty, RangeSubtype::Numeric),
+        "datemultirange" => cast_multirange(v, source_ty, RangeSubtype::Date),
+        "tsmultirange" => cast_multirange(v, source_ty, RangeSubtype::Timestamp),
+        "tstzmultirange" => cast_multirange(v, source_ty, RangeSubtype::TimestampTz),
         "json" => {
             if let Value::Json(text) = v {
                 return Ok(Value::Json(text.clone()));
@@ -210,6 +225,58 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
         "boolean" | "bool" => cast_boolean(v),
         other => Err(SQLError::Unsupported(format!("CAST AS {other}"))),
     }
+}
+
+fn cast_range(v: &Value, source_ty: Option<&str>, subtype: RangeSubtype) -> Result<Value> {
+    let source = source_ty.map(canonical_type_name);
+    if source.as_deref().is_some_and(|source| {
+        source != subtype.range_name() && !matches!(source, "unknown" | "cstring")
+    }) {
+        return Err(undefined_cast(
+            source.as_deref().unwrap_or("unknown"),
+            subtype.range_name(),
+        ));
+    }
+    let (Value::Str(text) | Value::FixedChar(text)) = v else {
+        return Err(undefined_cast(
+            source.as_deref().unwrap_or("unknown"),
+            subtype.range_name(),
+        ));
+    };
+    parse_range(text, subtype).map(|range| Value::Str(range.to_text()))
+}
+
+fn cast_multirange(v: &Value, source_ty: Option<&str>, subtype: RangeSubtype) -> Result<Value> {
+    let source = source_ty.map(canonical_type_name);
+    let (Value::Str(text) | Value::FixedChar(text)) = v else {
+        return Err(undefined_cast(
+            source.as_deref().unwrap_or("unknown"),
+            subtype.multirange_name(),
+        ));
+    };
+    match source.as_deref() {
+        Some(source) if source == subtype.range_name() => {
+            let range = parse_range(text, subtype)?;
+            Ok(Value::Str(
+                multirange_from_ranges(subtype, [range]).to_text(),
+            ))
+        }
+        None | Some("unknown" | "cstring") => {
+            parse_multirange(text, subtype).map(|multirange| Value::Str(multirange.to_text()))
+        }
+        Some(source) if source == subtype.multirange_name() => {
+            parse_multirange(text, subtype).map(|multirange| Value::Str(multirange.to_text()))
+        }
+        Some(source) => Err(undefined_cast(source, subtype.multirange_name())),
+    }
+}
+
+fn canonical_type_name(type_name: &str) -> String {
+    let normalized = type_name.trim().to_ascii_lowercase();
+    normalized
+        .strip_prefix("pg_catalog.")
+        .unwrap_or(&normalized)
+        .to_string()
 }
 
 /// Apply `PostgreSQL` prefix `-` while retaining the operand's declared type.

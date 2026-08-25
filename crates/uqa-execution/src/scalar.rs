@@ -1201,6 +1201,7 @@ fn scalar_source_type(expression: &ScalarExpr, context: &ScalarEvalContext<'_>) 
         }
         ScalarExpr::Literal(Value::Int(_)) => return Some("bigint".into()),
         ScalarExpr::Literal(Value::Bytes(_)) => return Some("bytea".into()),
+        ScalarExpr::Literal(Value::Str(_) | Value::FixedChar(_)) => return None,
         _ => {}
     }
     context
@@ -1273,6 +1274,18 @@ mod tests {
             )
             .unwrap(),
             Value::Str("-".into())
+        );
+    }
+
+    #[test]
+    fn cast_preserves_unknown_type_for_string_literals() {
+        let expression = ScalarExpr::Cast {
+            expr: Box::new(ScalarExpr::Literal(Value::Str("[1,5)".into()))),
+            ty: "int4range".into(),
+        };
+        assert_eq!(
+            eval_scalar(&expression, &ScalarEvalContext::new(None, &[])).unwrap(),
+            Value::Str("[1,5)".into())
         );
     }
 

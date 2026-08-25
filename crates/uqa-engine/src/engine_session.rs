@@ -9,7 +9,8 @@
 use super::{
     build_histogram, build_mcv, distinct_count, Arc, BTreeMap, CatalogFacade, CatalogIndexRow,
     ColumnStatsInput, DocId, DocumentStore, Engine, Ordering, RelationIdentity, SQLError,
-    StorageBackendError, StorageBackendResult, StoredView, TableState, Value, ViewRow,
+    StorageBackendError, StorageBackendResult, StoredView, StoredViewKind, TableState, Value,
+    ViewRow,
 };
 use uqa_execution::ScalarExpr;
 use uqa_planner::{QueryPlan, RelationalPlan, SourcePlan};
@@ -25,6 +26,7 @@ mod settings;
 mod settings_parse;
 mod view_binding;
 mod views;
+pub(crate) use views::{MaterializedViewRegistration, ViewRegistration};
 
 use analyze_helpers::collect_analyze_values;
 use settings_parse::parse_search_path_list;

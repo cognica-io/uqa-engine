@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 ```
 
-Implemented table properties include columns, defaults, generated serial values, virtual and stored generated columns, nullability, key constraints, checks, foreign keys, and vector or tensor dimensions. Temporary, unlogged, inherited, partitioned, typed, or tablespace-bound relations are not implemented.
+Implemented table properties include columns, defaults, generated serial values, virtual and stored generated columns, nullability, key constraints, checks, foreign keys, and vector or tensor dimensions. `TEMP` and `TEMPORARY` tables live in the session's `pg_temp` namespace, are omitted from durable storage, and support `ON COMMIT PRESERVE ROWS`, `ON COMMIT DELETE ROWS`, and `ON COMMIT DROP`; the drop action removes dependent temporary views and foreign-key links with PostgreSQL's internal cascade semantics. `DISCARD TEMP` removes the session's temporary tables, views, and sequences outside a transaction. `UNLOGGED` tables retain their catalog identity and rows across a clean reopen, although PostgreSQL crash-recovery truncation semantics remain unimplemented. Inherited, partitioned, typed, storage-parameterized, access-method-selected, or tablespace-bound tables are not implemented.
 
 ## Generated columns
 
@@ -95,6 +95,7 @@ CREATE TABLE parent (
 CREATE TABLE child (
     id INTEGER PRIMARY KEY,
     parent_id INTEGER,
+    score INTEGER,
     FOREIGN KEY (parent_id) REFERENCES parent(id)
         MATCH SIMPLE
         ON UPDATE CASCADE
@@ -104,7 +105,56 @@ CREATE TABLE child (
 
 Implemented match modes are `MATCH SIMPLE` and `MATCH FULL`. Referential actions are `NO ACTION`, `RESTRICT`, `CASCADE`, `SET NULL`, and `SET DEFAULT`. Column subsets are supported for `ON DELETE SET NULL` and `ON DELETE SET DEFAULT`. `MATCH PARTIAL` is not implemented.
 
-Referenced columns must satisfy the implemented unique-key requirements. Mutations validate referential actions as part of the same transaction.
+When the referenced column list is omitted, as in `REFERENCES parent`, the referenced table's primary-key columns are inferred in declaration order. Explicit or inferred referenced columns must form a primary-key or unique key, the referencing and referenced column counts must match, and each aligned type pair must support equality comparison. Mutations validate referential actions as part of the same transaction.
+
+## Constraint lifecycle
+
+PostgreSQL 18 named `CHECK`, foreign-key, and `NOT NULL` constraints support creation with `NOT VALID`, later validation, catalog inspection, alteration where PostgreSQL permits it, and removal:
+
+```sql
+ALTER TABLE child
+    ADD CONSTRAINT score_positive CHECK (score > 0) NOT VALID,
+    ADD CONSTRAINT child_parent_fk FOREIGN KEY (parent_id) REFERENCES parent(id) NOT VALID;
+
+ALTER TABLE child VALIDATE CONSTRAINT score_positive;
+ALTER TABLE child VALIDATE CONSTRAINT child_parent_fk;
+ALTER TABLE child ALTER CONSTRAINT child_parent_fk NOT ENFORCED;
+ALTER TABLE child ALTER CONSTRAINT child_parent_fk ENFORCED;
+ALTER TABLE child ALTER CONSTRAINT child_parent_fk DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE child DROP CONSTRAINT score_positive;
+```
+
+`NOT VALID` skips the existing-row scan while an enforced constraint still checks every new or changed row. `VALIDATE CONSTRAINT` scans existing rows and publishes `convalidated = true` only after the complete scan succeeds. Changing a foreign key from `NOT ENFORCED` to `ENFORCED` performs the same failure-atomic scan. PostgreSQL does not permit changing CHECK or named `NOT NULL` enforceability, and UQA Engine returns the corresponding error instead of approximating that operation.
+
+A named `NOT NULL` constraint can be declared inline, in table-constraint form, or through `ALTER TABLE ... ADD CONSTRAINT name NOT NULL column [NOT VALID] [NO INHERIT]`. Its `pg_constraint` row uses `contype = 'n'`, its validation and inheritance flags survive reopen, and dropping it clears `pg_attribute.attnotnull` unless the column remains part of a primary key.
+
+An `INITIALLY DEFERRED` foreign key is checked at the outer transaction commit. The final transaction state may therefore insert the child before its parent or temporarily delete a referenced parent, and savepoint rollback removes pending checks introduced after that savepoint. Per-transaction `SET CONSTRAINTS` mode changes are not yet implemented.
+
+Comma-separated `ALTER TABLE` actions execute in one transaction, so a later validation or duplicate-name failure rolls back every earlier action. Dropping a CHECK, foreign key, or named `NOT NULL` constraint removes only that owned constraint. Dropping a referenced primary-key or unique constraint uses PostgreSQL dependency behavior: `RESTRICT` reports dependent foreign keys and `CASCADE` removes those foreign keys without dropping their tables, including self-referencing foreign keys.
+
+## Temporal keys and foreign keys
+
+PostgreSQL 18 temporal keys place `WITHOUT OVERLAPS` on the final range or multirange key column, and temporal foreign keys place `PERIOD` before the final local and referenced columns:
+
+```sql execute
+CREATE TABLE account_periods (
+    account_id INTEGER,
+    valid_at DATERANGE,
+    PRIMARY KEY (account_id, valid_at WITHOUT OVERLAPS)
+);
+
+CREATE TABLE account_events (
+    event_id INTEGER PRIMARY KEY,
+    account_id INTEGER,
+    valid_at DATERANGE,
+    FOREIGN KEY (account_id, PERIOD valid_at)
+        REFERENCES account_periods (account_id, PERIOD valid_at)
+);
+```
+
+A `PRIMARY KEY` or `UNIQUE` key with `WITHOUT OVERLAPS` rejects empty period values and rejects overlapping ranges for rows whose ordinary key prefix is equal; adjacent periods do not overlap. A `PERIOD` foreign key requires an exactly matching range or multirange type and a referenced `PRIMARY KEY` or `UNIQUE` constraint with `WITHOUT OVERLAPS` over the same columns. The referenced rows with one ordinary key prefix may cover the child period in aggregate, so adjacent parent ranges can jointly satisfy one child range.
+
+Temporal constraints are enforced on insert, update, and delete. A parent update or delete is rejected when the remaining parent periods no longer cover an existing child, and `ALTER TABLE ADD CONSTRAINT` validates all existing rows before publishing any catalog change. The temporal flags persist across reopen and appear as `conperiod` in `pg_constraint`. The implemented temporal foreign-key action is `NO ACTION`; other referential actions are rejected before mutation. Physical GiST and exclusion-index planning for these constraints remains an open compatibility bug.
 
 ## ALTER TABLE
 
@@ -112,7 +162,8 @@ Implemented changes include:
 
 - Add a column
 - Add a primary-key, unique, check, or foreign-key constraint
-- Drop a column without `CASCADE`
+- Validate, alter, or drop a named constraint on the implemented lifecycle surface
+- Drop a column and its owned constraints, with `CASCADE` removal of inbound foreign keys
 - Rename a column
 - Rename a table
 - Set or drop a column default
@@ -131,7 +182,7 @@ ALTER TABLE orders ALTER COLUMN total TYPE NUMERIC(20, 2);
 ALTER TABLE generated_totals ALTER COLUMN line_total SET EXPRESSION AS (quantity * unit_price * 2);
 ```
 
-Type changes validate existing values before publishing the new schema. `DROP COLUMN CASCADE` is rejected without changing the table.
+Type changes evaluate an optional `USING` expression once for each old row, validate all rewritten rows, constraints, and generated dependencies, and publish the new schema and data atomically. Built-in ranges can be rewritten to their paired multirange with `USING multirange(column)` while retaining `WITHOUT OVERLAPS`; changing one side of an existing `PERIOD` relationship to an incompatible range identity is rejected with PostgreSQL 18 datatype-mismatch SQLSTATE `42804`. `DROP COLUMN CASCADE` removes inbound foreign keys before dropping the column; other dependency kinds that are not yet modeled for cascade still reject the operation atomically.
 
 ## Relational B-tree indexes
 
@@ -199,7 +250,9 @@ WHERE state = 'pending';
 DROP VIEW open_orders;
 ```
 
-An optional view column-name list renames query outputs positionally and may name only a leading subset. It cannot contain more names than the query returns, the final names must be unique, and quoted names retain their exact spelling. `CREATE OR REPLACE VIEW` must preserve the name and declared type of every existing column in order, but it may append columns at the end. Creation analyzes the query without executing it, then validates the column list and target relation; the durable definition retains the fixed public names across nested views, transactions, and reopen. Materialized views, view storage options, and `WITH CHECK OPTION` are not implemented.
+An optional view column-name list renames query outputs positionally and may name only a leading subset. It cannot contain more names than the query returns, the final names must be unique, and quoted names retain their exact spelling. `CREATE OR REPLACE VIEW` must preserve the name and declared type of every existing column in order, but it may append columns at the end. Creation analyzes the query without executing it, then validates the column list and target relation; the durable definition retains the fixed public names across nested views, transactions, and reopen. `TEMP` and `TEMPORARY` views are session-local, and a view over a temporary table or view becomes temporary as in PostgreSQL. View options `security_barrier`, `security_invoker`, and `check_option`, including `WITH [LOCAL | CASCADED] CHECK OPTION`, are validated, retained in `pg_class.reloptions`, and may be changed with `ALTER VIEW ... SET/RESET`; complete privilege, optimizer-security-barrier, and updatable-view check enforcement remain open.
+
+`CREATE MATERIALIZED VIEW` stores a query snapshot, supports `WITH [NO] DATA`, persists its rows and static schema across reopen, and remains stale until `REFRESH MATERIALIZED VIEW [WITH [NO] DATA]`. `pg_class` exposes relation kind `m`, population state, persistence, and reloptions, while `pg_matviews` exposes the implemented materialized-view metadata. The supported materialized-view option is `fillfactor`, including `ALTER MATERIALIZED VIEW ... SET/RESET`; temporary and unlogged materialized views, concurrent refresh, materialized-view indexes, access methods, tablespaces, and dependencies on temporary relations are not implemented.
 
 ## CREATE TABLE AS
 
@@ -210,7 +263,7 @@ FROM orders
 WHERE state = 'pending';
 ```
 
-CTAS creates and populates a table from a query, preserves the query's declared output types for implemented SQL types, and creates nullable columns without copying source constraints. An optional column-name list replaces output names positionally and may be shorter than the query output, in which case remaining names come from the query; quoted case is preserved. More names than output columns raise `42601`, while duplicate names and PostgreSQL system-column names raise `42701`, before the query is executed. `WITH NO DATA` creates and durably persists the same typed schema, including vector and tensor field metadata, without evaluating row-producing expressions or volatile functions; relation, column, function, type-input, and column-name-list analysis still occurs in PostgreSQL order. Top-level `SELECT ... INTO [TABLE] name` creates the same ordinary durable table and executes the query; PL/pgSQL `SELECT ... INTO` remains variable assignment. Temporary persistence, storage options, access methods, `ON COMMIT`, and tablespaces are not implemented.
+CTAS creates and populates a table from a query, preserves the query's declared output types for implemented SQL types, and creates nullable columns without copying source constraints. An optional column-name list replaces output names positionally and may be shorter than the query output, in which case remaining names come from the query; quoted case is preserved. More names than output columns raise `42601`, while duplicate names and PostgreSQL system-column names raise `42701`, before the query is executed. `WITH NO DATA` creates and durably persists the same typed schema, including vector and tensor field metadata, without evaluating row-producing expressions or volatile functions; relation, column, function, type-input, and column-name-list analysis still occurs in PostgreSQL order. CTAS supports ordinary, temporary, and unlogged targets, and temporary targets support all three `ON COMMIT` actions. Top-level `SELECT ... INTO [TEMPORARY | TEMP | UNLOGGED] [TABLE] name` creates the same corresponding table and executes the query; PL/pgSQL `SELECT ... INTO` remains variable assignment. Storage options, access methods, and tablespaces are not implemented.
 
 ## Sequences
 
@@ -222,7 +275,7 @@ SELECT setval('ticket_ids', 2000);
 ALTER SEQUENCE ticket_ids RESTART WITH 3000;
 ```
 
-`CREATE SEQUENCE` supports start and increment. `ALTER SEQUENCE` supports restart, increment, and start. SQL `DROP SEQUENCE` is not implemented; the Rust engine API provides `Engine::drop_sequence`. Minimum, maximum, cache, cycle, ownership, identity ownership, and temporary sequence clauses are not implemented.
+`CREATE SEQUENCE` supports start and increment for ordinary, temporary, and unlogged sequences. Temporary sequences live in `pg_temp`, participate in `DISCARD TEMP`, and do not survive a reopen; unlogged sequence state survives a clean reopen, while crash-recovery reset semantics remain open. `ALTER SEQUENCE` supports restart, increment, and start. SQL `DROP SEQUENCE` is not implemented; the Rust engine API provides `Engine::drop_sequence`. Minimum, maximum, cache, cycle, ownership, and identity ownership are not implemented.
 
 ## Foreign servers and tables
 
@@ -248,4 +301,4 @@ TRUNCATE TABLE staging_a, staging_b;
 DROP TABLE IF EXISTS staging_a;
 ```
 
-`TRUNCATE` removes all rows from its listed tables under a transaction boundary. SQL drop supports implemented table, index, view, schema, function, and procedure targets. Dependency-sensitive `CASCADE` forms fail rather than partially changing the catalog.
+`TRUNCATE` removes all rows from its listed tables under a transaction boundary. SQL drop supports implemented table, index, view, materialized-view, schema, function, and procedure targets. Relation-kind mismatches return PostgreSQL-compatible errors. Dependency-sensitive `CASCADE` forms fail rather than partially changing the catalog.

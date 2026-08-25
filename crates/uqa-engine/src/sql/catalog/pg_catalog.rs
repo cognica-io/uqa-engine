@@ -6,8 +6,6 @@
 
 //! Virtual `pg_catalog` relation builders.
 
-use uqa_sql::ast::RoleAttribute;
-
 use super::helpers::{
     all_schema_names, array_dimension_count, bool_value, catalog_array, catalog_name,
     catalog_ordinal, catalog_usize, constraint_catalog_rows, current_user_name, current_user_oid,
@@ -18,6 +16,8 @@ use super::helpers::{
     view_columns_for, PgTypeRoutineOids,
 };
 use super::{value_to_text, ColumnType, Engine, ResultRow, SQLColumnDef, SQLError, Value};
+use uqa_sql::ast::RangeSubtype;
+use uqa_sql::ast::RoleAttribute;
 
 pub(super) fn build_pg_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
@@ -84,7 +84,7 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
     {
         let (schema, table) = split_schema_name(&name)?;
         let columns = table_columns_for(engine, &name)?;
-        out.push(pg_class_row(
+        out.push(pg_class_row_with_lifecycle(
             &schema,
             &table,
             "r",
@@ -95,18 +95,50 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
                 .map_err(|err| SQLError::Internal(format!("read index catalog: {err}")))?
                 .iter()
                 .any(|idx| idx.table_name == name),
+            engine
+                .table_persistence(&name)
+                .map_err(|error| SQLError::Internal(format!("read table persistence: {error}")))?
+                .unwrap_or_default(),
+            true,
+            &[],
         ));
     }
     for name in engine.list_views()? {
         let (schema, view) = split_schema_name(&name)?;
         let columns = view_columns_for(engine, &name)?;
-        out.push(pg_class_row(
+        let definition = engine.view_definition(&name)?.ok_or_else(|| {
+            SQLError::Internal(format!("view `{name}` disappeared during catalog scan"))
+        })?;
+        out.push(pg_class_row_with_lifecycle(
             &schema,
             &view,
             "v",
             catalog_usize(columns.len(), "pg_class view column count")?,
             0.0,
             false,
+            definition.persistence,
+            true,
+            &definition.options,
+        ));
+    }
+    for name in engine.list_materialized_views()? {
+        let (schema, view) = split_schema_name(&name)?;
+        let definition = engine.view_definition(&name)?.ok_or_else(|| {
+            SQLError::Internal(format!(
+                "materialized view `{name}` disappeared during catalog scan"
+            ))
+        })?;
+        let columns = view_columns_for(engine, &name)?;
+        out.push(pg_class_row_with_lifecycle(
+            &schema,
+            &view,
+            "m",
+            catalog_usize(columns.len(), "pg_class materialized-view column count")?,
+            definition.materialized_rows.len() as f64,
+            false,
+            definition.persistence,
+            definition.populated,
+            &definition.options,
         ));
     }
     for name in engine.list_foreign_tables().map_err(SQLError::Internal)? {
@@ -131,7 +163,20 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
         .map_err(|err| SQLError::Internal(format!("read sequence catalog: {err}")))?
     {
         let (schema, name) = split_schema_name(&sequence)?;
-        out.push(pg_class_row(&schema, &name, "S", 0, 0.0, false));
+        out.push(pg_class_row_with_lifecycle(
+            &schema,
+            &name,
+            "S",
+            0,
+            0.0,
+            false,
+            engine
+                .sequence_persistence(&sequence)
+                .map_err(|error| SQLError::Internal(format!("read sequence persistence: {error}")))?
+                .unwrap_or_default(),
+            true,
+            &[],
+        ));
     }
     for idx in engine
         .list_catalog_indexes()
@@ -153,15 +198,56 @@ pub(super) fn pg_class_row(
     tuples: f64,
     has_index: bool,
 ) -> ResultRow {
+    pg_class_row_with_lifecycle(
+        schema,
+        name,
+        relkind,
+        natts,
+        tuples,
+        has_index,
+        uqa_sql::ast::RelationPersistence::Permanent,
+        true,
+        &[],
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pg_class_row_with_lifecycle(
+    schema: &str,
+    name: &str,
+    relkind: &str,
+    natts: i64,
+    tuples: f64,
+    has_index: bool,
+    persistence: uqa_sql::ast::RelationPersistence,
+    populated: bool,
+    options: &[(String, String)],
+) -> ResultRow {
     let oid = relation_oid(relkind, schema, name);
     let reltype = if matches!(relkind, "r" | "v" | "m" | "c" | "f" | "p") {
         stable_oid("rowtype", &format!("{schema}.{name}"))
     } else {
         0
     };
-    pg_class_catalog_row(
+    let mut row = pg_class_catalog_row(
         oid, reltype, schema, name, relkind, natts, tuples, has_index,
-    )
+    );
+    row.insert(
+        "relpersistence".into(),
+        str_value(persistence.catalog_code()),
+    );
+    row.insert("relispopulated".into(), bool_value(populated));
+    if !options.is_empty() {
+        let values = options
+            .iter()
+            .map(|(name, value)| str_value(format!("{name}={value}")))
+            .collect();
+        row.insert(
+            "reloptions".into(),
+            catalog_array(values, "pg_class.reloptions").unwrap_or(Value::Null),
+        );
+    }
+    row
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -273,6 +359,17 @@ pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
             ));
         }
     }
+    for view_name in engine.list_materialized_views()? {
+        let (schema, view) = split_schema_name(&view_name)?;
+        let relid = relation_oid("m", &schema, &view);
+        for (idx, col) in view_columns_for(engine, &view_name)?.iter().enumerate() {
+            out.push(pg_attribute_row(
+                relid,
+                catalog_ordinal(idx, "pg_attribute materialized-view column")?,
+                col,
+            ));
+        }
+    }
     for table_name in engine.list_foreign_tables().map_err(SQLError::Internal)? {
         let (schema, table) = split_schema_name(&table_name)?;
         let relid = relation_oid("f", &schema, &table);
@@ -289,6 +386,8 @@ pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
                 not_null: false,
                 not_null_explicit: false,
                 not_null_name: None,
+                not_null_validated: true,
+                not_null_no_inherit: false,
                 auto_increment: false,
                 unique: false,
                 default: None,
@@ -296,6 +395,8 @@ pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
                 check: None,
                 check_name: None,
                 check_enforced: true,
+                check_validated: true,
+                check_no_inherit: false,
                 references: None,
             };
             out.push(pg_attribute_row(
@@ -435,10 +536,13 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
                 ("conname", str_value(constraint.name)),
                 ("connamespace", int_value(schema_oid(&constraint.schema))),
                 ("contype", str_value(constraint.kind.pg_type())),
-                ("condeferrable", bool_value(false)),
-                ("condeferred", bool_value(false)),
-                ("conenforced", bool_value(constraint.enforced)),
-                ("convalidated", bool_value(constraint.enforced)),
+                ("condeferrable", bool_value(constraint.state.deferrable())),
+                (
+                    "condeferred",
+                    bool_value(constraint.state.initially_deferred()),
+                ),
+                ("conenforced", bool_value(constraint.state.enforced())),
+                ("convalidated", bool_value(constraint.state.validated())),
                 (
                     "conrelid",
                     int_value(relation_oid("r", &constraint.schema, &constraint.table)),
@@ -472,8 +576,8 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
                 ),
                 ("conislocal", bool_value(true)),
                 ("coninhcount", int_value(0)),
-                ("connoinherit", bool_value(constraint.kind.no_inherit())),
-                ("conperiod", bool_value(false)),
+                ("connoinherit", bool_value(constraint.state.no_inherit())),
+                ("conperiod", bool_value(constraint.period)),
                 ("conkey", constrained_key),
                 ("confkey", referenced_key),
                 ("conpfeqop", Value::Null),
@@ -572,6 +676,28 @@ pub(super) fn build_pg_views(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
     Ok(rows)
 }
 
+pub(super) fn build_pg_matviews(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+    let mut rows = Vec::new();
+    for name in engine.list_materialized_views()? {
+        let (schema, matview) = split_schema_name(&name)?;
+        let stored = engine.view_definition(&name)?.ok_or_else(|| {
+            SQLError::Internal(format!(
+                "materialized view `{name}` disappeared during pg_matviews scan"
+            ))
+        })?;
+        rows.push(row([
+            ("schemaname", str_value(schema)),
+            ("matviewname", str_value(matview)),
+            ("matviewowner", str_value(current_user_name())),
+            ("tablespace", Value::Null),
+            ("hasindexes", bool_value(false)),
+            ("ispopulated", bool_value(stored.populated)),
+            ("definition", str_value(format!("{:?}", stored.query))),
+        ]));
+    }
+    Ok(rows)
+}
+
 pub(super) fn build_pg_indexes(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::new();
     for idx in engine
@@ -639,6 +765,48 @@ pub(super) fn build_pg_type() -> Vec<ResultRow> {
         (ColumnType::AnyArray, "P", false, "p"),
         (ColumnType::Uuid, "U", false, "b"),
         (ColumnType::JsonB, "U", false, "b"),
+        (ColumnType::Range(RangeSubtype::Integer), "R", false, "r"),
+        (ColumnType::Range(RangeSubtype::Numeric), "R", false, "r"),
+        (ColumnType::Range(RangeSubtype::Timestamp), "R", false, "r"),
+        (
+            ColumnType::Range(RangeSubtype::TimestampTz),
+            "R",
+            false,
+            "r",
+        ),
+        (ColumnType::Range(RangeSubtype::Date), "R", false, "r"),
+        (ColumnType::Range(RangeSubtype::BigInteger), "R", false, "r"),
+        (
+            ColumnType::Multirange(RangeSubtype::Integer),
+            "R",
+            false,
+            "m",
+        ),
+        (
+            ColumnType::Multirange(RangeSubtype::Numeric),
+            "R",
+            false,
+            "m",
+        ),
+        (
+            ColumnType::Multirange(RangeSubtype::Timestamp),
+            "R",
+            false,
+            "m",
+        ),
+        (
+            ColumnType::Multirange(RangeSubtype::TimestampTz),
+            "R",
+            false,
+            "m",
+        ),
+        (ColumnType::Multirange(RangeSubtype::Date), "R", false, "m"),
+        (
+            ColumnType::Multirange(RangeSubtype::BigInteger),
+            "R",
+            false,
+            "m",
+        ),
         (ColumnType::Vector(0), "U", false, "b"),
         (ColumnType::Tensor(0), "U", false, "b"),
     ];
@@ -648,7 +816,9 @@ pub(super) fn build_pg_type() -> Vec<ResultRow> {
         .chain(
             catalog_types
                 .iter()
-                .filter(|&(ty, _, _, kind)| *kind == "b" && pg_type_array_oid(ty) != 0)
+                .filter(|&(ty, _, _, kind)| {
+                    matches!(*kind, "b" | "r" | "m") && pg_type_array_oid(ty) != 0
+                })
                 .cloned()
                 .map(|(ty, _, _, _)| (ColumnType::Array(Box::new(ty)), "A", false, "b")),
         )
@@ -870,6 +1040,36 @@ pub(super) fn build_pg_type() -> Vec<ResultRow> {
         _ => i64::MAX,
     });
     types
+}
+
+pub(super) fn build_pg_range() -> Vec<ResultRow> {
+    [
+        (RangeSubtype::Integer, 1_978, 3_914, 3_922),
+        (RangeSubtype::Numeric, 3_125, 0, 3_924),
+        (RangeSubtype::Timestamp, 3_128, 0, 3_929),
+        (RangeSubtype::TimestampTz, 3_127, 0, 3_930),
+        (RangeSubtype::Date, 3_122, 3_915, 3_925),
+        (RangeSubtype::BigInteger, 3_124, 3_928, 3_923),
+    ]
+    .into_iter()
+    .map(|(subtype, subtype_opclass, canonical, subtype_diff)| {
+        row([
+            (
+                "rngtypid",
+                int_value(pg_type_oid(&ColumnType::Range(subtype))),
+            ),
+            ("rngsubtype", int_value(pg_type_oid(&subtype.scalar_type()))),
+            (
+                "rngmultitypid",
+                int_value(pg_type_oid(&ColumnType::Multirange(subtype))),
+            ),
+            ("rngcollation", int_value(0)),
+            ("rngsubopc", int_value(subtype_opclass)),
+            ("rngcanonical", int_value(canonical)),
+            ("rngsubdiff", int_value(subtype_diff)),
+        ])
+    })
+    .collect()
 }
 
 struct PgTypeCatalogMetadata<'a> {

@@ -97,7 +97,7 @@ pub(in crate::sql) struct SingleRelation<'a> {
 /// branches, values, and query blocks recurse through plan children; query
 /// blocks select physical access and row operators without reconstructing a
 /// parser statement.
-pub(super) fn execute_query_plan(
+pub(crate) fn execute_query_plan(
     engine: &Engine,
     plan: &QueryPlan,
     params: &[SQLParam],

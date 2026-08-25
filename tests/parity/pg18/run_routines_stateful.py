@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stateful PostgreSQL 18.4 + AGE routine parity runner."""
+"""Stateful PostgreSQL 18.4 + AGE parity runner."""
 
 from __future__ import annotations
 
@@ -20,6 +20,17 @@ HERE = Path(__file__).parent
 REPO_ROOT = HERE.parent.parent.parent
 FIXTURE = HERE / "routines_stateful.sql"
 EXPECTED = HERE / "routines_stateful.expected.json"
+SUITES = {
+    "routines": (FIXTURE, EXPECTED),
+    "constraints": (
+        HERE / "constraints_stateful.sql",
+        HERE / "constraints_stateful.expected.json",
+    ),
+    "type-temporal": (
+        HERE / "type_temporal_stateful.sql",
+        HERE / "type_temporal_stateful.expected.json",
+    ),
+}
 USQL = os.environ.get("UQA_USQL", str(REPO_ROOT / "target" / "release" / "usql"))
 PG_CONTAINER = os.environ.get("UQA_PG_CONTAINER", "uqa-pg18-age")
 PG_DATABASE = os.environ.get("UQA_PG_DATABASE", "postgres")
@@ -71,7 +82,7 @@ def parse_cases(source: str) -> list[Case]:
     if current is not None:
         raise RuntimeError(f"unterminated @case {current[0]}")
     if not cases:
-        raise RuntimeError("stateful routine fixture has no cases")
+        raise RuntimeError("stateful fixture has no cases")
     if SCHEMA_PLACEHOLDER not in cases[0].sql:
         raise RuntimeError("first case must create the runner-provided schema")
     return cases
@@ -250,6 +261,8 @@ def execute_pg_case(case: Case, schema: str) -> dict:
 
 def run_postgres(cases: list[Case]) -> tuple[dict[str, str], list[dict]]:
     metadata = pg_oracle_metadata()
+    extension = pg_query("CREATE EXTENSION IF NOT EXISTS btree_gist")
+    require_success("PostgreSQL btree_gist setup", extension)
     schema = f"uqa_pg18_stateful_{os.getpid()}_{secrets.token_hex(4)}"
     entries: list[dict] = []
     try:
@@ -326,7 +339,7 @@ def validate_expected_document(document: object, cases: list[Case]) -> dict:
         )
     if digest != fixture_sha256():
         raise RuntimeError(
-            "routines_stateful.sql changed; regenerate the transcript with "
+            f"{FIXTURE.name} changed; regenerate the transcript with "
             "--update-expected against PostgreSQL 18.4 + AGE"
         )
 
@@ -392,7 +405,7 @@ def write_expected(document: dict) -> None:
             "w",
             encoding="utf-8",
             dir=HERE,
-            prefix=".routines-stateful-",
+            prefix=f".{FIXTURE.stem}-",
             delete=False,
         ) as output:
             temporary = Path(output.name)
@@ -433,7 +446,14 @@ def validate_declared_modes(label: str, cases: list[Case], entries: list[dict]) 
 
 
 def main() -> int:
+    global EXPECTED, FIXTURE
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--suite",
+        choices=tuple(SUITES),
+        default="routines",
+        help="stateful fixture suite to run",
+    )
     parser.add_argument(
         "--backend",
         choices=("both", "postgres", "uqa"),
@@ -446,6 +466,7 @@ def main() -> int:
         help="replace the checked-in transcript from the PostgreSQL 18.4 + AGE oracle",
     )
     args = parser.parse_args()
+    FIXTURE, EXPECTED = SUITES[args.suite]
     if args.update_expected and args.backend != "postgres":
         parser.error("--update-expected requires --backend postgres")
 
@@ -496,7 +517,9 @@ def main() -> int:
     if uqa_entries is not None:
         differences.extend(compare("UQA", uqa_entries, expected_entries))
     if differences:
-        print(f"stateful routine parity: cases={len(cases)} diff={len(differences)}")
+        print(
+            f"stateful {args.suite} parity: cases={len(cases)} diff={len(differences)}"
+        )
         for difference in differences:
             print(difference)
         return 1
@@ -504,7 +527,7 @@ def main() -> int:
         label for label, enabled in (("PostgreSQL", run_pg), ("UQA", run_uq)) if enabled
     )
     print(
-        f"stateful routine parity: cases={len(cases)} match={len(cases)} backends={backends}"
+        f"stateful {args.suite} parity: cases={len(cases)} match={len(cases)} backends={backends}"
     )
     return 0
 
@@ -518,5 +541,5 @@ if __name__ == "__main__":
         RuntimeError,
         subprocess.SubprocessError,
     ) as error:
-        print(f"stateful routine parity failed: {error}", file=sys.stderr)
+        print(f"stateful parity failed: {error}", file=sys.stderr)
         raise SystemExit(2) from error

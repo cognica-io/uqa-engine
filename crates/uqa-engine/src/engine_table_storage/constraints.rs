@@ -252,6 +252,60 @@ fn collect_constraint_columns(expression: &uqa_sql::ast::Expr, output: &mut Vec<
 }
 
 impl Engine {
+    /// Atomically replace the complete durable constraint state for one table.
+    /// SQL DDL prepares and validates the candidate before calling this method;
+    /// persistence is written before the in-memory catalog is published.
+    pub(crate) fn replace_constraint_state(
+        &self,
+        table: &str,
+        columns: Vec<uqa_sql::ast::ColumnDef>,
+        constraints: uqa_sql::ast::TableConstraintSet,
+    ) -> StorageBackendResult<()> {
+        self.with_implicit_storage_transaction(|engine| {
+            engine.replace_constraint_state_inner(table, columns, constraints)
+        })
+    }
+
+    fn replace_constraint_state_inner(
+        &self,
+        table: &str,
+        mut columns: Vec<uqa_sql::ast::ColumnDef>,
+        mut constraints: uqa_sql::ast::TableConstraintSet,
+    ) -> StorageBackendResult<()> {
+        let table_name = self
+            .try_resolve_table_name(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let state = self
+            .try_table(&table_name)?
+            .ok_or_else(|| table_not_found(&table_name))?;
+        for column in &mut columns {
+            if let Some(reference) = &mut column.references {
+                reference.table = self.canonical_foreign_key_target(&reference.table)?;
+            }
+        }
+        for foreign_key in &mut constraints.foreign_keys {
+            foreign_key.ref_table = self.canonical_foreign_key_target(&foreign_key.ref_table)?;
+        }
+        let relation =
+            RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
+        materialize_constraint_names(&relation, &mut columns, &mut constraints)?;
+        if self.is_persistent() {
+            self.try_save_table_schema_with_components(
+                &table_name,
+                &state,
+                &columns,
+                &constraints,
+            )?;
+        }
+        *state.columns.write() = columns;
+        *state.table_checks.write() = constraints.checks;
+        *state.foreign_keys.write() = constraints.foreign_keys;
+        *state.key_constraints.write() = constraints.key_constraints;
+        self.mark_column_stats_dirty(&table_name, &state)?;
+        self.refresh_value_indexes_for_table(&table_name)?;
+        Ok(())
+    }
+
     pub fn set_column_default(
         &self,
         table: &str,
@@ -364,10 +418,14 @@ impl Engine {
             .ok_or_else(|| column_not_found(&table_name, column))?;
         col.not_null = not_null;
         col.not_null_explicit = not_null;
+        col.not_null_validated = true;
+        col.not_null_no_inherit = false;
         if !not_null {
             col.not_null_name = None;
         }
         let mut constraints = uqa_sql::ast::TableConstraintSet {
+            persistence: t.persistence,
+            on_commit: t.on_commit,
             checks: t.table_checks.read().clone(),
             foreign_keys: t.foreign_keys.read().clone(),
             key_constraints: t.key_constraints.read().clone(),
@@ -459,6 +517,8 @@ impl Engine {
             foreign_key.ref_table = self.canonical_foreign_key_target(&foreign_key.ref_table)?;
         }
         let mut constraints = uqa_sql::ast::TableConstraintSet {
+            persistence: t.persistence,
+            on_commit: t.on_commit,
             checks,
             foreign_keys,
             key_constraints,
@@ -514,6 +574,8 @@ impl Engine {
             }
         }
         let mut constraints = uqa_sql::ast::TableConstraintSet {
+            persistence: t.persistence,
+            on_commit: t.on_commit,
             checks: t.table_checks.read().clone(),
             foreign_keys: t.foreign_keys.read().clone(),
             key_constraints,
@@ -574,6 +636,8 @@ impl Engine {
                         .or_else(|| Some(format!("{}_check", col.name))),
                     expr,
                     enforced: col.check_enforced,
+                    validated: col.check_validated,
+                    no_inherit: col.check_no_inherit,
                 });
             }
         }
@@ -596,6 +660,8 @@ impl Engine {
         let foreign_keys = t.foreign_keys.read().clone();
         let key_constraints = t.key_constraints.read().clone();
         Ok(uqa_sql::ast::TableConstraintSet {
+            persistence: t.persistence,
+            on_commit: t.on_commit,
             checks,
             foreign_keys,
             key_constraints,
@@ -626,12 +692,16 @@ impl Engine {
                         .or_else(|| Some(format!("{}_fkey", col.name))),
                     local_columns: vec![col.name.clone()],
                     ref_table: reference.table,
-                    ref_columns: vec![reference.column],
+                    ref_columns: reference.column.into_iter().collect(),
                     on_update: reference.on_update,
                     on_delete: reference.on_delete,
                     on_delete_set_columns: Vec::new(),
                     match_type: reference.match_type,
                     enforced: reference.enforced,
+                    validated: reference.validated,
+                    deferrable: reference.deferrable,
+                    initially_deferred: reference.initially_deferred,
+                    period: reference.period,
                 });
             }
         }
@@ -748,6 +818,7 @@ impl Engine {
                 kind,
                 columns: vec![column.name.clone()],
                 nulls_not_distinct: false,
+                without_overlaps: false,
             });
         }
         Ok(constraints)

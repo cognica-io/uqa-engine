@@ -12,12 +12,23 @@ use super::{
     StoredRelation, StoredSequence, TAG_RELATION, TAG_SEQUENCE,
 };
 
+fn validate_sequence_persistence(code: &str) -> StorageBackendResult<()> {
+    if matches!(code, "p" | "u") {
+        Ok(())
+    } else {
+        Err(StorageBackendError::Other(format!(
+            "invalid durable sequence persistence `{code}`"
+        )))
+    }
+}
+
 impl KeyValueCatalog {
     pub(super) fn create_sequence_row_impl(
         &self,
         sequence: &SequenceRow,
     ) -> StorageBackendResult<bool> {
         let _guard = self.sequence_lock.lock();
+        validate_sequence_persistence(&sequence.persistence)?;
         self.ensure_schema_exists(&sequence.relation)?;
         let key = relation_key(TAG_SEQUENCE, &sequence.relation)?;
         if self.store.get(&key)?.is_some() {
@@ -43,6 +54,7 @@ impl KeyValueCatalog {
                 increment: sequence.increment,
                 current: sequence.current,
                 called: sequence.called,
+                persistence: sequence.persistence.clone(),
             })?,
         )?;
         batch.commit()?;
@@ -54,6 +66,7 @@ impl KeyValueCatalog {
         sequence: &SequenceRow,
     ) -> StorageBackendResult<bool> {
         let _guard = self.sequence_lock.lock();
+        validate_sequence_persistence(&sequence.persistence)?;
         let key = relation_key(TAG_SEQUENCE, &sequence.relation)?;
         if self.store.get(&key)?.is_none() {
             return Ok(false);
@@ -65,6 +78,7 @@ impl KeyValueCatalog {
                 increment: sequence.increment,
                 current: sequence.current,
                 called: sequence.called,
+                persistence: sequence.persistence.clone(),
             })?,
         )?;
         Ok(true)
@@ -99,6 +113,7 @@ impl KeyValueCatalog {
                     increment: stored.increment,
                     current: stored.current,
                     called: stored.called,
+                    persistence: stored.persistence,
                 })
             })
             .collect::<StorageBackendResult<Vec<_>>>()?;

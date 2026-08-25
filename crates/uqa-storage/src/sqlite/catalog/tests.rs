@@ -161,6 +161,7 @@ fn migration_18_preserves_legacy_sequence_sentinel_semantics() {
             increment: 1,
             current: 0,
             called: false,
+            persistence: "p".into(),
         })
         .unwrap();
     drop(current);
@@ -198,6 +199,48 @@ fn migration_18_preserves_legacy_sequence_sentinel_semantics() {
             Ok(())
         })
         .unwrap();
+}
+
+#[test]
+fn migration_23_moves_sequence_persistence_into_typed_rows() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let current = Catalog::open(connection.clone()).unwrap();
+    current
+        .create_sequence_row(&SequenceRow {
+            relation: RelationIdentity::new("public", "unlogged_ids"),
+            start: 1,
+            increment: 1,
+            current: 1,
+            called: false,
+            persistence: "u".into(),
+        })
+        .unwrap();
+    drop(current);
+    connection
+        .with(|conn| {
+            conn.execute("ALTER TABLE _sequences DROP COLUMN persistence", [])?;
+            conn.execute(
+                "INSERT OR REPLACE INTO _metadata(key, value) VALUES ('sequence-persistence:public.unlogged_ids', 'u')",
+                [],
+            )?;
+            conn.execute(
+                "UPDATE _metadata SET value = '22' WHERE key = 'schema_version'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+    let upgraded = Catalog::open(connection.clone()).unwrap();
+    let rows = upgraded.load_sequence_rows().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].persistence, "u");
+    assert_eq!(
+        upgraded
+            .get_metadata("sequence-persistence:public.unlogged_ids")
+            .unwrap(),
+        None
+    );
 }
 
 #[test]
@@ -615,7 +658,7 @@ fn v22_migration_preserves_legacy_postings_in_clustered_rows() {
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(version, "22");
+        assert_eq!(version, CURRENT_SCHEMA_VERSION.to_string());
         Ok(())
     })
     .unwrap();
@@ -677,7 +720,7 @@ fn v22_migration_is_idempotent_when_clustered_tables_precede_the_version_marker(
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(version, "22");
+        assert_eq!(version, CURRENT_SCHEMA_VERSION.to_string());
         Ok(())
     })
     .unwrap();

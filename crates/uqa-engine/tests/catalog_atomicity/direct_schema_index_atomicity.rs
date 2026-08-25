@@ -46,6 +46,7 @@ fn direct_constraint_replacement_publishes_only_after_catalog_success() {
         kind: uqa_sql::ast::TableKeyConstraintKind::Unique,
         columns: vec!["id".to_string()],
         nulls_not_distinct: false,
+        without_overlaps: false,
     };
 
     fail_event(&connection, "_tables", "INSERT");

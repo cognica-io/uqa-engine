@@ -318,7 +318,7 @@ impl RowLockManager {
         id
     }
 
-    fn table_name(&self, table: u64) -> Arc<str> {
+    pub(crate) fn table_name(&self, table: u64) -> Arc<str> {
         self.table_names
             .lock()
             .get(&table)

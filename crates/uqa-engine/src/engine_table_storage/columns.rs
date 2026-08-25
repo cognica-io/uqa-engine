@@ -7,8 +7,8 @@
 //! Column registration, index rebuild, and table or column rename.
 
 use super::{
-    materialize_constraint_names, table_not_found, Engine, RelationIdentity, StorageBackendError,
-    StorageBackendResult,
+    materialize_constraint_names, schema_expr_references_column, table_not_found, Engine,
+    RelationIdentity, StorageBackendError, StorageBackendResult,
 };
 use crate::VectorIndexSpec;
 
@@ -63,6 +63,8 @@ impl Engine {
         }
         columns.push(column);
         let mut constraints = uqa_sql::ast::TableConstraintSet {
+            persistence: t.persistence,
+            on_commit: t.on_commit,
             checks: t.table_checks.read().clone(),
             foreign_keys: t.foreign_keys.read().clone(),
             key_constraints: t.key_constraints.read().clone(),
@@ -114,8 +116,24 @@ impl Engine {
         Self::value_indexes_clear(&t);
         {
             let mut cols = t.columns.write();
+            for definition in cols.iter_mut() {
+                if definition
+                    .check
+                    .as_ref()
+                    .is_some_and(|expression| schema_expr_references_column(expression, column))
+                {
+                    definition.check = None;
+                    definition.check_name = None;
+                    definition.check_enforced = true;
+                    definition.check_validated = true;
+                    definition.check_no_inherit = false;
+                }
+            }
             cols.retain(|c| c.name != column);
         }
+        t.table_checks
+            .write()
+            .retain(|constraint| !schema_expr_references_column(&constraint.expr, column));
         t.key_constraints
             .write()
             .retain(|constraint| !constraint.columns.iter().any(|name| name == column));

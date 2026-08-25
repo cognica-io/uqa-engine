@@ -37,6 +37,7 @@ mod operators;
 mod overload_resolution;
 mod qualified_column;
 mod random_range;
+mod range;
 mod reverse;
 mod routine_signature;
 mod string_binary;
@@ -48,7 +49,7 @@ pub use common::{
     effective_overload_argument_type_with_params, function_call_argument_signature,
     values_column_types, FunctionCallArgumentSignature,
 };
-pub use equality::equality_operand_type;
+pub use equality::{equality_operand_type, foreign_key_operand_type};
 pub(crate) use fixed_builtin::runtime_dispatch_name;
 #[doc(hidden)]
 pub use fixed_builtin::{

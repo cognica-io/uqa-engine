@@ -139,6 +139,8 @@ pub(super) fn sql_type_name(ty: &ColumnType) -> String {
         ColumnType::Timestamp => "timestamp".into(),
         ColumnType::TimestampTz => "timestamp with time zone".into(),
         ColumnType::Interval => "interval".into(),
+        ColumnType::Range(subtype) => subtype.range_name().into(),
+        ColumnType::Multirange(subtype) => subtype.multirange_name().into(),
         ColumnType::Vector(dim) => format!("vector({dim})"),
         ColumnType::Tensor(dim) => format!("tensor({dim})"),
         ColumnType::Domain { schema, name, .. } => format!("{schema}.{name}"),
@@ -186,11 +188,30 @@ pub(super) fn fdw_type_name(ty: &uqa_fdw::ColumnType) -> String {
         uqa_fdw::ColumnType::Timestamp => "timestamp".into(),
         uqa_fdw::ColumnType::TimestampTz => "timestamp with time zone".into(),
         uqa_fdw::ColumnType::Interval => "interval".into(),
+        uqa_fdw::ColumnType::Range(subtype) => fdw_range_name(subtype, false).into(),
+        uqa_fdw::ColumnType::Multirange(subtype) => fdw_range_name(subtype, true).into(),
         uqa_fdw::ColumnType::Vector(dim) => format!("vector({dim})"),
         uqa_fdw::ColumnType::Tensor(dim) => format!("tensor({dim})"),
         uqa_fdw::ColumnType::Domain { schema, name, .. } => format!("{schema}.{name}"),
         uqa_fdw::ColumnType::Array(element) => format!("{}[]", fdw_type_name(element)),
         uqa_fdw::ColumnType::Record => "record".into(),
+    }
+}
+
+fn fdw_range_name(subtype: &uqa_fdw::RangeSubtype, multirange: bool) -> &'static str {
+    match (subtype, multirange) {
+        (uqa_fdw::RangeSubtype::Integer, false) => "int4range",
+        (uqa_fdw::RangeSubtype::BigInteger, false) => "int8range",
+        (uqa_fdw::RangeSubtype::Numeric, false) => "numrange",
+        (uqa_fdw::RangeSubtype::Date, false) => "daterange",
+        (uqa_fdw::RangeSubtype::Timestamp, false) => "tsrange",
+        (uqa_fdw::RangeSubtype::TimestampTz, false) => "tstzrange",
+        (uqa_fdw::RangeSubtype::Integer, true) => "int4multirange",
+        (uqa_fdw::RangeSubtype::BigInteger, true) => "int8multirange",
+        (uqa_fdw::RangeSubtype::Numeric, true) => "nummultirange",
+        (uqa_fdw::RangeSubtype::Date, true) => "datemultirange",
+        (uqa_fdw::RangeSubtype::Timestamp, true) => "tsmultirange",
+        (uqa_fdw::RangeSubtype::TimestampTz, true) => "tstzmultirange",
     }
 }
 
@@ -215,9 +236,9 @@ pub(super) fn column_constraints(col: &ColumnDef) -> String {
         flags.push(format!("CHECK ({})", expr_display(check)));
     }
     if let Some(reference) = &col.references {
-        flags.push(format!(
-            "REFERENCES {}({})",
-            reference.table, reference.column
+        flags.push(reference.column.as_ref().map_or_else(
+            || format!("REFERENCES {}", reference.table),
+            |column| format!("REFERENCES {}({column})", reference.table),
         ));
     }
     flags.join(" ")

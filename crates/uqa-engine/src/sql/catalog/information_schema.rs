@@ -482,11 +482,29 @@ pub(super) fn build_info_table_constraints(engine: &Engine) -> Result<Vec<Result
                 ("table_schema", str_value(constraint.schema)),
                 ("table_name", str_value(constraint.table)),
                 ("constraint_type", str_value(constraint_type)),
-                ("is_deferrable", str_value("NO")),
-                ("initially_deferred", str_value("NO")),
+                (
+                    "is_deferrable",
+                    str_value(if constraint.state.deferrable() {
+                        "YES"
+                    } else {
+                        "NO"
+                    }),
+                ),
+                (
+                    "initially_deferred",
+                    str_value(if constraint.state.initially_deferred() {
+                        "YES"
+                    } else {
+                        "NO"
+                    }),
+                ),
                 (
                     "enforced",
-                    str_value(if constraint.enforced { "YES" } else { "NO" }),
+                    str_value(if constraint.state.enforced() {
+                        "YES"
+                    } else {
+                        "NO"
+                    }),
                 ),
                 ("nulls_distinct", nulls_distinct),
             ])

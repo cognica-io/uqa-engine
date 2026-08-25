@@ -39,6 +39,10 @@ pub(super) fn resolve_operator_type(
         (Some(left), Some(right)) => match (base_type(left), base_type(right)) {
             (ColumnType::JsonB, ColumnType::JsonB) => true,
             (ColumnType::Array(left), ColumnType::Array(right)) => left == right,
+            (
+                ColumnType::Range(left) | ColumnType::Multirange(left),
+                ColumnType::Range(right) | ColumnType::Multirange(right),
+            ) => left == right,
             _ => false,
         },
         (Some(known), None) | (None, Some(known)) => supported_type(known),
@@ -116,7 +120,10 @@ fn is_unknown_literal(expression: &ScalarExpr) -> bool {
 }
 
 fn supported_type(ty: &ColumnType) -> bool {
-    matches!(base_type(ty), ColumnType::Array(_) | ColumnType::JsonB)
+    matches!(
+        base_type(ty),
+        ColumnType::Array(_) | ColumnType::JsonB | ColumnType::Range(_) | ColumnType::Multirange(_)
+    )
 }
 
 fn type_name(ty: Option<&ColumnType>) -> String {

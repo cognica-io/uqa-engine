@@ -159,16 +159,27 @@ impl Engine {
         Ok(())
     }
 
-    pub(super) fn drop_table_state_inner(&self, name: &str) -> StorageBackendResult<()> {
+    pub(crate) fn drop_table_state_inner(&self, name: &str) -> StorageBackendResult<()> {
         let relation = Self::resolved_relation_identity(name)?;
         if !self.storage.tables.read().contains_key(&relation) {
             return Err(table_not_found(name));
         }
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            catalog.drop_table_and_data(name)?;
-            self.note_table_catalog_changed();
+        let temporary = self
+            .storage
+            .tables
+            .read()
+            .get(&relation)
+            .is_some_and(|table| table.persistence == uqa_sql::ast::RelationPersistence::Temporary);
+        if !temporary {
+            if let Some(catalog) = self.storage.catalog.as_ref() {
+                catalog.drop_table_and_data(name)?;
+                self.note_table_catalog_changed();
+            }
         }
         self.storage.tables.write().remove(&relation);
+        if temporary {
+            self.note_table_catalog_changed();
+        }
         // Sweep every related per-table registry so catalog state
         // does not outlive the table.
         self.durable
@@ -180,6 +191,14 @@ impl Engine {
             .write()
             .retain(|_, row| row.table_name != name);
         Ok(())
+    }
+
+    pub(crate) fn drop_temporary_table_on_commit_inner(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<()> {
+        self.drop_temporary_views_depending_on_relation_inner(name)?;
+        self.try_drop_tables_inner(&[name.to_string()], true)
     }
 
     pub fn has_table(&self, name: &str) -> StorageBackendResult<bool> {

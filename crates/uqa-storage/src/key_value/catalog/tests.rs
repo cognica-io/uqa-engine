@@ -152,6 +152,7 @@ fn relation_namespace_migration_rejects_alias_and_cross_kind_collisions() {
                         increment: 1,
                         current: 0,
                         called: true,
+                        persistence: "p".into(),
                     })
                     .unwrap(),
                 )

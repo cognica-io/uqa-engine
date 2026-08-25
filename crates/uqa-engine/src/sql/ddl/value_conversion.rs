@@ -128,6 +128,30 @@ fn convert_declared_value_to_column_type(
                     )
                 })
         }
+        (ColumnType::Range(source), ColumnType::Range(target)) if source == target => {
+            uqa_sql::expr::cast_value_from(&value, target.range_name(), Some(source.range_name()))
+        }
+        (ColumnType::Range(source), ColumnType::Multirange(target)) if source == target => {
+            uqa_sql::expr::cast_value_from(
+                &value,
+                target.multirange_name(),
+                Some(source.range_name()),
+            )
+        }
+        (ColumnType::Multirange(source), ColumnType::Multirange(target)) if source == target => {
+            uqa_sql::expr::cast_value_from(
+                &value,
+                target.multirange_name(),
+                Some(source.multirange_name()),
+            )
+        }
+        (_, ColumnType::Range(_) | ColumnType::Multirange(_)) => {
+            Err(SQLError::TypeMismatch(format!(
+                "column cannot be cast automatically from type {} to type {}",
+                column_type_name(source_ty),
+                column_type_name(target_ty)
+            )))
+        }
         (source, ColumnType::Oid)
             if matches!(
                 source,
@@ -353,6 +377,10 @@ pub(crate) fn convert_value_to_column_type(
         | ColumnType::Timestamp
         | ColumnType::TimestampTz
         | ColumnType::Interval => convert_temporal_value(value, ty),
+        ColumnType::Range(subtype) => uqa_sql::expr::cast_value(&value, subtype.range_name()),
+        ColumnType::Multirange(subtype) => {
+            uqa_sql::expr::cast_value(&value, subtype.multirange_name())
+        }
         ColumnType::Vector(dim) => {
             let vector = value_to_vector(&value)?;
             validate_vector_dimensions(*dim, vector.len())?;
@@ -492,6 +520,8 @@ pub(in crate::sql) fn column_type_name(ty: &ColumnType) -> &str {
         ColumnType::Timestamp => "timestamp",
         ColumnType::TimestampTz => "timestamp with time zone",
         ColumnType::Interval => "interval",
+        ColumnType::Range(subtype) => subtype.range_name(),
+        ColumnType::Multirange(subtype) => subtype.multirange_name(),
         ColumnType::Vector(_) => "vector",
         ColumnType::Tensor(_) => "tensor",
         ColumnType::Domain { name, .. } => name,

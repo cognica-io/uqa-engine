@@ -71,21 +71,22 @@ use planning::lower_statement;
 pub(super) use planning::{execute_compiled_statement, optimize_engine_plan};
 pub(crate) use plpgsql_exec::{call_bound_user_scalar_function, call_user_scalar_function};
 use select::query_has_row_locks;
-pub(crate) use select::RowLockRetryCache;
+pub(crate) use select::{execute_query_plan, RowLockRetryCache};
 
 use aggregates::{
     aggregate_value, contains_aggregate, has_aggregate, projection_label_at, AggregateAccumulator,
     PhysicalAggregateExecutor,
 };
 use catalog::build_info_schema_rows;
-pub(crate) use catalog::resolve_age_label_relation_name;
-pub(crate) use catalog::resolve_catalog_column_type;
+pub(crate) use catalog::{
+    resolve_age_label_relation_name, resolve_catalog_column_type, resolve_regclass_oid,
+};
 pub(in crate::sql) use catalog::{virtual_relation_accepts_row_lock, virtual_relation_schema};
 use ddl::{
     coerce_to_column_type, column_type_name, core_value_to_json, json_table_arg,
     json_table_value_to_text, json_to_core_value, run_alter_sequence, run_alter_table,
     run_create_index, run_create_sequence, run_create_table, run_create_table_as, run_drop,
-    value_to_text,
+    value_to_text, CreateTableAsExecution,
 };
 pub(crate) use ddl::{convert_value_to_column_type, validate_vector_dimensions};
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};

@@ -12,7 +12,8 @@ use super::{
 };
 use uqa_core::ArrayValue;
 use uqa_sql::ast::{
-    ForeignKey, ForeignKeyAction, ForeignKeyMatch, TableKeyConstraintKind, WindowFrame, WindowSpec,
+    ForeignKey, ForeignKeyAction, ForeignKeyMatch, RangeSubtype, TableKeyConstraintKind,
+    WindowFrame, WindowSpec,
 };
 
 pub(super) use super::expression_text::{default_expr_text, schema_expr_text};
@@ -141,6 +142,9 @@ pub(super) fn all_schema_names(engine: &Engine) -> Result<Vec<String>, SQLError>
             .map_err(|err| SQLError::Internal(format!("read schema catalog: {err}")))?,
     );
     schemas.extend(super::ag_catalog::age_namespace_names(engine)?);
+    if engine.has_temporary_relations() {
+        schemas.push(engine.temporary_schema_name());
+    }
     schemas.sort();
     schemas.dedup();
     Ok(schemas)
@@ -176,6 +180,8 @@ pub(super) fn view_columns_for(engine: &Engine, view: &str) -> Result<Vec<SQLCol
             not_null: false,
             not_null_explicit: false,
             not_null_name: None,
+            not_null_validated: true,
+            not_null_no_inherit: false,
             auto_increment: false,
             unique: false,
             default: None,
@@ -183,6 +189,8 @@ pub(super) fn view_columns_for(engine: &Engine, view: &str) -> Result<Vec<SQLCol
             check: None,
             check_name: None,
             check_enforced: true,
+            check_validated: true,
+            check_no_inherit: false,
             references: None,
         })
         .collect())
@@ -219,6 +227,22 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::OidVector => 30,
         ColumnType::AnyArray => 2277,
         ColumnType::Record => 2249,
+        ColumnType::Range(subtype) => match subtype {
+            RangeSubtype::Integer => 3904,
+            RangeSubtype::Numeric => 3906,
+            RangeSubtype::Timestamp => 3908,
+            RangeSubtype::TimestampTz => 3910,
+            RangeSubtype::Date => 3912,
+            RangeSubtype::BigInteger => 3926,
+        },
+        ColumnType::Multirange(subtype) => match subtype {
+            RangeSubtype::Integer => 4451,
+            RangeSubtype::Numeric => 4532,
+            RangeSubtype::Timestamp => 4533,
+            RangeSubtype::TimestampTz => 4534,
+            RangeSubtype::Date => 4535,
+            RangeSubtype::BigInteger => 4536,
+        },
         ColumnType::Array(element) => match element.as_ref() {
             ColumnType::SmallInteger => 1005,
             ColumnType::Integer => 1007,
@@ -258,6 +282,22 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
             ColumnType::Vector(_) => 380_002,
             ColumnType::Tensor(_) => 380_003,
             ColumnType::Domain { oid, .. } => pg_domain_array_oid(*oid),
+            ColumnType::Range(subtype) => match subtype {
+                RangeSubtype::Integer => 3905,
+                RangeSubtype::Numeric => 3907,
+                RangeSubtype::Timestamp => 3909,
+                RangeSubtype::TimestampTz => 3911,
+                RangeSubtype::Date => 3913,
+                RangeSubtype::BigInteger => 3927,
+            },
+            ColumnType::Multirange(subtype) => match subtype {
+                RangeSubtype::Integer => 6150,
+                RangeSubtype::Numeric => 6151,
+                RangeSubtype::Timestamp => 6152,
+                RangeSubtype::TimestampTz => 6153,
+                RangeSubtype::Date => 6155,
+                RangeSubtype::BigInteger => 6157,
+            },
             ColumnType::Array(_) => pg_type_oid(element),
         },
         ColumnType::Date => 1082,
@@ -435,7 +475,13 @@ pub(super) fn pg_type_align(ty: &ColumnType) -> &'static str {
         | ColumnType::TimeTz
         | ColumnType::Timestamp
         | ColumnType::TimestampTz
-        | ColumnType::Interval => "d",
+        | ColumnType::Interval
+        | ColumnType::Range(
+            RangeSubtype::BigInteger | RangeSubtype::Timestamp | RangeSubtype::TimestampTz,
+        )
+        | ColumnType::Multirange(
+            RangeSubtype::BigInteger | RangeSubtype::Timestamp | RangeSubtype::TimestampTz,
+        ) => "d",
         ColumnType::Array(element) if matches!(pg_type_align(element), "d") => "d",
         ColumnType::Domain { base, .. } => pg_type_align(base),
         _ => "i",
@@ -456,6 +502,8 @@ pub(super) fn pg_type_storage(ty: &ColumnType) -> &'static str {
         | ColumnType::PgNodeTree
         | ColumnType::AnyArray
         | ColumnType::Array(_)
+        | ColumnType::Range(_)
+        | ColumnType::Multirange(_)
         | ColumnType::Vector(_)
         | ColumnType::Tensor(_) => "x",
         ColumnType::Domain { base, .. } => pg_type_storage(base),
@@ -628,6 +676,16 @@ pub(super) fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRoutineOids {
         ColumnType::Record => PgTypeRoutineOids::new(2290, 2291, 2402, 2403),
         ColumnType::Uuid => PgTypeRoutineOids::new(2952, 2953, 2961, 2962),
         ColumnType::JsonB => PgTypeRoutineOids::new(3806, 3804, 3805, 3803),
+        ColumnType::Range(_) => {
+            let mut routines = PgTypeRoutineOids::new(3834, 3835, 3836, 3837);
+            routines.analyze = 3916;
+            routines
+        }
+        ColumnType::Multirange(_) => {
+            let mut routines = PgTypeRoutineOids::new(4231, 4232, 4233, 4234);
+            routines.analyze = 4242;
+            routines
+        }
         ColumnType::Vector(_) | ColumnType::Tensor(_) => PgTypeRoutineOids::new(0, 0, 0, 0),
         ColumnType::Array(_) | ColumnType::Domain { .. } => {
             unreachable!("array and domain type routines are handled before scalar dispatch")
@@ -719,6 +777,8 @@ pub(super) fn info_udt_name(ty: &ColumnType) -> String {
         ColumnType::OidVector => "oidvector".into(),
         ColumnType::AnyArray => "anyarray".into(),
         ColumnType::Record => "record".into(),
+        ColumnType::Range(subtype) => subtype.range_name().into(),
+        ColumnType::Multirange(subtype) => subtype.multirange_name().into(),
         ColumnType::Array(element) => match element.as_ref() {
             ColumnType::SmallInteger => "_int2".into(),
             ColumnType::Integer => "_int4".into(),
@@ -758,6 +818,8 @@ pub(super) fn info_udt_name(ty: &ColumnType) -> String {
             ColumnType::Vector(_) => "_vector".into(),
             ColumnType::Tensor(_) => "_tensor".into(),
             ColumnType::Domain { name, .. } => format!("_{name}"),
+            ColumnType::Range(subtype) => format!("_{}", subtype.range_name()),
+            ColumnType::Multirange(subtype) => format!("_{}", subtype.multirange_name()),
             ColumnType::Array(_) => info_udt_name(element),
         },
         ColumnType::Date => "date".into(),
@@ -843,13 +905,6 @@ impl ConstraintCatalogKind {
             _ => None,
         }
     }
-
-    pub(super) const fn no_inherit(self) -> bool {
-        matches!(
-            self,
-            Self::PrimaryKey | Self::Unique { .. } | Self::ForeignKey
-        )
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -876,8 +931,100 @@ pub(super) struct ConstraintCatalogRow {
     pub(super) name: String,
     pub(super) kind: ConstraintCatalogKind,
     pub(super) columns: Vec<ConstraintCatalogColumn>,
-    pub(super) enforced: bool,
+    pub(super) state: ConstraintCatalogState,
+    pub(super) period: bool,
     pub(super) foreign_key: Option<ForeignKeyCatalogData>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ConstraintCatalogState {
+    validation: ConstraintValidationState,
+    deferral: ConstraintDeferralState,
+    inheritance: ConstraintInheritanceState,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ConstraintValidationState {
+    enforced: bool,
+    validated: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ConstraintDeferralState {
+    NotDeferrable,
+    InitiallyImmediate,
+    InitiallyDeferred,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ConstraintInheritanceState {
+    Inheritable,
+    NoInherit,
+}
+
+impl ConstraintCatalogState {
+    const fn new(
+        validation: ConstraintValidationState,
+        deferral: ConstraintDeferralState,
+        inheritance: ConstraintInheritanceState,
+    ) -> Self {
+        Self {
+            validation,
+            deferral,
+            inheritance,
+        }
+    }
+
+    pub(super) const fn enforced(self) -> bool {
+        self.validation.enforced
+    }
+
+    pub(super) const fn validated(self) -> bool {
+        self.validation.validated
+    }
+
+    pub(super) const fn deferrable(self) -> bool {
+        !matches!(self.deferral, ConstraintDeferralState::NotDeferrable)
+    }
+
+    pub(super) const fn initially_deferred(self) -> bool {
+        matches!(self.deferral, ConstraintDeferralState::InitiallyDeferred)
+    }
+
+    pub(super) const fn no_inherit(self) -> bool {
+        matches!(self.inheritance, ConstraintInheritanceState::NoInherit)
+    }
+}
+
+impl ConstraintValidationState {
+    const fn new(enforced: bool, validated: bool) -> Self {
+        Self {
+            enforced,
+            validated,
+        }
+    }
+}
+
+impl ConstraintDeferralState {
+    const fn new(deferrable: bool, initially_deferred: bool) -> Self {
+        if !deferrable {
+            ConstraintDeferralState::NotDeferrable
+        } else if initially_deferred {
+            ConstraintDeferralState::InitiallyDeferred
+        } else {
+            ConstraintDeferralState::InitiallyImmediate
+        }
+    }
+}
+
+impl ConstraintInheritanceState {
+    const fn new(no_inherit: bool) -> Self {
+        if no_inherit {
+            ConstraintInheritanceState::NoInherit
+        } else {
+            ConstraintInheritanceState::Inheritable
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -887,7 +1034,8 @@ struct PendingConstraintCatalogRow {
     requested_name: Option<String>,
     kind: ConstraintCatalogKind,
     columns: Vec<ConstraintCatalogColumn>,
-    enforced: bool,
+    state: ConstraintCatalogState,
+    period: bool,
     foreign_key: Option<ForeignKeyCatalogData>,
 }
 
@@ -918,7 +1066,12 @@ pub(super) fn constraint_catalog_rows(
                         name: col.name.clone(),
                         table_ordinal: ordinal,
                     }],
-                    enforced: true,
+                    state: ConstraintCatalogState::new(
+                        ConstraintValidationState::new(true, col.not_null_validated),
+                        ConstraintDeferralState::new(false, false),
+                        ConstraintInheritanceState::new(col.not_null_no_inherit),
+                    ),
+                    period: false,
                     foreign_key: None,
                 });
             }
@@ -929,7 +1082,12 @@ pub(super) fn constraint_catalog_rows(
                     requested_name: col.check_name.clone(),
                     kind: ConstraintCatalogKind::Check,
                     columns: check_constraint_columns(expr, &columns, &table_name)?,
-                    enforced: col.check_enforced,
+                    state: ConstraintCatalogState::new(
+                        ConstraintValidationState::new(col.check_enforced, col.check_validated),
+                        ConstraintDeferralState::new(false, false),
+                        ConstraintInheritanceState::new(col.check_no_inherit),
+                    ),
+                    period: false,
                     foreign_key: None,
                 });
             }
@@ -938,12 +1096,16 @@ pub(super) fn constraint_catalog_rows(
                     name: reference.name.clone(),
                     local_columns: vec![col.name.clone()],
                     ref_table: reference.table.clone(),
-                    ref_columns: vec![reference.column.clone()],
+                    ref_columns: reference.column.iter().cloned().collect(),
                     on_update: reference.on_update,
                     on_delete: reference.on_delete,
                     on_delete_set_columns: Vec::new(),
                     match_type: reference.match_type,
                     enforced: reference.enforced,
+                    validated: reference.validated,
+                    deferrable: reference.deferrable,
+                    initially_deferred: reference.initially_deferred,
+                    period: reference.period,
                 };
                 pending.push(foreign_key_catalog_row(
                     engine,
@@ -971,7 +1133,12 @@ pub(super) fn constraint_catalog_rows(
                     },
                 },
                 columns: named_constraint_columns(&constraint.columns, &columns, &table_name)?,
-                enforced: true,
+                state: ConstraintCatalogState::new(
+                    ConstraintValidationState::new(true, true),
+                    ConstraintDeferralState::new(false, false),
+                    ConstraintInheritanceState::new(true),
+                ),
+                period: constraint.without_overlaps,
                 foreign_key: None,
             });
         }
@@ -983,7 +1150,12 @@ pub(super) fn constraint_catalog_rows(
                 requested_name: constraint.name,
                 kind: ConstraintCatalogKind::Check,
                 columns: check_constraint_columns(&constraint.expr, &columns, &table_name)?,
-                enforced: constraint.enforced,
+                state: ConstraintCatalogState::new(
+                    ConstraintValidationState::new(constraint.enforced, constraint.validated),
+                    ConstraintDeferralState::new(false, false),
+                    ConstraintInheritanceState::new(constraint.no_inherit),
+                ),
+                period: false,
                 foreign_key: None,
             });
         }
@@ -1012,7 +1184,8 @@ pub(super) fn constraint_catalog_rows(
                 name,
                 kind: constraint.kind,
                 columns: constraint.columns,
-                enforced: constraint.enforced,
+                state: constraint.state,
+                period: constraint.period,
                 foreign_key: constraint.foreign_key,
             });
         }
@@ -1213,7 +1386,12 @@ fn foreign_key_catalog_row(
         requested_name: foreign_key.name.clone(),
         kind: ConstraintCatalogKind::ForeignKey,
         columns: local_columns,
-        enforced: foreign_key.enforced,
+        state: ConstraintCatalogState::new(
+            ConstraintValidationState::new(foreign_key.enforced, foreign_key.validated),
+            ConstraintDeferralState::new(foreign_key.deferrable, foreign_key.initially_deferred),
+            ConstraintInheritanceState::new(true),
+        ),
+        period: foreign_key.period,
         foreign_key: Some(ForeignKeyCatalogData {
             schema: referenced_schema,
             table: referenced_table,

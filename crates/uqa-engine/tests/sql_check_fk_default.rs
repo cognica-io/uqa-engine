@@ -105,7 +105,7 @@ fn postgresql_18_not_enforced_constraints_are_metadata_only() {
             &[],
         )
         .unwrap_err();
-    assert!(format!("{err:?}").contains("NOT NULL"));
+    assert_eq!(err.sqlstate(), Some("23502"));
 }
 
 #[test]

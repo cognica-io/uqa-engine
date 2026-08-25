@@ -6,6 +6,8 @@
 
 //! Consolidated catalog, DDL, and mutation integration tests.
 
+#[path = "engine_catalog/pg18_constraint_lifecycle.rs"]
+mod pg18_constraint_lifecycle;
 #[path = "sql_analyze_persistence.rs"]
 mod sql_analyze_persistence;
 #[path = "sql_analyzer_ddl.rs"]
@@ -42,12 +44,16 @@ mod sql_point_update;
 mod sql_referential_actions;
 #[path = "sql_rejected_ddl_lifecycle.rs"]
 mod sql_rejected_ddl_lifecycle;
+#[path = "engine_catalog/sql_relation_forms.rs"]
+mod sql_relation_forms;
 #[path = "sql_sequences.rs"]
 mod sql_sequences;
 #[path = "sql_set_search_path.rs"]
 mod sql_set_search_path;
 #[path = "sql_show_discard.rs"]
 mod sql_show_discard;
+#[path = "engine_catalog/sql_type_migration_temporal.rs"]
+mod sql_type_migration_temporal;
 #[path = "sql_types.rs"]
 mod sql_types;
 #[path = "sql_unique_constraint.rs"]

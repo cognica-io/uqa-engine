@@ -17,6 +17,15 @@ use uqa_pg_wire::{
 #[path = "protocol/libpq_interop.rs"]
 mod libpq_interop;
 
+#[path = "protocol/extended_contract.rs"]
+mod extended_contract;
+
+#[path = "protocol/client_matrix.rs"]
+mod client_matrix;
+
+#[path = "protocol/fixture_server.rs"]
+mod fixture_server;
+
 fn startup_packet(code_or_version: i32, body: &[u8]) -> Vec<u8> {
     let length = i32::try_from(8 + body.len()).expect("test packet fits");
     let mut packet = Vec::new();

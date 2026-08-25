@@ -17,9 +17,19 @@ impl Engine {
         let (schema, relation) =
             RelationIdentity::parse_reference(name).map_err(StorageBackendError::Other)?;
         if let Some(schema) = schema {
+            if schema == "pg_temp" {
+                return Ok(vec![RelationIdentity::new(
+                    self.temporary_schema_name(),
+                    relation,
+                )]);
+            }
             return Ok(vec![RelationIdentity::new(schema, relation)]);
         }
         let mut candidates = Vec::new();
+        candidates.push(RelationIdentity::new(
+            self.temporary_schema_name(),
+            &relation,
+        ));
         for schema in &self.session.state.read().search_path {
             if schema == "pg_catalog" || schema == "information_schema" {
                 continue;
@@ -27,6 +37,25 @@ impl Engine {
             candidates.push(RelationIdentity::new(schema, &relation));
         }
         Ok(candidates)
+    }
+
+    pub(crate) fn try_temporary_relation_name_for_create(
+        &self,
+        name: &str,
+    ) -> Result<String, String> {
+        let (schema, relation) = RelationIdentity::parse_reference(name)?;
+        let temporary_schema = self.temporary_schema_name();
+        if schema
+            .as_deref()
+            .is_some_and(|schema| schema != "pg_temp" && schema != temporary_schema)
+        {
+            return Err("temporary relations cannot specify a schema name".into());
+        }
+        Ok(RelationIdentity::new(temporary_schema, relation).qualified_name())
+    }
+
+    pub(crate) fn temporary_schema_name(&self) -> String {
+        format!("pg_temp_{}", self.session_id)
     }
 
     pub(crate) fn try_relation_name_for_create(&self, name: &str) -> Result<String, String> {
@@ -65,8 +94,11 @@ impl Engine {
             .map_err(StorageBackendError::Other)?;
         if self.storage.tables.read().contains_key(&relation) {
             Ok(Some("table"))
-        } else if self.durable.views.read().contains_key(&relation) {
-            Ok(Some("view"))
+        } else if let Some(view) = self.durable.views.read().get(&relation) {
+            Ok(Some(match view.kind {
+                super::StoredViewKind::View => "view",
+                super::StoredViewKind::Materialized => "materialized view",
+            }))
         } else if self.durable.sequences.read().contains_key(&relation) {
             Ok(Some("sequence"))
         } else if self.durable.foreign_tables.read().contains_key(&relation) {
@@ -89,8 +121,11 @@ impl Engine {
         for relation in self.relation_lookup_candidates(name)? {
             let kind = if self.storage.tables.read().contains_key(&relation) {
                 Some("table")
-            } else if self.durable.views.read().contains_key(&relation) {
-                Some("view")
+            } else if let Some(view) = self.durable.views.read().get(&relation) {
+                Some(match view.kind {
+                    super::StoredViewKind::View => "view",
+                    super::StoredViewKind::Materialized => "materialized view",
+                })
             } else if self.durable.sequences.read().contains_key(&relation) {
                 Some("sequence")
             } else if self.durable.foreign_tables.read().contains_key(&relation) {
@@ -185,6 +220,49 @@ impl Engine {
         self.try_table(name)
             .map_err(|err| SQLError::Internal(format!("resolve table `{name}`: {err}")))?
             .ok_or_else(|| SQLError::UnknownTable(name.to_string()))
+    }
+
+    pub(crate) fn table_persistence(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<Option<uqa_sql::ast::RelationPersistence>> {
+        Ok(self.try_table(name)?.map(|table| table.persistence))
+    }
+
+    pub(crate) fn has_temporary_relations(&self) -> bool {
+        self.storage
+            .tables
+            .read()
+            .values()
+            .any(|table| table.persistence == uqa_sql::ast::RelationPersistence::Temporary)
+            || self
+                .durable
+                .views
+                .read()
+                .values()
+                .any(|view| view.persistence == uqa_sql::ast::RelationPersistence::Temporary)
+            || self
+                .durable
+                .sequence_persistence
+                .read()
+                .values()
+                .any(|persistence| *persistence == uqa_sql::ast::RelationPersistence::Temporary)
+    }
+
+    pub(crate) fn sequence_persistence(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<Option<uqa_sql::ast::RelationPersistence>> {
+        let Some(name) = self.try_resolve_sequence_name(name)? else {
+            return Ok(None);
+        };
+        let relation = Self::resolved_relation_identity(&name)?;
+        Ok(self
+            .durable
+            .sequence_persistence
+            .read()
+            .get(&relation)
+            .copied())
     }
 
     pub(crate) fn training_set_from_table(

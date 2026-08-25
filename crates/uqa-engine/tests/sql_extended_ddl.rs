@@ -186,8 +186,9 @@ fn truncate_uses_the_foreign_keys_creation_schema() {
     let delete_error = eng
         .sql("DELETE FROM app.parent WHERE id = 2", &[])
         .unwrap_err();
+    assert_eq!(delete_error.sqlstate(), Some("23503"));
     assert!(
-        delete_error.to_string().contains("referenced"),
+        delete_error.to_string().contains("app.child"),
         "{delete_error}"
     );
     let truncate_error = eng.sql("TRUNCATE app.parent", &[]).unwrap_err();

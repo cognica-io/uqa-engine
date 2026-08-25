@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Virtual `pg_proc` row synthesis.
+//! Virtual `pg_catalog.pg_proc` relation builder.
 
 use super::builtin_routines::PG18_BUILTIN_ROUTINES;
 use super::helpers::{
@@ -28,7 +28,7 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
                 ("prolang", int_value(routine.language())),
                 ("procost", Value::Float(1.0)),
                 ("prorows", Value::Float(0.0)),
-                ("provariadic", int_value(0)),
+                ("provariadic", int_value(routine.variadic_type())),
                 ("prosupport", int_value(0)),
                 ("prokind", str_value(routine.kind)),
                 ("prosecdef", bool_value(false)),

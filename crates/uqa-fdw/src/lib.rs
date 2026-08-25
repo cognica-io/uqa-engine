@@ -50,6 +50,16 @@ pub struct ColumnDef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RangeSubtype {
+    Integer,
+    BigInteger,
+    Numeric,
+    Date,
+    Timestamp,
+    TimestampTz,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ColumnType {
     SmallInteger,
     Integer,
@@ -90,6 +100,8 @@ pub enum ColumnType {
     Timestamp,
     TimestampTz,
     Interval,
+    Range(RangeSubtype),
+    Multirange(RangeSubtype),
     Vector(u32),
     Tensor(u32),
     Domain {

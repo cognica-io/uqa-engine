@@ -7,7 +7,7 @@ UQA Engine deliberately uses PostgreSQL-oriented syntax and behavior while remai
 - SQL parsing uses PostgreSQL grammar through `libpg_query`.
 - Session metadata reports `server_version` as `18.0-uqa`.
 - The repository checks all 22 deterministic TPC-H-derived scale-factor `0.001` query results against PostgreSQL 18.4 fixtures.
-- The optional wire crate implements PostgreSQL protocol 3.0 through 3.2 codec primitives, minor-version negotiation, reserved startup-option reporting, protocol-specific cancellation-key validation, FunctionCall, GSS/SSPI message shapes, notifications, and COPY format validation. PostgreSQL 18.4 `psql`/libpq tests verify 3.0, 3.2, and `latest` startup, 3.2-to-3.0 downgrade, authentication ordering, SSL rejection and retry, legacy and 256-byte cancellation keys, and extended Parse/Bind/Describe/Execute/Sync flow.
+- The optional wire crate implements PostgreSQL protocol 3.0 through 3.2 codec primitives, minor-version negotiation, reserved startup-option reporting, protocol-specific and middleware-layered cancellation-key validation, context-aware cleartext/MD5/GSS/SSPI/SASL authentication sequencing, shared extended-query and function-call text/binary format resolution, notifications, and COPY format validation. PostgreSQL 18.4 `psql`/libpq tests verify 3.0, 3.2, and `latest` startup, 3.2-to-3.0 downgrade, authentication ordering, SSL rejection and retry, legacy and 256-byte cancellation keys, and extended Parse/Bind/Describe/Execute/Sync flow; the pinned psycopg 3.3.4, pgx 5.10.0, and node-postgres 8.23.0 Docker matrix additionally exercises prepared reuse, binary result selection, binary parameters where the driver supports them, COPY in and out, failed-transaction recovery, and one-connection pool reuse against PostgreSQL 18.4 and the codec fixture server.
 - PostgreSQL-shaped `information_schema` and `pg_catalog` virtual relations carry declared PostgreSQL 18 row types even when empty; implemented `pg_type` rows expose exact scalar, array, information-schema domain, pseudo-type, and `information_schema_catalog_name` metadata.
 - Apache AGE-shaped `cypher(...) AS (...)` integrates graph results into SQL, and the AGE catalog surface (`LOAD 'age'`, `ag_catalog.ag_graph`, `ag_catalog.ag_label`, the `agtype` / `graphid` types, and the graph and label management functions) lets AGE drivers bootstrap against the embedded engine.
 - Recursive CTE `SEARCH` and `CYCLE` preserve PostgreSQL 18 depth/breadth sequence types, path-sensitive cycle rows, generated-column visibility, recursive wildcard behavior, `UNION` distinctness, iteration-wide limiting, validation order, and stored-plan reopen behavior; `MATERIALIZED` and `NOT MATERIALIZED` select PostgreSQL's eligible folding policy while recursive and volatile definitions remain materialized.
@@ -30,17 +30,18 @@ Relational operators keep static row schemas until the final consumer. Spill for
 
 ## Open PostgreSQL 18 relation-feature bugs
 
-- Temporary and unlogged tables, views, and sequences
+Temporary tables, views, sequences, CTAS, `SELECT INTO`, temporary-relation name resolution through `pg_temp`, automatic temporary views over temporary relations, all three temporary-table `ON COMMIT` actions, `DISCARD TEMP`, unlogged tables and sequences across clean reopen, ordinary materialized views and refresh, and validated view/materialized-view reloptions are implemented. Their catalog identity is exposed through `pg_namespace`, `pg_class`, `pg_attribute`, and the applicable `pg_views`, `pg_matviews`, or `pg_sequences` view.
+
+- Unlogged-relation reset after crash recovery
 - Table inheritance and partitioning
 - Typed tables
 - Table storage parameters and tablespaces
 - Table `USING` access methods
-- `ON COMMIT` table behavior
 - Cross-database relation or routine names
-- Materialized views
-- View options and `WITH CHECK OPTION`
+- Temporary and unlogged materialized views, concurrent refresh, materialized-view indexes, access methods, and tablespaces
+- Complete privilege and optimizer effects for `security_invoker` and `security_barrier`, and updatable-view enforcement for `WITH CHECK OPTION`
 
-These forms currently fail during compilation without creating a partial object. That failure is fail-safe behavior while implementation is incomplete, not a compatibility exemption.
+Unsupported forms fail before catalog mutation. That failure is fail-safe behavior while implementation is incomplete, not a compatibility exemption.
 
 ## Open PostgreSQL 18 query-clause bugs
 
@@ -50,12 +51,15 @@ Each missing clause above must be implemented with PostgreSQL 18 semantics; sour
 
 ## Open PostgreSQL 18 DDL bugs
 
+For implemented tables, views, sequences, and foreign tables, text-to-`regclass` casts resolve the visible relation to the OID exposed by `pg_class`; a missing cast target reports `42P01`, while `to_regclass(text)` returns `NULL`.
+
 - Virtual and stored generated columns implement durable definitions, selective virtual evaluation, exactly-once stored evaluation, DML assignment rules, DDL-time static typing for the implemented expression surface, exact stored SQL routine overload binding and dependencies, supported constraints and indexes, catalogs, ALTER operations, failure atomicity, and reopen behavior. The complete PostgreSQL built-in function and operator overload matrix, privileges, inheritance and partition propagation, `pg_dump`/`pg_restore`, and complete upstream regression coverage remain open compatibility bugs.
+- Named CHECK, foreign-key, and `NOT NULL` constraints implement `NOT VALID`, failure-atomic validation, supported `ALTER CONSTRAINT` state changes, actual `INITIALLY DEFERRED` foreign-key checks at outer commit, savepoint rollback, catalog and information-schema flags, dependency-aware drop, multi-action ALTER atomicity, and durable reopen. Per-transaction `SET CONSTRAINTS`, inheritance and partition propagation, the complete dependency graph, `pg_dump`/`pg_restore`, and the upstream constraint regression matrix remain open compatibility bugs.
 - `WITHOUT OVERLAPS` keys and `PERIOD` foreign keys are not implemented because range and multirange column types are not yet available.
 - Expression indexes are not implemented.
 - SQL index access methods are B-tree, GIN, IVF, and HNSW.
 - Dependency-sensitive `DROP ... CASCADE` remains incomplete for implemented catalog objects except graph namespaces and the bounded routine graph. `DROP FUNCTION signature CASCADE` removes the exact function, its generated columns, and direct or transitive stored views while retaining unrelated objects; `DROP PROCEDURE signature CASCADE` removes a procedure with no modeled dependents. Every additional routine-dependent object kind, dependent-procedure graph, multi-target CASCADE graph, deletion order, notice, and diagnostic is tracked by `routines.function-procedure-drop-cascade-extended`.
-- `ALTER TABLE DROP COLUMN CASCADE` is rejected.
+- `ALTER TABLE DROP COLUMN CASCADE` removes inbound foreign-key constraints and the target column's owned constraints; cascade over every other PostgreSQL dependency kind remains incomplete.
 - `ALTER COLUMN TYPE USING` is preserved structurally and evaluated once per old row inside the atomic ALTER transaction; the complete PostgreSQL assignment-cast matrix, dependency and collation rewrites, domain checks, and upstream ALTER regression cases remain open.
 - `CREATE SCHEMA AUTHORIZATION` and embedded schema elements are not implemented.
 - Sequence minimum, maximum, cycle, cache, ownership, and identity-owned sequence options are not implemented.
@@ -80,7 +84,7 @@ The virtual catalogs expose engine metadata needed by supported clients and test
 
 Known mutable settings are `search_path`, `client_encoding`, `datestyle`, `timezone`, and `work_mem`. Unknown or unsupported settings return an error rather than becoming ignored server configuration.
 
-`DISCARD TEMP` is rejected because temporary relations are unavailable.
+`DISCARD TEMP` removes the current session's temporary tables, views, sequences, and sequence state, and is rejected inside a transaction as PostgreSQL requires.
 
 `LOAD` accepts the Apache AGE library names (`age`, `age.so`, `$libdir/age`, `$libdir/age.so`) as no-ops because the AGE surface is embedded; every other library fails as a missing `$libdir` file because the engine loads no shared objects.
 
@@ -88,7 +92,7 @@ Known mutable settings are `search_path`, `client_encoding`, `datestyle`, `timez
 
 SQL and PL/pgSQL routines cover a broad tested subset, including overloads, defaults, set returns, procedures, control flow, dynamic SQL, recursion limits, diagnostics, exception handling, qualified named types, table-backed `%TYPE`, strict assignment/return casts, bound cursors, `refcursor` parameters and returns, and session portals that survive routine exit until close or transaction end. Dynamic cursor queries, `MOVE`, non-`NEXT` fetch directions, holdable cursors, and top-level SQL portal control remain open. The routine security slice implements durable logical roles, owner and EXECUTE ACL changes, `SECURITY DEFINER` and `INVOKER`, routine-local configuration, leakproof and parallel metadata, and recognized PostgreSQL support-function identities; memberships, passwords, per-role settings, non-routine privileges, extension languages, and complete planner and server-security consequences remain open.
 
-The bounded original PostgreSQL 18 additions inventory is verified. This closes only `functions.identified-pg18-additions`; the complete PostgreSQL 18 function, operator, type, cast, extension, and catalog matrix remains an open compatibility bug under `functions.full-pg18-matrix`. The implemented-carrier polymorphic, variadic, and pseudo-type routine slice is independently verified under `routines.polymorphic-variadic-pseudotype-overloads`; missing enum/range/multirange carriers, extension languages and security, and extended dependency graphs remain separate items rather than broadening that claim.
+The bounded original PostgreSQL 18 additions inventory is verified. This closes only `functions.identified-pg18-additions`; the complete PostgreSQL 18 function, operator, type, cast, extension, and catalog matrix remains an open compatibility bug under `functions.full-pg18-matrix`. The implemented-carrier polymorphic, variadic, and pseudo-type routine slice is independently verified under `routines.polymorphic-variadic-pseudotype-overloads`; missing enum carriers, extension languages and security, and extended dependency graphs remain separate items rather than broadening that claim.
 
 The implemented fixed-signature built-ins documented in the function manual share candidate selection with visible SQL routines for qualification, search-path shadowing, exact and implicit matches, preferred and unknown categories, domains, named and default slots, and stable stored bindings where generated expressions are allowed. Catalog evidence includes the PostgreSQL 18 `pg_proc` identities for unit `random()` (1598), `to_hex(integer|bigint)` (2089 and 2090), `gen_random_uuid()` (3432), `casefold(text)` (6412), `uuidv4()` (6428), and `uuidv7()` / `uuidv7(interval)` (6429 and 6430). The complete PostgreSQL built-in, operator, cast, and `pg_proc` matrix remains open.
 

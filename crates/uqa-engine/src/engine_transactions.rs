@@ -5,12 +5,13 @@
 //
 
 use super::{
-    BTreeMap, BackendTransactionMode, Engine, EngineDataSnapshot, SQLError, SQLParam, SQLResult,
-    SessionStateSnapshot, StorageBackendError, StorageBackendResult, TableDataSnapshot,
-    TransactionDirtyState, TransactionFrame, TransactionIntent, TransactionSavepoint,
-    TransactionStatus,
+    BTreeSet, BackendTransactionMode, Engine, EngineDataSnapshot, SQLError, SQLParam, SQLResult,
+    SessionStateSnapshot, StorageBackendError, StorageBackendResult, TransactionDirtyState,
+    TransactionFrame, TransactionIntent, TransactionSavepoint, TransactionStatus,
 };
 use uqa_sql::ast::TransactionStmt;
+
+mod snapshots;
 
 fn panic_description(payload: &(dyn std::any::Any + Send)) -> &str {
     payload
@@ -371,6 +372,20 @@ impl Engine {
 
     pub fn run_transaction_statement(&self, tx: TransactionStmt) -> Result<(), SQLError> {
         let _statement = self.runtime.statement_gate.lock();
+        let apply_on_commit = if matches!(&tx, TransactionStmt::Commit) {
+            let stack = self.session.transactions.lock();
+            stack.len() == 1
+                && stack
+                    .last()
+                    .is_some_and(|frame| frame.status == TransactionStatus::Active)
+        } else {
+            false
+        };
+        if apply_on_commit {
+            if let Err(error) = self.apply_temporary_on_commit_actions() {
+                return Err(self.abort_sql_transaction_after_error(error));
+            }
+        }
         let mut guard = self.session.transactions.lock();
         let failed = guard
             .last()
@@ -406,6 +421,37 @@ impl Engine {
                 Err(error)
             }
         }
+    }
+
+    fn apply_temporary_on_commit_actions(&self) -> Result<(), SQLError> {
+        let actions = self
+            .storage
+            .tables
+            .read()
+            .iter()
+            .filter(|(_, table)| {
+                table.persistence == uqa_sql::ast::RelationPersistence::Temporary
+                    && table.on_commit != uqa_sql::ast::OnCommitAction::PreserveRows
+            })
+            .map(|(relation, table)| (relation.qualified_name(), table.on_commit))
+            .collect::<Vec<_>>();
+        for (name, action) in actions {
+            match action {
+                uqa_sql::ast::OnCommitAction::PreserveRows => {}
+                uqa_sql::ast::OnCommitAction::DeleteRows => {
+                    self.truncate_locked_table(&name)?;
+                }
+                uqa_sql::ast::OnCommitAction::Drop => {
+                    self.drop_temporary_table_on_commit_inner(&name)
+                        .map_err(|error| {
+                            SQLError::Internal(format!(
+                                "drop temporary table `{name}` at commit: {error}"
+                            ))
+                        })?;
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn ensure_transaction_usable(&self) -> Result<(), SQLError> {
@@ -492,6 +538,7 @@ impl Engine {
             next_lock_mark,
             snapshot_change_baseline,
             row_changes: Vec::new(),
+            deferred_foreign_key_rows: BTreeSet::new(),
         });
         self.update_statement_row_lock_baseline(snapshot_change_baseline);
         Ok(())
@@ -567,7 +614,7 @@ impl Engine {
                 return Err(recovered);
             }
         };
-        Ok((None, baseline))
+        Ok((self.snapshot_transaction_data()?, baseline))
     }
 
     /// Register the physical backend writer this session holds in the logical lock manager. Eager writer frames (typed `begin`, direct transactions) and promoted deferred frames must both hold the `\0uqa-backend-writer` relation lock, otherwise a writer blocked on a row lock is invisible to the deadlock detector and a promoting SQL session waits at the storage layer instead of reporting `40P01`.
@@ -613,10 +660,15 @@ impl Engine {
     }
 
     fn commit_transaction_frame(&self, stack: &mut Vec<TransactionFrame>) -> Result<(), SQLError> {
+        let storage_savepoint = stack
+            .last()
+            .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?
+            .storage_savepoint
+            .clone();
+        self.validate_deferred_constraints_before_commit(stack, storage_savepoint.is_some())?;
         let frame = stack
             .last()
             .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?;
-        let storage_savepoint = frame.storage_savepoint.clone();
         let read_only = frame.intent == TransactionIntent::ReadOnly;
         if read_only && storage_savepoint.is_none() {
             if let Some(backend) = self.storage.backend.as_ref() {
@@ -679,36 +731,16 @@ impl Engine {
                 .publish_row_changes(self.session_id, committed.row_changes.iter().copied());
             drop(change_publication);
             self.row_locks.release_session(self.session_id);
-            if self
-                .epochs
-                .table_catalog
-                .dirty
-                .load(std::sync::atomic::Ordering::Acquire)
-            {
-                self.publish_table_catalog_changes();
-            }
-            if self
-                .epochs
-                .catalog_registry
-                .dirty
-                .load(std::sync::atomic::Ordering::Acquire)
-            {
-                self.publish_catalog_registry_changes();
-            }
-            if self
-                .epochs
-                .table_data
-                .dirty
-                .load(std::sync::atomic::Ordering::Acquire)
-            {
-                self.publish_table_data_changes();
-            }
+            self.publish_committed_transaction_epochs();
             publication_result?;
             self.session.portals.lock().clear();
         }
         if let Some(parent) = stack.last_mut() {
             parent.next_lock_mark = parent.next_lock_mark.max(committed.next_lock_mark);
             parent.row_changes.extend(committed.row_changes);
+            parent
+                .deferred_foreign_key_rows
+                .extend(committed.deferred_foreign_key_rows);
         }
         Ok(())
     }
@@ -871,6 +903,7 @@ impl Engine {
                 savepoint.dirty,
                 savepoint.lock_mark,
                 savepoint.row_changes.clone(),
+                savepoint.deferred_foreign_key_rows.clone(),
             )
         });
         let transaction_snapshot = (
@@ -906,20 +939,27 @@ impl Engine {
             }
         }
 
-        let (session_snapshot, data_snapshot, dirty, keep_mark, row_changes) =
-            if let Some((_, session, data, dirty, mark, row_changes)) = savepoint {
-                (session, data, dirty, Some(mark), row_changes)
-            } else {
-                (
-                    transaction_snapshot.0,
-                    transaction_snapshot.1,
-                    transaction_snapshot.2,
-                    frame_storage_savepoint
-                        .as_ref()
-                        .map(|_| frame_begin_lock_mark.saturating_sub(1)),
-                    Vec::new(),
-                )
-            };
+        let (
+            session_snapshot,
+            data_snapshot,
+            dirty,
+            keep_mark,
+            row_changes,
+            deferred_foreign_key_rows,
+        ) = if let Some((_, session, data, dirty, mark, row_changes, deferred_rows)) = savepoint {
+            (session, data, dirty, Some(mark), row_changes, deferred_rows)
+        } else {
+            (
+                transaction_snapshot.0,
+                transaction_snapshot.1,
+                transaction_snapshot.2,
+                frame_storage_savepoint
+                    .as_ref()
+                    .map(|_| frame_begin_lock_mark.saturating_sub(1)),
+                Vec::new(),
+                BTreeSet::new(),
+            )
+        };
         if let Some(snapshot) = data_snapshot.as_ref() {
             if let Err(restore_error) = self.restore_transaction_data(snapshot) {
                 cleanup_errors.push(format!("memory restore: {restore_error}"));
@@ -938,11 +978,7 @@ impl Engine {
             }
         }
         self.restore_session_state(&session_snapshot);
-        if let Some(mark) = keep_mark {
-            self.row_locks.release_mark_above(self.session_id, mark);
-        } else {
-            self.row_locks.release_session(self.session_id);
-        }
+        self.release_aborted_statement_locks(keep_mark);
         if let Some(frame) = stack.last_mut() {
             frame.status = if backend_aborted {
                 TransactionStatus::FailedBackendAborted
@@ -950,8 +986,17 @@ impl Engine {
                 TransactionStatus::Failed
             };
             frame.row_changes = row_changes;
+            frame.deferred_foreign_key_rows = deferred_foreign_key_rows;
         }
         transaction_abort_result(error, &cleanup_errors)
+    }
+
+    fn release_aborted_statement_locks(&self, keep_mark: Option<u32>) {
+        if let Some(mark) = keep_mark {
+            self.row_locks.release_mark_above(self.session_id, mark);
+        } else {
+            self.row_locks.release_session(self.session_id);
+        }
     }
 
     /// A deferred outer frame still runs a backend read transaction, which cannot carry backend savepoints. Savepoints are then recorded on the frame only; promotion to a writer recreates every recorded savepoint on the write transaction, so `PostgreSQL`'s fresh READ COMMITTED snapshot per statement survives `SAVEPOINT` and nested `BEGIN`.
@@ -984,6 +1029,7 @@ impl Engine {
         frame.lock_mark = frame.next_lock_mark;
         frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
         let row_changes = frame.row_changes.clone();
+        let deferred_foreign_key_rows = frame.deferred_foreign_key_rows.clone();
         frame.savepoints.push(TransactionSavepoint {
             name,
             session_snapshot,
@@ -991,6 +1037,7 @@ impl Engine {
             dirty: self.transaction_dirty_state(),
             lock_mark: keep_mark,
             row_changes,
+            deferred_foreign_key_rows,
         });
         Ok(())
     }
@@ -1059,6 +1106,9 @@ impl Engine {
         self.restore_session_state(&savepoint.session_snapshot);
         let keep_mark = savepoint.lock_mark;
         frame.row_changes.clone_from(&savepoint.row_changes);
+        frame
+            .deferred_foreign_key_rows
+            .clone_from(&savepoint.deferred_foreign_key_rows);
         frame.savepoints.truncate(position + 1);
         self.row_locks
             .release_mark_above(self.session_id, keep_mark);
@@ -1294,149 +1344,6 @@ impl Engine {
             .lock()
             .retain(|name, _| snapshot.portal_names.contains(name));
     }
-
-    fn snapshot_transaction_data(&self) -> Result<Option<EngineDataSnapshot>, SQLError> {
-        if self.storage.backend.is_some() {
-            return Ok(None);
-        }
-        let mut tables = BTreeMap::new();
-        for (name, table) in self.storage.tables.read().iter() {
-            // Capture an already-writable deep copy once. Calling `snapshot`
-            // and then probing `writable_snapshot` would allocate and discard
-            // a second database-sized clone before the statement even starts.
-            let document_store: std::sync::Arc<dyn uqa_storage::DocumentStore> =
-                std::sync::Arc::from(table.document_store.read().writable_snapshot().map_err(
-                    |err| Self::storage_tx_error("snapshot writable document store", &err),
-                )?);
-            let inverted_index: std::sync::Arc<dyn uqa_storage::InvertedIndex> =
-                std::sync::Arc::from(table.inverted_index.read().writable_snapshot().map_err(
-                    |err| Self::storage_tx_error("snapshot writable inverted index", &err),
-                )?);
-            let mut vector_indexes = BTreeMap::new();
-            for (field, index) in table.vector_indexes.read().iter() {
-                let snapshot: std::sync::Arc<dyn uqa_storage::VectorIndex> =
-                    std::sync::Arc::from(index.writable_snapshot().map_err(|err| {
-                        Self::storage_tx_error("snapshot writable vector index", &err)
-                    })?);
-                vector_indexes.insert(field.clone(), snapshot);
-            }
-            tables.insert(
-                name.clone(),
-                TableDataSnapshot {
-                    state: table.clone(),
-                    document_store,
-                    inverted_index,
-                    vector_indexes,
-                    fts_fields: table.fts_fields.read().clone(),
-                    columns: table.columns.read().clone(),
-                    next_id: *table.next_id.lock(),
-                    analyzer: table.analyzer.read().clone(),
-                    column_stats: table.column_stats.read().clone(),
-                    column_stats_loaded: table
-                        .column_stats_loaded
-                        .load(std::sync::atomic::Ordering::Acquire),
-                    column_stats_dirty: table
-                        .column_stats_dirty
-                        .load(std::sync::atomic::Ordering::Acquire),
-                    table_checks: table.table_checks.read().clone(),
-                    foreign_keys: table.foreign_keys.read().clone(),
-                    key_constraints: table.key_constraints.read().clone(),
-                    doc_count_cache: table
-                        .doc_count_cache
-                        .load(std::sync::atomic::Ordering::Acquire),
-                    doc_count_dirty: table
-                        .doc_count_dirty
-                        .load(std::sync::atomic::Ordering::Acquire),
-                },
-            );
-        }
-        Ok(Some(EngineDataSnapshot {
-            tables,
-            durable: self.durable.snapshot(),
-            foreign_memory_tables: self.extensions.foreign_memory_tables.read().clone(),
-        }))
-    }
-
-    /// Memory-engine rollback path: snapshots only exist when no
-    /// persistent backend is attached, so these store operations run
-    /// against in-memory stores. They are still fallible by signature;
-    /// propagating keeps a (logic-bug) failure loud instead of leaving
-    /// a half-restored engine behind a successful-looking rollback.
-    fn restore_transaction_data(&self, snapshot: &EngineDataSnapshot) -> Result<(), SQLError> {
-        self.clear_bayesian_params_cache();
-        {
-            let mut tables = self.storage.tables.write();
-            tables.retain(|name, _| snapshot.tables.contains_key(name));
-            for (name, table_snapshot) in &snapshot.tables {
-                tables
-                    .entry(name.clone())
-                    .or_insert_with(|| table_snapshot.state.clone());
-            }
-        }
-        for table_snapshot in snapshot.tables.values() {
-            let table = &table_snapshot.state;
-            let document_store = table_snapshot
-                .document_store
-                .writable_snapshot()
-                .map_err(|err| Self::storage_tx_error("ROLLBACK document restore", &err))?;
-            let inverted_index = table_snapshot
-                .inverted_index
-                .writable_snapshot()
-                .map_err(|err| Self::storage_tx_error("ROLLBACK FTS restore", &err))?;
-            let mut vector_indexes = BTreeMap::new();
-            for (field, index) in &table_snapshot.vector_indexes {
-                vector_indexes.insert(
-                    field.clone(),
-                    index
-                        .writable_snapshot()
-                        .map_err(|err| Self::storage_tx_error("ROLLBACK vector restore", &err))?,
-                );
-            }
-            *table.document_store.write() = document_store;
-            *table.inverted_index.write() = inverted_index;
-            *table.vector_indexes.write() = vector_indexes;
-            table
-                .fts_fields
-                .write()
-                .clone_from(&table_snapshot.fts_fields);
-            table.columns.write().clone_from(&table_snapshot.columns);
-            *table.next_id.lock() = table_snapshot.next_id;
-            *table.analyzer.write() = table_snapshot.analyzer.clone();
-            *table.column_stats.write() = table_snapshot.column_stats.clone();
-            table.column_stats_loaded.store(
-                table_snapshot.column_stats_loaded,
-                std::sync::atomic::Ordering::Release,
-            );
-            table.column_stats_dirty.store(
-                table_snapshot.column_stats_dirty,
-                std::sync::atomic::Ordering::Release,
-            );
-            table
-                .table_checks
-                .write()
-                .clone_from(&table_snapshot.table_checks);
-            table
-                .foreign_keys
-                .write()
-                .clone_from(&table_snapshot.foreign_keys);
-            table
-                .key_constraints
-                .write()
-                .clone_from(&table_snapshot.key_constraints);
-            Self::value_indexes_clear(table);
-            table.doc_count_cache.store(
-                table_snapshot.doc_count_cache,
-                std::sync::atomic::Ordering::Release,
-            );
-            table.doc_count_dirty.store(
-                table_snapshot.doc_count_dirty,
-                std::sync::atomic::Ordering::Release,
-            );
-        }
-        self.durable.restore(&snapshot.durable);
-        *self.extensions.foreign_memory_tables.write() = snapshot.foreign_memory_tables.clone();
-        Ok(())
-    }
 }
 
 fn failed_transaction_error() -> SQLError {
@@ -1458,6 +1365,8 @@ fn transaction_abort_result(error: SQLError, cleanup_errors: &[String]) -> SQLEr
     }
 }
 
+mod completion;
+mod constraints;
 mod row_locks_session;
 
 #[cfg(test)]

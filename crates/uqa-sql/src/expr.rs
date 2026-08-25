@@ -21,6 +21,7 @@ mod encoding;
 mod json;
 mod json_strip;
 mod random;
+mod range;
 mod time;
 mod uuid;
 
@@ -38,6 +39,9 @@ use json::{
 pub use json_strip::argument_positions as json_strip_nulls_argument_positions;
 use json_strip::strip_json_nulls_text;
 pub use random::{RANDOM_INT4_FUNCTION, RANDOM_INT8_FUNCTION, RANDOM_NUMERIC_FUNCTION};
+pub use range::{
+    multirange_from_ranges, parse_multirange, parse_range, CanonicalMultirange, CanonicalRange,
+};
 use time::{
     age_between, coerce_temporal, date_trunc_value, extract_from_value, format_pg_number,
     format_temporal, hex_encode, make_timestamp, parse_timestamp, pg_to_chrono_fmt,
@@ -54,6 +58,7 @@ mod scalar_helpers;
 mod scalar_json;
 mod scalar_math;
 mod scalar_postgres;
+mod scalar_range;
 mod scalar_temporal;
 
 use binary::{
@@ -94,9 +99,9 @@ pub fn coercion_type_name(ty: &ColumnType) -> String {
 /// accepted here: lowering assigns them physical query-plan slots executed by
 /// `uqa-execution::ScalarSubqueryRunner`.
 pub trait EngineHook {
-    fn nextval(&self, name: &str) -> std::result::Result<i64, String>;
-    fn currval(&self, name: &str) -> std::result::Result<i64, String>;
-    fn setval(&self, name: &str, value: i64) -> std::result::Result<i64, String>;
+    fn nextval(&self, name: &str) -> Result<i64>;
+    fn currval(&self, name: &str) -> Result<i64>;
+    fn setval(&self, name: &str, value: i64) -> Result<i64>;
 
     fn call_scalar_function(&self, _name: &str, _args: &[Value]) -> Option<Result<Value>> {
         None
@@ -108,6 +113,11 @@ pub trait EngineHook {
 
     /// Resolve a catalog-owned SQL type name for casts evaluated with an engine context.
     fn resolve_type_name(&self, _name: &str) -> std::result::Result<Option<ColumnType>, String> {
+        Ok(None)
+    }
+
+    /// Resolve a relation name to the OID carrier used by `regclass`.
+    fn resolve_regclass(&self, _name: &str) -> std::result::Result<Option<i64>, String> {
         Ok(None)
     }
 
@@ -198,6 +208,18 @@ pub fn cast_value_with_type_resolution(
         || Cow::Borrowed(target_ty),
         |ty| Cow::Owned(coercion_type_name(ty)),
     );
+    if target_ty.eq_ignore_ascii_case("regclass") {
+        if let (Some(engine), Value::Str(name) | Value::FixedChar(name)) = (engine, value) {
+            return engine
+                .resolve_regclass(name)
+                .map_err(SQLError::Internal)?
+                .map(Value::Int)
+                .ok_or_else(|| SQLError::Routine {
+                    sqlstate: "42P01".into(),
+                    message: format!("relation \"{name}\" does not exist"),
+                });
+        }
+    }
     cast_value_from(value, &target_ty, source_ty)
 }
 
@@ -682,7 +704,22 @@ pub const UNDEFINED_FUNCTION_MARKER: &str = "\0uqa.undefined_function:";
 #[must_use]
 pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> Option<bool> {
     let normalized = normalized_function_name(name);
+    if normalized.starts_with("__range_") {
+        return Some(true);
+    }
     match normalized.as_ref() {
+        "int4range" | "int8range" | "numrange" | "daterange" | "tsrange" | "tstzrange"
+            if matches!(argument_count, 2 | 3) =>
+        {
+            Some(false)
+        }
+        "int4multirange" | "int8multirange" | "nummultirange" | "datemultirange"
+        | "tsmultirange" | "tstzmultirange"
+            if argument_count <= 1 =>
+        {
+            Some(true)
+        }
+        "multirange" if argument_count == 1 => Some(true),
         "coalesce" | "greatest" | "least" if argument_count >= 1 => Some(false),
         "nullif" | "concat_op" if argument_count == 2 => Some(false),
         "concat" | "format" | "json_build_array" | "jsonb_build_array" | "json_build_object"
@@ -763,6 +800,7 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         | TO_OCT_INT8_FUNCTION
         | "to_json"
         | "to_jsonb"
+        | "to_regclass"
         | "to_timestamp"
         | "upper"
         | "uuid_extract_timestamp"
@@ -991,6 +1029,32 @@ fn eval_function_call_inner(
             .flatten()
             .unwrap_or_else(|| "uqa".to_string());
         return Ok(Value::Str(user));
+    }
+    if lower == "to_regclass" {
+        let [value] = evaluated.as_slice() else {
+            return Err(SQLError::BadArity {
+                name: "to_regclass".into(),
+                expected: "1".into(),
+                actual: evaluated.len(),
+            });
+        };
+        let name = match value {
+            Value::Null => return Ok(Value::Null),
+            Value::Str(name) | Value::FixedChar(name) => name,
+            value => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "to_regclass requires text, got {}",
+                    value_type_name(value)
+                )));
+            }
+        };
+        let oid = ctx
+            .engine
+            .map(|engine| engine.resolve_regclass(name))
+            .transpose()
+            .map_err(SQLError::Internal)?
+            .flatten();
+        return Ok(oid.map_or(Value::Null, Value::Int));
     }
 
     // Functions registered in the operator registry (text_match,

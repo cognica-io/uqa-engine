@@ -10,6 +10,7 @@ use crate::engine_user_functions::{canonical_routine_type_name, routine_signatur
 use crate::sql::{builtin_function_dispatch_name, ColumnType, Engine, SQLError, Value};
 use uqa_sql::ast::{
     BinaryOp, ColumnDef, Expr, FunctionBinding, FunctionReturns, GeneratedFunctionDependency,
+    RangeSubtype,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +37,8 @@ pub(super) enum GenerationType {
     Timestamp,
     TimestampTz,
     Interval,
+    Range(RangeSubtype),
+    Multirange(RangeSubtype),
     Vector,
     Tensor,
     Record,
@@ -288,6 +291,8 @@ pub(super) fn column_generation_type(ty: &ColumnType) -> GenerationType {
         ColumnType::Timestamp => GenerationType::Timestamp,
         ColumnType::TimestampTz => GenerationType::TimestampTz,
         ColumnType::Interval => GenerationType::Interval,
+        ColumnType::Range(subtype) => GenerationType::Range(*subtype),
+        ColumnType::Multirange(subtype) => GenerationType::Multirange(*subtype),
         ColumnType::Vector(_) => GenerationType::Vector,
         ColumnType::Tensor(_) => GenerationType::Tensor,
         ColumnType::Domain { base, .. } => column_generation_type(base),
@@ -322,6 +327,8 @@ pub(super) fn generation_type_name(ty: &GenerationType) -> String {
         GenerationType::Timestamp => "timestamp without time zone".into(),
         GenerationType::TimestampTz => "timestamp with time zone".into(),
         GenerationType::Interval => "interval".into(),
+        GenerationType::Range(subtype) => subtype.range_name().into(),
+        GenerationType::Multirange(subtype) => subtype.multirange_name().into(),
         GenerationType::Vector => "vector".into(),
         GenerationType::Tensor => "tensor".into(),
         GenerationType::Record => "record".into(),
@@ -932,6 +939,18 @@ fn generation_type_from_name(name: &str) -> Option<GenerationType> {
         "timestamp" => GenerationType::Timestamp,
         "timestamptz" => GenerationType::TimestampTz,
         "interval" => GenerationType::Interval,
+        "int4range" => GenerationType::Range(RangeSubtype::Integer),
+        "int8range" => GenerationType::Range(RangeSubtype::BigInteger),
+        "numrange" => GenerationType::Range(RangeSubtype::Numeric),
+        "daterange" => GenerationType::Range(RangeSubtype::Date),
+        "tsrange" => GenerationType::Range(RangeSubtype::Timestamp),
+        "tstzrange" => GenerationType::Range(RangeSubtype::TimestampTz),
+        "int4multirange" => GenerationType::Multirange(RangeSubtype::Integer),
+        "int8multirange" => GenerationType::Multirange(RangeSubtype::BigInteger),
+        "nummultirange" => GenerationType::Multirange(RangeSubtype::Numeric),
+        "datemultirange" => GenerationType::Multirange(RangeSubtype::Date),
+        "tsmultirange" => GenerationType::Multirange(RangeSubtype::Timestamp),
+        "tstzmultirange" => GenerationType::Multirange(RangeSubtype::TimestampTz),
         "vector" => GenerationType::Vector,
         "tensor" => GenerationType::Tensor,
         "record" => GenerationType::Record,

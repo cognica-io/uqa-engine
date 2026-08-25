@@ -45,12 +45,14 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::PgViews => build_pg_views(engine)?,
         VirtualRelation::PgIndexes => build_pg_indexes(engine)?,
         VirtualRelation::PgType => build_pg_type(),
+        VirtualRelation::PgRange => build_pg_range(),
         VirtualRelation::PgProc => build_pg_proc(engine)?,
         VirtualRelation::PgDatabase => build_pg_database(),
         VirtualRelation::PgRoles => build_pg_roles(engine),
         VirtualRelation::PgUser => build_pg_user(engine),
         VirtualRelation::PgSettings => build_pg_settings(engine)?,
-        VirtualRelation::PgDescription | VirtualRelation::PgMatviews => Vec::new(),
+        VirtualRelation::PgDescription => Vec::new(),
+        VirtualRelation::PgMatviews => build_pg_matviews(engine)?,
         VirtualRelation::PgSequences => build_pg_sequences(engine)?,
         VirtualRelation::AgGraph => build_ag_graph(engine)?,
         VirtualRelation::AgLabel => build_ag_label(engine)?,
@@ -63,7 +65,7 @@ mod expression_text;
 mod helpers;
 mod information_schema;
 mod pg_catalog;
-mod pg_proc_catalog;
+mod pg_proc;
 mod schema;
 
 pub(crate) use ag_catalog::resolve_age_label_relation_name;
@@ -75,10 +77,11 @@ use information_schema::{
 };
 use pg_catalog::{
     build_pg_attrdef, build_pg_attribute, build_pg_class, build_pg_constraint, build_pg_database,
-    build_pg_index, build_pg_indexes, build_pg_namespace, build_pg_roles, build_pg_sequences,
-    build_pg_settings, build_pg_tables, build_pg_type, build_pg_user, build_pg_views,
+    build_pg_index, build_pg_indexes, build_pg_matviews, build_pg_namespace, build_pg_range,
+    build_pg_roles, build_pg_sequences, build_pg_settings, build_pg_tables, build_pg_type,
+    build_pg_user, build_pg_views,
 };
-use pg_proc_catalog::build_pg_proc;
+use pg_proc::build_pg_proc;
 use schema::{resolve_virtual_relation, VirtualRelation};
 pub(in crate::sql) use schema::{virtual_relation_accepts_row_lock, virtual_relation_schema};
 
@@ -127,4 +130,23 @@ pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> O
         }
     }
     resolved
+}
+
+pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, String> {
+    let Some((canonical, kind)) = engine
+        .try_resolve_relation_kind(name)
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
+    let (schema, relation) =
+        helpers::split_schema_name(&canonical).map_err(|error| error.to_string())?;
+    let relkind = match kind {
+        "table" => "r",
+        "view" => "v",
+        "sequence" => "S",
+        "foreign table" => "f",
+        other => return Err(format!("unknown relation kind `{other}` for `{canonical}`")),
+    };
+    Ok(Some(helpers::relation_oid(relkind, &schema, &relation)))
 }
