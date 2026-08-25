@@ -80,6 +80,10 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
             "relhassubclass".into(),
             bool_value(!engine.direct_hierarchy_children(&name)?.is_empty()),
         );
+        row.insert(
+            "relhastriggers".into(),
+            bool_value(engine.relation_has_triggers(&name)?),
+        );
         if let Some(bound) = hierarchy.partition_bound.as_ref() {
             row.insert(
                 "relpartbound".into(),

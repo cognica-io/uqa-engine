@@ -1,0 +1,140 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! `CREATE/DROP TRIGGER` lowering.
+
+use pg_query::protobuf::DropBehavior;
+use pg_query::TriggerType;
+
+use crate::ast::{CreateTrigger, DropTrigger, TriggerEvent, TriggerTiming};
+
+use super::{
+    compile_expr, compile_qualified_name, extract_string, range_var_name, NodeEnum, Result,
+    SQLError,
+};
+
+pub(super) fn compile_create_trigger(
+    stmt: &pg_query::protobuf::CreateTrigStmt,
+) -> Result<CreateTrigger> {
+    let relation = stmt
+        .relation
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("CREATE TRIGGER without relation".into()))?;
+    if stmt.isconstraint || stmt.deferrable || stmt.initdeferred || stmt.constrrel.is_some() {
+        return Err(SQLError::Unsupported(
+            "constraint triggers are not implemented".into(),
+        ));
+    }
+    if !stmt.transition_rels.is_empty() {
+        return Err(SQLError::Unsupported(
+            "trigger transition relations are not implemented".into(),
+        ));
+    }
+    let timing = match stmt.timing {
+        value if value == TriggerType::Before as i32 => TriggerTiming::Before,
+        0 => TriggerTiming::After,
+        value if value == TriggerType::Instead as i32 => {
+            return Err(SQLError::Unsupported(
+                "INSTEAD OF triggers require updatable view execution".into(),
+            ));
+        }
+        value => {
+            return Err(SQLError::Internal(format!(
+                "CREATE TRIGGER has unknown timing bit {value}"
+            )))
+        }
+    };
+    let mut events = Vec::new();
+    for (bit, event) in [
+        (TriggerType::Insert as i32, TriggerEvent::Insert),
+        (TriggerType::Update as i32, TriggerEvent::Update),
+        (TriggerType::Delete as i32, TriggerEvent::Delete),
+        (TriggerType::Truncate as i32, TriggerEvent::Truncate),
+    ] {
+        if stmt.events & bit != 0 {
+            events.push(event);
+        }
+    }
+    if events.is_empty() {
+        return Err(SQLError::Internal("CREATE TRIGGER without an event".into()));
+    }
+    let arguments = stmt
+        .args
+        .iter()
+        .map(extract_string)
+        .collect::<Result<_>>()?;
+    let update_columns = stmt
+        .columns
+        .iter()
+        .map(extract_string)
+        .collect::<Result<_>>()?;
+    let when = stmt.when_clause.as_deref().map(compile_expr).transpose()?;
+    Ok(CreateTrigger {
+        name: stmt.trigname.clone(),
+        table: range_var_name(relation),
+        function: compile_qualified_name(&stmt.funcname, "CREATE TRIGGER")?,
+        arguments,
+        row: stmt.row,
+        timing,
+        events,
+        update_columns,
+        when,
+        or_replace: stmt.replace,
+    })
+}
+
+fn compile_drop_relation_component(
+    stmt: &pg_query::protobuf::DropStmt,
+    statement: &str,
+) -> Result<(String, String)> {
+    if stmt.objects.len() != 1 {
+        return Err(SQLError::Unsupported(format!(
+            "{statement} accepts exactly one object"
+        )));
+    }
+    let object = stmt
+        .objects
+        .first()
+        .ok_or_else(|| SQLError::Internal(format!("{statement} without an object")))?;
+    let NodeEnum::List(parts) = object
+        .node
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal(format!("{statement} has an empty object")))?
+    else {
+        return Err(SQLError::Internal(format!(
+            "{statement} object is not a qualified name"
+        )));
+    };
+    let mut parts = parts
+        .items
+        .iter()
+        .map(extract_string)
+        .collect::<Result<Vec<_>>>()?;
+    let name = parts
+        .pop()
+        .ok_or_else(|| SQLError::Internal(format!("{statement} without an object name")))?;
+    if !(1..=2).contains(&parts.len()) {
+        return Err(SQLError::Unsupported(format!(
+            "{statement}: cross-database relation names are not supported"
+        )));
+    }
+    let table = parts
+        .iter()
+        .map(|part| super::render_relation_component(part))
+        .collect::<Vec<_>>()
+        .join(".");
+    Ok((name, table))
+}
+
+pub(super) fn compile_drop_trigger(stmt: &pg_query::protobuf::DropStmt) -> Result<DropTrigger> {
+    let (name, table) = compile_drop_relation_component(stmt, "DROP TRIGGER")?;
+    Ok(DropTrigger {
+        name,
+        table,
+        if_exists: stmt.missing_ok,
+        cascade: matches!(stmt.behavior(), DropBehavior::DropCascade),
+    })
+}

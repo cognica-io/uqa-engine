@@ -323,6 +323,7 @@ fn run_alter_table_action(
             if_exists,
             cascade: false,
         } => {
+            engine.handle_drop_column_trigger_dependencies(&stmt.table, &name, false)?;
             drop_column_restrict(engine, &stmt.table, &name, if_exists)?;
         }
         AlterTableAction::DropColumn {
@@ -330,6 +331,7 @@ fn run_alter_table_action(
             if_exists,
             cascade: true,
         } => {
+            engine.handle_drop_column_trigger_dependencies(&stmt.table, &name, true)?;
             drop_column_cascade(engine, &stmt.table, &name, if_exists)?;
         }
         AlterTableAction::RenameColumn { from, to } => {
@@ -371,6 +373,16 @@ fn run_alter_table_action(
                     stmt.table
                 )));
             }
+        }
+        AlterTableAction::RenameTrigger { from, to } => {
+            engine.rename_trigger(&stmt.table, &from, &to)?;
+        }
+        AlterTableAction::SetTriggerEnableMode {
+            name,
+            user_only: _,
+            mode,
+        } => {
+            engine.set_trigger_enable_mode(&stmt.table, name.as_deref(), mode)?;
         }
         AlterTableAction::SetDefault { name, default } => {
             reject_default_change_on_generated_column(engine, &stmt.table, &name)?;

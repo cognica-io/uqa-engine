@@ -53,6 +53,18 @@ pub(in crate::sql) fn run_update_inner(
     let mut ctes = CteScope::new();
     crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
+    let assigned_columns = stmt
+        .assignments
+        .iter()
+        .map(|assignment| assignment.column.clone())
+        .collect::<Vec<_>>();
+    crate::sql::triggers::fire_statement_triggers(
+        engine,
+        &stmt.table,
+        uqa_sql::ast::TriggerTiming::Before,
+        uqa_sql::ast::TriggerEvent::Update,
+        &assigned_columns,
+    )?;
 
     if stmt.source.is_none() {
         let allowed = BTreeSet::from([stmt.target_qualifier.clone()]);
@@ -68,7 +80,15 @@ pub(in crate::sql) fn run_update_inner(
     // evaluate WHERE against each joined row, and apply assignments to the
     // matching target rows.
     if let Some(source) = stmt.source.as_deref() {
-        return run_update_from(engine, stmt, source, params, &mut ctes);
+        let result = run_update_from(engine, stmt, source, params, &mut ctes)?;
+        crate::sql::triggers::fire_statement_triggers(
+            engine,
+            &stmt.table,
+            uqa_sql::ast::TriggerTiming::After,
+            uqa_sql::ast::TriggerEvent::Update,
+            &assigned_columns,
+        )?;
+        return Ok(result);
     }
     let target_tables = engine.hierarchy_scan_tables(&stmt.table, stmt.include_descendants)?;
     let target_hierarchy = engine
@@ -77,8 +97,19 @@ pub(in crate::sql) fn run_update_inner(
     let target_is_partitioned =
         target_hierarchy.partition_spec.is_some() || target_hierarchy.partition_bound.is_some();
     let has_runtime_scope = !ctes.rows.is_empty() || !ctes.scalar_subqueries.is_empty();
-    if !has_runtime_scope && target_tables.len() == 1 && !target_is_partitioned {
+    if !has_runtime_scope
+        && target_tables.len() == 1
+        && !target_is_partitioned
+        && !engine.has_row_triggers(&stmt.table, uqa_sql::ast::TriggerEvent::Update)?
+    {
         if let Some(result) = try_run_point_update(engine, stmt, params)? {
+            crate::sql::triggers::fire_statement_triggers(
+                engine,
+                &stmt.table,
+                uqa_sql::ast::TriggerTiming::After,
+                uqa_sql::ast::TriggerEvent::Update,
+                &assigned_columns,
+            )?;
             return Ok(result);
         }
     }
@@ -122,11 +153,6 @@ pub(in crate::sql) fn run_update_inner(
         }
         candidates
     };
-    let assigned_columns = stmt
-        .assignments
-        .iter()
-        .map(|assignment| assignment.column.clone())
-        .collect::<Vec<_>>();
     let snapshot_ctes = ctes.returning_statement_snapshot_scope();
     let overlay = DmlCommandMutationOverlay::new(engine);
     let mut prepared_updates = Vec::new();
@@ -218,6 +244,19 @@ pub(in crate::sql) fn run_update_inner(
                 doc.remove(&assignment.column);
             }
         }
+        let Some(triggered_document) = crate::sql::triggers::fire_before_row_triggers(
+            engine,
+            &storage_table,
+            uqa_sql::ast::TriggerEvent::Update,
+            doc_id,
+            Some(&original_doc),
+            Some(&doc),
+            &assigned_columns,
+        )?
+        else {
+            continue;
+        };
+        doc = triggered_document;
         if let Some(mut prepared) = prepare_document_rewrite(
             engine,
             &storage_table,
@@ -261,16 +300,37 @@ pub(in crate::sql) fn run_update_inner(
                 )?);
             }
             affected += 1;
-            prepared_updates.push(prepared);
+            prepared_updates.push((prepared, rewritten_doc_id));
         }
     }
     drop(overlay);
     if !prepared_updates.is_empty() {
         engine.prepare_explicit_transaction_writer()?;
-        for mut prepared in prepared_updates {
-            apply_validated_prepared_document_rewrite(engine, &mut prepared)?;
+        for (prepared, _) in &mut prepared_updates {
+            apply_validated_prepared_document_rewrite(engine, prepared)?;
         }
     }
+    for (prepared, rewritten_doc_id) in &prepared_updates {
+        crate::sql::triggers::fire_after_row_trigger_event(
+            engine,
+            crate::sql::triggers::AfterRowTriggerEvent::new(
+                &prepared.table,
+                uqa_sql::ast::TriggerEvent::Update,
+                prepared.doc_id,
+                *rewritten_doc_id,
+                Some(&prepared.old_document),
+                Some(&prepared.new_document),
+                &assigned_columns,
+            ),
+        )?;
+    }
+    crate::sql::triggers::fire_statement_triggers(
+        engine,
+        &stmt.table,
+        uqa_sql::ast::TriggerTiming::After,
+        uqa_sql::ast::TriggerEvent::Update,
+        &assigned_columns,
+    )?;
     if !stmt.returning.is_empty() {
         return dml_returning_result(
             engine,

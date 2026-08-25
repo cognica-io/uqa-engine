@@ -25,6 +25,7 @@ mod administrative;
 mod dispatch;
 mod dml;
 mod drop_alter;
+mod events;
 mod hierarchy;
 mod merge;
 mod names;

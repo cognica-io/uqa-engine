@@ -19,7 +19,7 @@ use super::{
     AlterViewOptionsAction, AlterViewOptionsStmt, DropKind, DropStmt, Node, NodeEnum, Result,
     SQLError, Statement, TableKeyConstraint, TableKeyConstraintKind,
 };
-use crate::ast::{ForeignKey, TableCheck};
+use crate::ast::{EventEnableMode, ForeignKey, TableCheck};
 
 fn extract_strings(nodes: &[pg_query::protobuf::Node]) -> Result<Vec<String>> {
     nodes.iter().map(extract_string).collect()
@@ -27,6 +27,9 @@ fn extract_strings(nodes: &[pg_query::protobuf::Node]) -> Result<Vec<String>> {
 
 pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statement> {
     use pg_query::protobuf::{DropBehavior, ObjectType};
+    if stmt.remove_type() == ObjectType::ObjectTrigger {
+        return super::events::compile_drop_trigger(stmt).map(Statement::DropTrigger);
+    }
     let kind = match stmt.remove_type() {
         ObjectType::ObjectTable => DropKind::Table,
         ObjectType::ObjectIndex => DropKind::Index,
@@ -191,6 +194,38 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
             }
         };
         let action = match cmd.subtype() {
+            AlterTableType::AtEnableTrig
+            | AlterTableType::AtEnableAlwaysTrig
+            | AlterTableType::AtEnableReplicaTrig
+            | AlterTableType::AtDisableTrig => AlterTableAction::SetTriggerEnableMode {
+                name: Some(cmd.name.clone()),
+                user_only: false,
+                mode: match cmd.subtype() {
+                    AlterTableType::AtEnableTrig => EventEnableMode::Origin,
+                    AlterTableType::AtEnableAlwaysTrig => EventEnableMode::Always,
+                    AlterTableType::AtEnableReplicaTrig => EventEnableMode::Replica,
+                    AlterTableType::AtDisableTrig => EventEnableMode::Disabled,
+                    _ => unreachable!("trigger enable modes were matched above"),
+                },
+            },
+            AlterTableType::AtEnableTrigAll
+            | AlterTableType::AtDisableTrigAll
+            | AlterTableType::AtEnableTrigUser
+            | AlterTableType::AtDisableTrigUser => AlterTableAction::SetTriggerEnableMode {
+                name: None,
+                user_only: matches!(
+                    cmd.subtype(),
+                    AlterTableType::AtEnableTrigUser | AlterTableType::AtDisableTrigUser
+                ),
+                mode: if matches!(
+                    cmd.subtype(),
+                    AlterTableType::AtEnableTrigAll | AlterTableType::AtEnableTrigUser
+                ) {
+                    EventEnableMode::Origin
+                } else {
+                    EventEnableMode::Disabled
+                },
+            },
             AlterTableType::AtAddInherit | AlterTableType::AtDropInherit => {
                 let parent = match cmd
                     .def
@@ -590,7 +625,7 @@ fn collect_reset_reloption_names(nodes: &[Node], kind: AlterViewKind) -> Result<
     Ok(names)
 }
 
-pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<AlterTableStmt> {
+pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Statement> {
     use pg_query::protobuf::ObjectType;
     let relation = stmt
         .relation
@@ -605,17 +640,21 @@ pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Al
         ObjectType::ObjectTable => AlterTableAction::RenameTable {
             to: render_relation_component(&stmt.newname),
         },
+        ObjectType::ObjectTrigger => AlterTableAction::RenameTrigger {
+            from: stmt.subname.clone(),
+            to: stmt.newname.clone(),
+        },
         other => {
             return Err(SQLError::Unsupported(format!(
                 "RENAME target {other:?} not supported"
             )));
         }
     };
-    Ok(AlterTableStmt {
+    Ok(Statement::AlterTable(AlterTableStmt {
         table,
         qualifier: relation.relname.clone(),
         if_exists: stmt.missing_ok,
         recurse: false,
         actions: vec![action],
-    })
+    }))
 }

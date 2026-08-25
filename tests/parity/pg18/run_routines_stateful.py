@@ -30,6 +30,10 @@ SUITES = {
         HERE / "type_temporal_stateful.sql",
         HERE / "type_temporal_stateful.expected.json",
     ),
+    "triggers": (
+        HERE / "triggers_stateful.sql",
+        HERE / "triggers_stateful.expected.json",
+    ),
 }
 USQL = os.environ.get("UQA_USQL", str(REPO_ROOT / "target" / "release" / "usql"))
 PG_CONTAINER = os.environ.get("UQA_PG_CONTAINER", "uqa-pg18-age")

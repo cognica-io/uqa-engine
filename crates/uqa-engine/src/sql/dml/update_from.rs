@@ -139,6 +139,19 @@ pub(in crate::sql) fn run_update_from(
                 doc.remove(&assignment.column);
             }
         }
+        let Some(triggered_document) = crate::sql::triggers::fire_before_row_triggers(
+            engine,
+            &storage_table,
+            uqa_sql::ast::TriggerEvent::Update,
+            doc_id,
+            Some(&original_doc),
+            Some(&doc),
+            &assigned_columns,
+        )?
+        else {
+            continue;
+        };
+        doc = triggered_document;
         if let Some(mut prepared) = prepare_document_rewrite(
             engine,
             &storage_table,
@@ -182,15 +195,29 @@ pub(in crate::sql) fn run_update_from(
                 )?);
             }
             affected += 1;
-            prepared_updates.push((prepared, source_context));
+            prepared_updates.push((prepared, source_context, rewritten_doc_id));
         }
     }
     drop(overlay);
     if !prepared_updates.is_empty() {
         engine.prepare_explicit_transaction_writer()?;
-        for (mut prepared, _) in prepared_updates {
-            apply_validated_prepared_document_rewrite(engine, &mut prepared)?;
+        for (prepared, _, _) in &mut prepared_updates {
+            apply_validated_prepared_document_rewrite(engine, prepared)?;
         }
+    }
+    for (prepared, _, rewritten_doc_id) in &prepared_updates {
+        crate::sql::triggers::fire_after_row_trigger_event(
+            engine,
+            crate::sql::triggers::AfterRowTriggerEvent::new(
+                &prepared.table,
+                uqa_sql::ast::TriggerEvent::Update,
+                prepared.doc_id,
+                *rewritten_doc_id,
+                Some(&prepared.old_document),
+                Some(&prepared.new_document),
+                &assigned_columns,
+            ),
+        )?;
     }
     if !stmt.returning.is_empty() {
         return dml_returning_result(

@@ -247,6 +247,8 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::CreateRole(_)
         | CommandPlan::AlterRole(_)
         | CommandPlan::DropRole(_)
+        | CommandPlan::CreateTrigger(_)
+        | CommandPlan::DropTrigger(_)
         | CommandPlan::DoBlock { .. } => {}
     }
 }

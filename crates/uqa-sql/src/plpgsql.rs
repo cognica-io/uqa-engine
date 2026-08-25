@@ -42,6 +42,10 @@ use crate::error::{Result, SQLError};
 pub struct PLpgSQLFunction {
     pub datums: Vec<PLpgSQLDatum>,
     pub action: PLpgSQLBlock,
+    /// Datum holding the implicit `NEW` record for a trigger function.
+    pub new_datum: Option<usize>,
+    /// Datum holding the implicit `OLD` record for a trigger function.
+    pub old_datum: Option<usize>,
     /// Index of the implicit `FOUND` variable in [`Self::datums`].
     pub found_datum: Option<usize>,
 }

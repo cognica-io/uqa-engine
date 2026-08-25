@@ -233,8 +233,9 @@ impl Expr {
         })
     }
 
-    /// Whether `hit` matches this node or any node below it. Subquery bodies are opaque: `ScalarSubquery` and `Exists` own their expression trees.
-    fn any_node(&self, hit: &dyn Fn(&Self) -> bool) -> bool {
+    /// Whether `hit` matches this node or any scalar node below it. Subquery bodies are opaque because they own independent query trees.
+    #[must_use]
+    pub fn any_node(&self, hit: &dyn Fn(&Self) -> bool) -> bool {
         if hit(self) {
             return true;
         }

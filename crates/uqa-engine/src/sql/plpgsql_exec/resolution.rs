@@ -277,6 +277,13 @@ pub(super) fn coerce_routine_value(
                 message: "cannot cast non-composite value to type record".into(),
             }),
         },
+        "trigger" => match value {
+            Value::Record(_) | Value::Null => Ok(value.clone()),
+            _ => Err(SQLError::Routine {
+                sqlstate: "42804".into(),
+                message: "trigger function must return a row or NULL".into(),
+            }),
+        },
         "anyarray" => match value {
             Value::Array(_) | Value::List(_) | Value::Null => Ok(value.clone()),
             _ => Err(SQLError::Routine {

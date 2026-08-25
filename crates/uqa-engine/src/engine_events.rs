@@ -1,0 +1,44 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Durable row-trigger registry and PostgreSQL-compatible lifecycle.
+
+use serde::{Deserialize, Serialize};
+use uqa_sql::ast::{CreateTrigger, EventEnableMode};
+use uqa_sql::SQLError;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct StoredTrigger {
+    pub(crate) definition: CreateTrigger,
+    #[serde(default)]
+    pub(crate) enabled: EventEnableMode,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct StoredTriggerCatalog {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    triggers: Vec<StoredTrigger>,
+}
+
+fn duplicate_object(kind: &str, name: &str, table: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42710".into(),
+        message: format!("{kind} \"{name}\" for relation \"{table}\" already exists"),
+    }
+}
+
+fn undefined_object(kind: &str, name: &str, table: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42704".into(),
+        message: format!("{kind} \"{name}\" for table \"{table}\" does not exist"),
+    }
+}
+
+mod lifecycle;
+mod lookup;
+mod persistence;
+mod registry;
+mod validation;

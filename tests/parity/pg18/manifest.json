@@ -111,6 +111,8 @@
       "routines.polymorphic-variadic-pseudotype-overloads",
       "routines.extension-language-privilege-security",
       "plpgsql.datum-slots-and-bound-cursors",
+      "ddl.triggers",
+      "ddl.rewrite-rules",
       "graph.age-default-label-drop",
       "graph.age-cypher-complete-matrix",
       "regression.core-and-isolation"
@@ -563,6 +565,22 @@
       "supported_version": "PostgreSQL 18 PRIMARY KEY and UNIQUE WITHOUT OVERLAPS plus PERIOD foreign keys over matching built-in range or multirange identities, including empty and overlap rejection, aggregate adjacent-parent coverage, insert/update/delete enforcement, ALTER TABLE validation and atomic failure, pg_constraint conperiod metadata, and durable reopen behavior",
       "status": "partial",
       "open_issue": "Physical GiST and exclusion-index planning, temporal referential actions beyond NO ACTION, deferrable temporal enforcement, dump/restore, and the complete upstream temporal regression matrix remain."
+    },
+    {
+      "id": "ddl.triggers",
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE stateful trigger DDL, execution, ordering, generated-row image, catalog, dependency, transaction, partition, ON CONFLICT, and MERGE behavior in tests/parity/pg18/triggers_stateful.expected.json plus official trigger regression cases",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_triggers::; env UQA_USQL=target/debug/usql python3 tests/parity/pg18/run_routines_stateful.py --suite triggers",
+      "supported_version": "Durable PL/pgSQL BEFORE and AFTER row and statement triggers for INSERT, UPDATE, DELETE, and TRUNCATE; UPDATE OF and WHEN validation; alphabetical row-trigger order; deferred AFTER ROW execution; PostgreSQL OLD, NEW, TG_* and zero-based TG_ARGV context; zero-row statement firing; generated-column BEFORE images; ON CONFLICT and MERGE action ordering; inherited partition row-trigger catalog clones; enable, disable, rename, drop, relation, column, and function dependency lifecycle; pg_trigger, relhastriggers, hastriggers, and pg_get_triggerdef",
+      "status": "partial",
+      "open_issue": "Constraint and deferred triggers, transition relations, INSTEAD OF view triggers, partition-moving UPDATE trigger semantics, direct lifecycle operations on partition clones, session_replication_role execution modes, privileges, exact pg_node_tree serialization, dump/restore, and the complete upstream trigger regression schedule remain."
+    },
+    {
+      "id": "ddl.rewrite-rules",
+      "postgresql_reference": "PostgreSQL 18 CREATE RULE, rewrite, view-rule, catalog, dependency, and regression behavior",
+      "uqa_test": "No rewrite-rule execution harness yet",
+      "supported_version": "No executable CREATE RULE surface",
+      "status": "not_audited",
+      "open_issue": "CREATE RULE parsing, OLD and NEW rewrite binding, DO ALSO, DO INSTEAD, DO NOTHING, recursion, view _RETURN rules, pg_rewrite, pg_get_ruledef, enable modes, dependencies, and the PostgreSQL 18 rule regression schedule remain to be implemented and differentially verified."
     },
     {
       "id": "graph.age-default-label-drop",

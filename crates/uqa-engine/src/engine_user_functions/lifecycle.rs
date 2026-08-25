@@ -29,6 +29,7 @@ struct SQLFunctionDropPlan {
     targets: Vec<RoutineDropTarget>,
     dependent_views: Vec<String>,
     dependent_columns: Vec<(String, String)>,
+    dependent_triggers: Vec<(String, String)>,
     notices: Vec<(&'static str, String)>,
 }
 
@@ -41,6 +42,7 @@ struct RoutineDropResolution {
 struct RoutineObjectDependents {
     views: Vec<String>,
     columns: Vec<(String, String)>,
+    triggers: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -156,6 +158,12 @@ fn append_routine_cascade_notice(
             .map(|(table, column)| format!("column {column} of table {table}")),
     );
     cascaded.extend(dependents.views.iter().map(|view| format!("view {view}")));
+    cascaded.extend(
+        dependents
+            .triggers
+            .iter()
+            .map(|(table, trigger)| format!("trigger {trigger} on table {table}")),
+    );
     cascaded.sort();
     cascaded.dedup();
     match cascaded.as_slice() {
@@ -385,6 +393,7 @@ impl Engine {
             targets: resolution.targets,
             dependent_views: dependents.views,
             dependent_columns: dependents.columns,
+            dependent_triggers: dependents.triggers,
             notices: resolution.notices,
         })
     }
@@ -482,6 +491,7 @@ impl Engine {
     ) -> Result<RoutineObjectDependents, SQLError> {
         let mut dependent_views = Vec::new();
         let mut dependent_columns = Vec::new();
+        let mut dependent_triggers = Vec::new();
         for target in targets {
             if !target.is_procedure {
                 let columns =
@@ -491,15 +501,31 @@ impl Engine {
                     .map_err(|error| {
                         SQLError::Internal(format!("read view function dependencies: {error}"))
                     })?;
+                let triggers = if target.argument_types.is_empty() {
+                    self.list_triggers()
+                        .into_iter()
+                        .filter(|trigger| trigger.definition.function == target.name)
+                        .map(|trigger| {
+                            (
+                                trigger.definition.table.clone(),
+                                trigger.definition.name.clone(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
                 if cascade {
                     dependent_columns.extend(columns);
                     dependent_views.extend(views);
+                    dependent_triggers.extend(triggers);
                 } else {
                     Self::ensure_no_function_dependencies(
                         &target.name,
                         &target.argument_types,
                         &columns,
                         &views,
+                        &triggers,
                     )?;
                 }
             }
@@ -507,9 +533,12 @@ impl Engine {
         dependent_columns.sort();
         dependent_columns.dedup();
         dependent_views = self.cascade_view_closure(dependent_views)?;
+        dependent_triggers.sort();
+        dependent_triggers.dedup();
         Ok(RoutineObjectDependents {
             views: dependent_views,
             columns: dependent_columns,
+            triggers: dependent_triggers,
         })
     }
 
@@ -519,8 +548,17 @@ impl Engine {
             targets,
             dependent_views,
             dependent_columns,
+            dependent_triggers,
             notices,
         } = plan;
+        for (table, name) in &dependent_triggers {
+            self.drop_trigger(&uqa_sql::ast::DropTrigger {
+                name: name.clone(),
+                table: table.clone(),
+                if_exists: false,
+                cascade: true,
+            })?;
+        }
         if !dependent_views.is_empty() {
             self.drop_views_inner(&dependent_views)?;
         }
@@ -654,8 +692,9 @@ impl Engine {
         argument_types: &[String],
         generated: &[(String, String)],
         views: &[String],
+        triggers: &[(String, String)],
     ) -> Result<(), SQLError> {
-        if generated.is_empty() && views.is_empty() {
+        if generated.is_empty() && views.is_empty() && triggers.is_empty() {
             return Ok(());
         }
         let mut dependency_kinds = Vec::new();
@@ -671,6 +710,16 @@ impl Engine {
         }
         if !views.is_empty() {
             dependency_kinds.push(format!("view(s) `{}`", views.join("`, `")));
+        }
+        if !triggers.is_empty() {
+            dependency_kinds.push(format!(
+                "trigger(s) `{}`",
+                triggers
+                    .iter()
+                    .map(|(table, trigger)| format!("{trigger} on {table}"))
+                    .collect::<Vec<_>>()
+                    .join("`, `")
+            ));
         }
         Err(SQLError::Routine {
             sqlstate: "2BP01".into(),

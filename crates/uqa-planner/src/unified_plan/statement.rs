@@ -349,6 +349,12 @@ impl UnifiedPlan {
             Statement::CreateRole(value) => Self::Command(Box::new(CommandPlan::CreateRole(value))),
             Statement::AlterRole(value) => Self::Command(Box::new(CommandPlan::AlterRole(value))),
             Statement::DropRole(value) => Self::Command(Box::new(CommandPlan::DropRole(value))),
+            Statement::CreateTrigger(value) => {
+                Self::Command(Box::new(CommandPlan::CreateTrigger(value)))
+            }
+            Statement::DropTrigger(value) => {
+                Self::Command(Box::new(CommandPlan::DropTrigger(value)))
+            }
             Statement::DoBlock { language, body } => {
                 Self::Command(Box::new(CommandPlan::DoBlock { language, body }))
             }
@@ -424,6 +430,8 @@ impl CommandPlan {
             Self::CreateRole(_) => "CreateRole",
             Self::AlterRole(_) => "AlterRole",
             Self::DropRole(_) => "DropRole",
+            Self::CreateTrigger(_) => "CreateTrigger",
+            Self::DropTrigger(_) => "DropTrigger",
             Self::DoBlock { .. } => "DoBlock",
             Self::Call { .. } => "Call",
         }

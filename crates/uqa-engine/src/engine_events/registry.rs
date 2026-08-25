@@ -1,0 +1,192 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Transactional trigger registry mutations.
+
+use std::collections::BTreeMap;
+
+use uqa_sql::ast::{CreateTrigger, DropTrigger, EventEnableMode};
+use uqa_sql::SQLError;
+
+use crate::{Engine, RelationIdentity};
+
+use super::{duplicate_object, undefined_object, StoredTrigger};
+
+impl Engine {
+    pub(crate) fn register_trigger(&self, mut definition: CreateTrigger) -> Result<(), SQLError> {
+        let relation = self.validate_trigger_definition(&mut definition)?;
+        self.ensure_partition_trigger_name_available(
+            &relation,
+            &definition.name,
+            definition.or_replace,
+        )?;
+        let mut triggers = self.durable.triggers.write();
+        let mut next = triggers.clone();
+        let table_triggers = next.entry(relation).or_default();
+        if table_triggers.contains_key(&definition.name) && !definition.or_replace {
+            return Err(duplicate_object(
+                "trigger",
+                &definition.name,
+                &definition.table,
+            ));
+        }
+        table_triggers.insert(
+            definition.name.clone(),
+            StoredTrigger {
+                definition,
+                enabled: EventEnableMode::Origin,
+            },
+        );
+        self.persist_trigger_catalog_snapshot(&next)?;
+        *triggers = next;
+        drop(triggers);
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+
+    fn ensure_partition_trigger_name_available(
+        &self,
+        relation: &RelationIdentity,
+        name: &str,
+        replacing_local: bool,
+    ) -> Result<(), SQLError> {
+        let ancestor_sources = self
+            .partition_trigger_sources(&relation.qualified_name())?
+            .into_iter()
+            .skip(1)
+            .collect::<Vec<_>>();
+        let mut descendant_relations = Vec::new();
+        for table in self
+            .table_names()
+            .map_err(|error| SQLError::Internal(format!("read trigger partitions: {error}")))?
+        {
+            if table == relation.qualified_name() {
+                continue;
+            }
+            let sources = self.partition_trigger_sources(&table)?;
+            if sources.iter().skip(1).any(|source| source == relation) {
+                descendant_relations.push(RelationIdentity::from_legacy_name(&table).map_err(
+                    |error| {
+                        SQLError::Internal(format!("decode trigger partition `{table}`: {error}"))
+                    },
+                )?);
+            }
+        }
+        let triggers = self.durable.triggers.read();
+        for source in ancestor_sources {
+            if triggers
+                .get(&source)
+                .is_some_and(|entries| entries.contains_key(name))
+            {
+                return Err(duplicate_object(
+                    "trigger",
+                    name,
+                    &relation.qualified_name(),
+                ));
+            }
+        }
+        for descendant in descendant_relations {
+            if triggers
+                .get(&descendant)
+                .is_some_and(|entries| entries.contains_key(name))
+            {
+                return Err(duplicate_object(
+                    "trigger",
+                    name,
+                    &descendant.qualified_name(),
+                ));
+            }
+        }
+        if !replacing_local
+            && triggers
+                .get(relation)
+                .is_some_and(|entries| entries.contains_key(name))
+        {
+            return Err(duplicate_object(
+                "trigger",
+                name,
+                &relation.qualified_name(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn drop_trigger(&self, statement: &DropTrigger) -> Result<(), SQLError> {
+        let relation = self.resolve_trigger_table(&statement.table)?;
+        let table = relation.qualified_name();
+        let mut triggers = self.durable.triggers.write();
+        let mut next = triggers.clone();
+        let removed = next
+            .get_mut(&relation)
+            .and_then(|entries| entries.remove(&statement.name));
+        if removed.is_none() {
+            if statement.if_exists {
+                self.push_sql_notice(
+                    "NOTICE",
+                    &format!(
+                        "trigger \"{}\" for relation \"{}\" does not exist, skipping",
+                        statement.name, table
+                    ),
+                );
+                return Ok(());
+            }
+            return Err(undefined_object("trigger", &statement.name, &table));
+        }
+        if next.get(&relation).is_some_and(BTreeMap::is_empty) {
+            next.remove(&relation);
+        }
+        self.persist_trigger_catalog_snapshot(&next)?;
+        *triggers = next;
+        drop(triggers);
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+
+    pub(crate) fn rename_trigger(&self, table: &str, from: &str, to: &str) -> Result<(), SQLError> {
+        let relation = self.resolve_trigger_table(table)?;
+        let mut triggers = self.durable.triggers.write();
+        let mut next = triggers.clone();
+        let entries = next.entry(relation).or_default();
+        if entries.contains_key(to) {
+            return Err(duplicate_object("trigger", to, table));
+        }
+        let mut trigger = entries
+            .remove(from)
+            .ok_or_else(|| undefined_object("trigger", from, table))?;
+        trigger.definition.name = to.to_string();
+        entries.insert(to.to_string(), trigger);
+        self.persist_trigger_catalog_snapshot(&next)?;
+        *triggers = next;
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+
+    pub(crate) fn set_trigger_enable_mode(
+        &self,
+        table: &str,
+        name: Option<&str>,
+        mode: EventEnableMode,
+    ) -> Result<(), SQLError> {
+        let relation = self.resolve_trigger_table(table)?;
+        let mut triggers = self.durable.triggers.write();
+        let mut next = triggers.clone();
+        let entries = next.entry(relation).or_default();
+        if let Some(name) = name {
+            entries
+                .get_mut(name)
+                .ok_or_else(|| undefined_object("trigger", name, table))?
+                .enabled = mode;
+        } else {
+            for trigger in entries.values_mut() {
+                trigger.enabled = mode;
+            }
+        }
+        self.persist_trigger_catalog_snapshot(&next)?;
+        *triggers = next;
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+}

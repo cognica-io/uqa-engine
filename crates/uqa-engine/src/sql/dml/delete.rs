@@ -42,6 +42,13 @@ pub(in crate::sql) fn run_delete_inner(
         &stmt.table,
         crate::row_locks::RelationLockMode::RowExclusive,
     )?;
+    crate::sql::triggers::fire_statement_triggers(
+        engine,
+        &stmt.table,
+        uqa_sql::ast::TriggerTiming::Before,
+        uqa_sql::ast::TriggerEvent::Delete,
+        &[],
+    )?;
     let mut affected = 0u64;
     let cancel = engine.cancellation_token();
     let mut qualified_targets: Vec<(
@@ -187,6 +194,19 @@ pub(in crate::sql) fn run_delete_inner(
         if !qualified_ids.insert((storage_table.clone(), doc_id)) {
             continue;
         }
+        if crate::sql::triggers::fire_before_row_triggers(
+            engine,
+            &storage_table,
+            uqa_sql::ast::TriggerEvent::Delete,
+            doc_id,
+            Some(&doc),
+            None,
+            &[],
+        )?
+        .is_none()
+        {
+            continue;
+        }
         engine.stage_command_document(&storage_table, doc_id, None)?;
         qualified_targets.push((storage_table, doc_id, doc, returning_context));
     }
@@ -239,10 +259,31 @@ pub(in crate::sql) fn run_delete_inner(
     drop(overlay);
     if !prepared_deletes.is_empty() {
         engine.prepare_explicit_transaction_writer()?;
-        for (mut prepared, _) in prepared_deletes {
-            apply_validated_prepared_document_delete(engine, &mut prepared)?;
+        for (prepared, _) in &mut prepared_deletes {
+            apply_validated_prepared_document_delete(engine, prepared)?;
         }
     }
+    for (prepared, _) in &prepared_deletes {
+        crate::sql::triggers::fire_after_row_trigger_event(
+            engine,
+            crate::sql::triggers::AfterRowTriggerEvent::new(
+                &prepared.table,
+                uqa_sql::ast::TriggerEvent::Delete,
+                prepared.doc_id,
+                prepared.doc_id,
+                Some(&prepared.document),
+                None,
+                &[],
+            ),
+        )?;
+    }
+    crate::sql::triggers::fire_statement_triggers(
+        engine,
+        &stmt.table,
+        uqa_sql::ast::TriggerTiming::After,
+        uqa_sql::ast::TriggerEvent::Delete,
+        &[],
+    )?;
     if !stmt.returning.is_empty() {
         return dml_returning_result(
             engine,

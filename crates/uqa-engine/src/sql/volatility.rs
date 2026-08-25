@@ -129,6 +129,7 @@ pub(super) fn function_volatility(
                 | "fts_index_stats"
                 | "pg_get_expr"
                 | "pg_get_partkeydef"
+                | "pg_get_triggerdef"
         )
     {
         FunctionVolatility::Stable

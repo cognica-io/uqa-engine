@@ -349,7 +349,12 @@ fn validate_routine_output_types(
                 )));
             }
             None if ROUTINE_RESULT_PSEUDO_TYPES.contains(&type_name.as_str())
-                && !matches!(type_name.as_str(), "record" | "refcursor" | "void") =>
+                && !matches!(type_name.as_str(), "record" | "refcursor" | "void")
+                && !(type_name == "trigger"
+                    && def.language == "plpgsql"
+                    && !def.is_procedure
+                    && def.params.is_empty()
+                    && matches!(def.returns, FunctionReturns::Scalar { .. })) =>
             {
                 return Err(routine_definition_error(format!(
                     "{} routines cannot return type {type_name}",

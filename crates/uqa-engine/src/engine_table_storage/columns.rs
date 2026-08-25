@@ -311,6 +311,7 @@ impl Engine {
             }
         }
         self.rewrite_column_rename_dependencies(&table_name, from, to)?;
+        self.rename_trigger_column_inner(&table_name, from, to)?;
         Self::value_indexes_clear(&t);
         {
             let mut cols = t.columns.write();
@@ -447,8 +448,9 @@ impl Engine {
         let Some(state) = tables.remove(&from_relation) else {
             return Ok(false);
         };
-        tables.insert(to_relation, state.clone());
+        tables.insert(to_relation.clone(), state.clone());
         drop(tables);
+        self.rename_relation_triggers_inner(&from_relation, &to_relation)?;
         self.rename_catalog_index_table_refs(&from, &to);
         {
             let mut analyzers = self.durable.table_field_analyzers.write();

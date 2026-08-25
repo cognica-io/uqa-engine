@@ -207,6 +207,15 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             }
         }
         let truncate = |engine: &Engine| {
+            for table in &targets {
+                crate::sql::triggers::fire_statement_triggers(
+                    engine,
+                    table,
+                    uqa_sql::ast::TriggerTiming::Before,
+                    uqa_sql::ast::TriggerEvent::Truncate,
+                    &[],
+                )?;
+            }
             // Referencing relations first makes the mutation order explicit
             // even though the low-level clear does not evaluate row FKs.
             fn visit(
@@ -247,7 +256,17 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                     &mut ordered,
                 )?;
             }
-            engine.truncate_tables_with_identity(&ordered, restart_identity)
+            engine.truncate_tables_with_identity(&ordered, restart_identity)?;
+            for table in &targets {
+                crate::sql::triggers::fire_statement_triggers(
+                    engine,
+                    table,
+                    uqa_sql::ast::TriggerTiming::After,
+                    uqa_sql::ast::TriggerEvent::Truncate,
+                    &[],
+                )?;
+            }
+            Ok(())
         };
         if self.engine.transaction_depth() == 0 {
             self.engine.transaction(truncate)?;
@@ -401,6 +420,14 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             }
             CommandPlan::DropRole(statement) => {
                 self.engine.drop_roles(statement)?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::CreateTrigger(statement) => {
+                self.engine.register_trigger(statement.clone())?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::DropTrigger(statement) => {
+                self.engine.drop_trigger(statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::AlterTable(statement) => {

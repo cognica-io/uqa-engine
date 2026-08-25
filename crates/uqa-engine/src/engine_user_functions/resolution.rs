@@ -606,10 +606,26 @@ pub(super) fn static_function_return_type(
     def: &CreateFunction,
     invocation: Option<&RoutineInvocationBinding>,
 ) -> Result<ColumnType, SQLError> {
+    let invocation_return = invocation.and_then(|invocation| invocation.return_type.as_deref());
+    let declared_return = match &def.returns {
+        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
+            Some(type_name.as_str())
+        }
+        FunctionReturns::Table | FunctionReturns::None => None,
+    };
+    if invocation_return
+        .or(declared_return)
+        .is_some_and(|type_name| canonical_routine_type_name(type_name) == "trigger")
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "trigger functions can only be called as triggers".into(),
+        });
+    }
     if matches!(def.returns, FunctionReturns::Table) || def.output_params().len() > 1 {
         return Ok(ColumnType::Record);
     }
-    if let Some(type_name) = invocation.and_then(|invocation| invocation.return_type.as_deref()) {
+    if let Some(type_name) = invocation_return {
         return crate::sql::resolve_catalog_column_type(engine, type_name)
             .or_else(|| ColumnType::from_sql_name(type_name).ok())
             .ok_or_else(|| {
