@@ -9,7 +9,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ColumnType, Expr, GeneratedColumn, OnCommitAction, RelationPersistence, TableHierarchy,
+    deserialize_auto_increment, AutoIncrement, ColumnType, Expr, GeneratedColumn, OnCommitAction,
+    RelationPersistence, TableHierarchy,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,10 +37,13 @@ pub struct ColumnDef {
     /// constraints.
     #[serde(default)]
     pub not_null_no_inherit: bool,
-    /// `SERIAL` / `BIGSERIAL` columns auto-allocate from a per-table
-    /// monotonic counter when the value is omitted from `INSERT`.
-    #[serde(default)]
-    pub auto_increment: bool,
+    /// Sequence provenance for `SERIAL` / `BIGSERIAL` and identity columns. The custom decoder accepts the legacy boolean representation written by releases that merged both SQL features into one table counter.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_auto_increment",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub auto_increment: Option<AutoIncrement>,
     /// `UNIQUE` column constraint -- the engine rejects an INSERT
     /// whose value for this column already exists in another row.
     #[serde(default)]

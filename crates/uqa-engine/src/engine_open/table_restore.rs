@@ -112,7 +112,12 @@ impl Engine {
         let column_stats = Self::load_column_stats_from_catalog(catalog, &table_name)?;
         let column_stats_dirty = column_stats.is_empty() && !columns.is_empty();
         let max_id = docs.max_doc_id()?;
-        let persisted_next_id = if columns.iter().any(|column| column.auto_increment) {
+        let persisted_next_id = if columns.iter().any(|column| {
+            column
+                .auto_increment
+                .as_ref()
+                .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy)
+        }) {
             Self::load_persisted_next_id(catalog, &table_name)?
         } else {
             None

@@ -258,7 +258,10 @@ impl Engine {
         let mut dependents = Vec::new();
         for (table_name, table) in self.table_entries() {
             for column in table.columns.read().iter() {
-                let mut depends = false;
+                let mut depends = column
+                    .auto_increment
+                    .as_ref()
+                    .is_some_and(|provenance| provenance.sequence.as_deref() == Some(sequence));
                 if let Some(default) = &column.default {
                     depends = self
                         .stored_sequence_targets_in_expr(default)?
@@ -367,6 +370,16 @@ impl Engine {
             let mut changed = false;
 
             for column in &mut columns {
+                if let Some(owner) = column
+                    .auto_increment
+                    .as_mut()
+                    .and_then(|provenance| provenance.owner.as_mut())
+                {
+                    if stored_relation_reference_matches(&owner.table, &from_relation) {
+                        owner.table = to.to_string();
+                        changed = true;
+                    }
+                }
                 for expression in [&mut column.default, &mut column.check]
                     .into_iter()
                     .flatten()
@@ -447,6 +460,7 @@ impl Engine {
             let mut changed = false;
 
             for column in &mut columns {
+                changed |= Self::rewrite_auto_increment_owner_column(column, &target, from, to);
                 for expression in [&mut column.default, &mut column.check]
                     .into_iter()
                     .flatten()
@@ -535,6 +549,26 @@ impl Engine {
             *table.foreign_keys.write() = foreign_keys;
         }
         Ok(())
+    }
+
+    fn rewrite_auto_increment_owner_column(
+        column: &mut uqa_sql::ast::ColumnDef,
+        target: &RelationIdentity,
+        from: &str,
+        to: &str,
+    ) -> bool {
+        let Some(owner) = column
+            .auto_increment
+            .as_mut()
+            .and_then(|provenance| provenance.owner.as_mut())
+        else {
+            return false;
+        };
+        if !stored_relation_reference_matches(&owner.table, target) || owner.column != from {
+            return false;
+        }
+        owner.column = to.to_string();
+        true
     }
 
     pub(super) fn preflight_drop_column_dependencies(

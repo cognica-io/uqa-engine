@@ -165,7 +165,7 @@ impl Engine {
         }
     }
 
-    /// Return the physical counter owner for an auto-incrementing column. Declarative partitions share the top partitioned parent's counter; ordinary inheritance keeps its existing per-relation behavior because the current column metadata does not distinguish SERIAL defaults from identity attributes.
+    /// Return the physical counter owner for legacy auto-increment metadata. Declarative partitions share the top partitioned parent's counter; newly created SERIAL and identity columns use their durable sequence binding instead.
     pub(crate) fn partition_identity_owner(&self, table: &str) -> Result<String, SQLError> {
         if let Some(root) = self.partition_hierarchy_root(table)? {
             return Ok(root);
@@ -175,7 +175,7 @@ impl Engine {
             .ok_or_else(|| SQLError::UnknownTable(table.to_string()))
     }
 
-    /// Rebuild a partitioned parent's shared auto-increment watermark from every physical partition. Persistent table counters are reconstructed from document ids, so the logical owner must observe the maximum restored descendant watermark before it can allocate another value.
+    /// Rebuild a partitioned parent's shared legacy auto-increment watermark from every physical partition. Persistent table counters are reconstructed from document ids, so the logical owner must observe the maximum restored descendant watermark before it can allocate another value.
     pub(crate) fn synchronize_partition_identity_watermarks(&self) -> StorageBackendResult<()> {
         let entries = self
             .storage
@@ -186,12 +186,12 @@ impl Engine {
             .collect::<std::collections::BTreeMap<_, _>>();
         let mut root_watermarks = std::collections::BTreeMap::<String, u128>::new();
         for (name, table) in &entries {
-            if !table
-                .columns
-                .read()
-                .iter()
-                .any(|column| column.auto_increment)
-            {
+            if !table.columns.read().iter().any(|column| {
+                column
+                    .auto_increment
+                    .as_ref()
+                    .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy)
+            }) {
                 continue;
             }
             let mut current = name.clone();

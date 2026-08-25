@@ -15,6 +15,8 @@ mod copy_io;
 mod fk_conflict;
 #[path = "sql_relation_hierarchy/hash.rs"]
 mod hash;
+#[path = "sql_relation_hierarchy/identity_provenance.rs"]
+mod identity_provenance;
 #[path = "sql_relation_hierarchy/merge.rs"]
 mod merge;
 #[path = "sql_relation_hierarchy/movement.rs"]

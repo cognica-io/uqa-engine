@@ -105,7 +105,7 @@ fn bigserial_auto_id_assigns_monotonic_ids() {
 }
 
 #[test]
-fn serial_auto_id_with_explicit_id_advances_watermark() {
+fn serial_explicit_value_does_not_advance_implicit_sequence() {
     let eng = Engine::new();
     eng.sql("CREATE TABLE t (id SERIAL PRIMARY KEY, body TEXT)", &[])
         .unwrap();
@@ -122,7 +122,7 @@ fn serial_auto_id_with_explicit_id_advances_watermark() {
             other => panic!("expected int, got {other:?}"),
         })
         .collect();
-    assert_eq!(ids, vec![10, 11]);
+    assert_eq!(ids, vec![1, 10]);
 }
 
 #[test]

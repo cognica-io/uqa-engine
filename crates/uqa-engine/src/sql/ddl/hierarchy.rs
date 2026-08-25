@@ -69,10 +69,22 @@ pub(super) fn prepare_create_table_hierarchy(
                 message: format!("cannot inherit from partitioned table \"{requested_parent}\""),
             });
         }
-        let columns = engine
+        let mut columns = engine
             .try_describe_table(&parent)
             .map_err(|error| SQLError::Internal(format!("read inherited row type: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(parent.clone()))?;
+        if !is_partition {
+            // PostgreSQL inherits the NOT NULL property of an identity column, but not its identity generation attribute or owned sequence. SERIAL is different: its nextval default is ordinary inherited metadata and therefore keeps pointing at the parent's sequence.
+            for column in &mut columns {
+                if column
+                    .auto_increment
+                    .as_ref()
+                    .is_some_and(uqa_sql::ast::AutoIncrement::is_identity)
+                {
+                    column.auto_increment = None;
+                }
+            }
+        }
         merge_parent_columns(&mut inherited_columns, columns)?;
         let constraints = engine
             .try_declared_table_constraints(&parent)
@@ -190,6 +202,9 @@ fn merge_same_column(
     inherited.not_null_explicit |= declared.not_null_explicit;
     inherited.primary_key |= declared.primary_key;
     inherited.unique |= declared.unique;
+    if declared.auto_increment.is_some() {
+        inherited.auto_increment = declared.auto_increment;
+    }
     if declared.default.is_some() || !merging_parents {
         inherited.default = declared.default;
     }

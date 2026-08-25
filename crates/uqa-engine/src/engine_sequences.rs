@@ -328,6 +328,12 @@ impl Engine {
         Ok(true)
     }
 
+    pub(crate) fn restart_owned_sequence(&self, name: &str) -> StorageBackendResult<()> {
+        self.alter_sequence_inner(name, SequenceRestart::FromStart, None, None, false)
+            .map(|_| ())
+            .map_err(StorageBackendError::Other)
+    }
+
     fn validate_sequence_increment(name: &str, increment: i64) -> Result<(), String> {
         if increment == 0 {
             Err(format!("Sequence `{name}` increment must not be zero"))
@@ -388,6 +394,18 @@ impl Engine {
             self.note_catalog_registry_changed();
         }
         Ok(removed)
+    }
+
+    pub(crate) fn drop_owned_sequence(&self, name: &str) -> StorageBackendResult<()> {
+        self.drop_sequence_inner(name)
+            .and_then(|removed| {
+                if removed {
+                    Ok(())
+                } else {
+                    Err(format!("owned sequence `{name}` does not exist"))
+                }
+            })
+            .map_err(StorageBackendError::Other)
     }
 
     fn resolve_sequence_value_target(

@@ -492,7 +492,7 @@ pub(in crate::sql) fn can_patch_update_without_full_row(
         .iter()
         .any(|col| {
             col.not_null
-                && !col.auto_increment
+                && col.auto_increment.is_none()
                 && matches!(updates.get(&col.name), Some(Value::Null))
         })
     {

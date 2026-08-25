@@ -20,6 +20,7 @@ mod ranges;
 mod relation_hierarchy;
 mod relation_lifecycle;
 mod routine_security;
+mod sequence;
 
 pub use constraints::*;
 pub use cte::*;
@@ -30,6 +31,7 @@ pub use ranges::*;
 pub use relation_hierarchy::*;
 pub use relation_lifecycle::*;
 pub use routine_security::*;
+pub use sequence::*;
 
 const fn default_include_descendants() -> bool {
     true

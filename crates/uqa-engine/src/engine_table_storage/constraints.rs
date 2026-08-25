@@ -776,7 +776,7 @@ impl Engine {
         let cols = t.columns.read();
         let auto_increment: std::collections::BTreeSet<String> = cols
             .iter()
-            .filter(|column| column.auto_increment)
+            .filter(|column| column.auto_increment.is_some())
             .map(|column| column.name.clone())
             .collect();
         drop(cols);
@@ -902,12 +902,12 @@ impl Engine {
         table: &str,
         state: &TableState,
     ) -> StorageBackendResult<()> {
-        let persisted = if state
-            .columns
-            .read()
-            .iter()
-            .any(|column| column.auto_increment)
-        {
+        let persisted = if state.columns.read().iter().any(|column| {
+            column
+                .auto_increment
+                .as_ref()
+                .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy)
+        }) {
             self.storage
                 .catalog
                 .as_ref()

@@ -135,7 +135,11 @@ fn validate_document_non_key_constraints_with_old(
     let document = logical_document.as_ref().unwrap_or(document);
 
     for col_def in &definitions {
-        if !col_def.not_null || col_def.auto_increment {
+        if !col_def.not_null
+            || col_def.auto_increment.as_ref().is_some_and(|provenance| {
+                provenance.kind == uqa_sql::ast::AutoIncrementKind::Legacy
+            })
+        {
             continue;
         }
         match document.get(&col_def.name) {

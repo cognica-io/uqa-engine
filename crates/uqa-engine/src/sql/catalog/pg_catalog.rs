@@ -472,7 +472,7 @@ pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
                 not_null_name: None,
                 not_null_validated: true,
                 not_null_no_inherit: false,
-                auto_increment: false,
+                auto_increment: None,
                 unique: false,
                 default: None,
                 generated: None,
@@ -511,12 +511,26 @@ pub(super) fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> R
         ("attnotnull", bool_value(col.not_null || col.primary_key)),
         (
             "atthasdef",
-            bool_value(col.default.is_some() || col.auto_increment || col.generated.is_some()),
+            bool_value(
+                col.default.is_some()
+                    || col.generated.is_some()
+                    || col
+                        .auto_increment
+                        .as_ref()
+                        .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy),
+            ),
         ),
         ("atthasmissing", bool_value(false)),
         (
             "attidentity",
-            str_value(if col.auto_increment { "d" } else { "" }),
+            str_value(match col.auto_increment.as_ref().map(|value| value.kind) {
+                Some(uqa_sql::ast::AutoIncrementKind::IdentityAlways) => "a",
+                Some(
+                    uqa_sql::ast::AutoIncrementKind::IdentityByDefault
+                    | uqa_sql::ast::AutoIncrementKind::Legacy,
+                ) => "d",
+                Some(uqa_sql::ast::AutoIncrementKind::Serial) | None => "",
+            }),
         ),
         (
             "attgenerated",
@@ -549,10 +563,14 @@ pub(super) fn build_pg_attrdef(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
         let (_, table) = split_schema_name(&table_name)?;
         let relid = table_relation_oid(engine, &table_name)?;
         for (idx, col) in table_columns_for(engine, &table_name)?.iter().enumerate() {
-            if col.default.is_none() && !col.auto_increment && col.generated.is_none() {
+            let legacy_auto_increment = col
+                .auto_increment
+                .as_ref()
+                .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy);
+            if col.default.is_none() && !legacy_auto_increment && col.generated.is_none() {
                 continue;
             }
-            let default = if col.auto_increment {
+            let default = if legacy_auto_increment {
                 format!("nextval('{}_{}_seq')", table, col.name)
             } else if let Some(generated) = &col.generated {
                 super::helpers::schema_expr_text(&generated.expression)

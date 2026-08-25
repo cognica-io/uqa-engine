@@ -661,17 +661,80 @@ fn prepare_auto_increment_identity(
     let Some(auto_id_column) = auto_id_column else {
         return Ok(None);
     };
-    let owner = engine.partition_identity_owner(table)?;
-    engine.lock_relation(&owner, crate::row_locks::RelationLockMode::RowExclusive)?;
-    prepare_insert_identity(
-        engine,
-        &owner,
-        id_column,
-        Some(auto_id_column),
-        document,
-        action,
-    )
-    .map(Some)
+    let definitions = engine
+        .auto_increment_columns(table)
+        .map_err(|error| dml_storage_error(action, error))?;
+    let mut selected_generated = false;
+    for (column, provenance) in &definitions {
+        if !provenance.is_identity() {
+            continue;
+        }
+        let supplied = document
+            .get(column)
+            .is_some_and(|value| !matches!(value, Value::Null));
+        if supplied {
+            if provenance.kind == uqa_sql::ast::AutoIncrementKind::IdentityAlways {
+                return Err(SQLError::Routine {
+                    sqlstate: "428C9".into(),
+                    message: format!(
+                        "cannot insert a non-DEFAULT value into identity column \"{column}\""
+                    ),
+                });
+            }
+            continue;
+        }
+        let sequence = provenance.sequence.as_deref().ok_or_else(|| {
+            SQLError::Internal(format!(
+                "identity column `{table}.{column}` has no durable sequence binding"
+            ))
+        })?;
+        let value = engine.nextval_sql(sequence)?;
+        document.insert(
+            column.clone(),
+            crate::sql::coerce_to_column_type(engine, table, column, Value::Int(value))?,
+        );
+        selected_generated |= column == auto_id_column;
+    }
+    let provenance = definitions
+        .iter()
+        .find(|(column, _)| column == auto_id_column)
+        .map(|(_, provenance)| provenance)
+        .ok_or_else(|| {
+            SQLError::Internal(format!(
+                "auto-increment column `{table}.{auto_id_column}` disappeared"
+            ))
+        })?;
+    match provenance.kind {
+        uqa_sql::ast::AutoIncrementKind::Serial => Ok(None),
+        uqa_sql::ast::AutoIncrementKind::IdentityAlways
+        | uqa_sql::ast::AutoIncrementKind::IdentityByDefault => {
+            let mut identity = prepare_insert_identity(
+                engine,
+                table,
+                id_column,
+                Some(auto_id_column),
+                document,
+                action,
+            )?;
+            if selected_generated {
+                identity.1 = false;
+            }
+            Ok(Some(identity))
+        }
+        uqa_sql::ast::AutoIncrementKind::Legacy => {
+            let owner = engine.partition_identity_owner(table)?;
+            engine.lock_relation(&owner, crate::row_locks::RelationLockMode::RowExclusive)?;
+            prepare_insert_identity(
+                engine,
+                &owner,
+                id_column,
+                Some(auto_id_column),
+                document,
+                action,
+            )
+            .map(Some)
+        }
+    }
 }
 
 fn persist_auto_increment_identity(
@@ -680,7 +743,16 @@ fn persist_auto_increment_identity(
     auto_id_column: Option<&str>,
     action: &str,
 ) -> Result<(), SQLError> {
-    if auto_id_column.is_none() {
+    let Some(auto_id_column) = auto_id_column else {
+        return Ok(());
+    };
+    let legacy = engine
+        .auto_increment_columns(table)
+        .map_err(|error| dml_storage_error(action, error))?
+        .into_iter()
+        .find(|(column, _)| column == auto_id_column)
+        .is_some_and(|(_, provenance)| provenance.kind == uqa_sql::ast::AutoIncrementKind::Legacy);
+    if !legacy {
         return Ok(());
     }
     let owner = engine.partition_identity_owner(table)?;
