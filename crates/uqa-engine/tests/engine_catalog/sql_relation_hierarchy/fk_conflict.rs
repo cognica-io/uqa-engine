@@ -79,14 +79,18 @@ fn hierarchy_foreign_keys_follow_physical_rows_and_route_referential_actions() {
             &[],
         )
         .unwrap_err();
-    assert!(missing_parent.to_string().contains("FOREIGN KEY"));
+    assert_eq!(missing_parent.sqlstate(), Some("23503"));
+    assert!(missing_parent
+        .to_string()
+        .contains("foreign key constraint"));
     let restricted = engine
         .sql(
             "DELETE FROM hierarchy_accounts WHERE region = 1 AND account_id = 7",
             &[],
         )
         .unwrap_err();
-    assert!(restricted.to_string().contains("FOREIGN KEY"));
+    assert_eq!(restricted.sqlstate(), Some("23503"));
+    assert!(restricted.to_string().contains("foreign key constraint"));
     assert_eq!(
         engine
             .sql(
@@ -150,6 +154,73 @@ fn hierarchy_foreign_keys_follow_physical_rows_and_route_referential_actions() {
     assert_eq!(set_row.rows[0]["region"], Value::Null);
     assert_eq!(set_row.rows[0]["account_id"], Value::Null);
     assert_eq!(set_row.rows[0]["marker"], Value::Str("set-high".into()));
+}
+
+#[test]
+fn hierarchy_temporal_cross_type_foreign_keys_scan_physical_partitions() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE hierarchy_periods (
+            bucket SMALLINT,
+            tenant INTEGER,
+            valid_at DATERANGE,
+            CONSTRAINT hierarchy_periods_pk PRIMARY KEY (bucket, tenant, valid_at WITHOUT OVERLAPS)
+        ) PARTITION BY RANGE (bucket)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE hierarchy_periods_low PARTITION OF hierarchy_periods FOR VALUES FROM (MINVALUE) TO (10)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE hierarchy_periods_high PARTITION OF hierarchy_periods FOR VALUES FROM (10) TO (MAXVALUE)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE hierarchy_period_refs (
+            row_id INTEGER PRIMARY KEY,
+            bucket BIGINT,
+            tenant BIGINT,
+            valid_at DATERANGE,
+            CONSTRAINT hierarchy_period_refs_fk FOREIGN KEY (bucket, tenant, PERIOD valid_at)
+                REFERENCES hierarchy_periods (bucket, tenant, PERIOD valid_at)
+        )",
+    );
+    exec(
+        &engine,
+        "INSERT INTO hierarchy_periods VALUES
+            (1, 7, '[2024-01-01,2024-01-10)'),
+            (1, 7, '[2024-01-10,2024-01-20)'),
+            (11, 8, '[2024-02-01,2024-02-10)'),
+            (11, 8, '[2024-02-10,2024-02-20)')",
+    );
+    exec(
+        &engine,
+        "INSERT INTO hierarchy_period_refs VALUES
+            (1, 1, 7, '[2024-01-05,2024-01-15)'),
+            (2, 11, 8, '[2024-02-05,2024-02-15)')",
+    );
+
+    let uncovered = engine
+        .sql(
+            "INSERT INTO hierarchy_period_refs VALUES (3, 11, 8, '[2024-02-05,2024-02-25)')",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(uncovered.sqlstate(), Some("23503"));
+    assert!(uncovered.to_string().contains("hierarchy_period_refs_fk"));
+
+    let referenced_delete = engine
+        .sql(
+            "DELETE FROM hierarchy_periods WHERE bucket = 11 AND valid_at = '[2024-02-01,2024-02-10)'",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(referenced_delete.sqlstate(), Some("23503"));
+    assert!(referenced_delete
+        .to_string()
+        .contains("hierarchy_period_refs_fk"));
 }
 
 #[test]

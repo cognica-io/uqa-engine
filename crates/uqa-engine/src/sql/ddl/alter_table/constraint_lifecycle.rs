@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL 18 ALTER TABLE constraint lifecycle.
+//! `PostgreSQL` 18 ALTER TABLE constraint lifecycle.
 
 use super::foreign_key::{
     column_foreign_key, validate_foreign_key_definition, validate_foreign_key_rows,

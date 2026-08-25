@@ -410,10 +410,6 @@ fn relation_forms_and_options_preserve_lifecycle_semantics() {
 fn unsupported_create_ddl_never_loses_remaining_envelope_semantics() {
     for (sql, expected) in [
         (
-            "CREATE TABLE inherited (id INTEGER) INHERITS (parent)",
-            "INHERITS",
-        ),
-        (
             "CREATE TABLE optioned (id INTEGER) WITH (fillfactor = 70)",
             "storage options",
         ),

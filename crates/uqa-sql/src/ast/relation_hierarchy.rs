@@ -30,7 +30,7 @@ pub struct TableHierarchy {
     /// Columns declared by this relation before inherited columns were merged into its stored row type. `PostgreSQL` exposes this provenance through `pg_attribute.attislocal`; keeping it in durable hierarchy metadata distinguishes an explicitly redeclared inherited column from a purely inherited one after reopen.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub local_columns: Vec<String>,
-    /// Original local sequence metadata hidden while an attached partition uses a parent's identity generator. PostgreSQL keeps a pre-existing SERIAL default and restores its behavior after DETACH.
+    /// Original local sequence metadata hidden while an attached partition uses a parent's identity generator. `PostgreSQL` keeps a pre-existing SERIAL default and restores its behavior after DETACH.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub partition_identity_overrides: Vec<PartitionIdentityOverride>,
 }

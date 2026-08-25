@@ -30,7 +30,7 @@ Relational operators keep static row schemas until the final consumer. Spill for
 
 ## Open PostgreSQL 18 relation-feature bugs
 
-Temporary tables, views, sequences, CTAS, `SELECT INTO`, temporary-relation name resolution through `pg_temp`, automatic temporary views over temporary relations, all three temporary-table `ON COMMIT` actions, `DISCARD TEMP`, unlogged tables and sequences across clean reopen, ordinary materialized views and refresh, validated view/materialized-view reloptions, ordinary inheritance, and declarative list/range/hash partitioning are implemented. Hierarchy scans preserve physical `tableoid`, ancestor statistics aggregate descendants, and catalog identity includes `pg_inherits`, partition-aware `pg_class` and `pg_attribute`, `pg_partitioned_table`, `pg_get_expr`, `pg_get_partkeydef`, and partitioned parent and child indexes.
+Temporary tables, views, sequences, CTAS, `SELECT INTO`, temporary-relation name resolution through `pg_temp`, automatic temporary views over temporary relations, all three temporary-table `ON COMMIT` actions, `DISCARD TEMP`, unlogged tables and sequences across clean reopen, ordinary materialized views and refresh, validated view/materialized-view reloptions, ordinary inheritance, and declarative list/range/hash partitioning are implemented. Hierarchy scans preserve physical `tableoid`, ancestor statistics aggregate descendants, and catalog identity includes `pg_inherits`, partition-aware `pg_class` and `pg_attribute`, `pg_partitioned_table`, `pg_get_expr`, `pg_get_partkeydef`, and partitioned parent and child indexes. `ALTER TABLE ... INHERIT`, `NO INHERIT`, `ATTACH PARTITION`, and `DETACH PARTITION` validate and publish durable hierarchy changes atomically; direct and query COPY paths preserve the corresponding named-storage, descendant-scan, partition-routing, generated-value, and rollback behavior.
 
 - Unlogged-relation reset after crash recovery
 - Typed tables
@@ -39,6 +39,8 @@ Temporary tables, views, sequences, CTAS, `SELECT INTO`, temporary-relation name
 - Cross-database relation or routine names
 - Temporary and unlogged materialized views, concurrent refresh, materialized-view indexes, access methods, and tablespaces
 - Complete privilege and optimizer effects for `security_invoker` and `security_barrier`, and updatable-view enforcement for `WITH CHECK OPTION`
+- PostgreSQL's interruptible `DETACH PARTITION ... CONCURRENTLY` pending state, later `FINALIZE`, and complete multi-session lock-wait behavior
+- Remaining upstream inheritance and partition regression schedules, privilege behavior, dump/restore, and unsupported index-method interactions
 
 Unsupported forms fail before catalog mutation. That failure is fail-safe behavior while implementation is incomplete, not a compatibility exemption.
 
@@ -54,7 +56,7 @@ For implemented tables, views, sequences, and foreign tables, text-to-`regclass`
 
 - Virtual and stored generated columns implement durable definitions, selective virtual evaluation, exactly-once stored evaluation, DML assignment rules, DDL-time static typing for the implemented expression surface, exact stored SQL routine overload binding and dependencies, supported constraints and indexes, catalogs, ALTER operations, failure atomicity, and reopen behavior. The complete PostgreSQL built-in function and operator overload matrix, privileges, inheritance and partition propagation, `pg_dump`/`pg_restore`, and complete upstream regression coverage remain open compatibility bugs.
 - Named CHECK, foreign-key, and `NOT NULL` constraints implement `NOT VALID`, failure-atomic validation, supported `ALTER CONSTRAINT` state changes, actual `INITIALLY DEFERRED` foreign-key checks at outer commit, savepoint rollback, catalog and information-schema flags, dependency-aware drop, multi-action ALTER atomicity, and durable reopen. Per-transaction `SET CONSTRAINTS`, inheritance and partition propagation, the complete dependency graph, `pg_dump`/`pg_restore`, and the upstream constraint regression matrix remain open compatibility bugs.
-- `WITHOUT OVERLAPS` keys and `PERIOD` foreign keys are not implemented because range and multirange column types are not yet available.
+- `WITHOUT OVERLAPS` keys and `PERIOD` foreign keys enforce the implemented range and multirange matrix, aggregate temporal coverage, mutation safety, ALTER validation, catalog flags, and reopen behavior. Physical GiST and exclusion-index planning, temporal actions beyond `NO ACTION`, deferrable temporal enforcement, dump/restore, and the complete upstream regression matrix remain open compatibility bugs.
 - Expression indexes are not implemented.
 - SQL index access methods are B-tree, GIN, IVF, and HNSW.
 - Dependency-sensitive `DROP ... CASCADE` remains incomplete for implemented catalog objects except graph namespaces and the bounded routine graph. `DROP FUNCTION signature CASCADE` removes the exact function, its generated columns, and direct or transitive stored views while retaining unrelated objects; `DROP PROCEDURE signature CASCADE` removes a procedure with no modeled dependents. Every additional routine-dependent object kind, dependent-procedure graph, multi-target CASCADE graph, deletion order, notice, and diagnostic is tracked by `routines.function-procedure-drop-cascade-extended`.

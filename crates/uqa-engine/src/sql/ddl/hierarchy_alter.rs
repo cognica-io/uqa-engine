@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL 18 ALTER inheritance and partition lifecycle.
+//! `PostgreSQL` 18 ALTER inheritance and partition lifecycle.
 
 use super::{ddl_storage_error, AlterTableAction, Engine, SQLError, Value};
 use uqa_sql::ast::{

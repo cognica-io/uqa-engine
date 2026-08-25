@@ -6,7 +6,11 @@
 
 //! Physical tuple-successor tracking for rows that move between partitions.
 
-use super::*;
+use super::{
+    epoch_is_after, lock_strengths_conflict, table_hash, CommittedRowChange,
+    CommittedRowChangeKind, CrossAttachment, DocId, LockStrength, RowChangeBaseline, RowLockKey,
+    RowLockManager, SQLError,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PhysicalRowChangeTarget {
