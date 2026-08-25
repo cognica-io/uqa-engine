@@ -103,6 +103,9 @@ impl Engine {
         }
         if restart_identity {
             *t.next_id.lock() = 1;
+            self.persist_next_id(table_name).map_err(|error| {
+                SQLError::Internal(format!("persist TRUNCATE identity: {error}"))
+            })?;
         }
         self.value_indexes_truncate(table_name, &t)?;
         self.mark_column_stats_dirty(table_name, &t)

@@ -466,13 +466,17 @@ fn truncate_table_basic() {
 }
 
 #[test]
-fn truncate_table_resets_auto_increment() {
+fn truncate_table_defaults_to_continue_identity_and_can_restart() {
     let engine = Engine::new();
     exec(&engine, "CREATE TABLE t (id SERIAL PRIMARY KEY, val TEXT)");
     exec(&engine, "INSERT INTO t (val) VALUES ('a')");
     exec(&engine, "INSERT INTO t (val) VALUES ('b')");
     exec(&engine, "TRUNCATE TABLE t");
     exec(&engine, "INSERT INTO t (val) VALUES ('c')");
+    let result = query(&engine, "SELECT id FROM t");
+    assert_eq!(result.rows[0]["id"], Value::Int(3));
+    exec(&engine, "TRUNCATE TABLE t RESTART IDENTITY");
+    exec(&engine, "INSERT INTO t (val) VALUES ('d')");
     let result = query(&engine, "SELECT id FROM t");
     assert_eq!(result.rows[0]["id"], Value::Int(1));
 }

@@ -12,17 +12,17 @@ use std::sync::Arc;
 
 use super::{
     apply_validated_prepared_document_rewrite, build_returning_row, coerce_to_column_type,
-    decode_prepared_insert_conflict, dml_returning_result, dml_storage_error, doc_id_value,
-    document_supplied_id, encode_prepared_insert_conflict, eval_lowered_expression,
-    eval_mutation_assignment, index_vectors_for_type, insert_identity_columns,
-    lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
-    partition_insert_target, stage_prepared_document_rewrite,
-    validate_document_non_key_constraints, validate_key_constraints, validate_mutation_columns,
-    validate_returning_alias_relations, BTreeMap, ColumnType, ConflictActionPlan, ConflictPlan,
-    CteScope, DmlCommandMutationOverlay, DmlReturningShape, DocId, Document, Engine,
-    InsertConflictLocks, InsertConflictPreparation, InsertPlan, MutationAssignmentTarget,
-    PreparedInsertConflict, ReturningProjectionRow, ReturningRowImage, ReturningRowImages,
-    SQLError, SQLParam, SQLResult,
+    decode_prepared_insert_conflict, dml_returning_result, dml_storage_error,
+    encode_prepared_insert_conflict, eval_lowered_expression, eval_mutation_assignment,
+    index_vectors_for_type, insert_identity_columns, lock_document_key_dependencies,
+    lock_existing_document_foreign_key_dependencies, partition_insert_target,
+    persist_auto_increment_identity, prepare_auto_increment_identity, prepare_insert_identity,
+    stage_prepared_document_rewrite, validate_document_non_key_constraints,
+    validate_key_constraints, validate_mutation_columns, validate_returning_alias_relations,
+    BTreeMap, ColumnType, ConflictActionPlan, ConflictPlan, CteScope, DmlCommandMutationOverlay,
+    DmlReturningShape, DocId, Document, Engine, InsertConflictLocks, InsertConflictPreparation,
+    InsertPlan, MutationAssignmentTarget, PreparedInsertConflict, ReturningProjectionRow,
+    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult,
 };
 
 struct InsertSelectConsumer {
@@ -43,6 +43,7 @@ struct InsertSelectConsumerState {
     affected: u64,
     returning_rows: Vec<uqa_execution::OwnedPhysicalRow>,
     has_prepared_effect: bool,
+    has_prepared_auto_identity: bool,
 }
 
 struct PreparedInsertSelect {
@@ -51,6 +52,7 @@ struct PreparedInsertSelect {
     affected: u64,
     returning_rows: Vec<uqa_execution::OwnedPhysicalRow>,
     has_prepared_effect: bool,
+    has_prepared_auto_identity: bool,
 }
 
 struct PreparedInsertRowContext<'a> {
@@ -94,6 +96,7 @@ impl InsertSelectConsumer {
                 affected: 0,
                 returning_rows: Vec::new(),
                 has_prepared_effect: false,
+                has_prepared_auto_identity: false,
             }),
         })
     }
@@ -115,6 +118,7 @@ impl InsertSelectConsumer {
             affected: state.affected,
             returning_rows: std::mem::take(&mut state.returning_rows),
             has_prepared_effect: state.has_prepared_effect,
+            has_prepared_auto_identity: state.has_prepared_auto_identity,
         })
     }
 }
@@ -189,6 +193,7 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
             affected,
             returning_rows,
             has_prepared_effect,
+            has_prepared_auto_identity,
         } = &mut *state;
         let columns = columns.as_ref().ok_or_else(|| {
             SQLError::Internal("INSERT SELECT row consumer was not initialized".into())
@@ -215,6 +220,15 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
             );
         }
         apply_missing_column_defaults(engine, &stmt.table, &mut document, params)?;
+        let prepared_auto_identity = prepare_auto_increment_identity(
+            engine,
+            &stmt.table,
+            id_column,
+            auto_id_column.as_deref(),
+            &mut document,
+            "prepare INSERT SELECT identity",
+        )?;
+        *has_prepared_auto_identity |= prepared_auto_identity.is_some();
         crate::sql::generated::refresh_stored_generated_columns(
             engine,
             &stmt.table,
@@ -231,13 +245,17 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
             &target_table,
             crate::row_locks::RelationLockMode::RowExclusive,
         )?;
-        let insert_identity = prepare_insert_identity(
-            engine,
-            &target_table,
-            id_column,
-            auto_id_column.as_deref(),
-            &mut document,
-        )?;
+        let insert_identity = match prepared_auto_identity {
+            Some(identity) => identity,
+            None => prepare_insert_identity(
+                engine,
+                &target_table,
+                id_column,
+                None,
+                &mut document,
+                "prepare INSERT SELECT identity",
+            )?,
+        };
         lock_existing_document_foreign_key_dependencies(engine, &target_table, &document)?;
         let prepared_conflict = if let Some(on_conflict) = stmt.on_conflict.as_ref() {
             conflict_locks
@@ -373,10 +391,17 @@ pub(in crate::sql) fn run_insert_inner(
             affected,
             returning_rows,
             has_prepared_effect,
+            has_prepared_auto_identity,
         } = consumer.take_prepared()?;
         drop(overlay);
-        if has_prepared_effect {
+        if has_prepared_effect || has_prepared_auto_identity {
             engine.prepare_explicit_transaction_writer()?;
+            persist_auto_increment_identity(
+                engine,
+                &stmt.table,
+                auto_id_col.as_deref(),
+                "persist INSERT SELECT identity",
+            )?;
         }
         drop(conflict_locks);
         let cancel = engine.cancellation_token();
@@ -489,6 +514,14 @@ pub(in crate::sql) fn run_insert_inner(
             }
         }
         apply_missing_column_defaults(engine, &stmt.table, &mut document, params)?;
+        let prepared_auto_identity = prepare_auto_increment_identity(
+            engine,
+            &stmt.table,
+            &id_column,
+            auto_id_col.as_deref(),
+            &mut document,
+            "prepare INSERT identity",
+        )?;
         crate::sql::generated::refresh_stored_generated_columns(
             engine,
             &stmt.table,
@@ -505,13 +538,17 @@ pub(in crate::sql) fn run_insert_inner(
             &target_table,
             crate::row_locks::RelationLockMode::RowExclusive,
         )?;
-        let insert_identity = prepare_insert_identity(
-            engine,
-            &target_table,
-            &id_column,
-            auto_id_col.as_deref(),
-            &mut document,
-        )?;
+        let insert_identity = match prepared_auto_identity {
+            Some(identity) => identity,
+            None => prepare_insert_identity(
+                engine,
+                &target_table,
+                &id_column,
+                None,
+                &mut document,
+                "prepare INSERT identity",
+            )?,
+        };
         lock_existing_document_foreign_key_dependencies(engine, &target_table, &document)?;
         let prepared = if let Some(on_conflict) = stmt.on_conflict.as_ref() {
             conflict_locks.prepare_document(InsertConflictPreparation {
@@ -554,8 +591,15 @@ pub(in crate::sql) fn run_insert_inner(
         prepared_conflicts.push(prepared);
     }
     drop(overlay);
-    if has_prepared_effect {
+    let has_prepared_auto_identity = auto_id_col.is_some() && !stmt.rows.is_empty();
+    if has_prepared_effect || has_prepared_auto_identity {
         engine.prepare_explicit_transaction_writer()?;
+        persist_auto_increment_identity(
+            engine,
+            &stmt.table,
+            auto_id_col.as_deref(),
+            "persist INSERT identity",
+        )?;
     }
     drop(conflict_locks);
     for ((target_table, document), prepared) in target_tables
@@ -595,28 +639,6 @@ pub(in crate::sql) fn run_insert_inner(
         );
     }
     Ok(SQLResult::from_affected(affected))
-}
-
-fn prepare_insert_identity(
-    engine: &Engine,
-    table: &str,
-    id_column: &str,
-    auto_id_column: Option<&str>,
-    document: &mut Document,
-) -> Result<(DocId, bool), SQLError> {
-    let supplied_id = document_supplied_id(document, id_column, auto_id_column == Some(id_column))?;
-    let supplied = supplied_id.is_some();
-    let doc_id = match supplied_id {
-        Some(doc_id) => doc_id,
-        None => engine.allocate_next_id(table)?,
-    };
-    if auto_id_column == Some(id_column) {
-        document.insert(id_column.to_string(), doc_id_value(doc_id)?);
-    }
-    engine
-        .advance_next_id(table, doc_id)
-        .map_err(|error| dml_storage_error("prepare INSERT identity", error))?;
-    Ok((doc_id, supplied))
 }
 
 fn attach_prepared_insert_identity(

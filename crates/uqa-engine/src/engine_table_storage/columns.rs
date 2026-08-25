@@ -7,8 +7,8 @@
 //! Column registration, index rebuild, and table or column rename.
 
 use super::{
-    materialize_constraint_names, table_not_found, Engine, RelationIdentity, StorageBackendError,
-    StorageBackendResult,
+    materialize_constraint_names, table_next_id_metadata_key, table_not_found, Engine,
+    RelationIdentity, StorageBackendError, StorageBackendResult,
 };
 use crate::VectorIndexSpec;
 
@@ -39,6 +39,7 @@ impl Engine {
         table: &str,
         mut column: uqa_sql::ast::ColumnDef,
     ) -> StorageBackendResult<()> {
+        let auto_increment = column.auto_increment;
         let table_name = self
             .try_resolve_table_name(table)?
             .ok_or_else(|| table_not_found(table))?;
@@ -81,6 +82,9 @@ impl Engine {
         *t.table_checks.write() = constraints.checks;
         *t.foreign_keys.write() = constraints.foreign_keys;
         *t.key_constraints.write() = constraints.key_constraints;
+        if auto_increment {
+            self.persist_next_id(&table_name)?;
+        }
         self.refresh_value_indexes_for_table(&table_name)?;
         Ok(())
     }
@@ -428,6 +432,17 @@ impl Engine {
         if self.is_persistent() {
             self.rebind_persistent_table_stores(&to, &state)?;
             self.try_save_table_schema(&to, &state)?;
+            if state
+                .columns
+                .read()
+                .iter()
+                .any(|column| column.auto_increment)
+            {
+                self.persist_next_id(&to)?;
+                if let Some(catalog) = self.storage.catalog.as_ref() {
+                    catalog.set_metadata(&table_next_id_metadata_key(&from), "")?;
+                }
+            }
         }
         self.mark_column_stats_dirty(&to, &state)?;
         self.refresh_value_indexes_for_table(&to)?;

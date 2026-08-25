@@ -214,9 +214,7 @@ impl Engine {
             let temporary = table.persistence == uqa_sql::ast::RelationPersistence::Temporary;
             if self.storage.backend.is_some() && !temporary {
                 self.rebind_persistent_table_stores(&name, &table)?;
-                let next_id = u128::from(table.document_store.read().max_doc_id()?) + 1;
-                let mut current = table.next_id.lock();
-                *current = (*current).max(next_id);
+                self.refresh_table_next_id(&name, &table)?;
             } else {
                 Self::value_indexes_clear(&table);
             }
@@ -243,6 +241,7 @@ impl Engine {
                     .store(true, std::sync::atomic::Ordering::Release);
             }
         }
+        self.synchronize_partition_identity_watermarks()?;
         self.clear_sql_statement_cache();
         // Set the generation before rebinding prepared plans so optimizer
         // statistics can resolve tables without recursively refreshing.

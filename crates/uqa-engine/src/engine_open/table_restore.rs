@@ -25,6 +25,7 @@ impl Engine {
             let table = Self::load_session_table(catalog, backend, schema)?;
             self.storage.tables.write().insert(relation, table);
         }
+        self.synchronize_partition_identity_watermarks()?;
         self.restore_graphs_from_catalog(catalog)?;
         self.restore_engine_registries_from_catalog(catalog)?;
         Ok(())
@@ -111,13 +112,19 @@ impl Engine {
         let column_stats = Self::load_column_stats_from_catalog(catalog, &table_name)?;
         let column_stats_dirty = column_stats.is_empty() && !columns.is_empty();
         let max_id = docs.max_doc_id()?;
+        let persisted_next_id = if columns.iter().any(|column| column.auto_increment) {
+            Self::load_persisted_next_id(catalog, &table_name)?
+        } else {
+            None
+        };
+        let next_id = persisted_next_id.unwrap_or(1).max(u128::from(max_id) + 1);
         Ok(Arc::new(TableState {
             document_store: RwLock::new(docs),
             inverted_index: RwLock::new(inv),
             vector_indexes: RwLock::new(vectors),
             fts_fields: RwLock::new(schema.fts_fields),
             columns: RwLock::new(columns),
-            next_id: parking_lot::Mutex::new(u128::from(max_id) + 1),
+            next_id: parking_lot::Mutex::new(next_id),
             analyzer: RwLock::new(analyzer),
             column_stats: RwLock::new(column_stats),
             column_stats_loaded: AtomicBool::new(true),

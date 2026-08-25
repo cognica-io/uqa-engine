@@ -165,6 +165,78 @@ impl Engine {
         }
     }
 
+    /// Return the physical counter owner for an auto-incrementing column. Declarative partitions share the top partitioned parent's counter; ordinary inheritance keeps its existing per-relation behavior because the current column metadata does not distinguish SERIAL defaults from identity attributes.
+    pub(crate) fn partition_identity_owner(&self, table: &str) -> Result<String, SQLError> {
+        if let Some(root) = self.partition_hierarchy_root(table)? {
+            return Ok(root);
+        }
+        self.try_resolve_table_name(table)
+            .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))
+    }
+
+    /// Rebuild a partitioned parent's shared auto-increment watermark from every physical partition. Persistent table counters are reconstructed from document ids, so the logical owner must observe the maximum restored descendant watermark before it can allocate another value.
+    pub(crate) fn synchronize_partition_identity_watermarks(&self) -> StorageBackendResult<()> {
+        let entries = self
+            .storage
+            .tables
+            .read()
+            .iter()
+            .map(|(relation, table)| (relation.qualified_name(), table.clone()))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut root_watermarks = std::collections::BTreeMap::<String, u128>::new();
+        for (name, table) in &entries {
+            if !table
+                .columns
+                .read()
+                .iter()
+                .any(|column| column.auto_increment)
+            {
+                continue;
+            }
+            let mut current = name.clone();
+            let mut visited = BTreeSet::new();
+            let mut participates = false;
+            loop {
+                if !visited.insert(current.clone()) {
+                    return Err(StorageBackendError::Other(format!(
+                        "partition hierarchy cycle reaches `{current}`"
+                    )));
+                }
+                let state = entries.get(&current).ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "partition hierarchy references missing table `{current}`"
+                    ))
+                })?;
+                let hierarchy = state.hierarchy.read();
+                participates |= hierarchy.partition_spec.is_some() || hierarchy.is_partition();
+                if !hierarchy.is_partition() {
+                    break;
+                }
+                current = hierarchy.parents.first().cloned().ok_or_else(|| {
+                    StorageBackendError::Other("partition has no parent relation".into())
+                })?;
+            }
+            if participates {
+                let watermark = *table.next_id.lock();
+                root_watermarks
+                    .entry(current)
+                    .and_modify(|current| *current = (*current).max(watermark))
+                    .or_insert(watermark);
+            }
+        }
+        for (root, watermark) in root_watermarks {
+            let table = entries.get(&root).ok_or_else(|| {
+                StorageBackendError::Other(format!(
+                    "partition hierarchy references missing root `{root}`"
+                ))
+            })?;
+            let mut current = table.next_id.lock();
+            *current = (*current).max(watermark);
+        }
+        Ok(())
+    }
+
     /// Expand a `DROP TABLE` target set through table hierarchy dependencies.
     /// Declarative partitions are owned by their parent and are always dropped
     /// with it, while ordinary inheritance children require `CASCADE`.

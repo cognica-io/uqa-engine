@@ -12,13 +12,13 @@ use super::{
     build_projection_physical_row_with_ctes, decode_merge_pair, decode_prepared_doc_id,
     decode_prepared_document_delete, decode_prepared_document_rewrite, dml_join_rows,
     dml_null_target_row, dml_returning_result_with_projections, dml_storage_error, dml_target_row,
-    doc_id_value, document_supplied_id, document_vectors, encode_merge_pair,
-    encode_prepared_doc_id, encode_prepared_document_delete, encode_prepared_document_rewrite,
-    eval_mutation_assignment, eval_mutation_expr, expanded_returning_projections,
-    insert_identity_columns, lock_document_key_dependencies,
+    document_vectors, encode_merge_pair, encode_prepared_doc_id, encode_prepared_document_delete,
+    encode_prepared_document_rewrite, eval_mutation_assignment, eval_mutation_expr,
+    expanded_returning_projections, insert_identity_columns, lock_document_key_dependencies,
     lock_existing_document_foreign_key_dependencies, lock_mutation_target, merge_pair_schema,
     merge_source_index_value, missing_document_error, partition_insert_target,
-    prepare_document_delete, prepare_document_rewrite, retarget_prepared_document_rewrite,
+    persist_auto_increment_identity, prepare_auto_increment_identity, prepare_document_delete,
+    prepare_document_rewrite, prepare_insert_identity, retarget_prepared_document_rewrite,
     returning_row_context, stage_prepared_document_delete, stage_prepared_document_rewrite,
     update_lock_strength, validate_document_constraints, validate_mutation_columns,
     validate_returning_alias_relations, BTreeMap, BTreeSet, CteScope, DmlCommandMutationOverlay,
@@ -505,6 +505,19 @@ pub(in crate::sql) fn run_merge_inner(
             SelectedMergeAction::Insert { mut document } => {
                 let (auto_id_col, id_column) =
                     insert_identity_columns(engine, &target_table, "MERGE INSERT")?;
+                let prepared_auto_identity = prepare_auto_increment_identity(
+                    engine,
+                    &target_table,
+                    &id_column,
+                    auto_id_col.as_deref(),
+                    &mut document,
+                    "prepare MERGE INSERT identity",
+                )?;
+                crate::sql::generated::refresh_stored_generated_columns(
+                    engine,
+                    &target_table,
+                    &mut document,
+                )?;
                 // MERGE INTO ONLY excludes descendants from matching, while PostgreSQL still routes INSERT actions through the target's partition tree.
                 let storage_table =
                     partition_insert_target(engine, &target_table, &document, params, true)?;
@@ -512,23 +525,20 @@ pub(in crate::sql) fn run_merge_inner(
                     &storage_table,
                     crate::row_locks::RelationLockMode::RowExclusive,
                 )?;
-                let doc_id = match document_supplied_id(
-                    &document,
-                    &id_column,
-                    auto_id_col.as_deref() == Some(id_column.as_str()),
-                )? {
-                    Some(doc_id) => doc_id,
-                    None => engine.allocate_next_id(&storage_table)?,
+                let (doc_id, _) = match prepared_auto_identity {
+                    Some(identity) => identity,
+                    None => prepare_insert_identity(
+                        engine,
+                        &storage_table,
+                        &id_column,
+                        None,
+                        &mut document,
+                        "prepare MERGE INSERT identity",
+                    )?,
                 };
-                if auto_id_col.as_deref() == Some(id_column.as_str()) {
-                    document.insert(id_column, doc_id_value(doc_id)?);
-                }
                 lock_existing_document_foreign_key_dependencies(engine, &storage_table, &document)?;
                 let _key_locks =
                     lock_document_key_dependencies(engine, &storage_table, &document, None)?;
-                engine
-                    .advance_next_id(&storage_table, doc_id)
-                    .map_err(|error| dml_storage_error("MERGE INSERT", error))?;
                 validate_document_constraints(engine, &storage_table, &document, params, None)?;
                 engine.stage_command_document(&storage_table, doc_id, Some(document.clone()))?;
                 if !stmt.returning.is_empty() {
@@ -571,6 +581,15 @@ pub(in crate::sql) fn run_merge_inner(
         .map_err(crate::sql::select::physical_exec_error)?;
     if has_mutation {
         engine.prepare_explicit_transaction_writer()?;
+        let auto_id_column = engine
+            .auto_increment_column(&target_table)
+            .map_err(|error| dml_storage_error("MERGE INSERT", error))?;
+        persist_auto_increment_identity(
+            engine,
+            &target_table,
+            auto_id_column.as_deref(),
+            "persist MERGE INSERT identity",
+        )?;
     }
     let prepared_reader = prepared_actions
         .read_rows()
@@ -900,11 +919,6 @@ fn select_merge_action(
                     }
                 }
                 apply_missing_column_defaults(engine, target_table, &mut document, params)?;
-                crate::sql::generated::refresh_stored_generated_columns(
-                    engine,
-                    target_table,
-                    &mut document,
-                )?;
                 Ok(SelectedMergeAction::Insert { document })
             }
             MergeWhenPlan::NothingMatched { .. }

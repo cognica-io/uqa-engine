@@ -221,20 +221,7 @@ pub(in crate::sql) fn partition_insert_target(
     let hierarchy = engine
         .try_table_hierarchy(&table)
         .map_err(|error| SQLError::Internal(format!("read partition metadata: {error}")))?;
-    if hierarchy.partition_bound.is_some() {
-        let parent = hierarchy.parents.first().ok_or_else(|| {
-            SQLError::Internal(format!("partition `{table}` has no parent relation"))
-        })?;
-        let selected = select_direct_partition(engine, parent, document, params)?;
-        if selected.as_deref() != Some(table.as_str()) {
-            return Err(SQLError::Routine {
-                sqlstate: "23514".into(),
-                message: format!(
-                    "new row for relation \"{requested_table}\" violates partition constraint"
-                ),
-            });
-        }
-    }
+    validate_partition_ancestor_path(engine, requested_table, &table, document, params)?;
     if let Some(spec) = hierarchy.partition_spec.as_ref() {
         if !include_descendants {
             return Err(SQLError::Routine {
@@ -247,6 +234,43 @@ pub(in crate::sql) fn partition_insert_target(
         return route_partition_tree(engine, &child, document, params);
     }
     Ok(table)
+}
+
+fn validate_partition_ancestor_path(
+    engine: &Engine,
+    requested_table: &str,
+    table: &str,
+    document: &Document,
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
+    let mut child = table.to_string();
+    let mut visited = std::collections::BTreeSet::new();
+    loop {
+        if !visited.insert(child.clone()) {
+            return Err(SQLError::Internal(format!(
+                "partition hierarchy cycle reaches `{child}`"
+            )));
+        }
+        let hierarchy = engine
+            .try_table_hierarchy(&child)
+            .map_err(|error| SQLError::Internal(format!("read partition metadata: {error}")))?;
+        if hierarchy.partition_bound.is_none() {
+            return Ok(());
+        }
+        let parent = hierarchy.parents.first().ok_or_else(|| {
+            SQLError::Internal(format!("partition `{child}` has no parent relation"))
+        })?;
+        let selected = select_direct_partition(engine, parent, document, params)?;
+        if selected.as_deref() != Some(child.as_str()) {
+            return Err(SQLError::Routine {
+                sqlstate: "23514".into(),
+                message: format!(
+                    "new row for relation \"{requested_table}\" violates partition constraint"
+                ),
+            });
+        }
+        child.clone_from(parent);
+    }
 }
 
 fn route_partition_tree(

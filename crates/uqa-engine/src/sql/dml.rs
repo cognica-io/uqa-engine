@@ -589,6 +589,68 @@ fn insert_identity_columns(
     Ok((auto_increment, id_column))
 }
 
+fn prepare_auto_increment_identity(
+    engine: &Engine,
+    table: &str,
+    id_column: &str,
+    auto_id_column: Option<&str>,
+    document: &mut Document,
+    action: &str,
+) -> Result<Option<(DocId, bool)>, SQLError> {
+    let Some(auto_id_column) = auto_id_column else {
+        return Ok(None);
+    };
+    let owner = engine.partition_identity_owner(table)?;
+    engine.lock_relation(&owner, crate::row_locks::RelationLockMode::RowExclusive)?;
+    prepare_insert_identity(
+        engine,
+        &owner,
+        id_column,
+        Some(auto_id_column),
+        document,
+        action,
+    )
+    .map(Some)
+}
+
+fn persist_auto_increment_identity(
+    engine: &Engine,
+    table: &str,
+    auto_id_column: Option<&str>,
+    action: &str,
+) -> Result<(), SQLError> {
+    if auto_id_column.is_none() {
+        return Ok(());
+    }
+    let owner = engine.partition_identity_owner(table)?;
+    engine
+        .persist_next_id(&owner)
+        .map_err(|error| dml_storage_error(action, error))
+}
+
+fn prepare_insert_identity(
+    engine: &Engine,
+    allocation_table: &str,
+    id_column: &str,
+    auto_id_column: Option<&str>,
+    document: &mut Document,
+    action: &str,
+) -> Result<(DocId, bool), SQLError> {
+    let supplied_id = document_supplied_id(document, id_column, auto_id_column == Some(id_column))?;
+    let supplied = supplied_id.is_some();
+    let doc_id = match supplied_id {
+        Some(doc_id) => doc_id,
+        None => engine.allocate_next_id(allocation_table)?,
+    };
+    if auto_id_column == Some(id_column) {
+        document.insert(id_column.to_string(), doc_id_value(doc_id)?);
+    }
+    engine
+        .advance_next_id(allocation_table, doc_id)
+        .map_err(|error| dml_storage_error(action, error))?;
+    Ok((doc_id, supplied))
+}
+
 fn validate_mutation_columns<'a>(
     engine: &Engine,
     table: &str,
