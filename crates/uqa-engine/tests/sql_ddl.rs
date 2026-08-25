@@ -36,6 +36,15 @@ fn assert_err_with_sqlstate(engine: &Engine, sql: &str, sqlstate: &str, message:
     assert_eq!(error.to_string(), message);
 }
 
+fn assert_err_sqlstate(engine: &Engine, sql: &str, sqlstate: &str) {
+    let error = engine.sql(sql, &[]).unwrap_err();
+    assert_eq!(
+        error.sqlstate(),
+        Some(sqlstate),
+        "unexpected error: {error}"
+    );
+}
+
 fn engine_with_users() -> Engine {
     let engine = Engine::new();
     exec(
@@ -335,10 +344,10 @@ fn alter_table_drop_column() {
 #[test]
 fn alter_table_drop_column_nonexistent_raises() {
     let engine = engine_with_users();
-    assert_err_contains(
+    assert_err_sqlstate(
         &engine,
         "ALTER TABLE users DROP COLUMN nonexistent",
-        "does not exist",
+        "42703",
     );
 }
 
@@ -425,10 +434,10 @@ fn alter_table_drop_default() {
 fn alter_table_set_not_null() {
     let engine = engine_with_users();
     exec(&engine, "ALTER TABLE users ALTER COLUMN name SET NOT NULL");
-    assert_err_contains(
+    assert_err_sqlstate(
         &engine,
         "INSERT INTO users (id, age) VALUES (4, 28)",
-        "NOT NULL",
+        "23502",
     );
 }
 
@@ -701,10 +710,10 @@ fn foreign_key_basic_insert() {
 fn foreign_key_insert_violation() {
     let engine = engine_with_parents();
     create_children(&engine);
-    assert_err_contains(
+    assert_err_sqlstate(
         &engine,
         "INSERT INTO children VALUES (1, 999, 'bad')",
-        "FOREIGN KEY constraint violated",
+        "23503",
     );
 }
 
@@ -723,11 +732,7 @@ fn foreign_key_delete_violation() {
     let engine = engine_with_parents();
     create_children(&engine);
     exec(&engine, "INSERT INTO children VALUES (1, 1, 'child1')");
-    assert_err_contains(
-        &engine,
-        "DELETE FROM parents WHERE id = 1",
-        "FOREIGN KEY constraint violated",
-    );
+    assert_err_sqlstate(&engine, "DELETE FROM parents WHERE id = 1", "23503");
 }
 
 #[test]
@@ -746,10 +751,10 @@ fn foreign_key_update_violation() {
     let engine = engine_with_parents();
     create_children(&engine);
     exec(&engine, "INSERT INTO children VALUES (1, 1, 'child1')");
-    assert_err_contains(
+    assert_err_sqlstate(
         &engine,
         "UPDATE children SET parent_id = 999 WHERE id = 1",
-        "FOREIGN KEY constraint violated",
+        "23503",
     );
 }
 
@@ -768,9 +773,5 @@ fn foreign_key_update_parent_pk_violation() {
     let engine = engine_with_parents();
     create_children(&engine);
     exec(&engine, "INSERT INTO children VALUES (1, 1, 'child1')");
-    assert_err_contains(
-        &engine,
-        "UPDATE parents SET id = 99 WHERE id = 1",
-        "FOREIGN KEY constraint violated",
-    );
+    assert_err_sqlstate(&engine, "UPDATE parents SET id = 99 WHERE id = 1", "23503");
 }

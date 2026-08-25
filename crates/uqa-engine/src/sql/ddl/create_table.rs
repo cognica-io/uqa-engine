@@ -100,10 +100,14 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
             foreign_key,
         )?;
     }
+    let registered_columns = engine
+        .try_describe_table(&c.name)
+        .map_err(|err| ddl_storage_error("CREATE TABLE columns", err))?
+        .ok_or_else(|| SQLError::UnknownTable(c.name.clone()))?;
     engine
         .replace_constraint_state(
             &c.name,
-            c.columns.clone(),
+            registered_columns,
             uqa_sql::ast::TableConstraintSet {
                 checks: c.checks.clone(),
                 foreign_keys: c.foreign_keys.clone(),
