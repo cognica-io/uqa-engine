@@ -28,6 +28,8 @@ mod sql_blocking_spill;
 mod sql_correlated_subqueries;
 #[path = "sql_cte.rs"]
 mod sql_cte;
+#[path = "engine_queries/sql_cte_pg18_controls.rs"]
+mod sql_cte_pg18_controls;
 #[path = "sql_cursor.rs"]
 mod sql_cursor;
 #[path = "sql_dpccp_join_order.rs"]

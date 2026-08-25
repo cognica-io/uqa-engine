@@ -128,18 +128,45 @@ FROM active
 GROUP BY department_id;
 ```
 
-Recursive CTEs are implemented:
+Recursive CTEs accept PostgreSQL 18 traversal ordering and cycle detection. `SEARCH { DEPTH | BREADTH } FIRST BY column [, ...] SET sequence_column` appends one generated ordering column: depth-first search produces `record[]`, while breadth-first search produces a `record` containing the zero-based level followed by the `BY` values. `CYCLE column [, ...] SET mark_column [ TO mark_value DEFAULT mark_default ] USING path_column` appends a mark and a `record[]` path; the defaults are `true` and `false`. A cycle row is returned once with the mark value and is not expanded in the next iteration.
 
-```sql
+```sql execute
 WITH RECURSIVE numbers(n) AS (
     VALUES (1)
     UNION ALL
     SELECT n + 1 FROM numbers WHERE n < 5
 )
-SELECT n FROM numbers ORDER BY n;
+SEARCH DEPTH FIRST BY n SET traversal
+SELECT n, cardinality(traversal) AS depth FROM numbers ORDER BY traversal;
 ```
 
-Recursive `SEARCH` and `CYCLE` clauses and `NOT MATERIALIZED` are not implemented.
+The generated columns are visible to the query that reads the CTE. Inside the recursive term, an explicit generated cycle-column reference is legal, but `*` expands only the declared CTE columns so PostgreSQL's internal traversal state does not change the recursive union's column count.
+
+```sql execute
+WITH RECURSIVE ring(n) AS (
+    VALUES (0)
+    UNION ALL
+    SELECT (n + 1) % 3 FROM ring WHERE NOT is_cycle
+)
+CYCLE n SET is_cycle USING path
+SELECT n, is_cycle, cardinality(path) AS path_length FROM ring ORDER BY path_length;
+```
+
+`SEARCH` and `CYCLE` require an actually self-referencing `WITH RECURSIVE` query. Their `BY`/cycle columns must be unique members of the CTE column list, and generated sequence, mark, and path names must not conflict with one another or the declared columns. The cycle mark and default use a common type with equality semantics. These structural failures use PostgreSQL SQLSTATEs such as syntax error (`42601`), ambiguous column (`42702`), datatype mismatch (`42804`), and undefined equality operator (`42883`).
+
+PostgreSQL 18 rejects a recursive query's combined top-level `ORDER BY`, `OFFSET`, and `LIMIT` or `FETCH` clauses with feature-not-supported (`0A000`), and UQA Engine rejects the same shapes before execution. Parenthesized clauses local to a nonrecursive or recursive UNION operand remain distinct and follow PostgreSQL's operand-local behavior.
+
+An ordinary CTE defaults to PostgreSQL's planning policy: a side-effect-free, nonrecursive CTE referenced once may be folded into its parent, while a multiply referenced CTE is evaluated once and shared. `AS MATERIALIZED` is an optimization fence and forces one shared evaluation. `AS NOT MATERIALIZED` allows each reference to be folded and evaluated independently; PostgreSQL ignores that request for recursive or volatile CTEs and UQA Engine does the same.
+
+```sql execute
+WITH source AS NOT MATERIALIZED (
+    SELECT * FROM (VALUES (1), (2)) AS values_source(id)
+)
+SELECT left_source.id
+FROM source AS left_source
+JOIN source AS right_source ON right_source.id = left_source.id
+ORDER BY left_source.id;
+```
 
 ## Set operations
 
@@ -209,7 +236,7 @@ ORDER BY department, salary DESC;
 2. Arguments: `OF` names are unqualified SQL relation or alias identifiers from the current `FROM` clause. An aliased item can be named only by its alias; an unaliased item accepts only its unqualified table name. Repeating a name is harmless, and one unqualified name can select multiple unaliased same-name relations from different schemas. Identifiers are not values and cannot be parameters. Omitting `OF` selects every lockable relation in the query block.
 3. Result: the same rows the query would return without the clause. `_score` and other output columns are unchanged. Lock identity columns stay internal.
 4. Effects: each returned tuple from a selected base table or lockable view/subquery is locked until the current transaction ends; rows skipped by `OFFSET` are locked as well. An outer clause cannot lock through a CTE, aggregate, window, distinct, or set-operation row-identity barrier, so place the clause inside the underlying query when that behavior is required. If a target tuple changes between the command-snapshot scan and lock acquisition, the current committed tuple is substituted and the query qualifications are rechecked while unchanged inputs remain on the original command snapshot; a pure lock wait does not admit later inserts. Autocommit statements take a statement transaction and release locks when that statement finishes. `UPDATE`, `DELETE`, and `MERGE`, including rows changed by referential actions, take `FOR NO KEY UPDATE` or `FOR UPDATE` locks on the rows they mutate. Locking queries also retain a relation lock, so operations such as `TRUNCATE` wait until the locking transaction ends. `ROLLBACK TO SAVEPOINT` removes row and relation acquisitions and strength upgrades made after that savepoint. Independent engines over the same durable database coordinate row and relation locks within one OS process and across OS processes; cross-process coordination uses a `<database>.uqa-locks` sidecar file created next to the database.
-5. Errors: `DISTINCT`, `GROUP BY`, `HAVING`, aggregate functions, window functions, and directly locked set-operation queries reject the clause (`0A000`). An explicit `OF` target rejects a CTE reference or table function; an unqualified clause silently skips CTEs, table functions, and `VALUES` sources because they have no lockable rows. A top-level `VALUES` statement, a foreign table, a virtual catalog relation, and a lockable relation on the nullable side of an outer join reject the clause (`0A000`), while a `WHERE` qualification that cannot be true for the join's null-extended side reduces the outer join first and makes that side lockable. An `OF` name that is not visible in `FROM`, including a base name hidden by an alias, is `42P01`. `NOWAIT` that cannot lock immediately is `55P03`. A wait-for cycle is `40P01`. Cancellation during a wait is `57014`.
+5. Errors: `DISTINCT`, `GROUP BY`, `HAVING`, aggregate functions, window functions, and directly locked set-operation queries reject the clause (`0A000`). An explicit `OF` target rejects a CTE reference or table function; an unqualified clause silently skips CTEs, table functions, and `VALUES` sources because they have no lockable rows. A top-level `VALUES` statement, a foreign table, a virtual catalog view, and a lockable relation on the nullable side of an outer join reject the clause (`0A000`), while a `WHERE` qualification that cannot be true for the join's null-extended side reduces the outer join first and makes that side lockable. PostgreSQL base-catalog table shapes implemented as virtual relations, including `pg_type`, `pg_class`, and the AGE `ag_graph`/`ag_label` catalogs, accept the clause and return their synthesized rows without a storage-row lock. An `OF` name that is not visible in `FROM`, including a base name hidden by an alias, is `42P01`. Shape errors and locking clauses are validated in PostgreSQL order before later `OF` target failures. `NOWAIT` that cannot lock immediately is `55P03`. A wait-for cycle is `40P01`. Cancellation during a wait is `57014`.
 6. Example:
 
 ```sql execute

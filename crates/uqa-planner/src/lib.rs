@@ -89,9 +89,10 @@ pub use query_optimizer::{
 pub use text_top_k::{plan_text_top_k, TextTopKCapabilities};
 pub use unified_plan::{
     rewrite_scalar_expression, AccessPathPlan, AggregateClassifier, AssignmentPlan, CommandPlan,
-    ComputePlan, ConflictActionPlan, ConflictPlan, CtePlan, DeletePlan, ExpressionPlan, InsertPlan,
-    JoinExecutionStrategy, MergePlan, MergeWhenPlan, OrderPlan, ProjectionPlan, QueryBlockPlan,
-    QueryPlan, RelationalPlan, SourcePlan, TableFunctionPlan, UnifiedPlan, UpdatePlan,
+    ComputePlan, ConflictActionPlan, ConflictPlan, CteCyclePlan, CtePlan, CteSearchPlan,
+    DeletePlan, ExpressionPlan, InsertPlan, JoinExecutionStrategy, MergePlan, MergeWhenPlan,
+    OrderPlan, ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan,
+    TableFunctionPlan, UnifiedPlan, UpdatePlan,
 };
 pub use uqa_execution::{
     ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec, SubqueryId,

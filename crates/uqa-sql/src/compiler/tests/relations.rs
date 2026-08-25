@@ -314,33 +314,60 @@ fn qualified_wildcard_preserves_its_structured_relation_identity() {
 }
 
 #[test]
-fn unsupported_cte_control_clauses_fail_explicitly() {
-    let not_materialized =
-        compile("WITH c AS NOT MATERIALIZED (SELECT 1) SELECT * FROM c").unwrap_err();
-    assert!(matches!(
-        not_materialized,
-        SQLError::Unsupported(message) if message.contains("NOT MATERIALIZED")
-    ));
+fn cte_materialization_search_and_cycle_controls_survive_compilation() {
+    let Statement::Select(not_materialized) =
+        first("WITH c AS NOT MATERIALIZED (SELECT 1) SELECT * FROM c")
+    else {
+        panic!("expected SELECT");
+    };
+    assert_eq!(
+        not_materialized.with[0].materialization,
+        crate::ast::CteMaterialization::NotMaterialized
+    );
 
-    let search = compile(
+    let Statement::Select(search) = first(
         "WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM t WHERE n < 3) \
          SEARCH DEPTH FIRST BY n SET ordering SELECT * FROM t",
-    )
-    .unwrap_err();
-    assert!(matches!(
-        search,
-        SQLError::Unsupported(message) if message.contains("SEARCH")
-    ));
+    ) else {
+        panic!("expected SELECT");
+    };
+    let search = search.with[0].search.as_ref().expect("SEARCH clause");
+    assert_eq!(search.columns, ["n"]);
+    assert!(!search.breadth_first);
+    assert_eq!(search.sequence_column, "ordering");
 
-    let cycle = compile(
+    let Statement::Select(cycle) = first(
         "WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM t WHERE n < 3) \
          CYCLE n SET is_cycle USING path SELECT * FROM t",
-    )
-    .unwrap_err();
-    assert!(matches!(
-        cycle,
-        SQLError::Unsupported(message) if message.contains("CYCLE")
-    ));
+    ) else {
+        panic!("expected SELECT");
+    };
+    let cycle = cycle.with[0].cycle.as_ref().expect("CYCLE clause");
+    assert_eq!(cycle.columns, ["n"]);
+    assert_eq!(cycle.mark_column, "is_cycle");
+    assert_eq!(cycle.path_column, "path");
+}
+
+#[test]
+fn recursive_query_top_level_ordering_and_slicing_match_postgresql_18_rejections() {
+    for (sql, expected) in [
+        (
+            "WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n<3 ORDER BY n) SELECT * FROM t",
+            "ORDER BY in a recursive query is not implemented",
+        ),
+        (
+            "WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n<3 OFFSET 1) SELECT * FROM t",
+            "OFFSET in a recursive query is not implemented",
+        ),
+        (
+            "WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n<3 FETCH FIRST 1 ROW ONLY) SELECT * FROM t",
+            "LIMIT in a recursive query is not implemented",
+        ),
+    ] {
+        let error = compile(sql).expect_err(sql);
+        assert_eq!(error.sqlstate(), Some("0A000"), "{sql}: {error}");
+        assert!(error.to_string().contains(expected), "{sql}: {error}");
+    }
 }
 
 #[test]

@@ -6,8 +6,9 @@
 //! Physical assembly for tables, CTEs, views, catalogs, and foreign tables.
 
 use super::{
-    apply_propagated_view_lock, attach_qualifier_filter, build_info_schema_rows, combine_filters,
-    execute_query_plan_output, execute_view_plan_output_with_parent_cache, materialize_plan_ctes,
+    alias_query_output_to_shared, apply_propagated_view_lock, attach_qualifier_filter,
+    build_info_schema_rows, combine_filters, execute_query_plan_output,
+    execute_view_plan_output_with_parent_cache, materialize_plan_ctes,
     push_output_filter_into_query_plan, qualifier_filter, qualifier_for, qualify_source_operator,
     qualify_source_operator_with_columns, query_contains_volatile_function, query_cte_names,
     query_output_shared, table_lock_origin, try_build_streaming_subquery_operator,
@@ -36,6 +37,15 @@ pub(super) fn build_table_source_operator<'a>(
             if let Some(materialized) = ctes.rows.get(name).cloned() {
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(uqa_execution::SharedSpillScan::new(materialized));
+                if let Some(visible) = ctes.recursive_control_width(name) {
+                    let operator: Box<dyn PhysicalOperator + 'a> =
+                        Box::new(uqa_execution::ColumnSelection::hiding_trailing_columns(
+                            scan, visible, &qualifier,
+                        ));
+                    return Ok(attach_qualifier_filter(
+                        operator, &qualifier, filters, engine, params, ctes,
+                    ));
+                }
                 let operator =
                     qualify_source_operator(scan, &qualifier, prune, ctes.lock_identities.emit);
                 return Ok(attach_qualifier_filter(
@@ -43,7 +53,7 @@ pub(super) fn build_table_source_operator<'a>(
                 ));
             }
 
-            if let Some(plan) = ctes.remove_deferred(name) {
+            if let Some(plan) = ctes.deferred_for_scan(name) {
                 let streamed = {
                     let mut scoped_ctes = ctes.enter_lock_identity_emission(false);
                     try_build_streaming_subquery_operator(
@@ -67,12 +77,27 @@ pub(super) fn build_table_source_operator<'a>(
                         operator, &qualifier, filters, engine, params, ctes,
                     ));
                 }
-                materialize_plan_ctes(engine, std::slice::from_ref(&plan), params, ctes)?;
-                let materialized = ctes.rows.get(name).cloned().ok_or_else(|| {
-                    SQLError::Internal(format!(
-                        "deferred CTE `{name}` did not produce a materialized input"
-                    ))
-                })?;
+                let materialized =
+                    if plan.materialization == uqa_sql::ast::CteMaterialization::NotMaterialized {
+                        let output = {
+                            let mut scoped_ctes = ctes.enter_lock_identity_emission(false);
+                            execute_query_plan_output(
+                                engine,
+                                &plan.query,
+                                params,
+                                &mut scoped_ctes,
+                                QueryOutputMode::SharedSpill,
+                            )?
+                        };
+                        alias_query_output_to_shared(engine, output, &plan.columns)?
+                    } else {
+                        materialize_plan_ctes(engine, std::slice::from_ref(&plan), params, ctes)?;
+                        ctes.rows.get(name).cloned().ok_or_else(|| {
+                            SQLError::Internal(format!(
+                                "deferred CTE `{name}` did not produce a materialized input"
+                            ))
+                        })?
+                    };
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(uqa_execution::SharedSpillScan::new(materialized));
                 let operator = qualify_source_operator(scan, &qualifier, prune, false);

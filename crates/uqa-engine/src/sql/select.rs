@@ -413,7 +413,13 @@ pub(super) fn execute_query_plan_output(
         for cte in ordered_ctes.iter().copied().filter(|cte| {
             !recursive.contains(cte.name.as_str())
                 && reachable.contains(&cte.name)
-                && single_reference.contains(&cte.name)
+                && match cte.materialization {
+                    uqa_sql::ast::CteMaterialization::Default => {
+                        single_reference.contains(&cte.name)
+                    }
+                    uqa_sql::ast::CteMaterialization::Materialized => false,
+                    uqa_sql::ast::CteMaterialization::NotMaterialized => true,
+                }
                 && matches!(
                     query_contains_volatile_function(engine, &cte.query),
                     Ok(false)
@@ -427,7 +433,14 @@ pub(super) fn execute_query_plan_output(
             ordered_ctes.into_iter().filter(|cte| {
                 reachable.contains(&cte.name)
                     && (recursive.contains(cte.name.as_str())
-                        || !single_reference.contains(&cte.name)
+                        || matches!(
+                            cte.materialization,
+                            uqa_sql::ast::CteMaterialization::Materialized
+                        )
+                        || (matches!(
+                            cte.materialization,
+                            uqa_sql::ast::CteMaterialization::Default
+                        ) && !single_reference.contains(&cte.name))
                         || !matches!(
                             query_contains_volatile_function(engine, &cte.query),
                             Ok(false)

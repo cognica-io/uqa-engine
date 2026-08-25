@@ -10,6 +10,7 @@ UQA Engine deliberately uses PostgreSQL-oriented syntax and behavior while remai
 - The optional wire crate implements PostgreSQL protocol 3.0 through 3.2 codec primitives, minor-version negotiation, reserved startup-option reporting, protocol-specific cancellation-key validation, FunctionCall, GSS/SSPI message shapes, notifications, and COPY format validation. PostgreSQL 18.4 `psql`/libpq tests verify 3.0, 3.2, and `latest` startup, 3.2-to-3.0 downgrade, authentication ordering, SSL rejection and retry, legacy and 256-byte cancellation keys, and extended Parse/Bind/Describe/Execute/Sync flow.
 - PostgreSQL-shaped `information_schema` and `pg_catalog` virtual relations carry declared PostgreSQL 18 row types even when empty; implemented `pg_type` rows expose exact scalar, array, information-schema domain, pseudo-type, and `information_schema_catalog_name` metadata.
 - Apache AGE-shaped `cypher(...) AS (...)` integrates graph results into SQL, and the AGE catalog surface (`LOAD 'age'`, `ag_catalog.ag_graph`, `ag_catalog.ag_label`, the `agtype` / `graphid` types, and the graph and label management functions) lets AGE drivers bootstrap against the embedded engine.
+- Recursive CTE `SEARCH` and `CYCLE` preserve PostgreSQL 18 depth/breadth sequence types, path-sensitive cycle rows, generated-column visibility, recursive wildcard behavior, `UNION` distinctness, iteration-wide limiting, validation order, and stored-plan reopen behavior; `MATERIALIZED` and `NOT MATERIALIZED` select PostgreSQL's eligible folding policy while recursive and volatile definitions remain materialized.
 
 The fixture coverage is evidence for those queries and types, not a claim of complete PostgreSQL 18 compatibility.
 
@@ -44,8 +45,6 @@ These forms currently fail during compilation without creating a partial object.
 ## Open PostgreSQL 18 query-clause bugs
 
 - Collations, domains, user-defined equality operators, and the complete common-type matrix for `JOIN ... USING` columns with different declared types
-- Recursive CTE `SEARCH` and `CYCLE`
-- CTE `NOT MATERIALIZED`
 
 Each missing clause above must be implemented with PostgreSQL 18 semantics; source-query rewriting is not an accepted compatibility solution.
 

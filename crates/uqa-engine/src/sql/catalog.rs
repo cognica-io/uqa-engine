@@ -78,8 +78,8 @@ use pg_catalog::{
     build_pg_sequences, build_pg_settings, build_pg_tables, build_pg_type, build_pg_user,
     build_pg_views,
 };
-pub(in crate::sql) use schema::virtual_relation_schema;
 use schema::{resolve_virtual_relation, VirtualRelation};
+pub(in crate::sql) use schema::{virtual_relation_accepts_row_lock, virtual_relation_schema};
 
 static CATALOG_DOMAIN_TYPES: LazyLock<Vec<ColumnType>> = LazyLock::new(|| {
     let mut domains = schema::information_schema_domains();

@@ -11,10 +11,12 @@
 
 use serde::{Deserialize, Serialize};
 
+mod cte;
 mod expressions;
 mod from;
 mod locking;
 
+pub use cte::*;
 pub use expressions::*;
 pub use from::*;
 pub use locking::*;
@@ -1118,14 +1120,6 @@ pub struct SelectStmt {
     /// `FOR { UPDATE | NO KEY UPDATE | SHARE | KEY SHARE }` row-locking clauses, in source order. Empty when the query does not lock rows.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub locking: Vec<LockingClause>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CTE {
-    pub name: String,
-    pub columns: Vec<String>,
-    pub recursive: bool,
-    pub query: Box<SelectStmt>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

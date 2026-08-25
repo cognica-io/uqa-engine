@@ -80,7 +80,7 @@ use aggregates::{
 use catalog::build_info_schema_rows;
 pub(crate) use catalog::resolve_age_label_relation_name;
 pub(crate) use catalog::resolve_catalog_column_type;
-pub(in crate::sql) use catalog::virtual_relation_schema;
+pub(in crate::sql) use catalog::{virtual_relation_accepts_row_lock, virtual_relation_schema};
 use ddl::{
     coerce_to_column_type, column_type_name, core_value_to_json, json_table_arg,
     json_table_value_to_text, json_to_core_value, run_alter_sequence, run_alter_table,

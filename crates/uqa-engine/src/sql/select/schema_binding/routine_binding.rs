@@ -7,9 +7,10 @@
 //! Persistent exact routine identity binding for catalog-owned query plans.
 
 use super::{
-    cte_references_own_name, expr_contains_subquery, operator_join_relation_schema,
-    ordered_plan_ctes, overlay_outer_schema, rename_schema, CteScope, Engine, QueryPlan,
-    RelationalPlan, RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope, SourcePlan,
+    cte_references_own_name, expr_contains_subquery, extend_cte_generated_schema,
+    extend_recursive_cte_binding_schema, operator_join_relation_schema, ordered_plan_ctes,
+    overlay_outer_schema, rename_schema, CteScope, Engine, QueryPlan, RelationalPlan, RowSchema,
+    SQLError, SQLParam, ScalarExpr, SchemaScope, SourcePlan,
 };
 use uqa_execution::FunctionTypeResolver;
 use uqa_sql::ast::FunctionBinding;
@@ -34,6 +35,25 @@ impl SchemaScope {
                 .position(|cte| cte.name == name)
                 .ok_or_else(|| SQLError::Internal(format!("ordered CTE `{name}` disappeared")))?;
             let self_recursive = cte_references_own_name(&plan.ctes[position]);
+            if let Some(cycle) = plan.ctes[position].cycle.as_mut() {
+                let schema = RowSchema::default();
+                self.bind_scalar_routines_for_storage(
+                    engine,
+                    &mut cycle.mark_value,
+                    &schema,
+                    &[],
+                    params,
+                    outer,
+                )?;
+                self.bind_scalar_routines_for_storage(
+                    engine,
+                    &mut cycle.mark_default,
+                    &schema,
+                    &[],
+                    params,
+                    outer,
+                )?;
+            }
             let provisional = if self_recursive {
                 self.bind_recursive_seed(engine, &plan.ctes[position].query, params, outer)?
             } else {
@@ -45,11 +65,18 @@ impl SchemaScope {
                 )?
             };
             let columns = plan.ctes[position].columns.clone();
-            previous.push((
-                name.clone(),
-                self.ctes
-                    .insert(name.clone(), rename_schema(&provisional, &columns, None)),
-            ));
+            let provisional = rename_schema(&provisional, &columns, None);
+            let provisional = if self_recursive {
+                extend_recursive_cte_binding_schema(
+                    engine,
+                    &plan.ctes[position],
+                    provisional,
+                    params,
+                )?
+            } else {
+                extend_cte_generated_schema(engine, &plan.ctes[position], provisional, params)?
+            };
+            previous.push((name.clone(), self.ctes.insert(name.clone(), provisional)));
             if self_recursive {
                 let complete = self.bind_query_routines_for_storage(
                     engine,
@@ -57,8 +84,10 @@ impl SchemaScope {
                     params,
                     outer,
                 )?;
-                self.ctes
-                    .insert(name, rename_schema(&complete, &columns, None));
+                let complete = rename_schema(&complete, &columns, None);
+                let complete =
+                    extend_cte_generated_schema(engine, &plan.ctes[position], complete, params)?;
+                self.ctes.insert(name, complete);
             }
         }
 

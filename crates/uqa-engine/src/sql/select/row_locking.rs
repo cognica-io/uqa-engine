@@ -11,6 +11,7 @@ use super::{
     QueryBlockPlan, QueryPlan, RelationalPlan, SQLError, SQLParam, ScalarExpr, SourcePlan, Value,
 };
 use crate::row_locks::LockAcquire;
+use crate::sql::virtual_relation_accepts_row_lock;
 use uqa_execution::{
     Batch, ExecResult, PhysicalOperator, PhysicalRow, RowProjectionValue, RowSchema,
 };
@@ -256,14 +257,14 @@ enum LockLeafKind {
     Values,
     Function,
     Foreign,
-    Virtual,
+    Virtual { lockable: bool },
 }
 
 impl LockLeafKind {
     fn implicitly_lockable(&self) -> bool {
         matches!(
             self,
-            Self::Base | Self::View(_) | Self::Subquery(_) | Self::Foreign | Self::Virtual
+            Self::Base | Self::View(_) | Self::Subquery(_) | Self::Foreign | Self::Virtual { .. }
         )
     }
 
@@ -490,7 +491,8 @@ fn classify_table_leaf(
     {
         return Ok(LockLeafKind::Base);
     }
-    Ok(LockLeafKind::Virtual)
+    let lockable = virtual_relation_accepts_row_lock(engine, name).unwrap_or(false);
+    Ok(LockLeafKind::Virtual { lockable })
 }
 
 fn reject_unusable_lock_leaf(
@@ -512,7 +514,10 @@ fn reject_unusable_lock_leaf(
             strength.sql_name(),
             source.display_name
         ))),
-        LockLeafKind::Virtual => Err(SQLError::Unsupported(format!(
+        LockLeafKind::Virtual { lockable: true } => {
+            reject_nullable_lock_source(source.nullable, strength)
+        }
+        LockLeafKind::Virtual { lockable: false } => Err(SQLError::Unsupported(format!(
             "{} cannot be applied to relation \"{}\"",
             strength.sql_name(),
             source.display_name
