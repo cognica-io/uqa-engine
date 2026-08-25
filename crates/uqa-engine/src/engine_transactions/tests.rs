@@ -89,46 +89,55 @@ fn rollback_failure_after_callback_panic_is_returned_instead_of_panicking_again(
 
 #[test]
 fn waiting_writer_refreshes_when_sqlite_commit_precedes_epoch_publication() {
-    let directory = tempfile::tempdir().unwrap();
-    let root = Engine::open(&directory.path().join("catalog-race.db")).unwrap();
-    let writer = root.new_session().unwrap();
-    let waiter = root.new_session().unwrap();
+    for create_sql in [
+        "CREATE TABLE fresh.items (id INTEGER)",
+        "CREATE TABLE fresh.items AS SELECT 1 AS id",
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let root = Engine::open(&directory.path().join("catalog-race.db")).unwrap();
+        let writer = root.new_session().unwrap();
+        let waiter = root.new_session().unwrap();
 
-    writer.begin().unwrap();
-    assert!(!waiter.has_schema("fresh").unwrap());
-    writer.sql("CREATE SCHEMA fresh", &[]).unwrap();
+        writer.begin().unwrap();
+        assert!(!waiter.has_schema("fresh").unwrap());
+        writer.sql("CREATE SCHEMA fresh", &[]).unwrap();
 
-    let (started_tx, started_rx) = mpsc::channel();
-    let (done_tx, done_rx) = mpsc::channel();
-    let waiting_thread = std::thread::spawn(move || {
-        started_tx.send(()).unwrap();
-        let result = waiter.sql("CREATE TABLE fresh.items (id INTEGER)", &[]);
-        done_tx.send(result).unwrap();
-    });
-    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-    assert!(done_rx.recv_timeout(Duration::from_millis(200)).is_err());
+        let (started_tx, started_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let waiting_thread = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let result = waiter.sql(create_sql, &[]);
+            done_tx.send(result).unwrap();
+        });
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        match done_rx.recv_timeout(Duration::from_millis(200)) {
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(error) => panic!("waiting writer result channel failed early: {error}"),
+            Ok(result) => panic!("waiting writer completed before writer release: {result:?}"),
+        }
 
-    // End the physical transaction without publishing the shared epoch. This deterministically models the interval after SQLite COMMIT has released its writer lock but before Engine::commit publishes it. The logical writer registration goes with it, exactly as the real commit path releases the session's locks before publication.
-    writer
-        .storage
-        .backend
-        .as_ref()
-        .unwrap()
-        .commit_transaction()
-        .unwrap();
-    writer.row_locks.release_session(writer.session_id);
+        // End the physical transaction without publishing the shared epoch. This deterministically models the interval after SQLite COMMIT has released its writer lock but before Engine::commit publishes it. The logical writer registration goes with it, exactly as the real commit path releases the session's locks before publication.
+        writer
+            .storage
+            .backend
+            .as_ref()
+            .unwrap()
+            .commit_transaction()
+            .unwrap();
+        writer.row_locks.release_session(writer.session_id);
 
-    done_rx
-        .recv_timeout(Duration::from_secs(2))
-        .unwrap()
-        .unwrap();
-    waiting_thread.join().unwrap();
-    writer.session.transactions.lock().clear();
-    assert!(root
-        .new_session()
-        .unwrap()
-        .has_table("fresh.items")
-        .unwrap());
+        done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .unwrap();
+        waiting_thread.join().unwrap();
+        writer.session.transactions.lock().clear();
+        assert!(root
+            .new_session()
+            .unwrap()
+            .has_table("fresh.items")
+            .unwrap());
+    }
 }
 
 #[test]

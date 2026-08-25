@@ -64,6 +64,9 @@ fn run_create_table_as_inner(
     engine: &Engine,
     execution: &CreateTableAsExecution<'_>,
 ) -> Result<SQLResult, SQLError> {
+    if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+        engine.prepare_explicit_transaction_writer()?;
+    }
     let name = if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {
         engine
             .try_temporary_relation_name_for_create(execution.name)

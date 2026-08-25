@@ -20,6 +20,9 @@ pub(in crate::sql) fn run_create_table(
 }
 
 fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResult, SQLError> {
+    if c.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+        engine.prepare_explicit_transaction_writer()?;
+    }
     c.name = if c.persistence == uqa_sql::ast::RelationPersistence::Temporary {
         engine
             .try_temporary_relation_name_for_create(&c.name)
