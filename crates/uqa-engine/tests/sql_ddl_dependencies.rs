@@ -15,6 +15,8 @@ fn integer_column(name: &str, default: Option<Expr>) -> ColumnDef {
         not_null: false,
         not_null_explicit: false,
         not_null_name: None,
+        not_null_validated: true,
+        not_null_no_inherit: false,
         auto_increment: false,
         unique: false,
         default,
@@ -22,6 +24,8 @@ fn integer_column(name: &str, default: Option<Expr>) -> ColumnDef {
         check: None,
         check_name: None,
         check_enforced: true,
+        check_validated: true,
+        check_no_inherit: false,
         references: None,
     }
 }
@@ -175,7 +179,12 @@ fn typed_default_dependency_is_rewritten_and_drop_is_restricted() {
         .unwrap();
 
     let error = engine.drop_column("defaults", "source").unwrap_err();
-    assert!(error.to_string().contains("DEFAULT/CHECK"), "{error}");
+    assert!(
+        error
+            .to_string()
+            .contains("dependent DEFAULT/generation expression"),
+        "{error}"
+    );
     assert_eq!(
         engine.table_columns("defaults").unwrap(),
         vec!["source", "derived"]

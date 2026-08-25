@@ -11,11 +11,13 @@
 
 use serde::{Deserialize, Serialize};
 
+mod constraints;
 mod cte;
 mod expressions;
 mod from;
 mod locking;
 
+pub use constraints::*;
 pub use cte::*;
 pub use expressions::*;
 pub use from::*;
@@ -441,182 +443,6 @@ impl FunctionBinding {
 pub type GeneratedFunctionDependency = FunctionBinding;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(clippy::struct_excessive_bools)]
-pub struct ColumnDef {
-    pub name: String,
-    pub ty: ColumnType,
-    pub primary_key: bool,
-    pub not_null: bool,
-    /// Whether `NOT NULL` was declared as its own constraint instead of being
-    /// implied by `PRIMARY KEY` or an auto-incrementing identity.
-    #[serde(default)]
-    pub not_null_explicit: bool,
-    /// Durable `PostgreSQL` 18 `NOT NULL` constraint name. Parsing leaves an
-    /// unnamed declaration as `None`; table registration assigns and persists
-    /// `PostgreSQL`'s generated name before the constraint becomes visible.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub not_null_name: Option<String>,
-    /// `SERIAL` / `BIGSERIAL` columns auto-allocate from a per-table
-    /// monotonic counter when the value is omitted from `INSERT`.
-    #[serde(default)]
-    pub auto_increment: bool,
-    /// `UNIQUE` column constraint -- the engine rejects an INSERT
-    /// whose value for this column already exists in another row.
-    #[serde(default)]
-    pub unique: bool,
-    /// `DEFAULT <expr>`. Evaluated at INSERT time when the column is
-    /// not present in the row tuple. Persisted in catalog metadata so
-    /// reopened engines keep the same INSERT semantics.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default: Option<Expr>,
-    /// `PostgreSQL` 18 generated-column definition. Stored values are refreshed
-    /// on every row write; virtual values are evaluated from the physical row
-    /// only when a logical row is read.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generated: Option<GeneratedColumn>,
-    /// `CHECK (<expr>)` column-level constraint. Evaluated at INSERT
-    /// (and UPDATE-replace) time against the row being written.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub check: Option<Expr>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub check_name: Option<String>,
-    #[serde(default = "default_true")]
-    pub check_enforced: bool,
-    /// `REFERENCES parent(col)` column-level FOREIGN KEY. The engine
-    /// rejects INSERT / UPDATE whose value is not present in the
-    /// referenced (table, column) pair.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub references: Option<ForeignKeyRef>,
-}
-
-/// `REFERENCES table(column)` reference target.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForeignKeyRef {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    pub table: String,
-    pub column: String,
-    #[serde(default)]
-    pub on_update: ForeignKeyAction,
-    #[serde(default)]
-    pub on_delete: ForeignKeyAction,
-    #[serde(default)]
-    pub match_type: ForeignKeyMatch,
-    #[serde(default = "default_true")]
-    pub enforced: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateTable {
-    pub name: String,
-    /// Local SQL relation identifier used while binding expressions declared inside the table definition.
-    pub qualifier: String,
-    pub columns: Vec<ColumnDef>,
-    /// `CREATE TABLE IF NOT EXISTS` - silently ignore the statement
-    /// when a table with this name already exists.
-    pub if_not_exists: bool,
-    /// Table-level `CHECK (...)` constraints. Each entry is an
-    /// expression that must evaluate truthy against every row.
-    #[allow(dead_code)]
-    pub checks: Vec<TableCheck>,
-    /// Table-level `FOREIGN KEY (col, ...) REFERENCES parent(col, ...)`.
-    pub foreign_keys: Vec<ForeignKey>,
-    /// Every declared `PRIMARY KEY` / `UNIQUE` constraint, including
-    /// column-level declarations. Keeping the typed key (rather than only
-    /// setting per-column flags) preserves composite-key and `NULLS NOT
-    /// DISTINCT` semantics through planning and catalog persistence.
-    #[serde(default)]
-    pub key_constraints: Vec<TableKeyConstraint>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TableKeyConstraintKind {
-    PrimaryKey,
-    Unique,
-}
-
-/// A table key whose columns are compared as one tuple.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TableKeyConstraint {
-    pub name: Option<String>,
-    pub kind: TableKeyConstraintKind,
-    pub columns: Vec<String>,
-    /// `PostgreSQL` UNIQUE keys normally treat every NULL-containing tuple as
-    /// distinct. `UNIQUE NULLS NOT DISTINCT` opts into NULL equality.
-    #[serde(default)]
-    pub nulls_not_distinct: bool,
-}
-
-/// Durable table-level constraints that do not fit in `ColumnDef`.
-///
-/// `serde(default)` on the catalog field containing this structure keeps
-/// databases written before constraint persistence backward compatible.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct TableConstraintSet {
-    #[serde(default)]
-    pub checks: Vec<TableCheck>,
-    #[serde(default)]
-    pub foreign_keys: Vec<ForeignKey>,
-    #[serde(default)]
-    pub key_constraints: Vec<TableKeyConstraint>,
-}
-
-/// `CHECK (expr)` constraint with an optional name (`CONSTRAINT <name>
-/// CHECK (...)`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TableCheck {
-    pub name: Option<String>,
-    pub expr: Expr,
-    #[serde(default = "default_true")]
-    pub enforced: bool,
-}
-
-/// Table-level foreign key. `local_columns.len()` matches
-/// `ref_columns.len()`; the engine joins on the position-aligned
-/// pairs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForeignKey {
-    pub name: Option<String>,
-    pub local_columns: Vec<String>,
-    pub ref_table: String,
-    pub ref_columns: Vec<String>,
-    #[serde(default)]
-    pub on_update: ForeignKeyAction,
-    #[serde(default)]
-    pub on_delete: ForeignKeyAction,
-    /// Optional column subset for `ON DELETE SET NULL (...)` and
-    /// `ON DELETE SET DEFAULT (...)`. Empty means every local FK
-    /// column participates.
-    #[serde(default)]
-    pub on_delete_set_columns: Vec<String>,
-    #[serde(default)]
-    pub match_type: ForeignKeyMatch,
-    #[serde(default = "default_true")]
-    pub enforced: bool,
-}
-
-const fn default_true() -> bool {
-    true
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum ForeignKeyAction {
-    #[default]
-    NoAction,
-    Restrict,
-    Cascade,
-    SetNull,
-    SetDefault,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum ForeignKeyMatch {
-    #[default]
-    Simple,
-    Full,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateIndex {
     pub name: Option<String>,
     pub table: String,
@@ -949,7 +775,7 @@ pub struct AlterTableStmt {
     /// Local SQL relation identifier used while binding new or replaced generation expressions.
     pub qualifier: String,
     pub if_exists: bool,
-    pub action: AlterTableAction,
+    pub actions: Vec<AlterTableAction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -961,6 +787,32 @@ pub enum AlterTableAction {
     },
     AddKeyConstraint {
         constraint: TableKeyConstraint,
+    },
+    AddCheckConstraint {
+        constraint: TableCheck,
+    },
+    AddForeignKeyConstraint {
+        constraint: ForeignKey,
+    },
+    AddNotNullConstraint {
+        name: Option<String>,
+        column: String,
+        validated: bool,
+        no_inherit: bool,
+    },
+    ValidateConstraint {
+        name: String,
+    },
+    AlterConstraint {
+        name: String,
+        enforceability: Option<bool>,
+        deferrability: Option<(bool, bool)>,
+        no_inherit: Option<bool>,
+    },
+    DropConstraint {
+        name: String,
+        if_exists: bool,
+        cascade: bool,
     },
     DropColumn {
         name: String,

@@ -50,12 +50,15 @@ Each missing clause above must be implemented with PostgreSQL 18 semantics; sour
 
 ## Open PostgreSQL 18 DDL bugs
 
+For implemented tables, views, sequences, and foreign tables, text-to-`regclass` casts resolve the visible relation to the OID exposed by `pg_class`; a missing cast target reports `42P01`, while `to_regclass(text)` returns `NULL`.
+
 - Virtual and stored generated columns implement durable definitions, selective virtual evaluation, exactly-once stored evaluation, DML assignment rules, DDL-time static typing for the implemented expression surface, exact stored SQL routine overload binding and dependencies, supported constraints and indexes, catalogs, ALTER operations, failure atomicity, and reopen behavior. The complete PostgreSQL built-in function and operator overload matrix, privileges, inheritance and partition propagation, `pg_dump`/`pg_restore`, and complete upstream regression coverage remain open compatibility bugs.
+- Named CHECK, foreign-key, and `NOT NULL` constraints implement `NOT VALID`, failure-atomic validation, supported `ALTER CONSTRAINT` state changes, actual `INITIALLY DEFERRED` foreign-key checks at outer commit, savepoint rollback, catalog and information-schema flags, dependency-aware drop, multi-action ALTER atomicity, and durable reopen. Per-transaction `SET CONSTRAINTS`, inheritance and partition propagation, the complete dependency graph, `pg_dump`/`pg_restore`, and the upstream constraint regression matrix remain open compatibility bugs.
 - `WITHOUT OVERLAPS` keys and `PERIOD` foreign keys are not implemented because range and multirange column types are not yet available.
 - Expression indexes are not implemented.
 - SQL index access methods are B-tree, GIN, IVF, and HNSW.
 - Dependency-sensitive `DROP ... CASCADE` remains incomplete for implemented catalog objects except graph namespaces and the bounded routine graph. `DROP FUNCTION signature CASCADE` removes the exact function, its generated columns, and direct or transitive stored views while retaining unrelated objects; `DROP PROCEDURE signature CASCADE` removes a procedure with no modeled dependents. Every additional routine-dependent object kind, dependent-procedure graph, multi-target CASCADE graph, deletion order, notice, and diagnostic is tracked by `routines.function-procedure-drop-cascade-extended`.
-- `ALTER TABLE DROP COLUMN CASCADE` is rejected.
+- `ALTER TABLE DROP COLUMN CASCADE` removes inbound foreign-key constraints and the target column's owned constraints; cascade over every other PostgreSQL dependency kind remains incomplete.
 - `ALTER COLUMN TYPE USING` is preserved structurally and evaluated once per old row inside the atomic ALTER transaction; the complete PostgreSQL assignment-cast matrix, dependency and collation rewrites, domain checks, and upstream ALTER regression cases remain open.
 - `CREATE SCHEMA AUTHORIZATION` and embedded schema elements are not implemented.
 - Sequence minimum, maximum, cycle, cache, ownership, and identity-owned sequence options are not implemented.

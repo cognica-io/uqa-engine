@@ -373,6 +373,7 @@ struct TransactionFrame {
     next_lock_mark: u32,
     snapshot_change_baseline: row_locks::RowChangeBaseline,
     row_changes: Vec<row_locks::PendingRowChange>,
+    deferred_foreign_key_rows: BTreeSet<row_locks::RowLockKey>,
 }
 
 struct TransactionSavepoint {
@@ -382,6 +383,7 @@ struct TransactionSavepoint {
     dirty: TransactionDirtyState,
     lock_mark: u32,
     row_changes: Vec<row_locks::PendingRowChange>,
+    deferred_foreign_key_rows: BTreeSet<row_locks::RowLockKey>,
 }
 
 #[derive(Clone, Default)]
@@ -693,6 +695,10 @@ impl uqa_sql::expr::EngineHook for Engine {
         name: &str,
     ) -> std::result::Result<Option<uqa_sql::ast::ColumnType>, String> {
         Ok(crate::sql::resolve_catalog_column_type(self, name))
+    }
+
+    fn resolve_regclass(&self, name: &str) -> std::result::Result<Option<i64>, String> {
+        crate::sql::resolve_regclass_oid(self, name)
     }
 
     fn nextval(&self, name: &str) -> std::result::Result<i64, String> {

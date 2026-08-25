@@ -910,6 +910,10 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         Ok(crate::sql::resolve_catalog_column_type(self.engine, name))
     }
 
+    fn resolve_regclass(&self, name: &str) -> std::result::Result<Option<i64>, String> {
+        crate::sql::resolve_regclass_oid(self.engine, name)
+    }
+
     fn nextval(&self, name: &str) -> std::result::Result<i64, String> {
         self.engine.nextval(name)
     }
