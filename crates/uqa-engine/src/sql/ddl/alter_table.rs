@@ -22,6 +22,7 @@ use super::hierarchy_alter::run_alter_hierarchy_action;
 mod constraint_drop;
 mod constraint_lifecycle;
 mod foreign_key;
+mod recursion;
 
 use constraint_drop::{drop_column_cascade, drop_column_restrict, drop_constraint};
 use constraint_lifecycle::{
@@ -35,6 +36,9 @@ use constraint_lifecycle::{
 };
 pub(super) use foreign_key::{
     column_foreign_key, validate_foreign_key_definition_with_local_state,
+};
+use recursion::{
+    materialize_recursive_action_names, merge_existing_recursive_action, recursive_alter_targets,
 };
 
 pub(in crate::sql) fn run_alter_table(
@@ -91,18 +95,34 @@ fn run_alter_table_inner(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLRes
         recurse,
         actions,
     } = stmt;
-    for action in actions {
-        run_alter_table_action(
-            engine,
-            AlterTableStmt {
-                table: table.clone(),
-                qualifier: qualifier.clone(),
-                if_exists,
-                recurse,
-                actions: Vec::new(),
-            },
-            action,
-        )?;
+    for mut action in actions {
+        materialize_recursive_action_names(engine, &table, recurse, &mut action)?;
+        let targets = recursive_alter_targets(engine, &table, recurse, &action)?;
+        for target in targets {
+            if target != table && merge_existing_recursive_action(engine, &target, &action)? {
+                continue;
+            }
+            let target_qualifier = if target == table {
+                qualifier.clone()
+            } else {
+                crate::RelationIdentity::from_legacy_name(&target)
+                    .map_err(|error| {
+                        SQLError::Internal(format!("resolve recursive ALTER target: {error}"))
+                    })?
+                    .name
+            };
+            run_alter_table_action(
+                engine,
+                AlterTableStmt {
+                    table: target,
+                    qualifier: target_qualifier,
+                    if_exists,
+                    recurse: false,
+                    actions: Vec::new(),
+                },
+                action.clone(),
+            )?;
+        }
     }
     Ok(SQLResult::empty())
 }
@@ -866,13 +886,16 @@ fn validate_added_key_constraint(
             continue;
         }
         if !seen.insert(values) {
-            return Err(SQLError::TypeMismatch(format!(
-                "{} constraint would be violated by duplicate values on table `{table}`",
-                match constraint.kind {
-                    uqa_sql::ast::TableKeyConstraintKind::PrimaryKey => "PRIMARY KEY",
-                    uqa_sql::ast::TableKeyConstraintKind::Unique => "UNIQUE",
-                }
-            )));
+            return Err(SQLError::Routine {
+                sqlstate: "23505".into(),
+                message: format!(
+                    "{} constraint would be violated by duplicate values on table `{table}`",
+                    match constraint.kind {
+                        uqa_sql::ast::TableKeyConstraintKind::PrimaryKey => "PRIMARY KEY",
+                        uqa_sql::ast::TableKeyConstraintKind::Unique => "UNIQUE",
+                    }
+                ),
+            });
         }
     }
     Ok(())

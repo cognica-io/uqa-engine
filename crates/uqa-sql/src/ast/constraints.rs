@@ -205,7 +205,7 @@ pub struct DetachedPartitionConstraint {
 }
 
 /// Table-level foreign key. Compilation preserves an omitted referenced column list as empty; validation fills it from the primary key before publication.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ForeignKey {
     pub name: Option<String>,

@@ -649,12 +649,20 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
             };
             let constrained_relation_oid = table_relation_oid(
                 engine,
-                &format!("{}.{}", constraint.schema, constraint.table),
+                &format!(
+                    "{}.{}",
+                    uqa_sql::expr::quote_ident(&constraint.schema),
+                    uqa_sql::expr::quote_ident(&constraint.table)
+                ),
             )?;
             let referenced_relation_oid = match foreign_key {
                 Some(foreign_key) => table_relation_oid(
                     engine,
-                    &format!("{}.{}", foreign_key.schema, foreign_key.table),
+                    &format!(
+                        "{}.{}",
+                        uqa_sql::expr::quote_ident(&foreign_key.schema),
+                        uqa_sql::expr::quote_ident(&foreign_key.table)
+                    ),
                 )?,
                 None => 0,
             };

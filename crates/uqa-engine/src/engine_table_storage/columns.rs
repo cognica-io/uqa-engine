@@ -473,9 +473,9 @@ impl Engine {
                     .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy)
             }) {
                 self.persist_next_id(&to)?;
-                if let Some(catalog) = self.storage.catalog.as_ref() {
-                    catalog.set_metadata(&table_next_id_metadata_key(&from), "")?;
-                }
+            }
+            if let Some(catalog) = self.storage.catalog.as_ref() {
+                catalog.set_metadata(&table_next_id_metadata_key(&from), "")?;
             }
         }
         self.mark_column_stats_dirty(&to, &state)?;

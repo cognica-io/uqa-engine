@@ -11,12 +11,13 @@ use super::{
     build_join_spill_with_ctes, build_returning_row, dml_join_rows, dml_returning_result,
     dml_target_row, eval_mutation_expr, finalize_referential_partition_rewrite,
     foreign_key_comparison_types, foreign_key_lookup_values, lock_mutation_target,
-    period_foreign_key_coverage, prepare_document_rewrite, referencing_rows,
-    referrers_to_for_actions, stage_prepared_document_rewrite, validate_dml_expression_qualifiers,
-    validate_returning_alias_relations, BTreeSet, CteScope, DeletePlan, DmlCommandMutationOverlay,
-    DmlReturningShape, DocId, Document, Engine, ForeignKey, ForeignKeyAction, MutationLockTarget,
-    PreparedDeleteAction, PreparedDocumentDelete, ReturningProjectionRow, ReturningRowImage,
-    ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
+    lock_physical_mutation_target, period_foreign_key_coverage, prepare_document_rewrite,
+    referencing_rows, referrers_to_for_actions, stage_prepared_document_rewrite,
+    validate_dml_expression_qualifiers, validate_returning_alias_relations, BTreeSet, CteScope,
+    DeletePlan, DmlCommandMutationOverlay, DmlReturningShape, DocId, Document, Engine, ForeignKey,
+    ForeignKeyAction, MutationLockTarget, PhysicalMutationLockTarget, PreparedDeleteAction,
+    PreparedDocumentDelete, ReturningProjectionRow, ReturningRowImage, ReturningRowImages,
+    SQLError, SQLParam, SQLResult, Value,
 };
 
 pub(in crate::sql) fn run_delete(
@@ -138,16 +139,18 @@ pub(in crate::sql) fn run_delete_inner(
             };
             Some(candidate)
         };
-        let target = lock_mutation_target(
+        let target = lock_physical_mutation_target(
             engine,
             &storage_table,
             &stmt.target_qualifier,
             doc_id,
             uqa_sql::ast::LockStrength::ForUpdate,
         )?;
-        let MutationLockTarget::Present { doc_id, recheck } = target else {
+        let PhysicalMutationLockTarget::Present { identity, recheck } = target else {
             continue;
         };
+        let storage_table = identity.table;
+        let doc_id = identity.doc_id;
         let qualified = if recheck {
             engine.refresh_explicit_statement_snapshot()?;
             if let Some((_, Some(source_context))) = candidate.as_ref() {

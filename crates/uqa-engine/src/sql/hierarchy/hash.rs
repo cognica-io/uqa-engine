@@ -10,11 +10,14 @@ use uqa_core::{TemporalValue, Value};
 use uqa_sql::ast::{ColumnDef, ColumnType, Expr, PartitionSpec, PartitionStrategy};
 use uqa_sql::SQLError;
 
+use crate::Engine;
+
 const HASH_PARTITION_SEED: u64 = 0x7a5b_2236_7996_dcfd;
 const HASH_COMBINE_CONSTANT: u64 = 0x49a0_f4dd_15e5_a8e3;
 const POSTGRES_EPOCH_UNIX_DAYS: i32 = 10_957;
 
 pub(super) fn validate_partition_spec(
+    engine: &Engine,
     spec: &PartitionSpec,
     columns: &[ColumnDef],
 ) -> Result<(), SQLError> {
@@ -22,8 +25,8 @@ pub(super) fn validate_partition_spec(
         return Ok(());
     }
     for key in &spec.keys {
-        let ty = partition_key_type(key, columns)?;
-        validate_partition_key_type(ty)?;
+        let ty = partition_key_type(engine, key, columns)?;
+        validate_partition_key_type(&ty)?;
     }
     Ok(())
 }
@@ -80,6 +83,7 @@ pub(super) fn bounds_overlap(
 }
 
 pub(super) fn row_hash(
+    engine: &Engine,
     spec: &PartitionSpec,
     columns: &[ColumnDef],
     values: &[Value],
@@ -93,11 +97,11 @@ pub(super) fn row_hash(
     }
     let mut row_hash = 0_u64;
     for (key, value) in spec.keys.iter().zip(values) {
-        let ty = partition_key_type(key, columns)?;
+        let ty = partition_key_type(engine, key, columns)?;
         if matches!(value, Value::Null) {
             continue;
         }
-        row_hash = hash_combine64(row_hash, hash_value(value, ty)?);
+        row_hash = hash_combine64(row_hash, hash_value(value, &ty)?);
     }
     Ok(row_hash)
 }
@@ -109,23 +113,28 @@ pub(super) fn bound_matches(row_hash: u64, modulus: i32, remainder: i32) -> Resu
     Ok(row_hash % modulus == remainder)
 }
 
-fn partition_key_type<'a>(
+fn partition_key_type(
+    engine: &Engine,
     expression: &Expr,
-    columns: &'a [ColumnDef],
-) -> Result<&'a ColumnType, SQLError> {
-    let name = match expression {
-        Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } => name,
-        _ => {
-            return Err(SQLError::Unsupported(
-                "HASH partition key expressions are not supported".into(),
-            ))
-        }
-    };
-    columns
-        .iter()
-        .find(|column| column.name == *name)
-        .map(|column| &column.ty)
-        .ok_or_else(|| SQLError::UnknownColumn(name.clone()))
+    columns: &[ColumnDef],
+) -> Result<ColumnType, SQLError> {
+    if let Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } = expression {
+        return columns
+            .iter()
+            .find(|column| column.name == *name)
+            .map(|column| column.ty.clone())
+            .ok_or_else(|| SQLError::UnknownColumn(name.clone()));
+    }
+    let schema = uqa_execution::RowSchema::with_types(
+        columns.iter().map(|column| column.name.clone()).collect(),
+        columns
+            .iter()
+            .map(|column| Some(column.ty.clone()))
+            .collect(),
+    );
+    let expression = uqa_planner::ExpressionPlan::lower(expression.clone());
+    uqa_execution::common_context_expression_type(&expression.scalar, &schema, &[], Some(engine))?
+        .ok_or_else(|| SQLError::TypeMismatch("cannot determine HASH partition key type".into()))
 }
 
 fn validate_partition_key_type(ty: &ColumnType) -> Result<(), SQLError> {

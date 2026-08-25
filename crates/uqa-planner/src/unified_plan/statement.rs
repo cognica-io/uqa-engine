@@ -46,7 +46,7 @@ impl UnifiedPlan {
                 }))
             }
             Statement::CreateTable(value) => {
-                Self::Command(Box::new(CommandPlan::CreateTable(value)))
+                Self::Command(Box::new(CommandPlan::CreateTable(Box::new(value))))
             }
             Statement::CreateIndex(value) => {
                 Self::Command(Box::new(CommandPlan::CreateIndex(value)))

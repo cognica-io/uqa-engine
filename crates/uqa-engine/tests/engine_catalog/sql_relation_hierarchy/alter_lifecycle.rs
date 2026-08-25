@@ -111,6 +111,119 @@ fn inherit_validates_columns_checks_generated_kinds_and_cycles() {
 }
 
 #[test]
+fn local_column_redeclaration_without_default_retains_inherited_default() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE default_parent (value INTEGER DEFAULT 7)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE default_child (value INTEGER) INHERITS (default_parent)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO default_child (value) VALUES (DEFAULT)",
+    );
+    assert_eq!(
+        engine
+            .sql("SELECT value FROM ONLY default_child", &[])
+            .unwrap()
+            .rows[0]["value"],
+        Value::Int(7)
+    );
+}
+
+#[test]
+fn alter_table_recurses_columns_checks_and_not_null_but_honors_only() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE alter_parent (a INTEGER)");
+    exec(
+        &engine,
+        "CREATE TABLE alter_child () INHERITS (alter_parent)",
+    );
+
+    let only_column = engine
+        .sql(
+            "ALTER TABLE ONLY alter_parent ADD COLUMN blocked INTEGER",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(only_column.sqlstate(), Some("42P16"));
+    let only_check = engine
+        .sql(
+            "ALTER TABLE ONLY alter_parent ADD CONSTRAINT blocked_check CHECK (a > 0)",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(only_check.sqlstate(), Some("42P16"));
+
+    exec(
+        &engine,
+        "ALTER TABLE alter_parent ADD COLUMN inherited INTEGER DEFAULT 7",
+    );
+    exec(
+        &engine,
+        "ALTER TABLE alter_parent ADD CONSTRAINT inherited_check CHECK (a > 0)",
+    );
+    let invalid_child = engine
+        .sql("INSERT INTO alter_child (a) VALUES (-1)", &[])
+        .unwrap_err();
+    assert_eq!(invalid_child.sqlstate(), Some("23514"));
+    exec(&engine, "INSERT INTO alter_child (a) VALUES (1)");
+    assert_eq!(
+        engine
+            .sql("SELECT inherited FROM ONLY alter_child", &[])
+            .unwrap()
+            .rows[0]["inherited"],
+        Value::Int(7)
+    );
+
+    exec(
+        &engine,
+        "ALTER TABLE ONLY alter_parent ALTER COLUMN a SET NOT NULL",
+    );
+    exec(&engine, "INSERT INTO alter_child (a) VALUES (NULL)");
+    exec(&engine, "DELETE FROM alter_child WHERE a IS NULL");
+    exec(
+        &engine,
+        "ALTER TABLE alter_parent ALTER COLUMN a SET NOT NULL",
+    );
+    assert_eq!(
+        engine
+            .sql("INSERT INTO alter_child (a) VALUES (NULL)", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("23502")
+    );
+
+    exec(&engine, "CREATE SCHEMA \"alter.dot\"");
+    exec(
+        &engine,
+        "CREATE TABLE \"alter.dot\".\"parent.dot\" (a INTEGER)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE \"alter.dot\".\"child.dot\" () INHERITS (\"alter.dot\".\"parent.dot\")",
+    );
+    exec(&engine, "ALTER TABLE \"alter.dot\".\"parent.dot\" ADD COLUMN generated_value INTEGER GENERATED ALWAYS AS (a + 1) STORED");
+    exec(
+        &engine,
+        "INSERT INTO \"alter.dot\".\"child.dot\" (a) VALUES (4)",
+    );
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT generated_value FROM ONLY \"alter.dot\".\"child.dot\"",
+                &[],
+            )
+            .unwrap()
+            .rows[0]["generated_value"],
+        Value::Int(5)
+    );
+}
+
+#[test]
 fn attach_partition_validates_existing_and_default_rows_then_routes_immediately() {
     let engine = Engine::new();
     exec(
@@ -265,6 +378,40 @@ fn attach_propagates_identity_key_and_foreign_key_then_detach_localizes_schema()
             .sqlstate(),
         Some("23502")
     );
+    exec(
+        &engine,
+        "INSERT INTO attached_identity (id, k, ref_id) VALUES (21, 6, 999)",
+    );
+}
+
+#[test]
+fn detach_removes_only_constraints_copied_by_attach() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE detach_ref (id INTEGER PRIMARY KEY)");
+    exec(&engine, "INSERT INTO detach_ref VALUES (1)");
+    exec(&engine, "CREATE TABLE detach_parent (k INTEGER PRIMARY KEY, ref_id INTEGER REFERENCES detach_ref(id)) PARTITION BY RANGE (k)");
+    exec(&engine, "CREATE TABLE detach_child (k INTEGER PRIMARY KEY, ref_id INTEGER REFERENCES detach_ref(id))");
+    exec(
+        &engine,
+        "ALTER TABLE detach_parent ATTACH PARTITION detach_child FOR VALUES FROM (0) TO (10)",
+    );
+    exec(
+        &engine,
+        "ALTER TABLE detach_parent DETACH PARTITION detach_child",
+    );
+    exec(&engine, "INSERT INTO detach_child VALUES (1, 1)");
+    let duplicate = engine
+        .sql("INSERT INTO detach_child VALUES (1, 1)", &[])
+        .unwrap_err();
+    assert_eq!(duplicate.sqlstate(), Some("23505"), "{duplicate}");
+    let missing_reference = engine
+        .sql("INSERT INTO detach_child VALUES (2, 999)", &[])
+        .unwrap_err();
+    assert_eq!(
+        missing_reference.sqlstate(),
+        Some("23503"),
+        "{missing_reference}"
+    );
 }
 
 #[test]
@@ -344,6 +491,53 @@ fn attach_and_detach_edges_survive_reopen() {
             .len(),
         1
     );
+}
+
+#[test]
+fn reopen_repairs_a_legacy_dangling_hierarchy_parent() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("dangling-parent.db");
+    {
+        let engine = Engine::open(&path).unwrap();
+        exec(&engine, "CREATE TABLE vanished_parent (a INTEGER)");
+        exec(
+            &engine,
+            "CREATE TABLE surviving_child () INHERITS (vanished_parent)",
+        );
+        exec(&engine, "INSERT INTO surviving_child VALUES (1)");
+    }
+    {
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute(
+                "DELETE FROM _tables WHERE schema_name = 'public' AND relation_name = 'vanished_parent'",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "DELETE FROM _relations WHERE schema_name = 'public' AND relation_name = 'vanished_parent'",
+                [],
+            )
+            .unwrap();
+    }
+    let reopened = Engine::open(&path).unwrap();
+    assert!(reopened
+        .sql(
+            "SELECT * FROM pg_catalog.pg_inherits AS edge JOIN pg_catalog.pg_class AS child ON child.oid = edge.inhrelid WHERE child.relname = 'surviving_child'",
+            &[],
+        )
+        .unwrap()
+        .rows
+        .is_empty());
+    assert_eq!(
+        reopened
+            .sql("SELECT a FROM surviving_child", &[])
+            .unwrap()
+            .rows[0]["a"],
+        Value::Int(1)
+    );
+    reopened.column_stats("surviving_child").unwrap();
 }
 
 #[test]

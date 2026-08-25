@@ -375,7 +375,9 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
 
     fn execute_command(&self, command: &CommandPlan) -> Result<SQLResult, SQLError> {
         match command {
-            CommandPlan::CreateTable(statement) => run_create_table(self.engine, statement.clone()),
+            CommandPlan::CreateTable(statement) => {
+                run_create_table(self.engine, statement.as_ref().clone())
+            }
             CommandPlan::CreateIndex(statement) => run_create_index(self.engine, statement.clone()),
             CommandPlan::Insert(plan) => self.execute_insert(plan),
             CommandPlan::Update(plan) => self.execute_update(plan),

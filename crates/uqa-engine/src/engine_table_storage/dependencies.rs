@@ -263,7 +263,7 @@ impl Engine {
                     .as_ref()
                     .is_some_and(|provenance| provenance.sequence.as_deref() == Some(sequence));
                 if let Some(default) = &column.default {
-                    depends = self
+                    depends |= self
                         .stored_sequence_targets_in_expr(default)?
                         .contains(sequence);
                 }

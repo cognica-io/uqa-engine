@@ -247,6 +247,8 @@ fn compile_copy_options(nodes: &[pg_query::Node]) -> Result<CopyOptions, SQLErro
         quote: b'"',
         escape: b'"',
     };
+    let quote_explicit = names.contains("quote");
+    let escape_explicit = names.contains("escape");
     for (name, value) in raw {
         match name.as_str() {
             "format" => {}
@@ -276,7 +278,7 @@ fn compile_copy_options(nodes: &[pg_query::Node]) -> Result<CopyOptions, SQLErro
             }
         }
     }
-    validate_copy_options(&options)?;
+    validate_copy_options(&options, quote_explicit, escape_explicit)?;
     Ok(options)
 }
 
@@ -323,24 +325,28 @@ fn copy_single_byte_option(name: &str, value: &str) -> Result<u8, SQLError> {
     Ok(byte)
 }
 
-fn validate_copy_options(options: &CopyOptions) -> Result<(), SQLError> {
+fn validate_copy_options(
+    options: &CopyOptions,
+    quote_explicit: bool,
+    escape_explicit: bool,
+) -> Result<(), SQLError> {
     if options.null.contains(['\n', '\r']) {
         return Err(copy_option_error(
             "COPY null representation cannot use newline or carriage return",
         ));
     }
-    if options.format == CopyFormat::Text {
-        if options.delimiter == b'\\' {
-            return Err(copy_option_error("COPY delimiter cannot be backslash"));
-        }
-        if options.header != CopyHeader::False {
-            return Err(copy_option_error("COPY HEADER available only in CSV mode"));
-        }
-        if options.quote != b'"' || options.escape != b'"' {
-            return Err(copy_option_error(
-                "COPY quote or escape available only in CSV mode",
-            ));
-        }
+    if options.format == CopyFormat::Text && options.delimiter == b'\\' {
+        return Err(copy_option_error("COPY delimiter cannot be backslash"));
+    }
+    if options.format != CopyFormat::Csv && (quote_explicit || escape_explicit) {
+        return Err(copy_option_error(
+            "COPY quote or escape available only in CSV mode",
+        ));
+    }
+    if options.format == CopyFormat::Binary && options.header != CopyHeader::False {
+        return Err(copy_option_error(
+            "COPY HEADER is not available in binary mode",
+        ));
     }
     if options.format == CopyFormat::Csv && options.delimiter == options.quote {
         return Err(copy_option_error(
@@ -410,6 +416,9 @@ mod tests {
 
         for invalid in [
             r"COPY items FROM STDIN WITH (FORMAT text, DELIMITER E'\\')",
+            "COPY items FROM STDIN WITH (FORMAT text, QUOTE '\"')",
+            "COPY items FROM STDIN WITH (FORMAT binary, ESCAPE '\"')",
+            "COPY items FROM STDIN WITH (FORMAT binary, HEADER)",
             "COPY items FROM STDIN WITH (DELIMITER '|', NULL 'a|b')",
             "COPY items FROM STDIN WITH (FORMAT csv, NULL 'a\"b')",
         ] {
@@ -448,6 +457,14 @@ mod tests {
                 .sqlstate(),
             Some("22021")
         );
+
+        let with_header = compile_copy("COPY t FROM STDIN WITH (HEADER MATCH)")
+            .unwrap()
+            .options;
+        assert_eq!(
+            decode_copy_input(b"a\tb\n1\t2\n", &with_header, &columns).unwrap(),
+            vec![vec![Some("1".into()), Some("2".into())]]
+        );
     }
 
     #[test]
@@ -461,5 +478,9 @@ mod tests {
         assert_eq!(rows[0], vec![None, Some(String::new())]);
         assert_eq!(rows[1][0].as_deref(), Some("a,b"));
         assert_eq!(rows[1][1].as_deref(), Some("line\nvalue"));
+
+        let permissive = decode_copy_input(b"\"a\"b,c\n\"a\" ,b\n", &options, &columns).unwrap();
+        assert_eq!(permissive[0], vec![Some("ab".into()), Some("c".into())]);
+        assert_eq!(permissive[1], vec![Some("a ".into()), Some("b".into())]);
     }
 }

@@ -41,6 +41,8 @@ pub(in crate::compiler) fn compile_table_hierarchy(
         partition_bound,
         local_columns: Vec::new(),
         partition_identity_overrides: Vec::new(),
+        partition_inherited_key_constraints: Vec::new(),
+        partition_inherited_foreign_keys: Vec::new(),
     })
 }
 

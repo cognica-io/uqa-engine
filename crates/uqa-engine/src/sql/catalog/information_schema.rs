@@ -193,7 +193,10 @@ fn information_schema_column_row(
             "identity_generation",
             match column.auto_increment.as_ref().map(|value| value.kind) {
                 Some(uqa_sql::ast::AutoIncrementKind::IdentityAlways) => str_value("ALWAYS"),
-                Some(uqa_sql::ast::AutoIncrementKind::IdentityByDefault) => str_value("BY DEFAULT"),
+                Some(
+                    uqa_sql::ast::AutoIncrementKind::IdentityByDefault
+                    | uqa_sql::ast::AutoIncrementKind::Legacy,
+                ) => str_value("BY DEFAULT"),
                 _ => Value::Null,
             },
         ),
@@ -202,7 +205,7 @@ fn information_schema_column_row(
             if column
                 .auto_increment
                 .as_ref()
-                .is_some_and(uqa_sql::ast::AutoIncrement::is_identity)
+                .is_some_and(|provenance| provenance.is_identity() || provenance.is_legacy())
             {
                 str_value("1")
             } else {
@@ -214,7 +217,7 @@ fn information_schema_column_row(
             if column
                 .auto_increment
                 .as_ref()
-                .is_some_and(uqa_sql::ast::AutoIncrement::is_identity)
+                .is_some_and(|provenance| provenance.is_identity() || provenance.is_legacy())
             {
                 str_value("1")
             } else {

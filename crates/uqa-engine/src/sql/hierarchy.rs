@@ -12,10 +12,11 @@ use std::cmp::Ordering;
 mod hash;
 
 pub(in crate::sql) fn validate_hash_partition_spec(
+    engine: &Engine,
     spec: &uqa_sql::ast::PartitionSpec,
     columns: &[uqa_sql::ast::ColumnDef],
 ) -> Result<(), SQLError> {
-    hash::validate_partition_spec(spec, columns)
+    hash::validate_partition_spec(engine, spec, columns)
 }
 
 pub(in crate::sql) fn validate_new_partition_bound(
@@ -146,7 +147,7 @@ fn partition_key_values_and_hash(
 ) -> Result<(Vec<Value>, Option<u64>), SQLError> {
     let (keys, definitions) = evaluate_partition_keys(engine, table, &spec.keys, document, &[])?;
     let row_hash = (spec.strategy == uqa_sql::ast::PartitionStrategy::Hash)
-        .then(|| hash::row_hash(spec, &definitions, &keys))
+        .then(|| hash::row_hash(engine, spec, &definitions, &keys))
         .transpose()?;
     Ok((keys, row_hash))
 }
@@ -155,19 +156,32 @@ fn validate_partition_bound_width(
     spec: &uqa_sql::ast::PartitionSpec,
     bound: &uqa_sql::ast::PartitionBound,
 ) -> Result<(), SQLError> {
-    use uqa_sql::ast::PartitionBound;
-    match bound {
-        PartitionBound::List(_) if spec.keys.len() != 1 => Err(invalid_partition_bound(
-            "cannot use list partition bounds with more than one partition key",
-        )),
-        PartitionBound::Range { lower, upper }
+    use uqa_sql::ast::{PartitionBound, PartitionStrategy};
+    match (spec.strategy, bound) {
+        (_, PartitionBound::Default) => Ok(()),
+        (PartitionStrategy::List, PartitionBound::List(_)) if spec.keys.len() != 1 => {
+            Err(invalid_partition_bound(
+                "cannot use list partition bounds with more than one partition key",
+            ))
+        }
+        (PartitionStrategy::List, PartitionBound::List(_)) => Ok(()),
+        (PartitionStrategy::Range, PartitionBound::Range { lower, upper })
             if lower.len() != spec.keys.len() || upper.len() != spec.keys.len() =>
         {
             Err(invalid_partition_bound(
                 "partition bound has the wrong number of columns",
             ))
         }
-        _ => Ok(()),
+        (PartitionStrategy::Range, PartitionBound::Range { .. })
+        | (PartitionStrategy::Hash, PartitionBound::Hash { .. }) => Ok(()),
+        (strategy, _) => Err(invalid_partition_bound(format!(
+            "invalid bound specification for a {} partitioned table",
+            match strategy {
+                PartitionStrategy::List => "list",
+                PartitionStrategy::Range => "range",
+                PartitionStrategy::Hash => "hash",
+            }
+        ))),
     }
 }
 
@@ -382,7 +396,7 @@ fn select_direct_partition_with_spec(
     let (keys, definitions) =
         evaluate_partition_keys(engine, parent, &spec.keys, document, params)?;
     let row_hash = (spec.strategy == uqa_sql::ast::PartitionStrategy::Hash)
-        .then(|| hash::row_hash(spec, &definitions, &keys))
+        .then(|| hash::row_hash(engine, spec, &definitions, &keys))
         .transpose()?;
     let mut default = None;
     for child in engine.direct_hierarchy_children(parent)? {

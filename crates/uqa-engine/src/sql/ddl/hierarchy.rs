@@ -24,7 +24,7 @@ pub(super) fn prepare_create_table_hierarchy(
                 "partition bound has no parent relation".into(),
             ));
         }
-        validate_partition_keys(table)?;
+        validate_partition_keys(engine, table)?;
         return Ok(());
     }
     let is_partition = table.hierarchy.partition_bound.is_some();
@@ -117,7 +117,7 @@ pub(super) fn prepare_create_table_hierarchy(
         table.key_constraints = inherited_keys;
     }
     table.hierarchy.parents = canonical_parents;
-    validate_partition_keys(table)?;
+    validate_partition_keys(engine, table)?;
     if let (Some(parent), Some(bound)) = (
         table.hierarchy.parents.first(),
         table.hierarchy.partition_bound.as_ref(),
@@ -163,7 +163,7 @@ fn merge_parent_columns(
 ) -> Result<(), SQLError> {
     for column in incoming {
         if let Some(existing) = merged.iter_mut().find(|item| item.name == column.name) {
-            merge_same_column(existing, column, true)?;
+            merge_same_column(existing, column)?;
         } else {
             merged.push(column);
         }
@@ -177,7 +177,7 @@ fn merge_local_columns(
 ) -> Result<(), SQLError> {
     for column in local {
         if let Some(existing) = inherited.iter_mut().find(|item| item.name == column.name) {
-            merge_same_column(existing, column, false)?;
+            merge_same_column(existing, column)?;
         } else {
             inherited.push(column);
         }
@@ -185,10 +185,9 @@ fn merge_local_columns(
     Ok(())
 }
 
-fn merge_same_column(
+pub(super) fn merge_same_column(
     inherited: &mut uqa_sql::ast::ColumnDef,
     declared: uqa_sql::ast::ColumnDef,
-    merging_parents: bool,
 ) -> Result<(), SQLError> {
     if inherited.ty != declared.ty {
         return Err(SQLError::Routine {
@@ -215,7 +214,7 @@ fn merge_same_column(
     if declared.auto_increment.is_some() {
         inherited.auto_increment = declared.auto_increment;
     }
-    if declared.default.is_some() || !merging_parents {
+    if declared.default.is_some() {
         inherited.default = declared.default;
     }
     if declared.generated.is_some() {
@@ -232,7 +231,7 @@ fn merge_same_column(
     Ok(())
 }
 
-fn validate_partition_keys(table: &CreateTable) -> Result<(), SQLError> {
+fn validate_partition_keys(engine: &Engine, table: &CreateTable) -> Result<(), SQLError> {
     let Some(spec) = table.hierarchy.partition_spec.as_ref() else {
         return Ok(());
     };
@@ -251,5 +250,5 @@ fn validate_partition_keys(table: &CreateTable) -> Result<(), SQLError> {
             }
         }
     }
-    crate::sql::validate_hash_partition_spec(spec, &table.columns)
+    crate::sql::validate_hash_partition_spec(engine, spec, &table.columns)
 }

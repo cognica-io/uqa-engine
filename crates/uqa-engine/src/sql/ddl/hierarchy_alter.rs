@@ -182,10 +182,13 @@ fn attach_partition(
         let mut columns = table_columns(engine, target, "ATTACH PARTITION")?;
         let identity_overrides = install_inherited_identity(&mut columns, &inherited_identity)?;
         let mut constraints = declared_constraints(engine, target, "ATTACH PARTITION")?;
-        append_inherited_keys(&mut constraints.key_constraints, &parent_keys);
-        append_inherited_foreign_keys(&mut constraints.foreign_keys, &parent_foreign_keys);
+        let inherited_keys = append_inherited_keys(&mut constraints.key_constraints, &parent_keys);
+        let inherited_foreign_keys =
+            append_inherited_foreign_keys(&mut constraints.foreign_keys, &parent_foreign_keys);
         let mut hierarchy = constraints.hierarchy.clone();
         hierarchy.partition_identity_overrides = identity_overrides;
+        hierarchy.partition_inherited_key_constraints = inherited_keys;
+        hierarchy.partition_inherited_foreign_keys = inherited_foreign_keys;
         if target == &partition {
             hierarchy.parents = vec![parent.to_string()];
             hierarchy.parent_sequence_numbers = vec![1];
@@ -278,6 +281,7 @@ fn detach_partition(
             &inherited_identity,
             &constraints.hierarchy.partition_identity_overrides,
         );
+        remove_partition_inherited_constraints(&mut constraints);
         if concurrently {
             constraints.checks.push(detached_bound_check(
                 target,
@@ -288,6 +292,8 @@ fn detach_partition(
         }
         let mut hierarchy = constraints.hierarchy.clone();
         hierarchy.partition_identity_overrides.clear();
+        hierarchy.partition_inherited_key_constraints.clear();
+        hierarchy.partition_inherited_foreign_keys.clear();
         if target == &partition {
             hierarchy.parents.clear();
             hierarchy.parent_sequence_numbers.clear();
@@ -593,7 +599,11 @@ fn restore_identity_overrides(
     }
 }
 
-fn append_inherited_keys(target: &mut Vec<TableKeyConstraint>, inherited: &[TableKeyConstraint]) {
+fn append_inherited_keys(
+    target: &mut Vec<TableKeyConstraint>,
+    inherited: &[TableKeyConstraint],
+) -> Vec<TableKeyConstraint> {
+    let mut appended = Vec::new();
     for constraint in inherited {
         if target
             .iter()
@@ -603,8 +613,10 @@ fn append_inherited_keys(target: &mut Vec<TableKeyConstraint>, inherited: &[Tabl
         }
         let mut constraint = constraint.clone();
         constraint.name = None;
-        target.push(constraint);
+        target.push(constraint.clone());
+        appended.push(constraint);
     }
+    appended
 }
 
 fn key_equivalent(left: &TableKeyConstraint, right: &TableKeyConstraint) -> bool {
@@ -613,13 +625,40 @@ fn key_equivalent(left: &TableKeyConstraint, right: &TableKeyConstraint) -> bool
         && left.nulls_not_distinct == right.nulls_not_distinct
 }
 
-fn append_inherited_foreign_keys(target: &mut Vec<ForeignKey>, inherited: &[ForeignKey]) {
+fn append_inherited_foreign_keys(
+    target: &mut Vec<ForeignKey>,
+    inherited: &[ForeignKey],
+) -> Vec<ForeignKey> {
+    let mut appended = Vec::new();
     for constraint in inherited {
         if !target
             .iter()
             .any(|candidate| foreign_key_equivalent(candidate, constraint))
         {
             target.push(constraint.clone());
+            appended.push(constraint.clone());
+        }
+    }
+    appended
+}
+
+fn remove_partition_inherited_constraints(constraints: &mut uqa_sql::ast::TableConstraintSet) {
+    for inherited in &constraints.hierarchy.partition_inherited_key_constraints {
+        if let Some(index) = constraints
+            .key_constraints
+            .iter()
+            .position(|constraint| constraint == inherited)
+        {
+            constraints.key_constraints.remove(index);
+        }
+    }
+    for inherited in &constraints.hierarchy.partition_inherited_foreign_keys {
+        if let Some(index) = constraints
+            .foreign_keys
+            .iter()
+            .position(|constraint| constraint == inherited)
+        {
+            constraints.foreign_keys.remove(index);
         }
     }
 }

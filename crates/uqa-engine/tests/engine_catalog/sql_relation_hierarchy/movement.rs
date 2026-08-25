@@ -402,3 +402,99 @@ fn waiting_update_from_spill_follows_a_row_moved_to_another_partition() {
     assert_eq!(high.rows[0]["bucket"], Value::Int(12));
     assert_eq!(high.rows[0]["value"], Value::Str("from-waiter".into()));
 }
+
+#[test]
+fn waiting_parent_delete_follows_a_row_moved_to_another_partition() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = Engine::open(&directory.path().join("partition-delete-successor.db")).unwrap();
+    create_range_movement_fixture(&root);
+    exec(
+        &root,
+        "INSERT INTO movement_targets VALUES (1, 1, 'before')",
+    );
+    let holder = root.new_session().unwrap();
+    let waiter = root.new_session().unwrap();
+    exec(&holder, "BEGIN");
+    exec(
+        &holder,
+        "SELECT item_key FROM movement_targets WHERE item_key = 1 FOR UPDATE",
+    );
+    let (done_tx, done_rx) = mpsc::channel();
+    let waiting_thread = std::thread::spawn(move || {
+        done_tx
+            .send(waiter.sql(
+                "DELETE FROM movement_targets WHERE item_key = 1 RETURNING bucket, value",
+                &[],
+            ))
+            .unwrap();
+    });
+    assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
+    exec(
+        &holder,
+        "UPDATE movement_targets SET bucket = 12 WHERE item_key = 1",
+    );
+    exec(&holder, "COMMIT");
+
+    let result = done_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap()
+        .unwrap();
+    waiting_thread.join().unwrap();
+    assert_eq!(result.affected_rows, 1);
+    assert_eq!(result.rows[0]["bucket"], Value::Int(12));
+    assert!(root
+        .sql("SELECT * FROM movement_targets", &[])
+        .unwrap()
+        .rows
+        .is_empty());
+}
+
+#[test]
+fn waiting_merge_follows_a_row_moved_to_another_partition() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = Engine::open(&directory.path().join("partition-merge-successor.db")).unwrap();
+    create_range_movement_fixture(&root);
+    exec(
+        &root,
+        "INSERT INTO movement_targets VALUES (1, 1, 'before')",
+    );
+    let holder = root.new_session().unwrap();
+    let waiter = root.new_session().unwrap();
+    exec(&holder, "BEGIN");
+    exec(
+        &holder,
+        "SELECT item_key FROM movement_targets WHERE item_key = 1 FOR UPDATE",
+    );
+    let (done_tx, done_rx) = mpsc::channel();
+    let waiting_thread = std::thread::spawn(move || {
+        done_tx
+            .send(waiter.sql(
+                "MERGE INTO movement_targets AS target USING (SELECT 1 AS item_key, 'merged' AS value) AS source ON target.item_key = source.item_key WHEN MATCHED THEN UPDATE SET value = source.value WHEN NOT MATCHED THEN INSERT (item_key, bucket, value) VALUES (source.item_key, 1, source.value) RETURNING merge_action() AS action, target.bucket AS bucket, target.value AS value",
+                &[],
+            ))
+            .unwrap();
+    });
+    assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
+    exec(
+        &holder,
+        "UPDATE movement_targets SET bucket = 12 WHERE item_key = 1",
+    );
+    exec(&holder, "COMMIT");
+
+    let result = done_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap()
+        .unwrap();
+    waiting_thread.join().unwrap();
+    assert_eq!(result.affected_rows, 1);
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["action"], Value::Str("UPDATE".into()));
+    assert_eq!(result.rows[0]["bucket"], Value::Int(12));
+    assert_eq!(result.rows[0]["value"], Value::Str("merged".into()));
+    assert_eq!(
+        root.sql("SELECT count(*) AS count FROM movement_targets", &[])
+            .unwrap()
+            .rows[0]["count"],
+        Value::Int(1)
+    );
+}

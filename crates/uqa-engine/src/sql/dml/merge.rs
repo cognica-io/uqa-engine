@@ -15,16 +15,16 @@ use super::{
     document_vectors, encode_merge_pair, encode_prepared_doc_id, encode_prepared_document_delete,
     encode_prepared_document_rewrite, eval_mutation_assignment, eval_mutation_expr,
     expanded_returning_projections, insert_identity_columns, lock_document_key_dependencies,
-    lock_existing_document_foreign_key_dependencies, lock_mutation_target, merge_pair_schema,
-    merge_source_index_value, missing_document_error, partition_insert_target,
+    lock_existing_document_foreign_key_dependencies, lock_physical_mutation_target,
+    merge_pair_schema, merge_source_index_value, missing_document_error, partition_insert_target,
     persist_auto_increment_identity, prepare_auto_increment_identity, prepare_document_delete,
     prepare_document_rewrite, prepare_insert_identity, retarget_prepared_document_rewrite,
     returning_row_context, stage_prepared_document_delete, stage_prepared_document_rewrite,
     update_lock_strength, validate_document_constraints, validate_mutation_columns,
     validate_returning_alias_relations, BTreeMap, BTreeSet, CteScope, DmlCommandMutationOverlay,
     DmlReturningShape, Document, Engine, MergePlan, MergeWhenPlan, MutationAssignmentTarget,
-    MutationLockTarget, ProjectionPlan, ReturningRowImage, ReturningRowImages, SQLError, SQLParam,
-    SQLResult, Value, MERGE_ACTION_COLUMN,
+    PhysicalMutationLockTarget, ProjectionPlan, ReturningRowImage, ReturningRowImages, SQLError,
+    SQLParam, SQLResult, Value, MERGE_ACTION_COLUMN,
 };
 
 const MERGE_PREPARED_UPDATE: i64 = 1;
@@ -252,7 +252,7 @@ pub(in crate::sql) fn run_merge_inner(
     let mut deleted_targets = BTreeSet::new();
     for (storage_table, doc_id) in lock_target_ids {
         let original_identity = (storage_table.clone(), doc_id);
-        let target = lock_mutation_target(
+        let target = lock_physical_mutation_target(
             engine,
             &storage_table,
             &target_qual,
@@ -260,19 +260,17 @@ pub(in crate::sql) fn run_merge_inner(
             merge_target_lock_strength(engine, stmt, &storage_table),
         )?;
         match target {
-            MutationLockTarget::Present {
-                doc_id: locked_id,
-                recheck,
-            } => {
+            PhysicalMutationLockTarget::Present { identity, recheck } => {
                 recheck_matches |= recheck;
-                if recheck || locked_id != doc_id {
+                let locked_identity = (identity.table, identity.doc_id);
+                if recheck || locked_identity != original_identity {
                     rechecked_target_ids.insert(original_identity.clone());
                 }
-                if locked_id != doc_id {
-                    successors.insert(original_identity, (storage_table, locked_id));
+                if locked_identity != original_identity {
+                    successors.insert(original_identity, locked_identity);
                 }
             }
-            MutationLockTarget::Deleted => {
+            PhysicalMutationLockTarget::Deleted => {
                 recheck_matches = true;
                 deleted_targets.insert(original_identity);
             }

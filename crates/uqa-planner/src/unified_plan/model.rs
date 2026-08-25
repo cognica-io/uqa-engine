@@ -370,7 +370,7 @@ pub enum MergeWhenPlan {
 /// procedural payloads contain catalog data, never a second SQL dispatcher.
 #[derive(Debug, Clone)]
 pub enum CommandPlan {
-    CreateTable(uqa_sql::ast::CreateTable),
+    CreateTable(Box<uqa_sql::ast::CreateTable>),
     CreateIndex(uqa_sql::ast::CreateIndex),
     Insert(Box<InsertPlan>),
     Update(Box<UpdatePlan>),

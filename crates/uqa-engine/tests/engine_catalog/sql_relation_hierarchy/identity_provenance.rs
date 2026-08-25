@@ -236,3 +236,45 @@ fn legacy_boolean_auto_increment_metadata_remains_readable() {
         serde_json::from_str(&serde_json::to_string(&current).unwrap()).unwrap();
     assert_eq!(round_trip.auto_increment, current.auto_increment);
 }
+
+#[test]
+fn legacy_boolean_auto_increment_catalog_fields_are_internally_consistent() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("legacy-auto-increment-catalog.db");
+    {
+        let engine = Engine::open(&database).unwrap();
+        exec(&engine, "CREATE TABLE legacy_catalog (id SERIAL)");
+    }
+    {
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        let columns: String = connection
+            .query_row(
+                "SELECT columns FROM _tables WHERE schema_name = 'public' AND relation_name = 'legacy_catalog'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut columns: serde_json::Value = serde_json::from_str(&columns).unwrap();
+        columns[0]["auto_increment"] = serde_json::Value::Bool(true);
+        connection
+            .execute(
+                "UPDATE _tables SET columns = ?1 WHERE schema_name = 'public' AND relation_name = 'legacy_catalog'",
+                [serde_json::to_string(&columns).unwrap()],
+            )
+            .unwrap();
+    }
+    let reopened = Engine::open(&database).unwrap();
+    let column = reopened
+        .sql(
+            "SELECT is_identity, identity_generation, identity_start, identity_increment FROM information_schema.columns WHERE table_name = 'legacy_catalog' AND column_name = 'id'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(column.rows[0]["is_identity"], Value::Str("YES".into()));
+    assert_eq!(
+        column.rows[0]["identity_generation"],
+        Value::Str("BY DEFAULT".into())
+    );
+    assert_eq!(column.rows[0]["identity_start"], Value::Str("1".into()));
+    assert_eq!(column.rows[0]["identity_increment"], Value::Str("1".into()));
+}

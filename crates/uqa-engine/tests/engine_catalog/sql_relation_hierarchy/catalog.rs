@@ -96,6 +96,42 @@ fn partition_catalogs_bounds_and_deparsers_match_postgresql_18() {
     assert_eq!(absent.rows[0]["keydef"], Value::Null);
 
     assert_partition_catalog_routines(&engine);
+
+    exec(
+        &engine,
+        "CREATE VIEW partition_catalog_view AS SELECT partrelid FROM pg_catalog.pg_partitioned_table",
+    );
+    assert_eq!(
+        engine
+            .sql("SELECT partrelid FROM partition_catalog_view", &[])
+            .unwrap()
+            .rows
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn constraint_relation_oids_preserve_quoted_dot_components() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE SCHEMA \"catalog.dot\"");
+    exec(
+        &engine,
+        "CREATE TABLE \"catalog.dot\".\"parent.dot\" (id INTEGER PRIMARY KEY)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE \"catalog.dot\".\"child.dot\" (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES \"catalog.dot\".\"parent.dot\"(id))",
+    );
+    let rows = engine
+        .sql(
+            "SELECT conrelid = child.oid AS constrained_matches, confrelid = parent.oid AS referenced_matches FROM pg_catalog.pg_constraint AS constraint_row JOIN pg_catalog.pg_class AS child ON child.oid = constraint_row.conrelid JOIN pg_catalog.pg_namespace AS child_ns ON child_ns.oid = child.relnamespace LEFT JOIN pg_catalog.pg_class AS parent ON parent.oid = constraint_row.confrelid WHERE child_ns.nspname = 'catalog.dot' AND child.relname = 'child.dot' AND constraint_row.contype = 'f'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(rows.rows.len(), 1);
+    assert_eq!(rows.rows[0]["constrained_matches"], Value::Bool(true));
+    assert_eq!(rows.rows[0]["referenced_matches"], Value::Bool(true));
 }
 
 fn assert_partition_catalog_routines(engine: &Engine) {

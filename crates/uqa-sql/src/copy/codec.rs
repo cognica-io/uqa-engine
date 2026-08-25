@@ -291,11 +291,9 @@ fn decode_csv_rows(
             continue;
         }
         if after_quote && !matches!(byte, b'\n' | b'\r') && byte != options.delimiter {
-            return Err(copy_data_error(
-                "22P04",
-                "extra data after last expected column",
-                line,
-            ));
+            field.push(byte);
+            index += 1;
+            continue;
         }
         if byte == options.delimiter {
             row.push(csv_field(&field, quoted, options)?);

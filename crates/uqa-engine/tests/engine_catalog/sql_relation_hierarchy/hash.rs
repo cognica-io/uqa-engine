@@ -193,15 +193,27 @@ fn hash_partition_ddl_rejects_invalid_bounds_defaults_and_modulus_chains() {
     assert!(overlap.to_string().contains("would overlap partition"));
     assert!(!engine.has_table("hash_mod8_r4").unwrap());
 
-    let expression = engine
-        .sql(
-            "CREATE TABLE hash_expression (k INTEGER) PARTITION BY HASH ((k + 1))",
-            &[],
-        )
-        .unwrap_err();
-    assert_eq!(expression.sqlstate(), Some("0A000"));
-    assert!(expression
-        .to_string()
-        .contains("HASH partition key expressions"));
-    assert!(!engine.has_table("hash_expression").unwrap());
+    exec(
+        &engine,
+        "CREATE TABLE range_validation (k INTEGER) PARTITION BY RANGE (k)",
+    );
+    exec(&engine, "CREATE TABLE wrong_bound_candidate (k INTEGER)");
+    assert_eq!(
+        engine
+            .sql(
+                "ALTER TABLE range_validation ATTACH PARTITION wrong_bound_candidate FOR VALUES WITH (MODULUS 8, REMAINDER 4)",
+                &[],
+            )
+            .unwrap_err()
+            .sqlstate(),
+        Some("42P17")
+    );
+
+    exec(
+        &engine,
+        "CREATE TABLE hash_expression (k INTEGER) PARTITION BY HASH ((k + 1))",
+    );
+    create_hash_partitions(&engine, "hash_expression", &[7]);
+    exec(&engine, "INSERT INTO hash_expression VALUES (0)");
+    assert_eq!(leaf_count(&engine, "hash_expression", 7), 1);
 }

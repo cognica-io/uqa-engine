@@ -10,10 +10,10 @@ mod period;
 
 use super::{
     coerce_to_column_type, dml_storage_error, document_vectors, eval_lowered_expression,
-    lock_mutation_row, lock_mutation_target, missing_document_error, partition_insert_target,
-    update_lock_strength, ColumnType, DocId, Document, Engine, ForeignKey, ForeignKeyAction,
-    ForeignKeyMatch, MutationLockTarget, PhysicalDocumentIdentity, PreparedDocumentRewrite,
-    SQLError, SQLParam, Value,
+    lock_mutation_row, lock_mutation_target, lock_physical_mutation_target, missing_document_error,
+    partition_insert_target, update_lock_strength, ColumnType, DocId, Document, Engine, ForeignKey,
+    ForeignKeyAction, ForeignKeyMatch, MutationLockTarget, PhysicalDocumentIdentity,
+    PhysicalMutationLockTarget, PreparedDocumentRewrite, SQLError, SQLParam, Value,
 };
 use sha2::{Digest, Sha256};
 use uqa_sql::ast::TableKeyConstraint;
@@ -619,10 +619,13 @@ pub(in crate::sql) fn validate_key_constraints(
             .name
             .as_deref()
             .map_or_else(String::new, |name| format!(" `{name}`"));
-        return Err(SQLError::TypeMismatch(format!(
-            "{kind} constraint{name} violated: duplicate value for columns ({}) in table `{table}`",
-            constraint.columns.join(", ")
-        )));
+        return Err(SQLError::Routine {
+            sqlstate: "23505".into(),
+            message: format!(
+                "{kind} constraint{name} violated: duplicate value for columns ({}) in table `{table}`",
+                constraint.columns.join(", ")
+            ),
+        });
     }
     Ok(())
 }
@@ -1294,24 +1297,20 @@ pub(in crate::sql) fn lock_referencing_child(
     comparison: &ForeignKeyComparison,
     expected: &[Value],
 ) -> Result<Option<(PhysicalDocumentIdentity, Document)>, SQLError> {
-    let target = lock_mutation_target(
+    let target = lock_physical_mutation_target(
         engine,
         &child.table,
         ref_table,
         child.doc_id,
         update_lock_strength(engine, &child.table, lock_columns),
     )?;
-    let MutationLockTarget::Present {
-        doc_id: child_id,
-        recheck,
-    } = target
-    else {
+    let PhysicalMutationLockTarget::Present { identity, recheck } = target else {
         return Ok(None);
     };
     if recheck {
         engine.refresh_explicit_statement_snapshot()?;
     }
-    let Some(child_doc) = engine.get_document(&child.table, child_id)? else {
+    let Some(child_doc) = engine.get_document(&identity.table, identity.doc_id)? else {
         return Ok(None);
     };
     let actual = fk
@@ -1320,13 +1319,7 @@ pub(in crate::sql) fn lock_referencing_child(
         .map(|column| child_doc.get(column).cloned().unwrap_or(Value::Null))
         .collect();
     let actual = comparison.normalize(actual)?;
-    Ok((actual == expected).then_some((
-        PhysicalDocumentIdentity {
-            table: child.table.clone(),
-            doc_id: child_id,
-        },
-        child_doc,
-    )))
+    Ok((actual == expected).then_some((identity, child_doc)))
 }
 
 pub(in crate::sql) fn referencing_rows(
