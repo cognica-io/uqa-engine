@@ -70,6 +70,12 @@ pub(in crate::sql) enum MutationLockTarget {
     Deleted,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(in crate::sql) struct PhysicalDocumentIdentity {
+    pub table: String,
+    pub doc_id: DocId,
+}
+
 pub(in crate::sql) struct PreparedDocumentRewrite {
     pub table: String,
     pub doc_id: DocId,

@@ -53,6 +53,16 @@ struct PreparedInsertSelect {
     has_prepared_effect: bool,
 }
 
+struct PreparedInsertRowContext<'a> {
+    engine: &'a Engine,
+    stmt: &'a InsertPlan,
+    storage_table: &'a str,
+    document: &'a Document,
+    shared_document: Option<&'a Arc<Document>>,
+    params: &'a [SQLParam],
+    scope: &'a CteScope,
+}
+
 impl InsertSelectConsumer {
     fn new(
         engine: &Engine,
@@ -253,15 +263,15 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
             attach_prepared_insert_identity(prepared_conflict, insert_identity);
         let prepared_effect = !matches!(&prepared_conflict, PreparedInsertConflict::Skip);
         if let Some(row) = stage_prepared_insert_row(
-            engine,
             PreparedInsertRowContext {
+                engine,
                 stmt,
                 storage_table: &target_table,
+                document: &document,
+                shared_document: None,
                 params,
                 scope: snapshot_scope,
             },
-            &document,
-            None,
             &mut prepared_conflict,
         )? {
             returning_rows.push(row);
@@ -522,15 +532,15 @@ pub(in crate::sql) fn run_insert_inner(
         let prepared_effect = !matches!(&prepared, PreparedInsertConflict::Skip);
         let document = Arc::new(document);
         if let Some(returning) = stage_prepared_insert_row(
-            engine,
             PreparedInsertRowContext {
+                engine,
                 stmt,
                 storage_table: &target_table,
+                document: document.as_ref(),
+                shared_document: Some(&document),
                 params,
                 scope: &snapshot_scope,
             },
-            document.as_ref(),
-            Some(&document),
             &mut prepared,
         )? {
             returning_rows.push(returning);
@@ -619,23 +629,16 @@ fn attach_prepared_insert_identity(
     }
 }
 
-struct PreparedInsertRowContext<'a> {
-    stmt: &'a InsertPlan,
-    storage_table: &'a str,
-    params: &'a [SQLParam],
-    scope: &'a CteScope,
-}
-
 fn stage_prepared_insert_row(
-    engine: &Engine,
     context: PreparedInsertRowContext<'_>,
-    document: &Document,
-    shared_document: Option<&Arc<Document>>,
     prepared: &mut PreparedInsertConflict,
 ) -> Result<Option<uqa_execution::OwnedPhysicalRow>, SQLError> {
     let PreparedInsertRowContext {
+        engine,
         stmt,
         storage_table,
+        document,
+        shared_document,
         params,
         scope,
     } = context;

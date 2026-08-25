@@ -9,13 +9,13 @@
 use super::{
     apply_set_action_to_child, apply_validated_prepared_document_rewrite,
     build_join_spill_with_ctes, build_returning_row, dml_join_rows, dml_returning_result,
-    dml_target_row, eval_mutation_expr, lock_mutation_target, prepare_document_rewrite,
-    referencing_rows, referrers_to_for_actions, stage_prepared_document_rewrite,
-    validate_dml_expression_qualifiers, validate_returning_alias_relations, BTreeSet, CteScope,
-    DeletePlan, DmlCommandMutationOverlay, DmlReturningShape, DocId, Document, Engine, ForeignKey,
-    ForeignKeyAction, MutationLockTarget, PreparedDeleteAction, PreparedDocumentDelete,
-    ReturningProjectionRow, ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult,
-    Value,
+    dml_target_row, eval_mutation_expr, finalize_referential_partition_rewrite,
+    lock_mutation_target, prepare_document_rewrite, referencing_rows, referrers_to_for_actions,
+    stage_prepared_document_rewrite, validate_dml_expression_qualifiers,
+    validate_returning_alias_relations, BTreeSet, CteScope, DeletePlan, DmlCommandMutationOverlay,
+    DmlReturningShape, DocId, Document, Engine, ForeignKey, ForeignKeyAction, MutationLockTarget,
+    PreparedDeleteAction, PreparedDocumentDelete, ReturningProjectionRow, ReturningRowImage,
+    ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
 };
 
 pub(in crate::sql) fn run_delete(
@@ -429,8 +429,8 @@ fn prepare_referenced_key_delete_actions(
         }
         engine.lock_relation(&ref_table, crate::row_locks::RelationLockMode::RowExclusive)?;
         let referencing = referencing_rows(engine, &ref_table, &fk.local_columns, &key_values)?;
-        for (child_id, _child_doc) in referencing {
-            if root_deletes.contains(&(ref_table.clone(), child_id)) {
+        for (child, _child_doc) in referencing {
+            if root_deletes.contains(&(child.table.clone(), child.doc_id)) {
                 continue;
             }
             match fk.on_delete {
@@ -444,8 +444,8 @@ fn prepare_referenced_key_delete_actions(
                 ForeignKeyAction::Cascade => {
                     if let Some(prepared) = prepare_document_delete(
                         engine,
-                        &ref_table,
-                        child_id,
+                        &child.table,
+                        child.doc_id,
                         params,
                         root_deletes,
                         delete_stack,
@@ -456,10 +456,10 @@ fn prepare_referenced_key_delete_actions(
                 }
                 ForeignKeyAction::SetNull | ForeignKeyAction::SetDefault => {
                     let columns = delete_set_columns(&fk);
-                    let Some((child_id, child_doc)) = super::lock_referencing_child(
+                    let Some((child, child_doc)) = super::lock_referencing_child(
                         engine,
                         &ref_table,
-                        child_id,
+                        &child,
                         &columns,
                         &fk.local_columns,
                         &key_values,
@@ -470,22 +470,23 @@ fn prepare_referenced_key_delete_actions(
                     let mut updated = child_doc.clone();
                     apply_set_action_to_child(
                         engine,
-                        &ref_table,
+                        &child.table,
                         &child_doc,
                         &mut updated,
                         &columns,
                         fk.on_delete,
                         params,
                     )?;
-                    if let Some(prepared) = prepare_document_rewrite(
+                    if let Some(mut prepared) = prepare_document_rewrite(
                         engine,
-                        &ref_table,
-                        child_id,
+                        &child.table,
+                        child.doc_id,
                         child_doc,
                         updated,
                         params,
                         rewrite_stack,
                     )? {
+                        finalize_referential_partition_rewrite(engine, &mut prepared, params)?;
                         actions.push(PreparedDeleteAction::Rewrite(Box::new(prepared)));
                     }
                 }

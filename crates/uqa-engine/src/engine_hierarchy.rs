@@ -114,6 +114,57 @@ impl Engine {
             .collect())
     }
 
+    /// Return the canonical relation followed by each direct ancestor in breadth-first declaration order. Physical row identity stays attached to the relation that stores the row; this list is only for discovering constraints declared against a logical ancestor.
+    pub(crate) fn hierarchy_ancestor_tables(&self, table: &str) -> Result<Vec<String>, SQLError> {
+        let table = self
+            .try_resolve_table_name(table)
+            .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        let mut output = Vec::new();
+        let mut visited = BTreeSet::new();
+        let mut pending = std::collections::VecDeque::from([table]);
+        while let Some(candidate) = pending.pop_front() {
+            if !visited.insert(candidate.clone()) {
+                continue;
+            }
+            let hierarchy = self
+                .try_table_hierarchy(&candidate)
+                .map_err(|error| SQLError::Internal(format!("read table hierarchy: {error}")))?;
+            output.push(candidate);
+            pending.extend(hierarchy.parents);
+        }
+        Ok(output)
+    }
+
+    /// Return the top declarative-partitioning root that owns `table`, or `None` when the relation is not a partitioned table or partition.
+    pub(crate) fn partition_hierarchy_root(&self, table: &str) -> Result<Option<String>, SQLError> {
+        let mut current = self
+            .try_resolve_table_name(table)
+            .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        let mut visited = BTreeSet::new();
+        let mut participates = false;
+        loop {
+            if !visited.insert(current.clone()) {
+                return Err(SQLError::Internal(format!(
+                    "partition hierarchy cycle reaches `{current}`"
+                )));
+            }
+            let hierarchy = self.try_table_hierarchy(&current).map_err(|error| {
+                SQLError::Internal(format!("read partition hierarchy: {error}"))
+            })?;
+            participates |= hierarchy.partition_spec.is_some() || hierarchy.is_partition();
+            if !hierarchy.is_partition() {
+                return Ok(participates.then_some(current));
+            }
+            current = hierarchy
+                .parents
+                .first()
+                .cloned()
+                .ok_or_else(|| SQLError::Internal("partition has no parent relation".into()))?;
+        }
+    }
+
     /// Expand a `DROP TABLE` target set through table hierarchy dependencies.
     /// Declarative partitions are owned by their parent and are always dropped
     /// with it, while ordinary inheritance children require `CASCADE`.

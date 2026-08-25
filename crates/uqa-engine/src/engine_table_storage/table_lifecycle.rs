@@ -54,6 +54,27 @@ impl Engine {
         Ok(canonical_names)
     }
 
+    fn drop_target_sets(
+        canonical_names: &[String],
+    ) -> StorageBackendResult<(std::collections::BTreeSet<String>, Vec<RelationIdentity>)> {
+        let target_names = canonical_names.iter().cloned().collect();
+        let targets = canonical_names
+            .iter()
+            .map(|name| Self::resolved_relation_identity(name))
+            .collect::<StorageBackendResult<Vec<_>>>()?;
+        Ok((target_names, targets))
+    }
+
+    fn ensure_no_drop_view_dependencies(
+        &self,
+        canonical_names: &[String],
+    ) -> StorageBackendResult<()> {
+        for name in canonical_names {
+            self.ensure_no_dependent_views("DROP TABLE", name)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn try_drop_tables_inner(
         &self,
         names: &[String],
@@ -68,15 +89,10 @@ impl Engine {
                 hierarchy_dependents.join("`, `")
             )));
         }
-        let target_names = canonical_names
-            .iter()
-            .cloned()
-            .collect::<std::collections::BTreeSet<_>>();
-        let targets = canonical_names
-            .iter()
-            .map(|name| Self::resolved_relation_identity(name))
-            .collect::<StorageBackendResult<Vec<_>>>()?;
+        let (target_names, targets) = Self::drop_target_sets(&canonical_names)?;
 
+        // Finish every dependency check before mutating a referrer or target.
+        self.ensure_no_drop_view_dependencies(&canonical_names)?;
         let entries = self.table_entries();
         self.ensure_drop_targets_unreferenced(&canonical_names, &target_names, &targets, &entries)?;
 

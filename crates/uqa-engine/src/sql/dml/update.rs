@@ -9,14 +9,14 @@
 use super::{
     apply_validated_prepared_document_rewrite, build_returning_row, coerce_to_column_type,
     dml_returning_result, dml_storage_error, dml_target_row, eval_mutation_assignment,
-    eval_mutation_expr, index_vectors_for_type, lock_mutation_target, partition_insert_target,
-    prepare_document_rewrite, referrers_to_for_actions, retarget_prepared_document_rewrite,
-    run_update_from, stage_prepared_document_rewrite, update_lock_strength,
-    validate_dml_expression_qualifiers, validate_mutation_columns,
-    validate_returning_alias_relations, BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope,
-    DmlCommandMutationOverlay, DmlReturningShape, Engine, MutationAssignmentTarget,
-    MutationLockTarget, ReturningProjectionRow, ReturningRowImage, ReturningRowImages,
-    RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, ScalarExpr, UpdatePlan, Value,
+    eval_mutation_expr, finalize_partition_rewrite, index_vectors_for_type, lock_mutation_target,
+    prepare_document_rewrite, referrers_to_for_actions, run_update_from,
+    stage_prepared_document_rewrite, update_lock_strength, validate_dml_expression_qualifiers,
+    validate_mutation_columns, validate_returning_alias_relations, BTreeMap, BTreeSet, BinaryOp,
+    ColumnType, CteScope, DmlCommandMutationOverlay, DmlReturningShape, Engine,
+    MutationAssignmentTarget, MutationLockTarget, PartitionRewritePolicy, ReturningProjectionRow,
+    ReturningRowImage, ReturningRowImages, RowIndependentUpdateValues, SQLError, SQLParam,
+    SQLResult, ScalarExpr, UpdatePlan, Value,
 };
 
 pub(in crate::sql) fn run_update(
@@ -215,11 +215,6 @@ pub(in crate::sql) fn run_update_inner(
                 doc.remove(&assignment.column);
             }
         }
-        let destination_table = if target_is_partitioned {
-            partition_insert_target(engine, &stmt.table, &doc, params, stmt.include_descendants)?
-        } else {
-            storage_table.clone()
-        };
         if let Some(mut prepared) = prepare_document_rewrite(
             engine,
             &storage_table,
@@ -229,7 +224,14 @@ pub(in crate::sql) fn run_update_inner(
             params,
             &mut rewrite_stack,
         )? {
-            retarget_prepared_document_rewrite(engine, &mut prepared, &destination_table)?;
+            finalize_partition_rewrite(
+                engine,
+                &mut prepared,
+                &stmt.table,
+                params,
+                stmt.include_descendants,
+                PartitionRewritePolicy::Move,
+            )?;
             let rewritten_doc_id = stage_prepared_document_rewrite(engine, &mut prepared, params)?;
             if !stmt.returning.is_empty() {
                 returning_rows.push(build_returning_row(

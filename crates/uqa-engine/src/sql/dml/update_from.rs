@@ -9,11 +9,11 @@
 use super::{
     apply_validated_prepared_document_rewrite, build_join_spill_with_ctes, build_returning_row,
     dml_join_rows, dml_returning_result, dml_target_row, eval_mutation_assignment,
-    eval_mutation_expr, lock_mutation_target, partition_insert_target, prepare_document_rewrite,
-    retarget_prepared_document_rewrite, stage_prepared_document_rewrite, update_lock_strength,
-    validate_returning_alias_relations, CteScope, DmlCommandMutationOverlay, DmlReturningShape,
-    Engine, MutationAssignmentTarget, MutationLockTarget, ReturningProjectionRow,
-    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, SourcePlan, UpdatePlan,
+    eval_mutation_expr, finalize_partition_rewrite, lock_mutation_target, prepare_document_rewrite,
+    stage_prepared_document_rewrite, update_lock_strength, validate_returning_alias_relations,
+    CteScope, DmlCommandMutationOverlay, DmlReturningShape, Engine, MutationAssignmentTarget,
+    MutationLockTarget, PartitionRewritePolicy, ReturningProjectionRow, ReturningRowImage,
+    ReturningRowImages, SQLError, SQLParam, SQLResult, SourcePlan, UpdatePlan,
 };
 
 pub(in crate::sql) fn run_update_from(
@@ -39,11 +39,6 @@ pub(in crate::sql) fn run_update_from(
         .map(|assignment| assignment.column.clone())
         .collect::<Vec<_>>();
     let target_tables = engine.hierarchy_scan_tables(&target, stmt.include_descendants)?;
-    let target_hierarchy = engine
-        .try_table_hierarchy(&target)
-        .map_err(|error| SQLError::Internal(format!("read UPDATE hierarchy: {error}")))?;
-    let target_is_partitioned =
-        target_hierarchy.partition_spec.is_some() || target_hierarchy.partition_bound.is_some();
     let mut target_rows = Vec::new();
     for table in target_tables {
         target_rows.extend(
@@ -140,11 +135,6 @@ pub(in crate::sql) fn run_update_from(
                 doc.remove(&assignment.column);
             }
         }
-        let destination_table = if target_is_partitioned {
-            partition_insert_target(engine, &target, &doc, params, stmt.include_descendants)?
-        } else {
-            storage_table.clone()
-        };
         if let Some(mut prepared) = prepare_document_rewrite(
             engine,
             &storage_table,
@@ -154,7 +144,14 @@ pub(in crate::sql) fn run_update_from(
             params,
             &mut rewrite_stack,
         )? {
-            retarget_prepared_document_rewrite(engine, &mut prepared, &destination_table)?;
+            finalize_partition_rewrite(
+                engine,
+                &mut prepared,
+                &target,
+                params,
+                stmt.include_descendants,
+                PartitionRewritePolicy::Move,
+            )?;
             let rewritten_doc_id = stage_prepared_document_rewrite(engine, &mut prepared, params)?;
             if !stmt.returning.is_empty() {
                 returning_rows.push(build_returning_row(
