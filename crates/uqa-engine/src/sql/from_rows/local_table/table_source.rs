@@ -7,14 +7,13 @@
 
 use super::{
     alias_query_output_to_shared, apply_propagated_view_lock, attach_qualifier_filter,
-    build_info_schema_rows, combine_filters, execute_query_plan_output,
-    execute_view_plan_output_with_parent_cache, materialize_plan_ctes,
+    build_hierarchy_retrieval_operator, build_info_schema_rows, combine_filters,
+    execute_query_plan_output, execute_view_plan_output_with_parent_cache, materialize_plan_ctes,
     push_output_filter_into_query_plan, qualifier_filter, qualifier_for, qualify_source_operator,
     qualify_source_operator_with_columns, query_contains_volatile_function, query_cte_names,
-    query_output_shared, table_lock_origin, try_build_streaming_subquery_operator,
-    try_streaming_local_table_scan, virtual_relation_schema, ColumnPrune, CteScope, Engine,
-    QualifierFilters, QueryOutputMode, SQLError, SQLParam, ScoredDocumentSource, ScoredInput,
-    SourcePlan,
+    query_output_shared, try_build_streaming_subquery_operator, try_streaming_local_table_scan,
+    virtual_relation_schema, ColumnPrune, CteScope, Engine, QualifierFilters, QueryOutputMode,
+    SQLError, SQLParam, SourcePlan,
 };
 use uqa_execution::PhysicalOperator;
 
@@ -283,52 +282,9 @@ pub(super) fn build_table_source_operator<'a>(
             if let Some(predicate) = qualifier_filter(filters, &qualifier)
                 .filter(uqa_planner::optimizer::contains_retrieval)
             {
-                let lock_origin =
-                    table_lock_origin(engine, name, &qualifier, ctes.lock_identities.emit)?;
-                let recheck_pins =
-                    lock_origin
-                        .as_ref()
-                        .and_then(|(origin_qualifier, storage_name)| {
-                            ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
-                        });
-                // A tuple-local recheck judges the substituted committed images with the retrieval predicate re-executed against the latest committed index state, not this session's pinned snapshot.
-                let entries = if recheck_pins.is_some() {
-                    engine.committed_retrieval_entries(name, &predicate, params)?
-                } else {
-                    crate::operator_tree_bridge::run_optimised(
-                        engine,
-                        name,
-                        Some(&predicate),
-                        params,
-                    )?
-                }
-                .ok_or_else(|| {
-                    SQLError::Unsupported(format!(
-                        "JOIN filter retrieval predicate for `{qualifier}` cannot be represented by the shared operator IR"
-                    ))
-                })?;
-                let table = engine.require_table(name)?;
-                let columns = engine.try_table_columns(name).map_err(|error| {
-                    SQLError::Internal(format!("read table columns for `{name}`: {error}"))
-                })?;
-                let source = ScoredDocumentSource::new(
-                    name,
-                    table,
-                    ScoredInput::entries(entries, true),
-                    columns,
-                    None,
-                    None,
-                )
-                .with_lock_origin(lock_origin)
-                .with_recheck_pins(recheck_pins);
-                let scan: Box<dyn PhysicalOperator + 'a> =
-                    Box::new(uqa_execution::TableScan::new(Box::new(source)));
-                return Ok(qualify_source_operator(
-                    scan,
-                    &qualifier,
-                    prune,
-                    ctes.lock_identities.emit,
-                ));
+                return build_hierarchy_retrieval_operator(
+                    engine, from, &qualifier, &predicate, params, ctes, prune,
+                );
             }
 
             let Some((operator, filter_pushed)) =

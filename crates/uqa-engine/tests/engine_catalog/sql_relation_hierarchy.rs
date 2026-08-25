@@ -11,6 +11,8 @@ use uqa_engine::Engine;
 
 #[path = "sql_relation_hierarchy/regressions.rs"]
 mod regressions;
+#[path = "sql_relation_hierarchy/retrieval.rs"]
+mod retrieval;
 
 fn exec(engine: &Engine, sql: &str) {
     engine.sql(sql, &[]).unwrap();

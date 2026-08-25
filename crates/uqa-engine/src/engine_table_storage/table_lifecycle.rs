@@ -86,7 +86,7 @@ impl Engine {
         // Finish every dependency check before mutating a referrer or target.
         self.ensure_no_drop_view_dependencies(&canonical_names)?;
         let entries = self.table_entries();
-        self.ensure_drop_targets_unreferenced(&target_names, &targets, &entries)?;
+        Self::ensure_drop_targets_unreferenced(&target_names, &targets, &entries)?;
 
         let mut inbound = Vec::new();
         let mut updates = Vec::new();
@@ -159,7 +159,6 @@ impl Engine {
     }
 
     fn ensure_drop_targets_unreferenced(
-        &self,
         target_names: &std::collections::BTreeSet<String>,
         targets: &[RelationIdentity],
         entries: &[(String, Arc<TableState>)],

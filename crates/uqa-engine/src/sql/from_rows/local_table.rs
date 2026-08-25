@@ -18,10 +18,11 @@ use super::{
     resolve_user_table_function, shape_join_using_output, table_function_column_types,
     table_function_empty_schema, validate_table_function_alias_count,
     validate_table_function_column_definition, ColumnPrune, CteScope, Engine,
-    EngineExpressionEvaluator, EngineLateralSource, JoinExecutionStrategy, JoinKind,
-    QualifierFilters, QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
-    ScoredDocumentSource, ScoredInput, SourceEvalContext, SourcePlan, TableFunctionCall,
-    TableFunctionTypeRequest, Value, TABLE_FUNCTION_ORDINALITY_COLUMN,
+    EngineExpressionEvaluator, EngineLateralSource, HierarchyScoredDocumentSource,
+    JoinExecutionStrategy, JoinKind, QualifierFilters, QueryOutputMode, ResultRow, SQLError,
+    SQLParam, ScalarExpr, ScopedEngineHook, ScoredDocumentSource, ScoredInput, SourceEvalContext,
+    SourcePlan, TableFunctionCall, TableFunctionTypeRequest, Value,
+    TABLE_FUNCTION_ORDINALITY_COLUMN,
 };
 
 use crate::sql::select::{
@@ -146,6 +147,8 @@ impl uqa_execution::RowSource for EngineHierarchyRowSource {
 
 #[path = "local_table/function_source.rs"]
 mod function_source;
+#[path = "local_table/hierarchy_retrieval.rs"]
+mod hierarchy_retrieval;
 #[path = "local_table/join_source.rs"]
 mod join_source;
 #[path = "local_table/row_source.rs"]
@@ -166,6 +169,7 @@ mod table_source;
 mod values_source;
 
 use function_source::{build_function_group_source_operator, build_function_source_operator};
+use hierarchy_retrieval::build_hierarchy_retrieval_operator;
 use join_source::build_join_source_operator;
 use row_source::table_lock_origin;
 use rows_from::RowsFromOperator;

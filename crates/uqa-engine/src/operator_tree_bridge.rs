@@ -905,6 +905,23 @@ fn lower_where_bound(
     }
 }
 
+/// Return the candidate-pool bound when the complete predicate is one raw KNN
+/// leaf. A hierarchy scan applies that bound once after merging every physical
+/// relation rather than independently filling it from each child.
+pub(crate) fn direct_knn_support_limit(
+    engine: &Engine,
+    expression: &ScalarExpr,
+    params: &[SQLParam],
+) -> Result<Option<usize>, SQLError> {
+    let Some(tree) = lower_where_bound(engine, expression, params)? else {
+        return Ok(None);
+    };
+    Ok(match tree {
+        OperatorTree::KNN { k, .. } => Some(k),
+        _ => None,
+    })
+}
+
 /// The "lower -> optimise -> execute" pipeline. `Some(rows)` when the
 /// WHERE expression maps cleanly onto the operator tree; `None` keeps the
 /// predicate in the enclosing relational filter node. Any engine-side failure
