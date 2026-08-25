@@ -684,7 +684,7 @@ impl Engine {
                         .or_else(|| Some(format!("{}_fkey", col.name))),
                     local_columns: vec![col.name.clone()],
                     ref_table: reference.table,
-                    ref_columns: vec![reference.column],
+                    ref_columns: reference.column.into_iter().collect(),
                     on_update: reference.on_update,
                     on_delete: reference.on_delete,
                     on_delete_set_columns: Vec::new(),

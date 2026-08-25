@@ -397,7 +397,7 @@ fn prepare_referenced_key_delete_actions(
             continue;
         }
         engine.lock_relation(&ref_table, crate::row_locks::RelationLockMode::RowExclusive)?;
-        let referencing = referencing_rows(engine, &ref_table, &fk.local_columns, &key_values)?;
+        let referencing = referencing_rows(engine, &ref_table, &fk, &key_values)?;
         for (child_id, _child_doc) in referencing {
             if root_deletes.contains(&(ref_table.clone(), child_id)) {
                 continue;
@@ -435,7 +435,7 @@ fn prepare_referenced_key_delete_actions(
                         &ref_table,
                         child_id,
                         &columns,
-                        &fk.local_columns,
+                        &fk,
                         &key_values,
                     )?
                     else {

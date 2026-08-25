@@ -443,9 +443,9 @@ impl Engine {
                 }
                 if let Some(reference) = &mut column.references {
                     if stored_relation_reference_matches(&reference.table, &target)
-                        && reference.column == from
+                        && reference.column.as_deref() == Some(from)
                     {
-                        reference.column = to.to_string();
+                        reference.column = Some(to.to_string());
                         changed = true;
                     }
                 }
@@ -557,7 +557,7 @@ impl Engine {
                 }
                 if candidate.references.as_ref().is_some_and(|reference| {
                     stored_relation_reference_matches(&reference.table, &target)
-                        && reference.column == column
+                        && reference.column.as_deref() == Some(column)
                 }) {
                     inbound.push(candidate_name.clone());
                 }

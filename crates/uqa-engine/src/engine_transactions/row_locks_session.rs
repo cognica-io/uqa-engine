@@ -182,6 +182,20 @@ impl Engine {
         )
     }
 
+    fn table_has_initially_deferred_foreign_key(&self, table: &str) -> Result<bool, SQLError> {
+        self.try_foreign_keys(table)
+            .map(|foreign_keys| {
+                foreign_keys.iter().any(|foreign_key| {
+                    foreign_key.enforced && foreign_key.deferrable && foreign_key.initially_deferred
+                })
+            })
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "read deferred foreign keys for table `{table}`: {error}"
+                ))
+            })
+    }
+
     fn note_row_change(
         &self,
         table: &str,
@@ -193,11 +207,15 @@ impl Engine {
             table: self.row_locks.table_key(&canonical),
             doc_id,
         };
+        let track_deferred_foreign_key = !self.session.transactions.lock().is_empty()
+            && self.table_has_initially_deferred_foreign_key(&canonical)?;
         let mut stack = self.session.transactions.lock();
         let change = crate::row_locks::PendingRowChange { key, kind };
         if let Some(frame) = stack.last_mut() {
             frame.row_changes.push(change);
-            frame.deferred_foreign_key_rows.insert((canonical, doc_id));
+            if track_deferred_foreign_key {
+                frame.deferred_foreign_key_rows.insert(key);
+            }
             Ok(())
         } else {
             drop(stack);
@@ -254,11 +272,15 @@ impl Engine {
         doc_id: uqa_core::DocId,
     ) -> Result<(), SQLError> {
         let canonical = self.row_lock_table_name(table)?;
+        let key = crate::row_locks::RowLockKey {
+            table: self.row_locks.table_key(&canonical),
+            doc_id,
+        };
         let mut stack = self.session.transactions.lock();
         let frame = stack.last_mut().ok_or_else(|| {
             SQLError::Internal("deferred foreign-key row outside a transaction".into())
         })?;
-        frame.deferred_foreign_key_rows.insert((canonical, doc_id));
+        frame.deferred_foreign_key_rows.insert(key);
         Ok(())
     }
 
@@ -278,6 +300,8 @@ impl Engine {
             table,
             doc_id: new_doc_id,
         };
+        let track_deferred_foreign_key = !self.session.transactions.lock().is_empty()
+            && self.table_has_initially_deferred_foreign_key(&canonical)?;
         let mut stack = self.session.transactions.lock();
         let change = crate::row_locks::PendingRowChange {
             key: old,
@@ -285,12 +309,10 @@ impl Engine {
         };
         if let Some(frame) = stack.last_mut() {
             frame.row_changes.push(change);
-            frame
-                .deferred_foreign_key_rows
-                .insert((canonical.clone(), old_doc_id));
-            frame
-                .deferred_foreign_key_rows
-                .insert((canonical, new_doc_id));
+            if track_deferred_foreign_key {
+                frame.deferred_foreign_key_rows.insert(old);
+                frame.deferred_foreign_key_rows.insert(new);
+            }
             Ok(())
         } else {
             drop(stack);

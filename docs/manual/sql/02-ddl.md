@@ -95,6 +95,7 @@ CREATE TABLE parent (
 CREATE TABLE child (
     id INTEGER PRIMARY KEY,
     parent_id INTEGER,
+    score INTEGER,
     FOREIGN KEY (parent_id) REFERENCES parent(id)
         MATCH SIMPLE
         ON UPDATE CASCADE
@@ -104,7 +105,7 @@ CREATE TABLE child (
 
 Implemented match modes are `MATCH SIMPLE` and `MATCH FULL`. Referential actions are `NO ACTION`, `RESTRICT`, `CASCADE`, `SET NULL`, and `SET DEFAULT`. Column subsets are supported for `ON DELETE SET NULL` and `ON DELETE SET DEFAULT`. `MATCH PARTIAL` is not implemented.
 
-Referenced columns must satisfy the implemented unique-key requirements. Mutations validate referential actions as part of the same transaction.
+When the referenced column list is omitted, as in `REFERENCES parent`, the referenced table's primary-key columns are inferred in declaration order. Explicit or inferred referenced columns must form a primary-key or unique key, the referencing and referenced column counts must match, and each aligned type pair must support equality comparison. Mutations validate referential actions as part of the same transaction.
 
 ## Constraint lifecycle
 

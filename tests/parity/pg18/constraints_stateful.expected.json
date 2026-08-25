@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "cd3f715ed5e1b37a74afa31317d581378dc279962f4ea8e404b610cb027c81a6",
+  "fixture_sha256": "a3f572dc049f531ba6deab692df033075c566c7845d28d4a9e646305e73d1142",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -360,6 +360,124 @@
       "rows": [
         [
           "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_inferred_fk_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "create_inferred_fk_child",
+      "kind": "ok"
+    },
+    {
+      "name": "inferred_fk_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "inferred_fk_accepts_compatible_key",
+      "kind": "ok"
+    },
+    {
+      "name": "inferred_fk_rejects_missing_key",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "create_no_key_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "inferred_fk_requires_primary_key",
+      "kind": "error",
+      "sqlstate": "42704"
+    },
+    {
+      "name": "create_composite_key_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "inferred_fk_requires_matching_arity",
+      "kind": "error",
+      "sqlstate": "42830"
+    },
+    {
+      "name": "create_incompatible_key_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "inferred_fk_rejects_incompatible_types",
+      "kind": "error",
+      "sqlstate": "42804"
+    },
+    {
+      "name": "failed_fk_creates_leave_no_catalog_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "create_directional_type_targets",
+      "kind": "ok"
+    },
+    {
+      "name": "real_to_numeric_fk_is_incompatible",
+      "kind": "error",
+      "sqlstate": "42804"
+    },
+    {
+      "name": "numeric_to_real_fk_is_compatible",
+      "kind": "ok"
+    },
+    {
+      "name": "create_temporal_cross_type_fks",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_temporal_cross_type_keys",
+      "kind": "ok"
+    },
+    {
+      "name": "temporal_non_midnight_key_is_rejected",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "temporal_delete_set_null",
+      "kind": "ok"
+    },
+    {
+      "name": "temporal_delete_set_null_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "temporal_update_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "temporal_update_cascade_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
         ]
       ]
     }

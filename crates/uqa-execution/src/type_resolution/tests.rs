@@ -429,6 +429,36 @@ fn equality_resolution_rejects_postgresql_undefined_operators() {
 }
 
 #[test]
+fn foreign_key_type_resolution_uses_the_referenced_operator_family() {
+    let numeric = ColumnType::Numeric {
+        precision: None,
+        scale: None,
+    };
+    assert_eq!(
+        foreign_key_operand_type(&ColumnType::Integer, &numeric).unwrap(),
+        numeric
+    );
+    assert!(foreign_key_operand_type(&numeric, &ColumnType::Integer).is_err());
+    assert_eq!(
+        foreign_key_operand_type(&numeric, &ColumnType::Real).unwrap(),
+        ColumnType::Real
+    );
+    assert!(foreign_key_operand_type(&ColumnType::Real, &numeric).is_err());
+    assert_eq!(
+        foreign_key_operand_type(&ColumnType::BigInteger, &ColumnType::SmallInteger).unwrap(),
+        ColumnType::BigInteger
+    );
+    assert_eq!(
+        foreign_key_operand_type(&ColumnType::Timestamp, &ColumnType::Date).unwrap(),
+        ColumnType::Timestamp
+    );
+    assert_eq!(
+        foreign_key_operand_type(&ColumnType::Text, &ColumnType::Character(8)).unwrap(),
+        ColumnType::Bpchar
+    );
+}
+
+#[test]
 fn values_type_resolution_uses_declared_casts_instead_of_runtime_values() {
     let rows = vec![
         vec![ScalarExpr::Cast {

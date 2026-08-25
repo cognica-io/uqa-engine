@@ -172,6 +172,135 @@ fn foreign_key_not_valid_and_enforceability_follow_pg18_state_transitions() {
 }
 
 #[test]
+fn omitted_foreign_key_columns_infer_primary_keys_and_check_types() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE parent (id BIGINT PRIMARY KEY)");
+    exec(
+        &engine,
+        "CREATE TABLE table_child (id INTEGER PRIMARY KEY, parent_id INTEGER, CONSTRAINT table_child_parent_fk FOREIGN KEY (parent_id) REFERENCES parent)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE column_child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE altered_child (id INTEGER PRIMARY KEY, parent_id INTEGER)",
+    );
+    exec(
+        &engine,
+        "ALTER TABLE altered_child ADD CONSTRAINT altered_child_parent_fk FOREIGN KEY (parent_id) REFERENCES parent",
+    );
+
+    for table in ["table_child", "column_child", "altered_child"] {
+        let foreign_keys = engine.foreign_keys(table).unwrap();
+        assert_eq!(foreign_keys.len(), 1, "{table}");
+        assert_eq!(foreign_keys[0].ref_columns, ["id"], "{table}");
+    }
+
+    exec(&engine, "INSERT INTO parent VALUES (7)");
+    exec(&engine, "INSERT INTO table_child VALUES (1, 7)");
+    exec(&engine, "INSERT INTO column_child VALUES (1, 7)");
+    exec(&engine, "INSERT INTO altered_child VALUES (1, 7)");
+    error(
+        &engine,
+        "INSERT INTO table_child VALUES (2, 8)",
+        "23503",
+        "violates foreign key constraint \"table_child_parent_fk\"",
+    );
+
+    exec(&engine, "CREATE TABLE no_key (id INTEGER)");
+    error(
+        &engine,
+        "CREATE TABLE no_key_child (parent_id INTEGER REFERENCES no_key)",
+        "42704",
+        "there is no primary key for referenced table",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE composite_parent (tenant_id INTEGER, id INTEGER, PRIMARY KEY (tenant_id, id))",
+    );
+    error(
+        &engine,
+        "CREATE TABLE composite_child (parent_id INTEGER REFERENCES composite_parent)",
+        "42830",
+        "number of referencing and referenced columns for foreign key disagree",
+    );
+
+    exec(
+        &engine,
+        "CREATE TABLE numeric_parent (id NUMERIC PRIMARY KEY)",
+    );
+    error(
+        &engine,
+        "CREATE TABLE real_child (parent_id REAL REFERENCES numeric_parent)",
+        "42804",
+        "incompatible types",
+    );
+    exec(&engine, "CREATE TABLE real_parent (id REAL PRIMARY KEY)");
+    exec(
+        &engine,
+        "CREATE TABLE numeric_child (parent_id NUMERIC REFERENCES real_parent)",
+    );
+    exec(&engine, "INSERT INTO real_parent VALUES (1.25)");
+    exec(&engine, "INSERT INTO numeric_child VALUES (1.25)");
+}
+
+#[test]
+fn temporal_cross_type_foreign_keys_preserve_values_and_referential_actions() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE date_parent (id DATE PRIMARY KEY)");
+    exec(
+        &engine,
+        "CREATE TABLE timestamp_child (id INTEGER PRIMARY KEY, parent_id TIMESTAMP REFERENCES date_parent ON DELETE SET NULL)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO date_parent VALUES (DATE '2024-01-01')",
+    );
+    exec(
+        &engine,
+        "INSERT INTO timestamp_child VALUES (1, TIMESTAMP '2024-01-01 00:00:00')",
+    );
+    error(
+        &engine,
+        "INSERT INTO timestamp_child VALUES (2, TIMESTAMP '2024-01-01 12:00:00')",
+        "23503",
+        "violates foreign key constraint",
+    );
+    exec(&engine, "DELETE FROM date_parent");
+    let row = engine
+        .sql("SELECT parent_id FROM timestamp_child WHERE id = 1", &[])
+        .unwrap();
+    assert_eq!(row.rows[0]["parent_id"], Value::Null);
+
+    exec(
+        &engine,
+        "CREATE TABLE timestamp_parent (id TIMESTAMP PRIMARY KEY)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE date_child (parent_id DATE REFERENCES timestamp_parent ON UPDATE CASCADE)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO timestamp_parent VALUES (TIMESTAMP '2024-02-01 00:00:00')",
+    );
+    exec(&engine, "INSERT INTO date_child VALUES (DATE '2024-02-01')");
+    exec(
+        &engine,
+        "UPDATE timestamp_parent SET id = TIMESTAMP '2024-02-02 00:00:00'",
+    );
+    let row = engine
+        .sql(
+            "SELECT parent_id = DATE '2024-02-02' AS updated FROM date_child",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(row.rows[0]["updated"], Value::Bool(true));
+}
+
+#[test]
 fn initially_deferred_foreign_key_checks_final_commit_state_and_savepoints() {
     let engine = Engine::new();
     exec(&engine, "CREATE TABLE parent (id INTEGER PRIMARY KEY)");
@@ -214,6 +343,44 @@ fn initially_deferred_foreign_key_checks_final_commit_state_and_savepoints() {
         "23503",
         "violates foreign key constraint \"child_parent_fk\"",
     );
+
+    let nested_error = engine
+        .transaction(|outer| {
+            outer.transaction(|inner| {
+                inner.sql("INSERT INTO child VALUES (7, 7007)", &[])?;
+                Ok(())
+            })
+        })
+        .unwrap_err();
+    assert_eq!(nested_error.sqlstate(), Some("23503"));
+    assert!(nested_error
+        .to_string()
+        .contains("violates foreign key constraint \"child_parent_fk\""));
+    assert!(engine
+        .sql("SELECT id FROM child WHERE id = 7", &[])
+        .unwrap()
+        .rows
+        .is_empty());
+
+    engine
+        .transaction(|outer| {
+            outer.transaction(|inner| {
+                inner.sql("INSERT INTO child VALUES (8, 8008)", &[])?;
+                Ok(())
+            })?;
+            outer.sql("INSERT INTO parent VALUES (8008)", &[])?;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        engine
+            .sql("SELECT parent_id FROM child WHERE id = 8", &[])
+            .unwrap()
+            .rows
+            .len(),
+        1
+    );
+
     exec(
         &engine,
         "ALTER TABLE child ALTER CONSTRAINT child_parent_fk NOT DEFERRABLE INITIALLY IMMEDIATE",
@@ -492,6 +659,34 @@ fn persistent_reopen_restores_validation_enforcement_deferral_and_inheritance() 
     exec(&reopened, "INSERT INTO active_child VALUES (1, 1001)");
     exec(&reopened, "INSERT INTO parent VALUES (1001)");
     exec(&reopened, "COMMIT");
+}
+
+#[test]
+fn failed_foreign_key_create_is_atomic_across_persistent_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("failed-foreign-key-create.sqlite");
+    {
+        let engine = Engine::open(&database).unwrap();
+        exec(&engine, "CREATE TABLE text_parent (id TEXT PRIMARY KEY)");
+        let create_error = engine
+            .transaction(|transaction| {
+                transaction.sql(
+                    "CREATE TABLE rejected_child (parent_id INTEGER CONSTRAINT rejected_child_fk REFERENCES text_parent)",
+                    &[],
+                )?;
+                Ok(())
+            })
+            .unwrap_err();
+        assert_eq!(create_error.sqlstate(), Some("42804"));
+        assert!(create_error.to_string().contains("incompatible types"));
+        assert!(!engine.has_table("rejected_child").unwrap());
+        assert!(!constraint_exists(&engine, "rejected_child_fk"));
+    }
+
+    let reopened = Engine::open(&database).unwrap();
+    assert!(reopened.has_table("text_parent").unwrap());
+    assert!(!reopened.has_table("rejected_child").unwrap());
+    assert!(!constraint_exists(&reopened, "rejected_child_fk"));
 }
 
 #[test]

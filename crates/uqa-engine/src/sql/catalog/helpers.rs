@@ -1028,7 +1028,7 @@ pub(super) fn constraint_catalog_rows(
                     name: reference.name.clone(),
                     local_columns: vec![col.name.clone()],
                     ref_table: reference.table.clone(),
-                    ref_columns: vec![reference.column.clone()],
+                    ref_columns: reference.column.iter().cloned().collect(),
                     on_update: reference.on_update,
                     on_delete: reference.on_delete,
                     on_delete_set_columns: Vec::new(),

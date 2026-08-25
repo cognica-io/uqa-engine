@@ -16,8 +16,13 @@ use uqa_sql::ast::{GeneratedColumn, GeneratedColumnKind};
 use super::defaults::validate_default_expression;
 
 mod constraint_drop;
+mod foreign_key;
 
 use constraint_drop::{drop_column_cascade, drop_column_restrict, drop_constraint};
+pub(super) use foreign_key::{
+    column_foreign_key, validate_foreign_key_definition_with_local_state,
+};
+use foreign_key::{validate_foreign_key_definition, validate_foreign_key_rows};
 
 pub(in crate::sql) fn run_alter_table(
     engine: &Engine,
@@ -116,6 +121,28 @@ fn run_alter_table_action(
             column.generated = candidate_columns
                 .last()
                 .and_then(|candidate| candidate.generated.clone());
+            if let Some(reference) = column.references.clone() {
+                let mut foreign_key = column_foreign_key(&column, &reference);
+                validate_foreign_key_definition_with_local_state(
+                    engine,
+                    &stmt.table,
+                    Some(&candidate_columns),
+                    None,
+                    &mut foreign_key,
+                )?;
+                let [referenced_column] = foreign_key.ref_columns.as_slice() else {
+                    return Err(SQLError::Internal(
+                        "column FOREIGN KEY did not resolve exactly one referenced column".into(),
+                    ));
+                };
+                let Some(reference) = column.references.as_mut() else {
+                    return Err(SQLError::Internal(
+                        "column FOREIGN KEY disappeared during validation".into(),
+                    ));
+                };
+                reference.table = foreign_key.ref_table;
+                reference.column = Some(referenced_column.clone());
+            }
             let generated_kind = column.generated.as_ref().map(|generated| generated.kind);
             match column.ty {
                 ColumnType::Vector(dim) | ColumnType::Tensor(dim) => {
@@ -738,58 +765,6 @@ fn add_not_null_constraint(
     Ok(())
 }
 
-pub(super) fn validate_foreign_key_definition(
-    engine: &Engine,
-    table: &str,
-    foreign_key: &mut uqa_sql::ast::ForeignKey,
-) -> Result<(), SQLError> {
-    let columns = engine
-        .try_describe_table(table)
-        .map_err(|error| ddl_storage_error("FOREIGN KEY local table", error))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    for column in &foreign_key.local_columns {
-        if !columns.iter().any(|definition| definition.name == *column) {
-            return Err(SQLError::UnknownColumn(format!("{table}.{column}")));
-        }
-    }
-    let referenced = engine
-        .try_resolve_table_name(&foreign_key.ref_table)
-        .map_err(|error| ddl_storage_error("FOREIGN KEY referenced table", error))?
-        .ok_or_else(|| SQLError::UnknownTable(foreign_key.ref_table.clone()))?;
-    let referenced_columns = engine
-        .try_describe_table(&referenced)
-        .map_err(|error| ddl_storage_error("FOREIGN KEY referenced columns", error))?
-        .ok_or_else(|| SQLError::UnknownTable(referenced.clone()))?;
-    for column in &foreign_key.ref_columns {
-        if !referenced_columns
-            .iter()
-            .any(|definition| definition.name == *column)
-        {
-            return Err(SQLError::UnknownColumn(format!("{referenced}.{column}")));
-        }
-    }
-    let referenced_keys = engine
-        .try_key_constraints(&referenced)
-        .map_err(|error| ddl_storage_error("FOREIGN KEY referenced key", error))?;
-    let has_unique_key = referenced_keys.iter().any(|key| {
-        key.columns.len() == foreign_key.ref_columns.len()
-            && foreign_key
-                .ref_columns
-                .iter()
-                .all(|column| key.columns.contains(column))
-    });
-    if !has_unique_key {
-        return Err(constraint_error(
-            "42830",
-            format!(
-                "there is no unique constraint matching given keys for referenced table \"{referenced}\""
-            ),
-        ));
-    }
-    foreign_key.ref_table = referenced;
-    Ok(())
-}
-
 fn validate_and_mark_constraint(engine: &Engine, table: &str, name: &str) -> Result<(), SQLError> {
     let (mut columns, mut constraints) = table_constraint_state(engine, table)?;
     let location = find_constraint(&columns, &constraints, name).ok_or_else(|| {
@@ -883,26 +858,6 @@ fn validate_and_mark_constraint(engine: &Engine, table: &str, name: &str) -> Res
     publish_constraint_state(engine, table, columns, constraints)
 }
 
-fn column_foreign_key(
-    column: &uqa_sql::ast::ColumnDef,
-    reference: &uqa_sql::ast::ForeignKeyRef,
-) -> uqa_sql::ast::ForeignKey {
-    uqa_sql::ast::ForeignKey {
-        name: reference.name.clone(),
-        local_columns: vec![column.name.clone()],
-        ref_table: reference.table.clone(),
-        ref_columns: vec![reference.column.clone()],
-        on_update: reference.on_update,
-        on_delete: reference.on_delete,
-        on_delete_set_columns: Vec::new(),
-        match_type: reference.match_type,
-        enforced: reference.enforced,
-        validated: reference.validated,
-        deferrable: reference.deferrable,
-        initially_deferred: reference.initially_deferred,
-    }
-}
-
 fn validate_not_null_rows(engine: &Engine, table: &str, column: &str) -> Result<(), SQLError> {
     for doc_id in engine.table_doc_ids(table)? {
         let Some(document) = engine.get_document(table, doc_id)? else {
@@ -963,37 +918,6 @@ fn validate_check_rows(
         }
     }
     Ok(())
-}
-
-fn validate_foreign_key_rows(
-    engine: &Engine,
-    table: &str,
-    name: &str,
-    foreign_key: &uqa_sql::ast::ForeignKey,
-) -> Result<(), SQLError> {
-    for doc_id in engine.table_doc_ids(table)? {
-        let Some(document) = engine.get_document(table, doc_id)? else {
-            continue;
-        };
-        let Some(values) = crate::sql::dml::foreign_key_lookup_values(foreign_key, &document)?
-        else {
-            continue;
-        };
-        if engine
-            .find_conflict(&foreign_key.ref_table, &foreign_key.ref_columns, &values)?
-            .is_none()
-        {
-            return Err(foreign_key_violation(table, name));
-        }
-    }
-    Ok(())
-}
-
-fn foreign_key_violation(table: &str, name: &str) -> SQLError {
-    constraint_error(
-        "23503",
-        format!("insert or update on table \"{table}\" violates foreign key constraint \"{name}\""),
-    )
 }
 
 fn alter_constraint(

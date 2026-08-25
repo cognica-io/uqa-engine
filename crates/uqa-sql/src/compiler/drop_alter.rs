@@ -222,7 +222,9 @@ pub(super) fn compile_alter_table(
                                 SQLError::Internal("FOREIGN KEY without referenced table".into())
                             })?;
                         let ref_columns = extract_strings(&constraint.pk_attrs)?;
-                        if local_columns.is_empty() || local_columns.len() != ref_columns.len() {
+                        if local_columns.is_empty()
+                            || !ref_columns.is_empty() && local_columns.len() != ref_columns.len()
+                        {
                             return Err(SQLError::TypeMismatch(
                                 "FOREIGN KEY local and referenced column counts must match".into(),
                             ));

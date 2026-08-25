@@ -64,21 +64,20 @@ pub struct ColumnDef {
     pub check_validated: bool,
     #[serde(default)]
     pub check_no_inherit: bool,
-    /// `REFERENCES parent(col)` column-level FOREIGN KEY. The engine
-    /// rejects INSERT / UPDATE whose value is not present in the
-    /// referenced (table, column) pair.
+    /// Column-level `REFERENCES parent[(col)]` foreign key. An omitted column is resolved to the referenced primary key before publication.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub references: Option<ForeignKeyRef>,
 }
 
-/// `REFERENCES table(column)` reference target.
+/// `REFERENCES table[(column)]` reference target.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ForeignKeyRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub table: String,
-    pub column: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<String>,
     #[serde(default)]
     pub on_update: ForeignKeyAction,
     #[serde(default)]
@@ -164,9 +163,7 @@ pub struct TableCheck {
     pub no_inherit: bool,
 }
 
-/// Table-level foreign key. `local_columns.len()` matches
-/// `ref_columns.len()`; the engine joins on the position-aligned
-/// pairs.
+/// Table-level foreign key. Compilation preserves an omitted referenced column list as empty; validation fills it from the primary key before publication.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ForeignKey {
