@@ -79,6 +79,7 @@ impl PhysicalOuterRow<'_> {
 pub(super) struct PhysicalEvalContext<'a> {
     row: Option<&'a ResultRow>,
     row_lookup: Option<&'a dyn RowLookup>,
+    row_schema: Option<&'a RowSchema>,
     params: &'a [SQLParam],
     function_hook: Option<&'a dyn EngineHook>,
     subquery_runner: Option<&'a dyn PhysicalSubqueryRunner>,
@@ -90,6 +91,7 @@ impl<'a> PhysicalEvalContext<'a> {
         Self {
             row,
             row_lookup: row.map(|row| row as &dyn RowLookup),
+            row_schema: None,
             params,
             function_hook: None,
             subquery_runner: None,
@@ -101,6 +103,7 @@ impl<'a> PhysicalEvalContext<'a> {
         Self {
             row: None,
             row_lookup: Some(row),
+            row_schema: None,
             params,
             function_hook: None,
             subquery_runner: None,
@@ -110,6 +113,11 @@ impl<'a> PhysicalEvalContext<'a> {
 
     pub(super) fn with_function_hook(mut self, hook: &'a dyn EngineHook) -> Self {
         self.function_hook = Some(hook);
+        self
+    }
+
+    pub(super) fn with_row_schema(mut self, schema: &'a RowSchema) -> Self {
+        self.row_schema = Some(schema);
         self
     }
 
@@ -187,6 +195,7 @@ pub(crate) fn eval_lowered_expression_with_schema(
     let scope = CteScope::new();
     let hook = ScopedEngineHook::new(engine, &scope);
     let context = PhysicalEvalContext::new(Some(row), params)
+        .with_row_schema(schema)
         .with_function_hook(&hook)
         .with_subquery_runner(&hook);
     eval_physical(&expression, &context)
@@ -232,6 +241,9 @@ pub(super) fn eval_physical_scalar(
     );
     if let Some(hook) = context.function_hook {
         scalar_context = scalar_context.with_function_hook(hook);
+    }
+    if let Some(schema) = context.row_schema {
+        scalar_context = scalar_context.with_row_schema(schema);
     }
     if context.subquery_runner.is_some() {
         scalar_context = scalar_context.with_subquery_runner(&subqueries);

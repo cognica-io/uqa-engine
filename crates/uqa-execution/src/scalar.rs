@@ -624,6 +624,7 @@ impl SubqueryResult {
 pub struct ScalarEvalContext<'a> {
     row: Option<&'a ResultRow>,
     row_lookup: Option<&'a dyn RowLookup>,
+    row_schema: Option<&'a RowSchema>,
     params: &'a [SQLParam],
     function_hook: Option<&'a dyn EngineHook>,
     subquery_runner: Option<&'a dyn ScalarSubqueryRunner>,
@@ -636,6 +637,7 @@ impl<'a> ScalarEvalContext<'a> {
         Self {
             row,
             row_lookup: row.map(|row| row as &dyn RowLookup),
+            row_schema: None,
             params,
             function_hook: None,
             subquery_runner: None,
@@ -648,6 +650,7 @@ impl<'a> ScalarEvalContext<'a> {
         Self {
             row: None,
             row_lookup: Some(row),
+            row_schema: None,
             params,
             function_hook: None,
             subquery_runner: None,
@@ -658,6 +661,12 @@ impl<'a> ScalarEvalContext<'a> {
     #[must_use]
     pub fn with_function_hook(mut self, hook: &'a dyn EngineHook) -> Self {
         self.function_hook = Some(hook);
+        self
+    }
+
+    #[must_use]
+    pub fn with_row_schema(mut self, schema: &'a RowSchema) -> Self {
+        self.row_schema = Some(schema);
         self
     }
 
@@ -773,9 +782,9 @@ pub fn eval_scalar(
             )
         }
         ScalarExpr::UnaryMinus(inner) => {
-            let source_ty = scalar_source_type(inner);
+            let source_ty = scalar_source_type(inner, context);
             let value = eval_scalar(inner, context)?;
-            negate_value(&value, source_ty)
+            negate_value(&value, source_ty.as_deref())
         }
         ScalarExpr::Not(inner) => {
             let value = eval_scalar(inner, context)?;
@@ -806,9 +815,9 @@ pub fn eval_scalar(
             else_branch,
         } => eval_case(base.as_deref(), when, else_branch.as_deref(), context),
         ScalarExpr::Cast { expr, ty } => {
-            let source_ty = scalar_source_type(expr);
+            let source_ty = scalar_source_type(expr, context);
             let value = eval_scalar(expr, context)?;
-            cast_value_with_type_resolution(&value, source_ty, ty, context.function_hook)
+            cast_value_with_type_resolution(&value, source_ty.as_deref(), ty, context.function_hook)
         }
         ScalarExpr::ScalarSubquery(subquery) => execute_scalar_subquery(*subquery, context),
         ScalarExpr::Exists { subquery, negated } => {
@@ -1183,15 +1192,25 @@ fn execute_in_subquery(
     }
 }
 
-fn scalar_source_type(expression: &ScalarExpr) -> Option<&str> {
+fn scalar_source_type(expression: &ScalarExpr, context: &ScalarEvalContext<'_>) -> Option<String> {
     match expression {
-        ScalarExpr::Cast { ty, .. } => Some(ty),
-        ScalarExpr::UnaryMinus(inner) => scalar_source_type(inner),
-        ScalarExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => Some("integer"),
-        ScalarExpr::Literal(Value::Int(_)) => Some("bigint"),
-        ScalarExpr::Literal(Value::Bytes(_)) => Some("bytea"),
-        _ => None,
+        ScalarExpr::Cast { ty, .. } => return Some(ty.clone()),
+        ScalarExpr::UnaryMinus(inner) => return scalar_source_type(inner, context),
+        ScalarExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => {
+            return Some("integer".into());
+        }
+        ScalarExpr::Literal(Value::Int(_)) => return Some("bigint".into()),
+        ScalarExpr::Literal(Value::Bytes(_)) => return Some("bytea".into()),
+        _ => {}
     }
+    context
+        .row_schema
+        .and_then(|schema| {
+            crate::scalar_type(expression, schema, context.params)
+                .ok()
+                .flatten()
+        })
+        .map(|ty| ty.sql_name())
 }
 
 fn scalar_integer_width(expression: &ScalarExpr) -> Option<IntegerWidth> {
@@ -1220,6 +1239,7 @@ mod tests {
     use super::{
         eval_call_arguments, eval_scalar, scalar_call_arguments, ScalarEvalContext, ScalarExpr,
     };
+    use crate::{PhysicalRow, RowSchema};
     use uqa_core::Value;
     use uqa_sql::ast::{BinaryOp, ColumnType};
     use uqa_sql::{SQLError, SQLParam};
@@ -1234,6 +1254,25 @@ mod tests {
         assert_eq!(
             eval_scalar(&expression, &ScalarEvalContext::new(None, &[])).unwrap(),
             Value::Int(21)
+        );
+    }
+
+    #[test]
+    fn cast_uses_the_input_schema_declared_source_type() {
+        let schema = RowSchema::with_types(vec!["support".into()], vec![Some(ColumnType::Regproc)]);
+        let row = PhysicalRow::from_values(vec![Value::Int(0)]);
+        let view = schema.view(&row);
+        let expression = ScalarExpr::Cast {
+            expr: Box::new(ScalarExpr::Column("support".into())),
+            ty: "text".into(),
+        };
+        assert_eq!(
+            eval_scalar(
+                &expression,
+                &ScalarEvalContext::from_row_lookup(&view, &[]).with_row_schema(&schema),
+            )
+            .unwrap(),
+            Value::Str("-".into())
         );
     }
 

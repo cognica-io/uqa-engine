@@ -89,7 +89,7 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     let routines = engine
         .sql(
             "SELECT oid, proname, pronamespace, proowner, prolang, procost, prorows, provariadic, \
-                    prosupport, prokind, prosecdef, proleakproof, proisstrict, proretset, provolatile, \
+                    prosupport, prosupport::text AS prosupport_text, prokind, prosecdef, proleakproof, proisstrict, proretset, provolatile, \
                     proparallel, pronargs, pronargdefaults, prorettype, proargtypes, proallargtypes, \
                     proargmodes, proargnames, proargdefaults, protrftypes, prosrc, probin, prosqlbody, \
                     proconfig, proacl \
@@ -198,6 +198,7 @@ fn assert_pg18_fixed_routine_metadata(routines: &SQLResult) {
         assert_eq!(row(oid)["prorows"], Value::Float(0.0));
         assert_eq!(row(oid)["provariadic"], Value::Int(0));
         assert_eq!(row(oid)["prosupport"], Value::Int(0));
+        assert_eq!(row(oid)["prosupport_text"], Value::Str("-".into()));
         assert_eq!(row(oid)["prokind"], Value::Str("f".into()));
         assert_eq!(row(oid)["prosecdef"], Value::Bool(false));
         assert_eq!(row(oid)["proleakproof"], Value::Bool(false));

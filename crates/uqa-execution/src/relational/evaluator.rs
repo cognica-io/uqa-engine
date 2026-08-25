@@ -85,6 +85,18 @@ impl ExpressionEvaluator for DefaultExpressionEvaluator {
         Ok(eval_scalar(expression, &context)?)
     }
 
+    fn evaluate_physical(
+        &self,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        row: &PhysicalRow,
+    ) -> ExecResult<Value> {
+        let view = schema.view(row);
+        let context =
+            ScalarEvalContext::from_row_lookup(&view, &self.params).with_row_schema(schema);
+        Ok(eval_scalar(expression, &context)?)
+    }
+
     fn parameters(&self) -> &[SQLParam] {
         &self.params
     }

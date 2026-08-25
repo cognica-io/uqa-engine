@@ -7,8 +7,8 @@
 //! Routine ownership, execution privileges, and security attributes.
 
 use uqa_sql::ast::{
-    AlterRoutineOwnerStmt, AlterRoutineStmt, CreateFunction, GrantRoutineStmt, RoutineAclEntry,
-    RoutineConfigAction,
+    AlterRoutineOwnerStmt, AlterRoutineStmt, CreateFunction, GrantRoutineStmt, RoleAttribute,
+    RoutineAclEntry, RoutineConfigAction,
 };
 use uqa_sql::SQLError;
 
@@ -39,12 +39,17 @@ impl Engine {
         };
         let requested_types = resolve_alter_routine_identity_types(self, &identity)?;
         let new_owner = self.resolve_role_reference(&stmt.new_owner);
-        if self.role_definition(&new_owner).is_none() {
+        let current_user = self.current_user_name();
+        let roles = self.durable.roles.read();
+        if !roles.contains_key(&new_owner) {
             return Err(SQLError::Routine {
                 sqlstate: "42704".into(),
                 message: format!("role \"{new_owner}\" does not exist"),
             });
         }
+        let current_user_is_superuser = roles
+            .get(&current_user)
+            .is_some_and(|role| role.has(RoleAttribute::Superuser));
         let mut registry = self.durable.sql_user_functions.write();
         let (name, position) = self.resolve_sql_routine_alter_target(
             &registry,
@@ -53,7 +58,7 @@ impl Engine {
             stmt.kind,
         )?;
         let existing = registry[&name][position].clone();
-        self.ensure_routine_owner(&existing.def)?;
+        Self::ensure_routine_owner_as(&existing.def, &current_user, current_user_is_superuser)?;
         let mut def = existing.def.clone();
         def.owner = new_owner;
         let mut next = registry.clone();
@@ -64,11 +69,30 @@ impl Engine {
         self.persist_sql_functions_snapshot(&next)?;
         *registry = next;
         drop(registry);
+        drop(roles);
         self.note_catalog_registry_changed();
         Ok(())
     }
 
     pub(crate) fn grant_sql_routine(&self, stmt: &GrantRoutineStmt) -> Result<(), SQLError> {
+        let grantees = stmt
+            .grantees
+            .iter()
+            .map(|role| self.resolve_role_reference(role))
+            .collect::<Vec<_>>();
+        let current_user = self.current_user_name();
+        let roles = self.durable.roles.read();
+        for role in &grantees {
+            if role != "PUBLIC" && !roles.contains_key(role) {
+                return Err(SQLError::Routine {
+                    sqlstate: "42704".into(),
+                    message: format!("role \"{role}\" does not exist"),
+                });
+            }
+        }
+        let current_user_is_superuser = roles
+            .get(&current_user)
+            .is_some_and(|role| role.has(RoleAttribute::Superuser));
         let mut registry = self.durable.sql_user_functions.write();
         let mut resolved = Vec::with_capacity(stmt.items.len());
         for item in &stmt.items {
@@ -79,21 +103,8 @@ impl Engine {
                 stmt.kind,
             )?;
             let function = registry[&name][position].clone();
-            self.ensure_routine_owner(&function.def)?;
+            Self::ensure_routine_owner_as(&function.def, &current_user, current_user_is_superuser)?;
             resolved.push((name, position));
-        }
-        let grantees = stmt
-            .grantees
-            .iter()
-            .map(|role| self.resolve_role_reference(role))
-            .collect::<Vec<_>>();
-        for role in &grantees {
-            if role != "PUBLIC" && self.role_definition(role).is_none() {
-                return Err(SQLError::Routine {
-                    sqlstate: "42704".into(),
-                    message: format!("role \"{role}\" does not exist"),
-                });
-            }
         }
         let mut next = registry.clone();
         for (name, position) in resolved {
@@ -132,6 +143,7 @@ impl Engine {
         self.persist_sql_functions_snapshot(&next)?;
         *registry = next;
         drop(registry);
+        drop(roles);
         self.note_catalog_registry_changed();
         Ok(())
     }
@@ -161,8 +173,12 @@ impl Engine {
         }
     }
 
-    pub(super) fn ensure_routine_owner(&self, definition: &CreateFunction) -> Result<(), SQLError> {
-        if self.current_user_is_superuser() || self.current_user_name() == definition.owner {
+    pub(super) fn ensure_routine_owner_as(
+        definition: &CreateFunction,
+        current_user: &str,
+        current_user_is_superuser: bool,
+    ) -> Result<(), SQLError> {
+        if current_user_is_superuser || current_user == definition.owner {
             Ok(())
         } else {
             Err(SQLError::Routine {

@@ -732,6 +732,7 @@ impl<'a> EngineExpressionEvaluator<'a> {
         let view = schema.view(row);
         let hook = ScopedEngineHook::new(self.engine, &self.ctes);
         let context = PhysicalEvalContext::from_row_lookup(&view, self.params)
+            .with_row_schema(schema)
             .with_function_hook(&hook)
             .with_subquery_runner(&hook)
             .with_physical_outer_row(schema, row);

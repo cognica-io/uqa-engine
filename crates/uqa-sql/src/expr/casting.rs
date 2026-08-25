@@ -91,10 +91,12 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
             let source = source_ty
                 .map(str::trim)
                 .map(|source| source.strip_prefix("pg_catalog.").unwrap_or(source));
-            let text = if matches!(source, Some("int2vector" | "oidvector")) {
-                vector_value_to_string(v).unwrap_or_else(|| value_to_string(v))
-            } else {
-                value_to_string(v)
+            let text = match (source, v) {
+                (Some("int2vector" | "oidvector"), _) => {
+                    vector_value_to_string(v).unwrap_or_else(|| value_to_string(v))
+                }
+                (Some("regproc"), Value::Int(0)) => "-".into(),
+                _ => value_to_string(v),
             };
             Ok(Value::Str(text))
         }
@@ -1186,6 +1188,18 @@ mod tests {
         assert_eq!(
             cast_value_from(&Value::Int(2205), "regclass", Some("oid")).unwrap(),
             Value::Int(2205)
+        );
+    }
+
+    #[test]
+    fn regproc_zero_uses_postgresql_dash_text_output() {
+        assert_eq!(
+            cast_value_from(&Value::Int(0), "text", Some("pg_catalog.regproc")).unwrap(),
+            Value::Str("-".into())
+        );
+        assert_eq!(
+            cast_value_from(&Value::Int(42), "text", Some("regproc")).unwrap(),
+            Value::Str("42".into())
         );
     }
 

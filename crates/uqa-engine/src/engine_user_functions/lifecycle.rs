@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_sql::ast::{
     AlterRoutineKind, AlterRoutineStmt, CreateFunction, DropFunctionItem, DropFunctionStmt,
-    FunctionBinding, FunctionBody,
+    FunctionBinding, FunctionBody, RoleAttribute,
 };
 use uqa_sql::SQLError;
 
@@ -184,18 +184,6 @@ impl Engine {
         if def.owner.is_empty() {
             def.owner = self.current_user_name();
         }
-        if self.role_definition(&def.owner).is_none() {
-            return Err(SQLError::Routine {
-                sqlstate: "42704".into(),
-                message: format!("role \"{}\" does not exist", def.owner),
-            });
-        }
-        if def.security.leakproof && !self.current_user_is_superuser() {
-            return Err(SQLError::Routine {
-                sqlstate: "42501".into(),
-                message: "only superuser can define a leakproof function".into(),
-            });
-        }
         if let Some(support) = def.support.as_deref() {
             self.validate_routine_support(support)?;
         }
@@ -210,6 +198,27 @@ impl Engine {
         let name = def.name.clone();
         let signature = routine_signature_types(&def);
         let kind = routine_kind(&def);
+        let current_user = self.current_user_name();
+        let roles = self.durable.roles.read();
+        if !roles.contains_key(&def.owner) {
+            return Err(SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("role \"{}\" does not exist", def.owner),
+            });
+        }
+        let current_user_is_superuser = roles
+            .get(&current_user)
+            .is_some_and(|role| role.has(RoleAttribute::Superuser));
+        if (def.security.leakproof || def.support.is_some()) && !current_user_is_superuser {
+            return Err(SQLError::Routine {
+                sqlstate: "42501".into(),
+                message: if def.security.leakproof {
+                    "only superuser can define a leakproof function".into()
+                } else {
+                    "must be superuser to specify a support function".into()
+                },
+            });
+        }
         let mut registry = self.durable.sql_user_functions.write();
         let mut next = registry.clone();
         {
@@ -255,6 +264,7 @@ impl Engine {
         self.persist_sql_functions_snapshot(&next)?;
         *registry = next;
         drop(registry);
+        drop(roles);
         self.note_catalog_registry_changed();
         Ok(())
     }
@@ -262,6 +272,11 @@ impl Engine {
     /// Change mutable routine attributes without replacing its identity or compiled body.
     pub(crate) fn alter_sql_routine(&self, stmt: &AlterRoutineStmt) -> Result<(), SQLError> {
         let requested_types = resolve_alter_routine_identity_types(self, stmt)?;
+        let current_user = self.current_user_name();
+        let roles = self.durable.roles.read();
+        let current_user_is_superuser = roles
+            .get(&current_user)
+            .is_some_and(|role| role.has(RoleAttribute::Superuser));
         let mut registry = self.durable.sql_user_functions.write();
         let (name, position) = self.resolve_sql_routine_alter_target(
             &registry,
@@ -278,7 +293,7 @@ impl Engine {
                     "resolved ALTER routine target `{name}` disappeared before mutation"
                 ))
             })?;
-        self.ensure_routine_owner(&existing.def)?;
+        Self::ensure_routine_owner_as(&existing.def, &current_user, current_user_is_superuser)?;
         if existing.def.is_procedure
             && (stmt.volatility.is_some()
                 || stmt.strict.is_some()
@@ -303,7 +318,7 @@ impl Engine {
             def.security.security_definer = security_definer;
         }
         if let Some(leakproof) = stmt.leakproof {
-            if leakproof && !self.current_user_is_superuser() {
+            if leakproof && !current_user_is_superuser {
                 return Err(SQLError::Routine {
                     sqlstate: "42501".into(),
                     message: "only superuser can define a leakproof function".into(),
@@ -333,6 +348,7 @@ impl Engine {
         self.persist_sql_functions_snapshot(&next)?;
         *registry = next;
         drop(registry);
+        drop(roles);
         self.note_catalog_registry_changed();
         Ok(())
     }

@@ -110,10 +110,6 @@ impl Engine {
         self.session.state.read().session_user.clone()
     }
 
-    pub(crate) fn role_definition(&self, name: &str) -> Option<RoleDefinition> {
-        self.durable.roles.read().get(name).cloned()
-    }
-
     pub(crate) fn roles_for_catalog(&self) -> Vec<RoleDefinition> {
         self.durable.roles.read().values().cloned().collect()
     }
@@ -201,14 +197,18 @@ impl Engine {
     pub(crate) fn alter_role(&self, statement: &AlterRoleStmt) -> Result<(), SQLError> {
         self.require_role_administration("alter role")?;
         let name = self.resolve_role_reference(&statement.name);
+        let current = self.current_user_name();
         let mut roles = self.durable.roles.write();
         let existing = roles.get(&name).cloned().ok_or_else(|| SQLError::Routine {
             sqlstate: "42704".into(),
             message: format!("role \"{name}\" does not exist"),
         })?;
+        let current_is_superuser = roles
+            .get(&current)
+            .is_some_and(|role| role.has(RoleAttribute::Superuser));
         if (statement.attributes.contains_key(&RoleAttribute::Superuser)
             || existing.has(RoleAttribute::Superuser))
-            && !self.current_user_is_superuser()
+            && !current_is_superuser
         {
             return Err(insufficient_privilege(
                 "must be superuser to alter superuser roles or change superuser attribute",
@@ -264,8 +264,17 @@ impl Engine {
             }
             names.push(name);
         }
+        let routines = self.durable.sql_user_functions.read();
         for name in &names {
-            if let Some(dependent) = self.role_routine_dependency(name) {
+            if let Some(dependent) = routines.values().flatten().find_map(|function| {
+                let owns = function.def.owner == *name;
+                let has_acl = function
+                    .def
+                    .execute_acl
+                    .as_ref()
+                    .is_some_and(|acl| acl.iter().any(|entry| entry.role == *name));
+                (owns || has_acl).then(|| format!("routine {}", function.def.name))
+            }) {
                 return Err(SQLError::Routine {
                     sqlstate: "2BP01".into(),
                     message: format!("role \"{name}\" cannot be dropped because some objects depend on it: {dependent}"),
@@ -278,26 +287,10 @@ impl Engine {
         }
         self.persist_roles_snapshot(&next)?;
         *roles = next;
+        drop(routines);
         drop(roles);
         self.note_catalog_registry_changed();
         Ok(())
-    }
-
-    fn role_routine_dependency(&self, role: &str) -> Option<String> {
-        self.durable
-            .sql_user_functions
-            .read()
-            .values()
-            .flatten()
-            .find_map(|function| {
-                let owns = function.def.owner == role;
-                let has_acl = function
-                    .def
-                    .execute_acl
-                    .as_ref()
-                    .is_some_and(|acl| acl.iter().any(|entry| entry.role == role));
-                (owns || has_acl).then(|| format!("routine {}", function.def.name))
-            })
     }
 
     fn require_role_administration(&self, action: &str) -> Result<(), SQLError> {
