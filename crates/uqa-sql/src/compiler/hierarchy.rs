@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL inheritance and declarative-partitioning lowering.
+//! `PostgreSQL` inheritance and declarative-partitioning lowering.
 
 use super::{compile_expr, range_var_name, Node, NodeEnum, Result, SQLError};
 use crate::ast::{

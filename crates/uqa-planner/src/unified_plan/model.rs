@@ -324,6 +324,7 @@ pub struct MergePlan {
     pub target: String,
     pub target_qualifier: String,
     pub target_alias: Option<String>,
+    pub include_descendants: bool,
     pub source: Box<SourcePlan>,
     pub join_condition: ScalarExpr,
     pub when_clauses: Vec<MergeWhenPlan>,

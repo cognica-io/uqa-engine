@@ -1404,6 +1404,8 @@ pub struct MergeStmt {
     pub target: String,
     pub target_qualifier: String,
     pub target_alias: Option<String>,
+    #[serde(default = "default_true")]
+    pub include_descendants: bool,
     pub source: FromClause,
     pub join_condition: Expr,
     pub when_clauses: Vec<MergeWhen>,

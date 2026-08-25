@@ -7,8 +7,8 @@
 //! Table drop, lookup, description, and default inspection.
 
 use super::{
-    stored_relation_reference_matches, table_not_found, Engine, RelationIdentity,
-    StorageBackendError, StorageBackendResult,
+    stored_relation_reference_matches, table_not_found, Arc, Engine, RelationIdentity,
+    StorageBackendError, StorageBackendResult, TableState,
 };
 
 impl Engine {
@@ -77,25 +77,8 @@ impl Engine {
             .map(|name| Self::resolved_relation_identity(name))
             .collect::<StorageBackendResult<Vec<_>>>()?;
 
-        // Finish every dependency check before mutating a referrer or target.
-        for name in &canonical_names {
-            self.ensure_no_dependent_views("DROP TABLE", name)?;
-        }
         let entries = self.table_entries();
-        for (candidate_name, table) in &entries {
-            if target_names.contains(candidate_name) {
-                continue;
-            }
-            if let Some(target) = targets
-                .iter()
-                .find(|target| Self::table_schema_references_relation(table, target))
-            {
-                return Err(StorageBackendError::Other(format!(
-                    "DROP TABLE `{}` rejected: schema expression on `{candidate_name}` may depend on it and cannot be rewritten safely",
-                    target.qualified_name()
-                )));
-            }
-        }
+        self.ensure_drop_targets_unreferenced(&canonical_names, &target_names, &targets, &entries)?;
 
         let mut inbound = Vec::new();
         let mut updates = Vec::new();
@@ -163,6 +146,34 @@ impl Engine {
         }
         for name in canonical_names {
             self.drop_table_state_inner(&name)?;
+        }
+        Ok(())
+    }
+
+    fn ensure_drop_targets_unreferenced(
+        &self,
+        canonical_names: &[String],
+        target_names: &std::collections::BTreeSet<String>,
+        targets: &[RelationIdentity],
+        entries: &[(String, Arc<TableState>)],
+    ) -> StorageBackendResult<()> {
+        // Finish every dependency check before mutating a referrer or target.
+        for name in canonical_names {
+            self.ensure_no_dependent_views("DROP TABLE", name)?;
+        }
+        for (candidate_name, table) in entries {
+            if target_names.contains(candidate_name) {
+                continue;
+            }
+            if let Some(target) = targets
+                .iter()
+                .find(|target| Self::table_schema_references_relation(table, target))
+            {
+                return Err(StorageBackendError::Other(format!(
+                    "DROP TABLE `{}` rejected: schema expression on `{candidate_name}` may depend on it and cannot be rewritten safely",
+                    target.qualified_name()
+                )));
+            }
         }
         Ok(())
     }

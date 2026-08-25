@@ -161,6 +161,25 @@ fn merge_not_matched_by_source_preserves_all_actions() {
 }
 
 #[test]
+fn merge_preserves_only_target_scope() {
+    let Statement::Merge(merge) = first(
+        "MERGE INTO ONLY target USING source ON target.id = source.id \
+         WHEN MATCHED THEN DO NOTHING",
+    ) else {
+        panic!("expected MERGE");
+    };
+    assert!(!merge.include_descendants);
+
+    let Statement::Merge(merge) = first(
+        "MERGE INTO target USING source ON target.id = source.id \
+         WHEN MATCHED THEN DO NOTHING",
+    ) else {
+        panic!("expected MERGE");
+    };
+    assert!(merge.include_descendants);
+}
+
+#[test]
 fn merge_rejects_a_clause_after_an_unconditional_clause_of_the_same_kind() {
     let error = compile(
         "MERGE INTO target USING source ON target.id = source.id \

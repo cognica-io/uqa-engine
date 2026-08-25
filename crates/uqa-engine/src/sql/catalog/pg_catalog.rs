@@ -605,11 +605,11 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
                 )?,
                 None => Value::Null,
             };
-            let conrelid = table_relation_oid(
+            let relation_oid = table_relation_oid(
                 engine,
                 &format!("{}.{}", constraint.schema, constraint.table),
             )?;
-            let confrelid = match foreign_key {
+            let referenced_relation_oid = match foreign_key {
                 Some(foreign_key) => table_relation_oid(
                     engine,
                     &format!("{}.{}", foreign_key.schema, foreign_key.table),
@@ -634,11 +634,11 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
                 ("condeferred", bool_value(false)),
                 ("conenforced", bool_value(constraint.enforced)),
                 ("convalidated", bool_value(constraint.enforced)),
-                ("conrelid", int_value(conrelid)),
+                ("conrelid", int_value(relation_oid)),
                 ("contypid", int_value(0)),
                 ("conindid", int_value(0)),
                 ("conparentid", int_value(0)),
-                ("confrelid", int_value(confrelid)),
+                ("confrelid", int_value(referenced_relation_oid)),
                 (
                     "confupdtype",
                     str_value(foreign_key.map_or(" ", |foreign_key| {

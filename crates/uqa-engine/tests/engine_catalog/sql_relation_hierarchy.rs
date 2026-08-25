@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL 18 table inheritance and declarative partition routing.
+//! `PostgreSQL` 18 table inheritance and declarative partition routing.
 
 use uqa_core::Value;
 use uqa_engine::Engine;
@@ -16,22 +16,7 @@ fn exec(engine: &Engine, sql: &str) {
     engine.sql(sql, &[]).unwrap();
 }
 
-#[test]
-fn range_partitions_route_rows_scan_descendants_and_honor_only() {
-    let engine = Engine::new();
-    exec(
-        &engine,
-        "CREATE TABLE measurements (id INTEGER, base INTEGER, doubled INTEGER GENERATED ALWAYS AS (base * 2) STORED) PARTITION BY RANGE (id)",
-    );
-    exec(
-        &engine,
-        "CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (MINVALUE) TO (10)",
-    );
-    exec(
-        &engine,
-        "CREATE TABLE measurements_high PARTITION OF measurements FOR VALUES FROM (10) TO (MAXVALUE)",
-    );
-
+fn assert_measurement_partition_catalog(engine: &Engine) {
     let classes = engine
         .sql(
             "SELECT relname, relkind, relispartition, relhassubclass FROM pg_catalog.pg_class WHERE relname IN ('measurements', 'measurements_low', 'measurements_high') ORDER BY relname",
@@ -55,7 +40,9 @@ fn range_partitions_route_rows_scan_descendants_and_honor_only() {
         Value::Str("measurements".into())
     );
     assert_eq!(inheritance.rows[0]["inhseqno"], Value::Int(1));
+}
 
+fn insert_and_assert_measurement_partition_rows(engine: &Engine) {
     let returning = engine
         .sql(
             "INSERT INTO measurements (id, base) VALUES (1, 3), (11, 4) RETURNING id, doubled",
@@ -65,7 +52,6 @@ fn range_partitions_route_rows_scan_descendants_and_honor_only() {
     assert_eq!(returning.rows.len(), 2);
     assert_eq!(returning.rows[0]["doubled"], Value::Int(6));
     assert_eq!(returning.rows[1]["doubled"], Value::Int(8));
-
     let rows = engine
         .sql(
             "SELECT id, base, doubled FROM measurements ORDER BY id",
@@ -94,7 +80,9 @@ fn range_partitions_route_rows_scan_descendants_and_honor_only() {
             .rows[0]["id"],
         Value::Int(11)
     );
+}
 
+fn update_and_delete_measurement_partitions(engine: &Engine) {
     let wrong_partition = engine
         .sql(
             "INSERT INTO measurements_low (id, base) VALUES (20, 1)",
@@ -128,7 +116,6 @@ fn range_partitions_route_rows_scan_descendants_and_honor_only() {
             .collect::<Vec<_>>(),
         vec![Value::Int(11), Value::Int(12)]
     );
-
     let deleted = engine
         .sql(
             "DELETE FROM measurements WHERE id = 11 RETURNING old.id AS old_id, new.id IS NULL AS new_missing",
@@ -138,13 +125,15 @@ fn range_partitions_route_rows_scan_descendants_and_honor_only() {
     assert_eq!(deleted.rows.len(), 1);
     assert_eq!(deleted.rows[0]["old_id"], Value::Int(11));
     assert_eq!(deleted.rows[0]["new_missing"], Value::Bool(true));
+}
 
+fn update_from_and_delete_using_measurement_partitions(engine: &Engine) {
     exec(
-        &engine,
+        engine,
         "CREATE TABLE measurement_adjustments (old_id INTEGER, new_id INTEGER, new_base INTEGER)",
     );
     exec(
-        &engine,
+        engine,
         "INSERT INTO measurement_adjustments VALUES (12, 2, 6)",
     );
     let moved_from = engine
@@ -170,7 +159,9 @@ fn range_partitions_route_rows_scan_descendants_and_honor_only() {
         .unwrap();
     assert_eq!(deleted_using.rows.len(), 1);
     assert_eq!(deleted_using.rows[0]["old_id"], Value::Int(2));
+}
 
+fn assert_measurement_partition_lifecycle(engine: &Engine) {
     let overlap = engine
         .sql(
             "CREATE TABLE measurements_overlap PARTITION OF measurements FOR VALUES FROM (5) TO (15)",
@@ -181,17 +172,39 @@ fn range_partitions_route_rows_scan_descendants_and_honor_only() {
     assert!(!engine.has_table("measurements_overlap").unwrap());
     let truncate_only = engine.sql("TRUNCATE ONLY measurements", &[]).unwrap_err();
     assert_eq!(truncate_only.sqlstate(), Some("42809"));
-    exec(&engine, "INSERT INTO measurements VALUES (1, 1), (11, 1)");
-    exec(&engine, "TRUNCATE measurements");
+    exec(engine, "INSERT INTO measurements VALUES (1, 1), (11, 1)");
+    exec(engine, "TRUNCATE measurements");
     assert!(engine
         .sql("SELECT * FROM measurements", &[])
         .unwrap()
         .rows
         .is_empty());
-    exec(&engine, "DROP TABLE measurements");
+    exec(engine, "DROP TABLE measurements");
     assert!(!engine.has_table("measurements").unwrap());
     assert!(!engine.has_table("measurements_low").unwrap());
     assert!(!engine.has_table("measurements_high").unwrap());
+}
+
+#[test]
+fn range_partitions_route_rows_scan_descendants_and_honor_only() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE measurements (id INTEGER, base INTEGER, doubled INTEGER GENERATED ALWAYS AS (base * 2) STORED) PARTITION BY RANGE (id)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (MINVALUE) TO (10)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE measurements_high PARTITION OF measurements FOR VALUES FROM (10) TO (MAXVALUE)",
+    );
+    assert_measurement_partition_catalog(&engine);
+    insert_and_assert_measurement_partition_rows(&engine);
+    update_and_delete_measurement_partitions(&engine);
+    update_from_and_delete_using_measurement_partitions(&engine);
+    assert_measurement_partition_lifecycle(&engine);
 }
 
 #[test]
@@ -325,4 +338,191 @@ fn inherited_generated_columns_scan_children_and_survive_reopen() {
     exec(&reopened, "DROP TABLE renamed_parent_values CASCADE");
     assert!(!reopened.has_table("renamed_parent_values").unwrap());
     assert!(!reopened.has_table("child_values").unwrap());
+}
+
+fn assert_merge_partition_rows(engine: &Engine) {
+    let low = engine
+        .sql(
+            "SELECT id, bucket, value FROM merge_targets_low ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(low.rows.len(), 1);
+    assert_eq!(low.rows[0]["id"], Value::Int(1));
+    assert_eq!(low.rows[0]["value"], Value::Str("low-updated".into()));
+    let high = engine
+        .sql(
+            "SELECT id, bucket, value FROM merge_targets_high ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(high.rows.len(), 3);
+    assert_eq!(high.rows[0]["id"], Value::Int(1));
+    assert_eq!(high.rows[0]["value"], Value::Str("high-updated".into()));
+    assert_eq!(high.rows[1]["id"], Value::Int(2));
+    assert_eq!(high.rows[1]["bucket"], Value::Int(12));
+    assert_eq!(high.rows[2]["id"], Value::Int(4));
+}
+
+#[test]
+fn merge_tracks_physical_partition_identity_and_routes_actions_under_spill() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE merge_targets (id INTEGER, bucket INTEGER, value TEXT) PARTITION BY RANGE (bucket)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE merge_targets_low PARTITION OF merge_targets FOR VALUES FROM (0) TO (10)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE merge_targets_high PARTITION OF merge_targets FOR VALUES FROM (10) TO (20)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO merge_targets VALUES (1, 1, 'low'), (1, 11, 'high'), (2, 2, 'move'), (3, 3, 'delete')",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE merge_source (source_seq INTEGER PRIMARY KEY, id INTEGER, old_bucket INTEGER, new_bucket INTEGER, value TEXT)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO merge_source VALUES (1, 1, 1, 1, 'low-updated'), (2, 1, 11, 11, 'high-updated'), (3, 2, 2, 12, 'moved'), (4, 4, 14, 14, 'inserted')",
+    );
+    exec(&engine, "SET work_mem TO '1B'");
+
+    let returned = engine
+        .sql(
+            "MERGE INTO merge_targets AS target USING merge_source AS source ON target.id = source.id AND target.bucket = source.old_bucket WHEN MATCHED THEN UPDATE SET bucket = source.new_bucket, value = source.value WHEN NOT MATCHED BY SOURCE THEN DELETE WHEN NOT MATCHED THEN INSERT (id, bucket, value) VALUES (source.id, source.new_bucket, source.value) RETURNING merge_action() AS action, old.id AS old_id, old.bucket AS old_bucket, new.id AS new_id, new.bucket AS new_bucket, new.value AS new_value",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(returned.rows.len(), 5);
+    assert_eq!(
+        returned
+            .rows
+            .iter()
+            .filter(|row| row["action"] == Value::Str("UPDATE".into()))
+            .count(),
+        3
+    );
+    assert_eq!(
+        returned
+            .rows
+            .iter()
+            .filter(|row| row["action"] == Value::Str("DELETE".into()))
+            .count(),
+        1
+    );
+    assert_eq!(
+        returned
+            .rows
+            .iter()
+            .filter(|row| row["action"] == Value::Str("INSERT".into()))
+            .count(),
+        1
+    );
+    let moved = returned
+        .rows
+        .iter()
+        .find(|row| row["old_id"] == Value::Int(2))
+        .unwrap();
+    assert_eq!(moved["old_bucket"], Value::Int(2));
+    assert_eq!(moved["new_bucket"], Value::Int(12));
+
+    assert_merge_partition_rows(&engine);
+
+    exec(
+        &engine,
+        "TRUNCATE merge_source; INSERT INTO merge_source VALUES (9, 9, 5, 5, 'only-insert')",
+    );
+    let only = engine
+        .sql(
+            "MERGE INTO ONLY merge_targets AS target USING merge_source AS source ON target.id = source.id AND target.bucket = source.old_bucket WHEN NOT MATCHED THEN INSERT (id, bucket, value) VALUES (source.id, source.new_bucket, source.value) RETURNING new.id AS id, new.value AS value",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(only.rows.len(), 1);
+    assert_eq!(only.rows[0]["id"], Value::Int(9));
+    assert_eq!(only.rows[0]["value"], Value::Str("only-insert".into()));
+    assert_eq!(
+        engine
+            .sql("SELECT value FROM merge_targets_low WHERE id = 9", &[])
+            .unwrap()
+            .rows[0]["value"],
+        Value::Str("only-insert".into())
+    );
+}
+
+#[test]
+fn merge_only_limits_ordinary_inheritance_matching_but_not_parent_inserts() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE merge_parent (id INTEGER, value TEXT)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE merge_child (extra TEXT) INHERITS (merge_parent)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO merge_parent VALUES (1, 'parent'); INSERT INTO merge_child VALUES (2, 'child', 'extra')",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE merge_only_source (id INTEGER, value TEXT); INSERT INTO merge_only_source VALUES (1, 'parent-updated'), (2, 'inserted-parent')",
+    );
+
+    let returned = engine
+        .sql(
+            "MERGE INTO ONLY merge_parent AS target USING merge_only_source AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.value WHEN NOT MATCHED THEN INSERT (id, value) VALUES (source.id, source.value) RETURNING merge_action() AS action, new.id AS id, new.value AS value",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(returned.rows.len(), 2);
+    let parent = engine
+        .sql("SELECT id, value FROM ONLY merge_parent ORDER BY id", &[])
+        .unwrap();
+    assert_eq!(parent.rows.len(), 2);
+    assert_eq!(parent.rows[0]["value"], Value::Str("parent-updated".into()));
+    assert_eq!(
+        parent.rows[1]["value"],
+        Value::Str("inserted-parent".into())
+    );
+    let child = engine
+        .sql("SELECT id, value FROM ONLY merge_child", &[])
+        .unwrap();
+    assert_eq!(child.rows.len(), 1);
+    assert_eq!(child.rows[0]["id"], Value::Int(2));
+    assert_eq!(child.rows[0]["value"], Value::Str("child".into()));
+}
+
+#[test]
+fn merge_scans_a_multiply_inherited_descendant_once() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE merge_root (id INTEGER, value TEXT); CREATE TABLE merge_left () INHERITS (merge_root); CREATE TABLE merge_right () INHERITS (merge_root); CREATE TABLE merge_diamond () INHERITS (merge_left, merge_right)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO merge_diamond VALUES (7, 'before'); CREATE TABLE merge_diamond_source (id INTEGER, value TEXT); INSERT INTO merge_diamond_source VALUES (7, 'after')",
+    );
+    let returned = engine
+        .sql(
+            "MERGE INTO merge_root AS target USING merge_diamond_source AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.value RETURNING new.id AS id, new.value AS value",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(returned.rows.len(), 1);
+    assert_eq!(returned.rows[0]["id"], Value::Int(7));
+    assert_eq!(returned.rows[0]["value"], Value::Str("after".into()));
+    let stored = engine
+        .sql("SELECT id, value FROM ONLY merge_diamond", &[])
+        .unwrap();
+    assert_eq!(stored.rows.len(), 1);
+    assert_eq!(stored.rows[0]["value"], Value::Str("after".into()));
 }

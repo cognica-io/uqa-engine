@@ -254,13 +254,15 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
         let prepared_effect = !matches!(&prepared_conflict, PreparedInsertConflict::Skip);
         if let Some(row) = stage_prepared_insert_row(
             engine,
-            stmt,
-            &target_table,
+            PreparedInsertRowContext {
+                stmt,
+                storage_table: &target_table,
+                params,
+                scope: snapshot_scope,
+            },
             &document,
             None,
             &mut prepared_conflict,
-            params,
-            snapshot_scope,
         )? {
             returning_rows.push(row);
         }
@@ -521,13 +523,15 @@ pub(in crate::sql) fn run_insert_inner(
         let document = Arc::new(document);
         if let Some(returning) = stage_prepared_insert_row(
             engine,
-            stmt,
-            &target_table,
+            PreparedInsertRowContext {
+                stmt,
+                storage_table: &target_table,
+                params,
+                scope: &snapshot_scope,
+            },
             document.as_ref(),
             Some(&document),
             &mut prepared,
-            params,
-            &snapshot_scope,
         )? {
             returning_rows.push(returning);
         }
@@ -615,16 +619,26 @@ fn attach_prepared_insert_identity(
     }
 }
 
+struct PreparedInsertRowContext<'a> {
+    stmt: &'a InsertPlan,
+    storage_table: &'a str,
+    params: &'a [SQLParam],
+    scope: &'a CteScope,
+}
+
 fn stage_prepared_insert_row(
     engine: &Engine,
-    stmt: &InsertPlan,
-    storage_table: &str,
+    context: PreparedInsertRowContext<'_>,
     document: &Document,
     shared_document: Option<&Arc<Document>>,
     prepared: &mut PreparedInsertConflict,
-    params: &[SQLParam],
-    scope: &CteScope,
 ) -> Result<Option<uqa_execution::OwnedPhysicalRow>, SQLError> {
+    let PreparedInsertRowContext {
+        stmt,
+        storage_table,
+        params,
+        scope,
+    } = context;
     validate_document_non_key_constraints(engine, storage_table, document, params)?;
     let images = match prepared {
         PreparedInsertConflict::Insert { doc_id, .. } => {

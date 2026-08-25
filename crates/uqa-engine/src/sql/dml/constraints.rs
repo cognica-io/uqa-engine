@@ -140,8 +140,7 @@ fn validate_document_non_key_constraints_with_old(
         if !uqa_sql::expr::truthy(&result) {
             let label = constraint.name.unwrap_or_else(|| "<unnamed>".into());
             let relation = crate::RelationIdentity::from_legacy_name(table)
-                .map(|identity| identity.name)
-                .unwrap_or_else(|_| table.to_string());
+                .map_or_else(|_| table.to_string(), |identity| identity.name);
             return Err(SQLError::Routine {
                 sqlstate: "23514".into(),
                 message: format!(

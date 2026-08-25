@@ -322,6 +322,7 @@ impl UnifiedPlan {
                     target: statement.target,
                     target_qualifier: statement.target_qualifier,
                     target_alias: statement.target_alias,
+                    include_descendants: statement.include_descendants,
                     source: Box::new(source),
                     join_condition,
                     when_clauses,

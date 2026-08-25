@@ -75,21 +75,22 @@ impl Engine {
         let tables = self.storage.tables.read();
         let children = tables
             .iter()
-            .filter_map(|(identity, state)| {
+            .filter(|(_, state)| {
                 state
                     .hierarchy
                     .read()
                     .parents
                     .iter()
                     .any(|candidate| candidate == parent)
-                    .then(|| identity.qualified_name())
             })
+            .map(|(identity, _)| identity.qualified_name())
             .collect::<Vec<_>>();
         drop(tables);
         for child in children {
             self.collect_hierarchy_descendants(&child, visiting, visited, output)?;
         }
         visiting.remove(parent);
+        visited.insert(parent.to_string());
         Ok(())
     }
 
@@ -101,15 +102,15 @@ impl Engine {
         let tables = self.storage.tables.read();
         Ok(tables
             .iter()
-            .filter_map(|(identity, state)| {
+            .filter(|(_, state)| {
                 state
                     .hierarchy
                     .read()
                     .parents
                     .iter()
                     .any(|candidate| candidate == &parent)
-                    .then(|| identity.qualified_name())
             })
+            .map(|(identity, _)| identity.qualified_name())
             .collect())
     }
 
