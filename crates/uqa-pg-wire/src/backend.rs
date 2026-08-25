@@ -21,6 +21,23 @@ pub enum Authentication {
     SaslFinal(Vec<u8>),
 }
 
+impl Authentication {
+    pub(crate) const fn description(&self) -> &'static str {
+        match self {
+            Self::Ok => "AuthenticationOk",
+            Self::KerberosV5 => "AuthenticationKerberosV5",
+            Self::CleartextPassword => "AuthenticationCleartextPassword",
+            Self::Md5Password(_) => "AuthenticationMD5Password",
+            Self::Gss => "AuthenticationGSS",
+            Self::GssContinue(_) => "AuthenticationGSSContinue",
+            Self::Sspi => "AuthenticationSSPI",
+            Self::Sasl { .. } => "AuthenticationSASL",
+            Self::SaslContinue(_) => "AuthenticationSASLContinue",
+            Self::SaslFinal(_) => "AuthenticationSASLFinal",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SSLResponse {
     Accept,
@@ -315,8 +332,14 @@ fn encode_authentication(auth: &Authentication) -> Result<Vec<u8>, PgWireError> 
         }
         Authentication::Sspi => body.write_i32(9),
         Authentication::Sasl { mechanisms } => {
+            if mechanisms.is_empty() {
+                return Err(PgWireError::EmptySaslMechanismList);
+            }
             body.write_i32(10);
             for mechanism in mechanisms {
+                if mechanism.is_empty() {
+                    return Err(PgWireError::EmptySaslMechanism);
+                }
                 body.write_cstring(mechanism, "SASL mechanism")?;
             }
             body.write_byte(0);

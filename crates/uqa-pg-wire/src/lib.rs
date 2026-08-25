@@ -18,11 +18,13 @@
 //! responsibility of the embedding server; there is no query-execution bridge
 //! in this crate that could turn an execution failure into an empty success.
 
+pub mod auth;
 pub mod backend;
 mod codec;
 pub mod frontend;
 pub mod protocol;
 
+pub use auth::{AuthenticationExchange, AuthenticationResponse, AuthenticationResponseKind};
 pub use backend::{
     encode_all, encode_all_for_protocol, Authentication, BackendKeyData, BackendMessage,
     CopyResponse, ErrorOrNotice, FieldDescription, GSSEncResponse, NoticeSeverity,
@@ -30,8 +32,8 @@ pub use backend::{
 };
 pub use frontend::{
     decode_frontend, decode_frontend_with_max, decode_startup, decode_startup_with_max, Bind,
-    CloseTarget, DescribeTarget, Execute, FrontendMessage, FunctionCall, Parse, StartupFrame,
-    StartupMessage, StartupNegotiation,
+    CloseTarget, DescribeTarget, Execute, FrontendMessage, FunctionCall, Parse, PasswordMessage,
+    StartupFrame, StartupMessage, StartupNegotiation,
 };
 pub use protocol::{
     CancelKey, DecodeError, DecodeOutcome, FormatCode, PgWireError, ProtocolVersion,

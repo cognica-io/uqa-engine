@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 
 use crate::codec::{message_total_len, DecodeLen, Reader, MESSAGE_HEADER_LEN};
 use crate::protocol::{
-    CancelKey, DecodeOutcome, FormatCode, PgWireError, ProtocolVersion, CANCEL_REQUEST_CODE,
-    GSSENC_REQUEST_CODE, SSL_REQUEST_CODE,
+    resolve_format_code, resolve_format_codes, CancelKey, DecodeOutcome, FormatCode, PgWireError,
+    ProtocolVersion, CANCEL_REQUEST_CODE, GSSENC_REQUEST_CODE, SSL_REQUEST_CODE,
 };
 
 pub const DEFAULT_MAX_MESSAGE_LEN: usize = 16 * 1024 * 1024;
@@ -119,7 +119,7 @@ pub enum FrontendMessage {
     Flush,
     Sync,
     Terminate,
-    Password(Vec<u8>),
+    Password(PasswordMessage),
     CopyData(Vec<u8>),
     CopyDone,
     CopyFail(String),
@@ -140,6 +140,94 @@ pub struct Bind {
     pub parameter_formats: Vec<FormatCode>,
     pub parameters: Vec<Option<Vec<u8>>>,
     pub result_formats: Vec<FormatCode>,
+}
+
+impl Bind {
+    /// Expand `PostgreSQL`'s zero, one, or one-per-parameter format-code forms.
+    pub fn resolved_parameter_formats(&self) -> Result<Vec<FormatCode>, PgWireError> {
+        resolve_format_codes(
+            &self.parameter_formats,
+            self.parameters.len(),
+            |format_count, parameter_count| PgWireError::ParameterFormatCountMismatch {
+                format_count,
+                parameter_count,
+            },
+        )
+    }
+
+    /// Resolve the wire format for one bound parameter.
+    pub fn parameter_format(&self, index: usize) -> Result<FormatCode, PgWireError> {
+        resolve_format_code(
+            &self.parameter_formats,
+            self.parameters.len(),
+            index,
+            "Bind parameter",
+            |format_count, parameter_count| PgWireError::ParameterFormatCountMismatch {
+                format_count,
+                parameter_count,
+            },
+        )
+    }
+
+    /// Expand `PostgreSQL`'s zero, one, or one-per-column result format forms.
+    pub fn resolved_result_formats(
+        &self,
+        column_count: usize,
+    ) -> Result<Vec<FormatCode>, PgWireError> {
+        resolve_format_codes(
+            &self.result_formats,
+            column_count,
+            |format_count, column_count| PgWireError::ResultFormatCountMismatch {
+                format_count,
+                column_count,
+            },
+        )
+    }
+
+    /// Resolve the requested wire format for one result column.
+    pub fn result_format(
+        &self,
+        index: usize,
+        column_count: usize,
+    ) -> Result<FormatCode, PgWireError> {
+        resolve_format_code(
+            &self.result_formats,
+            column_count,
+            index,
+            "Bind result column",
+            |format_count, column_count| PgWireError::ResultFormatCountMismatch {
+                format_count,
+                column_count,
+            },
+        )
+    }
+}
+
+/// The body of the context-dependent frontend message tagged `p`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PasswordMessage(Vec<u8>);
+
+impl PasswordMessage {
+    #[must_use]
+    pub fn new(bytes: impl Into<Vec<u8>>) -> Self {
+        Self(bytes.into())
+    }
+
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    #[must_use]
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.0
+    }
+}
+
+impl AsRef<[u8]> for PasswordMessage {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,6 +254,34 @@ pub struct FunctionCall {
     pub argument_formats: Vec<FormatCode>,
     pub arguments: Vec<Option<Vec<u8>>>,
     pub result_format: FormatCode,
+}
+
+impl FunctionCall {
+    /// Expand `PostgreSQL`'s zero, one, or one-per-argument format-code forms.
+    pub fn resolved_argument_formats(&self) -> Result<Vec<FormatCode>, PgWireError> {
+        resolve_format_codes(
+            &self.argument_formats,
+            self.arguments.len(),
+            |format_count, argument_count| PgWireError::FunctionArgumentFormatCountMismatch {
+                format_count,
+                argument_count,
+            },
+        )
+    }
+
+    /// Resolve the wire format for one function-call argument.
+    pub fn argument_format(&self, index: usize) -> Result<FormatCode, PgWireError> {
+        resolve_format_code(
+            &self.argument_formats,
+            self.arguments.len(),
+            index,
+            "FunctionCall argument",
+            |format_count, argument_count| PgWireError::FunctionArgumentFormatCountMismatch {
+                format_count,
+                argument_count,
+            },
+        )
+    }
 }
 
 pub fn decode_startup(input: &[u8]) -> DecodeOutcome<StartupFrame> {
@@ -290,7 +406,7 @@ fn parse_frontend_message(tag: u8, body: &[u8]) -> Result<FrontendMessage, PgWir
             reader.ensure_empty("Terminate")?;
             FrontendMessage::Terminate
         }
-        b'p' => FrontendMessage::Password(body.to_vec()),
+        b'p' => FrontendMessage::Password(PasswordMessage::new(body)),
         b'd' => FrontendMessage::CopyData(body.to_vec()),
         b'c' => {
             reader.ensure_empty("CopyDone")?;

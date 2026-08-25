@@ -1,0 +1,9 @@
+{
+  "name": "uqa-pg18-node-postgres-matrix",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "pg": "8.23.0",
+    "pg-copy-streams": "7.0.0"
+  }
+}
