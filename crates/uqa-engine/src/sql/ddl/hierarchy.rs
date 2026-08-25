@@ -13,6 +13,11 @@ pub(super) fn prepare_create_table_hierarchy(
     engine: &Engine,
     table: &mut CreateTable,
 ) -> Result<(), SQLError> {
+    table.hierarchy.local_columns = table
+        .columns
+        .iter()
+        .map(|column| column.name.clone())
+        .collect();
     if table.hierarchy.parents.is_empty() {
         if table.hierarchy.partition_bound.is_some() {
             return Err(SQLError::Internal(

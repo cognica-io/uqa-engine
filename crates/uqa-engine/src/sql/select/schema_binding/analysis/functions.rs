@@ -71,6 +71,7 @@ pub(super) fn single_pseudo_column_qualifier(schema: &RowSchema) -> Option<Strin
         .filter(|qualifier| {
             schema.has_qualified_column(qualifier, "_doc_id")
                 && schema.has_qualified_column(qualifier, "_score")
+                && schema.has_qualified_column(qualifier, "tableoid")
         })
         .map(str::to_string)
         .collect::<BTreeSet<_>>()
@@ -90,7 +91,7 @@ fn pseudo_column_qualifiers(schema: &RowSchema, column: &str) -> BTreeSet<String
 }
 
 fn is_pseudo_column(column: &str) -> bool {
-    matches!(column, "_doc_id" | "_score")
+    matches!(column, "_doc_id" | "_score" | "tableoid")
 }
 
 pub(super) struct ScalarFunctionValidation<'a> {

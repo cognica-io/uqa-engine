@@ -30,7 +30,19 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 ```
 
-Implemented table properties include columns, defaults, generated serial values, virtual and stored generated columns, nullability, key constraints, checks, foreign keys, and vector or tensor dimensions. `TEMP` and `TEMPORARY` tables live in the session's `pg_temp` namespace, are omitted from durable storage, and support `ON COMMIT PRESERVE ROWS`, `ON COMMIT DELETE ROWS`, and `ON COMMIT DROP`; the drop action removes dependent temporary views and foreign-key links with PostgreSQL's internal cascade semantics. `DISCARD TEMP` removes the session's temporary tables, views, and sequences outside a transaction. `UNLOGGED` tables retain their catalog identity and rows across a clean reopen, although PostgreSQL crash-recovery truncation semantics remain unimplemented. Inherited, partitioned, typed, storage-parameterized, access-method-selected, or tablespace-bound tables are not implemented.
+Implemented table properties include columns, defaults, generated serial values, virtual and stored generated columns, nullability, key constraints, checks, foreign keys, ordinary inheritance, declarative partitioning, and vector or tensor dimensions. `TEMP` and `TEMPORARY` tables live in the session's `pg_temp` namespace, are omitted from durable storage, and support `ON COMMIT PRESERVE ROWS`, `ON COMMIT DELETE ROWS`, and `ON COMMIT DROP`; the drop action removes dependent temporary views and foreign-key links with PostgreSQL's internal cascade semantics. `DISCARD TEMP` removes the session's temporary tables, views, and sequences outside a transaction. `UNLOGGED` tables retain their catalog identity and rows across a clean reopen, although PostgreSQL crash-recovery truncation semantics remain unimplemented. Typed, storage-parameterized, access-method-selected, or tablespace-bound tables are not implemented.
+
+## Inheritance and partitioning
+
+Ordinary `INHERITS` tables and declarative `LIST`, `RANGE`, and `HASH` partitioning retain independent physical rows while a parent scan includes descendants; `ONLY parent` scans only the parent's own storage. Partition inserts and hierarchy mutations route to the matching leaf, and bounds, local-versus-inherited column provenance, partition keys, default partitions, partitioned indexes, and inheritance edges are durable catalog state.
+
+```sql
+CREATE TABLE events (event_id INTEGER, occurred_on DATE) PARTITION BY RANGE (occurred_on);
+CREATE TABLE events_2026 PARTITION OF events FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
+CREATE TABLE events_other PARTITION OF events DEFAULT;
+```
+
+`pg_class.relpartbound` has `pg_node_tree` identity, `pg_partitioned_table` exposes each partition key, and `pg_get_expr` and `pg_get_partkeydef` deparse the stored definitions. An index declared on a partitioned parent has PostgreSQL's `relkind = 'I'` identity, and its derived child-index hierarchy appears in `pg_class`, `pg_index`, `pg_indexes`, and `pg_inherits`.
 
 ## Generated columns
 

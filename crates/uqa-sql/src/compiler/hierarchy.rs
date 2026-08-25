@@ -38,6 +38,7 @@ pub(in crate::compiler) fn compile_table_hierarchy(
         parents,
         partition_spec,
         partition_bound,
+        local_columns: Vec::new(),
     })
 }
 

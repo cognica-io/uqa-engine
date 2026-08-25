@@ -9,7 +9,7 @@ use super::{
     has_filters_for_qualifier, is_score_provenance_column, qualifier_filter, qualifier_for,
     table_lock_origin, Arc, ColumnPrune, CteScope, Engine, EngineHierarchyRowSource,
     EngineTableRowSource, QualifierFilters, SQLError, SQLParam, SourcePlan,
-    StreamingLocalTableScan,
+    StreamingLocalTableScan, Value, TABLE_OID_COLUMN,
 };
 
 pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
@@ -88,9 +88,15 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
             .collect(),
         None => table_columns,
     };
-    let schema = columns.clone();
+    let include_table_oid = wanted
+        .as_ref()
+        .is_some_and(|wanted| wanted.contains(TABLE_OID_COLUMN));
+    let mut schema = columns.clone();
+    if include_table_oid {
+        schema.push(TABLE_OID_COLUMN.into());
+    }
     let root_column_definitions = root_table.columns.read().clone();
-    let column_types = columns
+    let mut column_types = columns
         .iter()
         .map(|column| {
             root_column_definitions
@@ -99,6 +105,9 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
                 .map(|definition| definition.ty.clone())
         })
         .collect::<Vec<_>>();
+    if include_table_oid {
+        column_types.push(Some(uqa_sql::ast::ColumnType::Oid));
+    }
     let physical_schema =
         uqa_execution::RowSchema::with_qualified_types(&qualifier, schema.clone(), column_types);
     let table_names = engine.hierarchy_scan_tables(name, *include_descendants)?;
@@ -114,7 +123,9 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         let column_definitions = table.columns.read().clone();
         let lock_origin =
             table_lock_origin(engine, &table_name, &qualifier, ctes.lock_identities.emit)?;
-        let predicate = qualifier_filter(filters, &qualifier)
+        let predicate_expression = qualifier_filter(filters, &qualifier);
+        let predicate = predicate_expression
+            .filter(|predicate| !expression_references_tableoid(predicate))
             .map(|predicate| {
                 uqa_execution::ProjectedPredicate::compile_with_schema(
                     &predicate,
@@ -136,6 +147,10 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
             None
         };
         let estimated_cardinality = engine.table_doc_count(&table_name)?;
+        let table_oid = include_table_oid
+            .then(|| crate::sql::catalog::table_relation_oid(engine, &table_name))
+            .transpose()?
+            .map(Value::Int);
         sources.push(EngineTableRowSource {
             table_name,
             table,
@@ -143,6 +158,7 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
             columns: columns.clone(),
             schema: schema.clone(),
             physical_schema: physical_schema.clone(),
+            table_oid,
             predicate,
             estimated_cardinality,
             after: None,
@@ -169,4 +185,9 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         Box::new(uqa_execution::TableScan::new(source)),
         filter_pushed,
     )))
+}
+
+fn expression_references_tableoid(expression: &uqa_execution::ScalarExpr) -> bool {
+    let mut columns = std::collections::BTreeSet::new();
+    expression.collect_columns(&mut columns) && columns.contains(TABLE_OID_COLUMN)
 }

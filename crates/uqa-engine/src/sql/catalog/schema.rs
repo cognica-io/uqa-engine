@@ -27,6 +27,7 @@ pub(super) enum VirtualRelation {
     PgNamespace,
     PgClass,
     PgInherits,
+    PgPartitionedTable,
     PgAttribute,
     PgAttrdef,
     PgConstraint,
@@ -87,6 +88,9 @@ pub(super) fn resolve_virtual_relation(engine: &Engine, name: &str) -> Option<Vi
         (_, true, "pg_class") | (false, false, "pg_class") => Some(VirtualRelation::PgClass),
         (_, true, "pg_inherits") | (false, false, "pg_inherits") => {
             Some(VirtualRelation::PgInherits)
+        }
+        (_, true, "pg_partitioned_table") | (false, false, "pg_partitioned_table") => {
+            Some(VirtualRelation::PgPartitionedTable)
         }
         (_, true, "pg_attribute") | (false, false, "pg_attribute") => {
             Some(VirtualRelation::PgAttribute)
@@ -155,6 +159,7 @@ impl VirtualRelation {
             Self::PgNamespace
                 | Self::PgClass
                 | Self::PgInherits
+                | Self::PgPartitionedTable
                 | Self::PgAttribute
                 | Self::PgAttrdef
                 | Self::PgConstraint
@@ -346,6 +351,16 @@ impl VirtualRelation {
                 "inhparent" => ColumnType::Oid,
                 "inhseqno" => ColumnType::Integer,
                 "inhdetachpending" => ColumnType::Boolean,
+            ],
+            Self::PgPartitionedTable => columns![
+                "partrelid" => ColumnType::Oid,
+                "partstrat" => ColumnType::InternalChar,
+                "partnatts" => ColumnType::SmallInteger,
+                "partdefid" => ColumnType::Oid,
+                "partattrs" => ColumnType::Int2Vector,
+                "partclass" => ColumnType::OidVector,
+                "partcollation" => ColumnType::OidVector,
+                "partexprs" => ColumnType::PgNodeTree,
             ],
             Self::PgAttribute => columns![
                 "attrelid" => ColumnType::Oid,

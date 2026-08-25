@@ -22,7 +22,7 @@ use super::{
     JoinExecutionStrategy, JoinKind, QualifierFilters, QueryOutputMode, ResultRow, SQLError,
     SQLParam, ScalarExpr, ScopedEngineHook, ScoredDocumentSource, ScoredInput, SourceEvalContext,
     SourcePlan, TableFunctionCall, TableFunctionTypeRequest, Value,
-    TABLE_FUNCTION_ORDINALITY_COLUMN,
+    TABLE_FUNCTION_ORDINALITY_COLUMN, TABLE_OID_COLUMN,
 };
 
 use crate::sql::select::{
@@ -50,6 +50,7 @@ pub(in crate::sql) struct EngineTableRowSource {
     columns: Vec<String>,
     schema: Vec<String>,
     physical_schema: uqa_execution::RowSchema,
+    table_oid: Option<Value>,
     predicate: Option<uqa_execution::ProjectedPredicate>,
     estimated_cardinality: u64,
     after: Option<uqa_core::DocId>,

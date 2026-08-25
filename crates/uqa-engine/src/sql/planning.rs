@@ -27,7 +27,7 @@ impl uqa_planner::SourceStatistics for EngineSourceStatistics<'_> {
         match self.engine.try_table(table) {
             Ok(None) => None,
             Ok(Some(_)) => match (
-                self.engine.table_doc_count(table),
+                hierarchy_row_count(self.engine, table),
                 self.engine.try_column_stats(table),
             ) {
                 (Ok(row_count), Ok(columns)) => {
@@ -119,6 +119,20 @@ impl uqa_planner::SourceStatistics for EngineSourceStatistics<'_> {
             }
         }
     }
+}
+
+fn hierarchy_row_count(engine: &Engine, table: &str) -> Result<u64, SQLError> {
+    let mut total = 0_u64;
+    for member in engine.hierarchy_scan_tables(table, true)? {
+        total = total
+            .checked_add(engine.table_doc_count(&member)?)
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "optimizer hierarchy row count overflow for `{table}`"
+                ))
+            })?;
+    }
+    Ok(total)
 }
 
 #[cfg(test)]

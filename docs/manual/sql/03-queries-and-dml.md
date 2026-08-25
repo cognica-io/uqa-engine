@@ -18,6 +18,19 @@ LIMIT 20 OFFSET 0;
 
 Ascending order defaults to NULLS LAST and descending order defaults to NULLS FIRST. Use explicit `NULLS FIRST` or `NULLS LAST` when portability matters.
 
+## Hierarchy scans and `tableoid`
+
+A scan of an inherited or partitioned parent includes its physical descendants unless `ONLY` is specified. The PostgreSQL system column `tableoid` is an `OID` that identifies the physical relation which supplied each row; it can be selected, qualified, joined to `pg_catalog.pg_class`, and used in predicates, but it is omitted from `SELECT *`.
+
+```sql
+SELECT e.event_id, c.relname AS physical_table
+FROM events AS e
+JOIN pg_catalog.pg_class AS c ON c.oid = e.tableoid
+ORDER BY e.event_id;
+```
+
+Parent planner statistics aggregate the hierarchy members scanned by the parent. `ANALYZE parent` refreshes that combined column distribution, and a later mutation of a descendant invalidates the ancestor statistics so the next statistics read cannot reuse a stale parent estimate.
+
 ### FETCH WITH TIES
 
 `FETCH FIRST count ROWS WITH TIES` takes the requested prefix from the available ordered rows and extends it through every following row whose complete `ORDER BY` key is equal to the last requested row. `OFFSET` is applied first, an omitted count defaults to one row, and a zero count returns no rows.

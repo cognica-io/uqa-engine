@@ -162,6 +162,7 @@ pub(crate) fn bind_catalog_query_routines_with_outer(
 
 const SCORE_COLUMN: &str = "_score";
 pub(in crate::sql) const DOC_ID_COLUMN: &str = "_doc_id";
+pub(in crate::sql) const TABLE_OID_COLUMN: &str = "tableoid";
 const MERGE_ACTION_COLUMN: &str = "_merge_action";
 // NUL cannot occur in a SQL identifier, so this row-carried field cannot
 // collide with a user column. Its value is the score emitted by an executed
@@ -230,6 +231,8 @@ pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
                         | "setval"
                         | "current_schema"
                         | "current_schemas"
+                        | "pg_get_expr"
+                        | "pg_get_partkeydef"
                 )
         }
         _ => false,

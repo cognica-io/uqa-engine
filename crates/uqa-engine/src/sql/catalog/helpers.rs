@@ -864,8 +864,13 @@ pub(super) fn indexdef(name: &str, index_type: &str, table: &str, columns: &[Str
         index_type
     };
     format!(
-        "CREATE INDEX {name} ON {table} USING {method} ({})",
-        columns.join(", ")
+        "CREATE INDEX {} ON {table} USING {method} ({})",
+        uqa_sql::expr::quote_ident(name),
+        columns
+            .iter()
+            .map(|column| uqa_sql::expr::quote_ident(column))
+            .collect::<Vec<_>>()
+            .join(", ")
     )
 }
 

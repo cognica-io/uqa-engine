@@ -12,7 +12,7 @@ use std::sync::Arc;
 use super::{
     qualify_source_operator, table_lock_origin, ColumnPrune, CteScope, Engine,
     HierarchyScoredDocumentSource, SQLError, SQLParam, ScalarExpr, ScoredDocumentSource,
-    ScoredInput, SharedLockOrigin, SourcePlan,
+    ScoredInput, SharedLockOrigin, SourcePlan, TABLE_OID_COLUMN,
 };
 use crate::sql::select::RecheckDoc;
 use crate::ScoredEntry;
@@ -111,9 +111,15 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
         None => {}
     }
 
-    let columns = engine.try_table_columns(logical_table).map_err(|error| {
+    let mut columns = engine.try_table_columns(logical_table).map_err(|error| {
         SQLError::Internal(format!("read table columns for `{logical_table}`: {error}"))
     })?;
+    if prune
+        .and_then(|prune| prune.get(qualifier))
+        .is_some_and(|wanted| wanted.contains(TABLE_OID_COLUMN))
+    {
+        columns.push(TABLE_OID_COLUMN.into());
+    }
     let estimated_cardinality = physical
         .iter()
         .map(|retrieval| retrieval.entries.len())
@@ -130,6 +136,10 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
                 None,
                 None,
             )
+            .with_table_oid(crate::sql::catalog::table_relation_oid(
+                engine,
+                &retrieval.table_name,
+            )?)
             .with_lock_origin(retrieval.lock_origin)
             .with_recheck_pins(retrieval.recheck_pins),
         );

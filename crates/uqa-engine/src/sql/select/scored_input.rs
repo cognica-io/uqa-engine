@@ -13,7 +13,7 @@ pub(in crate::sql) use hierarchy::HierarchyScoredDocumentSource;
 
 use super::{
     doc_id_value, Arc, DocId, ExecResult, RecheckDoc, ResultRow, SQLError, ScoredEntry, Value,
-    DOC_ID_COLUMN, SCORE_COLUMN, SCORE_PROVENANCE_COLUMN,
+    DOC_ID_COLUMN, SCORE_COLUMN, SCORE_PROVENANCE_COLUMN, TABLE_OID_COLUMN,
 };
 
 pub(in crate::sql) enum ScoredInput {
@@ -49,16 +49,23 @@ pub(super) enum HiddenColumn {
     DocId,
     Score,
     ScoreProvenance,
+    TableOid,
 }
 
 impl HiddenColumn {
-    const ALL: [Self; 3] = [Self::DocId, Self::Score, Self::ScoreProvenance];
+    const ALL: [Self; 4] = [
+        Self::DocId,
+        Self::Score,
+        Self::ScoreProvenance,
+        Self::TableOid,
+    ];
 
     fn bit(self) -> u8 {
         match self {
             Self::DocId => 1,
             Self::Score => 2,
             Self::ScoreProvenance => 4,
+            Self::TableOid => 8,
         }
     }
 
@@ -67,6 +74,7 @@ impl HiddenColumn {
             Self::DocId => DOC_ID_COLUMN,
             Self::Score => SCORE_COLUMN,
             Self::ScoreProvenance => SCORE_PROVENANCE_COLUMN,
+            Self::TableOid => TABLE_OID_COLUMN,
         }
     }
 }
@@ -103,6 +111,7 @@ pub(super) struct ScoredRowMetadata {
     doc_id: DocId,
     score: f64,
     score_origin: ScoreOrigin,
+    table_oid: Option<i64>,
     columns: HiddenColumns,
 }
 
@@ -130,6 +139,12 @@ impl ScoredRowMetadata {
             })
     }
 
+    pub(super) fn table_oid(self) -> Option<Value> {
+        self.columns
+            .contains(HiddenColumn::TableOid)
+            .then(|| self.table_oid.map_or(Value::Null, Value::Int))
+    }
+
     pub(super) fn insert_into(self, row: &mut ResultRow) -> Result<(), SQLError> {
         if let Some(value) = self.doc_id()? {
             row.insert(DOC_ID_COLUMN.into(), value);
@@ -139,6 +154,9 @@ impl ScoredRowMetadata {
         }
         if let Some(value) = self.score_provenance() {
             row.insert(SCORE_PROVENANCE_COLUMN.into(), value);
+        }
+        if let Some(value) = self.table_oid() {
+            row.insert(TABLE_OID_COLUMN.into(), value);
         }
         Ok(())
     }
@@ -188,6 +206,7 @@ pub(in crate::sql) struct ScoredDocumentSource {
     predicate: Option<uqa_execution::ProjectedPredicate>,
     score_origin: ScoreOrigin,
     hidden_columns: HiddenColumns,
+    table_oid: Option<i64>,
     ordering: Vec<uqa_execution::PhysicalOrder>,
     input_guarantees_presence: bool,
     lock_origin: Option<(Arc<str>, Arc<str>)>,
@@ -271,7 +290,7 @@ impl ScoredDocumentSource {
             .filter(|column| {
                 !matches!(
                     column.as_str(),
-                    DOC_ID_COLUMN | SCORE_COLUMN | SCORE_PROVENANCE_COLUMN
+                    DOC_ID_COLUMN | SCORE_COLUMN | SCORE_PROVENANCE_COLUMN | TABLE_OID_COLUMN
                 )
             })
             .cloned()
@@ -291,6 +310,7 @@ impl ScoredDocumentSource {
                         DOC_ID_COLUMN => Some(uqa_sql::ast::ColumnType::BigInteger),
                         SCORE_COLUMN => Some(uqa_sql::ast::ColumnType::DoublePrecision),
                         SCORE_PROVENANCE_COLUMN => Some(uqa_sql::ast::ColumnType::Text),
+                        TABLE_OID_COLUMN => Some(uqa_sql::ast::ColumnType::Oid),
                         _ => None,
                     })
             })
@@ -307,6 +327,7 @@ impl ScoredDocumentSource {
             predicate,
             score_origin,
             hidden_columns,
+            table_oid: None,
             ordering,
             input_guarantees_presence,
             lock_origin: None,
@@ -317,6 +338,11 @@ impl ScoredDocumentSource {
 
     pub(in crate::sql) fn with_lock_origin(mut self, origin: Option<(Arc<str>, Arc<str>)>) -> Self {
         self.lock_origin = origin;
+        self
+    }
+
+    pub(in crate::sql) fn with_table_oid(mut self, table_oid: i64) -> Self {
+        self.table_oid = Some(table_oid);
         self
     }
 
@@ -381,6 +407,7 @@ impl ScoredDocumentSource {
             doc_id,
             score,
             score_origin: self.score_origin,
+            table_oid: self.table_oid,
             columns: self.hidden_columns,
         }
     }

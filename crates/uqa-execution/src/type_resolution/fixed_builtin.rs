@@ -518,6 +518,19 @@ fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
             ),
         ],
         "casefold" => vec![overload(&local, &[ColumnType::Text], ColumnType::Text)],
+        "pg_get_expr" => vec![
+            overload(
+                &local,
+                &[ColumnType::PgNodeTree, ColumnType::Oid],
+                ColumnType::Text,
+            ),
+            overload(
+                &local,
+                &[ColumnType::PgNodeTree, ColumnType::Oid, ColumnType::Boolean],
+                ColumnType::Text,
+            ),
+        ],
+        "pg_get_partkeydef" => vec![overload(&local, &[ColumnType::Oid], ColumnType::Text)],
         _ => return None,
     };
     Some(overloads)
@@ -554,6 +567,8 @@ fn local_name(name: &str) -> Option<String> {
             | "uuidv4"
             | "uuidv7"
             | "casefold"
+            | "pg_get_expr"
+            | "pg_get_partkeydef"
     )
     .then(|| local.to_string())
 }

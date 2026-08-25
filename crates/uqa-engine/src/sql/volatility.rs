@@ -127,6 +127,8 @@ pub(super) fn function_volatility(
                 | "session_user"
                 | "list_analyzers"
                 | "fts_index_stats"
+                | "pg_get_expr"
+                | "pg_get_partkeydef"
         )
     {
         FunctionVolatility::Stable

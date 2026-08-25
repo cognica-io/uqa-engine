@@ -36,7 +36,7 @@ use super::{
     projection_label_at, BTreeMap, BTreeSet, BinaryOp, ColumnPrune, ColumnType, Engine,
     PhysicalAggregateExecutor, PhysicalWindowExecutor, QualifierFilters, ResultRow, SQLError,
     SQLParam, SQLResult, ScoredEntry, SetOpKind, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
-    SCORE_COLUMN, SCORE_PROVENANCE_COLUMN,
+    SCORE_COLUMN, SCORE_PROVENANCE_COLUMN, TABLE_OID_COLUMN,
 };
 
 mod cte_execution;

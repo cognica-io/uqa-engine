@@ -34,7 +34,7 @@ use super::{
     run_age_create_graph_with_evaluator, run_age_create_vlabel_with_evaluator,
     run_age_drop_graph_with_evaluator, run_age_drop_label_with_evaluator,
     run_age_graph_exists_with_evaluator, run_graph_create_with_evaluator,
-    run_graph_drop_with_evaluator, MERGE_ACTION_COLUMN, SCORE_PROVENANCE_COLUMN,
+    run_graph_drop_with_evaluator, MERGE_ACTION_COLUMN, SCORE_PROVENANCE_COLUMN, TABLE_OID_COLUMN,
 };
 
 pub(super) type ColumnPrune = BTreeMap<String, BTreeSet<String>>;

@@ -13,8 +13,7 @@ use super::Expr;
 /// Metadata shared by ordinary inheritance and declarative partitioning.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TableHierarchy {
-    /// Direct parents in declaration order. Names are parse-time identities in
-    /// the statement AST and canonical catalog identities after registration.
+    /// Direct parents in declaration order. Names are parse-time identities in the statement AST and canonical catalog identities after registration.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parents: Vec<String>,
     /// Partition key owned by a partitioned relation.
@@ -23,6 +22,9 @@ pub struct TableHierarchy {
     /// Bound owned by a child declared with `PARTITION OF`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub partition_bound: Option<PartitionBound>,
+    /// Columns declared by this relation before inherited columns were merged into its stored row type. `PostgreSQL` exposes this provenance through `pg_attribute.attislocal`; keeping it in durable hierarchy metadata distinguishes an explicitly redeclared inherited column from a purely inherited one after reopen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub local_columns: Vec<String>,
 }
 
 impl TableHierarchy {

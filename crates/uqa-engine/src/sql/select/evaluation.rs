@@ -14,7 +14,7 @@ use super::{
     PhysicalOuterRow, PhysicalSubqueryRunner, QueryOutputMode, QueryPlan, QueryRows, RecheckDoc,
     RecheckSourceRow, ResolvedRowLock, RowLockRecheckPins, SQLError, SQLParam, ScalarExpr,
     ScalarFrameBound, SharedExpressionEvaluator, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
-    SCORE_COLUMN,
+    SCORE_COLUMN, TABLE_OID_COLUMN,
 };
 use uqa_execution::FunctionTypeResolver;
 use uqa_sql::expr::RowLookup;
@@ -787,8 +787,10 @@ impl ExpressionEvaluator for EngineExpressionEvaluator<'_> {
     }
 
     fn star_column_visible(&self, column: &str) -> bool {
-        !matches!(column, SCORE_COLUMN | DOC_ID_COLUMN | MERGE_ACTION_COLUMN)
-            && !is_score_provenance_column(column)
+        !matches!(
+            column,
+            SCORE_COLUMN | DOC_ID_COLUMN | TABLE_OID_COLUMN | MERGE_ACTION_COLUMN
+        ) && !is_score_provenance_column(column)
     }
 
     fn parameters(&self) -> &[SQLParam] {

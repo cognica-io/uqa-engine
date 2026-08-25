@@ -33,9 +33,7 @@ impl Engine {
         Ok(())
     }
 
-    /// Return the canonical table followed by every descendant in stable
-    /// catalog order. A cycle indicates corrupt durable metadata and is never
-    /// silently truncated.
+    /// Return the canonical table followed by every descendant in stable catalog order. A cycle indicates corrupt durable metadata and is never silently truncated.
     pub(crate) fn hierarchy_scan_tables(
         &self,
         table: &str,
