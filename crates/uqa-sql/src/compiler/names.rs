@@ -80,16 +80,6 @@ pub(crate) fn validate_create_table_envelope(
         .as_ref()
         .ok_or_else(|| SQLError::Internal(format!("{statement} without relation")))?;
     let persistence = relation_persistence(relation, statement)?;
-    if !stmt.inh_relations.is_empty() {
-        return Err(SQLError::Unsupported(format!(
-            "{statement}: INHERITS is not supported"
-        )));
-    }
-    if stmt.partbound.is_some() || stmt.partspec.is_some() {
-        return Err(SQLError::Unsupported(format!(
-            "{statement}: partitioning is not supported"
-        )));
-    }
     if stmt.of_typename.is_some() {
         return Err(SQLError::Unsupported(format!(
             "{statement}: typed tables are not supported"

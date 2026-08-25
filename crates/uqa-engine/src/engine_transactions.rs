@@ -439,7 +439,7 @@ impl Engine {
             match action {
                 uqa_sql::ast::OnCommitAction::PreserveRows => {}
                 uqa_sql::ast::OnCommitAction::DeleteRows => {
-                    self.truncate_locked_table(&name)?;
+                    self.truncate_locked_table(&name, false)?;
                 }
                 uqa_sql::ast::OnCommitAction::Drop => {
                     self.drop_temporary_table_on_commit_inner(&name)

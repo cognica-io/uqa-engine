@@ -27,7 +27,7 @@ pub(super) fn table_lock_origin(
 }
 
 impl EngineTableRowSource {
-    fn next_physical_rows_batch(
+    pub(super) fn next_physical_rows_batch(
         &mut self,
         max_rows: usize,
     ) -> uqa_execution::ExecResult<Vec<uqa_execution::PhysicalRow>> {

@@ -246,6 +246,7 @@ fn collect_visible_qualifiers(from: &FromClause, names: &mut std::collections::B
             name,
             qualifier,
             alias,
+            ..
         } => {
             if let Some(alias) = alias {
                 names.insert(alias.clone());

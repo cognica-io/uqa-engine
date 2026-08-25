@@ -206,6 +206,7 @@ fn reordered_inner_join_source(
                 name,
                 qualifier,
                 alias,
+                ..
             } => {
                 let qualifier = alias.clone().unwrap_or_else(|| qualifier.clone());
                 relation_tables.insert(qualifier.clone(), name.clone());

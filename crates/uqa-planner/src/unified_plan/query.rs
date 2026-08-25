@@ -354,10 +354,12 @@ impl SourcePlan {
                 name,
                 qualifier,
                 alias,
+                include_descendants,
             } => Self::Table {
                 name,
                 qualifier,
                 alias,
+                include_descendants,
             },
             FromClause::Join {
                 left,
@@ -490,6 +492,7 @@ impl SourcePlan {
                 name,
                 qualifier,
                 alias,
+                ..
             } => output.push((
                 name.clone(),
                 Some(alias.as_ref().unwrap_or(qualifier).clone()),

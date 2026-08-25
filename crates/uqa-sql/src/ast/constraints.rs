@@ -8,7 +8,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{ColumnType, Expr, GeneratedColumn, OnCommitAction, RelationPersistence};
+use super::{
+    ColumnType, Expr, GeneratedColumn, OnCommitAction, RelationPersistence, TableHierarchy,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
@@ -124,6 +126,11 @@ pub struct CreateTable {
     /// Transaction-end behavior for temporary tables.
     #[serde(default)]
     pub on_commit: OnCommitAction,
+    /// Direct inheritance and declarative-partitioning metadata. The engine
+    /// resolves parent names and merges their row types atomically at create
+    /// time, then persists the canonical hierarchy with the table schema.
+    #[serde(default)]
+    pub hierarchy: TableHierarchy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,6 +172,9 @@ pub struct TableConstraintSet {
     /// Permanent and unlogged tables always use the default. Temporary tables are session-local and therefore never write this field to disk.
     #[serde(default)]
     pub on_commit: OnCommitAction,
+    /// Durable relation hierarchy and partition-bound metadata.
+    #[serde(default)]
+    pub hierarchy: TableHierarchy,
 }
 
 /// `CHECK (expr)` constraint with an optional name (`CONSTRAINT <name>

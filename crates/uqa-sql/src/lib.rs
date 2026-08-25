@@ -32,6 +32,7 @@
 pub mod ast;
 mod async_sql_engine;
 pub mod compiler;
+pub mod copy;
 pub mod error;
 pub mod expr;
 pub mod fts_query;

@@ -22,8 +22,8 @@ use crate::{Engine, SQLTableFunctionResult, SQLTableFunctionStream};
 use super::scalar::{PhysicalSubqueryRunner, PlanSubqueryArena};
 use super::select::{
     execute_query_plan_output, physical_work_mem_bytes, push_output_filter_into_query_plan,
-    CteScope, EngineExpressionEvaluator, QueryOutput, QueryOutputMode, QueryRows, ScopedEngineHook,
-    ScoredDocumentSource, ScoredInput,
+    CteScope, EngineExpressionEvaluator, HierarchyScoredDocumentSource, QueryOutput,
+    QueryOutputMode, QueryRows, ScopedEngineHook, ScoredDocumentSource, ScoredInput,
 };
 use super::volatility::query_contains_volatile_function;
 use super::{

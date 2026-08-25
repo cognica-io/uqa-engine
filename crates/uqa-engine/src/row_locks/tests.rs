@@ -465,6 +465,59 @@ fn conflicting_change_targets_follow_primary_key_rewrites() {
 }
 
 #[test]
+fn physical_change_targets_follow_rewrites_across_relations() {
+    let manager = Arc::new(RowLockManager::new());
+    let writer = manager.allocate_session();
+    let _observation = manager.begin_change_observation();
+    let baseline = RowChangeBaseline {
+        epoch: manager.current_change_epoch(),
+        cross_sequence: 0,
+    };
+    let source = RowLockKey {
+        table: manager.table_key("public.items_low"),
+        doc_id: 1,
+    };
+    let destination = RowLockKey {
+        table: manager.table_key("public.items_high"),
+        doc_id: 9,
+    };
+    manager
+        .publish_row_changes(
+            writer,
+            [
+                PendingRowChange {
+                    key: source,
+                    kind: PendingRowChangeKind::Delete,
+                },
+                PendingRowChange {
+                    key: destination,
+                    kind: PendingRowChangeKind::Insert,
+                },
+                PendingRowChange {
+                    key: source,
+                    kind: PendingRowChangeKind::Rewrite(destination),
+                },
+            ],
+        )
+        .unwrap();
+    assert_eq!(
+        manager
+            .physical_row_successor_after("public.items_low", 1, baseline)
+            .unwrap(),
+        PhysicalRowChangeTarget::Present {
+            table_hash: RowLockManager::stable_table_hash("public.items_high"),
+            doc_id: 9,
+        }
+    );
+    assert_eq!(
+        manager
+            .row_successor_after("public.items_low", 1, baseline)
+            .unwrap(),
+        RowChangeTarget::Deleted
+    );
+}
+
+#[test]
 fn delete_then_reinsert_of_the_same_key_terminates_the_old_generation() {
     let manager = Arc::new(RowLockManager::new());
     let writer = manager.allocate_session();

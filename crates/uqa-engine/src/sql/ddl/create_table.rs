@@ -7,7 +7,10 @@
 //! CREATE TABLE execution.
 
 use super::defaults::validate_default_expression;
-use super::{ddl_storage_error, ColumnType, CreateTable, Engine, SQLError, SQLResult};
+use super::{
+    ddl_storage_error, prepare_create_table_hierarchy, ColumnType, CreateTable, Engine, SQLError,
+    SQLResult,
+};
 use crate::sql::generated::prepare_generated_columns;
 
 use super::constraint_validation::{resolve_foreign_key_parent, validate_foreign_key_definition};
@@ -46,6 +49,7 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
             c.name
         )));
     }
+    prepare_create_table_hierarchy(engine, &mut c)?;
     for column in &c.columns {
         if let Some(default) = &column.default {
             validate_default_expression(engine, default)?;
@@ -167,9 +171,13 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
                 checks: c.checks.clone(),
                 foreign_keys: c.foreign_keys.clone(),
                 key_constraints: c.key_constraints.clone(),
+                hierarchy: c.hierarchy.clone(),
             },
         )
         .map_err(|err| ddl_storage_error("CREATE TABLE constraints", err))?;
+    engine
+        .install_table_hierarchy(&c.name, c.hierarchy.clone())
+        .map_err(|err| ddl_storage_error("CREATE TABLE hierarchy", err))?;
     engine
         .try_persist_table_schema(&c.name)
         .map_err(|e| ddl_storage_error("CREATE TABLE", e))?;

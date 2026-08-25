@@ -98,6 +98,7 @@ impl UnifiedPlan {
                 Self::Command(Box::new(CommandPlan::Insert(Box::new(InsertPlan {
                     table: statement.table,
                     target_qualifier: statement.target_qualifier,
+                    include_descendants: statement.include_descendants,
                     columns: statement.columns,
                     ctes,
                     rows,
@@ -129,6 +130,7 @@ impl UnifiedPlan {
                 Self::Command(Box::new(CommandPlan::Update(Box::new(UpdatePlan {
                     table: statement.table,
                     target_qualifier: statement.target_qualifier,
+                    include_descendants: statement.include_descendants,
                     assignments,
                     predicate,
                     ctes,
@@ -157,6 +159,7 @@ impl UnifiedPlan {
                 Self::Command(Box::new(CommandPlan::Delete(Box::new(DeletePlan {
                     table: statement.table,
                     target_qualifier: statement.target_qualifier,
+                    include_descendants: statement.include_descendants,
                     predicate,
                     ctes,
                     source: source.map(Box::new),
@@ -243,9 +246,15 @@ impl UnifiedPlan {
                 body: Box::new(Self::lower_with(*body, aggregates)),
             })),
             Statement::Analyze { table } => Self::Command(Box::new(CommandPlan::Analyze { table })),
-            Statement::Truncate { tables, cascade } => {
-                Self::Command(Box::new(CommandPlan::Truncate { tables, cascade }))
-            }
+            Statement::Truncate {
+                tables,
+                cascade,
+                restart_identity,
+            } => Self::Command(Box::new(CommandPlan::Truncate {
+                tables,
+                cascade,
+                restart_identity,
+            })),
             Statement::Transaction(value) => {
                 Self::Command(Box::new(CommandPlan::Transaction(value)))
             }
@@ -313,6 +322,7 @@ impl UnifiedPlan {
                     target: statement.target,
                     target_qualifier: statement.target_qualifier,
                     target_alias: statement.target_alias,
+                    include_descendants: statement.include_descendants,
                     source: Box::new(source),
                     join_condition,
                     when_clauses,

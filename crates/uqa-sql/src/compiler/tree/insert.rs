@@ -94,6 +94,7 @@ pub(in crate::compiler) fn compile_insert(
     Ok(InsertStmt {
         table,
         target_qualifier,
+        include_descendants: relation.inh,
         columns,
         with,
         rows,

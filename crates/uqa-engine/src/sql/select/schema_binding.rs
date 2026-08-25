@@ -615,6 +615,7 @@ impl SchemaScope {
                 name,
                 qualifier,
                 alias,
+                ..
             } => {
                 let qualifier = alias.as_deref().unwrap_or(qualifier);
                 if let Some(schema) = self.ctes.get(name) {

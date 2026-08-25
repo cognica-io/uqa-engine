@@ -17,6 +17,10 @@ pub enum FromClause {
         /// Relation name visible to SQL column binding before an alias is applied.
         qualifier: String,
         alias: Option<String>,
+        /// Ordinary references include inheritance children; `ONLY table`
+        /// clears this flag.
+        #[serde(default = "default_include_descendants")]
+        include_descendants: bool,
     },
     /// `FROM left <kind> right ON predicate`. `lateral` is true when
     /// the right side is a LATERAL subquery / function -- the engine
@@ -107,6 +111,10 @@ pub enum FromClause {
     },
 }
 
+const fn default_include_descendants() -> bool {
+    true
+}
+
 /// One function inside a [`FromClause::FunctionGroup`].
 ///
 /// A member owns its column definition list because `ROWS FROM` permits a
@@ -142,6 +150,7 @@ impl FromClause {
                 name,
                 qualifier,
                 alias,
+                ..
             } => out.push((
                 name.clone(),
                 Some(alias.as_ref().unwrap_or(qualifier).clone()),

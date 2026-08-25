@@ -28,6 +28,7 @@ pub(super) fn canonical_virtual_relation_reference(reference: &str) -> Option<St
         relation.as_str(),
         "pg_namespace"
             | "pg_class"
+            | "pg_inherits"
             | "pg_attribute"
             | "pg_attrdef"
             | "pg_constraint"

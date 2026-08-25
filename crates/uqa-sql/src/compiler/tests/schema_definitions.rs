@@ -253,3 +253,76 @@ fn create_table_rejects_invalid_key_declarations() {
         assert!(compile(sql).is_err(), "expected invalid DDL to fail: {sql}");
     }
 }
+
+#[test]
+fn hash_partition_ast_preserves_keys_and_validated_bounds() {
+    let Statement::CreateTable(parent) =
+        first("CREATE TABLE hash_parent (id BIGINT, label TEXT) PARTITION BY HASH (id, label)")
+    else {
+        panic!("not CREATE TABLE");
+    };
+    let spec = parent
+        .hierarchy
+        .partition_spec
+        .as_ref()
+        .expect("partition specification");
+    assert_eq!(spec.strategy, crate::ast::PartitionStrategy::Hash);
+    assert!(matches!(
+        spec.keys.as_slice(),
+        [Expr::Column(id), Expr::Column(label)] if id == "id" && label == "label"
+    ));
+
+    let Statement::CreateTable(child) = first(
+        "CREATE TABLE hash_child PARTITION OF hash_parent FOR VALUES WITH (REMAINDER 3, MODULUS 17)",
+    ) else {
+        panic!("not CREATE TABLE");
+    };
+    assert!(matches!(
+        child.hierarchy.partition_bound,
+        Some(crate::ast::PartitionBound::Hash {
+            modulus: 17,
+            remainder: 3,
+        })
+    ));
+}
+
+#[test]
+fn hash_partition_bound_validation_matches_postgresql_error_order() {
+    let zero_modulus =
+        compile("CREATE TABLE child PARTITION OF parent FOR VALUES WITH (MODULUS 0, REMAINDER 0)")
+            .unwrap_err();
+    assert_eq!(zero_modulus.sqlstate(), Some("42P16"));
+    assert_eq!(
+        zero_modulus.to_string(),
+        "modulus for hash partition must be an integer value greater than zero"
+    );
+
+    let large_remainder = compile(
+        "CREATE TABLE child PARTITION OF parent FOR VALUES WITH (MODULUS 17, REMAINDER 17)",
+    )
+    .unwrap_err();
+    assert_eq!(large_remainder.sqlstate(), Some("42P16"));
+    assert_eq!(
+        large_remainder.to_string(),
+        "remainder for hash partition must be less than modulus"
+    );
+}
+
+#[test]
+fn partition_keys_reject_unimplemented_collations_and_operator_classes() {
+    let collation =
+        compile("CREATE TABLE hash_text (value TEXT) PARTITION BY HASH (value COLLATE \"C\")")
+            .unwrap_err();
+    assert_eq!(collation.sqlstate(), Some("0A000"));
+    assert!(collation
+        .to_string()
+        .contains("non-default partition key collations"));
+
+    let opclass =
+        compile("CREATE TABLE hash_integer (value INTEGER) PARTITION BY HASH (value int4_ops)")
+            .unwrap_err();
+    assert_eq!(opclass.sqlstate(), Some("0A000"));
+    assert!(opclass
+        .to_string()
+        .contains("partition key operator classes"));
+}

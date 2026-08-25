@@ -328,6 +328,7 @@ fn source_scope(
             name,
             qualifier,
             alias,
+            ..
         } => {
             let mut qualifiers = BTreeSet::new();
             qualifiers.insert(alias.as_ref().unwrap_or(qualifier).clone());

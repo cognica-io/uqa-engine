@@ -11,10 +11,10 @@ use super::ScopedEngineHook;
 use super::{
     bind_projection_output_schema, build_join_spill_with_ctes,
     build_projection_physical_row_with_ctes, coerce_to_column_type, column_type_name, doc_id_value,
-    validate_vector_dimensions, value_to_tensor, value_to_vector, BTreeMap, BTreeSet, BinaryOp,
-    ColumnType, CteScope, DocId, Document, Engine, ForeignKey, ForeignKeyAction, ForeignKeyMatch,
-    RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN,
-    MERGE_ACTION_COLUMN,
+    partition_insert_target, validate_vector_dimensions, value_to_tensor, value_to_vector,
+    BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope, DocId, Document, Engine, ForeignKey,
+    ForeignKeyAction, ForeignKeyMatch, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult,
+    Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
 };
 use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema, ScalarExpr};
 use uqa_planner::{
@@ -70,9 +70,24 @@ pub(in crate::sql) enum MutationLockTarget {
     Deleted,
 }
 
+pub(in crate::sql) enum PhysicalMutationLockTarget {
+    Present {
+        identity: PhysicalDocumentIdentity,
+        recheck: bool,
+    },
+    Deleted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(in crate::sql) struct PhysicalDocumentIdentity {
+    pub table: String,
+    pub doc_id: DocId,
+}
+
 pub(in crate::sql) struct PreparedDocumentRewrite {
     pub table: String,
     pub doc_id: DocId,
+    pub destination: Option<(String, DocId)>,
     pub old_document: Document,
     pub new_document: Document,
     pub actions: Vec<PreparedDocumentRewrite>,
@@ -113,6 +128,15 @@ pub(in crate::sql) fn encode_prepared_document_rewrite(prepared: PreparedDocumen
     Value::Map(BTreeMap::from([
         ("table".into(), Value::Str(prepared.table)),
         ("doc_id".into(), encode_prepared_doc_id(prepared.doc_id)),
+        (
+            "destination".into(),
+            prepared.destination.map_or(Value::Null, |(table, doc_id)| {
+                Value::Map(BTreeMap::from([
+                    ("table".into(), Value::Str(table)),
+                    ("doc_id".into(), encode_prepared_doc_id(doc_id)),
+                ]))
+            }),
+        ),
         ("old".into(), Value::Map(prepared.old_document)),
         ("new".into(), Value::Map(prepared.new_document)),
         (
@@ -150,6 +174,31 @@ pub(in crate::sql) fn decode_prepared_document_rewrite(
         })?,
         "prepared rewrite spill payload",
     )?;
+    let destination = match fields.remove("destination") {
+        Some(Value::Null) | None => None,
+        Some(Value::Map(mut destination)) => {
+            let table = match destination.remove("table") {
+                Some(Value::Str(table)) => table,
+                _ => {
+                    return Err(SQLError::Internal(
+                        "prepared rewrite destination has no table".into(),
+                    ))
+                }
+            };
+            let doc_id = decode_prepared_doc_id(
+                destination.remove("doc_id").ok_or_else(|| {
+                    SQLError::Internal("prepared rewrite destination has no document id".into())
+                })?,
+                "prepared rewrite destination",
+            )?;
+            Some((table, doc_id))
+        }
+        Some(_) => {
+            return Err(SQLError::Internal(
+                "prepared rewrite destination is not a map".into(),
+            ))
+        }
+    };
     let old_document = match fields.remove("old") {
         Some(Value::Map(document)) => document,
         _ => {
@@ -180,6 +229,7 @@ pub(in crate::sql) fn decode_prepared_document_rewrite(
     Ok(PreparedDocumentRewrite {
         table,
         doc_id,
+        destination,
         old_document,
         new_document,
         actions,
@@ -326,6 +376,59 @@ pub(in crate::sql) fn lock_mutation_target(
         }
         recheck = true;
         current = successor;
+    }
+}
+
+/// Lock a DML candidate and follow a committed update chain across physical relations. Declarative partition movement changes the leaf table as well as the document id, so callers that scan a hierarchy must retain the complete successor identity.
+pub(in crate::sql) fn lock_physical_mutation_target(
+    engine: &Engine,
+    table: &str,
+    display_name: &str,
+    doc_id: DocId,
+    strength: uqa_sql::ast::LockStrength,
+) -> Result<PhysicalMutationLockTarget, SQLError> {
+    let mut current = PhysicalDocumentIdentity {
+        table: table.to_string(),
+        doc_id,
+    };
+    let mut recheck = false;
+    let mut visited = BTreeSet::new();
+    loop {
+        if !visited.insert(current.clone()) {
+            return Err(SQLError::Internal(format!(
+                "physical rewrite chain for `{display_name}` row {table}:{doc_id} contains a cycle at {}:{}",
+                current.table, current.doc_id
+            )));
+        }
+        recheck |= lock_mutation_row(
+            engine,
+            &current.table,
+            display_name,
+            current.doc_id,
+            strength,
+        )?;
+        match engine.committed_physical_row_successor(&current.table, current.doc_id)? {
+            crate::row_locks::PhysicalRowChangeTarget::Unchanged => {
+                return Ok(PhysicalMutationLockTarget::Present {
+                    identity: current,
+                    recheck,
+                });
+            }
+            crate::row_locks::PhysicalRowChangeTarget::Deleted => {
+                return Ok(PhysicalMutationLockTarget::Deleted);
+            }
+            crate::row_locks::PhysicalRowChangeTarget::Present { table_hash, doc_id } => {
+                let table = engine.row_lock_table_for_hash(table_hash)?;
+                if table == current.table && doc_id == current.doc_id {
+                    return Ok(PhysicalMutationLockTarget::Present {
+                        identity: current,
+                        recheck: true,
+                    });
+                }
+                recheck = true;
+                current = PhysicalDocumentIdentity { table, doc_id };
+            }
+        }
     }
 }
 
@@ -547,6 +650,68 @@ fn insert_identity_columns(
     Ok((auto_increment, id_column))
 }
 
+fn prepare_auto_increment_identity(
+    engine: &Engine,
+    table: &str,
+    id_column: &str,
+    auto_id_column: Option<&str>,
+    document: &mut Document,
+    action: &str,
+) -> Result<Option<(DocId, bool)>, SQLError> {
+    let Some(auto_id_column) = auto_id_column else {
+        return Ok(None);
+    };
+    let owner = engine.partition_identity_owner(table)?;
+    engine.lock_relation(&owner, crate::row_locks::RelationLockMode::RowExclusive)?;
+    prepare_insert_identity(
+        engine,
+        &owner,
+        id_column,
+        Some(auto_id_column),
+        document,
+        action,
+    )
+    .map(Some)
+}
+
+fn persist_auto_increment_identity(
+    engine: &Engine,
+    table: &str,
+    auto_id_column: Option<&str>,
+    action: &str,
+) -> Result<(), SQLError> {
+    if auto_id_column.is_none() {
+        return Ok(());
+    }
+    let owner = engine.partition_identity_owner(table)?;
+    engine
+        .persist_next_id(&owner)
+        .map_err(|error| dml_storage_error(action, error))
+}
+
+fn prepare_insert_identity(
+    engine: &Engine,
+    allocation_table: &str,
+    id_column: &str,
+    auto_id_column: Option<&str>,
+    document: &mut Document,
+    action: &str,
+) -> Result<(DocId, bool), SQLError> {
+    let supplied_id = document_supplied_id(document, id_column, auto_id_column == Some(id_column))?;
+    let supplied = supplied_id.is_some();
+    let doc_id = match supplied_id {
+        Some(doc_id) => doc_id,
+        None => engine.allocate_next_id(allocation_table)?,
+    };
+    if auto_id_column == Some(id_column) {
+        document.insert(id_column.to_string(), doc_id_value(doc_id)?);
+    }
+    engine
+        .advance_next_id(allocation_table, doc_id)
+        .map_err(|error| dml_storage_error(action, error))?;
+    Ok((doc_id, supplied))
+}
+
 fn validate_mutation_columns<'a>(
     engine: &Engine,
     table: &str,
@@ -658,6 +823,7 @@ fn eval_mutation_assignment(
 
 const MERGE_PAIR_DOC_ID: &str = "__uqa_merge_pair_doc_id";
 const MERGE_PAIR_KIND: &str = "__uqa_merge_pair_kind";
+const MERGE_PAIR_STORAGE_TABLE: &str = "__uqa_merge_pair_storage_table";
 const MERGE_PAIR_TARGET_DOCUMENT: &str = "__uqa_merge_pair_target_document";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -690,6 +856,7 @@ impl MergePairKind {
 
 struct MergePairing {
     kind: MergePairKind,
+    storage_table: Option<String>,
     doc_id: Option<DocId>,
     target_document: Option<Document>,
     source_row: OwnedPhysicalRow,
@@ -699,22 +866,30 @@ fn merge_pair_schema(source: &RowSchema) -> RowSchema {
     let header = RowSchema::with_types(
         vec![
             MERGE_PAIR_KIND.into(),
+            MERGE_PAIR_STORAGE_TABLE.into(),
             MERGE_PAIR_DOC_ID.into(),
             MERGE_PAIR_TARGET_DOCUMENT.into(),
         ],
-        vec![Some(ColumnType::BigInteger), Some(ColumnType::Text), None],
+        vec![
+            Some(ColumnType::BigInteger),
+            Some(ColumnType::Text),
+            Some(ColumnType::Text),
+            None,
+        ],
     );
     RowSchema::join(&header, source, std::iter::empty())
 }
 
 fn encode_merge_pair(
     kind: MergePairKind,
+    storage_table: Option<&str>,
     doc_id: Option<DocId>,
     target_document: Option<&Document>,
     source_row: &OwnedPhysicalRow,
 ) -> uqa_execution::PhysicalRow {
     let header = PhysicalRow::from_values(vec![
         Value::Int(kind.encode()),
+        storage_table.map_or(Value::Null, |table| Value::Str(table.to_string())),
         doc_id.map_or(Value::Null, |doc_id| Value::Str(doc_id.to_string())),
         target_document.map_or(Value::Null, |document| Value::Map(document.clone())),
     ]);
@@ -726,6 +901,15 @@ fn decode_merge_pair(encoded: OwnedPhysicalRow) -> Result<MergePairing, SQLError
         MergePairKind::decode(encoded.get(MERGE_PAIR_KIND).ok_or_else(|| {
             SQLError::Internal("spilled MERGE pairing lost its match kind".into())
         })?)?;
+    let storage_table = match encoded.get(MERGE_PAIR_STORAGE_TABLE) {
+        Some(Value::Str(table)) => Some(table.clone()),
+        Some(Value::Null) | None => None,
+        Some(value) => {
+            return Err(SQLError::Internal(format!(
+                "invalid spilled MERGE storage table value {value:?}"
+            )))
+        }
+    };
     let doc_id = match encoded.get(MERGE_PAIR_DOC_ID) {
         Some(Value::Null) | None => None,
         Some(Value::Str(doc_id)) => Some(doc_id.parse::<DocId>().map_err(|error| {
@@ -750,13 +934,15 @@ fn decode_merge_pair(encoded: OwnedPhysicalRow) -> Result<MergePairing, SQLError
     };
     match kind {
         MergePairKind::Matched | MergePairKind::NotMatchedBySource
-            if doc_id.is_none() || target_document.is_none() =>
+            if storage_table.is_none() || doc_id.is_none() || target_document.is_none() =>
         {
             return Err(SQLError::Internal(
                 "target-bearing MERGE pairing lost its target row".into(),
             ));
         }
-        MergePairKind::NotMatchedByTarget if doc_id.is_some() || target_document.is_some() => {
+        MergePairKind::NotMatchedByTarget
+            if storage_table.is_some() || doc_id.is_some() || target_document.is_some() =>
+        {
             return Err(SQLError::Internal(
                 "target-missing MERGE pairing unexpectedly retained a target row".into(),
             ));
@@ -765,6 +951,7 @@ fn decode_merge_pair(encoded: OwnedPhysicalRow) -> Result<MergePairing, SQLError
     }
     Ok(MergePairing {
         kind,
+        storage_table,
         doc_id,
         target_document,
         source_row: encoded,

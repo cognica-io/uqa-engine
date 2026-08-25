@@ -143,19 +143,40 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         run_explain(body, verbose, format, analysis.as_ref())
     }
 
-    fn execute_truncate(&self, tables: &[String], cascade: bool) -> Result<SQLResult, SQLError> {
+    fn execute_truncate(
+        &self,
+        tables: &[uqa_sql::ast::TruncateTarget],
+        cascade: bool,
+        restart_identity: bool,
+    ) -> Result<SQLResult, SQLError> {
         let mut targets = std::collections::BTreeSet::new();
         for requested in tables {
             let table = self
                 .engine
-                .try_resolve_table_name(requested)
-                .map_err(|err| SQLError::Internal(format!("resolve table `{requested}`: {err}")))?
+                .try_resolve_table_name(&requested.table)
+                .map_err(|err| {
+                    SQLError::Internal(format!("resolve table `{}`: {err}", requested.table))
+                })?
                 .ok_or_else(|| {
                     SQLError::Unsupported(format!(
-                        "TRUNCATE TABLE: relation `{requested}` does not exist"
+                        "TRUNCATE TABLE: relation `{}` does not exist",
+                        requested.table
                     ))
                 })?;
-            targets.insert(table);
+            let hierarchy = self
+                .engine
+                .try_table_hierarchy(&table)
+                .map_err(|err| SQLError::Internal(format!("read table hierarchy: {err}")))?;
+            if !requested.include_descendants && hierarchy.partition_spec.is_some() {
+                return Err(SQLError::Routine {
+                    sqlstate: "42809".into(),
+                    message: "cannot truncate only a partitioned table".into(),
+                });
+            }
+            targets.extend(
+                self.engine
+                    .hierarchy_scan_tables(&table, requested.include_descendants)?,
+            );
         }
         if cascade {
             let mut pending = targets.iter().cloned().collect::<Vec<_>>();
@@ -226,7 +247,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                     &mut ordered,
                 )?;
             }
-            engine.truncate_tables(&ordered)
+            engine.truncate_tables_with_identity(&ordered, restart_identity)
         };
         if self.engine.transaction_depth() == 0 {
             self.engine.transaction(truncate)?;
@@ -471,7 +492,11 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                     .map_err(|err| SQLError::Internal(format!("ANALYZE failed: {err}")))?;
                 Ok(SQLResult::empty())
             }
-            CommandPlan::Truncate { tables, cascade } => self.execute_truncate(tables, *cascade),
+            CommandPlan::Truncate {
+                tables,
+                cascade,
+                restart_identity,
+            } => self.execute_truncate(tables, *cascade, *restart_identity),
             CommandPlan::Transaction(statement) => {
                 self.engine.run_transaction_statement(statement.clone())?;
                 Ok(SQLResult::empty())

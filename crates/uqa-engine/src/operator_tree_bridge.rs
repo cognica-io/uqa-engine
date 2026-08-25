@@ -905,6 +905,46 @@ fn lower_where_bound(
     }
 }
 
+pub(crate) enum DirectVectorRetrieval {
+    Knn {
+        top_k: usize,
+    },
+    Calibrated {
+        field: String,
+        query_vector: Vec<f32>,
+        top_k: usize,
+        threshold: Option<f64>,
+    },
+}
+
+/// Describe a complete predicate that owns one bounded vector candidate pool.
+/// A hierarchy scan applies that pool and any query-local calibration once
+/// after merging every physical relation.
+pub(crate) fn direct_vector_retrieval(
+    engine: &Engine,
+    expression: &ScalarExpr,
+    params: &[SQLParam],
+) -> Result<Option<DirectVectorRetrieval>, SQLError> {
+    let Some(tree) = lower_where_bound(engine, expression, params)? else {
+        return Ok(None);
+    };
+    Ok(match tree {
+        OperatorTree::KNN { k, .. } => Some(DirectVectorRetrieval::Knn { top_k: k }),
+        OperatorTree::CalibratedVectorMatch {
+            field,
+            query_vector,
+            k,
+            threshold,
+        } => Some(DirectVectorRetrieval::Calibrated {
+            field,
+            query_vector,
+            top_k: k,
+            threshold,
+        }),
+        _ => None,
+    })
+}
+
 /// The "lower -> optimise -> execute" pipeline. `Some(rows)` when the
 /// WHERE expression maps cleanly onto the operator tree; `None` keeps the
 /// predicate in the enclosing relational filter node. Any engine-side failure

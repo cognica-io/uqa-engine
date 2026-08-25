@@ -6,7 +6,10 @@
 
 //! Streaming scored-document input adapters.
 
+mod hierarchy;
 mod materialize;
+
+pub(in crate::sql) use hierarchy::HierarchyScoredDocumentSource;
 
 use super::{
     doc_id_value, Arc, DocId, ExecResult, RecheckDoc, ResultRow, SQLError, ScoredEntry, Value,

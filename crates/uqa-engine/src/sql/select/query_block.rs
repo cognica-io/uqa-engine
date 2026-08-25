@@ -49,6 +49,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         name,
         qualifier,
         alias,
+        include_descendants,
     } = from
     {
         let foreign_table = engine
@@ -74,7 +75,12 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         let is_virtual = name.contains('.') || (local_table.is_none() && foreign_table.is_none());
         let command_overlay =
             ctes.reads_command_overlay() && engine.command_mutation_overlay_active();
-        if alias.is_none() && !is_virtual && !command_overlay {
+        let has_hierarchy_descendants = local_table.is_some()
+            && engine
+                .hierarchy_scan_tables(name, *include_descendants)?
+                .len()
+                > 1;
+        if alias.is_none() && !is_virtual && !command_overlay && !has_hierarchy_descendants {
             return run_single_table_select_output(
                 engine,
                 SingleRelation {
@@ -273,6 +279,7 @@ fn add_all_source_columns_to_prune(engine: &Engine, source: &SourcePlan, prune: 
             name,
             qualifier,
             alias,
+            ..
         } => {
             let qualifier = alias.as_deref().unwrap_or(qualifier);
             match engine.try_table_columns(name) {
