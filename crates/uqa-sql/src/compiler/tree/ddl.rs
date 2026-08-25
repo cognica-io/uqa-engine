@@ -12,7 +12,7 @@ use super::{
     CreateIndex, CreateTable, Expr, NodeEnum, Result, SQLError, TableKeyConstraint,
     TableKeyConstraintKind,
 };
-use crate::ast::{GeneratedColumn, GeneratedColumnKind};
+use crate::ast::{ColumnType, GeneratedColumn, GeneratedColumnKind};
 
 struct TableNotNullConstraint {
     name: Option<String>,
@@ -61,11 +61,6 @@ pub(in crate::compiler) fn compile_create_table(
                     register_constraint_name(&mut named_constraints, &cstr.conname)?;
                     let kind = match cstr.contype() {
                         pg_query::protobuf::ConstrType::ConstrPrimary => {
-                            if cstr.without_overlaps {
-                                return Err(SQLError::Unsupported(
-                                    "PRIMARY KEY ... WITHOUT OVERLAPS is not implemented".into(),
-                                ));
-                            }
                             if primary_key_seen {
                                 return Err(SQLError::TypeMismatch(
                                     "multiple PRIMARY KEY constraints are not allowed".into(),
@@ -75,11 +70,6 @@ pub(in crate::compiler) fn compile_create_table(
                             Some(TableKeyConstraintKind::PrimaryKey)
                         }
                         pg_query::protobuf::ConstrType::ConstrUnique => {
-                            if cstr.without_overlaps {
-                                return Err(SQLError::Unsupported(
-                                    "UNIQUE ... WITHOUT OVERLAPS is not implemented".into(),
-                                ));
-                            }
                             Some(TableKeyConstraintKind::Unique)
                         }
                         _ => None,
@@ -90,6 +80,7 @@ pub(in crate::compiler) fn compile_create_table(
                             kind,
                             columns: vec![col.colname.clone()],
                             nulls_not_distinct: cstr.nulls_not_distinct,
+                            without_overlaps: cstr.without_overlaps,
                         });
                     }
                 }
@@ -118,9 +109,9 @@ pub(in crate::compiler) fn compile_create_table(
                         });
                     }
                     pg_query::protobuf::ConstrType::ConstrForeign => {
-                        if cstr.fk_with_period || cstr.pk_with_period {
-                            return Err(SQLError::Unsupported(
-                                "temporal FOREIGN KEY ... PERIOD constraints are not implemented"
+                        if cstr.fk_with_period != cstr.pk_with_period {
+                            return Err(SQLError::TypeMismatch(
+                                "FOREIGN KEY must use PERIOD on both the referencing and referenced key"
                                     .into(),
                             ));
                         }
@@ -166,16 +157,11 @@ pub(in crate::compiler) fn compile_create_table(
                             validated: cstr.initially_valid && cstr.is_enforced,
                             deferrable: cstr.deferrable,
                             initially_deferred: cstr.initdeferred,
+                            period: cstr.fk_with_period,
                         });
                     }
                     pg_query::protobuf::ConstrType::ConstrPrimary
                     | pg_query::protobuf::ConstrType::ConstrUnique => {
-                        if cstr.without_overlaps {
-                            return Err(SQLError::Unsupported(
-                                "PRIMARY KEY or UNIQUE ... WITHOUT OVERLAPS is not implemented"
-                                    .into(),
-                            ));
-                        }
                         let kind =
                             if cstr.contype() == pg_query::protobuf::ConstrType::ConstrPrimary {
                                 if primary_key_seen {
@@ -194,6 +180,7 @@ pub(in crate::compiler) fn compile_create_table(
                             kind,
                             columns: key_columns,
                             nulls_not_distinct: cstr.nulls_not_distinct,
+                            without_overlaps: cstr.without_overlaps,
                         });
                     }
                     pg_query::protobuf::ConstrType::ConstrNotnull => {
@@ -271,6 +258,65 @@ pub(in crate::compiler) fn compile_create_table(
                     key_constraint_label(constraint.kind)
                 )));
             }
+        }
+        if constraint.without_overlaps {
+            let period_column = constraint
+                .columns
+                .last()
+                .expect("validated non-empty key constraint");
+            let period_type = columns
+                .iter()
+                .find(|column| column.name == *period_column)
+                .map(|column| &column.ty)
+                .ok_or_else(|| SQLError::Internal("WITHOUT OVERLAPS column disappeared".into()))?;
+            if !matches!(
+                period_type,
+                ColumnType::Range(_) | ColumnType::Multirange(_)
+            ) {
+                return Err(SQLError::TypeMismatch(format!(
+                    "column \"{period_column}\" in WITHOUT OVERLAPS is not a range or multirange type"
+                )));
+            }
+            if constraint.columns.len() < 2 {
+                return Err(SQLError::TypeMismatch(
+                    "constraint using WITHOUT OVERLAPS needs at least two columns".into(),
+                ));
+            }
+        }
+    }
+    for foreign_key in &foreign_keys {
+        if !foreign_key.period {
+            continue;
+        }
+        if foreign_key.local_columns.len() < 2 {
+            return Err(SQLError::TypeMismatch(
+                "FOREIGN KEY using PERIOD needs at least two columns".into(),
+            ));
+        }
+        if !matches!(
+            (foreign_key.on_update, foreign_key.on_delete),
+            (
+                crate::ast::ForeignKeyAction::NoAction,
+                crate::ast::ForeignKeyAction::NoAction
+            )
+        ) {
+            return Err(SQLError::Unsupported(
+                "unsupported referential action for foreign key constraint using PERIOD".into(),
+            ));
+        }
+        let period_column = foreign_key
+            .local_columns
+            .last()
+            .and_then(|name| columns.iter().find(|column| column.name == *name))
+            .ok_or_else(|| SQLError::Internal("PERIOD column disappeared".into()))?;
+        if !matches!(
+            period_column.ty,
+            ColumnType::Range(_) | ColumnType::Multirange(_)
+        ) {
+            return Err(SQLError::TypeMismatch(format!(
+                "column \"{}\" in PERIOD is not a range or multirange type",
+                period_column.name
+            )));
         }
     }
     // Keep legacy scalar-key consumers correct while retaining the full typed
@@ -430,8 +476,9 @@ pub(in crate::compiler) fn compile_column_def(
                 }
                 pg_query::protobuf::ConstrType::ConstrForeign => {
                     if cstr.fk_with_period || cstr.pk_with_period {
-                        return Err(SQLError::Unsupported(
-                            "temporal REFERENCES ... PERIOD constraints are not implemented".into(),
+                        return Err(SQLError::TypeMismatch(
+                            "column REFERENCES cannot declare PERIOD; use a table FOREIGN KEY"
+                                .into(),
                         ));
                     }
                     let table =
@@ -455,6 +502,7 @@ pub(in crate::compiler) fn compile_column_def(
                         validated: cstr.initially_valid && cstr.is_enforced,
                         deferrable: cstr.deferrable,
                         initially_deferred: cstr.initdeferred,
+                        period: false,
                     });
                     last_enforceable = Some(EnforceableConstraint::ForeignKey);
                 }

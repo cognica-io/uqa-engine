@@ -189,6 +189,7 @@ pub(super) fn compile_alter_table(
                                 kind,
                                 columns,
                                 nulls_not_distinct: constraint.nulls_not_distinct,
+                                without_overlaps: constraint.without_overlaps,
                             },
                         }
                     }
@@ -207,9 +208,9 @@ pub(super) fn compile_alter_table(
                         }
                     }
                     pg_query::protobuf::ConstrType::ConstrForeign => {
-                        if constraint.fk_with_period || constraint.pk_with_period {
-                            return Err(SQLError::Unsupported(
-                                "temporal FOREIGN KEY ... PERIOD constraints are not implemented"
+                        if constraint.fk_with_period != constraint.pk_with_period {
+                            return Err(SQLError::TypeMismatch(
+                                "FOREIGN KEY must use PERIOD on both the referencing and referenced key"
                                     .into(),
                             ));
                         }
@@ -235,21 +236,37 @@ pub(super) fn compile_alter_table(
                             &on_delete_set_columns,
                             &constraint.fk_del_action,
                         )?;
+                        let foreign_key = ForeignKey {
+                            name,
+                            local_columns,
+                            ref_table,
+                            ref_columns,
+                            on_update: compile_foreign_key_action(&constraint.fk_upd_action)?,
+                            on_delete: compile_foreign_key_action(&constraint.fk_del_action)?,
+                            on_delete_set_columns,
+                            match_type: compile_foreign_key_match(&constraint.fk_matchtype)?,
+                            enforced: constraint.is_enforced,
+                            validated: constraint.initially_valid,
+                            deferrable: constraint.deferrable,
+                            initially_deferred: constraint.initdeferred,
+                            period: constraint.fk_with_period,
+                        };
+                        if foreign_key.period
+                            && (!matches!(
+                                foreign_key.on_update,
+                                crate::ast::ForeignKeyAction::NoAction
+                            ) || !matches!(
+                                foreign_key.on_delete,
+                                crate::ast::ForeignKeyAction::NoAction
+                            ))
+                        {
+                            return Err(SQLError::Unsupported(
+                                "unsupported referential action for foreign key constraint using PERIOD"
+                                    .into(),
+                            ));
+                        }
                         AlterTableAction::AddForeignKeyConstraint {
-                            constraint: ForeignKey {
-                                name,
-                                local_columns,
-                                ref_table,
-                                ref_columns,
-                                on_update: compile_foreign_key_action(&constraint.fk_upd_action)?,
-                                on_delete: compile_foreign_key_action(&constraint.fk_del_action)?,
-                                on_delete_set_columns,
-                                match_type: compile_foreign_key_match(&constraint.fk_matchtype)?,
-                                enforced: constraint.is_enforced,
-                                validated: constraint.initially_valid,
-                                deferrable: constraint.deferrable,
-                                initially_deferred: constraint.initdeferred,
-                            },
+                            constraint: foreign_key,
                         }
                     }
                     pg_query::protobuf::ConstrType::ConstrNotnull => {

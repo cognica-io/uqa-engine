@@ -107,26 +107,37 @@ pub(in crate::sql::ddl) fn validate_foreign_key_definition_with_local_state(
             ));
         }
     }
-    let referenced_column_set = foreign_key
-        .ref_columns
-        .iter()
-        .collect::<std::collections::BTreeSet<_>>();
-    let has_unique_key = referenced_column_set.len() == foreign_key.ref_columns.len()
-        && referenced_keys.iter().any(|key| {
-            key.columns.len() == foreign_key.ref_columns.len()
-                && key
-                    .columns
-                    .iter()
-                    .collect::<std::collections::BTreeSet<_>>()
-                    == referenced_column_set
-        });
-    if !has_unique_key {
-        return Err(constraint_error(
-            "42830",
-            format!(
-                "there is no unique constraint matching given keys for referenced table \"{referenced}\""
-            ),
-        ));
+    if foreign_key.period {
+        super::super::constraint_validation::validate_foreign_key_definition(
+            table,
+            columns,
+            &referenced,
+            &referenced_columns,
+            &referenced_keys,
+            foreign_key,
+        )?;
+    } else {
+        let referenced_column_set = foreign_key
+            .ref_columns
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        let has_unique_key = referenced_column_set.len() == foreign_key.ref_columns.len()
+            && referenced_keys.iter().any(|key| {
+                key.columns.len() == foreign_key.ref_columns.len()
+                    && key
+                        .columns
+                        .iter()
+                        .collect::<std::collections::BTreeSet<_>>()
+                        == referenced_column_set
+            });
+        if !has_unique_key {
+            return Err(constraint_error(
+                "42830",
+                format!(
+                    "there is no unique constraint matching given keys for referenced table \"{referenced}\""
+                ),
+            ));
+        }
     }
     foreign_key.ref_table = referenced;
     Ok(())
@@ -149,6 +160,7 @@ pub(in crate::sql::ddl) fn column_foreign_key(
         validated: reference.validated,
         deferrable: reference.deferrable,
         initially_deferred: reference.initially_deferred,
+        period: reference.period,
     }
 }
 
@@ -167,7 +179,19 @@ pub(super) fn validate_foreign_key_rows(
         else {
             continue;
         };
-        if crate::sql::dml::find_foreign_key_parent(engine, foreign_key, &values)?.is_none() {
+        let parent_exists = if foreign_key.period {
+            crate::sql::dml::period_foreign_key_coverage(
+                engine,
+                foreign_key,
+                &values.values,
+                &[],
+                None,
+            )?
+            .0
+        } else {
+            crate::sql::dml::find_foreign_key_parent(engine, foreign_key, &values)?.is_some()
+        };
+        if !parent_exists {
             return Err(foreign_key_violation(table, name));
         }
     }

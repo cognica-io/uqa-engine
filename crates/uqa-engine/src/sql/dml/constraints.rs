@@ -13,9 +13,11 @@ use super::{
     MutationLockTarget, PreparedDocumentRewrite, SQLError, SQLParam, Value,
 };
 use sha2::{Digest, Sha256};
+use uqa_sql::ast::{RangeSubtype, TableKeyConstraint};
+use uqa_sql::expr::{multirange_from_ranges, parse_multirange, parse_range, CanonicalRange};
 
 pub(in crate::sql) struct ForeignKeyLookup {
-    values: Vec<Value>,
+    pub(in crate::sql) values: Vec<Value>,
     comparison: ForeignKeyComparison,
 }
 
@@ -223,6 +225,26 @@ fn lock_document_foreign_key_dependencies(
                 fk.name.as_deref().unwrap_or("<unnamed>")
             ),
         };
+        if fk.period {
+            let (covered, parent_ids) =
+                period_foreign_key_coverage(engine, &fk, &local_values.values, &[], None)?;
+            if !covered {
+                if allow_missing {
+                    continue;
+                }
+                return Err(violation());
+            }
+            for parent_id in parent_ids {
+                let _target = lock_mutation_target(
+                    engine,
+                    &fk.ref_table,
+                    &fk.ref_table,
+                    parent_id,
+                    uqa_sql::ast::LockStrength::ForKeyShare,
+                )?;
+            }
+            continue;
+        }
         let mut hops = 0usize;
         loop {
             let Some(parent_id) = find_foreign_key_parent(engine, &fk, &local_values)? else {
@@ -276,6 +298,88 @@ fn lock_document_foreign_key_dependencies(
     Ok(())
 }
 
+pub(in crate::sql) fn period_foreign_key_coverage(
+    engine: &Engine,
+    foreign_key: &ForeignKey,
+    local_values: &[Value],
+    excluded_parents: &[DocId],
+    replacement_parent: Option<(DocId, &Document)>,
+) -> Result<(bool, Vec<DocId>), SQLError> {
+    let Some(period_column) = foreign_key.ref_columns.last() else {
+        return Err(SQLError::Internal(
+            "PERIOD foreign key has no referenced period column".into(),
+        ));
+    };
+    let parent_type = engine
+        .column_type(&foreign_key.ref_table, period_column)
+        .map_err(|error| dml_storage_error("PERIOD foreign-key type lookup", error))?
+        .ok_or_else(|| {
+            SQLError::UnknownColumn(format!("{}.{period_column}", foreign_key.ref_table))
+        })?;
+    let Some(child_period) = local_values.last() else {
+        return Err(SQLError::Internal(
+            "PERIOD foreign key has no local period value".into(),
+        ));
+    };
+    let (child_subtype, child_ranges) = period_ranges(child_period, &parent_type)?;
+    if child_ranges.is_empty() {
+        return Ok((false, Vec::new()));
+    }
+    let ordinary_values = &local_values[..local_values.len() - 1];
+    let ordinary_columns = &foreign_key.ref_columns[..foreign_key.ref_columns.len() - 1];
+    let mut parent_ranges = Vec::new();
+    let mut parent_ids = Vec::new();
+    for doc_id in engine.table_doc_ids(&foreign_key.ref_table)? {
+        let replacement = replacement_parent
+            .filter(|(replacement_id, _)| *replacement_id == doc_id)
+            .map(|(_, document)| document);
+        if replacement.is_none() && excluded_parents.contains(&doc_id) {
+            continue;
+        }
+        let owned_parent = if replacement.is_some() {
+            None
+        } else {
+            Some(engine.get_document(&foreign_key.ref_table, doc_id)?)
+        };
+        let parent = match replacement.or_else(|| owned_parent.as_ref().and_then(Option::as_ref)) {
+            Some(parent) => parent,
+            None => {
+                return Err(missing_document_error(
+                    "PERIOD foreign-key parent scan",
+                    &foreign_key.ref_table,
+                    doc_id,
+                ));
+            }
+        };
+        if !ordinary_columns
+            .iter()
+            .zip(ordinary_values)
+            .all(|(column, value)| parent.get(column).cloned().unwrap_or(Value::Null) == *value)
+        {
+            continue;
+        }
+        let parent_period = parent.get(period_column).cloned().unwrap_or(Value::Null);
+        if matches!(parent_period, Value::Null) {
+            continue;
+        }
+        let (parent_subtype, mut ranges) = period_ranges(&parent_period, &parent_type)?;
+        if parent_subtype != child_subtype {
+            return Err(SQLError::TypeMismatch(
+                "PERIOD foreign-key range subtypes do not match".into(),
+            ));
+        }
+        parent_ranges.append(&mut ranges);
+        parent_ids.push(doc_id);
+    }
+    let coverage = multirange_from_ranges(child_subtype, parent_ranges);
+    Ok((
+        child_ranges
+            .iter()
+            .all(|range| coverage.contains_range(range)),
+        parent_ids,
+    ))
+}
+
 pub(crate) fn validate_deferred_foreign_key_rows(
     engine: &Engine,
     rows: &std::collections::BTreeSet<crate::row_locks::RowLockKey>,
@@ -293,6 +397,36 @@ pub(crate) fn validate_deferred_foreign_key_rows(
             .map_err(|error| dml_storage_error("deferred constraint validation", error))?
         {
             if !foreign_key.enforced || !foreign_key.deferrable || !foreign_key.initially_deferred {
+                continue;
+            }
+            if foreign_key.period {
+                for doc_id in &doc_ids {
+                    let Some(document) = engine.get_document(&table, *doc_id)? else {
+                        continue;
+                    };
+                    let Some(lookup) =
+                        foreign_key_lookup_values(engine, &table, &foreign_key, &document)?
+                    else {
+                        continue;
+                    };
+                    if !period_foreign_key_coverage(
+                        engine,
+                        &foreign_key,
+                        &lookup.values,
+                        &[],
+                        None,
+                    )?
+                    .0
+                    {
+                        return Err(SQLError::Routine {
+                            sqlstate: "23503".into(),
+                            message: format!(
+                                "insert or update on table \"{table}\" violates foreign key constraint \"{}\"",
+                                foreign_key.name.as_deref().unwrap_or("<unnamed>")
+                            ),
+                        });
+                    }
+                }
                 continue;
             }
             let comparison = foreign_key_comparison_types(engine, &table, &foreign_key)?;
@@ -350,6 +484,105 @@ pub(in crate::sql) fn key_constraint_values(
     Some(values)
 }
 
+fn period_ranges(
+    value: &Value,
+    column_type: &ColumnType,
+) -> Result<(RangeSubtype, Vec<CanonicalRange>), SQLError> {
+    let (Value::Str(text) | Value::FixedChar(text)) = value else {
+        return Err(SQLError::TypeMismatch(format!(
+            "PERIOD value has incompatible runtime carrier {value:?}"
+        )));
+    };
+    match column_type {
+        ColumnType::Range(subtype) => {
+            let range = parse_range(text, *subtype)?;
+            Ok((
+                *subtype,
+                (!range.is_empty()).then_some(range).into_iter().collect(),
+            ))
+        }
+        ColumnType::Multirange(subtype) => Ok((
+            *subtype,
+            parse_multirange(text, *subtype)?.ranges().to_vec(),
+        )),
+        other => Err(SQLError::TypeMismatch(format!(
+            "PERIOD column must be a range or multirange, got {}",
+            other.sql_name()
+        ))),
+    }
+}
+
+fn period_values_overlap(
+    left: &Value,
+    right: &Value,
+    column_type: &ColumnType,
+) -> Result<bool, SQLError> {
+    let (left_subtype, left) = period_ranges(left, column_type)?;
+    let (right_subtype, right) = period_ranges(right, column_type)?;
+    Ok(left_subtype == right_subtype
+        && left
+            .iter()
+            .any(|left| right.iter().any(|right| left.overlaps(right))))
+}
+
+pub(in crate::sql) fn without_overlaps_conflict(
+    engine: &Engine,
+    table: &str,
+    constraint: &TableKeyConstraint,
+    document: &Document,
+    ignored_doc_id: Option<DocId>,
+) -> Result<bool, SQLError> {
+    let Some(period_column) = constraint.columns.last() else {
+        return Err(SQLError::Internal(
+            "WITHOUT OVERLAPS constraint has no period column".into(),
+        ));
+    };
+    let period_type = engine
+        .column_type(table, period_column)
+        .map_err(|error| dml_storage_error("WITHOUT OVERLAPS type lookup", error))?
+        .ok_or_else(|| SQLError::UnknownColumn(format!("{table}.{period_column}")))?;
+    let candidate_period = document.get(period_column).cloned().unwrap_or(Value::Null);
+    if matches!(candidate_period, Value::Null) {
+        return Ok(false);
+    }
+    let (_, candidate_ranges) = period_ranges(&candidate_period, &period_type)?;
+    if candidate_ranges.is_empty() {
+        return Err(SQLError::Routine {
+            sqlstate: "23514".into(),
+            message: format!(
+                "empty WITHOUT OVERLAPS value found in column \"{period_column}\" in relation \"{table}\""
+            ),
+        });
+    }
+    let ordinary_columns = &constraint.columns[..constraint.columns.len() - 1];
+    for doc_id in engine.table_doc_ids(table)? {
+        if ignored_doc_id == Some(doc_id) {
+            continue;
+        }
+        let Some(existing) = engine.get_document(table, doc_id)? else {
+            return Err(missing_document_error(
+                "WITHOUT OVERLAPS scan",
+                table,
+                doc_id,
+            ));
+        };
+        if !ordinary_columns.iter().all(|column| {
+            existing.get(column).cloned().unwrap_or(Value::Null)
+                == document.get(column).cloned().unwrap_or(Value::Null)
+        }) {
+            continue;
+        }
+        let existing_period = existing.get(period_column).cloned().unwrap_or(Value::Null);
+        if matches!(existing_period, Value::Null) {
+            continue;
+        }
+        if period_values_overlap(&candidate_period, &existing_period, &period_type)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Reserve every UNIQUE / PRIMARY KEY value that a new row can publish, or every such value changed by a rewrite, before the backend writer is held. The reservation is the logical equivalent of `PostgreSQL`'s speculative index-tuple wait: a deferred reader that cannot yet see another writer's uncommitted row waits on the exact key, refreshes its snapshot, and only then decides whether INSERT or ON CONFLICT applies.
 pub(in crate::sql) fn lock_document_key_dependencies(
     engine: &Engine,
@@ -374,7 +607,12 @@ pub(in crate::sql) fn lock_document_key_dependencies(
         }) {
             continue;
         }
-        let key = uqa_execution::canonical_row_key(&values)
+        let lock_values = if constraint.without_overlaps {
+            &values[..values.len().saturating_sub(1)]
+        } else {
+            values.as_slice()
+        };
+        let key = uqa_execution::canonical_row_key(lock_values)
             .map_err(crate::sql::select::physical_exec_error)?;
         let mut digest = Sha256::new();
         digest.update(b"uqa-key-lock-v1");
@@ -384,6 +622,7 @@ pub(in crate::sql) fn lock_document_key_dependencies(
             uqa_sql::ast::TableKeyConstraintKind::Unique => 1,
         }]);
         digest.update([u8::from(constraint.nulls_not_distinct)]);
+        digest.update([u8::from(constraint.without_overlaps)]);
         for column in &constraint.columns {
             update_key_lock_digest(&mut digest, column.as_bytes())?;
         }
@@ -444,6 +683,16 @@ pub(in crate::sql) fn validate_key_constraints(
         let Some(values) = key_constraint_values(&constraint, document) else {
             continue;
         };
+        if constraint.without_overlaps {
+            if !without_overlaps_conflict(engine, table, &constraint, document, ignored_doc_id)? {
+                continue;
+            }
+            let name = constraint.name.as_deref().unwrap_or("<unnamed>");
+            return Err(SQLError::Routine {
+                sqlstate: "23P01".into(),
+                message: format!("conflicting key value violates exclusion constraint \"{name}\""),
+            });
+        }
         let Some(conflict_id) = engine.find_conflict(table, &constraint.columns, &values)? else {
             continue;
         };
@@ -685,6 +934,7 @@ pub(in crate::sql) fn prepare_document_rewrite(
     let actions = prepare_referenced_key_update_actions(
         engine,
         table,
+        doc_id,
         &old_document,
         &new_document,
         params,
@@ -790,6 +1040,7 @@ pub(in crate::sql) fn integer_primary_key_doc_id(
 fn prepare_referenced_key_update_actions(
     engine: &Engine,
     table: &str,
+    parent_doc_id: DocId,
     old_doc: &Document,
     new_doc: &Document,
     params: &[SQLParam],
@@ -813,6 +1064,44 @@ fn prepare_referenced_key_update_actions(
         engine.lock_relation(&ref_table, crate::row_locks::RelationLockMode::RowExclusive)?;
         let comparison = foreign_key_comparison_types(engine, &ref_table, &fk)?;
         let expected = comparison.normalize(old_values.clone())?;
+        if fk.period {
+            let ordinary_len = expected.len().saturating_sub(1);
+            for child_id in engine.table_doc_ids(&ref_table)? {
+                let Some(child_doc) = engine.get_document(&ref_table, child_id)? else {
+                    continue;
+                };
+                let Some(child_lookup) =
+                    foreign_key_lookup_values(engine, &ref_table, &fk, &child_doc)?
+                else {
+                    continue;
+                };
+                if child_lookup.values[..ordinary_len] != expected[..ordinary_len] {
+                    continue;
+                }
+                let (covered, _) = period_foreign_key_coverage(
+                    engine,
+                    &fk,
+                    &child_lookup.values,
+                    &[parent_doc_id],
+                    Some((parent_doc_id, new_doc)),
+                )?;
+                if covered {
+                    continue;
+                }
+                if fk.deferrable && fk.initially_deferred {
+                    engine.defer_foreign_key_row(&ref_table, child_id)?;
+                    continue;
+                }
+                return Err(SQLError::Routine {
+                    sqlstate: "23503".into(),
+                    message: format!(
+                        "update on table \"{table}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                        fk.name.as_deref().unwrap_or("<unnamed>")
+                    ),
+                });
+            }
+            continue;
+        }
         let referencing = referencing_rows(engine, &ref_table, &fk, &comparison, &expected)?;
         for (child_id, _child_doc) in referencing {
             match fk.on_update {

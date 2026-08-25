@@ -21,6 +21,7 @@ mod encoding;
 mod json;
 mod json_strip;
 mod random;
+mod range;
 mod time;
 mod uuid;
 
@@ -38,6 +39,9 @@ use json::{
 pub use json_strip::argument_positions as json_strip_nulls_argument_positions;
 use json_strip::strip_json_nulls_text;
 pub use random::{RANDOM_INT4_FUNCTION, RANDOM_INT8_FUNCTION, RANDOM_NUMERIC_FUNCTION};
+pub use range::{
+    multirange_from_ranges, parse_multirange, parse_range, CanonicalMultirange, CanonicalRange,
+};
 use time::{
     age_between, coerce_temporal, date_trunc_value, extract_from_value, format_pg_number,
     format_temporal, hex_encode, make_timestamp, parse_timestamp, pg_to_chrono_fmt,
@@ -54,6 +58,7 @@ mod scalar_helpers;
 mod scalar_json;
 mod scalar_math;
 mod scalar_postgres;
+mod scalar_range;
 mod scalar_temporal;
 
 use binary::{
@@ -691,7 +696,22 @@ pub const UNDEFINED_FUNCTION_MARKER: &str = "\0uqa.undefined_function:";
 #[must_use]
 pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> Option<bool> {
     let normalized = normalized_function_name(name);
+    if normalized.starts_with("__range_") {
+        return Some(true);
+    }
     match normalized.as_ref() {
+        "int4range" | "int8range" | "numrange" | "daterange" | "tsrange" | "tstzrange"
+            if matches!(argument_count, 2 | 3) =>
+        {
+            Some(false)
+        }
+        "int4multirange" | "int8multirange" | "nummultirange" | "datemultirange"
+        | "tsmultirange" | "tstzmultirange"
+            if argument_count <= 1 =>
+        {
+            Some(true)
+        }
+        "multirange" if argument_count == 1 => Some(true),
         "coalesce" | "greatest" | "least" if argument_count >= 1 => Some(false),
         "nullif" | "concat_op" if argument_count == 2 => Some(false),
         "concat" | "format" | "json_build_array" | "jsonb_build_array" | "json_build_object"

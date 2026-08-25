@@ -9,7 +9,7 @@
 use pg_query::protobuf::Node;
 use pg_query::NodeEnum;
 
-use crate::ast::ColumnType;
+use crate::ast::{ColumnType, RangeSubtype};
 use crate::error::{Result, SQLError};
 
 use super::tree::extract_string;
@@ -192,6 +192,18 @@ pub(super) fn compile_pg_type_name(
         "timestamp" | "datetime" | "timestamp without time zone" => Ok(ColumnType::Timestamp),
         "timestamptz" | "timestamp with time zone" => Ok(ColumnType::TimestampTz),
         "interval" => Ok(ColumnType::Interval),
+        "int4range" => Ok(ColumnType::Range(RangeSubtype::Integer)),
+        "int8range" => Ok(ColumnType::Range(RangeSubtype::BigInteger)),
+        "numrange" => Ok(ColumnType::Range(RangeSubtype::Numeric)),
+        "daterange" => Ok(ColumnType::Range(RangeSubtype::Date)),
+        "tsrange" => Ok(ColumnType::Range(RangeSubtype::Timestamp)),
+        "tstzrange" => Ok(ColumnType::Range(RangeSubtype::TimestampTz)),
+        "int4multirange" => Ok(ColumnType::Multirange(RangeSubtype::Integer)),
+        "int8multirange" => Ok(ColumnType::Multirange(RangeSubtype::BigInteger)),
+        "nummultirange" => Ok(ColumnType::Multirange(RangeSubtype::Numeric)),
+        "datemultirange" => Ok(ColumnType::Multirange(RangeSubtype::Date)),
+        "tsmultirange" => Ok(ColumnType::Multirange(RangeSubtype::Timestamp)),
+        "tstzmultirange" => Ok(ColumnType::Multirange(RangeSubtype::TimestampTz)),
         "json" => Ok(ColumnType::Json),
         "jsonb" => Ok(ColumnType::JsonB),
         "bytea" => Ok(ColumnType::Bytea),

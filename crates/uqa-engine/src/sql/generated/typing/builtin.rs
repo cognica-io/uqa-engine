@@ -34,9 +34,57 @@ pub(super) fn infer_builtin_function(
             common_type(&args[0], &args[1])?;
             finalize_common_type(args[0].clone())
         }
-        "upper" | "lower" | "initcap" => {
+        "upper" | "lower" => {
+            require_arity(name, args, 1, 1)?;
+            match args[0] {
+                GenerationType::Range(subtype) | GenerationType::Multirange(subtype) => {
+                    range_subtype_type(subtype)
+                }
+                _ => {
+                    require_signature(name, args, &[TypeClass::Text])?;
+                    GenerationType::Text
+                }
+            }
+        }
+        "initcap" => {
             require_signature(name, args, &[TypeClass::Text])?;
             GenerationType::Text
+        }
+        "isempty" | "lower_inc" | "upper_inc" | "lower_inf" | "upper_inf" | "range_adjacent" => {
+            require_arity(name, args, 1, if name == "range_adjacent" { 2 } else { 1 })?;
+            if !matches!(
+                args.first(),
+                Some(GenerationType::Range(_) | GenerationType::Multirange(_))
+            ) {
+                return Err(function_type_error(name, &args[0], "range or multirange"));
+            }
+            GenerationType::Boolean
+        }
+        "range_merge" => {
+            require_arity(name, args, 1, 2)?;
+            let subtype = match args.first() {
+                Some(GenerationType::Range(subtype) | GenerationType::Multirange(subtype)) => {
+                    *subtype
+                }
+                _ => return Err(function_type_error(name, &args[0], "range or multirange")),
+            };
+            GenerationType::Range(subtype)
+        }
+        "multirange" => {
+            require_arity(name, args, 1, 1)?;
+            match args.first() {
+                Some(GenerationType::Range(subtype)) => GenerationType::Multirange(*subtype),
+                _ => return Err(function_type_error(name, &args[0], "range")),
+            }
+        }
+        name if range_constructor_subtype(name).is_some() => {
+            let (subtype, multirange) = range_constructor_subtype(name).expect("matched above");
+            if multirange {
+                GenerationType::Multirange(subtype)
+            } else {
+                require_arity(name, args, 2, 3)?;
+                GenerationType::Range(subtype)
+            }
         }
         "trim" | "btrim" | "ltrim" | "rtrim" => {
             require_arity(name, args, 1, 2)?;
@@ -471,16 +519,60 @@ pub(super) fn infer_builtin_function(
     Ok(Some(result))
 }
 
+fn range_subtype_type(subtype: uqa_sql::ast::RangeSubtype) -> GenerationType {
+    match subtype {
+        uqa_sql::ast::RangeSubtype::Integer => GenerationType::Integer,
+        uqa_sql::ast::RangeSubtype::BigInteger => GenerationType::BigInteger,
+        uqa_sql::ast::RangeSubtype::Numeric => GenerationType::Numeric,
+        uqa_sql::ast::RangeSubtype::Date => GenerationType::Date,
+        uqa_sql::ast::RangeSubtype::Timestamp => GenerationType::Timestamp,
+        uqa_sql::ast::RangeSubtype::TimestampTz => GenerationType::TimestampTz,
+    }
+}
+
+fn range_constructor_subtype(name: &str) -> Option<(uqa_sql::ast::RangeSubtype, bool)> {
+    use uqa_sql::ast::RangeSubtype;
+    [
+        RangeSubtype::Integer,
+        RangeSubtype::BigInteger,
+        RangeSubtype::Numeric,
+        RangeSubtype::Date,
+        RangeSubtype::Timestamp,
+        RangeSubtype::TimestampTz,
+    ]
+    .into_iter()
+    .find_map(|subtype| {
+        if name == subtype.range_name() {
+            Some((subtype, false))
+        } else if name == subtype.multirange_name() {
+            Some((subtype, true))
+        } else {
+            None
+        }
+    })
+}
+
 fn require_containment_operands(name: &str, args: &[GenerationType]) -> Result<(), SQLError> {
     require_arity(name, args, 2, 2)?;
     let unknown = |ty: &GenerationType| {
         matches!(ty, GenerationType::Null | GenerationType::UnknownLiteral(_))
     };
-    let supported =
-        |ty: &GenerationType| matches!(ty, GenerationType::Array(_) | GenerationType::JsonB);
+    let supported = |ty: &GenerationType| {
+        matches!(
+            ty,
+            GenerationType::Array(_)
+                | GenerationType::JsonB
+                | GenerationType::Range(_)
+                | GenerationType::Multirange(_)
+        )
+    };
     let compatible = match (&args[0], &args[1]) {
         (GenerationType::JsonB, GenerationType::JsonB) => true,
         (GenerationType::Array(left), GenerationType::Array(right)) => left == right,
+        (GenerationType::Range(left), GenerationType::Range(right))
+        | (GenerationType::Range(left), GenerationType::Multirange(right))
+        | (GenerationType::Multirange(left), GenerationType::Range(right))
+        | (GenerationType::Multirange(left), GenerationType::Multirange(right)) => left == right,
         (left, right) if unknown(left) && supported(right) => true,
         (left, right) if supported(left) && unknown(right) => true,
         _ => false,

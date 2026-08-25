@@ -21,6 +21,7 @@ use super::{
     canonical_routine_type_name, registered_names, value_to_text, ColumnType, Engine, ResultRow,
     SQLColumnDef, SQLError, Value,
 };
+use uqa_sql::ast::RangeSubtype;
 
 pub(super) fn build_pg_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
@@ -483,7 +484,7 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
                 ("conislocal", bool_value(true)),
                 ("coninhcount", int_value(0)),
                 ("connoinherit", bool_value(constraint.state.no_inherit())),
-                ("conperiod", bool_value(false)),
+                ("conperiod", bool_value(constraint.period)),
                 ("conkey", constrained_key),
                 ("confkey", referenced_key),
                 ("conpfeqop", Value::Null),
@@ -648,6 +649,48 @@ pub(super) fn build_pg_type() -> Vec<ResultRow> {
         (ColumnType::AnyArray, "P", false, "p"),
         (ColumnType::Uuid, "U", false, "b"),
         (ColumnType::JsonB, "U", false, "b"),
+        (ColumnType::Range(RangeSubtype::Integer), "R", false, "r"),
+        (ColumnType::Range(RangeSubtype::Numeric), "R", false, "r"),
+        (ColumnType::Range(RangeSubtype::Timestamp), "R", false, "r"),
+        (
+            ColumnType::Range(RangeSubtype::TimestampTz),
+            "R",
+            false,
+            "r",
+        ),
+        (ColumnType::Range(RangeSubtype::Date), "R", false, "r"),
+        (ColumnType::Range(RangeSubtype::BigInteger), "R", false, "r"),
+        (
+            ColumnType::Multirange(RangeSubtype::Integer),
+            "R",
+            false,
+            "m",
+        ),
+        (
+            ColumnType::Multirange(RangeSubtype::Numeric),
+            "R",
+            false,
+            "m",
+        ),
+        (
+            ColumnType::Multirange(RangeSubtype::Timestamp),
+            "R",
+            false,
+            "m",
+        ),
+        (
+            ColumnType::Multirange(RangeSubtype::TimestampTz),
+            "R",
+            false,
+            "m",
+        ),
+        (ColumnType::Multirange(RangeSubtype::Date), "R", false, "m"),
+        (
+            ColumnType::Multirange(RangeSubtype::BigInteger),
+            "R",
+            false,
+            "m",
+        ),
         (ColumnType::Vector(0), "U", false, "b"),
         (ColumnType::Tensor(0), "U", false, "b"),
     ];
@@ -657,7 +700,9 @@ pub(super) fn build_pg_type() -> Vec<ResultRow> {
         .chain(
             catalog_types
                 .iter()
-                .filter(|&(ty, _, _, kind)| *kind == "b" && pg_type_array_oid(ty) != 0)
+                .filter(|&(ty, _, _, kind)| {
+                    matches!(*kind, "b" | "r" | "m") && pg_type_array_oid(ty) != 0
+                })
                 .cloned()
                 .map(|(ty, _, _, _)| (ColumnType::Array(Box::new(ty)), "A", false, "b")),
         )
@@ -881,6 +926,36 @@ pub(super) fn build_pg_type() -> Vec<ResultRow> {
     types
 }
 
+pub(super) fn build_pg_range() -> Vec<ResultRow> {
+    [
+        (RangeSubtype::Integer, 1_978, 3_914, 3_922),
+        (RangeSubtype::Numeric, 3_125, 0, 3_924),
+        (RangeSubtype::Timestamp, 3_128, 0, 3_929),
+        (RangeSubtype::TimestampTz, 3_127, 0, 3_930),
+        (RangeSubtype::Date, 3_122, 3_915, 3_925),
+        (RangeSubtype::BigInteger, 3_124, 3_928, 3_923),
+    ]
+    .into_iter()
+    .map(|(subtype, subtype_opclass, canonical, subtype_diff)| {
+        row([
+            (
+                "rngtypid",
+                int_value(pg_type_oid(&ColumnType::Range(subtype))),
+            ),
+            ("rngsubtype", int_value(pg_type_oid(&subtype.scalar_type()))),
+            (
+                "rngmultitypid",
+                int_value(pg_type_oid(&ColumnType::Multirange(subtype))),
+            ),
+            ("rngcollation", int_value(0)),
+            ("rngsubopc", int_value(subtype_opclass)),
+            ("rngcanonical", int_value(canonical)),
+            ("rngsubdiff", int_value(subtype_diff)),
+        ])
+    })
+    .collect()
+}
+
 struct PgTypeCatalogMetadata<'a> {
     oid: i64,
     name: String,
@@ -982,7 +1057,7 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
                 ("prolang", int_value(routine.language())),
                 ("procost", Value::Float(1.0)),
                 ("prorows", Value::Float(0.0)),
-                ("provariadic", int_value(0)),
+                ("provariadic", int_value(routine.variadic_type())),
                 ("prosupport", str_value("-")),
                 ("prokind", str_value(routine.kind)),
                 ("prosecdef", bool_value(false)),

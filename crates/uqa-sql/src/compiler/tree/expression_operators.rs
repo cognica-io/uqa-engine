@@ -183,6 +183,16 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                         filter: None,
                     });
                 }
+                "-|-" => {
+                    return Ok(Expr::Func {
+                        binding: None,
+                        name: "range_adjacent".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
+                }
                 "~~" => {
                     return Ok(Expr::Func {
                         binding: None,

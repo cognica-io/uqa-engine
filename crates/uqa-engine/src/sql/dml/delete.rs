@@ -9,9 +9,9 @@
 use super::{
     apply_set_action_to_child, apply_validated_prepared_document_rewrite,
     build_join_spill_with_ctes, build_returning_row, dml_join_rows, dml_returning_result,
-    dml_target_row, eval_mutation_expr, foreign_key_comparison_types, lock_mutation_target,
-    prepare_document_rewrite, referencing_rows, referrers_to_for_actions,
-    stage_prepared_document_rewrite, validate_dml_expression_qualifiers,
+    dml_target_row, eval_mutation_expr, foreign_key_comparison_types, foreign_key_lookup_values,
+    lock_mutation_target, period_foreign_key_coverage, prepare_document_rewrite, referencing_rows,
+    referrers_to_for_actions, stage_prepared_document_rewrite, validate_dml_expression_qualifiers,
     validate_returning_alias_relations, BTreeSet, CteScope, DeletePlan, DmlCommandMutationOverlay,
     DmlReturningShape, DocId, Document, Engine, ForeignKey, ForeignKeyAction, MutationLockTarget,
     PreparedDeleteAction, PreparedDocumentDelete, ReturningProjectionRow, ReturningRowImage,
@@ -326,8 +326,11 @@ pub(in crate::sql) fn prepare_document_delete(
     delete_stack.push((table.to_string(), doc_id));
     let actions = prepare_referenced_key_delete_actions(
         engine,
-        table,
-        &target,
+        ReferencedDelete {
+            table,
+            doc_id,
+            document: &target,
+        },
         params,
         root_deletes,
         delete_stack,
@@ -377,21 +380,26 @@ pub(in crate::sql) fn apply_validated_prepared_document_delete(
     engine.delete_document(&prepared.table, prepared.doc_id)
 }
 
+struct ReferencedDelete<'a> {
+    table: &'a str,
+    doc_id: DocId,
+    document: &'a Document,
+}
+
 fn prepare_referenced_key_delete_actions(
     engine: &Engine,
-    table: &str,
-    target: &Document,
+    parent: ReferencedDelete<'_>,
     params: &[SQLParam],
     root_deletes: &BTreeSet<(String, DocId)>,
     delete_stack: &mut Vec<(String, DocId)>,
     rewrite_stack: &mut Vec<(String, DocId)>,
 ) -> Result<Vec<PreparedDeleteAction>, SQLError> {
     let mut actions = Vec::new();
-    for (ref_table, fk) in referrers_to_for_actions(engine, table)? {
+    for (ref_table, fk) in referrers_to_for_actions(engine, parent.table)? {
         let key_values: Vec<Value> = fk
             .ref_columns
             .iter()
-            .map(|c| target.get(c).cloned().unwrap_or(Value::Null))
+            .map(|c| parent.document.get(c).cloned().unwrap_or(Value::Null))
             .collect();
         if key_values.iter().any(|v| matches!(v, Value::Null)) {
             continue;
@@ -399,6 +407,55 @@ fn prepare_referenced_key_delete_actions(
         engine.lock_relation(&ref_table, crate::row_locks::RelationLockMode::RowExclusive)?;
         let comparison = foreign_key_comparison_types(engine, &ref_table, &fk)?;
         let expected = comparison.normalize(key_values.clone())?;
+        if fk.period {
+            let ordinary_len = expected.len().saturating_sub(1);
+            let mut excluded_parents = root_deletes
+                .iter()
+                .filter_map(|(root_table, doc_id)| (root_table == parent.table).then_some(*doc_id))
+                .collect::<BTreeSet<_>>();
+            excluded_parents.insert(parent.doc_id);
+            let excluded_parents = excluded_parents.into_iter().collect::<Vec<_>>();
+            for child_id in engine.table_doc_ids(&ref_table)? {
+                if root_deletes.contains(&(ref_table.clone(), child_id)) {
+                    continue;
+                }
+                let Some(child_doc) = engine.get_document(&ref_table, child_id)? else {
+                    continue;
+                };
+                let Some(child_lookup) =
+                    foreign_key_lookup_values(engine, &ref_table, &fk, &child_doc)?
+                else {
+                    continue;
+                };
+                if child_lookup.values[..ordinary_len] != expected[..ordinary_len] {
+                    continue;
+                }
+                if period_foreign_key_coverage(
+                    engine,
+                    &fk,
+                    &child_lookup.values,
+                    &excluded_parents,
+                    None,
+                )?
+                .0
+                {
+                    continue;
+                }
+                if fk.deferrable && fk.initially_deferred {
+                    engine.defer_foreign_key_row(&ref_table, child_id)?;
+                    continue;
+                }
+                return Err(SQLError::Routine {
+                    sqlstate: "23503".into(),
+                    message: format!(
+                        "delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                        parent.table,
+                        fk.name.as_deref().unwrap_or("<unnamed>")
+                    ),
+                });
+            }
+            continue;
+        }
         let referencing = referencing_rows(engine, &ref_table, &fk, &comparison, &expected)?;
         for (child_id, _child_doc) in referencing {
             if root_deletes.contains(&(ref_table.clone(), child_id)) {
@@ -412,7 +469,8 @@ fn prepare_referenced_key_delete_actions(
                     return Err(SQLError::Routine {
                         sqlstate: "23503".into(),
                         message: format!(
-                            "update or delete on table \"{table}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                            "update or delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                            parent.table,
                             fk.name.as_deref().unwrap_or("<unnamed>")
                         ),
                     });

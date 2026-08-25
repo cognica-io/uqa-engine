@@ -37,6 +37,7 @@ mod operators;
 mod overload_resolution;
 mod qualified_column;
 mod random_range;
+mod range;
 mod reverse;
 mod routine_signature;
 mod string_binary;

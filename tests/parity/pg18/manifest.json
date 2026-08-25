@@ -503,18 +503,18 @@
     {
       "id": "types.declared-identity-casts-and-catalog",
       "postgresql_reference": "PostgreSQL 18.4 pg_cast, pg_type, pg_class, pg_attribute, scalar cast results, errors, and SQLSTATEs",
-      "uqa_test": "cargo test -p uqa-sql expr::casting::tests; cargo test -p uqa-engine --test integration engine_functions::pg18_semantics::; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::",
-      "supported_version": "Implemented scalar width identities, source-sensitive OID/XID/bytea casts, PostgreSQL space-separated int2vector/oidvector text and COPY output, built-in/domain/pseudo/composite pg_type metadata, and information_schema_catalog_name identity",
+      "uqa_test": "cargo test -p uqa-sql expr::casting::tests; cargo test -p uqa-engine --test integration engine_functions::pg18_semantics::; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::; cargo test -p uqa-engine --test integration engine_catalog::sql_type_migration_temporal::; python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal",
+      "supported_version": "Implemented scalar width identities, source-sensitive OID/XID/bytea casts, PostgreSQL space-separated int2vector/oidvector text and COPY output, built-in/domain/pseudo/composite pg_type metadata, information_schema_catalog_name identity, and all six PostgreSQL built-in range/multirange families with declared identity, canonical text I/O, constructors, accessors, overlap, containment, adjacency, range_merge, simple and compatible polymorphic routine substitution, pg_type, pg_range, and pg_proc metadata across storage, generated expressions, foreign tables, reopen, and supported schema rewrites",
       "status": "partial",
-      "open_issue": "The full assignment-cast matrix, pg_proc rows for every type I/O routine, collations, user composites, enums, ranges, multiranges, typmods, domain constraints, binary formats, and the concrete carriers needed to execute anyenum, anyrange, anymultirange, anycompatiblerange, and anycompatiblemultirange substitutions remain."
+      "open_issue": "The full assignment-cast matrix, pg_proc rows for every type I/O routine, collations, user composites, enum carriers and polymorphism, user-defined ranges and their polymorphism, typmods, domain constraints, binary formats, and complete range ordering and arithmetic remain."
     },
     {
       "id": "ddl.alter-type-and-migration",
       "postgresql_reference": "PostgreSQL 18.4 ALTER TABLE ALTER COLUMN TYPE and type conversion behavior",
-      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::alter_column_type_preserves_the_using_expression; cargo test -p uqa-engine --test integration engine_catalog::sql_ddl::alter_column_type_; cargo test -p uqa-engine --lib migration::tests",
-      "supported_version": "Structural USING expressions evaluated per old row, atomic rollback, source-sensitive OID widths, supported migration type identity, and explicit rejection of unknown migration types",
+      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::alter_column_type_preserves_the_using_expression; cargo test -p uqa-engine --test integration engine_catalog::sql_ddl::alter_column_type_; cargo test -p uqa-engine --test integration engine_catalog::sql_type_migration_temporal::alter_column_type_rewrites_atomically_and_preserves_temporal_dependencies; cargo test -p uqa-engine --lib migration::tests; python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal",
+      "supported_version": "Structural USING expressions evaluated per old row, atomic schema-and-data rollback, source-sensitive OID widths, supported migration type identity, explicit rejection of unknown migration types, range-to-paired-multirange rewrites, preserved WITHOUT OVERLAPS dependencies, incompatible PERIOD relationship rejection with SQLSTATE 42804, generated-expression validation, and durable reopen behavior",
       "status": "partial",
-      "open_issue": "The complete PostgreSQL assignment-cast matrix, dependency and collation rewrites, domain checks, and upstream ALTER TYPE regression cases remain."
+      "open_issue": "The complete PostgreSQL assignment-cast matrix, every remaining dependency kind, collation rewrites, domain checks, and upstream ALTER TYPE regression cases remain."
     },
     {
       "id": "catalog.pg-database-locale",
@@ -559,10 +559,10 @@
     {
       "id": "ddl.temporal-constraints",
       "postgresql_reference": "PostgreSQL 18 CREATE TABLE WITHOUT OVERLAPS and PERIOD constraints",
-      "uqa_test": "crates/uqa-engine/tests/sql_ddl_extensions.rs",
-      "supported_version": "PostgreSQL 18",
-      "status": "explicitly_rejected",
-      "open_issue": "Range and multirange carriers, operators, indexes, and temporal constraint enforcement are not implemented."
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_type_migration_temporal::; python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal",
+      "supported_version": "PostgreSQL 18 PRIMARY KEY and UNIQUE WITHOUT OVERLAPS plus PERIOD foreign keys over matching built-in range or multirange identities, including empty and overlap rejection, aggregate adjacent-parent coverage, insert/update/delete enforcement, ALTER TABLE validation and atomic failure, pg_constraint conperiod metadata, and durable reopen behavior",
+      "status": "partial",
+      "open_issue": "Physical GiST and exclusion-index planning, temporal referential actions beyond NO ACTION, deferrable temporal enforcement, dump/restore, and the complete upstream temporal regression matrix remain."
     },
     {
       "id": "graph.age-default-label-drop",

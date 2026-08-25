@@ -11,8 +11,11 @@ use super::{
     rewrite_column_values_to_type, AlterTableAction, AlterTableStmt, BTreeMap, ColumnType,
     Document, Engine, RowUpdateVectors, SQLError, SQLResult, Value,
 };
-use uqa_sql::ast::{GeneratedColumn, GeneratedColumnKind};
+use uqa_sql::ast::{ForeignKey, GeneratedColumn, GeneratedColumnKind};
 
+use super::constraint_validation::{
+    resolve_foreign_key_parent, validate_foreign_key_definition as validate_temporal_foreign_key,
+};
 use super::defaults::validate_default_expression;
 
 mod constraint_drop;
@@ -470,6 +473,13 @@ fn run_alter_table_action(
             let foreign_keys = engine
                 .try_foreign_keys(&stmt.table)
                 .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?;
+            validate_altered_constraint_column_types(
+                engine,
+                &stmt.table,
+                &candidate_columns,
+                &key_constraints,
+                &foreign_keys,
+            )?;
             crate::sql::generated::prepare_generated_columns(
                 engine,
                 &stmt.qualifier,
@@ -528,10 +538,89 @@ fn run_alter_table_action(
                     kind == GeneratedColumnKind::Stored,
                 )?;
             }
+            validate_all_table_rows(engine)?;
             engine
                 .try_persist_table_schema(&stmt.table)
                 .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
         }
+    }
+    Ok(())
+}
+
+fn validate_altered_constraint_column_types(
+    engine: &Engine,
+    table: &str,
+    candidate_columns: &[uqa_sql::ast::ColumnDef],
+    key_constraints: &[uqa_sql::ast::TableKeyConstraint],
+    foreign_keys: &[ForeignKey],
+) -> Result<(), SQLError> {
+    for constraint in key_constraints
+        .iter()
+        .filter(|constraint| constraint.without_overlaps)
+    {
+        let Some(period_column) = constraint.columns.last() else {
+            return Err(SQLError::Internal(
+                "WITHOUT OVERLAPS constraint has no period column".into(),
+            ));
+        };
+        let period_type = candidate_columns
+            .iter()
+            .find(|column| column.name == *period_column)
+            .map(|column| &column.ty)
+            .ok_or_else(|| SQLError::UnknownColumn(format!("{table}.{period_column}")))?;
+        if !matches!(
+            period_type,
+            ColumnType::Range(_) | ColumnType::Multirange(_)
+        ) {
+            return Err(SQLError::Routine {
+                sqlstate: "42804".into(),
+                message: format!(
+                    "column \"{period_column}\" in WITHOUT OVERLAPS is not a range or multirange type"
+                ),
+            });
+        }
+    }
+
+    for foreign_key in foreign_keys.iter().filter(|foreign_key| foreign_key.period) {
+        let (parent_name, parent_columns, parent_keys) =
+            resolve_foreign_key_parent(engine, &foreign_key.ref_table)?;
+        let parent_columns = if parent_name == table {
+            candidate_columns
+        } else {
+            parent_columns.as_slice()
+        };
+        validate_temporal_foreign_key(
+            table,
+            candidate_columns,
+            &parent_name,
+            parent_columns,
+            &parent_keys,
+            foreign_key,
+        )?;
+    }
+
+    for (child_table, foreign_key) in engine
+        .try_referrers_to(table)
+        .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?
+        .into_iter()
+        .filter(|(_, foreign_key)| foreign_key.period)
+    {
+        let child_columns = if child_table == table {
+            candidate_columns.to_vec()
+        } else {
+            engine
+                .try_describe_table(&child_table)
+                .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?
+                .ok_or_else(|| SQLError::UnknownTable(child_table.clone()))?
+        };
+        validate_temporal_foreign_key(
+            &child_table,
+            &child_columns,
+            table,
+            candidate_columns,
+            key_constraints,
+            &foreign_key,
+        )?;
     }
     Ok(())
 }
@@ -1197,6 +1286,34 @@ fn validate_added_key_constraint(
             )));
         }
     }
+    if constraint.without_overlaps {
+        let period_column = constraint.columns.last().ok_or_else(|| {
+            SQLError::TypeMismatch(
+                "constraint using WITHOUT OVERLAPS needs at least two columns".into(),
+            )
+        })?;
+        let period_type = columns
+            .iter()
+            .find(|column| column.name == *period_column)
+            .map(|column| &column.ty)
+            .ok_or_else(|| SQLError::UnknownColumn(format!("{table}.{period_column}")))?;
+        if !matches!(
+            period_type,
+            ColumnType::Range(_) | ColumnType::Multirange(_)
+        ) {
+            return Err(SQLError::Routine {
+                sqlstate: "42804".into(),
+                message: format!(
+                    "column \"{period_column}\" in WITHOUT OVERLAPS is not a range or multirange type"
+                ),
+            });
+        }
+        if constraint.columns.len() < 2 {
+            return Err(SQLError::TypeMismatch(
+                "constraint using WITHOUT OVERLAPS needs at least two columns".into(),
+            ));
+        }
+    }
 
     let existing_keys = engine
         .try_key_constraints(table)
@@ -1251,6 +1368,23 @@ fn validate_added_key_constraint(
             && contains_null
             && !constraint.nulls_not_distinct
         {
+            continue;
+        }
+        if constraint.without_overlaps {
+            if crate::sql::dml::without_overlaps_conflict(
+                engine,
+                table,
+                constraint,
+                &document,
+                Some(doc_id),
+            )? {
+                return Err(SQLError::Routine {
+                    sqlstate: "23P01".into(),
+                    message: format!(
+                        "could not create constraint because relation \"{table}\" contains overlapping key values"
+                    ),
+                });
+            }
             continue;
         }
         if !seen.insert(values) {

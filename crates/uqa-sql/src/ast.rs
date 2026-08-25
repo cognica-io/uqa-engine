@@ -16,12 +16,14 @@ mod cte;
 mod expressions;
 mod from;
 mod locking;
+mod ranges;
 
 pub use constraints::*;
 pub use cte::*;
 pub use expressions::*;
 pub use from::*;
 pub use locking::*;
+pub use ranges::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ColumnType {
@@ -90,6 +92,12 @@ pub enum ColumnType {
     /// 1970-01-01 00:00:00Z.
     TimestampTz,
     Interval,
+    /// One of `PostgreSQL`'s six built-in range identities. Values use a
+    /// canonical textual carrier so bounds remain durable across every
+    /// storage backend while the declared subtype stays in row metadata.
+    Range(RangeSubtype),
+    /// The `PostgreSQL` multirange paired with one built-in range subtype.
+    Multirange(RangeSubtype),
     /// `VECTOR(N)` columns store an `N`-dimensional `f32` embedding.
     Vector(u32),
     /// `TENSOR(N)` columns store an array of `N`-dimensional `f32`
@@ -140,6 +148,18 @@ pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str
         "_regtype" => "regtype",
         "_xid" => "xid",
         "_pg_node_tree" => "pg_node_tree",
+        "_int4range" => "int4range",
+        "_int8range" => "int8range",
+        "_numrange" => "numrange",
+        "_daterange" => "daterange",
+        "_tsrange" => "tsrange",
+        "_tstzrange" => "tstzrange",
+        "_int4multirange" => "int4multirange",
+        "_int8multirange" => "int8multirange",
+        "_nummultirange" => "nummultirange",
+        "_datemultirange" => "datemultirange",
+        "_tsmultirange" => "tsmultirange",
+        "_tstzmultirange" => "tstzmultirange",
         _ => return None,
     })
 }
@@ -271,6 +291,18 @@ impl ColumnType {
             "timestamp" | "datetime" | "timestamp without time zone" => Ok(Self::Timestamp),
             "timestamptz" | "timestamp with time zone" => Ok(Self::TimestampTz),
             "interval" => Ok(Self::Interval),
+            "int4range" => Ok(Self::Range(RangeSubtype::Integer)),
+            "int8range" => Ok(Self::Range(RangeSubtype::BigInteger)),
+            "numrange" => Ok(Self::Range(RangeSubtype::Numeric)),
+            "daterange" => Ok(Self::Range(RangeSubtype::Date)),
+            "tsrange" => Ok(Self::Range(RangeSubtype::Timestamp)),
+            "tstzrange" => Ok(Self::Range(RangeSubtype::TimestampTz)),
+            "int4multirange" => Ok(Self::Multirange(RangeSubtype::Integer)),
+            "int8multirange" => Ok(Self::Multirange(RangeSubtype::BigInteger)),
+            "nummultirange" => Ok(Self::Multirange(RangeSubtype::Numeric)),
+            "datemultirange" => Ok(Self::Multirange(RangeSubtype::Date)),
+            "tsmultirange" => Ok(Self::Multirange(RangeSubtype::Timestamp)),
+            "tstzmultirange" => Ok(Self::Multirange(RangeSubtype::TimestampTz)),
             "vector" => modifier
                 .and_then(|value| value.parse::<u32>().ok())
                 .filter(|dimension| *dimension > 0)
@@ -331,6 +363,8 @@ impl ColumnType {
             Self::Timestamp => "timestamp without time zone".into(),
             Self::TimestampTz => "timestamp with time zone".into(),
             Self::Interval => "interval".into(),
+            Self::Range(subtype) => subtype.range_name().into(),
+            Self::Multirange(subtype) => subtype.multirange_name().into(),
             Self::Vector(dimension) => format!("vector({dimension})"),
             Self::Tensor(dimension) => format!("tensor({dimension})"),
             Self::Domain { schema, name, .. } => format!("{schema}.{name}"),

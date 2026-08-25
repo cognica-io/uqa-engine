@@ -26,6 +26,8 @@ UQA Engine has PostgreSQL-oriented type names mapped to the value carriers imple
 | `JSONB` | Canonical JSON value with JSONB operations |
 | `BYTEA` | Byte string |
 | `type[]`, `ARRAY` | Homogeneous array of a supported element type |
+| `INT4RANGE`, `INT8RANGE`, `NUMRANGE`, `DATERANGE`, `TSRANGE`, `TSTZRANGE` | PostgreSQL built-in range identities with canonical text I/O over their scalar subtype |
+| `INT4MULTIRANGE`, `INT8MULTIRANGE`, `NUMMULTIRANGE`, `DATEMULTIRANGE`, `TSMULTIRANGE`, `TSTZMULTIRANGE` | PostgreSQL built-in multirange identities whose members are normalized, ordered, and merged |
 | `VECTOR(n)` | One finite fixed-dimensional numeric vector |
 | `TENSOR(n)` | A row-level list of finite vectors with fixed element dimension |
 
@@ -74,6 +76,19 @@ FROM events;
 ```
 
 Use `TIMESTAMPTZ` for instants and `TIMESTAMP` for timezone-independent wall-clock values. Store the original zone identifier separately when it is a business value.
+
+## Range and multirange types
+
+The six PostgreSQL built-in range families are implemented as declared SQL identities: `INT4RANGE` / `INT4MULTIRANGE`, `INT8RANGE` / `INT8MULTIRANGE`, `NUMRANGE` / `NUMMULTIRANGE`, `DATERANGE` / `DATEMULTIRANGE`, `TSRANGE` / `TSMULTIRANGE`, and `TSTZRANGE` / `TSTZMULTIRANGE`. Range literals use PostgreSQL bound notation, including unbounded and `empty` values, and multirange literals use braces around comma-separated range members.
+
+```sql execute
+SELECT '[1,4]'::int4range AS canonical_integer_range,
+       '{[1,3),[3,5),[10,12)}'::int4multirange AS normalized_multirange;
+```
+
+Discrete integer and date ranges canonicalize inclusive upper bounds and exclusive lower bounds to PostgreSQL's inclusive-lower, exclusive-upper form when the adjacent subtype value exists. Multiranges discard empty members, order members, and merge overlapping or adjacent members. The declared range or multirange identity survives storage, query planning, generated expressions, schema rewrites, foreign-table boundaries, reopen, and `pg_typeof`; `pg_type` and `pg_range` expose the corresponding PostgreSQL 18 built-in OIDs and subtype relationships.
+
+This implemented surface is limited to PostgreSQL's six built-in range families and text-form values. User-defined range types, binary range I/O, range indexes and exclusion-index planning, and complete comparison ordering remain open compatibility bugs.
 
 ## JSON and JSONB
 
