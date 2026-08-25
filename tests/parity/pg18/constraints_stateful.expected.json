@@ -1,0 +1,490 @@
+{
+  "schema_version": 1,
+  "fixture_sha256": "0ddff5faa27bea1e792f07b8d5c6d3a728fb45cad693cb715e702d8cc7fff3a7",
+  "oracle": {
+    "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
+    "server_version_num": "180004",
+    "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "age_version": "1.8.0"
+  },
+  "cases": [
+    {
+      "name": "create_schema",
+      "kind": "ok"
+    },
+    {
+      "name": "create_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "create_child",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_legacy_invalid_rows",
+      "kind": "ok"
+    },
+    {
+      "name": "add_check_not_valid",
+      "kind": "ok"
+    },
+    {
+      "name": "check_not_valid_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "c",
+          "t",
+          "f",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "check_not_valid_enforces_new_rows",
+      "kind": "error",
+      "sqlstate": "23514"
+    },
+    {
+      "name": "check_validation_failure_is_atomic",
+      "kind": "error",
+      "sqlstate": "23514"
+    },
+    {
+      "name": "check_stays_not_valid_after_failure",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "fix_legacy_check_row",
+      "kind": "ok"
+    },
+    {
+      "name": "validate_check",
+      "kind": "ok"
+    },
+    {
+      "name": "check_valid_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "add_fk_not_valid",
+      "kind": "ok"
+    },
+    {
+      "name": "fk_not_valid_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "f",
+          "f",
+          "f",
+          "t",
+          "f",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "fk_not_valid_enforces_new_rows",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "fk_validation_failure_is_atomic",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "insert_missing_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "validate_fk",
+      "kind": "ok"
+    },
+    {
+      "name": "disable_fk",
+      "kind": "ok"
+    },
+    {
+      "name": "disabled_fk_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "f",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "disabled_fk_allows_invalid_row",
+      "kind": "ok"
+    },
+    {
+      "name": "enabling_invalid_fk_is_atomic",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "fk_stays_disabled_after_failure",
+      "kind": "rows",
+      "rows": [
+        [
+          "f",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "delete_disabled_fk_row",
+      "kind": "ok"
+    },
+    {
+      "name": "enable_fk",
+      "kind": "ok"
+    },
+    {
+      "name": "make_fk_initially_deferred",
+      "kind": "ok"
+    },
+    {
+      "name": "deferred_fk_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "deferred_child_before_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "deferred_missing_parent_fails_commit",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "deferred_commit_failure_rolls_back",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "deferred_parent_delete_reinsert",
+      "kind": "ok"
+    },
+    {
+      "name": "deferred_parent_delete_fails_commit",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "deferred_parent_failure_rolls_back",
+      "kind": "rows",
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "deferred_savepoint_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "restore_immediate_fk",
+      "kind": "ok"
+    },
+    {
+      "name": "invalid_check_deferrability",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "invalid_fk_inheritability",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "invalid_not_valid_transition",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "create_named_not_null_target",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_legacy_null",
+      "kind": "ok"
+    },
+    {
+      "name": "add_named_not_null_not_valid",
+      "kind": "ok"
+    },
+    {
+      "name": "named_not_null_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "n",
+          "t",
+          "f",
+          "f",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "named_not_null_enforces_new_rows",
+      "kind": "error",
+      "sqlstate": "23502"
+    },
+    {
+      "name": "named_not_null_validation_failure",
+      "kind": "error",
+      "sqlstate": "23502"
+    },
+    {
+      "name": "fix_legacy_null",
+      "kind": "ok"
+    },
+    {
+      "name": "validate_named_not_null",
+      "kind": "ok"
+    },
+    {
+      "name": "set_named_not_null_no_inherit",
+      "kind": "ok"
+    },
+    {
+      "name": "named_not_null_valid_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "drop_named_not_null",
+      "kind": "ok"
+    },
+    {
+      "name": "dropped_not_null_attribute",
+      "kind": "rows",
+      "rows": [
+        [
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "create_dependency_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "create_dependency_child",
+      "kind": "ok"
+    },
+    {
+      "name": "drop_referenced_key_restrict",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "drop_referenced_key_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "cascade_keeps_child_and_drops_fk",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "create_atomic_target",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_atomic_bad_row",
+      "kind": "ok"
+    },
+    {
+      "name": "multi_action_validation_is_atomic",
+      "kind": "error",
+      "sqlstate": "23514"
+    },
+    {
+      "name": "failed_multi_action_leaves_no_constraint",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "duplicate_constraint_name_is_atomic",
+      "kind": "error",
+      "sqlstate": "42710"
+    },
+    {
+      "name": "duplicate_failure_leaves_no_constraint",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_inferred_fk_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "create_inferred_fk_child",
+      "kind": "ok"
+    },
+    {
+      "name": "inferred_fk_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "inferred_fk_accepts_compatible_key",
+      "kind": "ok"
+    },
+    {
+      "name": "inferred_fk_rejects_missing_key",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "create_no_key_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "inferred_fk_requires_primary_key",
+      "kind": "error",
+      "sqlstate": "42704"
+    },
+    {
+      "name": "create_composite_key_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "inferred_fk_requires_matching_arity",
+      "kind": "error",
+      "sqlstate": "42830"
+    },
+    {
+      "name": "duplicate_referenced_columns_are_not_a_unique_key",
+      "kind": "error",
+      "sqlstate": "42830"
+    },
+    {
+      "name": "create_incompatible_key_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "inferred_fk_rejects_incompatible_types",
+      "kind": "error",
+      "sqlstate": "42804"
+    },
+    {
+      "name": "failed_fk_creates_leave_no_catalog_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "create_directional_type_targets",
+      "kind": "ok"
+    },
+    {
+      "name": "real_to_numeric_fk_is_incompatible",
+      "kind": "error",
+      "sqlstate": "42804"
+    },
+    {
+      "name": "numeric_to_real_fk_is_compatible",
+      "kind": "ok"
+    },
+    {
+      "name": "create_temporal_cross_type_fks",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_temporal_cross_type_keys",
+      "kind": "ok"
+    },
+    {
+      "name": "temporal_non_midnight_key_is_rejected",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "temporal_delete_set_null",
+      "kind": "ok"
+    },
+    {
+      "name": "temporal_delete_set_null_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "temporal_update_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "temporal_update_cascade_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    }
+  ]
+}

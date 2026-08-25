@@ -343,9 +343,8 @@ fn stored_generated_primary_keys_are_remapped_and_failed_rewrites_roll_back() {
             "ALTER TABLE generated_parent ALTER COLUMN derived SET EXPRESSION AS (source + 20)",
             &[],
         )
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("FOREIGN KEY"), "{error}");
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("23503"), "{error}");
     let parent = engine
         .sql("SELECT derived FROM generated_parent", &[])
         .unwrap();
@@ -401,7 +400,7 @@ fn persistent_generated_expression_rewrites_commit_or_roll_back_as_one_change() 
                 &[],
             )
             .unwrap_err();
-        assert!(error.to_string().contains("FOREIGN KEY"), "{error}");
+        assert_eq!(error.sqlstate(), Some("23503"), "{error}");
     }
     {
         let engine = Engine::open(&database).unwrap();

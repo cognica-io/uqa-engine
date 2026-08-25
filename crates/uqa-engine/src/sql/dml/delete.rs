@@ -9,13 +9,13 @@
 use super::{
     apply_set_action_to_child, apply_validated_prepared_document_rewrite,
     build_join_spill_with_ctes, build_returning_row, dml_join_rows, dml_returning_result,
-    dml_target_row, eval_mutation_expr, lock_mutation_target, prepare_document_rewrite,
-    referencing_rows, referrers_to_for_actions, stage_prepared_document_rewrite,
-    validate_dml_expression_qualifiers, validate_returning_alias_relations, BTreeSet, CteScope,
-    DeletePlan, DmlCommandMutationOverlay, DmlReturningShape, DocId, Document, Engine, ForeignKey,
-    ForeignKeyAction, MutationLockTarget, PreparedDeleteAction, PreparedDocumentDelete,
-    ReturningProjectionRow, ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult,
-    Value,
+    dml_target_row, eval_mutation_expr, foreign_key_comparison_types, lock_mutation_target,
+    prepare_document_rewrite, referencing_rows, referrers_to_for_actions,
+    stage_prepared_document_rewrite, validate_dml_expression_qualifiers,
+    validate_returning_alias_relations, BTreeSet, CteScope, DeletePlan, DmlCommandMutationOverlay,
+    DmlReturningShape, DocId, Document, Engine, ForeignKey, ForeignKeyAction, MutationLockTarget,
+    PreparedDeleteAction, PreparedDocumentDelete, ReturningProjectionRow, ReturningRowImage,
+    ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
 };
 
 pub(in crate::sql) fn run_delete(
@@ -397,18 +397,25 @@ fn prepare_referenced_key_delete_actions(
             continue;
         }
         engine.lock_relation(&ref_table, crate::row_locks::RelationLockMode::RowExclusive)?;
-        let referencing = referencing_rows(engine, &ref_table, &fk.local_columns, &key_values)?;
+        let comparison = foreign_key_comparison_types(engine, &ref_table, &fk)?;
+        let expected = comparison.normalize(key_values.clone())?;
+        let referencing = referencing_rows(engine, &ref_table, &fk, &comparison, &expected)?;
         for (child_id, _child_doc) in referencing {
             if root_deletes.contains(&(ref_table.clone(), child_id)) {
                 continue;
             }
             match fk.on_delete {
+                ForeignKeyAction::NoAction if fk.deferrable && fk.initially_deferred => {
+                    engine.defer_foreign_key_row(&ref_table, child_id)?;
+                }
                 ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "FOREIGN KEY constraint violated: DELETE on `{table}` is referenced by `{ref_table}` ({} -> {})",
-                        fk.local_columns.join(", "),
-                        fk.ref_columns.join(", "),
-                    )));
+                    return Err(SQLError::Routine {
+                        sqlstate: "23503".into(),
+                        message: format!(
+                            "update or delete on table \"{table}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                            fk.name.as_deref().unwrap_or("<unnamed>")
+                        ),
+                    });
                 }
                 ForeignKeyAction::Cascade => {
                     if let Some(prepared) = prepare_document_delete(
@@ -430,8 +437,9 @@ fn prepare_referenced_key_delete_actions(
                         &ref_table,
                         child_id,
                         &columns,
-                        &fk.local_columns,
-                        &key_values,
+                        &fk,
+                        &comparison,
+                        &expected,
                     )?
                     else {
                         continue;

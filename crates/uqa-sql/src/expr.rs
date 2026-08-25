@@ -111,6 +111,11 @@ pub trait EngineHook {
         Ok(None)
     }
 
+    /// Resolve a relation name to the OID carrier used by `regclass`.
+    fn resolve_regclass(&self, _name: &str) -> std::result::Result<Option<i64>, String> {
+        Ok(None)
+    }
+
     /// Resolve the first existing schema on the logical session's search
     /// path. `None` lets standalone expression evaluation use its `public`
     /// compatibility default.
@@ -190,6 +195,18 @@ pub fn cast_value_with_type_resolution(
         || Cow::Borrowed(target_ty),
         |ty| Cow::Owned(coercion_type_name(ty)),
     );
+    if target_ty.eq_ignore_ascii_case("regclass") {
+        if let (Some(engine), Value::Str(name) | Value::FixedChar(name)) = (engine, value) {
+            return engine
+                .resolve_regclass(name)
+                .map_err(SQLError::Internal)?
+                .map(Value::Int)
+                .ok_or_else(|| SQLError::Routine {
+                    sqlstate: "42P01".into(),
+                    message: format!("relation \"{name}\" does not exist"),
+                });
+        }
+    }
     cast_value_from(value, &target_ty, source_ty)
 }
 
@@ -755,6 +772,7 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         | TO_OCT_INT8_FUNCTION
         | "to_json"
         | "to_jsonb"
+        | "to_regclass"
         | "to_timestamp"
         | "upper"
         | "uuid_extract_timestamp"
@@ -962,6 +980,32 @@ fn eval_function_call_inner(
         return ArrayValue::try_new(schemas.into_iter().map(Value::Str).collect())
             .map(Value::Array)
             .ok_or_else(|| SQLError::TypeMismatch("invalid current_schemas result".into()));
+    }
+    if lower == "to_regclass" {
+        let [value] = evaluated.as_slice() else {
+            return Err(SQLError::BadArity {
+                name: "to_regclass".into(),
+                expected: "1".into(),
+                actual: evaluated.len(),
+            });
+        };
+        let name = match value {
+            Value::Null => return Ok(Value::Null),
+            Value::Str(name) | Value::FixedChar(name) => name,
+            value => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "to_regclass requires text, got {}",
+                    value_type_name(value)
+                )));
+            }
+        };
+        let oid = ctx
+            .engine
+            .map(|engine| engine.resolve_regclass(name))
+            .transpose()
+            .map_err(SQLError::Internal)?
+            .flatten();
+        return Ok(oid.map_or(Value::Null, Value::Int));
     }
 
     // Functions registered in the operator registry (text_match,

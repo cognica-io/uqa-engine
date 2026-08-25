@@ -308,7 +308,7 @@ fn composite_primary_key_is_unique_and_every_member_is_not_null() {
         "INSERT INTO ledger (tenant, entry, value) VALUES ('a', NULL, 'bad')",
     ] {
         let error = eng.sql(sql, &[]).unwrap_err();
-        assert!(error.to_string().to_ascii_lowercase().contains("not null"));
+        assert_eq!(error.sqlstate(), Some("23502"), "{sql}: {error}");
     }
 }
 
