@@ -21,6 +21,7 @@ impl Engine {
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
         self.restore_sequences_from_catalog(catalog)?;
+        self.restore_roles_from_metadata(catalog)?;
         self.restore_sql_functions_from_metadata(catalog)?;
         self.restore_analyzers_from_catalog(catalog)?;
         self.restore_foreign_registries_from_catalog(catalog)?;

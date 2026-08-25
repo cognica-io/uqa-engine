@@ -295,6 +295,15 @@ impl UnifiedPlan {
             Statement::AlterRoutine(value) => {
                 Self::Command(Box::new(CommandPlan::AlterRoutine(value)))
             }
+            Statement::AlterRoutineOwner(value) => {
+                Self::Command(Box::new(CommandPlan::AlterRoutineOwner(value)))
+            }
+            Statement::GrantRoutine(value) => {
+                Self::Command(Box::new(CommandPlan::GrantRoutine(value)))
+            }
+            Statement::CreateRole(value) => Self::Command(Box::new(CommandPlan::CreateRole(value))),
+            Statement::AlterRole(value) => Self::Command(Box::new(CommandPlan::AlterRole(value))),
+            Statement::DropRole(value) => Self::Command(Box::new(CommandPlan::DropRole(value))),
             Statement::DoBlock { language, body } => {
                 Self::Command(Box::new(CommandPlan::DoBlock { language, body }))
             }
@@ -362,6 +371,11 @@ impl CommandPlan {
             Self::CreateFunction(_) => "CreateFunction",
             Self::DropFunction(_) => "DropFunction",
             Self::AlterRoutine(_) => "AlterRoutine",
+            Self::AlterRoutineOwner(_) => "AlterRoutineOwner",
+            Self::GrantRoutine(_) => "GrantRoutine",
+            Self::CreateRole(_) => "CreateRole",
+            Self::AlterRole(_) => "AlterRole",
+            Self::DropRole(_) => "DropRole",
             Self::DoBlock { .. } => "DoBlock",
             Self::Call { .. } => "Call",
         }

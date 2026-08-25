@@ -87,6 +87,7 @@ mod engine_graphs;
 mod engine_models;
 mod engine_open;
 mod engine_relations;
+mod engine_roles;
 mod engine_search;
 mod engine_sequences;
 mod engine_session;
@@ -149,6 +150,7 @@ const SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
 /// (`graph_label_registry::<graph>` -> JSON `GraphLabelRegistry`).
 const GRAPH_LABELS_METADATA_PREFIX: &str = "graph_label_registry::";
 const FUNCTIONS_METADATA_KEY: &str = "sql_functions_json";
+const ROLES_METADATA_KEY: &str = "sql_roles_json";
 const SQL_STATEMENT_CACHE_LIMIT: usize = 256;
 /// Default nesting cap for user-defined function calls. Exceeding it
 /// raises `stack depth limit exceeded`, mirroring the `PostgreSQL`
@@ -406,6 +408,16 @@ struct SessionStateSnapshot {
     sequence_currvals: BTreeMap<RelationIdentity, i64>,
     prepared: BTreeMap<String, PreparedStatementPlan>,
     sql_statement_cache: SQLStatementCache,
+    /// Names of portals that existed at this transaction or savepoint boundary. Rollback removes portals created later without rewinding cursor positions or resurrecting closed portals.
+    portal_names: BTreeSet<String>,
+    current_user: String,
+    session_user: String,
+}
+
+#[derive(Debug, Clone)]
+struct SessionPortalState {
+    result: SQLResult,
+    position: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -717,6 +729,12 @@ impl uqa_sql::expr::EngineHook for Engine {
     fn current_schema(&self) -> std::result::Result<Option<String>, String> {
         self.current_schema_name()
             .map_err(|error| error.to_string())
+    }
+    fn current_user(&self) -> std::result::Result<Option<String>, String> {
+        Ok(Some(self.current_user_name()))
+    }
+    fn session_user(&self) -> std::result::Result<Option<String>, String> {
+        Ok(Some(self.session_user_name()))
     }
     fn current_schemas(
         &self,

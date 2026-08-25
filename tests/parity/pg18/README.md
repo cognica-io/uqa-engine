@@ -67,3 +67,7 @@ python3 tests/parity/pg18/run_routines_stateful.py --backend postgres --update-e
 ```
 
 Every fixture case starts with `-- @case <name> <ok|rows|error>` and ends with `-- @end`; this explicit framing allows routine bodies to contain semicolons without making the runner guess SQL statement boundaries. The runner replaces `__UQA_STATEFUL_SCHEMA__` with an isolated generated schema name and rejects an expected transcript whose fixture SHA-256 or ordered case modes are stale.
+
+## Routine security and cursor oracle
+
+[`routine_security_cursor_oracle.md`](routine_security_cursor_oracle.md) records the PostgreSQL 18.4 with Apache AGE owner, EXECUTE ACL, `SECURITY DEFINER`, dynamic `current_user` versus stable `session_user`, routine configuration, planner-support metadata, `refcursor` type identity, and cross-call session-portal results used by the focused compiler and engine tests.

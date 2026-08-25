@@ -72,6 +72,7 @@ pub(super) struct DurableCatalogState {
     pub(super) foreign_tables: RwLock<BTreeMap<RelationIdentity, uqa_fdw::ForeignTable>>,
     pub(super) sql_user_functions:
         RwLock<BTreeMap<String, Vec<Arc<super::engine_user_functions::SQLUserFunction>>>>,
+    pub(super) roles: RwLock<BTreeMap<String, super::engine_roles::RoleDefinition>>,
 }
 
 #[derive(Clone)]
@@ -89,6 +90,7 @@ pub(super) struct DurableCatalogSnapshot {
     foreign_servers: BTreeMap<String, uqa_fdw::ForeignServer>,
     foreign_tables: BTreeMap<RelationIdentity, uqa_fdw::ForeignTable>,
     sql_user_functions: BTreeMap<String, Vec<Arc<super::engine_user_functions::SQLUserFunction>>>,
+    roles: BTreeMap<String, super::engine_roles::RoleDefinition>,
 }
 
 impl DurableCatalogState {
@@ -107,6 +109,10 @@ impl DurableCatalogState {
             foreign_servers: RwLock::new(BTreeMap::new()),
             foreign_tables: RwLock::new(BTreeMap::new()),
             sql_user_functions: RwLock::new(BTreeMap::new()),
+            roles: RwLock::new(BTreeMap::from([(
+                "uqa".to_string(),
+                super::engine_roles::RoleDefinition::bootstrap(),
+            )])),
         }
     }
 
@@ -128,6 +134,7 @@ impl DurableCatalogState {
             foreign_servers: self.foreign_servers.read().clone(),
             foreign_tables: self.foreign_tables.read().clone(),
             sql_user_functions: self.sql_user_functions.read().clone(),
+            roles: self.roles.read().clone(),
         }
     }
 
@@ -146,6 +153,7 @@ impl DurableCatalogState {
         *self.foreign_servers.write() = snapshot.foreign_servers.clone();
         *self.foreign_tables.write() = snapshot.foreign_tables.clone();
         *self.sql_user_functions.write() = snapshot.sql_user_functions.clone();
+        *self.roles.write() = snapshot.roles.clone();
     }
 }
 
@@ -162,6 +170,8 @@ pub(super) struct SessionContext {
     pub(super) row_lock_statements:
         Mutex<Vec<Option<std::sync::Arc<crate::sql::RowLockRetryCache>>>>,
     pub(super) command_mutation_overlays: Mutex<Vec<CommandMutationOverlay>>,
+    pub(super) portals: Mutex<BTreeMap<String, super::SessionPortalState>>,
+    pub(super) next_portal_id: Mutex<usize>,
 }
 
 impl SessionContext {
@@ -172,6 +182,9 @@ impl SessionContext {
             sequence_currvals: BTreeMap::new(),
             prepared: BTreeMap::new(),
             sql_statement_cache: SQLStatementCache::default(),
+            portal_names: BTreeSet::new(),
+            current_user: "uqa".to_string(),
+            session_user: "uqa".to_string(),
         };
         Self {
             state: RwLock::new(state),
@@ -179,6 +192,8 @@ impl SessionContext {
             transactions: Mutex::new(Vec::new()),
             row_lock_statements: Mutex::new(Vec::new()),
             command_mutation_overlays: Mutex::new(Vec::new()),
+            portals: Mutex::new(BTreeMap::new()),
+            next_portal_id: Mutex::new(1),
         }
     }
 }

@@ -93,6 +93,72 @@ fn def_elem_string(elem: &pg_query::protobuf::DefElem) -> Result<String> {
     }
 }
 
+fn def_elem_bool(elem: &pg_query::protobuf::DefElem, context: &str) -> Result<bool> {
+    match elem
+        .arg
+        .as_ref()
+        .and_then(|argument| argument.node.as_ref())
+    {
+        Some(NodeEnum::Boolean(value)) => Ok(value.boolval),
+        other => Err(SQLError::TypeMismatch(format!(
+            "{context} expects a boolean, got {other:?}"
+        ))),
+    }
+}
+
+fn compile_support_name(elem: &pg_query::protobuf::DefElem, context: &str) -> Result<String> {
+    let Some(NodeEnum::List(list)) = elem
+        .arg
+        .as_ref()
+        .and_then(|argument| argument.node.as_ref())
+    else {
+        return Err(SQLError::TypeMismatch(format!(
+            "{context} SUPPORT expects a routine name"
+        )));
+    };
+    compile_qualified_name(&list.items, context)
+}
+
+fn compile_routine_config_action(
+    element: &pg_query::protobuf::DefElem,
+    context: &str,
+) -> Result<crate::ast::RoutineConfigAction> {
+    use crate::ast::RoutineConfigAction;
+    use pg_query::protobuf::VariableSetKind;
+
+    let Some(NodeEnum::VariableSetStmt(setting)) = element
+        .arg
+        .as_ref()
+        .and_then(|argument| argument.node.as_ref())
+    else {
+        return Err(SQLError::TypeMismatch(format!(
+            "{context} SET expects a configuration action"
+        )));
+    };
+    match setting.kind() {
+        VariableSetKind::VarSetValue | VariableSetKind::VarSetDefault => {
+            let Statement::SetVariable { name, value } =
+                super::administrative::compile_variable_set(setting)?
+            else {
+                return Err(SQLError::Internal(
+                    "routine SET did not compile as a variable assignment".into(),
+                ));
+            };
+            Ok(RoutineConfigAction::Set { name, value })
+        }
+        VariableSetKind::VarSetCurrent => Ok(RoutineConfigAction::FromCurrent {
+            name: setting.name.clone(),
+        }),
+        VariableSetKind::VarReset => Ok(RoutineConfigAction::Reset {
+            name: setting.name.clone(),
+        }),
+        VariableSetKind::VarResetAll => Ok(RoutineConfigAction::ResetAll),
+        other => Err(SQLError::Unsupported(format!(
+            "{context}: configuration action {other:?} is not supported"
+        ))),
+    }
+}
+
 pub(super) fn compile_create_function(
     stmt: &pg_query::protobuf::CreateFunctionStmt,
 ) -> Result<crate::ast::CreateFunction> {
@@ -197,24 +263,14 @@ pub(super) fn compile_create_function(
         }
     };
 
-    if params.iter().any(|param| param.type_name == "refcursor") {
-        return Err(SQLError::Unsupported(format!(
-            "{keyword}: refcursor parameters require session portal state"
-        )));
-    }
-    if matches!(
-        &returns,
-        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }
-            if type_name == "refcursor"
-    ) {
-        return Err(SQLError::Unsupported(format!(
-            "{keyword}: refcursor returns require session portal state"
-        )));
-    }
-
     let mut language = String::new();
     let mut volatility = FunctionVolatility::Volatile;
     let mut strict = false;
+    let mut security_definer = false;
+    let mut leakproof = false;
+    let mut parallel = crate::ast::FunctionParallel::Unsafe;
+    let mut support = None;
+    let mut config_actions = Vec::new();
     let mut source: Option<String> = None;
     for opt in &stmt.options {
         let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() else {
@@ -237,15 +293,28 @@ pub(super) fn compile_create_function(
                 };
             }
             "strict" => {
-                strict = match elem.arg.as_ref().and_then(|a| a.node.as_ref()) {
-                    Some(NodeEnum::Boolean(value)) => value.boolval,
+                strict = def_elem_bool(elem, &format!("{keyword}: STRICT"))?;
+            }
+            "security" => {
+                security_definer = def_elem_bool(elem, &format!("{keyword}: SECURITY"))?;
+            }
+            "leakproof" => {
+                leakproof = def_elem_bool(elem, &format!("{keyword}: LEAKPROOF"))?;
+            }
+            "parallel" => {
+                parallel = match def_elem_string(elem)?.as_str() {
+                    "unsafe" => crate::ast::FunctionParallel::Unsafe,
+                    "restricted" => crate::ast::FunctionParallel::Restricted,
+                    "safe" => crate::ast::FunctionParallel::Safe,
                     other => {
                         return Err(SQLError::TypeMismatch(format!(
-                            "{keyword}: STRICT expects a boolean, got {other:?}"
-                        )));
+                            "{keyword}: invalid PARALLEL value `{other}`"
+                        )))
                     }
                 };
             }
+            "support" => support = Some(compile_support_name(elem, keyword)?),
+            "set" => config_actions.push(compile_routine_config_action(elem, keyword)?),
             "as" => {
                 let items: Vec<String> = match elem.arg.as_ref().and_then(|a| a.node.as_ref()) {
                     Some(NodeEnum::List(list)) => list
@@ -274,8 +343,7 @@ pub(super) fn compile_create_function(
                     "{keyword}: WINDOW functions"
                 )));
             }
-            // Planner / execution hints without engine semantics:
-            // COST, ROWS, PARALLEL, SECURITY, LEAKPROOF, SET, SUPPORT.
+            // Planner / execution hints outside this routine contract: COST and ROWS.
             other => {
                 return Err(SQLError::Unsupported(format!(
                     "{keyword}: option `{other}` is not supported"
@@ -320,6 +388,16 @@ pub(super) fn compile_create_function(
         creation_search_path: Vec::new(),
         volatility,
         strict,
+        owner: String::new(),
+        security: crate::ast::RoutineSecurityAttributes {
+            security_definer,
+            leakproof,
+        },
+        parallel,
+        support,
+        config: Vec::new(),
+        config_actions,
+        execute_acl: None,
     })
 }
 
@@ -496,7 +574,7 @@ pub(super) fn compile_drop_function(
 pub(super) fn compile_alter_routine(
     stmt: &pg_query::protobuf::AlterFunctionStmt,
 ) -> Result<crate::ast::AlterRoutineStmt> {
-    use crate::ast::{AlterRoutineKind, AlterRoutineStmt, FunctionVolatility};
+    use crate::ast::{AlterRoutineKind, AlterRoutineStmt, FunctionParallel, FunctionVolatility};
     use pg_query::protobuf::ObjectType;
 
     let (kind, keyword) = match stmt.objtype() {
@@ -538,6 +616,11 @@ pub(super) fn compile_alter_routine(
 
     let mut volatility = None;
     let mut strict = None;
+    let mut security_definer = None;
+    let mut leakproof = None;
+    let mut parallel = None;
+    let mut support = None;
+    let mut config_actions = Vec::new();
     for action in &stmt.actions {
         let Some(NodeEnum::DefElem(element)) = action.node.as_ref() else {
             return Err(SQLError::Unsupported(format!(
@@ -582,6 +665,52 @@ pub(super) fn compile_alter_routine(
                     },
                 );
             }
+            "security" => {
+                if security_definer.is_some() {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42601".into(),
+                        message: format!("{keyword}: conflicting or redundant security option"),
+                    });
+                }
+                security_definer = Some(def_elem_bool(element, &format!("{keyword}: SECURITY"))?);
+            }
+            "leakproof" => {
+                if leakproof.is_some() {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42601".into(),
+                        message: format!("{keyword}: conflicting or redundant leakproof option"),
+                    });
+                }
+                leakproof = Some(def_elem_bool(element, &format!("{keyword}: LEAKPROOF"))?);
+            }
+            "parallel" => {
+                if parallel.is_some() {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42601".into(),
+                        message: format!("{keyword}: conflicting or redundant parallel option"),
+                    });
+                }
+                parallel = Some(match def_elem_string(element)?.as_str() {
+                    "unsafe" => FunctionParallel::Unsafe,
+                    "restricted" => FunctionParallel::Restricted,
+                    "safe" => FunctionParallel::Safe,
+                    other => {
+                        return Err(SQLError::TypeMismatch(format!(
+                            "{keyword}: invalid PARALLEL value `{other}`"
+                        )))
+                    }
+                });
+            }
+            "support" => {
+                if support.is_some() {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42601".into(),
+                        message: format!("{keyword}: conflicting or redundant support option"),
+                    });
+                }
+                support = Some(compile_support_name(element, keyword)?);
+            }
+            "set" => config_actions.push(compile_routine_config_action(element, keyword)?),
             other => {
                 return Err(SQLError::Unsupported(format!(
                     "{keyword}: action `{other}` is not supported"
@@ -589,7 +718,14 @@ pub(super) fn compile_alter_routine(
             }
         }
     }
-    if volatility.is_none() && strict.is_none() {
+    if volatility.is_none()
+        && strict.is_none()
+        && security_definer.is_none()
+        && leakproof.is_none()
+        && parallel.is_none()
+        && support.is_none()
+        && config_actions.is_empty()
+    {
         return Err(SQLError::Unsupported(format!(
             "{keyword}: no supported action"
         )));
@@ -601,5 +737,314 @@ pub(super) fn compile_alter_routine(
         arg_type_references,
         volatility,
         strict,
+        security_definer,
+        leakproof,
+        parallel,
+        support,
+        config_actions,
     })
+}
+
+fn compile_role_spec(
+    role: &pg_query::protobuf::RoleSpec,
+    allow_public: bool,
+    context: &str,
+) -> Result<String> {
+    use pg_query::protobuf::RoleSpecType;
+    match role.roletype() {
+        RoleSpecType::RolespecCstring => Ok(role.rolename.clone()),
+        RoleSpecType::RolespecCurrentRole | RoleSpecType::RolespecCurrentUser => {
+            Ok("CURRENT_USER".into())
+        }
+        RoleSpecType::RolespecSessionUser => Ok("SESSION_USER".into()),
+        RoleSpecType::RolespecPublic if allow_public => Ok("PUBLIC".into()),
+        other => Err(SQLError::Unsupported(format!(
+            "{context}: role specification {other:?} is not supported"
+        ))),
+    }
+}
+
+struct CompiledRoutineTarget {
+    name: String,
+    arg_types: Option<Vec<String>>,
+    arg_type_references: Vec<Option<crate::ast::RoutineColumnTypeReference>>,
+}
+
+fn compile_object_with_args(
+    object: &pg_query::protobuf::ObjectWithArgs,
+    context: &str,
+) -> Result<CompiledRoutineTarget> {
+    let name = compile_qualified_name(&object.objname, context)?;
+    if object.args_unspecified {
+        return Ok(CompiledRoutineTarget {
+            name,
+            arg_types: None,
+            arg_type_references: Vec::new(),
+        });
+    }
+    let mut types = Vec::with_capacity(object.objargs.len());
+    let mut references = Vec::with_capacity(object.objargs.len());
+    for argument in &object.objargs {
+        let Some(NodeEnum::TypeName(type_name)) = argument.node.as_ref() else {
+            return Err(SQLError::Unsupported(format!(
+                "{context}: malformed argument type"
+            )));
+        };
+        let compiled = compile_function_type_name(type_name)?;
+        types.push(compiled.name);
+        references.push(compiled.reference);
+    }
+    if references.iter().all(Option::is_none) {
+        references.clear();
+    }
+    Ok(CompiledRoutineTarget {
+        name,
+        arg_types: Some(types),
+        arg_type_references: references,
+    })
+}
+
+pub(super) fn compile_alter_routine_owner(
+    statement: &pg_query::protobuf::AlterOwnerStmt,
+) -> Result<Statement> {
+    use crate::ast::{AlterRoutineKind, AlterRoutineOwnerStmt};
+    use pg_query::protobuf::ObjectType;
+    let (kind, context) = match statement.object_type() {
+        ObjectType::ObjectFunction => (AlterRoutineKind::Function, "ALTER FUNCTION"),
+        ObjectType::ObjectProcedure => (AlterRoutineKind::Procedure, "ALTER PROCEDURE"),
+        ObjectType::ObjectRoutine => (AlterRoutineKind::Routine, "ALTER ROUTINE"),
+        other => {
+            return Err(SQLError::Unsupported(format!(
+                "ALTER OWNER target {other:?} is not supported"
+            )))
+        }
+    };
+    let Some(NodeEnum::ObjectWithArgs(object)) = statement
+        .object
+        .as_deref()
+        .and_then(|object| object.node.as_ref())
+    else {
+        return Err(SQLError::Internal(format!(
+            "{context}: malformed routine target"
+        )));
+    };
+    let CompiledRoutineTarget {
+        name,
+        arg_types,
+        arg_type_references,
+    } = compile_object_with_args(object, context)?;
+    let owner = statement
+        .newowner
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal(format!("{context}: owner is missing")))?;
+    Ok(Statement::AlterRoutineOwner(AlterRoutineOwnerStmt {
+        kind,
+        name,
+        arg_types,
+        arg_type_references,
+        new_owner: compile_role_spec(owner, false, context)?,
+    }))
+}
+
+pub(super) fn compile_grant_routine(
+    statement: &pg_query::protobuf::GrantStmt,
+) -> Result<Statement> {
+    use crate::ast::{AlterRoutineKind, GrantRoutineItem, GrantRoutineStmt};
+    use pg_query::protobuf::{GrantTargetType, ObjectType};
+    if statement.targtype() != GrantTargetType::AclTargetObject {
+        return Err(SQLError::Unsupported(
+            "routine privileges require explicit object targets".into(),
+        ));
+    }
+    let (kind, context) = match statement.objtype() {
+        ObjectType::ObjectFunction => (AlterRoutineKind::Function, "FUNCTION"),
+        ObjectType::ObjectProcedure => (AlterRoutineKind::Procedure, "PROCEDURE"),
+        ObjectType::ObjectRoutine => (AlterRoutineKind::Routine, "ROUTINE"),
+        other => {
+            return Err(SQLError::Unsupported(format!(
+                "GRANT/REVOKE object type {other:?} is not supported"
+            )))
+        }
+    };
+    // PostgreSQL represents ALL [PRIVILEGES] with an empty privilege list.
+    // EXECUTE is the sole routine privilege, so it is equivalent here.
+    for privilege in &statement.privileges {
+        let Some(NodeEnum::AccessPriv(privilege)) = privilege.node.as_ref() else {
+            return Err(SQLError::Internal(
+                "GRANT/REVOKE contains a malformed privilege".into(),
+            ));
+        };
+        if !privilege.priv_name.eq_ignore_ascii_case("execute") || !privilege.cols.is_empty() {
+            return Err(SQLError::Unsupported(format!(
+                "only EXECUTE is valid for {context} privileges"
+            )));
+        }
+    }
+    let mut items = Vec::with_capacity(statement.objects.len());
+    for object in &statement.objects {
+        let Some(NodeEnum::ObjectWithArgs(object)) = object.node.as_ref() else {
+            return Err(SQLError::Internal(
+                "GRANT/REVOKE contains a malformed routine target".into(),
+            ));
+        };
+        let CompiledRoutineTarget {
+            name,
+            arg_types,
+            arg_type_references,
+        } = compile_object_with_args(object, context)?;
+        if !arg_type_references.is_empty() {
+            return Err(SQLError::Unsupported(
+                "routine privilege targets using %TYPE are not supported".into(),
+            ));
+        }
+        items.push(GrantRoutineItem { name, arg_types });
+    }
+    let grantees = statement
+        .grantees
+        .iter()
+        .map(|grantee| {
+            let Some(NodeEnum::RoleSpec(role)) = grantee.node.as_ref() else {
+                return Err(SQLError::Internal(
+                    "GRANT/REVOKE contains a malformed grantee".into(),
+                ));
+            };
+            compile_role_spec(role, true, "GRANT/REVOKE")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Statement::GrantRoutine(GrantRoutineStmt {
+        kind,
+        is_grant: statement.is_grant,
+        grant_option: statement.grant_option,
+        grant_option_only: !statement.is_grant && statement.grant_option,
+        items,
+        grantees,
+    }))
+}
+
+fn role_option_bool(element: &pg_query::protobuf::DefElem, context: &str) -> Result<bool> {
+    def_elem_bool(element, context)
+}
+
+fn role_option_i32(element: &pg_query::protobuf::DefElem, context: &str) -> Result<i32> {
+    match element
+        .arg
+        .as_ref()
+        .and_then(|argument| argument.node.as_ref())
+    {
+        Some(NodeEnum::Integer(value)) => Ok(value.ival),
+        other => Err(SQLError::TypeMismatch(format!(
+            "{context} expects an integer, got {other:?}"
+        ))),
+    }
+}
+
+pub(super) fn compile_create_role(
+    statement: &pg_query::protobuf::CreateRoleStmt,
+) -> Result<Statement> {
+    use crate::ast::{CreateRoleStmt, RoleAttribute};
+    use pg_query::protobuf::RoleStmtType;
+    let mut attributes = std::collections::BTreeSet::from([RoleAttribute::Inherit]);
+    if statement.stmt_type() == RoleStmtType::RolestmtUser {
+        attributes.insert(RoleAttribute::Login);
+    }
+    let mut role = CreateRoleStmt {
+        name: statement.role.clone(),
+        attributes,
+        connection_limit: -1,
+    };
+    for option in &statement.options {
+        let Some(NodeEnum::DefElem(element)) = option.node.as_ref() else {
+            return Err(SQLError::Internal(
+                "CREATE ROLE has a malformed option".into(),
+            ));
+        };
+        let (attribute, context) = match element.defname.to_ascii_lowercase().as_str() {
+            "superuser" => (RoleAttribute::Superuser, "SUPERUSER"),
+            "inherit" => (RoleAttribute::Inherit, "INHERIT"),
+            "createrole" => (RoleAttribute::CreateRole, "CREATEROLE"),
+            "createdb" => (RoleAttribute::CreateDb, "CREATEDB"),
+            "canlogin" => (RoleAttribute::Login, "LOGIN"),
+            "isreplication" => (RoleAttribute::Replication, "REPLICATION"),
+            "bypassrls" => (RoleAttribute::BypassRls, "BYPASSRLS"),
+            "connectionlimit" => {
+                role.connection_limit = role_option_i32(element, "CONNECTION LIMIT")?;
+                continue;
+            }
+            other => {
+                return Err(SQLError::Unsupported(format!(
+                    "CREATE ROLE option `{other}` is not supported"
+                )))
+            }
+        };
+        if role_option_bool(element, context)? {
+            role.attributes.insert(attribute);
+        } else {
+            role.attributes.remove(&attribute);
+        }
+    }
+    Ok(Statement::CreateRole(role))
+}
+
+pub(super) fn compile_alter_role(
+    statement: &pg_query::protobuf::AlterRoleStmt,
+) -> Result<Statement> {
+    use crate::ast::{AlterRoleStmt, RoleAttribute};
+    let role = statement
+        .role
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("ALTER ROLE has no target".into()))?;
+    let mut alter = AlterRoleStmt {
+        name: compile_role_spec(role, false, "ALTER ROLE")?,
+        attributes: std::collections::BTreeMap::new(),
+        connection_limit: None,
+    };
+    for option in &statement.options {
+        let Some(NodeEnum::DefElem(element)) = option.node.as_ref() else {
+            return Err(SQLError::Internal(
+                "ALTER ROLE has a malformed option".into(),
+            ));
+        };
+        let (attribute, context) = match element.defname.to_ascii_lowercase().as_str() {
+            "superuser" => (RoleAttribute::Superuser, "SUPERUSER"),
+            "inherit" => (RoleAttribute::Inherit, "INHERIT"),
+            "createrole" => (RoleAttribute::CreateRole, "CREATEROLE"),
+            "createdb" => (RoleAttribute::CreateDb, "CREATEDB"),
+            "canlogin" => (RoleAttribute::Login, "LOGIN"),
+            "isreplication" => (RoleAttribute::Replication, "REPLICATION"),
+            "bypassrls" => (RoleAttribute::BypassRls, "BYPASSRLS"),
+            "connectionlimit" => {
+                alter.connection_limit = Some(role_option_i32(element, "CONNECTION LIMIT")?);
+                continue;
+            }
+            other => {
+                return Err(SQLError::Unsupported(format!(
+                    "ALTER ROLE option `{other}` is not supported"
+                )))
+            }
+        };
+        alter
+            .attributes
+            .insert(attribute, role_option_bool(element, context)?);
+    }
+    Ok(Statement::AlterRole(alter))
+}
+
+pub(super) fn compile_drop_role(statement: &pg_query::protobuf::DropRoleStmt) -> Result<Statement> {
+    use crate::ast::DropRoleStmt;
+    let names = statement
+        .roles
+        .iter()
+        .map(|role| {
+            let Some(NodeEnum::RoleSpec(role)) = role.node.as_ref() else {
+                return Err(SQLError::Internal(
+                    "DROP ROLE has a malformed target".into(),
+                ));
+            };
+            compile_role_spec(role, false, "DROP ROLE")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Statement::DropRole(DropRoleStmt {
+        names,
+        if_exists: statement.missing_ok,
+    }))
 }

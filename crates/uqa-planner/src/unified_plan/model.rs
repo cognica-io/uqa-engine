@@ -430,6 +430,11 @@ pub enum CommandPlan {
     CreateFunction(Box<uqa_sql::ast::CreateFunction>),
     DropFunction(uqa_sql::ast::DropFunctionStmt),
     AlterRoutine(uqa_sql::ast::AlterRoutineStmt),
+    AlterRoutineOwner(uqa_sql::ast::AlterRoutineOwnerStmt),
+    GrantRoutine(uqa_sql::ast::GrantRoutineStmt),
+    CreateRole(uqa_sql::ast::CreateRoleStmt),
+    AlterRole(uqa_sql::ast::AlterRoleStmt),
+    DropRole(uqa_sql::ast::DropRoleStmt),
     DoBlock {
         language: String,
         body: String,

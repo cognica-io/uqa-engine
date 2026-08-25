@@ -97,6 +97,7 @@ const POLYMORPHIC_PSEUDO_TYPES: &[&str] = &[
 
 const ROUTINE_PARAMETER_PSEUDO_TYPES: &[&str] = &[
     "record",
+    "refcursor",
     "cstring",
     "any",
     "void",
@@ -118,6 +119,7 @@ const ROUTINE_PARAMETER_PSEUDO_TYPES: &[&str] = &[
 
 const ROUTINE_RESULT_PSEUDO_TYPES: &[&str] = &[
     "record",
+    "refcursor",
     "cstring",
     "any",
     "void",
@@ -303,9 +305,12 @@ fn validate_routine_input_types(def: &CreateFunction) -> Result<PolymorphicInput
             continue;
         }
         if ROUTINE_PARAMETER_PSEUDO_TYPES.contains(&type_name.as_str()) {
-            let record_is_supported =
-                type_name == "record" && (!is_input || def.language == "plpgsql");
-            if !record_is_supported {
+            let supported = match type_name.as_str() {
+                "record" => !is_input || def.language == "plpgsql",
+                "refcursor" => true,
+                _ => false,
+            };
+            if !supported {
                 return Err(routine_definition_error(format!(
                     "{} routines cannot have arguments of type {type_name}",
                     def.language
@@ -344,7 +349,7 @@ fn validate_routine_output_types(
                 )));
             }
             None if ROUTINE_RESULT_PSEUDO_TYPES.contains(&type_name.as_str())
-                && !matches!(type_name.as_str(), "record" | "void") =>
+                && !matches!(type_name.as_str(), "record" | "refcursor" | "void") =>
             {
                 return Err(routine_definition_error(format!(
                     "{} routines cannot return type {type_name}",

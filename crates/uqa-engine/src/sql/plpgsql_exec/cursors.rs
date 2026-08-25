@@ -7,8 +7,7 @@
 //! Bound PL/pgSQL cursor execution.
 
 use super::{
-    result_row_values, Interpreter, IntoTarget, PLpgSQLCursorArgument, PLpgSQLCursorState,
-    PLpgSQLDatum, PLpgSQLRowField, SQLError, Value,
+    Interpreter, IntoTarget, PLpgSQLCursorArgument, PLpgSQLDatum, PLpgSQLRowField, SQLError, Value,
 };
 
 impl Interpreter<'_> {
@@ -45,11 +44,7 @@ impl Interpreter<'_> {
 
         let portal_name = match self.values.get(cursor_index) {
             Some(Value::Str(name)) => name.clone(),
-            Some(Value::Null) => {
-                let name = format!("<unnamed portal {}>", self.next_cursor_id);
-                self.next_cursor_id += 1;
-                name
-            }
+            Some(Value::Null) => self.engine.allocate_session_portal_name(),
             Some(value) => {
                 return Err(SQLError::Routine {
                     sqlstate: "42804".into(),
@@ -62,13 +57,7 @@ impl Interpreter<'_> {
                 )));
             }
         };
-        if self.cursors.contains_key(&portal_name) {
-            return Err(SQLError::Routine {
-                sqlstate: "42P03".into(),
-                message: format!("cursor \"{portal_name}\" already in use"),
-            });
-        }
-
+        self.engine.ensure_session_portal_available(&portal_name)?;
         let values = self.evaluate_cursor_arguments(&cursor_name, &argument_fields, arguments)?;
         let saved_values = argument_fields
             .iter()
@@ -91,13 +80,7 @@ impl Interpreter<'_> {
         let result = result?;
 
         self.values[cursor_index] = Value::Str(portal_name.clone());
-        self.cursors.insert(
-            portal_name,
-            PLpgSQLCursorState {
-                result,
-                position: 0,
-            },
-        );
+        self.engine.open_session_portal(portal_name, result)?;
         Ok(())
     }
 
@@ -114,20 +97,7 @@ impl Interpreter<'_> {
             ));
         }
         let portal_name = self.open_portal_name(cursor_index, "FETCH")?;
-        let (columns, values) = {
-            let state = self
-                .cursors
-                .get_mut(&portal_name)
-                .ok_or_else(|| SQLError::Routine {
-                    sqlstate: "34000".into(),
-                    message: format!("cursor \"{portal_name}\" does not exist"),
-                })?;
-            let values = result_row_values(&state.result, state.position);
-            if values.is_some() {
-                state.position += 1;
-            }
-            (state.result.columns.clone(), values)
-        };
+        let (columns, values) = self.engine.fetch_session_portal_next(&portal_name)?;
         self.assign_into(target, &columns, values.as_deref())?;
         let found = values.is_some();
         self.last_row_count = i64::from(found);
@@ -137,13 +107,7 @@ impl Interpreter<'_> {
 
     pub(super) fn exec_close_cursor(&mut self, cursor_index: usize) -> Result<(), SQLError> {
         let portal_name = self.open_portal_name(cursor_index, "CLOSE")?;
-        if self.cursors.remove(&portal_name).is_none() {
-            return Err(SQLError::Routine {
-                sqlstate: "34000".into(),
-                message: format!("cursor \"{portal_name}\" does not exist"),
-            });
-        }
-        Ok(())
+        self.engine.close_session_portal(&portal_name)
     }
 
     fn evaluate_cursor_arguments(

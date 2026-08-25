@@ -47,8 +47,8 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::PgType => build_pg_type(),
         VirtualRelation::PgProc => build_pg_proc(engine)?,
         VirtualRelation::PgDatabase => build_pg_database(),
-        VirtualRelation::PgRoles => build_pg_roles(),
-        VirtualRelation::PgUser => build_pg_user(),
+        VirtualRelation::PgRoles => build_pg_roles(engine),
+        VirtualRelation::PgUser => build_pg_user(engine),
         VirtualRelation::PgSettings => build_pg_settings(engine)?,
         VirtualRelation::PgDescription | VirtualRelation::PgMatviews => Vec::new(),
         VirtualRelation::PgSequences => build_pg_sequences(engine)?,
@@ -63,6 +63,7 @@ mod expression_text;
 mod helpers;
 mod information_schema;
 mod pg_catalog;
+mod pg_proc_catalog;
 mod schema;
 
 pub(crate) use ag_catalog::resolve_age_label_relation_name;
@@ -74,10 +75,10 @@ use information_schema::{
 };
 use pg_catalog::{
     build_pg_attrdef, build_pg_attribute, build_pg_class, build_pg_constraint, build_pg_database,
-    build_pg_index, build_pg_indexes, build_pg_namespace, build_pg_proc, build_pg_roles,
-    build_pg_sequences, build_pg_settings, build_pg_tables, build_pg_type, build_pg_user,
-    build_pg_views,
+    build_pg_index, build_pg_indexes, build_pg_namespace, build_pg_roles, build_pg_sequences,
+    build_pg_settings, build_pg_tables, build_pg_type, build_pg_user, build_pg_views,
 };
+use pg_proc_catalog::build_pg_proc;
 use schema::{resolve_virtual_relation, VirtualRelation};
 pub(in crate::sql) use schema::{virtual_relation_accepts_row_lock, virtual_relation_schema};
 

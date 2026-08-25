@@ -197,6 +197,7 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::Xid => 28,
         ColumnType::Boolean => 16,
         ColumnType::Text => 25,
+        ColumnType::RefCursor => 1790,
         ColumnType::Name => 19,
         ColumnType::Uuid => 2950,
         ColumnType::Varchar(_) => 1043,
@@ -226,6 +227,7 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
             ColumnType::Xid => 1011,
             ColumnType::Boolean => 1000,
             ColumnType::Text => 1009,
+            ColumnType::RefCursor => 2201,
             ColumnType::Name => 1003,
             ColumnType::Uuid => 2951,
             ColumnType::Varchar(_) => 1015,
@@ -444,6 +446,7 @@ pub(super) fn pg_type_storage(ty: &ColumnType) -> &'static str {
     match ty {
         ColumnType::Numeric { .. } => "m",
         ColumnType::Text
+        | ColumnType::RefCursor
         | ColumnType::Varchar(_)
         | ColumnType::Bpchar
         | ColumnType::Character(_)
@@ -586,6 +589,7 @@ pub(super) fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRoutineOids {
         ColumnType::Regclass => PgTypeRoutineOids::new(2218, 2219, 2452, 2453),
         ColumnType::Regnamespace => PgTypeRoutineOids::new(4084, 4085, 4087, 4088),
         ColumnType::Text => PgTypeRoutineOids::new(46, 47, 2414, 2415),
+        ColumnType::RefCursor => PgTypeRoutineOids::new(46, 47, 2414, 2415),
         ColumnType::Oid => PgTypeRoutineOids::new(1798, 1799, 2418, 2419),
         ColumnType::Xid => PgTypeRoutineOids::new(50, 51, 2440, 2441),
         ColumnType::OidVector => PgTypeRoutineOids::new(54, 55, 2420, 2421),
@@ -693,6 +697,7 @@ pub(super) fn info_udt_name(ty: &ColumnType) -> String {
         ColumnType::Xid => "xid".into(),
         ColumnType::Boolean => "bool".into(),
         ColumnType::Text => "text".into(),
+        ColumnType::RefCursor => "refcursor".into(),
         ColumnType::Name => "name".into(),
         ColumnType::Uuid => "uuid".into(),
         ColumnType::Varchar(_) => "varchar".into(),
@@ -722,6 +727,7 @@ pub(super) fn info_udt_name(ty: &ColumnType) -> String {
             ColumnType::Xid => "_xid".into(),
             ColumnType::Boolean => "_bool".into(),
             ColumnType::Text => "_text".into(),
+            ColumnType::RefCursor => "_refcursor".into(),
             ColumnType::Name => "_name".into(),
             ColumnType::Uuid => "_uuid".into(),
             ColumnType::Varchar(_) => "_varchar".into(),

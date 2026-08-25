@@ -940,6 +940,14 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
             .map_err(|error| error.to_string())
     }
 
+    fn current_user(&self) -> std::result::Result<Option<String>, String> {
+        Ok(Some(self.engine.current_user_name()))
+    }
+
+    fn session_user(&self) -> std::result::Result<Option<String>, String> {
+        Ok(Some(self.engine.session_user_name()))
+    }
+
     fn current_schemas(
         &self,
         include_implicit: bool,

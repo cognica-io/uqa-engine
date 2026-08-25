@@ -276,8 +276,8 @@ pub(in crate::compiler) fn compile_sql_value_function(
         SqlValueFunctionOp::SvfopCurrentCatalog => "current_database",
         SqlValueFunctionOp::SvfopCurrentUser
         | SqlValueFunctionOp::SvfopCurrentRole
-        | SqlValueFunctionOp::SvfopSessionUser
         | SqlValueFunctionOp::SvfopUser => "current_user",
+        SqlValueFunctionOp::SvfopSessionUser => "session_user",
         other => {
             return Err(SQLError::Unsupported(format!(
                 "SQL value function {other:?}"

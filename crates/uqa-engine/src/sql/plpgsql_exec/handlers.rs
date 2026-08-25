@@ -55,6 +55,13 @@ pub(in crate::sql) fn run_do_block(
         creation_search_path: Vec::new(),
         volatility: uqa_sql::ast::FunctionVolatility::Volatile,
         strict: false,
+        owner: String::new(),
+        security: uqa_sql::ast::RoutineSecurityAttributes::default(),
+        parallel: uqa_sql::ast::FunctionParallel::Unsafe,
+        support: None,
+        config: Vec::new(),
+        config_actions: Vec::new(),
+        execute_acl: None,
     };
     let _guard = DepthGuard::enter(engine)?;
     let mut interpreter = Interpreter::new(engine, &def, &parsed, Vec::new())?;
@@ -205,6 +212,7 @@ fn execute_resolved_scalar_function(
         });
     }
     if function.def.strict && bound.iter().any(|v| matches!(v, Value::Null)) {
+        engine.ensure_routine_execute_privilege(&function.def)?;
         return Ok(Value::Null);
     }
     let outcome = execute_routine(engine, &function, bound, &invocation)?;
@@ -353,6 +361,7 @@ fn execute_resolved_table_function(
         output_column_names(&function.def)
     };
     if function.def.strict && bound.iter().any(|v| matches!(v, Value::Null)) {
+        engine.ensure_routine_execute_privilege(&function.def)?;
         let rows = if function.def.returns_set() {
             Vec::new()
         } else {

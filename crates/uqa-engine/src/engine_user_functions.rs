@@ -13,6 +13,7 @@ mod combined_overloads;
 mod declaration;
 mod lifecycle;
 mod resolution;
+mod security;
 
 pub(crate) use resolution::{
     routine_local_name, routine_returns_anonymous_record, routine_signature_types, RoutineCallKind,
@@ -20,6 +21,19 @@ pub(crate) use resolution::{
 pub(crate) use uqa_execution::canonical_routine_type_name;
 use uqa_planner::UnifiedPlan;
 use uqa_sql::ast::CreateFunction;
+
+pub(crate) fn builtin_routine_support_oid(name: &str) -> Option<i64> {
+    Some(match name.strip_prefix("pg_catalog.").unwrap_or(name) {
+        "textlike_support" => 1023,
+        "texticregexeq_support" => 1024,
+        "texticlike_support" => 1025,
+        "network_subset_support" => 1173,
+        "textregexeq_support" => 1364,
+        "varchar_support" => 3097,
+        "numeric_support" => 3157,
+        _ => return None,
+    })
+}
 
 /// A registered routine: the persistable definition plus its
 /// pre-compiled body.

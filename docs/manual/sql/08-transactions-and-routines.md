@@ -31,7 +31,7 @@ Rolling back to a savepoint keeps the transaction active and discards changes af
 
 ## Session isolation
 
-Every `Engine::new_session()` has independent transaction state, parameters, prepared statements, statement cache, sequence session state, random seed, notices, and cancellation token. Sessions share durable catalog and row state plus runtime function registries.
+Every `Engine::new_session()` has independent transaction state, parameters, prepared statements, statement cache, sequence session state, open portals, effective role, random seed, notices, and cancellation token. Sessions share durable catalog and row state plus runtime function registries.
 
 Do not use one session concurrently as if it were multiple transaction contexts. Create a session per independent SQL conversation.
 
@@ -70,6 +70,8 @@ SHOW search_path;
 SET timezone TO 'UTC';
 SHOW timezone;
 ```
+
+`SET ROLE name` changes `current_user` for the session while preserving `session_user`; `RESET ROLE`, `SET ROLE NONE`, and `SET ROLE DEFAULT` restore the session identity. The embedded connection starts as the durable bootstrap superuser role `uqa`, so it may assume any defined role. Role membership and non-superuser role assumption are not implemented.
 
 `DISCARD ALL`, `DISCARD PLANS`, and `DISCARD SEQUENCES` reset their implemented session state. `DISCARD TEMP` is rejected because temporary relations are not implemented.
 
@@ -111,7 +113,7 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 
 The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer and query `FOR`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, exception handlers, and bound cursors covered by the routine tests.
 
-Bound cursors support `CURSOR [(arguments)] FOR query`, positional or named `OPEN` arguments, repeated `FETCH NEXT ... INTO`, `FOUND`, and `CLOSE` within one routine activation. The query result and cursor position are owned by the PL/pgSQL interpreter. `OPEN ... FOR`, dynamic cursor queries, `MOVE`, fetch directions other than `NEXT`, `refcursor` parameters or returns, and cursors left open when a routine exits are rejected because those forms require session-level portal state that is not implemented.
+Bound cursors support `CURSOR [(arguments)] FOR query`, positional or named `OPEN` arguments, repeated `FETCH NEXT ... INTO`, `FOUND`, and `CLOSE`. An opened cursor is a session portal: a routine may return its `refcursor` name, a later routine in the same session and transaction may accept that name and continue fetching, and an outer transaction end closes the remaining portals. Rolling back to a savepoint closes portals opened after it without rewinding the position of an older portal, matching PostgreSQL 18. `OPEN ... FOR`, dynamic cursor queries, `MOVE`, fetch directions other than `NEXT`, holdable cursors, and top-level SQL `FETCH` remain unsupported.
 
 This is a deliberate subset. Validate every routine body during migration instead of assuming all PostgreSQL PL/pgSQL statements or diagnostics exist.
 
@@ -171,9 +173,9 @@ SELECT manual_pack(VARIADIC ARRAY[3, 4]);
 
 ### Altering routine attributes
 
-`ALTER FUNCTION` and kind-neutral `ALTER ROUTINE` can change `IMMUTABLE`, `STABLE`, `VOLATILE`, `STRICT`, and `CALLED ON NULL INPUT` for an existing function without changing its identity or replacing its compiled body. An explicit signature selects one exact input identity, `()` selects only the zero-input identity, and an omitted signature succeeds only when one visible routine of the requested kind remains unambiguous. Signature types can use implemented `%TYPE` references, and resolution follows `search_path` before checking whether the selected object has the requested kind.
+`ALTER FUNCTION` and kind-neutral `ALTER ROUTINE` can change volatility, null-input behavior, `SECURITY DEFINER` or `SECURITY INVOKER`, leakproofness, parallel-safety metadata, planner-support metadata, and routine-local `SET` configuration without changing identity or replacing the compiled body. `ALTER FUNCTION`, `ALTER PROCEDURE`, and `ALTER ROUTINE` can transfer an exact routine to another existing owner. An explicit signature selects one exact input identity, `()` selects only the zero-input identity, and an omitted signature succeeds only when one visible routine of the requested kind remains unambiguous. Signature types can use implemented `%TYPE` references, and resolution follows `search_path` before checking whether the selected object has the requested kind.
 
-The changed attributes are visible in `pg_proc` and survive catalog reopen. Missing, ambiguous, and wrong-kind targets fail without mutation; function-only attributes applied through `ALTER PROCEDURE` or to a procedure selected by `ALTER ROUTINE` report invalid function definition (`42P13`). Other PostgreSQL `ALTER FUNCTION`, `ALTER PROCEDURE`, and `ALTER ROUTINE` actions remain unsupported and fail explicitly.
+The changed attributes are visible in `pg_proc` and survive catalog reopen. Only the bootstrap superuser may mark a function leakproof or select one of the recognized PostgreSQL planner-support functions; UQA Engine records the corresponding PostgreSQL support OID but does not yet apply every planner consequence of those support callbacks. Missing, ambiguous, wrong-kind, privilege, and configuration failures leave the prior definition intact; function-only attributes applied through `ALTER PROCEDURE` or to a procedure selected by `ALTER ROUTINE` report invalid function definition (`42P13`).
 
 ```sql execute
 CREATE FUNCTION manual_identity(value INTEGER)
@@ -186,6 +188,14 @@ AS 'SELECT $1';
 ALTER FUNCTION manual_identity(INTEGER) STABLE STRICT;
 SELECT manual_identity(7);
 ```
+
+### Routine ownership, roles, and EXECUTE
+
+The durable bootstrap role is `uqa`. The implemented role lifecycle includes `CREATE ROLE` or `CREATE USER`, `ALTER ROLE`, and `DROP ROLE` for the `SUPERUSER`, `INHERIT`, `CREATEROLE`, `CREATEDB`, `LOGIN`, `REPLICATION`, `BYPASSRLS`, and connection-limit attributes. `pg_roles` and `pg_user` expose this state, and a role that owns a routine or appears in its ACL cannot be dropped until that dependency is removed.
+
+New routines are owned by `current_user` and grant `EXECUTE` to `PUBLIC` by default. `GRANT` and `REVOKE` accept `EXECUTE` or `ALL [PRIVILEGES]`, exact function, procedure, or routine signatures, `PUBLIC`, `CURRENT_USER`, `SESSION_USER`, and grant-option changes. An owner or superuser may transfer ownership and alter ACLs; execution checks occur before `STRICT` null short-circuiting. `CREATE OR REPLACE` preserves the existing owner and ACL.
+
+`SECURITY INVOKER` runs with the caller's `current_user`; `SECURITY DEFINER` temporarily uses the routine owner while `session_user` remains unchanged. Routine `SET`, `SET ... FROM CURRENT`, `RESET`, and `RESET ALL` configuration is applied only during the call and restored on every return or error. Role memberships, passwords, per-role settings, schema and database privileges, default privileges, non-owner grantor chains, row-level-security consequences, extension languages, and the complete PostgreSQL object privilege model remain compatibility bugs.
 
 ## Volatility and mutation
 

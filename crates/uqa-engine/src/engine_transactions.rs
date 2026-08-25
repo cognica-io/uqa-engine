@@ -704,6 +704,7 @@ impl Engine {
                 self.publish_table_data_changes();
             }
             publication_result?;
+            self.session.portals.lock().clear();
         }
         if let Some(parent) = stack.last_mut() {
             parent.next_lock_mark = parent.next_lock_mark.max(committed.next_lock_mark);
@@ -1281,11 +1282,17 @@ impl Engine {
     }
 
     fn snapshot_session_state(&self) -> SessionStateSnapshot {
-        self.session.state.read().clone()
+        let mut snapshot = self.session.state.read().clone();
+        snapshot.portal_names = self.session.portals.lock().keys().cloned().collect();
+        snapshot
     }
 
     fn restore_session_state(&self, snapshot: &SessionStateSnapshot) {
         *self.session.state.write() = snapshot.clone();
+        self.session
+            .portals
+            .lock()
+            .retain(|name, _| snapshot.portal_names.contains(name));
     }
 
     fn snapshot_transaction_data(&self) -> Result<Option<EngineDataSnapshot>, SQLError> {

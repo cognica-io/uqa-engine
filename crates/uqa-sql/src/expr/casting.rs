@@ -80,7 +80,14 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
             }
             Ok(Value::Decimal(value))
         }
-        "text" | "name" | "regproc" | "regtype" | "pg_node_tree" | "aclitem" => {
+        "text"
+        | "refcursor"
+        | "pg_catalog.refcursor"
+        | "name"
+        | "regproc"
+        | "regtype"
+        | "pg_node_tree"
+        | "aclitem" => {
             let source = source_ty
                 .map(str::trim)
                 .map(|source| source.strip_prefix("pg_catalog.").unwrap_or(source));

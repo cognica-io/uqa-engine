@@ -15,11 +15,13 @@ mod cte;
 mod expressions;
 mod from;
 mod locking;
+mod routine_security;
 
 pub use cte::*;
 pub use expressions::*;
 pub use from::*;
 pub use locking::*;
+pub use routine_security::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ColumnType {
@@ -32,6 +34,8 @@ pub enum ColumnType {
     Xid,
     Boolean,
     Text,
+    /// `PostgreSQL` cursor portal name (`pg_catalog.refcursor`).
+    RefCursor,
     Name,
     Uuid,
     Varchar(Option<u32>),
@@ -117,6 +121,7 @@ pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str
         "_regproc" => "regproc",
         "_regclass" => "regclass",
         "_text" => "text",
+        "_refcursor" => "refcursor",
         "_oid" => "oid",
         "_oidvector" => "oidvector",
         "_bpchar" => "bpchar",
@@ -209,6 +214,7 @@ impl ColumnType {
             "xid" => Ok(Self::Xid),
             "boolean" | "bool" => Ok(Self::Boolean),
             "text" => Ok(Self::Text),
+            "refcursor" => Ok(Self::RefCursor),
             "name" => Ok(Self::Name),
             "uuid" => Ok(Self::Uuid),
             "varchar" | "character varying" => Ok(Self::Varchar(character_length()?)),
@@ -295,6 +301,7 @@ impl ColumnType {
             Self::Xid => "xid".into(),
             Self::Boolean => "boolean".into(),
             Self::Text => "text".into(),
+            Self::RefCursor => "refcursor".into(),
             Self::Name => "name".into(),
             Self::Uuid => "uuid".into(),
             Self::Varchar(Some(length)) => format!("character varying({length})"),
@@ -793,6 +800,27 @@ pub struct CreateFunction {
     /// `STRICT` / `RETURNS NULL ON NULL INPUT` - the function is not
     /// invoked when any input argument is NULL; the result is NULL.
     pub strict: bool,
+    /// Catalog owner. The compiler leaves this empty and registration captures the effective current user; persisted definitions always carry a role name.
+    #[serde(default)]
+    pub owner: String,
+    /// Execution identity and leakproofness, flattened to retain the catalog-definition wire shape.
+    #[serde(default, flatten)]
+    pub security: RoutineSecurityAttributes,
+    /// Parallel-safety classification.
+    #[serde(default)]
+    pub parallel: FunctionParallel,
+    /// Optional planner support routine identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub support: Option<String>,
+    /// Effective per-routine configuration as `name=value` pairs in declaration order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub config: Vec<(String, String)>,
+    /// Creation-time configuration actions awaiting engine/session resolution. Registration consumes this list before persistence.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub config_actions: Vec<RoutineConfigAction>,
+    /// Explicit execution privileges. `None` means the `PostgreSQL` default (`PUBLIC=EXECUTE`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execute_acl: Option<Vec<RoutineAclEntry>>,
 }
 
 impl CreateFunction {
@@ -914,33 +942,6 @@ pub struct DropFunctionStmt {
     #[serde(default)]
     pub cascade: bool,
     pub items: Vec<DropFunctionItem>,
-}
-
-/// Routine namespace selected by `ALTER FUNCTION`, `ALTER PROCEDURE`, or `ALTER ROUTINE`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AlterRoutineKind {
-    Function,
-    Procedure,
-    Routine,
-}
-
-/// `ALTER FUNCTION | PROCEDURE | ROUTINE name[(input_types)] ...` with an optional exact declared input identity.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AlterRoutineStmt {
-    pub kind: AlterRoutineKind,
-    pub name: String,
-    /// Canonical declared input types. `PostgreSQL` excludes pure `OUT` parameters from this identity; `None` means the signature was omitted and must resolve to one visible routine of the selected kind.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub arg_types: Option<Vec<String>>,
-    /// `%TYPE` references aligned with a specified `arg_types` vector when any identity type requires catalog resolution; an empty vector means the signature was omitted or every type is already concrete.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub arg_type_references: Vec<Option<RoutineColumnTypeReference>>,
-    /// Replacement volatility when the statement contains `IMMUTABLE`, `STABLE`, or `VOLATILE`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub volatility: Option<FunctionVolatility>,
-    /// `Some(true)` for `STRICT`/`RETURNS NULL ON NULL INPUT`, `Some(false)` for `CALLED ON NULL INPUT`, and `None` when unchanged.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub strict: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1315,6 +1316,11 @@ pub enum Statement {
     DropFunction(DropFunctionStmt),
     /// `ALTER FUNCTION | PROCEDURE | ROUTINE name[(input_types)]` volatility and null-input attributes.
     AlterRoutine(AlterRoutineStmt),
+    AlterRoutineOwner(AlterRoutineOwnerStmt),
+    GrantRoutine(GrantRoutineStmt),
+    CreateRole(CreateRoleStmt),
+    AlterRole(AlterRoleStmt),
+    DropRole(DropRoleStmt),
     /// `DO [LANGUAGE lang] $$ ... $$` - anonymous code block.
     DoBlock {
         language: String,

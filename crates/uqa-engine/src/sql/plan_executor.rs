@@ -354,6 +354,26 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             CommandPlan::Update(plan) => self.execute_update(plan),
             CommandPlan::Delete(plan) => self.execute_delete(plan),
             CommandPlan::Drop(statement) => run_drop(self.engine, statement.clone()),
+            CommandPlan::AlterRoutineOwner(statement) => {
+                self.engine.alter_sql_routine_owner(statement)?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::GrantRoutine(statement) => {
+                self.engine.grant_sql_routine(statement)?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::CreateRole(statement) => {
+                self.engine.create_role(statement)?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::AlterRole(statement) => {
+                self.engine.alter_role(statement)?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::DropRole(statement) => {
+                self.engine.drop_roles(statement)?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::AlterTable(statement) => {
                 run_alter_table(self.engine, (**statement).clone())
             }
@@ -375,7 +395,11 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 Ok(SQLResult::empty())
             }
             CommandPlan::SetVariable { name, value } => {
-                self.engine.set_variable(name, value)?;
+                if name.eq_ignore_ascii_case("role") {
+                    self.engine.set_role(value)?;
+                } else {
+                    self.engine.set_variable(name, value)?;
+                }
                 Ok(SQLResult::empty())
             }
             CommandPlan::ShowVariable { name } => self.execute_show_variable(name),

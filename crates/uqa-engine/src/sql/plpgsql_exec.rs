@@ -88,12 +88,6 @@ struct RoutineOutcome {
     anonymous_record_column_types: Option<Vec<Option<ColumnType>>>,
 }
 
-#[derive(Clone)]
-struct PLpgSQLCursorState {
-    result: SQLResult,
-    position: usize,
-}
-
 /// Mutable activation record for one PL/pgSQL invocation.
 struct Interpreter<'a> {
     engine: &'a Engine,
@@ -108,8 +102,6 @@ struct Interpreter<'a> {
     found: Option<usize>,
     last_row_count: i64,
     is_set: bool,
-    cursors: HashMap<String, PLpgSQLCursorState>,
-    next_cursor_id: usize,
 }
 
 /// Maps variable names and positional parameters onto an activation record.
