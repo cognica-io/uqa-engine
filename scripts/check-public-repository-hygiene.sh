@@ -10,6 +10,7 @@ machine_path_pattern='(/Users/[[:alnum:]_.-]+/|/home/[[:alnum:]_.-]+/|[A-Za-z]:\
 internal_host_pattern='((^|[^[:alnum:]_.-])([[:alnum:]][[:alnum:]_-]*\.)+(internal|local)([^[:alnum:]_.(-]|$)|https?://(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.))'
 credential_pattern='(github_pat_[[:alnum:]_]{20,}|gh[pousr]_[[:alnum:]]{20,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{20,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----)'
 combined_pattern="($machine_path_pattern)|($internal_host_pattern)|($credential_pattern)"
+mixed_case_initialism_pattern='(^|[^[:alnum:]_])([C]pu|[M]lx|[U]qa)[[:alnum:]_]*([^[:alnum:]_]|$)'
 
 report_matches() {
   if (( reported == 0 )); then
@@ -24,6 +25,10 @@ if matches=$(git grep -I -n -E -- "$combined_pattern" -- . ":(exclude)$script_pa
   report_matches "$matches"
 fi
 
+if matches=$(git grep -I -n -E -- "$mixed_case_initialism_pattern" -- . ":(exclude)$script_path"); then
+  report_matches "$matches"
+fi
+
 while IFS= read -r -d '' file; do
   matches=""
 
@@ -31,6 +36,9 @@ while IFS= read -r -d '' file; do
   [[ "$file" == "$script_path" ]] && continue
 
   if matches=$(LC_ALL=C grep -I -H -n -E -- "$combined_pattern" "$file"); then
+    report_matches "$matches"
+  fi
+  if matches=$(LC_ALL=C grep -I -H -n -E -- "$mixed_case_initialism_pattern" "$file"); then
     report_matches "$matches"
   fi
 done < <(git ls-files -z --others --exclude-standard)

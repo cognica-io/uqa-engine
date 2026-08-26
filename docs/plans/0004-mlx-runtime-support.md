@@ -14,7 +14,7 @@ MLX training, arbitrary MLX Python functions, MLX-LM generation, and arbitrary H
 
 ## 2. Goals and non-goals
 
-The first supported target is deterministic batch inference for persisted `UqaDeepFusionV1` models on `aarch64-apple-darwin` with macOS 14 or newer. CPU behavior remains available on every current UQA target and remains the default until the `Auto` policy has independent correctness and performance evidence.
+The first supported target is deterministic batch inference for persisted `UQADeepFusionV1` models on `aarch64-apple-darwin` with macOS 14 or newer. CPU behavior remains available on every current UQA target and remains the default until the `Auto` policy has independent correctness and performance evidence.
 
 The implementation must satisfy all of the following goals:
 
@@ -103,6 +103,8 @@ No native pointer receives an unsafe `Send` or `Sync` implementation. `CompiledM
 
 The existing all-in-one `MLBackend` trait is replaced by contracts with distinct responsibilities. Exact Rust names may change during implementation, but the separation is mandatory.
 
+Rust identifiers and design pseudocode preserve UQA Engine's established all-capital initialisms, including `CPU`, `MLX`, and `UQA`; serialized configuration tokens remain lowercase where the external format defines `cpu` or `mlx`.
+
 ```rust
 pub trait ModelCompiler: Send + Sync {
     fn descriptor(&self) -> BackendDescriptor;
@@ -126,8 +128,8 @@ Analytical CPU training implements `ModelTrainer`; it is not a method on an MLX 
 
 | Policy | Contract |
 | --- | --- |
-| `Cpu` | Compile and execute every stage with the CPU backend. This is the initial default and the universal compatibility path. |
-| `MlxStrict` | Require one fully MLX-lowerable tensor program on an available supported device; reject host graph stages and unsupported tensor operations before execution. |
+| `CPU` | Compile and execute every stage with the CPU backend. This is the initial default and the universal compatibility path. |
+| `MLXStrict` | Require one fully MLX-lowerable tensor program on an available supported device; reject host graph stages and unsupported tensor operations before execution. |
 | `Hybrid` | Permit explicitly reported host stages for graph and engine operations while requiring every tensor stage to lower to MLX; reject an unsupported tensor stage rather than hiding it on the CPU. |
 | `Auto` | Select a complete placement at plan time from availability, capability, input shape, and measured crossover data; expose the selected placement and reason. Never replay a runtime MLX failure on CPU. |
 
@@ -184,7 +186,7 @@ The current model combines tensor math with operations over `ExecutionContext`, 
 | Graph propagate, graph convolution, and graph pool | Host stage | Preserve graph direction, edge-label filtering, aggregation, BFS grouping, representative doc id, and residual behavior. |
 | Runtime signal operators | Host stage | Preserve operator execution and log-odds fusion before entering the next tensor region. |
 
-`MlxStrict` accepts only a program without host stages. `Hybrid` makes each boundary visible in its plan and executes host and MLX stages in order. There is no policy that silently interprets one unsupported tensor operator on the CPU in the middle of a nominally MLX stage.
+`MLXStrict` accepts only a program without host stages. `Hybrid` makes each boundary visible in its plan and executes host and MLX stages in order. There is no policy that silently interprets one unsupported tensor operator on the CPU in the middle of a nominally MLX stage.
 
 ### 6.3 Tensor program and native compilation
 
@@ -198,7 +200,7 @@ Managed or zero-copy input buffers are an optimization, not a prerequisite. They
 
 ### 6.4 Precision and result parity
 
-Current public scores and probabilities remain `f64`. CPU compatibility execution remains `f64`, while MLX initially computes `f32` and widens results only at the output boundary. A model that requires `f64` is rejected by `MlxStrict`; narrowing never happens because the feature was merely enabled.
+Current public scores and probabilities remain `f64`. CPU compatibility execution remains `f64`, while MLX initially computes `f32` and widens results only at the output boundary. A model that requires `f64` is rejected by `MLXStrict`; narrowing never happens because the feature was merely enabled.
 
 The shared contract suite compares MLX with the CPU interpreter of the same `TensorProgramV1` in `f32`, then separately measures the declared difference from legacy CPU `f64`. Each operation family has checked absolute and relative tolerances, class ordering, tie behavior, stable softmax behavior, NaN and infinity rejection, and deterministic repeated-run evidence. Tolerances are recorded by operation and accumulated graph depth rather than using one permissive global epsilon.
 
@@ -345,7 +347,7 @@ Exit gate: A clean Apple-Silicon test loads the private runtime without Homebrew
 - Retain immutable parameters and compiled functions, implement bounded exact-shape caching, and verify all outputs against CPU `f32`.
 - Remove the old `uqa-ml/mlx` implementation after the replacement suite covers its valid case.
 
-Exit gate: `MlxStrict` supports every model made solely from the documented tensor layers, rejects every unsupported operation before native allocation, and passes numerical, leak, concurrency, and cache tests.
+Exit gate: `MLXStrict` supports every model made solely from the documented tensor layers, rejects every unsupported operation before native allocation, and passes numerical, leak, concurrency, and cache tests.
 
 ### Phase 4: Integrate engine placement and hybrid execution
 
