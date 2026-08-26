@@ -445,6 +445,12 @@ pub(in crate::sql) fn run_insert_inner(
         });
     }
     validate_returning_alias_relations(&stmt.target_qualifier, &stmt.returning_aliases, None)?;
+    crate::sql::rules::validate_rule_returning_contract(
+        engine,
+        &stmt.table,
+        uqa_sql::ast::RuleEvent::Insert,
+        !stmt.returning.is_empty(),
+    )?;
     let mut scope = CteScope::new();
     crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut scope)?;
     scope.scalar_subqueries.clone_from(&stmt.subqueries);
@@ -748,6 +754,7 @@ pub(in crate::sql) fn run_insert_inner(
                     old: None,
                     new_doc_id: Some(*doc_id),
                     new: Some(document.clone()),
+                    context: None,
                 },
             )
             .collect(),
@@ -896,22 +903,21 @@ pub(in crate::sql) fn run_insert_inner(
             &[],
         )?;
     }
-    rule_batch.execute_actions(engine)?;
+    let rule_returning = rule_batch.execute_actions(engine, !stmt.returning.is_empty())?;
     if !stmt.returning.is_empty() {
-        return dml_returning_result(
-            engine,
-            DmlReturningShape {
-                table: &stmt.table,
-                target_qualifier: &stmt.target_qualifier,
-                aliases: &stmt.returning_aliases,
-                returning: &stmt.returning,
-                params,
-                ctes: &scope,
-                supplemental_schema: None,
-            },
-            returning_rows,
-            affected,
-        );
+        let shape = DmlReturningShape {
+            table: &stmt.table,
+            target_qualifier: &stmt.target_qualifier,
+            aliases: &stmt.returning_aliases,
+            returning: &stmt.returning,
+            params,
+            ctes: &scope,
+            supplemental_schema: None,
+        };
+        if let Some(rule_returning) = rule_returning {
+            return rule_returning.project(engine, shape);
+        }
+        return dml_returning_result(engine, shape, returning_rows, affected);
     }
     Ok(SQLResult::from_affected(affected))
 }

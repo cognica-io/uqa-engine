@@ -42,6 +42,12 @@ pub(in crate::sql) fn run_update_inner(
         crate::row_locks::RelationLockMode::RowExclusive,
     )?;
     validate_returning_alias_relations(&stmt.target_qualifier, &stmt.returning_aliases, None)?;
+    crate::sql::rules::validate_rule_returning_contract(
+        engine,
+        &stmt.table,
+        uqa_sql::ast::RuleEvent::Update,
+        !stmt.returning.is_empty(),
+    )?;
     validate_mutation_columns(
         engine,
         &stmt.table,
@@ -269,10 +275,11 @@ pub(in crate::sql) fn run_update_inner(
                 old: Some(old.clone()),
                 new_doc_id: Some(*doc_id),
                 new: Some(new.clone()),
+                context: None,
             })
             .collect(),
     )?;
-    rule_batch.execute_actions(engine)?;
+    let rule_returning = rule_batch.execute_actions(engine, !stmt.returning.is_empty())?;
     if update_original_query && has_update_rules {
         crate::sql::triggers::fire_statement_triggers(
             engine,
@@ -378,20 +385,19 @@ pub(in crate::sql) fn run_update_inner(
         )?;
     }
     if !stmt.returning.is_empty() {
-        return dml_returning_result(
-            engine,
-            DmlReturningShape {
-                table: &stmt.table,
-                target_qualifier: &stmt.target_qualifier,
-                aliases: &stmt.returning_aliases,
-                returning: &stmt.returning,
-                params,
-                ctes: &ctes,
-                supplemental_schema: None,
-            },
-            returning_rows,
-            affected,
-        );
+        let shape = DmlReturningShape {
+            table: &stmt.table,
+            target_qualifier: &stmt.target_qualifier,
+            aliases: &stmt.returning_aliases,
+            returning: &stmt.returning,
+            params,
+            ctes: &ctes,
+            supplemental_schema: None,
+        };
+        if let Some(rule_returning) = rule_returning {
+            return rule_returning.project(engine, shape);
+        }
+        return dml_returning_result(engine, shape, returning_rows, affected);
     }
     Ok(SQLResult::from_affected(affected))
 }

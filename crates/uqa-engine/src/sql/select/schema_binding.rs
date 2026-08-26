@@ -1088,6 +1088,23 @@ pub(in crate::sql) fn bind_source_plan_schema(
     )
 }
 
+/// Derive and validate one FROM source's exact row type without executing it.
+pub(in crate::sql) fn analyze_source_plan_schema(
+    engine: &Engine,
+    source: &SourcePlan,
+    params: &[SQLParam],
+    ctes: &CteScope,
+    outer: Option<&RowSchema>,
+) -> Result<RowSchema, SQLError> {
+    SchemaScope::for_analysis(ctes).bind_source(
+        engine,
+        source,
+        &ctes.scalar_subqueries,
+        params,
+        outer,
+    )
+}
+
 /// Bind every table-function source in one execution-owned source plan to its exact routine identity and return the schema derived from those same bindings.
 pub(in crate::sql) fn bind_source_plan_schema_for_execution(
     engine: &Engine,
@@ -1117,7 +1134,47 @@ pub(in crate::sql) fn bind_projection_output_schema(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<RowSchema, SQLError> {
-    let mut scope = SchemaScope::from_execution_scope(ctes);
+    projection_output_schema(
+        SchemaScope::from_execution_scope(ctes),
+        engine,
+        projections,
+        expression_schema,
+        star_schema,
+        subqueries,
+        params,
+    )
+}
+
+/// Derive and validate a projection's exact output row type without executing it.
+pub(in crate::sql) fn analyze_projection_output_schema(
+    engine: &Engine,
+    projections: &[uqa_planner::ProjectionPlan],
+    expression_schema: &RowSchema,
+    star_schema: &RowSchema,
+    subqueries: &[QueryPlan],
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<RowSchema, SQLError> {
+    projection_output_schema(
+        SchemaScope::for_analysis(ctes),
+        engine,
+        projections,
+        expression_schema,
+        star_schema,
+        subqueries,
+        params,
+    )
+}
+
+fn projection_output_schema(
+    mut scope: SchemaScope,
+    engine: &Engine,
+    projections: &[uqa_planner::ProjectionPlan],
+    expression_schema: &RowSchema,
+    star_schema: &RowSchema,
+    subqueries: &[QueryPlan],
+    params: &[SQLParam],
+) -> Result<RowSchema, SQLError> {
     let labels = projection_columns(projections);
     let mut columns = Vec::new();
     let mut types = Vec::new();

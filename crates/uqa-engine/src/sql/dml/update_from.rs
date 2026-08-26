@@ -147,15 +147,18 @@ pub(in crate::sql) fn run_update_from(
         uqa_sql::ast::RuleEvent::Update,
         pending_updates
             .iter()
-            .map(|(_, doc_id, old, new, _)| crate::sql::rules::RuleRowImage {
-                old_doc_id: Some(*doc_id),
-                old: Some(old.clone()),
-                new_doc_id: Some(*doc_id),
-                new: Some(new.clone()),
-            })
+            .map(
+                |(_, doc_id, old, new, source_context)| crate::sql::rules::RuleRowImage {
+                    old_doc_id: Some(*doc_id),
+                    old: Some(old.clone()),
+                    new_doc_id: Some(*doc_id),
+                    new: Some(new.clone()),
+                    context: Some(source_context.clone()),
+                },
+            )
             .collect(),
     )?;
-    rule_batch.execute_actions(engine)?;
+    let rule_returning = rule_batch.execute_actions(engine, !stmt.returning.is_empty())?;
     let update_rules = engine.rules_for(&target, uqa_sql::ast::RuleEvent::Update)?;
     let update_original_query = !update_rules
         .iter()
@@ -256,20 +259,19 @@ pub(in crate::sql) fn run_update_from(
     }
     referential_actions.fire_after_statement_triggers(engine)?;
     if !stmt.returning.is_empty() {
-        return dml_returning_result(
-            engine,
-            DmlReturningShape {
-                table: &target,
-                target_qualifier: &stmt.target_qualifier,
-                aliases: &stmt.returning_aliases,
-                returning: &stmt.returning,
-                params,
-                ctes,
-                supplemental_schema: Some(from_rows.row_schema()),
-            },
-            returning_rows,
-            affected,
-        );
+        let shape = DmlReturningShape {
+            table: &target,
+            target_qualifier: &stmt.target_qualifier,
+            aliases: &stmt.returning_aliases,
+            returning: &stmt.returning,
+            params,
+            ctes,
+            supplemental_schema: Some(from_rows.row_schema()),
+        };
+        if let Some(rule_returning) = rule_returning {
+            return rule_returning.project(engine, shape);
+        }
+        return dml_returning_result(engine, shape, returning_rows, affected);
     }
     Ok(SQLResult::from_affected(affected))
 }

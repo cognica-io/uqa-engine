@@ -154,6 +154,15 @@ pub(crate) fn analyze_catalog_query_schema(
     select::analyze_query_plan_schema(engine, query, params, &CteScope::default(), None)
 }
 
+/// Analyze the declared RETURNING row type of a rewrite-rule action without
+/// executing the action.
+pub(crate) fn analyze_rule_action_returning_schema(
+    engine: &Engine,
+    statement: Statement,
+) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
+    dml::dml_statement_returning_schema(engine, statement)
+}
+
 /// Bind every catalog-owned scalar and table-function call to an exact routine identity before the query plan is serialized.
 pub(crate) fn bind_catalog_query_routines(
     engine: &Engine,

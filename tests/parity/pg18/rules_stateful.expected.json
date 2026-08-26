@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "3b955b4a88c7911f0e28de62656c4443a2381934304c0d7200fc2da4bb6af15e",
+  "fixture_sha256": "55ba338e4e3ddd6d4ce5ed74b1fd1d452c6f8c35e09584130b572e226d489c49",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -494,6 +494,419 @@
       "name": "disable_return_rule_rejected",
       "kind": "error",
       "sqlstate": "42809"
+    },
+    {
+      "name": "create_set_rule_source",
+      "kind": "ok"
+    },
+    {
+      "name": "create_set_rule_target",
+      "kind": "ok"
+    },
+    {
+      "name": "create_set_rule_rows",
+      "kind": "ok"
+    },
+    {
+      "name": "create_set_rule_statements",
+      "kind": "ok"
+    },
+    {
+      "name": "seed_set_rule_relations",
+      "kind": "ok"
+    },
+    {
+      "name": "create_set_rule_trigger_function",
+      "kind": "ok"
+    },
+    {
+      "name": "create_set_rule_insert_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "create_set_rule_update_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "create_set_rule_insert_action",
+      "kind": "ok"
+    },
+    {
+      "name": "create_set_rule_update_action",
+      "kind": "ok"
+    },
+    {
+      "name": "execute_set_rule_actions",
+      "kind": "ok"
+    },
+    {
+      "name": "set_rule_insert_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "1"
+        ],
+        [
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "set_rule_update_once",
+      "kind": "rows",
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "set_rule_statement_cardinality",
+      "kind": "rows",
+      "rows": [
+        [
+          "INSERT"
+        ],
+        [
+          "UPDATE"
+        ]
+      ]
+    },
+    {
+      "name": "create_insert_returning_event",
+      "kind": "ok"
+    },
+    {
+      "name": "create_insert_returning_action",
+      "kind": "ok"
+    },
+    {
+      "name": "create_insert_returning_provider",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_returning_provider_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          null,
+          "11",
+          "22",
+          "one!"
+        ],
+        [
+          null,
+          "12",
+          "24",
+          "two!"
+        ]
+      ]
+    },
+    {
+      "name": "insert_returning_event_suppressed",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "insert_returning_action_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "one"
+        ],
+        [
+          "2",
+          "two"
+        ]
+      ]
+    },
+    {
+      "name": "create_update_returning_event",
+      "kind": "ok"
+    },
+    {
+      "name": "create_update_returning_action",
+      "kind": "ok"
+    },
+    {
+      "name": "seed_update_returning_relations",
+      "kind": "ok"
+    },
+    {
+      "name": "create_update_returning_provider",
+      "kind": "ok"
+    },
+    {
+      "name": "update_returning_provider_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "200",
+          "121",
+          "121"
+        ]
+      ]
+    },
+    {
+      "name": "update_returning_relations",
+      "kind": "rows",
+      "rows": [
+        [
+          "action",
+          "21"
+        ],
+        [
+          "event",
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "create_alias_returning_event",
+      "kind": "ok"
+    },
+    {
+      "name": "create_alias_returning_action",
+      "kind": "ok"
+    },
+    {
+      "name": "seed_alias_returning_relations",
+      "kind": "ok"
+    },
+    {
+      "name": "create_alias_returning_provider",
+      "kind": "ok"
+    },
+    {
+      "name": "alias_returning_provider_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "200",
+          "42",
+          "121"
+        ]
+      ]
+    },
+    {
+      "name": "create_delete_returning_event",
+      "kind": "ok"
+    },
+    {
+      "name": "create_delete_returning_action",
+      "kind": "ok"
+    },
+    {
+      "name": "seed_delete_returning_relations",
+      "kind": "ok"
+    },
+    {
+      "name": "create_delete_returning_provider",
+      "kind": "ok"
+    },
+    {
+      "name": "delete_returning_provider_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "110",
+          null,
+          "110"
+        ]
+      ]
+    },
+    {
+      "name": "delete_returning_relations",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_returning_validation_event",
+      "kind": "ok"
+    },
+    {
+      "name": "create_returning_validation_action",
+      "kind": "ok"
+    },
+    {
+      "name": "returning_wrong_type_rejected",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "returning_wrong_size_rejected",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "returning_too_few_rejected",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "conditional_returning_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "non_instead_returning_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "multiple_action_returning_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "insert_action_event_returning_rejected",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "create_returning_contract_source",
+      "kind": "ok"
+    },
+    {
+      "name": "create_returning_conditional_suppress",
+      "kind": "ok"
+    },
+    {
+      "name": "returning_without_provider_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "returning_without_provider_rollback",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "create_returning_provider_a_table",
+      "kind": "ok"
+    },
+    {
+      "name": "create_returning_provider_b_table",
+      "kind": "ok"
+    },
+    {
+      "name": "create_returning_provider_a",
+      "kind": "ok"
+    },
+    {
+      "name": "create_returning_provider_b",
+      "kind": "ok"
+    },
+    {
+      "name": "multiple_rule_returning_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "multiple_rule_returning_rollback",
+      "kind": "rows",
+      "rows": [
+        [
+          "0",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_update_context_event",
+      "kind": "ok"
+    },
+    {
+      "name": "create_update_context_source",
+      "kind": "ok"
+    },
+    {
+      "name": "create_update_context_action",
+      "kind": "ok"
+    },
+    {
+      "name": "seed_update_context_relations",
+      "kind": "ok"
+    },
+    {
+      "name": "create_update_context_provider",
+      "kind": "ok"
+    },
+    {
+      "name": "update_context_provider_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "5",
+          "100",
+          "15"
+        ]
+      ]
+    },
+    {
+      "name": "update_context_relations",
+      "kind": "rows",
+      "rows": [
+        [
+          "action",
+          "15"
+        ],
+        [
+          "event",
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "create_delete_context_event",
+      "kind": "ok"
+    },
+    {
+      "name": "create_delete_context_source",
+      "kind": "ok"
+    },
+    {
+      "name": "create_delete_context_action",
+      "kind": "ok"
+    },
+    {
+      "name": "seed_delete_context_relations",
+      "kind": "ok"
+    },
+    {
+      "name": "create_delete_context_provider",
+      "kind": "ok"
+    },
+    {
+      "name": "delete_context_provider_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "hit",
+          "100",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "delete_context_relations",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "0"
+        ]
+      ]
     }
   ]
 }

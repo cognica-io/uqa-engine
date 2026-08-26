@@ -21,7 +21,7 @@ use super::{
 };
 use rusqlite::OptionalExtension;
 use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema};
-use uqa_sql::ast::ReturningAliases;
+use uqa_sql::ast::{ReturningAliases, Statement};
 
 enum CurrentInsertConflict {
     Overlay,
@@ -898,6 +898,16 @@ pub(in crate::sql) struct ReturningProjectionRow<'a> {
     pub context: Option<&'a OwnedPhysicalRow>,
 }
 
+pub(in crate::sql) struct ReturningValueProjectionRow<'a> {
+    pub table: &'a str,
+    pub target_qualifier: &'a str,
+    pub current: &'a [Value],
+    pub old: Option<&'a [Value]>,
+    pub new: Option<&'a [Value]>,
+    pub aliases: &'a ReturningAliases,
+    pub context: Option<&'a OwnedPhysicalRow>,
+}
+
 pub(in crate::sql) fn build_returning_row(
     engine: &Engine,
     input: ReturningProjectionRow<'_>,
@@ -906,6 +916,69 @@ pub(in crate::sql) fn build_returning_row(
     ctes: &CteScope,
 ) -> Result<OwnedPhysicalRow, SQLError> {
     let row = returning_projection_context(engine, input)?;
+    let projections = expanded_returning_projections(
+        engine,
+        input.table,
+        input.target_qualifier,
+        input.aliases,
+        returning,
+    )?;
+    let snapshot_scope = ctes.returning_statement_snapshot_scope();
+    build_projection_physical_row_with_ctes(engine, &row, &projections, params, &snapshot_scope)
+}
+
+/// Project a RETURNING row supplied positionally by a rewrite-rule action.
+/// Rule target lists describe the event relation's row type but are not
+/// storage documents, so integer primary-key values must remain ordinary
+/// values rather than being reconstructed from an internal document id.
+pub(in crate::sql) fn build_returning_value_row(
+    engine: &Engine,
+    input: ReturningValueProjectionRow<'_>,
+    returning: &[ProjectionPlan],
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<OwnedPhysicalRow, SQLError> {
+    let target = returning_target_schema(engine, input.table)?;
+    let width = target.len();
+    if input.current.len() != width
+        || input.old.is_some_and(|row| row.len() != width)
+        || input.new.is_some_and(|row| row.len() != width)
+    {
+        return Err(SQLError::Internal(
+            "rewrite-rule RETURNING row does not match the event relation".into(),
+        ));
+    }
+    let mut columns = target.columns().to_vec();
+    let mut types = target.column_types().to_vec();
+    let append_doc_id = !columns.iter().any(|column| column == DOC_ID_COLUMN);
+    if append_doc_id {
+        columns.push(DOC_ID_COLUMN.into());
+        types.push(Some(uqa_sql::ast::ColumnType::BigInteger));
+    }
+    let image = |row: Option<&[Value]>| {
+        let mut values = row.map_or_else(|| vec![Value::Null; width], <[Value]>::to_vec);
+        if append_doc_id {
+            values.push(Value::Null);
+        }
+        values
+    };
+    let mut current = input.current.to_vec();
+    if append_doc_id {
+        current.push(Value::Null);
+    }
+    let schema = returning_context_schema(&columns, &types, input.target_qualifier, input.aliases);
+    let values = current
+        .into_iter()
+        .chain(image(input.old))
+        .chain(image(input.new))
+        .collect();
+    let target = OwnedPhysicalRow::new(schema, PhysicalRow::from_values(values));
+    let row = input.context.map_or(target.clone(), |context| {
+        OwnedPhysicalRow::new(
+            RowSchema::join(&target.schema, &context.schema, std::iter::empty()),
+            PhysicalRow::concat(&target.row, &context.row),
+        )
+    });
     let projections = expanded_returning_projections(
         engine,
         input.table,
@@ -945,6 +1018,97 @@ pub(in crate::sql) struct DmlReturningShape<'a> {
     pub params: &'a [SQLParam],
     pub ctes: &'a CteScope,
     pub supplemental_schema: Option<&'a RowSchema>,
+}
+
+/// Derive a DML statement's declared RETURNING row type without executing the
+/// statement. Rewrite-rule registration uses this to enforce `PostgreSQL`'s
+/// positional event-row contract before the rule reaches durable storage.
+pub(in crate::sql) fn dml_statement_returning_schema(
+    engine: &Engine,
+    statement: Statement,
+) -> Result<Option<RowSchema>, SQLError> {
+    let plan = crate::sql::lower_statement(engine, statement);
+    let uqa_planner::UnifiedPlan::Command(command) = plan else {
+        return Ok(None);
+    };
+    match command.as_ref() {
+        uqa_planner::CommandPlan::Insert(plan) => analyze_dml_returning_plan(
+            engine,
+            &plan.table,
+            &plan.target_qualifier,
+            &plan.returning_aliases,
+            &plan.returning,
+            &plan.ctes,
+            None,
+            &plan.subqueries,
+        ),
+        uqa_planner::CommandPlan::Update(plan) => analyze_dml_returning_plan(
+            engine,
+            &plan.table,
+            &plan.target_qualifier,
+            &plan.returning_aliases,
+            &plan.returning,
+            &plan.ctes,
+            plan.source.as_deref(),
+            &plan.subqueries,
+        ),
+        uqa_planner::CommandPlan::Delete(plan) => analyze_dml_returning_plan(
+            engine,
+            &plan.table,
+            &plan.target_qualifier,
+            &plan.returning_aliases,
+            &plan.returning,
+            &plan.ctes,
+            plan.source.as_deref(),
+            &plan.subqueries,
+        ),
+        _ => Ok(None),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn analyze_dml_returning_plan(
+    engine: &Engine,
+    table: &str,
+    target_qualifier: &str,
+    aliases: &ReturningAliases,
+    returning: &[ProjectionPlan],
+    cte_plans: &[uqa_planner::CtePlan],
+    source: Option<&uqa_planner::SourcePlan>,
+    subqueries: &[uqa_planner::QueryPlan],
+) -> Result<Option<RowSchema>, SQLError> {
+    if returning.is_empty() {
+        return Ok(None);
+    }
+    let mut ctes = CteScope::new();
+    for plan in cte_plans {
+        ctes.insert_deferred(plan.clone());
+    }
+    ctes.scalar_subqueries = subqueries.to_vec();
+    let supplemental = source
+        .map(|source| {
+            crate::sql::select::analyze_source_plan_schema(engine, source, &[], &ctes, None)
+        })
+        .transpose()?;
+    let star_schema = returning_target_schema(engine, table)?;
+    let expression_schema = returning_expression_schema(
+        &star_schema,
+        target_qualifier,
+        aliases,
+        supplemental.as_ref(),
+    );
+    let projections =
+        expanded_returning_projections(engine, table, target_qualifier, aliases, returning)?;
+    crate::sql::select::analyze_projection_output_schema(
+        engine,
+        &projections,
+        &expression_schema,
+        &star_schema,
+        subqueries,
+        &[],
+        &ctes,
+    )
+    .map(Some)
 }
 
 pub(in crate::sql) fn dml_returning_result(
@@ -1008,7 +1172,7 @@ pub(in crate::sql) fn dml_returning_result_with_projections(
 
 fn returning_target_schema(engine: &Engine, table: &str) -> Result<RowSchema, SQLError> {
     let definitions = engine
-        .try_describe_table(table)
+        .try_describe_table_row_type(table)
         .map_err(|error| dml_storage_error("RETURNING schema lookup", error))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
     if definitions.is_empty() {

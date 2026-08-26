@@ -42,6 +42,12 @@ pub(in crate::sql) fn run_delete_inner(
         &stmt.table,
         crate::row_locks::RelationLockMode::RowExclusive,
     )?;
+    crate::sql::rules::validate_rule_returning_contract(
+        engine,
+        &stmt.table,
+        uqa_sql::ast::RuleEvent::Delete,
+        !stmt.returning.is_empty(),
+    )?;
     let delete_rules = engine.rules_for(&stmt.table, uqa_sql::ast::RuleEvent::Delete)?;
     let has_delete_rules = !delete_rules.is_empty();
     let delete_original_query = !delete_rules
@@ -210,15 +216,18 @@ pub(in crate::sql) fn run_delete_inner(
         uqa_sql::ast::RuleEvent::Delete,
         qualified_targets
             .iter()
-            .map(|(_, doc_id, old, _)| crate::sql::rules::RuleRowImage {
-                old_doc_id: Some(*doc_id),
-                old: Some(old.clone()),
-                new_doc_id: None,
-                new: None,
-            })
+            .map(
+                |(_, doc_id, old, returning_context)| crate::sql::rules::RuleRowImage {
+                    old_doc_id: Some(*doc_id),
+                    old: Some(old.clone()),
+                    new_doc_id: None,
+                    new: None,
+                    context: returning_context.clone(),
+                },
+            )
             .collect(),
     )?;
-    rule_batch.execute_actions(engine)?;
+    let rule_returning = rule_batch.execute_actions(engine, !stmt.returning.is_empty())?;
     if delete_original_query && has_delete_rules {
         crate::sql::triggers::fire_statement_triggers(
             engine,
@@ -316,22 +325,21 @@ pub(in crate::sql) fn run_delete_inner(
         )?;
     }
     if !stmt.returning.is_empty() {
-        return dml_returning_result(
-            engine,
-            DmlReturningShape {
-                table: &stmt.table,
-                target_qualifier: &stmt.target_qualifier,
-                aliases: &stmt.returning_aliases,
-                returning: &stmt.returning,
-                params,
-                ctes: &ctes,
-                supplemental_schema: using_rows
-                    .as_ref()
-                    .map(uqa_execution::SharedSpill::row_schema),
-            },
-            returning_rows,
-            affected,
-        );
+        let shape = DmlReturningShape {
+            table: &stmt.table,
+            target_qualifier: &stmt.target_qualifier,
+            aliases: &stmt.returning_aliases,
+            returning: &stmt.returning,
+            params,
+            ctes: &ctes,
+            supplemental_schema: using_rows
+                .as_ref()
+                .map(uqa_execution::SharedSpill::row_schema),
+        };
+        if let Some(rule_returning) = rule_returning {
+            return rule_returning.project(engine, shape);
+        }
+        return dml_returning_result(engine, shape, returning_rows, affected);
     }
     Ok(SQLResult::from_affected(affected))
 }

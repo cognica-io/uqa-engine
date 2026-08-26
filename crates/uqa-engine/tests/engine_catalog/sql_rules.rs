@@ -216,6 +216,432 @@ fn insert_select_and_constant_actions_preserve_statement_cardinality() {
 }
 
 #[test]
+fn rule_actions_execute_once_over_the_qualified_row_set() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE set_rule_source (id INTEGER PRIMARY KEY, value INTEGER)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE set_rule_target (id INTEGER PRIMARY KEY, value INTEGER)",
+    );
+    exec(&engine, "CREATE TABLE set_rule_rows (id INTEGER)");
+    exec(
+        &engine,
+        "CREATE TABLE set_rule_statements (seq BIGSERIAL PRIMARY KEY, event TEXT)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO set_rule_source VALUES (1, 10), (2, 20)",
+    );
+    exec(&engine, "INSERT INTO set_rule_target VALUES (1, 0)");
+    exec(
+        &engine,
+        "CREATE FUNCTION log_rule_statement() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO set_rule_statements(event) VALUES (TG_OP); RETURN NULL; END $$",
+    );
+    exec(
+        &engine,
+        "CREATE TRIGGER log_rule_insert AFTER INSERT ON set_rule_rows FOR EACH STATEMENT EXECUTE FUNCTION log_rule_statement()",
+    );
+    exec(
+        &engine,
+        "CREATE TRIGGER log_rule_update AFTER UPDATE ON set_rule_target FOR EACH STATEMENT EXECUTE FUNCTION log_rule_statement()",
+    );
+    exec(
+        &engine,
+        "CREATE RULE a_insert_rows AS ON UPDATE TO set_rule_source DO ALSO INSERT INTO set_rule_rows VALUES (NEW.id)",
+    );
+    exec(
+        &engine,
+        "CREATE RULE b_update_once AS ON UPDATE TO set_rule_source DO ALSO UPDATE set_rule_target SET value = NEW.id",
+    );
+
+    exec(&engine, "UPDATE set_rule_source SET value = value + 1");
+
+    assert_eq!(
+        exec(&engine, "SELECT id FROM set_rule_rows ORDER BY id")
+            .rows
+            .iter()
+            .map(|row| row.get("id"))
+            .collect::<Vec<_>>(),
+        [Some(&Value::Int(1)), Some(&Value::Int(2))]
+    );
+    assert_eq!(
+        exec(&engine, "SELECT value FROM set_rule_target").rows[0].get("value"),
+        Some(&Value::Int(1))
+    );
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT event FROM set_rule_statements ORDER BY seq",
+            "event"
+        ),
+        ["INSERT", "UPDATE"]
+    );
+}
+
+#[test]
+fn rule_returning_contract_is_validated_when_the_rule_is_created() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE returning_event (id INTEGER, note VARCHAR(3))",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE returning_action (id BIGINT, note VARCHAR(20))",
+    );
+    let wrong_type = engine
+        .sql(
+            "CREATE RULE wrong_type AS ON INSERT TO returning_event DO INSTEAD INSERT INTO returning_action VALUES (NEW.id, NEW.note) RETURNING id, note::VARCHAR(3)",
+            &[],
+        )
+        .expect_err("provider type must match the event row type");
+    assert_eq!(wrong_type.sqlstate(), Some("42P17"));
+    let wrong_size = engine
+        .sql(
+            "CREATE RULE wrong_size AS ON INSERT TO returning_event DO INSTEAD INSERT INTO returning_action VALUES (NEW.id, NEW.note) RETURNING id::INTEGER, note",
+            &[],
+        )
+        .expect_err("provider type modifier must match the event row type");
+    assert_eq!(wrong_size.sqlstate(), Some("42P17"));
+    let too_few = engine
+        .sql(
+            "CREATE RULE too_few AS ON INSERT TO returning_event DO INSTEAD INSERT INTO returning_action VALUES (NEW.id, NEW.note) RETURNING id::INTEGER",
+            &[],
+        )
+        .expect_err("provider must return the complete event row type");
+    assert_eq!(too_few.sqlstate(), Some("42P17"));
+    let conditional = engine
+        .sql(
+            "CREATE RULE conditional_returning AS ON INSERT TO returning_event WHERE NEW.id > 0 DO INSTEAD INSERT INTO returning_action VALUES (NEW.id, NEW.note) RETURNING id::INTEGER, note::VARCHAR(3)",
+            &[],
+        )
+        .expect_err("conditional rules cannot provide RETURNING");
+    assert_eq!(conditional.sqlstate(), Some("0A000"));
+    let also = engine
+        .sql(
+            "CREATE RULE also_returning AS ON INSERT TO returning_event DO ALSO INSERT INTO returning_action VALUES (NEW.id, NEW.note) RETURNING id::INTEGER, note::VARCHAR(3)",
+            &[],
+        )
+        .expect_err("non-INSTEAD rules cannot provide RETURNING");
+    assert_eq!(also.sqlstate(), Some("0A000"));
+    let multiple = engine
+        .sql(
+            "CREATE RULE multiple_returning AS ON INSERT TO returning_event DO INSTEAD (INSERT INTO returning_action VALUES (NEW.id, NEW.note) RETURNING id::INTEGER, note::VARCHAR(3); INSERT INTO returning_action VALUES (NEW.id + 1, NEW.note) RETURNING id::INTEGER, note::VARCHAR(3);)",
+            &[],
+        )
+        .expect_err("one rule cannot have multiple RETURNING providers");
+    assert_eq!(multiple.sqlstate(), Some("0A000"));
+    let insert_event_reference = engine
+        .sql(
+            "CREATE RULE insert_event_reference AS ON INSERT TO returning_event DO INSTEAD INSERT INTO returning_action VALUES (NEW.id, NEW.note) RETURNING NEW.id, note::VARCHAR(3)",
+            &[],
+        )
+        .expect_err("INSERT action NEW resolves against its action target first");
+    assert_eq!(insert_event_reference.sqlstate(), Some("42P17"));
+    exec(
+        &engine,
+        "CREATE TABLE returning_action_without_id (value INTEGER, note VARCHAR(3))",
+    );
+    let invisible_insert_event = engine
+        .sql(
+            "CREATE RULE invisible_insert_event AS ON INSERT TO returning_event DO INSTEAD INSERT INTO returning_action_without_id VALUES (NEW.id, NEW.note) RETURNING NEW.id, note",
+            &[],
+        )
+        .expect_err("INSERT action RETURNING cannot fall back to the rule event row");
+    assert_eq!(invisible_insert_event.sqlstate(), Some("42703"));
+}
+
+#[test]
+fn insert_rule_returning_maps_provider_rows_to_the_event_relation() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE insert_returning_event (z INTEGER, a TEXT)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE insert_returning_action (mapped_z INTEGER, mapped_a TEXT)",
+    );
+    exec(
+        &engine,
+        "CREATE RULE insert_returning_provider AS ON INSERT TO insert_returning_event DO INSTEAD INSERT INTO insert_returning_action VALUES (NEW.z, NEW.a) RETURNING mapped_z + 10, mapped_a || '!'",
+    );
+
+    let result = exec(
+        &engine,
+        "INSERT INTO insert_returning_event VALUES (1, 'one'), (2, 'two') RETURNING old.z AS old_z, new.z AS new_z, z * 2 AS doubled, a",
+    );
+    assert_eq!(result.affected_rows, 2);
+    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.value_at(0, 0), Some(&Value::Null));
+    assert_eq!(result.value_at(0, 1), Some(&Value::Int(11)));
+    assert_eq!(result.value_at(0, 2), Some(&Value::Int(22)));
+    assert_eq!(result.value_at(0, 3), Some(&Value::Str("one!".into())));
+    assert_eq!(result.value_at(1, 1), Some(&Value::Int(12)));
+    assert_eq!(result.value_at(1, 2), Some(&Value::Int(24)));
+    assert_eq!(result.value_at(1, 3), Some(&Value::Str("two!".into())));
+    assert!(exec(&engine, "SELECT * FROM insert_returning_event")
+        .rows
+        .is_empty());
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT mapped_z FROM insert_returning_action ORDER BY mapped_z"
+        )
+        .rows
+        .iter()
+        .map(|row| row.get("mapped_z"))
+        .collect::<Vec<_>>(),
+        [Some(&Value::Int(1)), Some(&Value::Int(2))]
+    );
+}
+
+#[test]
+fn update_and_delete_rule_returning_preserve_action_old_and_new_images() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE update_returning_event (id INTEGER PRIMARY KEY, value INTEGER)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE update_returning_action (id INTEGER PRIMARY KEY, mapped INTEGER)",
+    );
+    exec(&engine, "INSERT INTO update_returning_event VALUES (1, 10)");
+    exec(
+        &engine,
+        "INSERT INTO update_returning_action VALUES (1, 100)",
+    );
+    exec(
+        &engine,
+        "CREATE RULE update_returning_provider AS ON UPDATE TO update_returning_event DO INSTEAD UPDATE update_returning_action SET mapped = NEW.value + 10 WHERE id = OLD.id RETURNING id, mapped + 100",
+    );
+
+    let updated = exec(
+        &engine,
+        "UPDATE update_returning_event SET value = value + 1 RETURNING old.value AS old_value, new.value AS new_value, value",
+    );
+    assert_eq!(updated.affected_rows, 1);
+    assert_eq!(updated.value_at(0, 0), Some(&Value::Int(200)));
+    assert_eq!(updated.value_at(0, 1), Some(&Value::Int(121)));
+    assert_eq!(updated.value_at(0, 2), Some(&Value::Int(121)));
+    assert_eq!(
+        exec(&engine, "SELECT value FROM update_returning_event").value_at(0, 0),
+        Some(&Value::Int(10))
+    );
+    assert_eq!(
+        exec(&engine, "SELECT mapped FROM update_returning_action").value_at(0, 0),
+        Some(&Value::Int(21))
+    );
+
+    exec(
+        &engine,
+        "CREATE TABLE delete_returning_event (id INTEGER PRIMARY KEY, value INTEGER)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE delete_returning_action (id INTEGER PRIMARY KEY, mapped INTEGER)",
+    );
+    exec(&engine, "INSERT INTO delete_returning_event VALUES (1, 10)");
+    exec(
+        &engine,
+        "INSERT INTO delete_returning_action VALUES (1, 100)",
+    );
+    exec(
+        &engine,
+        "CREATE RULE delete_returning_provider AS ON DELETE TO delete_returning_event DO INSTEAD DELETE FROM delete_returning_action WHERE id = OLD.id RETURNING id, mapped + 10",
+    );
+    let deleted = exec(
+        &engine,
+        "DELETE FROM delete_returning_event RETURNING old.value AS old_value, new.value AS new_value, value",
+    );
+    assert_eq!(deleted.affected_rows, 1);
+    assert_eq!(deleted.value_at(0, 0), Some(&Value::Int(110)));
+    assert_eq!(deleted.value_at(0, 1), Some(&Value::Null));
+    assert_eq!(deleted.value_at(0, 2), Some(&Value::Int(110)));
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT count(*) AS count FROM delete_returning_event"
+        )
+        .value_at(0, 0),
+        Some(&Value::Int(1))
+    );
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT count(*) AS count FROM delete_returning_action"
+        )
+        .value_at(0, 0),
+        Some(&Value::Int(0))
+    );
+}
+
+#[test]
+fn rule_returning_preserves_update_from_and_delete_using_context() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE update_context_event (id INTEGER PRIMARY KEY, value INTEGER)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE update_context_source (id INTEGER PRIMARY KEY, delta INTEGER)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE update_context_action (id INTEGER PRIMARY KEY, mapped INTEGER)",
+    );
+    exec(&engine, "INSERT INTO update_context_event VALUES (1, 10)");
+    exec(&engine, "INSERT INTO update_context_source VALUES (1, 5)");
+    exec(&engine, "INSERT INTO update_context_action VALUES (1, 100)");
+    exec(
+        &engine,
+        "CREATE RULE update_context_provider AS ON UPDATE TO update_context_event DO INSTEAD UPDATE update_context_action SET mapped = NEW.value WHERE id = OLD.id RETURNING id, mapped",
+    );
+
+    let updated = exec(
+        &engine,
+        "UPDATE update_context_event AS event SET value = event.value + source.delta FROM update_context_source AS source WHERE event.id = source.id RETURNING source.delta, old.value, new.value",
+    );
+    assert_eq!(updated.affected_rows, 1);
+    assert_eq!(updated.value_at(0, 0), Some(&Value::Int(5)));
+    assert_eq!(updated.value_at(0, 1), Some(&Value::Int(100)));
+    assert_eq!(updated.value_at(0, 2), Some(&Value::Int(15)));
+    assert_eq!(
+        exec(&engine, "SELECT value FROM update_context_event").value_at(0, 0),
+        Some(&Value::Int(10))
+    );
+    assert_eq!(
+        exec(&engine, "SELECT mapped FROM update_context_action").value_at(0, 0),
+        Some(&Value::Int(15))
+    );
+
+    exec(
+        &engine,
+        "CREATE TABLE delete_context_event (id INTEGER PRIMARY KEY, value INTEGER)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE delete_context_source (id INTEGER PRIMARY KEY, tag TEXT)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE delete_context_action (id INTEGER PRIMARY KEY, mapped INTEGER)",
+    );
+    exec(&engine, "INSERT INTO delete_context_event VALUES (1, 10)");
+    exec(
+        &engine,
+        "INSERT INTO delete_context_source VALUES (1, 'hit')",
+    );
+    exec(&engine, "INSERT INTO delete_context_action VALUES (1, 100)");
+    exec(
+        &engine,
+        "CREATE RULE delete_context_provider AS ON DELETE TO delete_context_event DO INSTEAD DELETE FROM delete_context_action WHERE id = OLD.id RETURNING id, mapped",
+    );
+
+    let deleted = exec(
+        &engine,
+        "DELETE FROM delete_context_event AS event USING delete_context_source AS source WHERE event.id = source.id RETURNING source.tag, old.value, new.value",
+    );
+    assert_eq!(deleted.affected_rows, 1);
+    assert_eq!(deleted.value_at(0, 0), Some(&Value::Str("hit".into())));
+    assert_eq!(deleted.value_at(0, 1), Some(&Value::Int(100)));
+    assert_eq!(deleted.value_at(0, 2), Some(&Value::Null));
+    assert_eq!(
+        exec(&engine, "SELECT value FROM delete_context_event").value_at(0, 0),
+        Some(&Value::Int(10))
+    );
+    assert!(exec(&engine, "SELECT * FROM delete_context_action")
+        .rows
+        .is_empty());
+}
+
+#[test]
+fn rule_returning_retargets_explicit_action_image_aliases() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE alias_returning_event (id INTEGER PRIMARY KEY, value INTEGER)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE alias_returning_action (id INTEGER PRIMARY KEY, mapped INTEGER)",
+    );
+    exec(&engine, "INSERT INTO alias_returning_event VALUES (1, 10)");
+    exec(
+        &engine,
+        "INSERT INTO alias_returning_action VALUES (1, 100)",
+    );
+    exec(
+        &engine,
+        "CREATE RULE alias_returning_provider AS ON UPDATE TO alias_returning_event DO INSTEAD UPDATE alias_returning_action SET mapped = NEW.value + 10 WHERE id = OLD.id RETURNING WITH (OLD AS action_old, NEW AS action_new) id, action_old.mapped + action_new.mapped",
+    );
+    let result = exec(
+        &engine,
+        "UPDATE alias_returning_event SET value = value + 1 RETURNING old.value AS old_value, new.value AS new_value, value",
+    );
+    assert_eq!(result.value_at(0, 0), Some(&Value::Int(200)));
+    assert_eq!(result.value_at(0, 1), Some(&Value::Int(42)));
+    assert_eq!(result.value_at(0, 2), Some(&Value::Int(121)));
+}
+
+#[test]
+fn rule_returning_requires_one_active_provider_only_when_instead_can_suppress() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE returning_source (id INTEGER)");
+    exec(&engine, "CREATE TABLE returning_log (id INTEGER)");
+    exec(
+        &engine,
+        "CREATE RULE returning_also AS ON INSERT TO returning_source DO ALSO INSERT INTO returning_log VALUES (NEW.id)",
+    );
+    let ordinary = exec(
+        &engine,
+        "INSERT INTO returning_source VALUES (1) RETURNING id",
+    );
+    assert_eq!(ordinary.value_at(0, 0), Some(&Value::Int(1)));
+
+    exec(
+        &engine,
+        "CREATE RULE returning_conditional_suppress AS ON INSERT TO returning_source WHERE NEW.id < 0 DO INSTEAD NOTHING",
+    );
+    let missing = engine
+        .sql("INSERT INTO returning_source VALUES (2) RETURNING id", &[])
+        .expect_err("an INSTEAD rule requires one unconditional provider");
+    assert_eq!(missing.sqlstate(), Some("0A000"));
+    assert_eq!(
+        exec(&engine, "SELECT id FROM returning_source ORDER BY id")
+            .rows
+            .len(),
+        1
+    );
+
+    exec(&engine, "CREATE TABLE returning_action_a (id INTEGER)");
+    exec(&engine, "CREATE TABLE returning_action_b (id INTEGER)");
+    exec(
+        &engine,
+        "CREATE RULE returning_provider_a AS ON INSERT TO returning_source DO INSTEAD INSERT INTO returning_action_a VALUES (NEW.id) RETURNING id",
+    );
+    exec(
+        &engine,
+        "CREATE RULE returning_provider_b AS ON INSERT TO returning_source DO INSTEAD INSERT INTO returning_action_b VALUES (NEW.id) RETURNING id",
+    );
+    let multiple = engine
+        .sql("INSERT INTO returning_source VALUES (3) RETURNING id", &[])
+        .expect_err("multiple active providers must fail before action execution");
+    assert_eq!(multiple.sqlstate(), Some("0A000"));
+    assert!(exec(&engine, "SELECT * FROM returning_action_a")
+        .rows
+        .is_empty());
+    assert!(exec(&engine, "SELECT * FROM returning_action_b")
+        .rows
+        .is_empty());
+}
+
+#[test]
 fn recursive_rules_and_rule_incompatible_dml_fail_atomically() {
     let engine = Engine::new();
     exec(
@@ -447,6 +873,31 @@ fn rule_catalog_enable_rename_drop_and_reopen_are_durable() {
     )
     .rows
     .is_empty());
+}
+
+#[test]
+fn returning_rule_action_targets_restore_without_session_search_path() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("returning-rules.db");
+    {
+        let engine = Engine::open(&path).unwrap();
+        exec(&engine, "CREATE SCHEMA rule_scope");
+        exec(&engine, "SET search_path = rule_scope, public");
+        exec(&engine, "CREATE TABLE event_rows (id INTEGER)");
+        exec(&engine, "CREATE TABLE action_rows (id INTEGER)");
+        exec(
+            &engine,
+            "CREATE RULE returning_provider AS ON INSERT TO event_rows DO INSTEAD INSERT INTO action_rows VALUES (NEW.id) RETURNING id",
+        );
+    }
+    let engine = Engine::open(&path).expect("qualified rule action target must restore");
+    exec(&engine, "SET search_path = rule_scope, public");
+    let result = exec(&engine, "INSERT INTO event_rows VALUES (7) RETURNING id");
+    assert_eq!(result.value_at(0, 0), Some(&Value::Int(7)));
+    assert_eq!(
+        exec(&engine, "SELECT id FROM action_rows").value_at(0, 0),
+        Some(&Value::Int(7))
+    );
 }
 
 #[test]

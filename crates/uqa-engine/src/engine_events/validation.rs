@@ -11,7 +11,7 @@ use uqa_sql::ast::{
     ColumnType, CreateRule, CreateTrigger, Expr, FunctionReturns, RuleEvent, Statement,
     TriggerEvent, TriggerTiming,
 };
-use uqa_sql::plpgsql::{bind_expr, bind_statement, ResolvedVariable, VariableResolver};
+use uqa_sql::plpgsql::{bind_expr, ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
 
 use crate::engine_user_functions::{
@@ -168,6 +168,75 @@ fn is_boolean_type(ty: &ColumnType) -> bool {
     }
 }
 
+fn rule_action_has_returning(action: &Statement) -> bool {
+    match action {
+        Statement::Insert(statement) => !statement.returning.is_empty(),
+        Statement::Update(statement) => !statement.returning.is_empty(),
+        Statement::Delete(statement) => !statement.returning.is_empty(),
+        _ => false,
+    }
+}
+
+fn same_rule_returning_type_with_different_modifier(
+    actual: &ColumnType,
+    expected: &ColumnType,
+) -> bool {
+    match (actual, expected) {
+        (ColumnType::Varchar(_), ColumnType::Varchar(_))
+        | (ColumnType::Character(_), ColumnType::Character(_))
+        | (ColumnType::Numeric { .. }, ColumnType::Numeric { .. })
+        | (ColumnType::Vector(_), ColumnType::Vector(_))
+        | (ColumnType::Tensor(_), ColumnType::Tensor(_)) => true,
+        (ColumnType::Array(actual), ColumnType::Array(expected)) => {
+            same_rule_returning_type_with_different_modifier(actual, expected)
+        }
+        _ => false,
+    }
+}
+
+fn validate_rule_returning_shape(
+    schema: &uqa_execution::RowSchema,
+    columns: &[(String, ColumnType)],
+) -> Result<(), SQLError> {
+    if schema.len() < columns.len() {
+        return Err(SQLError::Routine {
+            sqlstate: "42P17".into(),
+            message: "RETURNING list has too few entries".into(),
+        });
+    }
+    if schema.len() > columns.len() {
+        return Err(SQLError::Routine {
+            sqlstate: "42P17".into(),
+            message: "RETURNING list has too many entries".into(),
+        });
+    }
+    for (position, (column, expected)) in columns.iter().enumerate() {
+        let Some(actual) = schema.column_type(position) else {
+            // PostgreSQL resolves an unknown literal against the event row's
+            // declared type when the rule target list is installed.
+            continue;
+        };
+        if actual == expected {
+            continue;
+        }
+        let difference = if same_rule_returning_type_with_different_modifier(actual, expected) {
+            "size"
+        } else {
+            "type"
+        };
+        return Err(SQLError::Routine {
+            sqlstate: "42P17".into(),
+            message: format!(
+                "RETURNING list's entry {} has different {difference} from column \"{column}\"\nDETAIL: RETURNING list entry has type {}, but column has type {}.",
+                position + 1,
+                actual.sql_name(),
+                expected.sql_name()
+            ),
+        });
+    }
+    Ok(())
+}
+
 fn validate_trigger_condition_references(
     definition: &CreateTrigger,
     columns: &[uqa_sql::ast::ColumnDef],
@@ -299,7 +368,7 @@ impl Engine {
 
     fn rule_relation_columns(&self, name: &str) -> Result<Vec<(String, ColumnType)>, SQLError> {
         if let Some(columns) = self
-            .try_describe_table(name)
+            .try_describe_table_row_type(name)
             .map_err(|error| SQLError::Internal(format!("read rule columns: {error}")))?
         {
             return Ok(columns
@@ -445,6 +514,36 @@ impl Engine {
         Ok(())
     }
 
+    fn canonicalize_rule_action_target(&self, action: &mut Statement) -> Result<(), SQLError> {
+        let target = match action {
+            Statement::Insert(statement) => &mut statement.table,
+            Statement::Update(statement) => &mut statement.table,
+            Statement::Delete(statement) => &mut statement.table,
+            _ => return Ok(()),
+        };
+        *target = self.resolve_rule_relation(target)?.qualified_name();
+        Ok(())
+    }
+
+    fn rule_action_target_columns(
+        &self,
+        action: &Statement,
+    ) -> Result<std::collections::BTreeSet<String>, SQLError> {
+        let table = match action {
+            Statement::Insert(statement) => &statement.table,
+            Statement::Update(statement) => &statement.table,
+            Statement::Delete(statement) => &statement.table,
+            _ => return Ok(std::collections::BTreeSet::new()),
+        };
+        Ok(self
+            .try_describe_table_row_type(table)
+            .map_err(|error| SQLError::Internal(format!("read rule action columns: {error}")))?
+            .ok_or_else(|| SQLError::UnknownTable(table.clone()))?
+            .into_iter()
+            .map(|column| column.name)
+            .collect())
+    }
+
     pub(super) fn validate_rule_definition(
         &self,
         definition: &mut CreateRule,
@@ -469,14 +568,44 @@ impl Engine {
         if let Some(condition) = definition.condition.as_mut() {
             self.validate_rule_condition(condition, &columns, definition.event)?;
         }
-        for action in &definition.actions {
-            bind_statement(
+        let returning_actions = definition
+            .actions
+            .iter()
+            .filter(|action| rule_action_has_returning(action))
+            .count();
+        if returning_actions > 1 {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "cannot have multiple RETURNING lists in a rule".into(),
+            });
+        }
+        if returning_actions != 0 && definition.condition.is_some() {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "RETURNING lists are not supported in conditional rules".into(),
+            });
+        }
+        if returning_actions != 0 && !definition.instead {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "RETURNING lists are not supported in non-INSTEAD rules".into(),
+            });
+        }
+        for action in &mut definition.actions {
+            self.canonicalize_rule_action_target(action)?;
+            let action_columns = self.rule_action_target_columns(action)?;
+            let bound = crate::engine_events::bind_rule_action(
                 action,
+                definition.event,
+                &action_columns,
                 &mut RuleRowTypeResolver {
                     columns: &columns,
                     event: definition.event,
                 },
             )?;
+            if let Some(schema) = crate::sql::analyze_rule_action_returning_schema(self, bound)? {
+                validate_rule_returning_shape(&schema, &columns)?;
+            }
         }
         Ok(relation)
     }

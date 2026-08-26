@@ -6,16 +6,27 @@
 
 //! `PostgreSQL` rewrite-rule qualification, OLD/NEW binding, action ordering, and recursion checks.
 
+mod actions;
+mod returning;
+
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::{DocId, Value};
+use uqa_execution::OwnedPhysicalRow;
 use uqa_sql::ast::{Expr, RuleEvent, Statement};
 use uqa_sql::plpgsql::{bind_expr, bind_statement, ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
 
 use crate::{Engine, RelationIdentity};
+
+use actions::{bind_insert_values_action, bind_set_oriented_action};
+use returning::{
+    augment_rule_returning_action, capture_rule_returning_result, rule_returning_columns,
+    statement_has_returning,
+};
+pub(in crate::sql) use returning::{validate_rule_returning_contract, RuleReturningResult};
 
 use super::scalar::eval_lowered_expression;
 
@@ -29,6 +40,7 @@ pub(in crate::sql) struct RuleRowImage {
     pub(in crate::sql) old: Option<Document>,
     pub(in crate::sql) new_doc_id: Option<DocId>,
     pub(in crate::sql) new: Option<Document>,
+    pub(in crate::sql) context: Option<OwnedPhysicalRow>,
 }
 
 struct PreparedRule {
@@ -56,46 +68,128 @@ impl PreparedRuleBatch {
         self.suppress_original.get(index).copied().unwrap_or(false)
     }
 
-    pub(in crate::sql) fn execute_actions(&self, engine: &Engine) -> Result<(), SQLError> {
+    pub(in crate::sql) fn execute_actions(
+        &self,
+        engine: &Engine,
+        capture_returning: bool,
+    ) -> Result<Option<RuleReturningResult>, SQLError> {
         if self.rules.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
         let _guard = RuleExecutionGuard::enter(&self.table, self.event)?;
         let columns = rule_columns(engine, &self.table)?;
-        for prepared in &self.rules {
+        let returning_columns = capture_returning
+            .then(|| rule_returning_columns(engine, &self.table))
+            .transpose()?;
+        let provider_exists = capture_returning
+            && self.rules.iter().any(|prepared| {
+                prepared
+                    .rule
+                    .definition
+                    .actions
+                    .iter()
+                    .any(statement_has_returning)
+            });
+        let mut returning = provider_exists.then(RuleReturningResult::empty);
+        for (rule_index, prepared) in self.rules.iter().enumerate() {
             for (action_index, action) in prepared.rule.definition.actions.iter().enumerate() {
-                let per_row = self.event == RuleEvent::Insert
+                if prepared.matching_rows.is_empty() {
+                    continue;
+                }
+                let captures_action = capture_returning && statement_has_returning(action);
+                let captures_source_context = captures_action
+                    && matches!(action, Statement::Update(_) | Statement::Delete(_))
+                    && prepared.matching_rows.iter().any(|row_index| {
+                        self.rows
+                            .get(*row_index)
+                            .is_some_and(|row| row.context.is_some())
+                    });
+                let needs_row_source = self.event == RuleEvent::Insert
                     || prepared.condition_references_row
                     || prepared
                         .action_references_row
                         .get(action_index)
                         .copied()
-                        .unwrap_or(false);
-                let rows: &[usize] = if per_row {
-                    &prepared.matching_rows
-                } else {
-                    prepared.matching_rows.get(..1).unwrap_or_default()
-                };
-                for row_index in rows {
-                    let row = self.rows.get(*row_index).ok_or_else(|| {
-                        SQLError::Internal("rewrite rule lost its qualified row image".into())
-                    })?;
-                    let bound = bind_statement(
+                        .unwrap_or(false)
+                    || captures_source_context;
+                let (mut bound, source_index) = if needs_row_source
+                    && matches!(action, Statement::Insert(insert) if !insert.rows.is_empty())
+                {
+                    (
+                        bind_insert_values_action(
+                            engine,
+                            self.event,
+                            action,
+                            &prepared.matching_rows,
+                            &self.rows,
+                            &columns,
+                        )?,
+                        None,
+                    )
+                } else if needs_row_source {
+                    let bound = bind_set_oriented_action(
+                        engine,
+                        self.event,
                         action,
-                        &mut RuntimeRuleResolver {
-                            old: row.old.as_ref(),
-                            new: row.new.as_ref(),
-                            old_doc_id: row.old_doc_id,
-                            new_doc_id: row.new_doc_id,
-                            columns: &columns,
-                        },
+                        &prepared.matching_rows,
+                        &self.rows,
+                        &columns,
+                        &format!("__uqa_rule_rows_{rule_index}_{action_index}"),
                     )?;
-                    super::execute_compiled_statement(engine, bound, &[])?;
+                    let source_index = captures_source_context.then_some(bound.source_index);
+                    (bound.statement, source_index)
+                } else {
+                    (action.clone(), None)
+                };
+                if captures_action {
+                    augment_rule_returning_action(engine, &mut bound, source_index)?;
+                }
+                let result = super::execute_compiled_statement(engine, bound, &[])?;
+                if captures_action {
+                    let definitions = returning_columns.as_deref().ok_or_else(|| {
+                        SQLError::Internal(
+                            "rewrite-rule RETURNING capture lost the event row type".into(),
+                        )
+                    })?;
+                    let captured = capture_rule_returning_result(
+                        result,
+                        definitions,
+                        captures_source_context.then_some(self.rows.as_slice()),
+                    )?;
+                    if returning
+                        .as_ref()
+                        .is_some_and(RuleReturningResult::has_rows)
+                    {
+                        return Err(SQLError::Routine {
+                            sqlstate: "0A000".into(),
+                            message: "cannot have RETURNING lists in multiple rules".into(),
+                        });
+                    }
+                    returning = Some(captured);
                 }
             }
         }
-        Ok(())
+        Ok(returning)
     }
+}
+
+fn rule_action_target_columns(
+    engine: &Engine,
+    action: &Statement,
+) -> Result<BTreeSet<String>, SQLError> {
+    let table = match action {
+        Statement::Insert(statement) => &statement.table,
+        Statement::Update(statement) => &statement.table,
+        Statement::Delete(statement) => &statement.table,
+        _ => return Ok(BTreeSet::new()),
+    };
+    Ok(engine
+        .try_describe_table_row_type(table)
+        .map_err(|error| SQLError::Internal(format!("read rule action row type: {error}")))?
+        .ok_or_else(|| SQLError::UnknownTable(table.clone()))?
+        .into_iter()
+        .map(|column| column.name)
+        .collect())
 }
 
 pub(in crate::sql) fn prepare_rule_batch(
@@ -207,7 +301,7 @@ fn rule_columns(
     table: &str,
 ) -> Result<BTreeMap<String, RuleColumnMetadata>, SQLError> {
     let columns = engine
-        .try_describe_table(table)
+        .try_describe_table_row_type(table)
         .map_err(|error| SQLError::Internal(format!("read rule row type: {error}")))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
     Ok(columns
