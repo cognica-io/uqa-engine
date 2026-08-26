@@ -24,6 +24,7 @@ use super::select::{
     execute_query_plan_output, physical_work_mem_bytes, push_output_filter_into_query_plan,
     CteScope, EngineExpressionEvaluator, HierarchyScoredDocumentSource, QueryOutput,
     QueryOutputMode, QueryRows, ScopedEngineHook, ScoredDocumentSource, ScoredInput,
+    ScoredSourceAttributes,
 };
 use super::volatility::query_contains_volatile_function;
 use super::{
@@ -37,7 +38,79 @@ use super::{
     run_graph_drop_with_evaluator, TABLE_OID_COLUMN,
 };
 
-pub(super) type ColumnPrune = BTreeMap<String, BTreeSet<String>>;
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(in crate::sql) struct RelationMetadataProjection(u8);
+
+impl RelationMetadataProjection {
+    const DOC_ID: u8 = 1;
+    const SCORE: u8 = 2;
+
+    pub(in crate::sql) fn request_doc_id(&mut self) {
+        self.0 |= Self::DOC_ID;
+    }
+
+    pub(in crate::sql) fn request_score(&mut self) {
+        self.0 |= Self::SCORE;
+    }
+
+    pub(in crate::sql) fn includes_doc_id(self) -> bool {
+        self.0 & Self::DOC_ID != 0
+    }
+
+    pub(in crate::sql) fn includes_score(self) -> bool {
+        self.0 & Self::SCORE != 0
+    }
+
+    pub(in crate::sql) fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(in crate::sql) struct SourceProjection {
+    columns: BTreeSet<String>,
+    retain_all: bool,
+    metadata: RelationMetadataProjection,
+}
+
+impl SourceProjection {
+    pub(super) fn retaining_all() -> Self {
+        Self {
+            retain_all: true,
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn contains(&self, column: &str) -> bool {
+        self.retain_all || self.columns.contains(column)
+    }
+
+    pub(super) fn retain_all(&mut self) {
+        self.retain_all = true;
+    }
+
+    pub(super) fn insert(&mut self, column: String) {
+        self.columns.insert(column);
+    }
+
+    pub(super) fn extend(&mut self, columns: impl IntoIterator<Item = String>) {
+        self.columns.extend(columns);
+    }
+
+    pub(in crate::sql) fn explicit_columns(self) -> Option<BTreeSet<String>> {
+        (!self.retain_all).then_some(self.columns)
+    }
+
+    pub(in crate::sql) fn metadata(&self) -> RelationMetadataProjection {
+        self.metadata
+    }
+
+    pub(super) fn metadata_mut(&mut self) -> &mut RelationMetadataProjection {
+        &mut self.metadata
+    }
+}
+
+pub(super) type ColumnPrune = BTreeMap<String, SourceProjection>;
 pub(super) type QualifierFilters = BTreeMap<String, Vec<ScalarExpr>>;
 
 fn checked_integer_value<T>(value: T, label: &str) -> Result<Value, SQLError>

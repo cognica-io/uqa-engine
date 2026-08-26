@@ -126,7 +126,7 @@ Regular path query syntax and functions such as `graph_traverse` and `graph_page
 
 ## Retrieval compatibility
 
-GIN, IVF, and HNSW names describe UQA Engine physical indexes and do not promise byte-format or parameter parity with PostgreSQL extensions. `_score`, retrieval predicates, Bayesian evidence functions, and model operators are UQA Engine query extensions.
+GIN, IVF, and HNSW names describe UQA Engine physical indexes and do not promise byte-format or parameter parity with PostgreSQL extensions. `_score`, `_doc_id`, `_meta.score`, `_meta.doc_id`, retrieval predicates, Bayesian evidence functions, and model operators are UQA Engine query extensions.
 
 Approximate IVF and HNSW results can differ from exact KNN by design. Text top-K remains exact when the planner selects WAND or Block-Max WAND because unsafe skipping falls back to scoring.
 

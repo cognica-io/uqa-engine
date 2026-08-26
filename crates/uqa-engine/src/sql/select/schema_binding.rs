@@ -1096,6 +1096,11 @@ pub(in crate::sql) fn bind_source_plan_schema(
     )
 }
 
+/// Add query-block pseudo columns after the complete source scope is known, so `_meta` is exposed only for one unambiguous local-table source and never shadows a real relation alias.
+pub(in crate::sql) fn with_query_table_pseudo_columns(schema: &RowSchema) -> RowSchema {
+    analysis::with_unqualified_table_pseudo_columns(schema)
+}
+
 /// Derive and validate one FROM source's exact row type without executing it.
 pub(in crate::sql) fn analyze_source_plan_schema(
     engine: &Engine,

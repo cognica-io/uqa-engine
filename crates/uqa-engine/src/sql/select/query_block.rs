@@ -12,10 +12,13 @@ use super::{
     has_window, overlay_outer_schema, projection_columns, qualifier_filters_for_stmt,
     resolve_row_locks, run_select_without_from_output, run_single_foreign_select_output,
     run_single_table_select_output, validate_query_block_expression_types,
-    validate_query_set_contexts, validate_source_set_contexts_before_build, BTreeSet, ColumnPrune,
-    CteScope, Engine, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr,
-    ScopedEngineHook, SingleRelation, SourcePlan,
+    validate_query_set_contexts, validate_source_set_contexts_before_build,
+    with_query_table_pseudo_columns, BTreeSet, ColumnPrune, CteScope, Engine, QueryBlockPlan,
+    QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr, ScopedEngineHook, SingleRelation,
+    SourcePlan,
 };
+use crate::sql::from_rows::SourceProjection;
+use crate::sql::{META_DOC_ID_COLUMN, META_QUALIFIER, META_SCORE_COLUMN};
 
 pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
     engine: &Engine,
@@ -30,6 +33,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         || Ok(uqa_execution::RowSchema::default()),
         |source| bind_source_plan_schema(engine, source, params, ctes, outer),
     )?;
+    let source_schema = with_query_table_pseudo_columns(&source_schema);
     let expression_schema = overlay_outer_schema(&source_schema, outer);
     validate_query_block_expression_types(engine, stmt, &expression_schema, params, ctes)?;
     let type_resolver = ScopedEngineHook::new(engine, ctes);
@@ -165,16 +169,13 @@ pub(in crate::sql) fn column_prune_for_stmt_with_filter(
     from: &SourcePlan,
     filter: Option<&ScalarExpr>,
 ) -> Option<ColumnPrune> {
-    if source_contains_join_alias(from)
+    let requires_full_projection = source_contains_join_alias(from)
         || has_window(&stmt.projections)
         || stmt.projections.iter().any(|projection| {
             matches!(projection.expr, ScalarExpr::Star)
                 || expr_contains_subquery(&projection.expr)
                 || expr_contains_volatile_function(engine, &projection.expr)
-        })
-    {
-        return None;
-    }
+        });
 
     let mut qualifiers = Vec::new();
     collect_from_qualifiers(from, &mut qualifiers);
@@ -182,40 +183,104 @@ pub(in crate::sql) fn column_prune_for_stmt_with_filter(
         return None;
     }
 
+    let metadata_qualifier = single_local_table_metadata_qualifier(engine, from);
+    let scope = PruneScope {
+        qualifiers: &qualifiers,
+        metadata_qualifier: metadata_qualifier.as_deref(),
+    };
     let mut prune: ColumnPrune = qualifiers
         .iter()
-        .map(|qualifier| (qualifier.clone(), BTreeSet::new()))
+        .map(|qualifier| {
+            (
+                qualifier.clone(),
+                if requires_full_projection {
+                    SourceProjection::retaining_all()
+                } else {
+                    SourceProjection::default()
+                },
+            )
+        })
         .collect();
     let mut valid = true;
-    collect_from_prune_columns(from, &qualifiers, &mut prune, &mut valid);
+    collect_from_prune_columns(from, scope, &mut prune, &mut valid);
     collect_join_binding_prune_columns(engine, from, &mut prune);
-    for projection in &stmt.projections {
-        collect_expr_prune_columns(&projection.expr, &qualifiers, &mut prune, &mut valid);
-    }
-    if let Some(filter) = filter {
-        collect_expr_prune_columns(filter, &qualifiers, &mut prune, &mut valid);
-    }
-    for expr in &stmt.group_by {
-        collect_expr_prune_columns(expr, &qualifiers, &mut prune, &mut valid);
-    }
-    for set in &stmt.grouping_sets {
-        for expr in set {
-            collect_expr_prune_columns(expr, &qualifiers, &mut prune, &mut valid);
-        }
-    }
-    if let Some(having) = stmt.having.as_ref() {
-        collect_expr_prune_columns(having, &qualifiers, &mut prune, &mut valid);
-    }
-    for order in &stmt.order_by {
-        collect_expr_prune_columns(&order.expr, &qualifiers, &mut prune, &mut valid);
-    }
-    for expr in &stmt.distinct_on {
-        collect_expr_prune_columns(expr, &qualifiers, &mut prune, &mut valid);
+    collect_query_block_prune_columns(stmt, filter, scope, &mut prune, &mut valid);
+    let metadata_requested = prune
+        .values()
+        .any(|projection| !projection.metadata().is_empty());
+    if requires_full_projection {
+        return metadata_requested.then_some(prune);
     }
     if !valid {
+        if metadata_requested {
+            for projection in prune.values_mut() {
+                projection.retain_all();
+            }
+            return Some(prune);
+        }
         return None;
     }
     Some(prune)
+}
+
+#[derive(Clone, Copy)]
+struct PruneScope<'a> {
+    qualifiers: &'a [String],
+    metadata_qualifier: Option<&'a str>,
+}
+
+fn collect_query_block_prune_columns(
+    stmt: &QueryBlockPlan,
+    filter: Option<&ScalarExpr>,
+    scope: PruneScope<'_>,
+    prune: &mut ColumnPrune,
+    valid: &mut bool,
+) {
+    let expressions = stmt
+        .projections
+        .iter()
+        .map(|projection| &projection.expr)
+        .chain(filter)
+        .chain(stmt.group_by.iter())
+        .chain(stmt.grouping_sets.iter().flatten())
+        .chain(stmt.having.iter())
+        .chain(stmt.order_by.iter().map(|order| &order.expr))
+        .chain(stmt.distinct_on.iter());
+    for expression in expressions {
+        collect_expr_prune_columns(expression, scope, prune, valid);
+    }
+}
+
+fn single_local_table_metadata_qualifier(engine: &Engine, source: &SourcePlan) -> Option<String> {
+    if source_contains_join_alias(source) {
+        return None;
+    }
+    fn collect(engine: &Engine, source: &SourcePlan, qualifiers: &mut BTreeSet<String>) {
+        match source {
+            SourcePlan::Table {
+                name,
+                qualifier,
+                alias,
+                ..
+            } => {
+                if engine.try_table(name).ok().flatten().is_some() {
+                    qualifiers.insert(alias.as_deref().unwrap_or(qualifier).to_string());
+                }
+            }
+            SourcePlan::Join { left, right, .. } => {
+                collect(engine, left, qualifiers);
+                collect(engine, right, qualifiers);
+            }
+            SourcePlan::Values { .. }
+            | SourcePlan::Function { .. }
+            | SourcePlan::FunctionGroup { .. }
+            | SourcePlan::Subquery { .. } => {}
+        }
+    }
+    let mut qualifiers = BTreeSet::new();
+    collect(engine, source, &mut qualifiers);
+    let qualifier = qualifiers.pop_first()?;
+    qualifiers.is_empty().then_some(qualifier)
 }
 
 fn source_contains_join_alias(source: &SourcePlan) -> bool {
@@ -441,9 +506,9 @@ pub(in crate::sql) fn collect_from_qualifiers(from: &SourcePlan, out: &mut Vec<S
     }
 }
 
-pub(in crate::sql) fn collect_from_prune_columns(
+fn collect_from_prune_columns(
     from: &SourcePlan,
-    qualifiers: &[String],
+    scope: PruneScope<'_>,
     prune: &mut ColumnPrune,
     valid: &mut bool,
 ) {
@@ -451,28 +516,28 @@ pub(in crate::sql) fn collect_from_prune_columns(
         SourcePlan::Join {
             left, right, on, ..
         } => {
-            collect_from_prune_columns(left, qualifiers, prune, valid);
-            collect_from_prune_columns(right, qualifiers, prune, valid);
+            collect_from_prune_columns(left, scope, prune, valid);
+            collect_from_prune_columns(right, scope, prune, valid);
             if let Some(on) = on.as_ref() {
-                collect_expr_prune_columns(on, qualifiers, prune, valid);
+                collect_expr_prune_columns(on, scope, prune, valid);
             }
         }
         SourcePlan::Values { rows, .. } => {
             for row in rows {
                 for expr in row {
-                    collect_expr_prune_columns(expr, qualifiers, prune, valid);
+                    collect_expr_prune_columns(expr, scope, prune, valid);
                 }
             }
         }
         SourcePlan::Function { args, .. } => {
             for expr in args {
-                collect_expr_prune_columns(expr, qualifiers, prune, valid);
+                collect_expr_prune_columns(expr, scope, prune, valid);
             }
         }
         SourcePlan::FunctionGroup { functions, .. } => {
             for function in functions {
                 for expr in &function.args {
-                    collect_expr_prune_columns(expr, qualifiers, prune, valid);
+                    collect_expr_prune_columns(expr, scope, prune, valid);
                 }
             }
         }
@@ -483,15 +548,15 @@ pub(in crate::sql) fn collect_from_prune_columns(
     }
 }
 
-pub(in crate::sql) fn collect_expr_prune_columns(
+fn collect_expr_prune_columns(
     expr: &ScalarExpr,
-    qualifiers: &[String],
+    scope: PruneScope<'_>,
     prune: &mut ColumnPrune,
     valid: &mut bool,
 ) {
     match expr {
         ScalarExpr::Column(column) => {
-            for qualifier in qualifiers {
+            for qualifier in scope.qualifiers {
                 if let Some(columns) = prune.get_mut(qualifier) {
                     columns.insert(column.clone());
                 }
@@ -500,6 +565,21 @@ pub(in crate::sql) fn collect_expr_prune_columns(
         ScalarExpr::QualifiedColumn {
             qualifier, column, ..
         } => {
+            if qualifier == META_QUALIFIER && !prune.contains_key(META_QUALIFIER) {
+                let Some(source) = scope
+                    .metadata_qualifier
+                    .and_then(|source| prune.get_mut(source))
+                else {
+                    *valid = false;
+                    return;
+                };
+                match column.as_str() {
+                    META_DOC_ID_COLUMN => source.metadata_mut().request_doc_id(),
+                    META_SCORE_COLUMN => source.metadata_mut().request_score(),
+                    _ => *valid = false,
+                }
+                return;
+            }
             if let Some(columns) = prune.get_mut(qualifier) {
                 columns.insert(column.clone());
             } else {
@@ -513,8 +593,7 @@ pub(in crate::sql) fn collect_expr_prune_columns(
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::ScalarSubquery(_)
-        | ScalarExpr::Exists { .. }
-        | ScalarExpr::InSubquery { .. } => {
+        | ScalarExpr::Exists { .. } => {
             *valid = false;
         }
         ScalarExpr::Array(items)
@@ -522,7 +601,7 @@ pub(in crate::sql) fn collect_expr_prune_columns(
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => {
             for item in items {
-                collect_expr_prune_columns(item, qualifiers, prune, valid);
+                collect_expr_prune_columns(item, scope, prune, valid);
             }
         }
         ScalarExpr::Func {
@@ -532,37 +611,59 @@ pub(in crate::sql) fn collect_expr_prune_columns(
             ..
         } => {
             for arg in args {
-                collect_expr_prune_columns(arg, qualifiers, prune, valid);
+                collect_expr_prune_columns(arg, scope, prune, valid);
             }
             for order in order_by {
-                collect_expr_prune_columns(&order.expr, qualifiers, prune, valid);
+                collect_expr_prune_columns(&order.expr, scope, prune, valid);
             }
             if let Some(filter) = filter.as_ref() {
-                collect_expr_prune_columns(filter, qualifiers, prune, valid);
+                collect_expr_prune_columns(filter, scope, prune, valid);
             }
         }
         ScalarExpr::Binary { lhs, rhs, .. } => {
-            collect_expr_prune_columns(lhs, qualifiers, prune, valid);
-            collect_expr_prune_columns(rhs, qualifiers, prune, valid);
+            collect_expr_prune_columns(lhs, scope, prune, valid);
+            collect_expr_prune_columns(rhs, scope, prune, valid);
         }
         ScalarExpr::Not(inner)
         | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => {
-            collect_expr_prune_columns(inner, qualifiers, prune, valid);
+            collect_expr_prune_columns(inner, scope, prune, valid);
         }
         ScalarExpr::Between { expr, low, high } => {
-            collect_expr_prune_columns(expr, qualifiers, prune, valid);
-            collect_expr_prune_columns(low, qualifiers, prune, valid);
-            collect_expr_prune_columns(high, qualifiers, prune, valid);
+            collect_expr_prune_columns(expr, scope, prune, valid);
+            collect_expr_prune_columns(low, scope, prune, valid);
+            collect_expr_prune_columns(high, scope, prune, valid);
         }
         ScalarExpr::InList { expr, list, .. } => {
-            collect_expr_prune_columns(expr, qualifiers, prune, valid);
+            collect_expr_prune_columns(expr, scope, prune, valid);
             for item in list {
-                collect_expr_prune_columns(item, qualifiers, prune, valid);
+                collect_expr_prune_columns(item, scope, prune, valid);
             }
         }
-        ScalarExpr::WindowCall { .. } => {
+        ScalarExpr::WindowCall { args, spec, .. } => {
+            for argument in args {
+                collect_expr_prune_columns(argument, scope, prune, valid);
+            }
+            for expression in &spec.partition_by {
+                collect_expr_prune_columns(expression, scope, prune, valid);
+            }
+            for order in &spec.order_by {
+                collect_expr_prune_columns(&order.expr, scope, prune, valid);
+            }
+            if let Some(frame) = &spec.frame {
+                for bound in [&frame.start, &frame.end] {
+                    if let uqa_execution::ScalarFrameBound::Preceding(expression)
+                    | uqa_execution::ScalarFrameBound::Following(expression) = bound
+                    {
+                        collect_expr_prune_columns(expression, scope, prune, valid);
+                    }
+                }
+            }
+            *valid = false;
+        }
+        ScalarExpr::InSubquery { expr, .. } => {
+            collect_expr_prune_columns(expr, scope, prune, valid);
             *valid = false;
         }
         ScalarExpr::Case {
@@ -571,14 +672,14 @@ pub(in crate::sql) fn collect_expr_prune_columns(
             else_branch,
         } => {
             if let Some(base) = base.as_ref() {
-                collect_expr_prune_columns(base, qualifiers, prune, valid);
+                collect_expr_prune_columns(base, scope, prune, valid);
             }
             for (cond, result) in when {
-                collect_expr_prune_columns(cond, qualifiers, prune, valid);
-                collect_expr_prune_columns(result, qualifiers, prune, valid);
+                collect_expr_prune_columns(cond, scope, prune, valid);
+                collect_expr_prune_columns(result, scope, prune, valid);
             }
             if let Some(else_branch) = else_branch.as_ref() {
-                collect_expr_prune_columns(else_branch, qualifiers, prune, valid);
+                collect_expr_prune_columns(else_branch, scope, prune, valid);
             }
         }
     }

@@ -171,7 +171,8 @@ impl ScoredDocumentSource {
     ) -> ExecResult<uqa_execution::PhysicalRow> {
         let (values, projection) = shared.into_parts();
         let source = uqa_execution::PhysicalRow::from_shared_values(values, projection);
-        if self.appended_score_attribute.is_none()
+        if self.appended_doc_id_attribute.is_none()
+            && self.appended_score_attribute.is_none()
             && self
             .projected_slots
             .iter()
@@ -203,7 +204,7 @@ impl ScoredDocumentSource {
                 }
             }
         }));
-        Ok(self.append_score_attribute(row, score))
+        Ok(self.append_metadata_attributes(row, doc_id, score)?)
     }
 
     pub(super) fn materialize_entries(
@@ -250,7 +251,7 @@ impl ScoredDocumentSource {
                 &extras,
             );
             let row = uqa_execution::PhysicalRow::from_values(row.into_values());
-            rows.push(self.append_score_attribute(row, entry.score));
+            rows.push(self.append_metadata_attributes(row, doc_id, entry.score)?);
             Ok(())
         })?;
         Ok(rows)
@@ -274,10 +275,11 @@ impl ScoredDocumentSource {
                 &extras,
             );
             let row = self
-                .append_score_attribute(
+                .append_metadata_attributes(
                     uqa_execution::PhysicalRow::from_values(row.into_values()),
+                    doc_id,
                     entry.score,
-                )
+                )?
                 .with_lock_origin(uqa_execution::RowLockOrigin::from_shared(
                     std::sync::Arc::clone(qualifier),
                     std::sync::Arc::clone(storage_name),

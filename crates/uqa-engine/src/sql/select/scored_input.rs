@@ -15,6 +15,8 @@ use super::{
     doc_id_value, Arc, DocId, ExecResult, RecheckDoc, ResultRow, SQLError, ScoredEntry, Value,
     DOC_ID_COLUMN, SCORE_COLUMN, TABLE_OID_COLUMN,
 };
+use crate::sql::from_rows::RelationMetadataProjection;
+use crate::sql::{META_DOC_ID_COLUMN, META_QUALIFIER, META_SCORE_COLUMN};
 
 pub(in crate::sql) enum ScoredInput {
     All,
@@ -193,6 +195,9 @@ pub(in crate::sql) struct ScoredDocumentSource {
     projected_slots: Vec<uqa_execution::ProjectedValueSlot>,
     predicate: Option<uqa_execution::ProjectedPredicate>,
     hidden_columns: HiddenColumns,
+    metadata_doc_id_attribute: Option<uqa_sql::ast::InternalColumnRef>,
+    metadata_score_attribute: Option<uqa_sql::ast::InternalColumnRef>,
+    appended_doc_id_attribute: Option<uqa_sql::ast::InternalColumnRef>,
     appended_score_attribute: Option<uqa_sql::ast::InternalColumnRef>,
     table_oid: Option<i64>,
     ordering: Vec<uqa_execution::PhysicalOrder>,
@@ -208,6 +213,87 @@ pub(in crate::sql) enum ScoredInputCursor {
     Entries(std::vec::IntoIter<ScoredEntry>),
 }
 
+#[derive(Clone, Copy, Default)]
+pub(in crate::sql) struct ScoredSourceAttributes {
+    shared_score: Option<uqa_sql::ast::InternalColumnRef>,
+    metadata: RelationMetadataProjection,
+}
+
+impl ScoredSourceAttributes {
+    pub(in crate::sql) fn shared_score(
+        column: uqa_sql::ast::InternalColumnRef,
+        metadata: RelationMetadataProjection,
+    ) -> Self {
+        Self {
+            shared_score: Some(column),
+            metadata,
+        }
+    }
+}
+
+fn expose_metadata_namespace(
+    schema: &uqa_execution::RowSchema,
+    doc_id: Option<uqa_sql::ast::InternalColumnRef>,
+    score: Option<uqa_sql::ast::InternalColumnRef>,
+) -> uqa_execution::RowSchema {
+    let aliases = [
+        doc_id.and_then(|column| {
+            schema.internal_slot(column).map(|slot| {
+                (
+                    uqa_execution::ColumnIdentity::qualified(META_QUALIFIER, META_DOC_ID_COLUMN),
+                    slot,
+                    Some(uqa_sql::ast::ColumnType::BigInteger),
+                )
+            })
+        }),
+        score.and_then(|column| {
+            schema.internal_slot(column).map(|slot| {
+                (
+                    uqa_execution::ColumnIdentity::qualified(META_QUALIFIER, META_SCORE_COLUMN),
+                    slot,
+                    Some(uqa_sql::ast::ColumnType::DoublePrecision),
+                )
+            })
+        }),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    if aliases.is_empty() {
+        schema.clone()
+    } else {
+        uqa_execution::RowSchema::with_physical_identity_aliases(schema, &aliases)
+    }
+}
+
+fn bind_structural_metadata_attribute(
+    schema: &uqa_execution::RowSchema,
+    hidden_columns: HiddenColumns,
+    hidden: HiddenColumn,
+    column: uqa_sql::ast::InternalColumnRef,
+    ty: uqa_sql::ast::ColumnType,
+) -> (uqa_execution::RowSchema, bool) {
+    if hidden_columns.contains(hidden) {
+        let position = schema
+            .position(hidden.name())
+            .expect("requested source metadata must have a logical position");
+        let slot = schema
+            .physical_slot(position)
+            .expect("requested source metadata must have a physical slot");
+        return (
+            uqa_execution::RowSchema::with_physical_internal_aliases(
+                schema,
+                &[(column, slot, Some(ty))],
+            ),
+            false,
+        );
+    }
+    (
+        uqa_execution::RowSchema::append_internal_typed(schema, &[(column, Some(ty))]),
+        true,
+    )
+}
+
 impl ScoredDocumentSource {
     pub(in crate::sql) fn new(
         table_name: &str,
@@ -217,27 +303,54 @@ impl ScoredDocumentSource {
         ordered_primary_key: Option<String>,
         predicate: Option<uqa_execution::ProjectedPredicate>,
     ) -> Self {
-        Self::new_with_score_column(
+        Self::new_with_metadata(
             table_name,
             table,
             input,
             schema,
             ordered_primary_key,
             predicate,
-            None,
+            RelationMetadataProjection::default(),
+        )
+    }
+
+    pub(in crate::sql) fn new_with_metadata(
+        table_name: &str,
+        table: Arc<crate::TableState>,
+        input: ScoredInput,
+        schema: Vec<String>,
+        ordered_primary_key: Option<String>,
+        predicate: Option<uqa_execution::ProjectedPredicate>,
+        metadata: RelationMetadataProjection,
+    ) -> Self {
+        Self::new_configured(
+            table_name,
+            table,
+            input,
+            schema,
+            ordered_primary_key,
+            predicate,
+            ScoredSourceAttributes {
+                metadata,
+                ..ScoredSourceAttributes::default()
+            },
         )
     }
 
     /// Build one physical scored source while optionally sharing the opaque score attribute with sibling scans that form one logical relation.
-    pub(in crate::sql) fn new_with_score_column(
+    pub(in crate::sql) fn new_configured(
         table_name: &str,
         table: Arc<crate::TableState>,
         input: ScoredInput,
         mut schema: Vec<String>,
         ordered_primary_key: Option<String>,
         predicate: Option<uqa_execution::ProjectedPredicate>,
-        score_column: Option<uqa_sql::ast::InternalColumnRef>,
+        attributes: ScoredSourceAttributes,
     ) -> Self {
+        let ScoredSourceAttributes {
+            shared_score: score_column,
+            metadata,
+        } = attributes;
         // Projection pruning may remove the primary-key column. An ordering
         // property is only meaningful when the ordered value is present in
         // the physical output schema.
@@ -337,39 +450,45 @@ impl ScoredDocumentSource {
         let schema = uqa_execution::RowSchema::with_types(schema, column_types);
         let schema =
             uqa_execution::RowSchema::with_wildcard_hidden_positions(&schema, wildcard_hidden);
+        let mut schema = schema;
+        let mut metadata_doc_id_attribute = None;
+        let mut metadata_score_attribute = None;
+        let mut appended_doc_id_attribute = None;
         let mut appended_score_attribute = None;
-        let schema = if score_origin.is_retrieval() {
-            let score_column = score_column
+        if metadata.includes_doc_id() {
+            let column = uqa_sql::ast::InternalRelationId::allocate().column(0);
+            metadata_doc_id_attribute = Some(column);
+            let (bound, appended) = bind_structural_metadata_attribute(
+                &schema,
+                hidden_columns,
+                HiddenColumn::DocId,
+                column,
+                uqa_sql::ast::ColumnType::BigInteger,
+            );
+            schema = bound;
+            appended_doc_id_attribute = appended.then_some(column);
+        }
+        if score_origin.is_retrieval() || metadata.includes_score() {
+            let column = score_column
                 .unwrap_or_else(|| uqa_sql::ast::InternalRelationId::allocate().column(0));
-            let schema = if hidden_columns.contains(HiddenColumn::Score) {
-                let score_position = schema
-                    .position(SCORE_COLUMN)
-                    .expect("retrieval source must carry its virtual score column");
-                let score_slot = schema
-                    .physical_slot(score_position)
-                    .expect("retrieval score must have a physical slot");
-                uqa_execution::RowSchema::with_physical_internal_aliases(
-                    &schema,
-                    &[(
-                        score_column,
-                        score_slot,
-                        Some(uqa_sql::ast::ColumnType::DoublePrecision),
-                    )],
-                )
-            } else {
-                appended_score_attribute = Some(score_column);
-                uqa_execution::RowSchema::append_internal_typed(
-                    &schema,
-                    &[(
-                        score_column,
-                        Some(uqa_sql::ast::ColumnType::DoublePrecision),
-                    )],
-                )
-            };
-            uqa_execution::RowSchema::with_score_source(&schema, None, score_column)
-        } else {
-            schema
-        };
+            if metadata.includes_score() {
+                metadata_score_attribute = Some(column);
+            }
+            let (bound, appended) = bind_structural_metadata_attribute(
+                &schema,
+                hidden_columns,
+                HiddenColumn::Score,
+                column,
+                uqa_sql::ast::ColumnType::DoublePrecision,
+            );
+            schema = bound;
+            appended_score_attribute = appended.then_some(column);
+            if score_origin.is_retrieval() {
+                schema = uqa_execution::RowSchema::with_score_source(&schema, None, column);
+            }
+        }
+        schema =
+            expose_metadata_namespace(&schema, metadata_doc_id_attribute, metadata_score_attribute);
         Self {
             table_name: table_name.to_string(),
             table,
@@ -380,6 +499,9 @@ impl ScoredDocumentSource {
             projected_slots,
             predicate,
             hidden_columns,
+            metadata_doc_id_attribute,
+            metadata_score_attribute,
+            appended_doc_id_attribute,
             appended_score_attribute,
             table_oid: None,
             ordering,
@@ -449,6 +571,11 @@ impl ScoredDocumentSource {
     /// Bind every visible column to its relation without changing public labels or copying values.
     pub(in crate::sql) fn with_qualifier(mut self, qualifier: &str) -> Self {
         self.schema = uqa_execution::RowSchema::with_relation_qualifier(&self.schema, qualifier);
+        self.schema = expose_metadata_namespace(
+            &self.schema,
+            self.metadata_doc_id_attribute,
+            self.metadata_score_attribute,
+        );
         self
     }
 
@@ -461,16 +588,24 @@ impl ScoredDocumentSource {
         }
     }
 
-    fn append_score_attribute(
+    fn append_metadata_attributes(
         &self,
         row: uqa_execution::PhysicalRow,
+        doc_id: DocId,
         score: f64,
-    ) -> uqa_execution::PhysicalRow {
-        if self.appended_score_attribute.is_some() {
-            row.append_values(vec![Value::Float(score)])
-        } else {
-            row
+    ) -> Result<uqa_execution::PhysicalRow, SQLError> {
+        let mut values = Vec::with_capacity(2);
+        if self.appended_doc_id_attribute.is_some() {
+            values.push(doc_id_value(doc_id)?);
         }
+        if self.appended_score_attribute.is_some() {
+            values.push(Value::Float(score));
+        }
+        Ok(if values.is_empty() {
+            row
+        } else {
+            row.append_values(values)
+        })
     }
 
     fn next_entries(&mut self, max_rows: usize) -> Result<Vec<ScoredEntry>, SQLError> {
@@ -555,7 +690,7 @@ impl uqa_execution::RowSource for ScoredDocumentSource {
         &mut self,
         executor: &mut dyn uqa_execution::AggregateExecutor,
     ) -> ExecResult<bool> {
-        if self.appended_score_attribute.is_some() {
+        if self.appended_doc_id_attribute.is_some() || self.appended_score_attribute.is_some() {
             return Ok(false);
         }
         if !executor.supports_projected_rows() {

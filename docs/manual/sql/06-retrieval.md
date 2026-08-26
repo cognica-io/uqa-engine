@@ -17,6 +17,23 @@ Retrieval functions create document support, scores, or transformations in the u
 
 A GIN index is required for every searched text field. Vector inputs must match the declared `VECTOR(n)` or `TENSOR(n)` dimension and contain finite values.
 
+## Row metadata
+
+`_score` and `_doc_id` remain available for compatibility. A query block with one unambiguous local-table source can also address the same engine-owned values as `_meta.score` (`DOUBLE PRECISION`) and `_meta.doc_id` (`BIGINT`). The `_meta` form is useful when the table has ordinary user columns named `_score` or `_doc_id`: those bare or table-qualified names continue to select the user values, while `_meta.score` and `_meta.doc_id` select the retrieval score and storage document identity independently. An unranked scan exposes `0.0` as its metadata score.
+
+```sql
+SELECT id,
+       _score AS stored_score,
+       _meta.score AS retrieval_score,
+       _doc_id AS stored_document_name,
+       _meta.doc_id AS storage_document_id
+FROM documents
+WHERE text_match(body, 'database')
+ORDER BY _meta.score DESC, id ASC;
+```
+
+The metadata namespace is binding-only: it adds nothing to `*`, and `_meta.*` is not a relation wildcard. When a query block contains more than one local-table metadata source, qualify and project the desired metadata inside a single-source subquery before joining. A real relation alias named `_meta` retains ordinary SQL name resolution and disables the virtual namespace for that query block.
+
 ## Analyzer resolution
 
 Document text and query leaves are transformed by a field-specific analyzer pipeline. Query execution resolves an explicit search analyzer, then falls back to the field's index analyzer, then to the built-in `standard` analyzer. Multiple tokens emitted for one leaf, including synonym expansions, are unioned across posting lists and feed scoring term accounting.

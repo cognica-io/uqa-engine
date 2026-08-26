@@ -18,9 +18,9 @@ use super::{
     validate_table_function_alias_count, validate_table_function_column_definition, ColumnPrune,
     CteScope, Engine, EngineExpressionEvaluator, EngineLateralSource,
     HierarchyScoredDocumentSource, JoinExecutionStrategy, JoinKind, QualifierFilters,
-    QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
-    ScoredDocumentSource, ScoredInput, SourceEvalContext, SourcePlan, TableFunctionCall,
-    TableFunctionTypeRequest, Value, TABLE_OID_COLUMN,
+    QueryOutputMode, RelationMetadataProjection, ResultRow, SQLError, SQLParam, ScalarExpr,
+    ScopedEngineHook, ScoredDocumentSource, ScoredInput, ScoredSourceAttributes, SourceEvalContext,
+    SourcePlan, TableFunctionCall, TableFunctionTypeRequest, Value, TABLE_OID_COLUMN,
 };
 
 use crate::sql::select::{
@@ -48,6 +48,7 @@ pub(in crate::sql) struct EngineTableRowSource {
     columns: Vec<String>,
     schema: Vec<String>,
     physical_schema: uqa_execution::RowSchema,
+    metadata: RelationMetadataProjection,
     table_oid: Option<Value>,
     predicate: Option<uqa_execution::ProjectedPredicate>,
     estimated_cardinality: u64,

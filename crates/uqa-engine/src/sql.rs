@@ -191,6 +191,9 @@ pub(crate) fn bind_catalog_query_routines_with_outer(
 const SCORE_COLUMN: &str = "_score";
 pub(in crate::sql) const DOC_ID_COLUMN: &str = "_doc_id";
 pub(in crate::sql) const TABLE_OID_COLUMN: &str = "tableoid";
+pub(in crate::sql) const META_QUALIFIER: &str = "_meta";
+pub(in crate::sql) const META_DOC_ID_COLUMN: &str = "doc_id";
+pub(in crate::sql) const META_SCORE_COLUMN: &str = "score";
 
 /// Executor-only carrier for `PostgreSQL` 18's `merge_action()` value. The attribute has no SQL name and therefore cannot collide with a target or source column named `_merge_action`.
 pub(in crate::sql) fn merge_action_attribute() -> uqa_sql::ast::InternalColumnRef {

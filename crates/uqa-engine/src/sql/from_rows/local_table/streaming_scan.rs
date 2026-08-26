@@ -76,6 +76,10 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         return Ok(None);
     };
     let wanted = prune.and_then(|prune| prune.get(&qualifier)).cloned();
+    let metadata = wanted
+        .as_ref()
+        .map(super::super::SourceProjection::metadata)
+        .unwrap_or_default();
     let table_columns = engine
         .try_table_columns(name)
         .map_err(|error| SQLError::Internal(format!("read table columns for `{name}`: {error}")))?;
@@ -107,8 +111,55 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
     if include_table_oid {
         column_types.push(Some(uqa_sql::ast::ColumnType::Oid));
     }
-    let physical_schema =
+    let mut physical_schema =
         uqa_execution::RowSchema::with_qualified_types(&qualifier, schema.clone(), column_types);
+    let metadata_relation = uqa_sql::ast::InternalRelationId::allocate();
+    let mut metadata_attributes = Vec::with_capacity(2);
+    if metadata.includes_doc_id() {
+        metadata_attributes.push((
+            metadata_relation.column(0),
+            Some(uqa_sql::ast::ColumnType::BigInteger),
+        ));
+    }
+    if metadata.includes_score() {
+        metadata_attributes.push((
+            metadata_relation.column(1),
+            Some(uqa_sql::ast::ColumnType::DoublePrecision),
+        ));
+    }
+    if !metadata_attributes.is_empty() {
+        physical_schema =
+            uqa_execution::RowSchema::append_internal_typed(&physical_schema, &metadata_attributes);
+        let mut aliases = Vec::with_capacity(metadata_attributes.len());
+        if metadata.includes_doc_id() {
+            let column = metadata_relation.column(0);
+            aliases.push((
+                uqa_execution::ColumnIdentity::qualified(
+                    crate::sql::META_QUALIFIER,
+                    crate::sql::META_DOC_ID_COLUMN,
+                ),
+                physical_schema
+                    .internal_slot(column)
+                    .expect("document metadata attribute must have a physical slot"),
+                Some(uqa_sql::ast::ColumnType::BigInteger),
+            ));
+        }
+        if metadata.includes_score() {
+            let column = metadata_relation.column(1);
+            aliases.push((
+                uqa_execution::ColumnIdentity::qualified(
+                    crate::sql::META_QUALIFIER,
+                    crate::sql::META_SCORE_COLUMN,
+                ),
+                physical_schema
+                    .internal_slot(column)
+                    .expect("score metadata attribute must have a physical slot"),
+                Some(uqa_sql::ast::ColumnType::DoublePrecision),
+            ));
+        }
+        physical_schema =
+            uqa_execution::RowSchema::with_physical_identity_aliases(&physical_schema, &aliases);
+    }
     let table_names = engine.hierarchy_scan_tables(name, *include_descendants)?;
     let mut sources = Vec::with_capacity(table_names.len());
     let mut filter_pushed = false;
@@ -157,6 +208,7 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
             columns: columns.clone(),
             schema: schema.clone(),
             physical_schema: physical_schema.clone(),
+            metadata,
             table_oid,
             predicate,
             estimated_cardinality,

@@ -10,6 +10,7 @@ mod functions;
 mod references;
 
 use super::{Engine, QueryBlockPlan, QueryPlan, SQLError, SQLParam, ScalarExpr, SchemaScope};
+use crate::sql::{META_DOC_ID_COLUMN, META_QUALIFIER, META_SCORE_COLUMN};
 use uqa_execution::{ColumnIdentity, FunctionTypeResolver, RowSchema};
 use uqa_sql::ast::{ColumnType, FunctionBinding};
 
@@ -290,5 +291,21 @@ pub(super) fn with_unqualified_table_pseudo_columns(schema: &RowSchema) -> RowSc
             schema.qualified_type(&qualifier, "tableoid").cloned(),
         ),
     ];
-    RowSchema::with_typed_virtual_identities(schema, &columns)
+    let schema = RowSchema::with_typed_virtual_identities(schema, &columns);
+    if schema.has_qualifier(META_QUALIFIER) {
+        return schema;
+    }
+    RowSchema::with_typed_virtual_identities(
+        &schema,
+        &[
+            (
+                ColumnIdentity::qualified(META_QUALIFIER, META_DOC_ID_COLUMN),
+                Some(ColumnType::BigInteger),
+            ),
+            (
+                ColumnIdentity::qualified(META_QUALIFIER, META_SCORE_COLUMN),
+                Some(ColumnType::DoublePrecision),
+            ),
+        ],
+    )
 }
