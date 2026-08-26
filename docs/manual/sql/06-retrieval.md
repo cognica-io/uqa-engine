@@ -146,7 +146,7 @@ These functions are lowered into operator trees when used in supported retrieval
 
 ## Deep and learned retrieval
 
-`deep_predict`, `deep_learn`, and the layer or model functions connect registered model state to query execution. Learned state has explicit persistence and catalog ownership; runtime callback code remains process-local.
+`deep_predict`, `deep_learn`, and the layer or model functions connect registered model state to query execution. Engine execution currently uses the CPU implementation; the direct `uqa-ml/mlx` crate feature is an experimental probe and is neither selected by SQL nor shipped as a supported backend. Learned state has explicit persistence and catalog ownership, while runtime callback and future accelerator state remain process-local.
 
 Use held out evaluation and version every feature schema, model identity, and calibration set together. A model score has no stable interpretation if feature ordering or normalization changes independently.
 

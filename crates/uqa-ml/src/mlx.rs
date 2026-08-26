@@ -4,7 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Optional Apple MLX backend through the official `mlx-c` API.
+//! Experimental Apple MLX probe through the official `mlx-c` API.
+//!
+//! This module accelerates only the validated feature-batch shape implemented below and is not wired into engine or package backend selection. See the MLX runtime support plan for the isolated production replacement.
 
 #![allow(unsafe_code)]
 

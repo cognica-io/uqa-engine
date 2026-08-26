@@ -65,7 +65,7 @@ UQA Engine is a Cargo workspace with narrow crate boundaries:
 | `uqa` | Umbrella Rust package for the supported embedded surface |
 | `uqa-client` | Local and HTTP engine connection abstraction |
 | `uqa-api` | Fluent query builder and public API helpers |
-| `uqa-ml` | Deep model specs, CPU inference, analytical training, optional MLX backend |
+| `uqa-ml` | Deep model specs, CPU inference, analytical training, and an experimental direct-crate MLX probe |
 | `uqa-cli` | `usql` CLI and admin commands |
 | `uqa-python` | Python extension and packaged `usql` executable |
 | `uqa-node` | Native Node.js extension and platform package boundary |
@@ -98,8 +98,8 @@ The public SQL and API surface includes:
 - CPU inference is always available.
 - Supported deep layers include dense, CNN1D, CNN2D, RNN, LSTM, graph propagation, convolution, pooling, batch norm, dropout, global pooling, softmax, flatten, and attention layers.
 - `deep_learn` performs deterministic analytical training for supported training sets.
-- `deep_predict` runs batch inference through the selected backend.
-- The `mlx` feature enables Apple MLX acceleration through `mlx-c` where available and falls back cleanly when unavailable.
+- Engine `deep_predict` currently runs through the CPU implementation; backend selection is not yet wired into `uqa-engine`.
+- The current `uqa-ml/mlx` feature is an experimental direct-crate probe for one exact `Input -> Dense -> Softmax` feature shape. It silently calls CPU code for other paths, depends on externally installed libraries, and is not a supported engine or package capability; [`0004-mlx-runtime-support.md`](0004-mlx-runtime-support.md) defines its replacement and release gates.
 
 ## 7. CLI contract
 

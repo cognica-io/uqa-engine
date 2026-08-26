@@ -136,7 +136,7 @@ graph TD
 | `uqa-fdw` | Foreign server/table contracts and pushdown handlers for DuckDB, Arrow IPC, and in-memory data |
 | `uqa-api` | Fluent `QueryBuilder` for common SQL, retrieval, graph, fusion, highlight, facet, and ML flows |
 | `uqa-cli` | `usql` interactive shell, scripts, history, completion, highlighting, introspection, and database migration commands |
-| `uqa-ml` | Serializable model specifications, CPU inference, analytical training, and optional Apple MLX backend integration |
+| `uqa-ml` | Serializable model specifications, CPU inference, analytical training, and an experimental direct-crate MLX probe |
 | `uqa-pg-wire` | Network-independent PostgreSQL v3 frontend decoding and backend message encoding |
 | `uqa-python`, `uqa-node`, `uqa-wasm` | Language and browser bindings over the embedded engine and authenticated HTTP data-plane boundaries |
 
@@ -322,7 +322,7 @@ Compressed encrypted containers use authenticated format v2, reject unauthentica
 
 ## ML, protocol, and bindings
 
-`uqa-ml` owns serializable model specifications, training data, inference backends, analytical `deep_learn`, and `deep_predict`. CPU inference supports dense, convolutional, recurrent, graph, pooling, normalization, dropout, softmax, and attention layers; the optional `mlx` feature implements the same backend boundary through Apple's `mlx-c` library.
+`uqa-ml` owns serializable model specifications, training data, CPU inference, analytical `deep_learn`, and `deep_predict`. CPU inference supports dense, convolutional, recurrent, graph, pooling, normalization, dropout, softmax, and attention layers. The current `mlx` feature is only a direct-crate probe for one feature-batch shape, silently delegates other paths to CPU, and is not connected to engine or binding selection; the production architecture is specified in [`../plans/0004-mlx-runtime-support.md`](../plans/0004-mlx-runtime-support.md).
 
 `uqa-pg-wire` only parses and encodes PostgreSQL v3 protocol messages. Socket ownership, scheduling, TLS, authentication storage, planning, and SQL execution remain responsibilities of an embedding server.
 

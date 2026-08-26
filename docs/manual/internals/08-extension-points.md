@@ -68,9 +68,9 @@ New builder methods should compose existing engine syntax or typed operations an
 
 ## Models
 
-`uqa-ml` owns serializable model specifications, CPU inference, analytical training, and optional Apple MLX backend integration. Model catalog records are durable; backend process objects and runtime resources are reconstructed.
+`uqa-ml` owns serializable model specifications, CPU inference, and analytical training. Its current `mlx` feature is an experimental direct-crate probe, not an engine-selected or packaged runtime; the replacement model, runtime, isolation, and distribution contracts are tracked in the [MLX runtime support plan](../../plans/0004-mlx-runtime-support.md). Model catalog records are durable, while backend process objects and runtime resources must remain process-local and reconstructible.
 
-A model extension must version input schema, layer specification, parameter encoding, normalization, and inference backend assumptions. Loading must validate all of them before publication.
+The current bare `DeepModel` JSON is a legacy unversioned format. A replacement or additional model kind must version input schema, layer specification, parameter encoding, normalization, precision, output semantics, and backend requirements, and loading must validate all of them before publication.
 
 ## PostgreSQL wire codec
 
