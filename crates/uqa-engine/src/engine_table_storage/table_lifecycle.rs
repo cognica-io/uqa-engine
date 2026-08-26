@@ -390,6 +390,22 @@ impl Engine {
         Ok(Some(columns))
     }
 
+    /// Snapshot catalog column definitions without resolving executable
+    /// default or generated expressions. Static row-type validation uses this
+    /// while catalog registries are reloaded under the backend transaction
+    /// mutex, where opening a sequence session would recursively acquire that
+    /// mutex.
+    pub(crate) fn try_describe_table_row_type(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Option<Vec<uqa_sql::ast::ColumnDef>>> {
+        let Some(table) = self.try_table(table)? else {
+            return Ok(None);
+        };
+        let columns = table.columns.read().clone();
+        Ok(Some(columns))
+    }
+
     /// DEFAULT expression for `column` on `table`, when one was
     /// declared via `... <col> <type> DEFAULT <expr>`.
     pub fn column_default_expr(

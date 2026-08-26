@@ -6,9 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{Expr, SelectStmt};
+use super::{Expr, InternalRelationId, SelectStmt};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FromClause {
     /// `FROM <table> [AS <alias>]`.
     Table {
@@ -57,6 +57,16 @@ pub enum FromClause {
         rows: Vec<Vec<Expr>>,
         alias: Option<String>,
         column_aliases: Vec<String>,
+        /// Opaque identity for an engine-injected, SQL-invisible VALUES row
+        /// carrier. Parser-produced VALUES sources always leave this unset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[doc(hidden)]
+        internal_relation: Option<InternalRelationId>,
+        /// Declared physical attribute types for an internal VALUES carrier;
+        /// needed even when the carrier has zero rows.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[doc(hidden)]
+        internal_column_types: Vec<Option<super::ColumnType>>,
     },
     /// `FROM <fn>(<args>) [AS <alias>(<col_aliases>)]` -- e.g.
     /// `generate_series(1, 5)`, `unnest(arr)`, `regexp_split_to_table`,
@@ -121,7 +131,7 @@ const fn default_include_descendants() -> bool {
 /// distinct `AS (name type, ...)` clause after each call. The range item's
 /// relation alias, positional aliases, and ordinality remain on the enclosing
 /// group.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TableFunction {
     pub name: String,
     pub output_name: String,

@@ -515,6 +515,7 @@ fn collect_resolved_aliases(
         | ScalarExpr::Star
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::WindowCall { .. }
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }
@@ -828,6 +829,7 @@ fn collect_scalar_qualifiers(expression: &ScalarExpr, output: &mut BTreeSet<Stri
         | ScalarExpr::Star
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)

@@ -14,8 +14,6 @@ use uqa_execution::{
 use uqa_sql::ast::{BinaryOp, ColumnType, JoinKind, JoinUsing};
 use uqa_sql::SQLError;
 
-use super::is_score_provenance_column;
-
 #[derive(Debug, Clone)]
 pub(in crate::sql) struct ResolvedJoinUsing {
     columns: Vec<ResolvedJoinColumn>,
@@ -41,12 +39,7 @@ fn visible_columns(schema: &RowSchema) -> Vec<(&str, usize)> {
         .columns()
         .iter()
         .enumerate()
-        .filter_map(|(position, physical)| {
-            if is_score_provenance_column(physical) {
-                return None;
-            }
-            Some((schema.public_name(position)?, position))
-        })
+        .filter_map(|(position, _)| Some((schema.public_name(position)?, position)))
         .collect()
 }
 

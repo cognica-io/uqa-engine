@@ -130,6 +130,26 @@ impl Engine {
         })
     }
 
+    pub(crate) fn lock_key_reservation(
+        &self,
+        digest: [u8; 32],
+        display_name: &str,
+    ) -> Result<crate::row_locks::LockAcquire, SQLError> {
+        let key = crate::row_locks::RowLockKey {
+            table: self.row_locks.key_reservation_key(digest),
+            doc_id: 0,
+        };
+        self.row_locks.acquire(&crate::row_locks::LockRequest {
+            session_id: self.session_id,
+            key,
+            strength: uqa_sql::ast::LockStrength::ForUpdate,
+            mark: self.current_lock_mark(),
+            wait: uqa_sql::ast::LockWait::Block,
+            cancel: &self.runtime.cancellation,
+            relation: display_name,
+        })
+    }
+
     pub(crate) fn lock_relation(
         &self,
         table: &str,

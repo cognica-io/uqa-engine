@@ -9,8 +9,8 @@
 use crate::engine_user_functions::{canonical_routine_type_name, routine_signature_types};
 use crate::sql::{builtin_function_dispatch_name, ColumnType, Engine, SQLError, Value};
 use uqa_sql::ast::{
-    BinaryOp, ColumnDef, Expr, FunctionBinding, FunctionReturns, GeneratedFunctionDependency,
-    RangeSubtype,
+    BinaryOp, ColumnDef, Expr, FunctionBinding, FunctionDispatch, FunctionReturns,
+    GeneratedFunctionDependency, RangeFunctionOperation, RangeSubtype,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,10 +98,11 @@ fn bind_function_calls(
             if let Some(filter) = filter {
                 bind_function_calls(engine, columns, filter, dependencies)?;
             }
-            if matches!(
-                name.as_str(),
-                uqa_sql::expr::NAMED_ARG_FUNCTION | uqa_sql::expr::VARIADIC_ARG_FUNCTION
-            ) {
+            if binding
+                .as_ref()
+                .and_then(|binding| binding.dispatch)
+                .is_some()
+            {
                 return Ok(());
             }
             let call_arguments = generated_call_arguments(args)?;
@@ -241,6 +242,7 @@ fn bind_function_calls(
         | Expr::QualifiedStar(_)
         | Expr::Column(_)
         | Expr::QualifiedColumn { .. }
+        | Expr::InternalColumn(_)
         | Expr::Literal(_)
         | Expr::WindowCall { .. }
         | Expr::ScalarSubquery(_)
@@ -466,6 +468,7 @@ fn infer_expression(
         | Expr::Param(_)
         | Expr::Star
         | Expr::QualifiedStar(_)
+        | Expr::InternalColumn(_)
         | Expr::WindowCall { .. }
         | Expr::ScalarSubquery(_)
         | Expr::Exists { .. }
@@ -498,6 +501,11 @@ fn infer_function(
 
     if let Some(binding) = binding {
         if binding.builtin {
+            if let Some(dispatch) = binding.dispatch {
+                if let Some(return_type) = infer_dispatched_function(dispatch, &argument_types)? {
+                    return Ok(return_type);
+                }
+            }
             if let Some(return_type) = uqa_execution::fixed_builtin_return_type(binding) {
                 return Ok(column_generation_type(&return_type));
             }
@@ -573,6 +581,62 @@ fn infer_function(
         .ok_or_else(|| SQLError::UnknownFunction(name.to_string()))
 }
 
+fn infer_dispatched_function(
+    dispatch: FunctionDispatch,
+    arguments: &[GenerationType],
+) -> Result<Option<GenerationType>, SQLError> {
+    let first = || {
+        arguments.first().cloned().ok_or_else(|| {
+            SQLError::TypeMismatch(format!("{} requires an argument", dispatch.label()))
+        })
+    };
+    Ok(Some(match dispatch {
+        FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => return Ok(None),
+        FunctionDispatch::ArraySubscripts | FunctionDispatch::Subscript => match first()? {
+            GenerationType::Array(element) => *element,
+            GenerationType::Vector | GenerationType::Tensor => GenerationType::Real,
+            GenerationType::Null | GenerationType::UnknownLiteral(_) => GenerationType::Null,
+            other => {
+                return Err(function_type_error(dispatch.label(), &other, "an array"));
+            }
+        },
+        FunctionDispatch::ArraySlices
+        | FunctionDispatch::Slice
+        | FunctionDispatch::ArraySortJson => first()?,
+        FunctionDispatch::AnyOperator
+        | FunctionDispatch::AllOperator
+        | FunctionDispatch::IsDistinct
+        | FunctionDispatch::BetweenSymmetric => GenerationType::Boolean,
+        FunctionDispatch::ToBinInt4
+        | FunctionDispatch::ToBinInt8
+        | FunctionDispatch::ToHexInt4
+        | FunctionDispatch::ToHexInt8
+        | FunctionDispatch::ToOctInt4
+        | FunctionDispatch::ToOctInt8 => GenerationType::Text,
+        FunctionDispatch::RandomInt4Range => GenerationType::Integer,
+        FunctionDispatch::RandomInt8Range => GenerationType::BigInteger,
+        FunctionDispatch::RandomNumericRange => GenerationType::Numeric,
+        FunctionDispatch::Range {
+            operation, subtype, ..
+        } => match operation {
+            RangeFunctionOperation::Lower | RangeFunctionOperation::Upper => {
+                column_generation_type(&subtype.scalar_type())
+            }
+            RangeFunctionOperation::Merge => GenerationType::Range(subtype),
+            RangeFunctionOperation::Multirange => GenerationType::Multirange(subtype),
+            RangeFunctionOperation::IsEmpty
+            | RangeFunctionOperation::LowerInclusive
+            | RangeFunctionOperation::UpperInclusive
+            | RangeFunctionOperation::LowerInfinite
+            | RangeFunctionOperation::UpperInfinite
+            | RangeFunctionOperation::Overlap
+            | RangeFunctionOperation::Contains
+            | RangeFunctionOperation::ContainedBy
+            | RangeFunctionOperation::Adjacent => GenerationType::Boolean,
+        },
+    }))
+}
+
 #[derive(Debug)]
 pub(super) struct GeneratedCallArgument<'a> {
     pub(super) name: Option<String>,
@@ -624,9 +688,12 @@ fn generated_call_argument(expression: &Expr) -> Result<GeneratedCallArgument<'_
             explicit_variadic: false,
         });
     };
-    if name == uqa_sql::expr::NAMED_ARG_FUNCTION {
+    if binding.as_ref().and_then(|binding| binding.dispatch)
+        == Some(uqa_sql::ast::FunctionDispatch::NamedArgument)
+    {
         validate_generated_marker(
             binding.as_ref(),
+            uqa_sql::ast::FunctionDispatch::NamedArgument,
             *distinct,
             order_by,
             filter.as_deref(),
@@ -641,7 +708,9 @@ fn generated_call_argument(expression: &Expr) -> Result<GeneratedCallArgument<'_
         if !explicit_variadic
             && matches!(
                 value,
-                Expr::Func { name, .. } if name == uqa_sql::expr::NAMED_ARG_FUNCTION
+                Expr::Func { binding, .. }
+                    if binding.as_ref().and_then(|binding| binding.dispatch)
+                        == Some(uqa_sql::ast::FunctionDispatch::NamedArgument)
             )
         {
             return Err(malformed_generated_argument(
@@ -674,11 +743,14 @@ fn generated_variadic_argument(expression: &Expr) -> Result<(&Expr, bool), SQLEr
     else {
         return Ok((expression, false));
     };
-    if name != uqa_sql::expr::VARIADIC_ARG_FUNCTION {
+    if binding.as_ref().and_then(|binding| binding.dispatch)
+        != Some(uqa_sql::ast::FunctionDispatch::VariadicArgument)
+    {
         return Ok((expression, false));
     }
     validate_generated_marker(
         binding.as_ref(),
+        uqa_sql::ast::FunctionDispatch::VariadicArgument,
         *distinct,
         order_by,
         filter.as_deref(),
@@ -691,9 +763,14 @@ fn generated_variadic_argument(expression: &Expr) -> Result<(&Expr, bool), SQLEr
     };
     if matches!(
         value,
-        Expr::Func { name, .. }
-            if name == uqa_sql::expr::VARIADIC_ARG_FUNCTION
-                || name == uqa_sql::expr::NAMED_ARG_FUNCTION
+        Expr::Func { binding, .. }
+            if matches!(
+                binding.as_ref().and_then(|binding| binding.dispatch),
+                Some(
+                    uqa_sql::ast::FunctionDispatch::VariadicArgument
+                        | uqa_sql::ast::FunctionDispatch::NamedArgument
+                )
+            )
     ) {
         return Err(malformed_generated_argument(
             "call argument contains nested syntax markers",
@@ -704,12 +781,22 @@ fn generated_variadic_argument(expression: &Expr) -> Result<(&Expr, bool), SQLEr
 
 fn validate_generated_marker(
     binding: Option<&FunctionBinding>,
+    expected_dispatch: uqa_sql::ast::FunctionDispatch,
     distinct: bool,
     order_by: &[uqa_sql::ast::OrderBy],
     filter: Option<&Expr>,
     name: &str,
 ) -> Result<(), SQLError> {
-    if binding.is_some() || distinct || !order_by.is_empty() || filter.is_some() {
+    if binding.is_none_or(|binding| {
+        !binding.builtin
+            || binding.dispatch != Some(expected_dispatch)
+            || !binding.argument_types.is_empty()
+            || binding.invocation.is_some()
+            || binding.resolution_error.is_some()
+    }) || distinct
+        || !order_by.is_empty()
+        || filter.is_some()
+    {
         return Err(malformed_generated_argument(&format!(
             "{name} syntax marker contains function-call metadata"
         )));
@@ -1221,16 +1308,16 @@ fn non_immutable_function(name: &str) -> SQLError {
 mod tests {
     use super::generated_call_arguments;
     use uqa_core::Value;
-    use uqa_sql::ast::Expr;
+    use uqa_sql::ast::{Expr, FunctionBinding, FunctionDispatch};
 
     #[test]
     fn generated_call_arguments_decode_named_variadic_marker() {
         let arguments = vec![marker(
-            uqa_sql::expr::NAMED_ARG_FUNCTION,
+            FunctionDispatch::NamedArgument,
             vec![
                 Expr::Literal(Value::Str("ITEMS".into())),
                 marker(
-                    uqa_sql::expr::VARIADIC_ARG_FUNCTION,
+                    FunctionDispatch::VariadicArgument,
                     vec![Expr::Literal(Value::Int(42))],
                 ),
             ],
@@ -1246,11 +1333,11 @@ mod tests {
     fn generated_call_arguments_reject_multiple_variadic_markers() {
         let arguments = vec![
             marker(
-                uqa_sql::expr::VARIADIC_ARG_FUNCTION,
+                FunctionDispatch::VariadicArgument,
                 vec![Expr::Literal(Value::Int(1))],
             ),
             marker(
-                uqa_sql::expr::VARIADIC_ARG_FUNCTION,
+                FunctionDispatch::VariadicArgument,
                 vec![Expr::Literal(Value::Int(2))],
             ),
         ];
@@ -1261,10 +1348,11 @@ mod tests {
             .contains("more than one"));
     }
 
-    fn marker(name: &str, args: Vec<Expr>) -> Expr {
+    fn marker(dispatch: FunctionDispatch, args: Vec<Expr>) -> Expr {
+        let binding = FunctionBinding::dispatched(dispatch);
         Expr::Func {
-            name: name.into(),
-            binding: None,
+            name: binding.name.clone(),
+            binding: Some(binding),
             args,
             distinct: false,
             order_by: Vec::new(),

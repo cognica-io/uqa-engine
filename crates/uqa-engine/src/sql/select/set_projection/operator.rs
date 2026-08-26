@@ -10,8 +10,8 @@ use uqa_execution::RowProjectionValue;
 
 use super::{
     eval_call_arguments, Batch, ColumnType, CteScope, Engine, ExecResult, OwnedPhysicalRow,
-    PhysicalOperator, PhysicalRow, PlanSubqueryArena, RowSchema, SQLError, SQLParam,
-    ScalarEvalContext, ScalarExpr, ScopedEngineHook, SetExpansion, SetFunctionCall,
+    PhysicalOperator, PhysicalRow, PlanSubqueryArena, ProjectionTarget, RowSchema, SQLError,
+    SQLParam, ScalarEvalContext, ScalarExpr, ScopedEngineHook, SetExpansion, SetFunctionCall,
     SetFunctionState, SetProjectionPlan, SharedExpressionEvaluator, Value,
 };
 
@@ -71,33 +71,26 @@ impl<'a> SetProjection<'a> {
             .iter()
             .zip(&call_types)
             .filter(|((_, expression), _)| !matches!(expression, ScalarExpr::Star))
-            .map(|((name, _), ty)| (name.clone(), ty.clone()))
+            .map(|((target, _), ty)| {
+                let ProjectionTarget::Internal(column) = target else {
+                    unreachable!("set-call expansion target must be an internal attribute");
+                };
+                (*column, ty.clone())
+            })
             .collect::<Vec<_>>();
         let schema = if pass_through {
-            RowSchema::append_typed(child.row_schema(), &appended)
+            RowSchema::append_internal_typed(child.row_schema(), &appended)
         } else {
-            let mut columns = Vec::new();
-            let mut types = Vec::new();
-            for ((name, expression), ty) in projections.iter().zip(&call_types) {
-                if matches!(expression, ScalarExpr::Star) {
-                    for (position, column) in child.schema().iter().enumerate() {
-                        columns.push(column.clone());
-                        types.push(child.row_schema().column_type(position).cloned());
-                    }
-                } else {
-                    columns.push(name.clone());
-                    types.push(ty.clone());
-                }
-            }
-            RowSchema::with_types(columns, types)
+            unreachable!("set-call expansion always preserves its input")
         };
         let evaluation_columns = plan
             .calls
             .iter()
             .zip(call_types)
-            .map(|(call, ty)| (call.placeholder.clone(), ty))
+            .map(|(call, ty)| (call.placeholder, ty))
             .collect::<Vec<_>>();
-        let evaluation_schema = RowSchema::append_typed(child.row_schema(), &evaluation_columns);
+        let evaluation_schema =
+            RowSchema::append_internal_typed(child.row_schema(), &evaluation_columns);
         let output_batch_size = plan.output_batch_size.max(1);
         Self {
             child,
@@ -234,14 +227,15 @@ impl<'a> SetProjection<'a> {
                         call.name
                     ))
                 })??;
-            let rows = crate::sql::from_rows::registered_table_function_rows(
+            let output = crate::sql::from_rows::registered_table_function_rows(
                 &call.name,
                 result,
                 None,
                 &[],
             )?;
             return Ok(SetFunctionState::Set {
-                rows: Box::new(rows.into_iter().map(Ok)),
+                columns: output.columns,
+                rows: output.rows,
                 exhausted: false,
             });
         }
@@ -265,13 +259,14 @@ impl<'a> SetProjection<'a> {
             ordinality: false,
             column_types: &[],
         };
-        let rows = crate::sql::from_rows::build_table_function_row_stream_with_row(
+        let output = crate::sql::from_rows::build_table_function_row_stream_with_row(
             &context,
             table_call,
             Some(row),
         )?;
         Ok(SetFunctionState::Set {
-            rows,
+            columns: output.columns,
+            rows: output.rows,
             exhausted: false,
         })
     }
@@ -335,8 +330,11 @@ impl<'a> SetProjection<'a> {
         let mut output = Vec::with_capacity(self.schema.len());
         for (_, expression) in &self.plan.projections {
             if matches!(expression, ScalarExpr::Star) {
-                for (position, column) in expansion.input.schema.columns().iter().enumerate() {
-                    if self.evaluator.star_column_visible(column) {
+                for position in 0..expansion.input.schema.len() {
+                    if self
+                        .evaluator
+                        .star_position_visible(&expansion.input.schema, position)
+                    {
                         output.push(expansion.input.schema.physical_slot(position).map_or(
                             RowProjectionValue::Owned(Value::Null),
                             RowProjectionValue::InputSlot,

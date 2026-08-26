@@ -11,7 +11,7 @@ use super::{
     json_array_values, json_each_row_stream, json_object_key_values, regexp_split_values,
     registered_table_function_row_stream, scalar_table_function_default_column,
     string_to_table_values, unnest_row_stream, Engine, PhysicalSubqueryRunner, PlanSubqueryArena,
-    QueryPlan, ResultRow, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, Value,
+    QueryPlan, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, Value,
 };
 
 pub(in crate::sql) struct SourceEvalContext<'a> {
@@ -53,7 +53,30 @@ pub(in crate::sql) struct TableFunctionCall<'a> {
     pub(in crate::sql) column_types: &'a [String],
 }
 
-pub(in crate::sql) const TABLE_FUNCTION_ORDINALITY_COLUMN: &str = "\0uqa.table_function.ordinality";
+/// SQL-visible column metadata paired with positional table-function rows. Column names never participate in row transport, so duplicate and unnamed outputs remain distinct physical attributes.
+pub(in crate::sql) struct TableFunctionRows {
+    pub(in crate::sql) columns: Vec<String>,
+    pub(in crate::sql) rows: uqa_execution::PhysicalProjectRows,
+}
+
+impl TableFunctionRows {
+    pub(in crate::sql) fn new(
+        columns: Vec<String>,
+        rows: uqa_execution::PhysicalProjectRows,
+    ) -> Self {
+        Self { columns, rows }
+    }
+
+    pub(in crate::sql) fn materialized(columns: Vec<String>, rows: Vec<Vec<Value>>) -> Self {
+        Self::new(
+            columns,
+            Box::new(
+                rows.into_iter()
+                    .map(|values| Ok(uqa_execution::PhysicalRow::from_values(values))),
+            ),
+        )
+    }
+}
 
 /// Build a table-function result as a fallible owned row stream. Built-in cardinality-producing functions are evaluated lazily; registered/user functions keep their existing vector-valued API and are adapted at this explicit extension boundary. A correlated lateral caller supplies its physical outer row so function arguments are evaluated in the same scope used during binding.
 #[allow(clippy::similar_names)]
@@ -61,15 +84,21 @@ pub(in crate::sql) fn build_table_function_row_stream_with_row(
     context: &SourceEvalContext<'_>,
     call: TableFunctionCall<'_>,
     row: Option<&uqa_execution::OwnedPhysicalRow>,
-) -> Result<uqa_execution::ProjectRows, SQLError> {
+) -> Result<TableFunctionRows, SQLError> {
     let ordinality = call.ordinality;
-    let rows = build_table_function_value_row_stream_with_row(context, call, row)?;
+    let mut output = build_table_function_value_row_stream_with_row(context, call, row)?;
     if !ordinality {
-        return Ok(rows);
+        return Ok(output);
     }
+    output.columns.push(
+        call.column_aliases
+            .get(output.columns.len())
+            .cloned()
+            .unwrap_or_else(|| "ordinality".into()),
+    );
     let mut next = Some(1_i64);
-    Ok(Box::new(rows.map(move |row| {
-        let mut row = row?;
+    output.rows = Box::new(output.rows.map(move |row| {
+        let row = row?;
         let ordinal = next.ok_or_else(|| {
             uqa_execution::ExecError::SQL(SQLError::Routine {
                 sqlstate: "22003".into(),
@@ -77,9 +106,9 @@ pub(in crate::sql) fn build_table_function_row_stream_with_row(
             })
         })?;
         next = ordinal.checked_add(1);
-        row.insert(TABLE_FUNCTION_ORDINALITY_COLUMN.into(), Value::Int(ordinal));
-        Ok(row)
-    })))
+        Ok(row.append_values(vec![Value::Int(ordinal)]))
+    }));
+    Ok(output)
 }
 
 #[allow(clippy::similar_names)]
@@ -87,7 +116,7 @@ fn build_table_function_value_row_stream_with_row(
     context: &SourceEvalContext<'_>,
     call: TableFunctionCall<'_>,
     row: Option<&uqa_execution::OwnedPhysicalRow>,
-) -> Result<uqa_execution::ProjectRows, SQLError> {
+) -> Result<TableFunctionRows, SQLError> {
     let TableFunctionCall {
         name,
         binding,
@@ -144,7 +173,6 @@ fn build_table_function_value_row_stream_with_row(
         }
         let default_col =
             scalar_table_function_default_column(&lower, output_name, alias, column_aliases);
-        let row_builder = ScalarFunctionRowBuilder { default_col };
 
         let values: Box<dyn Iterator<Item = Value> + Send> = match lower.as_str() {
             "generate_series" => generate_series_values(evaluated)?,
@@ -164,8 +192,9 @@ fn build_table_function_value_row_stream_with_row(
                 )));
             }
         };
-        return Ok(Box::new(
-            values.map(move |value| Ok(row_builder.row(value))),
+        return Ok(TableFunctionRows::new(
+            vec![default_col],
+            Box::new(values.map(|value| Ok(uqa_execution::PhysicalRow::from_values(vec![value])))),
         ));
     }
 
@@ -201,19 +230,5 @@ fn build_table_function_value_row_stream_with_row(
         return registered_table_function_row_stream(name, result, alias, column_aliases);
     }
 
-    let rows = build_table_function_rows_with_row(context, call, row)?;
-    Ok(Box::new(rows.into_iter().map(Ok)))
-}
-
-#[derive(Clone)]
-pub(in crate::sql) struct ScalarFunctionRowBuilder {
-    default_col: String,
-}
-
-impl ScalarFunctionRowBuilder {
-    fn row(&self, value: Value) -> ResultRow {
-        let mut row = ResultRow::new();
-        row.insert(self.default_col.clone(), value);
-        row
-    }
+    build_table_function_rows_with_row(context, call, row)
 }

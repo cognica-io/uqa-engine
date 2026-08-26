@@ -14,7 +14,7 @@ use super::{
     partition_insert_target, validate_vector_dimensions, value_to_tensor, value_to_vector,
     BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope, DocId, Document, Engine, ForeignKey,
     ForeignKeyAction, ForeignKeyMatch, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult,
-    Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
+    Value, DOC_ID_COLUMN,
 };
 use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema, ScalarExpr};
 use uqa_planner::{
@@ -503,6 +503,13 @@ fn missing_document_error(action: &str, table: &str, doc_id: DocId) -> SQLError 
     ))
 }
 
+fn is_virtual_document_id_column(column: &str, definitions: &[uqa_sql::ast::ColumnDef]) -> bool {
+    column == DOC_ID_COLUMN
+        && !definitions
+            .iter()
+            .any(|definition| definition.name == DOC_ID_COLUMN)
+}
+
 fn dml_target_row(
     engine: &Engine,
     table: &str,
@@ -543,7 +550,7 @@ fn dml_target_row(
     let values = columns
         .iter()
         .map(|column| {
-            if column == DOC_ID_COLUMN
+            if is_virtual_document_id_column(column, &definitions)
                 || definitions.iter().any(|definition| {
                     definition.name == *column
                         && definition.primary_key
@@ -627,18 +634,13 @@ fn dml_append_hidden_qualified_row(
     types: &[Option<ColumnType>],
     values: Vec<Value>,
 ) -> OwnedPhysicalRow {
-    let hidden = columns
+    let hidden_types = columns
         .iter()
         .enumerate()
-        .map(|(position, _)| {
-            (
-                format!("\0uqa.dml.{qualifier}.{position}"),
-                types.get(position).cloned().flatten(),
-            )
-        })
+        .map(|(position, _)| types.get(position).cloned().flatten())
         .collect::<Vec<_>>();
-    let schema = RowSchema::append_typed(&base.schema, &hidden);
-    let offset = base.schema.len();
+    let schema = RowSchema::append_hidden_typed(&base.schema, &hidden_types);
+    let offset = base.schema.physical_width();
     let aliases = columns
         .iter()
         .enumerate()
@@ -646,11 +648,12 @@ fn dml_append_hidden_qualified_row(
             (
                 ColumnIdentity::qualified(qualifier, column),
                 offset + position,
+                hidden_types[position].clone(),
             )
         })
         .collect::<Vec<_>>();
     OwnedPhysicalRow::new(
-        RowSchema::with_identity_aliases(&schema, &aliases),
+        RowSchema::with_physical_identity_aliases(&schema, &aliases),
         base.row.clone().append_values(values),
     )
 }
@@ -919,11 +922,6 @@ fn eval_mutation_assignment(
     coerce_to_column_type(engine, table, column, value).map(Some)
 }
 
-const MERGE_PAIR_DOC_ID: &str = "__uqa_merge_pair_doc_id";
-const MERGE_PAIR_KIND: &str = "__uqa_merge_pair_kind";
-const MERGE_PAIR_STORAGE_TABLE: &str = "__uqa_merge_pair_storage_table";
-const MERGE_PAIR_TARGET_DOCUMENT: &str = "__uqa_merge_pair_target_document";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MergePairKind {
     Matched,
@@ -961,13 +959,8 @@ struct MergePairing {
 }
 
 fn merge_pair_schema(source: &RowSchema) -> RowSchema {
-    let header = RowSchema::with_types(
-        vec![
-            MERGE_PAIR_KIND.into(),
-            MERGE_PAIR_STORAGE_TABLE.into(),
-            MERGE_PAIR_DOC_ID.into(),
-            MERGE_PAIR_TARGET_DOCUMENT.into(),
-        ],
+    let header = RowSchema::with_internal_relation_types(
+        uqa_sql::ast::InternalRelationId::allocate(),
         vec![
             Some(ColumnType::BigInteger),
             Some(ColumnType::Text),
@@ -996,10 +989,10 @@ fn encode_merge_pair(
 
 fn decode_merge_pair(encoded: OwnedPhysicalRow) -> Result<MergePairing, SQLError> {
     let kind =
-        MergePairKind::decode(encoded.get(MERGE_PAIR_KIND).ok_or_else(|| {
+        MergePairKind::decode(encoded.physical_value_at(0).ok_or_else(|| {
             SQLError::Internal("spilled MERGE pairing lost its match kind".into())
         })?)?;
-    let storage_table = match encoded.get(MERGE_PAIR_STORAGE_TABLE) {
+    let storage_table = match encoded.physical_value_at(1) {
         Some(Value::Str(table)) => Some(table.clone()),
         Some(Value::Null) | None => None,
         Some(value) => {
@@ -1008,7 +1001,7 @@ fn decode_merge_pair(encoded: OwnedPhysicalRow) -> Result<MergePairing, SQLError
             )))
         }
     };
-    let doc_id = match encoded.get(MERGE_PAIR_DOC_ID) {
+    let doc_id = match encoded.physical_value_at(2) {
         Some(Value::Null) | None => None,
         Some(Value::Str(doc_id)) => Some(doc_id.parse::<DocId>().map_err(|error| {
             SQLError::Internal(format!(
@@ -1021,7 +1014,7 @@ fn decode_merge_pair(encoded: OwnedPhysicalRow) -> Result<MergePairing, SQLError
             )))
         }
     };
-    let target_document = match encoded.get(MERGE_PAIR_TARGET_DOCUMENT) {
+    let target_document = match encoded.physical_value_at(3) {
         Some(Value::Map(document)) => Some(document.clone()),
         Some(Value::Null) | None => None,
         Some(value) => {

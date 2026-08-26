@@ -6,8 +6,9 @@
 
 use super::{
     BTreeSet, BackendTransactionMode, Engine, EngineDataSnapshot, SQLError, SQLParam, SQLResult,
-    SessionStateSnapshot, StorageBackendError, StorageBackendResult, TransactionDirtyState,
-    TransactionFrame, TransactionIntent, TransactionSavepoint, TransactionStatus,
+    SessionStateSnapshot, StorageBackendError, StorageBackendResult, StorageSavepointId,
+    TransactionDirtyState, TransactionFrame, TransactionIntent, TransactionSavepoint,
+    TransactionStatus,
 };
 use uqa_sql::ast::TransactionStmt;
 
@@ -506,11 +507,11 @@ impl Engine {
             (None, data_snapshot, baseline)
         } else {
             let baseline = stack[0].snapshot_change_baseline;
-            let savepoint = format!("__uqa_nested_tx_{}", stack.len());
+            let savepoint = StorageSavepointId::allocate();
             if let Some(backend) = self.storage.backend.as_ref() {
                 if !Self::backend_savepoints_deferred(stack) {
                     backend
-                        .savepoint(&savepoint)
+                        .savepoint(savepoint)
                         .map_err(|err| Self::storage_tx_error("nested BEGIN savepoint", &err))?;
                 }
                 (Some(savepoint), None, baseline)
@@ -627,11 +628,11 @@ impl Engine {
         Ok((self.snapshot_transaction_data()?, baseline))
     }
 
-    /// Register the physical backend writer this session holds in the logical lock manager. Eager writer frames (typed `begin`, direct transactions) and promoted deferred frames must both hold the `\0uqa-backend-writer` relation lock, otherwise a writer blocked on a row lock is invisible to the deadlock detector and a promoting SQL session waits at the storage layer instead of reporting `40P01`.
+    /// Register the physical backend writer this session holds in the logical lock manager. Eager writer frames (typed `begin`, direct transactions) and promoted deferred frames must both hold the structural backend-writer lock, otherwise a writer blocked on a row lock is invisible to the deadlock detector and a promoting SQL session waits at the storage layer instead of reporting `40P01`.
     fn acquire_backend_writer_lock(&self, mark: u32) -> Result<(), SQLError> {
         self.row_locks.acquire_relation(
             self.session_id,
-            self.row_locks.table_key("\0uqa-backend-writer"),
+            self.row_locks.backend_writer_key(),
             crate::row_locks::RelationLockMode::AccessExclusive,
             mark,
             &self.runtime.cancellation,
@@ -673,8 +674,7 @@ impl Engine {
         let storage_savepoint = stack
             .last()
             .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?
-            .storage_savepoint
-            .clone();
+            .storage_savepoint;
         self.validate_deferred_constraints_before_commit(stack, storage_savepoint.is_some())?;
         let frame = stack
             .last()
@@ -711,7 +711,7 @@ impl Engine {
         };
         let savepoints_deferred = Self::backend_savepoints_deferred(stack);
         if let Some(backend) = self.storage.backend.as_ref() {
-            let commit_result = if let Some(savepoint) = storage_savepoint.as_ref() {
+            let commit_result = if let Some(savepoint) = storage_savepoint {
                 if savepoints_deferred {
                     Ok(())
                 } else {
@@ -818,14 +818,13 @@ impl Engine {
         let storage_savepoint = stack
             .last()
             .ok_or_else(|| SQLError::Internal("ROLLBACK without an open transaction".into()))?
-            .storage_savepoint
-            .clone();
+            .storage_savepoint;
         let backend_aborted = stack
             .last()
             .is_some_and(|frame| frame.status == TransactionStatus::FailedBackendAborted);
         let savepoints_deferred = Self::backend_savepoints_deferred(stack);
         if let Some(backend) = self.storage.backend.as_ref().filter(|_| !backend_aborted) {
-            let rollback_result = if let Some(savepoint) = storage_savepoint.as_ref() {
+            let rollback_result = if let Some(savepoint) = storage_savepoint {
                 if savepoints_deferred {
                     Ok(())
                 } else {
@@ -907,7 +906,7 @@ impl Engine {
 
         let savepoint = frame.savepoints.last().map(|savepoint| {
             (
-                savepoint.name.clone(),
+                savepoint.storage_savepoint,
                 savepoint.session_snapshot.clone(),
                 savepoint.data_snapshot.clone(),
                 savepoint.dirty,
@@ -922,7 +921,7 @@ impl Engine {
             frame.dirty_at_begin,
         );
         // A nested frame owns a backend savepoint of its own; aborting the statement rolls the storage back to that savepoint so the outer frames' writes and locks survive, exactly like a PostgreSQL subtransaction abort. Only the outermost frame aborts the whole backend transaction.
-        let frame_storage_savepoint = frame.storage_savepoint.clone();
+        let frame_storage_savepoint = frame.storage_savepoint;
         let frame_begin_lock_mark = frame.begin_lock_mark;
         let savepoints_deferred = Self::backend_savepoints_deferred(&stack);
         let mut cleanup_errors = Vec::new();
@@ -933,9 +932,9 @@ impl Engine {
             let rollback = if savepoint.is_some() || frame_storage_savepoint.is_some() {
                 if savepoints_deferred {
                     Ok(())
-                } else if let Some((name, ..)) = savepoint.as_ref() {
-                    backend.rollback_to_savepoint(name)
-                } else if let Some(frame_savepoint) = frame_storage_savepoint.as_ref() {
+                } else if let Some((storage_savepoint, ..)) = savepoint.as_ref() {
+                    backend.rollback_to_savepoint(*storage_savepoint)
+                } else if let Some(frame_savepoint) = frame_storage_savepoint {
                     backend.rollback_to_savepoint(frame_savepoint)
                 } else {
                     Ok(())
@@ -1027,12 +1026,13 @@ impl Engine {
         let session_snapshot = self.snapshot_session_state();
         let data_snapshot = self.snapshot_transaction_data()?;
         let deferred = Self::backend_savepoints_deferred(stack);
+        let storage_savepoint = StorageSavepointId::allocate();
         let frame = stack.last_mut().ok_or_else(|| {
             SQLError::Internal("SAVEPOINT lost its checked transaction frame".into())
         })?;
         if let Some(backend) = self.storage.backend.as_ref().filter(|_| !deferred) {
             backend
-                .savepoint(&name)
+                .savepoint(storage_savepoint)
                 .map_err(|err| Self::storage_tx_error("SAVEPOINT", &err))?;
         }
         let keep_mark = frame.lock_mark;
@@ -1042,6 +1042,7 @@ impl Engine {
         let deferred_foreign_key_rows = frame.deferred_foreign_key_rows.clone();
         frame.savepoints.push(TransactionSavepoint {
             name,
+            storage_savepoint,
             session_snapshot,
             data_snapshot,
             dirty: self.transaction_dirty_state(),
@@ -1066,9 +1067,10 @@ impl Engine {
             .iter()
             .rposition(|savepoint| savepoint.name == name)
             .ok_or_else(|| SQLError::Internal(format!("savepoint `{name}` not found")))?;
+        let storage_savepoint = frame.savepoints[position].storage_savepoint;
         if let Some(backend) = self.storage.backend.as_ref().filter(|_| !deferred) {
             backend
-                .release_savepoint(name)
+                .release_savepoint(storage_savepoint)
                 .map_err(|err| Self::storage_tx_error("RELEASE SAVEPOINT", &err))?;
         }
         frame.savepoints.truncate(position);
@@ -1089,9 +1091,10 @@ impl Engine {
             .iter()
             .rposition(|savepoint| savepoint.name == name)
             .ok_or_else(|| SQLError::Internal(format!("savepoint `{name}` not found")))?;
+        let storage_savepoint = frame.savepoints[position].storage_savepoint;
         if let Some(backend) = self.storage.backend.as_ref().filter(|_| !deferred) {
             backend
-                .rollback_to_savepoint(name)
+                .rollback_to_savepoint(storage_savepoint)
                 .map_err(|err| Self::storage_tx_error("ROLLBACK TO SAVEPOINT", &err))?;
         }
         let mut cleanup_errors = Vec::new();
@@ -1280,24 +1283,24 @@ impl Engine {
             ));
         }
         // Writer promotion materializes every logical savepoint in creation order: each frame's own nested-BEGIN savepoint precedes the user savepoints declared inside that frame, and inner frames follow their parents. A refreshed read transaction keeps them logical.
-        let mut savepoint_names = Vec::new();
+        let mut storage_savepoints = Vec::new();
         if !deferred {
             for frame in stack.iter() {
-                if let Some(name) = frame.storage_savepoint.as_ref() {
-                    savepoint_names.push(name.clone());
+                if let Some(savepoint) = frame.storage_savepoint {
+                    storage_savepoints.push(savepoint);
                 }
-                savepoint_names.extend(
+                storage_savepoints.extend(
                     frame
                         .savepoints
                         .iter()
-                        .map(|savepoint| savepoint.name.clone()),
+                        .map(|savepoint| savepoint.storage_savepoint),
                 );
             }
         }
-        for savepoint_name in savepoint_names {
-            if let Err(error) = backend.savepoint(&savepoint_name) {
+        for storage_savepoint in storage_savepoints {
+            if let Err(error) = backend.savepoint(storage_savepoint) {
                 let failure = SQLError::Internal(format!(
-                    "recreate savepoint `{savepoint_name}` after {action} failed: {error}"
+                    "recreate storage savepoint after {action} failed: {error}"
                 ));
                 return Err(self.abort_failed_backend_transaction_replacement(
                     stack,

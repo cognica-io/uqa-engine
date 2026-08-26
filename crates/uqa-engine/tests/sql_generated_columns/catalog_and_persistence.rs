@@ -8,6 +8,39 @@
 
 use super::*;
 
+fn downgrade_generated_array_subscript(value: &mut serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::Array(values) => values
+            .iter_mut()
+            .map(downgrade_generated_array_subscript)
+            .sum(),
+        serde_json::Value::Object(object) => {
+            let mut changed = 0;
+            if let Some(serde_json::Value::Object(function)) = object.get_mut("Func") {
+                let is_array_subscript = function
+                    .get("binding")
+                    .and_then(|binding| binding.get("dispatch"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some("ArraySubscripts");
+                if is_array_subscript {
+                    function.insert(
+                        "name".into(),
+                        serde_json::Value::String("__array_subscripts".into()),
+                    );
+                    function.remove("binding");
+                    changed += 1;
+                }
+            }
+            changed
+                + object
+                    .values_mut()
+                    .map(downgrade_generated_array_subscript)
+                    .sum::<usize>()
+        }
+        _ => 0,
+    }
+}
+
 #[test]
 fn generated_column_catalog_metadata_matches_pg18() {
     let engine = Engine::new();
@@ -144,6 +177,68 @@ fn generated_schema_and_values_survive_reopen() {
         .unwrap();
     assert_eq!(int(&result.rows[0], "virtual_value"), 8);
     assert_eq!(int(&result.rows[0], "stored_value"), 14);
+}
+
+#[test]
+fn v016_generated_dispatch_markers_migrate_and_are_rewritten_on_reopen() {
+    use uqa_storage::{Catalog, ManagedConnection};
+
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("legacy-generated-dispatch.sqlite");
+    {
+        let engine = Engine::open(&database).unwrap();
+        engine
+            .sql(
+                "CREATE TABLE legacy_generated_dispatch (
+                     id INTEGER PRIMARY KEY,
+                     source INTEGER[],
+                     derived INTEGER GENERATED ALWAYS AS (source[2]) STORED
+                 )",
+                &[],
+            )
+            .unwrap();
+    }
+
+    {
+        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let mut tables = catalog.load_tables().unwrap();
+        let table = tables
+            .iter_mut()
+            .find(|table| table.relation.name == "legacy_generated_dispatch")
+            .unwrap();
+        let mut columns: serde_json::Value = serde_json::from_str(&table.columns_json).unwrap();
+        assert_eq!(
+            downgrade_generated_array_subscript(&mut columns),
+            1,
+            "unexpected stored columns: {columns}"
+        );
+        table.columns_json = serde_json::to_string(&columns).unwrap();
+        catalog.save_table(table).unwrap();
+    }
+
+    let reopened = Engine::open(&database).unwrap();
+    reopened
+        .sql(
+            "INSERT INTO legacy_generated_dispatch (id, source) VALUES (1, ARRAY[11, 42])",
+            &[],
+        )
+        .unwrap();
+    let selected = reopened
+        .sql("SELECT derived FROM legacy_generated_dispatch", &[])
+        .unwrap();
+    assert_eq!(selected.rows[0]["derived"], Value::Int(42));
+    drop(reopened);
+
+    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let migrated = catalog
+        .load_tables()
+        .unwrap()
+        .into_iter()
+        .find(|table| table.relation.name == "legacy_generated_dispatch")
+        .unwrap()
+        .columns_json;
+    assert!(!migrated.contains("__array_subscripts"));
+    assert!(migrated.contains(r#""dispatch":"ArraySubscripts""#));
 }
 
 #[test]

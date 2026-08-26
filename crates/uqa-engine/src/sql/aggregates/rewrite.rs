@@ -11,15 +11,14 @@ use super::{
     Engine, SQLError, ScalarEvalContext, ScalarExpr, ScalarOrder, Value,
 };
 
-const AGGREGATE_SLOT_PREFIX: &str = "\0uqa.aggregate.";
-
 pub(in crate::sql) fn compile_projection_aggregate_slots(
     engine: &Engine,
     expr: &ScalarExpr,
+    relation: uqa_sql::ast::InternalRelationId,
     cursor: &mut usize,
 ) -> Result<ScalarExpr, SQLError> {
     rewrite_aggregates(engine, expr, &mut |_| {
-        let slot = aggregate_slot(*cursor);
+        let slot = aggregate_slot(relation, *cursor);
         *cursor += 1;
         Ok(slot)
     })
@@ -28,13 +27,14 @@ pub(in crate::sql) fn compile_projection_aggregate_slots(
 pub(in crate::sql) fn compile_having_aggregate_slots(
     engine: &Engine,
     expr: &ScalarExpr,
+    relation: uqa_sql::ast::InternalRelationId,
     aggregate_targets: &[ScalarExpr],
 ) -> Result<ScalarExpr, SQLError> {
     rewrite_aggregates(engine, expr, &mut |aggregate| {
         aggregate_targets
             .iter()
             .position(|target| exprs_match(target, aggregate))
-            .map(aggregate_slot)
+            .map(|index| aggregate_slot(relation, index))
             .ok_or_else(|| {
                 SQLError::Unsupported(
                     "HAVING references an aggregate that is not in the aggregate plan".into(),
@@ -43,12 +43,15 @@ pub(in crate::sql) fn compile_having_aggregate_slots(
     })
 }
 
-pub(in crate::sql) fn aggregate_slot_index(column: &str) -> Option<usize> {
-    column.strip_prefix(AGGREGATE_SLOT_PREFIX)?.parse().ok()
+pub(in crate::sql) fn aggregate_slot_index(
+    column: uqa_sql::ast::InternalColumnRef,
+    relation: uqa_sql::ast::InternalRelationId,
+) -> Option<usize> {
+    (column.relation() == relation).then(|| column.attribute())
 }
 
-fn aggregate_slot(index: usize) -> ScalarExpr {
-    ScalarExpr::Column(format!("{AGGREGATE_SLOT_PREFIX}{index}"))
+fn aggregate_slot(relation: uqa_sql::ast::InternalRelationId, index: usize) -> ScalarExpr {
+    ScalarExpr::InternalColumn(relation.column(index))
 }
 
 fn rewrite_aggregates(

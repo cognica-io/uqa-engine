@@ -128,8 +128,8 @@ use uqa_storage::{
     MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, PersistentStorageBackend,
     PersistentStorageProvider, PersistentStorageSession, RelationIdentity,
     SQLiteCompressedContainerAnchor, SQLiteStorageProvider, SequenceRow, StorageBackendError,
-    StorageBackendResult, TableSchema, VectorFieldSchema, VectorIndex, VectorIndexOpenMode,
-    VectorIndexSpec, ViewRow,
+    StorageBackendResult, StorageSavepointId, TableSchema, VectorFieldSchema, VectorIndex,
+    VectorIndexOpenMode, VectorIndexSpec, ViewRow,
 };
 
 pub use sql::{SQLCursor, SQLCursorSummary};
@@ -367,7 +367,7 @@ enum TransactionStatus {
 struct TransactionFrame {
     /// Whether this outer frame is the SQL driver's per-statement autocommit boundary rather than a user-visible `BEGIN` block.
     implicit_statement: bool,
-    storage_savepoint: Option<String>,
+    storage_savepoint: Option<StorageSavepointId>,
     intent: TransactionIntent,
     backend_mode: BackendTransactionMode,
     status: TransactionStatus,
@@ -386,6 +386,7 @@ struct TransactionFrame {
 
 struct TransactionSavepoint {
     name: String,
+    storage_savepoint: StorageSavepointId,
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
     dirty: TransactionDirtyState,

@@ -16,8 +16,8 @@ use super::validation::{
     expression_may_return_set, function_may_return_set, resolve_set_function_binding,
 };
 use super::{
-    AggregateOutputProjectionPlan, Engine, GroupSetProjectionPlan, SetFunctionCall,
-    SET_VALUE_COLUMN_PREFIX,
+    AggregateOutputProjectionPlan, Engine, GroupSetProjectionPlan, ProjectionTarget,
+    SetFunctionCall,
 };
 use crate::sql::aggregates::{exprs_match, is_aggregate};
 
@@ -26,6 +26,7 @@ pub(super) fn rewrite_set_calls(
     resolver: &dyn FunctionTypeResolver,
     mut expression: ScalarExpr,
     calls: &mut Vec<SetFunctionCall>,
+    call_relation: uqa_sql::ast::InternalRelationId,
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<ScalarExpr, SQLError> {
@@ -38,16 +39,37 @@ pub(super) fn rewrite_set_calls(
             ..
         } => {
             for argument in args {
-                *argument =
-                    rewrite_set_calls(engine, resolver, argument.clone(), calls, schema, params)?;
+                *argument = rewrite_set_calls(
+                    engine,
+                    resolver,
+                    argument.clone(),
+                    calls,
+                    call_relation,
+                    schema,
+                    params,
+                )?;
             }
             for order in order_by {
-                order.expr =
-                    rewrite_set_calls(engine, resolver, order.expr.clone(), calls, schema, params)?;
+                order.expr = rewrite_set_calls(
+                    engine,
+                    resolver,
+                    order.expr.clone(),
+                    calls,
+                    call_relation,
+                    schema,
+                    params,
+                )?;
             }
             if let Some(filter) = filter {
-                **filter =
-                    rewrite_set_calls(engine, resolver, (**filter).clone(), calls, schema, params)?;
+                **filter = rewrite_set_calls(
+                    engine,
+                    resolver,
+                    (**filter).clone(),
+                    calls,
+                    call_relation,
+                    schema,
+                    params,
+                )?;
             }
         }
         ScalarExpr::Array(items)
@@ -55,46 +77,155 @@ pub(super) fn rewrite_set_calls(
         | ScalarExpr::And(items)
         | ScalarExpr::Or(items) => {
             for item in items {
-                *item = rewrite_set_calls(engine, resolver, item.clone(), calls, schema, params)?;
+                *item = rewrite_set_calls(
+                    engine,
+                    resolver,
+                    item.clone(),
+                    calls,
+                    call_relation,
+                    schema,
+                    params,
+                )?;
             }
         }
         ScalarExpr::Binary { lhs, rhs, .. } => {
-            **lhs = rewrite_set_calls(engine, resolver, (**lhs).clone(), calls, schema, params)?;
-            **rhs = rewrite_set_calls(engine, resolver, (**rhs).clone(), calls, schema, params)?;
+            **lhs = rewrite_set_calls(
+                engine,
+                resolver,
+                (**lhs).clone(),
+                calls,
+                call_relation,
+                schema,
+                params,
+            )?;
+            **rhs = rewrite_set_calls(
+                engine,
+                resolver,
+                (**rhs).clone(),
+                calls,
+                call_relation,
+                schema,
+                params,
+            )?;
         }
         ScalarExpr::Not(inner)
         | ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => {
-            **inner =
-                rewrite_set_calls(engine, resolver, (**inner).clone(), calls, schema, params)?;
+            **inner = rewrite_set_calls(
+                engine,
+                resolver,
+                (**inner).clone(),
+                calls,
+                call_relation,
+                schema,
+                params,
+            )?;
         }
         ScalarExpr::Between { expr, low, high } => {
-            **expr = rewrite_set_calls(engine, resolver, (**expr).clone(), calls, schema, params)?;
-            **low = rewrite_set_calls(engine, resolver, (**low).clone(), calls, schema, params)?;
-            **high = rewrite_set_calls(engine, resolver, (**high).clone(), calls, schema, params)?;
+            **expr = rewrite_set_calls(
+                engine,
+                resolver,
+                (**expr).clone(),
+                calls,
+                call_relation,
+                schema,
+                params,
+            )?;
+            **low = rewrite_set_calls(
+                engine,
+                resolver,
+                (**low).clone(),
+                calls,
+                call_relation,
+                schema,
+                params,
+            )?;
+            **high = rewrite_set_calls(
+                engine,
+                resolver,
+                (**high).clone(),
+                calls,
+                call_relation,
+                schema,
+                params,
+            )?;
         }
         ScalarExpr::InList { expr, list, .. } => {
-            **expr = rewrite_set_calls(engine, resolver, (**expr).clone(), calls, schema, params)?;
+            **expr = rewrite_set_calls(
+                engine,
+                resolver,
+                (**expr).clone(),
+                calls,
+                call_relation,
+                schema,
+                params,
+            )?;
             for item in list {
-                *item = rewrite_set_calls(engine, resolver, item.clone(), calls, schema, params)?;
+                *item = rewrite_set_calls(
+                    engine,
+                    resolver,
+                    item.clone(),
+                    calls,
+                    call_relation,
+                    schema,
+                    params,
+                )?;
             }
         }
         ScalarExpr::WindowCall { args, spec, .. } => {
             for argument in args {
-                *argument =
-                    rewrite_set_calls(engine, resolver, argument.clone(), calls, schema, params)?;
+                *argument = rewrite_set_calls(
+                    engine,
+                    resolver,
+                    argument.clone(),
+                    calls,
+                    call_relation,
+                    schema,
+                    params,
+                )?;
             }
             for item in &mut spec.partition_by {
-                *item = rewrite_set_calls(engine, resolver, item.clone(), calls, schema, params)?;
+                *item = rewrite_set_calls(
+                    engine,
+                    resolver,
+                    item.clone(),
+                    calls,
+                    call_relation,
+                    schema,
+                    params,
+                )?;
             }
             for order in &mut spec.order_by {
-                order.expr =
-                    rewrite_set_calls(engine, resolver, order.expr.clone(), calls, schema, params)?;
+                order.expr = rewrite_set_calls(
+                    engine,
+                    resolver,
+                    order.expr.clone(),
+                    calls,
+                    call_relation,
+                    schema,
+                    params,
+                )?;
             }
             if let Some(frame) = &mut spec.frame {
-                rewrite_set_frame_bound(engine, resolver, &mut frame.start, calls, schema, params)?;
-                rewrite_set_frame_bound(engine, resolver, &mut frame.end, calls, schema, params)?;
+                rewrite_set_frame_bound(
+                    engine,
+                    resolver,
+                    &mut frame.start,
+                    calls,
+                    call_relation,
+                    schema,
+                    params,
+                )?;
+                rewrite_set_frame_bound(
+                    engine,
+                    resolver,
+                    &mut frame.end,
+                    calls,
+                    call_relation,
+                    schema,
+                    params,
+                )?;
             }
         }
         ScalarExpr::Case {
@@ -103,28 +234,65 @@ pub(super) fn rewrite_set_calls(
             else_branch,
         } => {
             if let Some(base) = base {
-                **base =
-                    rewrite_set_calls(engine, resolver, (**base).clone(), calls, schema, params)?;
+                **base = rewrite_set_calls(
+                    engine,
+                    resolver,
+                    (**base).clone(),
+                    calls,
+                    call_relation,
+                    schema,
+                    params,
+                )?;
             }
             for (condition, result) in when {
-                *condition =
-                    rewrite_set_calls(engine, resolver, condition.clone(), calls, schema, params)?;
-                *result =
-                    rewrite_set_calls(engine, resolver, result.clone(), calls, schema, params)?;
+                *condition = rewrite_set_calls(
+                    engine,
+                    resolver,
+                    condition.clone(),
+                    calls,
+                    call_relation,
+                    schema,
+                    params,
+                )?;
+                *result = rewrite_set_calls(
+                    engine,
+                    resolver,
+                    result.clone(),
+                    calls,
+                    call_relation,
+                    schema,
+                    params,
+                )?;
             }
             if let Some(branch) = else_branch {
-                **branch =
-                    rewrite_set_calls(engine, resolver, (**branch).clone(), calls, schema, params)?;
+                **branch = rewrite_set_calls(
+                    engine,
+                    resolver,
+                    (**branch).clone(),
+                    calls,
+                    call_relation,
+                    schema,
+                    params,
+                )?;
             }
         }
         ScalarExpr::InSubquery { expr, .. } => {
-            **expr = rewrite_set_calls(engine, resolver, (**expr).clone(), calls, schema, params)?;
+            **expr = rewrite_set_calls(
+                engine,
+                resolver,
+                (**expr).clone(),
+                calls,
+                call_relation,
+                schema,
+                params,
+            )?;
         }
         ScalarExpr::Default
         | ScalarExpr::Star
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
@@ -162,15 +330,15 @@ pub(super) fn rewrite_set_calls(
                 .map(|call| call.level + 1)
                 .max()
                 .unwrap_or(0);
-            let placeholder = format!("{SET_VALUE_COLUMN_PREFIX}{}", calls.len());
+            let placeholder = call_relation.column(calls.len());
             calls.push(SetFunctionCall {
-                placeholder: placeholder.clone(),
+                placeholder,
                 name: name.clone(),
                 binding,
                 args: args.clone(),
                 level,
             });
-            return Ok(ScalarExpr::Column(placeholder));
+            return Ok(ScalarExpr::InternalColumn(placeholder));
         }
     }
     Ok(expression)
@@ -181,6 +349,7 @@ fn rewrite_set_frame_bound(
     resolver: &dyn FunctionTypeResolver,
     bound: &mut ScalarFrameBound,
     calls: &mut Vec<SetFunctionCall>,
+    call_relation: uqa_sql::ast::InternalRelationId,
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
@@ -191,6 +360,7 @@ fn rewrite_set_frame_bound(
                 resolver,
                 (**expression).clone(),
                 calls,
+                call_relation,
                 schema,
                 params,
             )?;
@@ -202,12 +372,15 @@ fn rewrite_set_frame_bound(
     Ok(())
 }
 
-fn replace_group_set_expression(expression: &mut ScalarExpr, mappings: &[(ScalarExpr, String)]) {
+fn replace_group_set_expression(
+    expression: &mut ScalarExpr,
+    mappings: &[(ScalarExpr, uqa_sql::ast::InternalColumnRef)],
+) {
     if let Some((_, column)) = mappings
         .iter()
         .find(|(group, _)| exprs_match(expression, group))
     {
-        *expression = ScalarExpr::Column(column.clone());
+        *expression = ScalarExpr::InternalColumn(*column);
         return;
     }
     match expression {
@@ -295,6 +468,7 @@ fn replace_group_set_expression(expression: &mut ScalarExpr, mappings: &[(Scalar
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
@@ -303,7 +477,10 @@ fn replace_group_set_expression(expression: &mut ScalarExpr, mappings: &[(Scalar
     }
 }
 
-fn replace_group_set_frame_bound(bound: &mut ScalarFrameBound, mappings: &[(ScalarExpr, String)]) {
+fn replace_group_set_frame_bound(
+    bound: &mut ScalarFrameBound,
+    mappings: &[(ScalarExpr, uqa_sql::ast::InternalColumnRef)],
+) {
     match bound {
         ScalarFrameBound::Preceding(expression) | ScalarFrameBound::Following(expression) => {
             replace_group_set_expression(expression, mappings);
@@ -339,14 +516,15 @@ pub(in crate::sql) fn prepare_group_set_projection(
         return Ok(None);
     }
 
+    let relation = uqa_sql::ast::InternalRelationId::allocate();
     let mappings = groups
         .iter()
         .enumerate()
-        .map(|(index, expression)| (expression.clone(), format!("\0uqa.group_set_value.{index}")))
+        .map(|(index, expression)| (expression.clone(), relation.column(index)))
         .collect::<Vec<_>>();
     let projections = mappings
         .iter()
-        .map(|(expression, column)| (column.clone(), expression.clone()))
+        .map(|(expression, column)| (ProjectionTarget::Internal(*column), expression.clone()))
         .collect();
     let mut rewritten = statement.clone();
     let projection_labels = projection_columns(&rewritten.projections);
@@ -383,12 +561,12 @@ fn capture_aggregate_dependency(
     expression: &ScalarExpr,
     dependencies: &mut Vec<ProjectionPlan>,
 ) -> ScalarExpr {
-    let placeholder = format!("\0uqa.aggregate_output.{}", dependencies.len());
+    let position = dependencies.len();
     dependencies.push(ProjectionPlan {
         expr: expression.clone(),
-        alias: Some(placeholder.clone()),
+        alias: None,
     });
-    ScalarExpr::Column(placeholder)
+    ScalarExpr::Position(position)
 }
 
 fn rewrite_aggregate_dependencies(
@@ -403,7 +581,10 @@ fn rewrite_aggregate_dependencies(
         return capture_aggregate_dependency(expression, dependencies);
     }
     match expression {
-        ScalarExpr::Column(_) | ScalarExpr::Position(_) | ScalarExpr::QualifiedColumn { .. } => {
+        ScalarExpr::Column(_)
+        | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
+        | ScalarExpr::QualifiedColumn { .. } => {
             capture_aggregate_dependency(expression, dependencies)
         }
         ScalarExpr::Func {
@@ -645,16 +826,25 @@ fn rewrite_aggregate_frame_bound(
 pub(in crate::sql) fn prepare_aggregate_output_projection(
     engine: &Engine,
     statement: &QueryBlockPlan,
+    internal_targets: &[(usize, uqa_sql::ast::InternalColumnRef)],
 ) -> AggregateOutputProjectionPlan {
     let labels = projection_columns(&statement.projections);
     let mut dependencies = Vec::new();
     let projections = statement
         .projections
         .iter()
+        .enumerate()
         .zip(labels)
-        .map(|(projection, label)| {
+        .map(|((position, projection), label)| {
+            let target = internal_targets
+                .iter()
+                .find(|(target_position, _)| *target_position == position)
+                .map_or_else(
+                    || ProjectionTarget::Column(label),
+                    |(_, column)| ProjectionTarget::Internal(*column),
+                );
             (
-                label,
+                target,
                 rewrite_aggregate_dependencies(
                     engine,
                     &statement.group_by,
@@ -667,7 +857,7 @@ pub(in crate::sql) fn prepare_aggregate_output_projection(
     if dependencies.is_empty() {
         dependencies.push(ProjectionPlan {
             expr: ScalarExpr::Literal(Value::Int(1)),
-            alias: Some("\0uqa.aggregate_output.seed".into()),
+            alias: None,
         });
     }
     let mut aggregate_statement = statement.clone();

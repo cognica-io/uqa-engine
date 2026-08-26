@@ -13,6 +13,78 @@ use uqa_sql::ast::ColumnType;
 use super::{ColumnIdentity, RowSchema, SchemaBuildMetadata, NULL_SLOT};
 
 impl RowSchema {
+    /// Select explicit physical slots with fresh public identities. This is
+    /// the structural equivalent of executor target entries whose values may
+    /// come from anonymous computed slots rather than SQL-named columns.
+    pub(crate) fn remap_typed_physical_identities(
+        input: &Self,
+        columns: &[(String, ColumnIdentity, usize, Option<ColumnType>)],
+        aliases: &[(ColumnIdentity, usize, Option<ColumnType>)],
+    ) -> Self {
+        let output_names = columns
+            .iter()
+            .map(|(output, _, _, _)| output.clone())
+            .collect();
+        let identities = columns
+            .iter()
+            .map(|(_, identity, _, _)| identity.clone())
+            .collect();
+        let slots = columns
+            .iter()
+            .map(|(_, _, physical, _)| {
+                if *physical < input.physical_width() {
+                    *physical
+                } else {
+                    NULL_SLOT
+                }
+            })
+            .collect();
+        let types = columns.iter().map(|(_, _, _, ty)| ty.clone()).collect();
+        let wildcard_hidden = columns
+            .iter()
+            .enumerate()
+            .filter_map(|(output, (_, _, physical, _))| {
+                input
+                    .index
+                    .cold
+                    .wildcard_hidden
+                    .iter()
+                    .any(|logical| input.slot(*logical) == Some(*physical))
+                    .then_some(output)
+            })
+            .collect();
+        let mut lookup_aliases = input.index.aliases.clone();
+        let mut alias_types = input.index.cold.aliases.clone();
+        for (identity, physical, ty) in aliases {
+            lookup_aliases.insert(
+                identity.clone(),
+                if *physical < input.physical_width() {
+                    *physical
+                } else {
+                    NULL_SLOT
+                },
+            );
+            alias_types.insert(identity.clone(), ty.clone());
+        }
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
+            output_names,
+            identities,
+            types,
+            slots,
+            input.physical_width(),
+            SchemaBuildMetadata {
+                aliases: lookup_aliases,
+                alias_types,
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
+                score_sources: input.index.cold.score_sources.clone(),
+                wildcard_hidden,
+                binding_only: input.index.cold.binding_only.clone(),
+                ..SchemaBuildMetadata::default()
+            },
+        )
+    }
+
     /// Select logical positions with explicit public labels, SQL identities, and types while preserving hidden aliases and physical fragments.
     pub(crate) fn remap_typed_identities(
         input: &Self,
@@ -32,6 +104,18 @@ impl RowSchema {
             .map(|(_, _, logical, _)| input.slot(*logical).unwrap_or(NULL_SLOT))
             .collect();
         let types = columns.iter().map(|(_, _, _, ty)| ty.clone()).collect();
+        let wildcard_hidden = columns
+            .iter()
+            .enumerate()
+            .filter_map(|(output, (_, _, logical, _))| {
+                input
+                    .index
+                    .cold
+                    .wildcard_hidden
+                    .contains(logical)
+                    .then_some(output)
+            })
+            .collect();
         let mut lookup_aliases = input.index.aliases.clone();
         let mut alias_types = input.index.cold.aliases.clone();
         for (identity, logical) in aliases {
@@ -47,6 +131,10 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: lookup_aliases,
                 alias_types,
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
+                score_sources: input.index.cold.score_sources.clone(),
+                wildcard_hidden,
                 binding_only: input.index.cold.binding_only.clone(),
                 ..SchemaBuildMetadata::default()
             },
@@ -71,6 +159,18 @@ impl RowSchema {
             .map(|(_, _, logical, _)| input.slot(*logical).unwrap_or(NULL_SLOT))
             .collect();
         let types = columns.iter().map(|(_, _, _, ty)| ty.clone()).collect();
+        let wildcard_hidden = columns
+            .iter()
+            .enumerate()
+            .filter_map(|(output, (_, _, logical, _))| {
+                input
+                    .index
+                    .cold
+                    .wildcard_hidden
+                    .contains(logical)
+                    .then_some(output)
+            })
+            .collect();
         Self::from_typed_parts_with_aliases_and_exact_precedence(
             output_names,
             identities,
@@ -80,6 +180,10 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: HashMap::new(),
                 alias_types: HashMap::new(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
+                score_sources: input.index.cold.score_sources.clone(),
+                wildcard_hidden,
                 binding_only: HashMap::new(),
                 ..SchemaBuildMetadata::default()
             },

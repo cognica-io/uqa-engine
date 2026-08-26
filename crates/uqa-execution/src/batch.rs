@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use smallvec::SmallVec;
 use uqa_core::Value;
-use uqa_sql::ast::ColumnType;
+use uqa_sql::ast::{ColumnType, InternalColumnRef};
 use uqa_sql::expr::RowLookup;
 use uqa_sql::ResultRow;
 
@@ -62,6 +62,13 @@ pub struct ColumnIdentity {
     column: Box<str>,
 }
 
+/// One score-bearing relation carried through the executor under an opaque internal attribute. The optional qualifier is SQL namespace metadata; the score value itself is never addressed by a magic SQL column name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ScoreSource {
+    qualifier: Option<Box<str>>,
+    column: InternalColumnRef,
+}
+
 impl ColumnIdentity {
     #[must_use]
     pub fn unqualified(column: impl Into<String>) -> Self {
@@ -105,6 +112,9 @@ struct SchemaIndex {
     qualified: HashMap<ColumnIdentity, usize>,
     /// Additional lookup identities that point directly at an existing physical slot without becoming output columns. Correlated table aliases use this to expose `(alias, column)` without duplicating the value.
     aliases: HashMap<ColumnIdentity, usize>,
+    /// Executor-only relation/attribute identities mapped directly to physical
+    /// slots. These never participate in SQL name lookup or wildcard output.
+    executor_attributes: HashMap<InternalColumnRef, usize>,
     /// Visible unqualified names with more than one logical owner.
     ambiguous_unqualified: HashSet<Box<str>>,
     /// Visible qualified identities with more than one logical owner.
@@ -118,6 +128,12 @@ struct SchemaColdMetadata {
     /// `None` is an as-yet unresolved type, not a runtime NULL value.
     columns: Box<[Option<ColumnType>]>,
     aliases: HashMap<ColumnIdentity, Option<ColumnType>>,
+    executor_attribute_types: HashMap<InternalColumnRef, Option<ColumnType>>,
+    score_sources: Vec<ScoreSource>,
+    /// Logical attributes omitted from unqualified and qualified wildcard
+    /// expansion. Explicit references and projections remain ordinary SQL
+    /// columns; only the source-owned metadata positions are hidden.
+    wildcard_hidden: HashSet<usize>,
     /// Static name-binding identities with no runtime slot. Unlike aliases,
     /// these are never part of qualified wildcard expansion or spill layout.
     binding_only: HashMap<ColumnIdentity, Option<ColumnType>>,
@@ -128,10 +144,26 @@ struct SchemaColdMetadata {
 struct SchemaBuildMetadata {
     aliases: HashMap<ColumnIdentity, usize>,
     alias_types: HashMap<ColumnIdentity, Option<ColumnType>>,
+    internal: HashMap<InternalColumnRef, usize>,
+    internal_types: HashMap<InternalColumnRef, Option<ColumnType>>,
+    score_sources: Vec<ScoreSource>,
+    wildcard_hidden: HashSet<usize>,
     binding_only: HashMap<ColumnIdentity, Option<ColumnType>>,
     exact_unqualified_precedence: bool,
     extra_ambiguous_unqualified: HashSet<Box<str>>,
     extra_ambiguous_qualified: HashSet<ColumnIdentity>,
+}
+
+pub(crate) struct PhysicalLayout {
+    pub(crate) columns: Vec<String>,
+    pub(crate) identities: Vec<ColumnIdentity>,
+    pub(crate) types: Vec<Option<ColumnType>>,
+    pub(crate) slots: Vec<Option<usize>>,
+    pub(crate) physical_width: usize,
+    pub(crate) aliases: Vec<(ColumnIdentity, Option<usize>, Option<ColumnType>)>,
+    pub(crate) internal: Vec<(InternalColumnRef, Option<usize>, Option<ColumnType>)>,
+    pub(crate) score_sources: Vec<(Option<String>, InternalColumnRef)>,
+    pub(crate) wildcard_hidden: HashSet<usize>,
 }
 
 /// Immutable column layout shared by an operator and all of its batches.
@@ -148,5 +180,5 @@ pub struct RowSchema {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProjectedSlot {
     Input(Option<usize>),
-    Computed,
+    Computed(usize),
 }

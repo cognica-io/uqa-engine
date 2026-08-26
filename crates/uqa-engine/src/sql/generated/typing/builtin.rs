@@ -360,30 +360,7 @@ pub(super) fn infer_builtin_function(
             require_signature(name, args, &[TypeClass::Array, TypeClass::Integer])?;
             args[0].clone()
         }
-        "array_overlap" | "__any_op" | "__all_op" | "__is_distinct" | "__between_symmetric" => {
-            GenerationType::Boolean
-        }
-        "__subscript" | "__array_subscripts" => {
-            require_arity(name, args, 2, usize::MAX)?;
-            require_one(name, &args[0], TypeClass::Array)?;
-            for argument in &args[1..] {
-                require_one(name, argument, TypeClass::Integer)?;
-            }
-            match &args[0] {
-                GenerationType::Array(element) => (**element).clone(),
-                GenerationType::Vector | GenerationType::Tensor => GenerationType::Real,
-                GenerationType::Null | GenerationType::UnknownLiteral(_) => GenerationType::Null,
-                _ => unreachable!(),
-            }
-        }
-        "__slice" | "__array_slices" => {
-            require_arity(name, args, 3, usize::MAX)?;
-            require_one(name, &args[0], TypeClass::Array)?;
-            for argument in &args[1..] {
-                require_one(name, argument, TypeClass::Integer)?;
-            }
-            args[0].clone()
-        }
+        "array_overlap" => GenerationType::Boolean,
         "array_length" | "array_upper" | "array_lower" => {
             require_signature(name, args, &[TypeClass::Array, TypeClass::Integer])?;
             GenerationType::Integer

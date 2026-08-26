@@ -676,6 +676,7 @@ pub(in crate::sql) struct LockRowsRecheckSource {
     statement: QueryBlockPlan,
     ctes: CteScope,
     ordered: bool,
+    projections: Vec<super::PhysicalProjection>,
 }
 
 impl LockRowsRecheckSource {
@@ -684,6 +685,21 @@ impl LockRowsRecheckSource {
             statement: statement.clone(),
             ctes: ctes.clone(),
             ordered,
+            projections: Vec::new(),
+        }
+    }
+
+    pub(in crate::sql) fn with_projections(
+        statement: &QueryBlockPlan,
+        ctes: &CteScope,
+        ordered: bool,
+        projections: Vec<super::PhysicalProjection>,
+    ) -> Self {
+        Self {
+            statement: statement.clone(),
+            ctes: ctes.clone(),
+            ordered,
+            projections,
         }
     }
 }
@@ -1235,6 +1251,7 @@ impl LockRows<'_> {
             self.params,
             &mut recheck_ctes,
             source.ordered,
+            &source.projections,
         )?;
         operator = align_recheck_schema(operator, &self.schema)?;
         operator.open().map_err(super::physical_exec_error)?;

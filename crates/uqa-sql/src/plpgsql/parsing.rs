@@ -25,13 +25,10 @@ pub fn parse_function(def: &CreateFunction) -> Result<PLpgSQLFunction> {
     parse_plpgsql_text(&text)
 }
 
-/// Parse a `DO $$ ... $$` body by wrapping it into an anonymous
-/// void-returning function.
+/// Parse a `DO $$ ... $$` body through `PostgreSQL`'s native inline-code path.
 pub fn parse_do_block(body: &str) -> Result<PLpgSQLFunction> {
     let tag = fresh_dollar_tag(body);
-    let text = format!(
-        "CREATE FUNCTION __uqa_do_block__() RETURNS void AS {tag}{body}{tag} LANGUAGE plpgsql;"
-    );
+    let text = format!("DO {tag}{body}{tag} LANGUAGE plpgsql;");
     parse_plpgsql_text(&text)
 }
 
@@ -114,7 +111,11 @@ pub(super) fn quote_ident(name: &str) -> String {
 pub(super) fn fresh_dollar_tag(body: &str) -> String {
     let mut n = 0usize;
     loop {
-        let tag = format!("$__uqa_plpgsql_{n}$");
+        let tag = if n == 0 {
+            "$$".to_string()
+        } else {
+            format!("$plpgsql{n}$")
+        };
         if !body.contains(&tag) {
             return tag;
         }

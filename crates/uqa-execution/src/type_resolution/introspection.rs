@@ -72,7 +72,7 @@ fn bind_type_introspection_inner(
             }
             let name =
                 array_transform::bind_call(name, &mut binding, &mut args, schema, params, resolver);
-            let name = range::bind_call(name, &args, schema, params, resolver);
+            let name = range::bind_call(name, &mut binding, &args, schema, params, resolver);
             let name =
                 fixed_builtin::bind_call(name, &mut binding, &mut args, schema, params, resolver);
             bind_catalog_function(&name, &mut binding, &args, schema, params, resolver);
@@ -320,6 +320,7 @@ fn requires_type_introspection_binding(expression: &ScalarExpr) -> bool {
         | ScalarExpr::Default
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
@@ -336,12 +337,7 @@ fn bind_catalog_function(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) {
-    if binding.is_some()
-        || matches!(
-            name,
-            uqa_sql::expr::NAMED_ARG_FUNCTION | uqa_sql::expr::VARIADIC_ARG_FUNCTION
-        )
-    {
+    if binding.is_some() {
         return;
     }
     if uqa_sql::ast::is_builtin_aggregate_function(&local_routine_name(name)) {

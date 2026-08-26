@@ -5,6 +5,7 @@
 //
 
 use super::{ScalarExpr, ScalarOrder, WindowSlot};
+use uqa_sql::ast::InternalRelationId;
 
 pub(in crate::sql) fn expr_has_window(expr: &ScalarExpr) -> bool {
     match expr {
@@ -52,6 +53,7 @@ pub(in crate::sql) fn expr_has_window(expr: &ScalarExpr) -> bool {
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
@@ -63,21 +65,18 @@ pub(in crate::sql) fn expr_has_window(expr: &ScalarExpr) -> bool {
 
 pub(super) fn rewrite_window_expr(
     expr: &ScalarExpr,
-    projection_index: usize,
-    counter: &mut usize,
     slots: &mut Vec<WindowSlot>,
 ) -> (ScalarExpr, bool) {
     match expr {
         ScalarExpr::WindowCall { name, args, spec } => {
-            let key = format!("__window_{projection_index}_{}", *counter);
-            *counter += 1;
+            let column = InternalRelationId::allocate().column(0);
             slots.push(WindowSlot {
-                key: key.clone(),
+                column,
                 name: name.clone(),
                 args: args.clone(),
                 spec: spec.clone(),
             });
-            (ScalarExpr::Column(key), true)
+            (ScalarExpr::InternalColumn(column), true)
         }
         ScalarExpr::Func {
             name,
@@ -87,13 +86,11 @@ pub(super) fn rewrite_window_expr(
             order_by,
             filter,
         } => {
-            let (args, args_changed) = rewrite_window_exprs(args, projection_index, counter, slots);
-            let (order_by, order_changed) =
-                rewrite_window_order_by(order_by, projection_index, counter, slots);
+            let (args, args_changed) = rewrite_window_exprs(args, slots);
+            let (order_by, order_changed) = rewrite_window_order_by(order_by, slots);
             let (filter, filter_changed) = match filter {
                 Some(expr) => {
-                    let (expr, changed) =
-                        rewrite_window_expr(expr, projection_index, counter, slots);
+                    let (expr, changed) = rewrite_window_expr(expr, slots);
                     (Some(Box::new(expr)), changed)
                 }
                 None => (None, false),
@@ -111,16 +108,16 @@ pub(super) fn rewrite_window_expr(
             )
         }
         ScalarExpr::Array(items) => {
-            let (items, changed) = rewrite_window_exprs(items, projection_index, counter, slots);
+            let (items, changed) = rewrite_window_exprs(items, slots);
             (ScalarExpr::Array(items), changed)
         }
         ScalarExpr::Row(items) => {
-            let (items, changed) = rewrite_window_exprs(items, projection_index, counter, slots);
+            let (items, changed) = rewrite_window_exprs(items, slots);
             (ScalarExpr::Row(items), changed)
         }
         ScalarExpr::Binary { op, lhs, rhs } => {
-            let (lhs, lhs_changed) = rewrite_window_expr(lhs, projection_index, counter, slots);
-            let (rhs, rhs_changed) = rewrite_window_expr(rhs, projection_index, counter, slots);
+            let (lhs, lhs_changed) = rewrite_window_expr(lhs, slots);
+            let (rhs, rhs_changed) = rewrite_window_expr(rhs, slots);
             (
                 ScalarExpr::Binary {
                     op: *op,
@@ -131,23 +128,23 @@ pub(super) fn rewrite_window_expr(
             )
         }
         ScalarExpr::Not(inner) => {
-            let (inner, changed) = rewrite_window_expr(inner, projection_index, counter, slots);
+            let (inner, changed) = rewrite_window_expr(inner, slots);
             (ScalarExpr::Not(Box::new(inner)), changed)
         }
         ScalarExpr::UnaryMinus(inner) => {
-            let (inner, changed) = rewrite_window_expr(inner, projection_index, counter, slots);
+            let (inner, changed) = rewrite_window_expr(inner, slots);
             (ScalarExpr::UnaryMinus(Box::new(inner)), changed)
         }
         ScalarExpr::And(items) => {
-            let (items, changed) = rewrite_window_exprs(items, projection_index, counter, slots);
+            let (items, changed) = rewrite_window_exprs(items, slots);
             (ScalarExpr::And(items), changed)
         }
         ScalarExpr::Or(items) => {
-            let (items, changed) = rewrite_window_exprs(items, projection_index, counter, slots);
+            let (items, changed) = rewrite_window_exprs(items, slots);
             (ScalarExpr::Or(items), changed)
         }
         ScalarExpr::IsNull { expr, negated } => {
-            let (expr, changed) = rewrite_window_expr(expr, projection_index, counter, slots);
+            let (expr, changed) = rewrite_window_expr(expr, slots);
             (
                 ScalarExpr::IsNull {
                     expr: Box::new(expr),
@@ -157,9 +154,9 @@ pub(super) fn rewrite_window_expr(
             )
         }
         ScalarExpr::Between { expr, low, high } => {
-            let (expr, expr_changed) = rewrite_window_expr(expr, projection_index, counter, slots);
-            let (low, low_changed) = rewrite_window_expr(low, projection_index, counter, slots);
-            let (high, high_changed) = rewrite_window_expr(high, projection_index, counter, slots);
+            let (expr, expr_changed) = rewrite_window_expr(expr, slots);
+            let (low, low_changed) = rewrite_window_expr(low, slots);
+            let (high, high_changed) = rewrite_window_expr(high, slots);
             (
                 ScalarExpr::Between {
                     expr: Box::new(expr),
@@ -174,8 +171,8 @@ pub(super) fn rewrite_window_expr(
             list,
             negated,
         } => {
-            let (expr, expr_changed) = rewrite_window_expr(expr, projection_index, counter, slots);
-            let (list, list_changed) = rewrite_window_exprs(list, projection_index, counter, slots);
+            let (expr, expr_changed) = rewrite_window_expr(expr, slots);
+            let (list, list_changed) = rewrite_window_exprs(list, slots);
             (
                 ScalarExpr::InList {
                     expr: Box::new(expr),
@@ -192,8 +189,7 @@ pub(super) fn rewrite_window_expr(
         } => {
             let (base, base_changed) = match base {
                 Some(expr) => {
-                    let (expr, changed) =
-                        rewrite_window_expr(expr, projection_index, counter, slots);
+                    let (expr, changed) = rewrite_window_expr(expr, slots);
                     (Some(Box::new(expr)), changed)
                 }
                 None => (None, false),
@@ -201,17 +197,14 @@ pub(super) fn rewrite_window_expr(
             let mut changed = base_changed;
             let mut rewritten_when = Vec::with_capacity(when.len());
             for (cond, result) in when {
-                let (cond, cond_changed) =
-                    rewrite_window_expr(cond, projection_index, counter, slots);
-                let (result, result_changed) =
-                    rewrite_window_expr(result, projection_index, counter, slots);
+                let (cond, cond_changed) = rewrite_window_expr(cond, slots);
+                let (result, result_changed) = rewrite_window_expr(result, slots);
                 changed |= cond_changed || result_changed;
                 rewritten_when.push((cond, result));
             }
             let (else_branch, else_changed) = match else_branch {
                 Some(expr) => {
-                    let (expr, changed) =
-                        rewrite_window_expr(expr, projection_index, counter, slots);
+                    let (expr, changed) = rewrite_window_expr(expr, slots);
                     (Some(Box::new(expr)), changed)
                 }
                 None => (None, false),
@@ -226,7 +219,7 @@ pub(super) fn rewrite_window_expr(
             )
         }
         ScalarExpr::Cast { expr, ty } => {
-            let (expr, changed) = rewrite_window_expr(expr, projection_index, counter, slots);
+            let (expr, changed) = rewrite_window_expr(expr, slots);
             (
                 ScalarExpr::Cast {
                     expr: Box::new(expr),
@@ -241,15 +234,13 @@ pub(super) fn rewrite_window_expr(
 
 fn rewrite_window_exprs(
     exprs: &[ScalarExpr],
-    projection_index: usize,
-    counter: &mut usize,
     slots: &mut Vec<WindowSlot>,
 ) -> (Vec<ScalarExpr>, bool) {
     let mut changed = false;
     let rewritten = exprs
         .iter()
         .map(|expr| {
-            let (expr, expr_changed) = rewrite_window_expr(expr, projection_index, counter, slots);
+            let (expr, expr_changed) = rewrite_window_expr(expr, slots);
             changed |= expr_changed;
             expr
         })
@@ -259,16 +250,13 @@ fn rewrite_window_exprs(
 
 fn rewrite_window_order_by(
     order_by: &[ScalarOrder],
-    projection_index: usize,
-    counter: &mut usize,
     slots: &mut Vec<WindowSlot>,
 ) -> (Vec<ScalarOrder>, bool) {
     let mut changed = false;
     let rewritten = order_by
         .iter()
         .map(|order| {
-            let (expr, expr_changed) =
-                rewrite_window_expr(&order.expr, projection_index, counter, slots);
+            let (expr, expr_changed) = rewrite_window_expr(&order.expr, slots);
             changed |= expr_changed;
             ScalarOrder {
                 expr,

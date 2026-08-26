@@ -23,6 +23,7 @@ struct RelationColumns {
 #[derive(Clone, Default)]
 struct QueryScope {
     qualifiers: BTreeSet<String>,
+    internal_relations: BTreeSet<uqa_sql::ast::InternalRelationId>,
     columns: RelationColumns,
 }
 
@@ -108,20 +109,13 @@ pub(super) fn decorrelate_exists(
         return Ok(None);
     }
 
-    let output_columns: Vec<String> = (0..inner_keys.len())
-        .map(|index| format!("__uqa_exists_key_{index}"))
-        .collect();
     let mut inner = plan.clone();
     let RelationalPlan::QueryBlock(inner_block) = &mut inner.root else {
         unreachable!("query-block shape checked above");
     };
     inner_block.projections = inner_keys
         .into_iter()
-        .zip(&output_columns)
-        .map(|(expr, alias)| ProjectionPlan {
-            expr,
-            alias: Some(alias.clone()),
-        })
+        .map(|expr| ProjectionPlan { expr, alias: None })
         .collect();
     inner_block.r#where = match residual.len() {
         0 => None,
@@ -160,6 +154,13 @@ fn correlation_column_scope(expression: &ScalarExpr, scope: &QueryScope) -> Opti
                 .iter()
                 .any(|local| local.eq_ignore_ascii_case(qualifier))
             {
+                Some(ColumnScope::Inner)
+            } else {
+                Some(ColumnScope::Outer)
+            }
+        }
+        ScalarExpr::InternalColumn(column) => {
+            if scope.internal_relations.contains(&column.relation()) {
                 Some(ColumnScope::Inner)
             } else {
                 Some(ColumnScope::Outer)
@@ -220,6 +221,7 @@ fn query_has_external_reference(
                 Some(source) => source_scope(engine, source, &ctes)?,
                 None => QueryScope {
                     qualifiers: BTreeSet::new(),
+                    internal_relations: BTreeSet::new(),
                     columns: RelationColumns {
                         names: BTreeSet::new(),
                         complete: true,
@@ -264,6 +266,7 @@ fn query_has_external_reference(
             }
             scopes.push(QueryScope {
                 qualifiers: BTreeSet::new(),
+                internal_relations: BTreeSet::new(),
                 columns: query_output_columns(left),
             });
             let result = (|| {
@@ -294,6 +297,7 @@ fn query_has_external_reference(
         RelationalPlan::Values { rows, subqueries } => {
             scopes.push(QueryScope {
                 qualifiers: BTreeSet::new(),
+                internal_relations: BTreeSet::new(),
                 columns: RelationColumns {
                     names: BTreeSet::new(),
                     complete: true,
@@ -334,6 +338,7 @@ fn source_scope(
             qualifiers.insert(alias.as_ref().unwrap_or(qualifier).clone());
             Ok(QueryScope {
                 qualifiers,
+                internal_relations: BTreeSet::new(),
                 columns: relation_columns(engine, name, ctes)?,
             })
         }
@@ -349,12 +354,15 @@ fn source_scope(
             let complete = left.columns.complete && right.columns.complete;
             let mut names = left.columns.names;
             names.extend(right.columns.names);
+            let mut internal_relations = left.internal_relations;
+            internal_relations.extend(right.internal_relations);
             if let Some(alias) = alias {
                 if !column_aliases.is_empty() {
                     names = column_aliases.iter().cloned().collect();
                 }
                 return Ok(QueryScope {
                     qualifiers: [alias.clone()].into_iter().collect(),
+                    internal_relations,
                     columns: RelationColumns {
                         names,
                         complete: complete && column_aliases.is_empty(),
@@ -365,6 +373,7 @@ fn source_scope(
             qualifiers.extend(right.qualifiers);
             Ok(QueryScope {
                 qualifiers,
+                internal_relations,
                 columns: RelationColumns { names, complete },
             })
         }
@@ -372,7 +381,19 @@ fn source_scope(
             rows,
             alias,
             column_aliases,
+            internal_relation,
+            ..
         } => {
+            if let Some(internal_relation) = internal_relation {
+                return Ok(QueryScope {
+                    qualifiers: BTreeSet::new(),
+                    internal_relations: [*internal_relation].into_iter().collect(),
+                    columns: RelationColumns {
+                        names: BTreeSet::new(),
+                        complete: true,
+                    },
+                });
+            }
             let qualifiers = alias.iter().cloned().collect();
             let names = if column_aliases.is_empty() {
                 (0..rows.first().map_or(0, Vec::len))
@@ -383,6 +404,7 @@ fn source_scope(
             };
             Ok(QueryScope {
                 qualifiers,
+                internal_relations: BTreeSet::new(),
                 columns: RelationColumns {
                     names,
                     complete: true,
@@ -410,6 +432,7 @@ fn source_scope(
             }
             Ok(QueryScope {
                 qualifiers,
+                internal_relations: BTreeSet::new(),
                 columns: RelationColumns { names, complete },
             })
         }
@@ -450,6 +473,7 @@ fn source_scope(
             }
             Ok(QueryScope {
                 qualifiers,
+                internal_relations: BTreeSet::new(),
                 columns: RelationColumns {
                     names: names.into_iter().collect(),
                     complete,
@@ -472,6 +496,7 @@ fn source_scope(
             };
             Ok(QueryScope {
                 qualifiers,
+                internal_relations: BTreeSet::new(),
                 columns,
             })
         }
@@ -577,6 +602,10 @@ fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -
                 .iter()
                 .any(|local| local.eq_ignore_ascii_case(qualifier))
         }),
+        ScalarExpr::InternalColumn(column) => !scopes
+            .iter()
+            .rev()
+            .any(|scope| scope.internal_relations.contains(&column.relation())),
         ScalarExpr::Func {
             args,
             order_by,

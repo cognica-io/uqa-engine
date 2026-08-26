@@ -25,7 +25,7 @@ use planning::rewrite_window_expr;
 
 #[derive(Clone)]
 struct WindowSlot {
-    key: String,
+    column: uqa_sql::ast::InternalColumnRef,
     name: String,
     args: Vec<ScalarExpr>,
     spec: ScalarWindowSpec,
@@ -49,7 +49,7 @@ impl PreparedWindowPlan {
     ) -> Result<RowSchema, SQLError> {
         let mut schema = input.clone();
         for slot in &self.slots {
-            if schema.position(&slot.key).is_some() {
+            if schema.internal_slot(slot.column).is_some() {
                 continue;
             }
             let expression = ScalarExpr::WindowCall {
@@ -59,7 +59,7 @@ impl PreparedWindowPlan {
             };
             let ty =
                 uqa_execution::scalar_type_with_resolver(&expression, &schema, params, engine)?;
-            schema = RowSchema::append_typed(&schema, &[(slot.key.clone(), ty)]);
+            schema = RowSchema::append_internal_typed(&schema, &[(slot.column, ty)]);
         }
         Ok(schema)
     }
@@ -132,8 +132,7 @@ pub(super) fn prepare_window_plan(projections: &[ProjectionPlan]) -> PreparedWin
     let mut slots = Vec::new();
     let mut rewritten = Vec::with_capacity(projections.len());
     for (idx, projection) in projections.iter().enumerate() {
-        let mut counter = 0usize;
-        let (expr, changed) = rewrite_window_expr(&projection.expr, idx, &mut counter, &mut slots);
+        let (expr, changed) = rewrite_window_expr(&projection.expr, &mut slots);
         let mut projection = projection.clone();
         projection.expr = expr;
         if changed && projection.alias.is_none() {
@@ -175,8 +174,8 @@ fn execute_window_plan(
             params,
             ctes,
         )?;
-        if schema.position(&slot.key).is_none() {
-            schema = RowSchema::append_typed(&schema, &[(slot.key.clone(), slot_type)]);
+        if schema.internal_slot(slot.column).is_none() {
+            schema = RowSchema::append_internal_typed(&schema, &[(slot.column, slot_type)]);
         }
     }
 
@@ -229,18 +228,14 @@ fn execute_spilled_window_slot(
     let mut partition_key: Option<Vec<Value>> = None;
     let mut output = SpillBuffer::new(phase_budget);
     let output_schema =
-        RowSchema::append_typed(&partition_schema, &[(slot.key.clone(), slot_type)]);
-    let expected_columns = {
-        let mut columns = schema.columns().to_vec();
-        if !columns.contains(&slot.key) {
-            columns.push(slot.key.clone());
-        }
-        columns
-    };
-    if output_schema.columns() != expected_columns {
+        RowSchema::append_internal_typed(&partition_schema, &[(slot.column, slot_type)]);
+    if output_schema.columns() != schema.columns()
+        || output_schema.internal_slot(slot.column).is_none()
+    {
         return Err(SQLError::Internal(format!(
-            "window output schema mismatch: expected {expected_columns:?}, got {:?}",
-            output_schema.columns()
+            "window output schema mismatch: expected {:?}, got {:?}",
+            schema.columns(),
+            output_schema.columns(),
         )));
     }
 
@@ -334,15 +329,12 @@ fn emit_window_partition(
         return Ok(());
     }
     let partition_schema = partition.row_schema().clone();
-    let mut expected_columns = partition_schema.columns().to_vec();
-    if !expected_columns.contains(&slot.key) {
-        expected_columns.push(slot.key.clone());
-    }
-    if schema.columns() != expected_columns {
+    if schema.columns() != partition_schema.columns() || schema.internal_slot(slot.column).is_none()
+    {
         return Err(SQLError::Internal(format!(
             "window output schema mismatch: expected {:?}, got {:?}",
             schema.columns(),
-            expected_columns
+            partition_schema.columns(),
         )));
     }
     let name = slot.name.to_ascii_lowercase();
@@ -949,6 +941,7 @@ fn float_frame_offset(offset: f64) -> Result<i64, SQLError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uqa_sql::expr::RowLookup as _;
 
     #[test]
     fn floating_frame_offset_rejects_invalid_and_out_of_range_values() {
@@ -985,7 +978,7 @@ mod tests {
         assert!(partition.encoded_bytes() > 4096 * 8);
 
         let slot = WindowSlot {
-            key: "total".into(),
+            column: uqa_sql::ast::InternalRelationId::allocate().column(0),
             name: "sum".into(),
             args: vec![ScalarExpr::Column("v".into())],
             spec: ScalarWindowSpec {
@@ -994,7 +987,7 @@ mod tests {
                 frame: None,
             },
         };
-        let schema = RowSchema::append(&partition_schema, &["total".into()]);
+        let schema = RowSchema::append_internal_typed(&partition_schema, &[(slot.column, None)]);
         let mut output = SpillBuffer::new(1);
         emit_window_partition(
             &slot,
@@ -1013,7 +1006,10 @@ mod tests {
         for batch in output.drain().unwrap() {
             let batch = batch.unwrap();
             for row in &batch.rows {
-                assert_eq!(batch.schema.view(row).get("total"), Some(&Value::Int(4096)));
+                assert_eq!(
+                    batch.schema.view(row).internal_column(slot.column),
+                    Some(&Value::Int(4096))
+                );
             }
         }
     }

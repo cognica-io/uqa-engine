@@ -10,7 +10,7 @@ use super::{
     multirange_from_ranges, parse_multirange, parse_range, value_to_string, CanonicalRange, Result,
     SQLError, Value,
 };
-use crate::ast::RangeSubtype;
+use crate::ast::{RangeFunctionOperation, RangeSubtype};
 
 const SUBTYPES: &[RangeSubtype] = &[
     RangeSubtype::Integer,
@@ -36,8 +36,31 @@ pub(super) fn eval_range_functions(name: &str, args: &[Value]) -> Option<Result<
     {
         return Some(multirange_constructor(subtype, args));
     }
-    let (operation, subtype, multirange) = decode_dispatch(name)?;
-    Some((|| {
+    None
+}
+
+pub(super) fn eval_dispatched_range_function(
+    operation: RangeFunctionOperation,
+    subtype: RangeSubtype,
+    multirange: bool,
+    args: &[Value],
+) -> Result<Value> {
+    let operation = match operation {
+        RangeFunctionOperation::Lower => "lower",
+        RangeFunctionOperation::Upper => "upper",
+        RangeFunctionOperation::IsEmpty => "isempty",
+        RangeFunctionOperation::LowerInclusive => "lower_inc",
+        RangeFunctionOperation::UpperInclusive => "upper_inc",
+        RangeFunctionOperation::LowerInfinite => "lower_inf",
+        RangeFunctionOperation::UpperInfinite => "upper_inf",
+        RangeFunctionOperation::Merge => "merge",
+        RangeFunctionOperation::Multirange => "multirange",
+        RangeFunctionOperation::Overlap => "overlap",
+        RangeFunctionOperation::Contains => "contains",
+        RangeFunctionOperation::ContainedBy => "contained_by",
+        RangeFunctionOperation::Adjacent => "adjacent",
+    };
+    (|| {
         if args.iter().any(|argument| matches!(argument, Value::Null)) {
             return Ok(Value::Null);
         }
@@ -53,7 +76,7 @@ pub(super) fn eval_range_functions(name: &str, args: &[Value]) -> Option<Result<
                 "unknown range dispatch operation `{operation}`"
             ))),
         }
-    })())
+    })()
 }
 
 fn range_constructor(subtype: RangeSubtype, args: &[Value]) -> Result<Value> {
@@ -262,19 +285,4 @@ fn range_text(value: &Value) -> Result<&str> {
             "range function requires a range value, got {other:?}"
         ))),
     }
-}
-
-fn decode_dispatch(name: &str) -> Option<(&str, RangeSubtype, bool)> {
-    let dispatch = name.strip_prefix("__range_")?;
-    for subtype in SUBTYPES {
-        for (type_name, multirange) in [
-            (subtype.multirange_name(), true),
-            (subtype.range_name(), false),
-        ] {
-            if let Some(operation) = dispatch.strip_suffix(type_name) {
-                return Some((operation.trim_end_matches('_'), *subtype, multirange));
-            }
-        }
-    }
-    None
 }

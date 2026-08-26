@@ -449,6 +449,7 @@ fn outer_expression_contains_volatile_function(engine: &Engine, expression: &Sca
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_) => false,
@@ -558,6 +559,7 @@ pub(in crate::sql) fn collect_subquery_ids(expression: &ScalarExpr, output: &mut
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_) => {}
@@ -652,6 +654,7 @@ fn collect_pushdown_outer_columns(expression: &ScalarExpr, output: &mut BTreeSet
         ScalarExpr::Default
         | ScalarExpr::Star
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::WindowCall { .. } => false,
     }
@@ -703,6 +706,7 @@ fn collect_source_column_owners(engine: &Engine, source: &SourcePlan, owners: &m
             rows,
             alias: Some(alias),
             column_aliases,
+            ..
         } => {
             let columns = if column_aliases.is_empty() {
                 (1..=rows.first().map_or(0, Vec::len))
@@ -1012,6 +1016,7 @@ pub(in crate::sql) fn rewrite_output_filter(
         } if expression_qualifier.eq_ignore_ascii_case(qualifier) => map_column(column, used)?,
         ScalarExpr::Default
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Star
         | ScalarExpr::QualifiedStar(_)

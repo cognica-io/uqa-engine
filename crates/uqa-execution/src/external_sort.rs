@@ -29,17 +29,11 @@ use crate::spill::{EncodedBatchSizer, SpillBuffer, SpillDrain};
 /// Maximum number of input runs opened by one merge operation.
 pub const EXTERNAL_SORT_MERGE_FAN_IN: usize = 16;
 
-const RUN_SOURCE_PREFIX: &str = "\0uqa.external_sort.source.";
-const RUN_KEY_PREFIX: &str = "\0uqa.external_sort.key.";
-const RUN_SEQUENCE: &str = "\0uqa.external_sort.sequence";
-
 fn run_schema(source_width: usize, key_count: usize) -> RowSchema {
-    let mut columns = (0..source_width)
-        .map(|index| format!("{RUN_SOURCE_PREFIX}{index}"))
-        .collect::<Vec<_>>();
-    columns.extend((0..key_count).map(|index| format!("{RUN_KEY_PREFIX}{index}")));
-    columns.push(RUN_SEQUENCE.to_string());
-    RowSchema::new(columns)
+    RowSchema::with_internal_relation_types(
+        uqa_sql::ast::InternalRelationId::allocate(),
+        vec![None; source_width + key_count + 1],
+    )
 }
 
 /// Physical external sort with stable SQL ordering and optional global top-K.
@@ -310,21 +304,20 @@ fn decode_record(
     let sequence_position = source_width
         .checked_add(expected_key_count)
         .ok_or_else(|| ExecError::Other("external sort run width overflow".into()))?;
-    if schema.len() != sequence_position.saturating_add(1) {
+    if schema.physical_width() != sequence_position.saturating_add(1) {
         return Err(ExecError::Other(format!(
             "invalid external sort run key count: expected {expected_key_count}"
         )));
     }
-    let view = schema.view(&row);
     for index in source_width..sequence_position {
-        if view.value_at(index).is_none() {
+        if row.value(index).is_none() {
             return Err(ExecError::Other(format!(
                 "external sort run is missing key {}",
                 index - source_width
             )));
         }
     }
-    let sequence = match view.value_at(sequence_position) {
+    let sequence = match row.value(sequence_position) {
         Some(Value::Bytes(bytes)) if bytes.len() == std::mem::size_of::<u64>() => {
             let bytes: [u8; 8] = bytes
                 .as_slice()
@@ -355,20 +348,19 @@ fn validate_run_batch(batch: &Batch, expected: &RowSchema) -> ExecResult<()> {
 
 fn compare_records(
     keys: &[SortKey],
-    schema: &RowSchema,
+    _schema: &RowSchema,
     source_width: usize,
     left: &DecoratedRow,
     right: &DecoratedRow,
 ) -> Ordering {
-    let left_view = schema.view(&left.row);
-    let right_view = schema.view(&right.row);
     compare_sort_key_values_by(keys, |index| {
         (
-            left_view
-                .value_at(source_width + index)
+            left.row
+                .value(source_width + index)
                 .expect("validated external sort run key"),
-            right_view
-                .value_at(source_width + index)
+            right
+                .row
+                .value(source_width + index)
                 .expect("validated external sort run key"),
         )
     })

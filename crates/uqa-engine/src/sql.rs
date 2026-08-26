@@ -27,7 +27,7 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use uqa_core::{DecimalValue, DocId, TemporalValue, Value};
 use uqa_sql::ast::{
@@ -154,6 +154,15 @@ pub(crate) fn analyze_catalog_query_schema(
     select::analyze_query_plan_schema(engine, query, params, &CteScope::default(), None)
 }
 
+/// Analyze the declared RETURNING row type of a rewrite-rule action without
+/// executing the action.
+pub(crate) fn analyze_rule_action_returning_schema(
+    engine: &Engine,
+    statement: Statement,
+) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
+    dml::dml_statement_returning_schema(engine, statement)
+}
+
 /// Bind every catalog-owned scalar and table-function call to an exact routine identity before the query plan is serialized.
 pub(crate) fn bind_catalog_query_routines(
     engine: &Engine,
@@ -182,16 +191,16 @@ pub(crate) fn bind_catalog_query_routines_with_outer(
 const SCORE_COLUMN: &str = "_score";
 pub(in crate::sql) const DOC_ID_COLUMN: &str = "_doc_id";
 pub(in crate::sql) const TABLE_OID_COLUMN: &str = "tableoid";
-const MERGE_ACTION_COLUMN: &str = "_merge_action";
-// NUL cannot occur in a SQL identifier, so this row-carried field cannot
-// collide with a user column. Its value is the score emitted by an executed
-// retrieval access path; `Null` explicitly marks an ordinary scan.
-const SCORE_PROVENANCE_COLUMN: &str = "\0uqa.score_bearing";
+pub(in crate::sql) const META_QUALIFIER: &str = "_meta";
+pub(in crate::sql) const META_DOC_ID_COLUMN: &str = "doc_id";
+pub(in crate::sql) const META_SCORE_COLUMN: &str = "score";
 
-fn is_score_provenance_column(column: &str) -> bool {
-    column == SCORE_PROVENANCE_COLUMN
+/// Executor-only carrier for `PostgreSQL` 18's `merge_action()` value. The attribute has no SQL name and therefore cannot collide with a target or source column named `_merge_action`.
+pub(in crate::sql) fn merge_action_attribute() -> uqa_sql::ast::InternalColumnRef {
+    static ATTRIBUTE: LazyLock<uqa_sql::ast::InternalColumnRef> =
+        LazyLock::new(|| uqa_sql::ast::InternalRelationId::allocate().column(0));
+    *ATTRIBUTE
 }
-
 /// Resolve reserved system-schema aliases only when the local name belongs to
 /// that schema's built-in surface. Ordinary qualified names stay intact for
 /// runtime callbacks and user-defined routine lookup.

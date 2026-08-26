@@ -24,8 +24,10 @@ pub(super) fn build_values_source_operator<'a>(
             rows,
             alias,
             column_aliases,
+            internal_relation,
+            internal_column_types,
         } => {
-            let column_types = crate::sql::select::values_types_in_scope(
+            let inferred_types = crate::sql::select::values_types_in_scope(
                 engine,
                 rows,
                 &ctes.scalar_subqueries,
@@ -33,6 +35,26 @@ pub(super) fn build_values_source_operator<'a>(
                 params,
                 ctes,
             )?;
+            let column_types = if internal_relation.is_some() {
+                if !alias.is_none() || !column_aliases.is_empty() {
+                    return Err(SQLError::Internal(
+                        "internal VALUES carrier has SQL-visible aliases".into(),
+                    ));
+                }
+                if !rows.is_empty()
+                    && rows
+                        .iter()
+                        .any(|row| row.len() != internal_column_types.len())
+                {
+                    return Err(SQLError::Internal(
+                        "internal VALUES carrier row width does not match its declared attributes"
+                            .into(),
+                    ));
+                }
+                internal_column_types.clone()
+            } else {
+                inferred_types
+            };
             let source_columns = if column_aliases.is_empty() {
                 (0..rows.first().map_or(0, Vec::len))
                     .map(|index| format!("column{}", index + 1))
@@ -44,6 +66,13 @@ pub(super) fn build_values_source_operator<'a>(
             let context =
                 SourceEvalContext::new(engine, params, &hook, &hook, &ctes.scalar_subqueries);
             let rows = build_values_physical_rows(&context, rows, &column_types)?;
+            if let Some(relation) = internal_relation {
+                let schema =
+                    uqa_execution::RowSchema::with_internal_relation_types(*relation, column_types);
+                return Ok(Box::new(uqa_execution::TableScan::from_physical_rows(
+                    schema, rows,
+                )));
+            }
             let schema = uqa_execution::RowSchema::with_types(source_columns.clone(), column_types);
             let operator: Box<dyn uqa_execution::PhysicalOperator + 'a> =
                 Box::new(uqa_execution::TableScan::from_physical_rows(schema, rows));

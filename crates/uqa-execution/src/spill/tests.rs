@@ -216,6 +216,65 @@ fn indexed_spill_preserves_hidden_aliases_without_named_rows() {
 }
 
 #[test]
+fn indexed_spill_preserves_structural_internal_attributes() {
+    let relation = uqa_sql::ast::InternalRelationId::allocate();
+    let internal = relation.column(0);
+    let schema = RowSchema::with_internal_relation_types(
+        relation,
+        vec![Some(uqa_sql::ast::ColumnType::BigInteger)],
+    );
+    let mut spill = IndexedSpill::new(schema).unwrap();
+    spill
+        .push(&PhysicalRow::from_values(vec![Value::Int(7)]))
+        .unwrap();
+
+    let restored = spill.get(0).unwrap();
+    assert!(spill.row_schema().columns().is_empty());
+    assert_eq!(spill.row_schema().physical_width(), 1);
+    let slot = spill.row_schema().internal_slot(internal).unwrap();
+    assert_eq!(restored.value(slot), Some(&Value::Int(7)));
+}
+
+#[test]
+fn positional_spill_preserves_structural_score_sources() {
+    let score_column = uqa_sql::ast::InternalRelationId::allocate().column(0);
+    let schema = RowSchema::with_types(
+        vec!["id".into(), "_score".into()],
+        vec![
+            Some(uqa_sql::ast::ColumnType::BigInteger),
+            Some(uqa_sql::ast::ColumnType::DoublePrecision),
+        ],
+    );
+    let schema = RowSchema::with_physical_internal_aliases(
+        &schema,
+        &[(
+            score_column,
+            1,
+            Some(uqa_sql::ast::ColumnType::DoublePrecision),
+        )],
+    );
+    let schema = RowSchema::with_score_source(&schema, Some("hit"), score_column);
+    let schema = RowSchema::with_wildcard_hidden_positions(&schema, [1]);
+    let mut buffer = SpillBuffer::new(0);
+    buffer
+        .push(Batch::from_physical_rows(
+            schema,
+            vec![PhysicalRow::from_values(vec![
+                Value::Int(7),
+                Value::Float(0.75),
+            ])],
+        ))
+        .unwrap();
+
+    let restored = buffer.drain_all().unwrap();
+    let view = restored[0].schema.view(&restored[0].rows[0]);
+    assert_eq!(view.score_source(Some("hit")), Some(&Value::Float(0.75)));
+    assert_eq!(view.score_source(None), Some(&Value::Float(0.75)));
+    assert!(restored[0].schema.wildcard_position_visible(0));
+    assert!(!restored[0].schema.wildcard_position_visible(1));
+}
+
+#[test]
 fn indexed_spill_retains_the_exact_input_physical_layout() {
     let input = RowSchema::new(vec!["discarded".into(), "id".into()]);
     let schema = RowSchema::select(&input, &[("id".into(), "id".into())]);

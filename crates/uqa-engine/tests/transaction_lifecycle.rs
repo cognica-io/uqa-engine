@@ -32,6 +32,32 @@ fn nested_begin_commit_pops_one_frame_at_a_time() {
 }
 
 #[test]
+fn user_savepoint_names_cannot_alias_nested_transaction_checkpoints() {
+    let directory = tempfile::tempdir().unwrap();
+    let eng = Engine::open(&directory.path().join("savepoint-identity.db")).unwrap();
+    eng.sql("CREATE TABLE savepoint_rows (id INTEGER)", &[])
+        .unwrap();
+    eng.begin().unwrap();
+    eng.sql("INSERT INTO savepoint_rows VALUES (1)", &[])
+        .unwrap();
+    eng.begin().unwrap();
+    eng.sql("INSERT INTO savepoint_rows VALUES (2)", &[])
+        .unwrap();
+    eng.savepoint("__uqa_nested_tx_1").unwrap();
+    eng.sql("INSERT INTO savepoint_rows VALUES (3)", &[])
+        .unwrap();
+
+    eng.rollback().unwrap();
+    eng.commit().unwrap();
+
+    let rows = eng
+        .sql("SELECT id FROM savepoint_rows ORDER BY id", &[])
+        .unwrap();
+    assert_eq!(rows.rows.len(), 1);
+    assert_eq!(rows.rows[0]["id"], uqa_core::Value::Int(1));
+}
+
+#[test]
 fn savepoint_release_round_trip() {
     let eng = Engine::new();
     eng.begin().unwrap();

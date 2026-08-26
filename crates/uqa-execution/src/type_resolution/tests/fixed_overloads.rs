@@ -5,6 +5,7 @@
 //
 
 use super::super::*;
+use uqa_sql::ast::FunctionDispatch;
 
 #[test]
 fn compatibility_resolvers_accept_mixed_case_pg_catalog_qualification() {
@@ -120,7 +121,9 @@ fn non_fixed_udf_introspection_retains_the_resolver_binding() {
             name: "application.stable_udf".into(),
             argument_types: vec!["integer".into()],
             builtin: false,
+            dispatch: None,
             invocation: None,
+            resolution_error: None,
         },
     };
     let parameters = [SQLParam::Scalar(Value::Int(7))];
@@ -178,7 +181,9 @@ fn non_fixed_udf_introspection_keeps_typed_text_distinct_from_unknown() {
                     name: "application.typed_text".into(),
                     argument_types: vec!["text".into()],
                     builtin: false,
+                    dispatch: None,
                     invocation: None,
+                    resolution_error: None,
                 },
                 return_type: ColumnType::Text,
                 exact_matches: 1,
@@ -267,7 +272,9 @@ fn scalar_introspection_rejects_non_scalar_catalog_bindings() {
                 name: format!("application.{routine_name}"),
                 argument_types: vec!["integer".into()],
                 builtin: false,
+                dispatch: None,
                 invocation: None,
+                resolution_error: None,
             },
         };
         let expression = ScalarExpr::Func {
@@ -345,46 +352,34 @@ fn fixed_builtin_binding_uses_typed_sql_parameters_across_families() {
     let bytes = || vec![param(Value::Bytes(vec![0, 255]))];
     let ints = |left, right| vec![param(Value::Int(left)), param(Value::Int(right))];
     for (function, parameters, expected_dispatch, expected_arguments, expected_return) in [
-        ("md5", bytes(), "md5", vec!["bytea"], ColumnType::Text),
-        (
-            "reverse",
-            bytes(),
-            "reverse",
-            vec!["bytea"],
-            ColumnType::Bytea,
-        ),
-        (
-            "length",
-            bytes(),
-            "length",
-            vec!["bytea"],
-            ColumnType::Integer,
-        ),
+        ("md5", bytes(), None, vec!["bytea"], ColumnType::Text),
+        ("reverse", bytes(), None, vec!["bytea"], ColumnType::Bytea),
+        ("length", bytes(), None, vec!["bytea"], ColumnType::Integer),
         (
             "to_hex",
             vec![param(Value::Int(42))],
-            TO_HEX_INT4_FUNCTION,
+            Some(FunctionDispatch::ToHexInt4),
             vec!["integer"],
             ColumnType::Text,
         ),
         (
             "to_hex",
             vec![param(Value::Int(int8))],
-            TO_HEX_INT8_FUNCTION,
+            Some(FunctionDispatch::ToHexInt8),
             vec!["bigint"],
             ColumnType::Text,
         ),
         (
             "random",
             ints(1, 2),
-            RANDOM_INT4_FUNCTION,
+            Some(FunctionDispatch::RandomInt4Range),
             vec!["integer", "integer"],
             ColumnType::Integer,
         ),
         (
             "random",
             ints(1, int8),
-            RANDOM_INT8_FUNCTION,
+            Some(FunctionDispatch::RandomInt8Range),
             vec!["bigint", "bigint"],
             ColumnType::BigInteger,
         ),
@@ -394,7 +389,7 @@ fn fixed_builtin_binding_uses_typed_sql_parameters_across_families() {
                 param(Value::Int(int8)),
                 param(Value::Decimal(uqa_core::DecimalValue::from_i64(3))),
             ],
-            RANDOM_NUMERIC_FUNCTION,
+            Some(FunctionDispatch::RandomNumericRange),
             vec!["numeric", "numeric"],
             ColumnType::Numeric {
                 precision: None,
@@ -404,7 +399,7 @@ fn fixed_builtin_binding_uses_typed_sql_parameters_across_families() {
         (
             "json_strip_nulls",
             vec![param(Value::Str("{}".into())), param(Value::Bool(true))],
-            "json_strip_nulls",
+            None,
             vec!["json", "boolean"],
             ColumnType::Json,
         ),
@@ -413,7 +408,7 @@ fn fixed_builtin_binding_uses_typed_sql_parameters_across_families() {
             vec![param(Value::Str(
                 "00000000-0000-4000-8000-000000000000".into(),
             ))],
-            "uuid_extract_version",
+            None,
             vec!["uuid"],
             ColumnType::SmallInteger,
         ),
@@ -441,7 +436,7 @@ fn fixed_builtin_binding_uses_typed_sql_parameters_across_families() {
             } => (name, binding, args),
             other => panic!("{function} must retain a bound scalar call: {other:?}"),
         };
-        assert_eq!(name, expected_dispatch, "{function}");
+        assert_eq!(name, function, "{function}");
         let expected_arguments = expected_arguments
             .into_iter()
             .map(str::to_string)
@@ -449,6 +444,7 @@ fn fixed_builtin_binding_uses_typed_sql_parameters_across_families() {
         let binding = binding.unwrap_or_else(|| panic!("{function} must retain its binding"));
         assert_eq!(binding.name, format!("pg_catalog.{function}"), "{function}");
         assert!(binding.builtin, "{function}");
+        assert_eq!(binding.dispatch, expected_dispatch, "{function}");
         assert_eq!(binding.argument_types, expected_arguments, "{function}");
         for (position, (argument, expected_type)) in
             args.iter().zip(&expected_arguments).enumerate()

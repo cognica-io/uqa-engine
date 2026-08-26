@@ -5,10 +5,10 @@
 //
 
 use super::{
-    AlterSequence, ColumnType, CreateFunction, FunctionBinding, FunctionBody, FunctionParallel,
-    FunctionParam, FunctionParamMode, FunctionReturns, FunctionVolatility,
-    RoutineInvocationBinding, RoutineSecurityAttributes, RoutineVariadicMode, SequenceRestart,
-    Statement,
+    AlterSequence, ColumnType, CreateFunction, FunctionBinding, FunctionBody, FunctionDispatch,
+    FunctionParallel, FunctionParam, FunctionParamMode, FunctionReturns, FunctionVolatility,
+    RangeFunctionOperation, RangeSubtype, RoutineInvocationBinding, RoutineSecurityAttributes,
+    RoutineVariadicMode, SequenceRestart, Statement,
 };
 
 #[test]
@@ -77,7 +77,9 @@ fn function_binding_builtin_identity_is_backward_compatible() {
         name: "pg_catalog.reverse".into(),
         argument_types: vec!["text".into()],
         builtin: true,
+        dispatch: None,
         invocation: None,
+        resolution_error: None,
     };
     let encoded = serde_json::to_string(&builtin).unwrap();
     assert!(encoded.contains(r#""builtin":true"#));
@@ -110,9 +112,75 @@ fn polymorphic_builtin_syntax_binding_has_stable_serde_shape() {
         name: "coalesce".into(),
         argument_types: vec!["text".into(), "text".into()],
         builtin: true,
+        dispatch: None,
         invocation: None,
+        resolution_error: None,
     };
     assert!(!fixed.is_polymorphic_builtin_syntax());
+}
+
+#[test]
+fn legacy_compiler_function_names_upgrade_only_at_the_catalog_boundary() {
+    let mut parser_name = "__subscript".to_string();
+    let mut parser_binding = None;
+    assert!(FunctionBinding::upgrade_legacy_serialized_dispatch(
+        &mut parser_name,
+        &mut parser_binding
+    ));
+    assert_eq!(
+        parser_binding.and_then(|binding| binding.dispatch),
+        Some(FunctionDispatch::Subscript)
+    );
+    assert_eq!(parser_name, "subscript");
+
+    let mut builtin_name = "__to_hex_int4".to_string();
+    let mut builtin_binding = Some(FunctionBinding {
+        name: "pg_catalog.to_hex".into(),
+        argument_types: vec!["integer".into()],
+        builtin: true,
+        dispatch: None,
+        invocation: None,
+        resolution_error: None,
+    });
+    assert!(FunctionBinding::upgrade_legacy_serialized_dispatch(
+        &mut builtin_name,
+        &mut builtin_binding
+    ));
+    assert_eq!(builtin_name, "pg_catalog.to_hex");
+    assert_eq!(
+        builtin_binding.and_then(|binding| binding.dispatch),
+        Some(FunctionDispatch::ToHexInt4)
+    );
+
+    let mut user_name = "__subscript".to_string();
+    let user_binding = FunctionBinding {
+        name: "app.__subscript".into(),
+        argument_types: vec!["integer".into()],
+        builtin: false,
+        dispatch: None,
+        invocation: None,
+        resolution_error: None,
+    };
+    let mut user_binding_slot = Some(user_binding.clone());
+    assert!(!FunctionBinding::upgrade_legacy_serialized_dispatch(
+        &mut user_name,
+        &mut user_binding_slot
+    ));
+    assert_eq!(user_name, "__subscript");
+    assert_eq!(user_binding_slot, Some(user_binding));
+
+    assert_eq!(
+        FunctionDispatch::from_legacy_serialized_name("__range_contained_by_tstzmultirange"),
+        Some(FunctionDispatch::Range {
+            operation: RangeFunctionOperation::ContainedBy,
+            subtype: RangeSubtype::TimestampTz,
+            multirange: true,
+        })
+    );
+    assert_eq!(
+        FunctionDispatch::from_legacy_serialized_name("app.__subscript"),
+        None
+    );
 }
 
 #[test]
@@ -125,6 +193,7 @@ fn routine_invocation_binding_round_trips_and_legacy_bindings_default_to_none() 
         name: "app.f".into(),
         argument_types: vec!["anyelement".into(), "anyarray".into()],
         builtin: false,
+        dispatch: None,
         invocation: Some(Box::new(RoutineInvocationBinding {
             argument_positions: vec![0, 1],
             argument_targets: vec!["integer".into(), "integer[]".into()],
@@ -132,6 +201,7 @@ fn routine_invocation_binding_round_trips_and_legacy_bindings_default_to_none() 
             return_type: Some("integer".into()),
             variadic_mode: RoutineVariadicMode::Explicit { parameter_index: 1 },
         })),
+        resolution_error: None,
     };
     let encoded = serde_json::to_value(&binding).unwrap();
     assert_eq!(

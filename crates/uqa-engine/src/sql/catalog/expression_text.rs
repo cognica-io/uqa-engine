@@ -24,6 +24,9 @@ pub(super) fn schema_expr_text(expr: &Expr) -> String {
         Expr::QualifiedColumn {
             qualifier, column, ..
         } => format!("{qualifier}.{column}"),
+        Expr::InternalColumn(column) => {
+            unreachable!("executor-only column {column:?} reached catalog SQL rendering")
+        }
         Expr::Literal(value) => schema_literal_text(value),
         Expr::Param(index) => format!("${index}"),
         Expr::Func {

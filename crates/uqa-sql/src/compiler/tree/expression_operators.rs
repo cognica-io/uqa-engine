@@ -6,11 +6,12 @@
 
 //! SQL operator, boolean, and null-test lowering.
 
-use super::expression_core::builtin_syntax_call;
+use super::expression_core::{builtin_syntax_call, dispatched_call};
 use super::{
     compile_expr, extract_strings, json_path_args, BinaryOp, Expr, NodeEnum, Result, SQLError,
     Value,
 };
+use crate::ast::FunctionDispatch;
 
 fn compile_pattern_operands(
     rhs: &pg_query::protobuf::Node,
@@ -378,18 +379,14 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 Some(NodeEnum::List(l)) if l.items.len() == 2 => l.items.clone(),
                 _ => return Err(SQLError::Internal("BETWEEN expects 2 bounds".into())),
             };
-            let call = Expr::Func {
-                binding: None,
-                name: "__between_symmetric".into(),
-                args: vec![
+            let call = dispatched_call(
+                FunctionDispatch::BetweenSymmetric,
+                vec![
                     compile_expr(expr)?,
                     compile_expr(&bounds[0])?,
                     compile_expr(&bounds[1])?,
                 ],
-                distinct: false,
-                order_by: Vec::new(),
-                filter: None,
-            };
+            );
             Ok(if matches!(kind, AExprKind::AexprNotBetweenSym) {
                 Expr::Not(Box::new(call))
             } else {
@@ -405,14 +402,10 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 .rexpr
                 .as_ref()
                 .ok_or_else(|| SQLError::Internal("IS DISTINCT FROM without rhs".into()))?;
-            let call = Expr::Func {
-                binding: None,
-                name: "__is_distinct".into(),
-                args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                distinct: false,
-                order_by: Vec::new(),
-                filter: None,
-            };
+            let call = dispatched_call(
+                FunctionDispatch::IsDistinct,
+                vec![compile_expr(lhs)?, compile_expr(rhs)?],
+            );
             Ok(if matches!(kind, AExprKind::AexprNotDistinct) {
                 Expr::Not(Box::new(call))
             } else {
@@ -463,23 +456,19 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                 .rexpr
                 .as_ref()
                 .ok_or_else(|| SQLError::Internal("ANY/ALL without rhs".into()))?;
-            let name = if matches!(kind, AExprKind::AexprOpAny) {
-                "__any_op"
+            let dispatch = if matches!(kind, AExprKind::AexprOpAny) {
+                FunctionDispatch::AnyOperator
             } else {
-                "__all_op"
+                FunctionDispatch::AllOperator
             };
-            Ok(Expr::Func {
-                binding: None,
-                name: name.into(),
-                args: vec![
+            Ok(dispatched_call(
+                dispatch,
+                vec![
                     compile_expr(lhs)?,
                     compile_expr(rhs)?,
                     Expr::Literal(Value::Str(op_name)),
                 ],
-                distinct: false,
-                order_by: Vec::new(),
-                filter: None,
-            })
+            ))
         }
         AExprKind::AexprNullif => {
             let lhs = a

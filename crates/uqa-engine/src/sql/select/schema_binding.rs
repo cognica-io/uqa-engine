@@ -23,9 +23,9 @@ pub(in crate::sql) use routine_binding::bind_query_plan_routines_for_storage;
 use cte_controls::{extend_recursive_cte_binding_schema, hide_recursive_generated_schema};
 
 use super::{
-    cte_references_own_name, expr_contains_subquery, is_score_provenance_column, ordered_plan_ctes,
-    projection_columns, user_function_output_columns, CteScope, Engine, QueryBlockPlan, QueryPlan,
-    RelationalPlan, SQLError, SQLParam, ScalarExpr, SourcePlan, Value,
+    cte_references_own_name, expr_contains_subquery, ordered_plan_ctes, projection_columns,
+    user_function_output_columns, CteScope, Engine, QueryBlockPlan, QueryPlan, RelationalPlan,
+    SQLError, SQLParam, ScalarExpr, SourcePlan, Value,
 };
 use crate::sql::from_rows::{
     alias_join_schema, apply_table_function_aliases, join_using_output_schema, resolve_join_using,
@@ -706,7 +706,15 @@ impl SchemaScope {
                 rows,
                 alias,
                 column_aliases,
+                internal_relation,
+                internal_column_types,
             } => {
+                if let Some(relation) = internal_relation {
+                    return Ok(RowSchema::with_internal_relation_types(
+                        *relation,
+                        internal_column_types.clone(),
+                    ));
+                }
                 let columns = if column_aliases.is_empty() {
                     (1..=rows.first().map_or(0, Vec::len))
                         .map(|index| format!("column{index}"))
@@ -1088,6 +1096,28 @@ pub(in crate::sql) fn bind_source_plan_schema(
     )
 }
 
+/// Add query-block pseudo columns after the complete source scope is known, so `_meta` is exposed only for one unambiguous local-table source and never shadows a real relation alias.
+pub(in crate::sql) fn with_query_table_pseudo_columns(schema: &RowSchema) -> RowSchema {
+    analysis::with_unqualified_table_pseudo_columns(schema)
+}
+
+/// Derive and validate one FROM source's exact row type without executing it.
+pub(in crate::sql) fn analyze_source_plan_schema(
+    engine: &Engine,
+    source: &SourcePlan,
+    params: &[SQLParam],
+    ctes: &CteScope,
+    outer: Option<&RowSchema>,
+) -> Result<RowSchema, SQLError> {
+    SchemaScope::for_analysis(ctes).bind_source(
+        engine,
+        source,
+        &ctes.scalar_subqueries,
+        params,
+        outer,
+    )
+}
+
 /// Bind every table-function source in one execution-owned source plan to its exact routine identity and return the schema derived from those same bindings.
 pub(in crate::sql) fn bind_source_plan_schema_for_execution(
     engine: &Engine,
@@ -1117,7 +1147,47 @@ pub(in crate::sql) fn bind_projection_output_schema(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<RowSchema, SQLError> {
-    let mut scope = SchemaScope::from_execution_scope(ctes);
+    projection_output_schema(
+        SchemaScope::from_execution_scope(ctes),
+        engine,
+        projections,
+        expression_schema,
+        star_schema,
+        subqueries,
+        params,
+    )
+}
+
+/// Derive and validate a projection's exact output row type without executing it.
+pub(in crate::sql) fn analyze_projection_output_schema(
+    engine: &Engine,
+    projections: &[uqa_planner::ProjectionPlan],
+    expression_schema: &RowSchema,
+    star_schema: &RowSchema,
+    subqueries: &[QueryPlan],
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<RowSchema, SQLError> {
+    projection_output_schema(
+        SchemaScope::for_analysis(ctes),
+        engine,
+        projections,
+        expression_schema,
+        star_schema,
+        subqueries,
+        params,
+    )
+}
+
+fn projection_output_schema(
+    mut scope: SchemaScope,
+    engine: &Engine,
+    projections: &[uqa_planner::ProjectionPlan],
+    expression_schema: &RowSchema,
+    star_schema: &RowSchema,
+    subqueries: &[QueryPlan],
+    params: &[SQLParam],
+) -> Result<RowSchema, SQLError> {
     let labels = projection_columns(projections);
     let mut columns = Vec::new();
     let mut types = Vec::new();
@@ -1197,7 +1267,6 @@ fn projection_star_columns(
                 .columns()
                 .iter()
                 .enumerate()
-                .filter(|(_, column)| !is_score_provenance_column(column))
                 .map(|(position, column)| {
                     (
                         schema.public_name(position).unwrap_or(column).to_string(),
@@ -1210,7 +1279,6 @@ fn projection_star_columns(
             let columns = schema
                 .qualified_star_layout(qualifier)
                 .into_iter()
-                .filter(|(column, _, _)| !is_score_provenance_column(column))
                 .map(|(column, _, ty)| (column, ty))
                 .collect::<Vec<_>>();
             if columns.is_empty() {
@@ -1228,15 +1296,10 @@ fn rename_schema(schema: &RowSchema, aliases: &[String], qualifier: Option<&str>
         .iter()
         .enumerate()
         .map(|(position, column)| {
-            let base = if is_score_provenance_column(column) {
-                column.clone()
-            } else {
-                aliases
-                    .get(position)
-                    .cloned()
-                    .unwrap_or_else(|| schema.public_name(position).unwrap_or(column).to_string())
-            };
-            base
+            aliases
+                .get(position)
+                .cloned()
+                .unwrap_or_else(|| schema.public_name(position).unwrap_or(column).to_string())
         })
         .collect();
     let renamed = match qualifier {

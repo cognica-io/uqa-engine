@@ -12,6 +12,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use uqa_analysis::Analyzer;
@@ -57,6 +58,27 @@ impl StorageBackendError {
 }
 
 pub type StorageBackendResult<T> = std::result::Result<T, StorageBackendError>;
+
+/// Opaque transaction checkpoint identity. SQL savepoint names remain engine metadata and are never forwarded into a backend namespace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StorageSavepointId(u64);
+
+impl StorageSavepointId {
+    #[must_use]
+    pub fn allocate() -> Self {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        let id = NEXT_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .expect("storage savepoint identity space exhausted");
+        Self(id)
+    }
+
+    pub(crate) fn backend_name(self) -> String {
+        self.0.to_string()
+    }
+}
 
 /// Session-bound catalog and physical storage handles created together.
 ///
@@ -357,11 +379,11 @@ pub trait PersistentStorageBackend: Send + Sync {
 
     fn rollback_transaction(&self) -> StorageBackendResult<()>;
 
-    fn savepoint(&self, name: &str) -> StorageBackendResult<()>;
+    fn savepoint(&self, id: StorageSavepointId) -> StorageBackendResult<()>;
 
-    fn release_savepoint(&self, name: &str) -> StorageBackendResult<()>;
+    fn release_savepoint(&self, id: StorageSavepointId) -> StorageBackendResult<()>;
 
-    fn rollback_to_savepoint(&self, name: &str) -> StorageBackendResult<()>;
+    fn rollback_to_savepoint(&self, id: StorageSavepointId) -> StorageBackendResult<()>;
 }
 
 #[derive(Clone)]
@@ -638,18 +660,18 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(())
     }
 
-    fn savepoint(&self, name: &str) -> StorageBackendResult<()> {
-        self.conn.savepoint(name)?;
+    fn savepoint(&self, id: StorageSavepointId) -> StorageBackendResult<()> {
+        self.conn.savepoint(&id.backend_name())?;
         Ok(())
     }
 
-    fn release_savepoint(&self, name: &str) -> StorageBackendResult<()> {
-        self.conn.release_savepoint(name)?;
+    fn release_savepoint(&self, id: StorageSavepointId) -> StorageBackendResult<()> {
+        self.conn.release_savepoint(&id.backend_name())?;
         Ok(())
     }
 
-    fn rollback_to_savepoint(&self, name: &str) -> StorageBackendResult<()> {
-        self.conn.rollback_to_savepoint(name)?;
+    fn rollback_to_savepoint(&self, id: StorageSavepointId) -> StorageBackendResult<()> {
+        self.conn.rollback_to_savepoint(&id.backend_name())?;
         Ok(())
     }
 }

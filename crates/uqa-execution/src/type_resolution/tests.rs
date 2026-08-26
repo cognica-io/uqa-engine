@@ -5,8 +5,28 @@
 //
 
 use super::*;
+use uqa_sql::ast::FunctionDispatch;
 
 mod fixed_overloads;
+
+fn dispatched(dispatch: FunctionDispatch, args: Vec<ScalarExpr>) -> ScalarExpr {
+    let binding = FunctionBinding::dispatched(dispatch);
+    ScalarExpr::Func {
+        name: binding.name.clone(),
+        binding: Some(binding),
+        args,
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    }
+}
+
+fn named_argument(name: &str, value: ScalarExpr) -> ScalarExpr {
+    dispatched(
+        FunctionDispatch::NamedArgument,
+        vec![ScalarExpr::Literal(Value::Str(name.into())), value],
+    )
+}
 
 #[test]
 fn typed_scalar_parameters_preserve_declared_width_domain_and_text_identity() {
@@ -146,7 +166,9 @@ fn gamma_binding_preserves_the_float8_signature_and_function_identity() {
         name: "pg_catalog.lgamma".into(),
         argument_types: vec!["double precision".into()],
         builtin: true,
+        dispatch: None,
         invocation: None,
+        resolution_error: None,
     };
     let error = resolve_gamma_overload(
         "gamma",
@@ -198,14 +220,7 @@ fn json_strip_binding_preserves_defaults_named_slots_and_declared_types() {
         ColumnType::Json
     );
 
-    let named = |name: &str, value: ScalarExpr| ScalarExpr::Func {
-        name: uqa_sql::expr::NAMED_ARG_FUNCTION.into(),
-        binding: None,
-        args: vec![ScalarExpr::Literal(Value::Str(name.into())), value],
-        distinct: false,
-        order_by: Vec::new(),
-        filter: None,
-    };
+    let named = named_argument;
     let expression = ScalarExpr::Func {
         name: "jsonb_strip_nulls".into(),
         binding: None,
@@ -302,17 +317,17 @@ fn uuid_extraction_binding_rejects_non_uuid_declared_types() {
     };
     assert_eq!(name, "uuid_extract_version");
 
-    let ScalarExpr::Func { name, .. } = bind_type_introspection(call("text_value"), &schema, &[])
+    let ScalarExpr::Func { name, binding, .. } =
+        bind_type_introspection(call("text_value"), &schema, &[])
     else {
-        panic!("an unresolved UUID overload must remain an error marker call");
+        panic!("an unresolved UUID overload must remain a typed error call");
     };
-    assert_eq!(
-        name,
-        format!(
-            "{}uuid_extract_version(text)",
-            uqa_sql::expr::UNDEFINED_FUNCTION_MARKER
-        )
-    );
+    assert_eq!(name, "uuid_extract_version");
+    assert!(matches!(
+        binding.and_then(|binding| binding.resolution_error),
+        Some(uqa_sql::ast::FunctionResolutionError::UndefinedFunction { signature })
+            if signature == "uuid_extract_version(text)"
+    ));
 }
 
 #[test]
@@ -366,16 +381,15 @@ fn uuid_extraction_binding_uses_declared_scalar_subquery_types() {
         panic!("UUID scalar subquery must remain a function call");
     };
     assert_eq!(name, "uuid_extract_version");
-    let ScalarExpr::Func { name, .. } = bind(1) else {
-        panic!("text scalar subquery must remain an error marker call");
+    let ScalarExpr::Func { name, binding, .. } = bind(1) else {
+        panic!("text scalar subquery must remain a typed error call");
     };
-    assert_eq!(
-        name,
-        format!(
-            "{}uuid_extract_version(text)",
-            uqa_sql::expr::UNDEFINED_FUNCTION_MARKER
-        )
-    );
+    assert_eq!(name, "uuid_extract_version");
+    assert!(matches!(
+        binding.and_then(|binding| binding.resolution_error),
+        Some(uqa_sql::ast::FunctionResolutionError::UndefinedFunction { signature })
+            if signature == "uuid_extract_version(text)"
+    ));
 }
 
 #[test]
@@ -502,13 +516,13 @@ fn integer_base_functions_bind_the_declared_overload_before_width_is_erased() {
         vec!["i4".into(), "i8".into()],
         vec![Some(ColumnType::Integer), Some(ColumnType::BigInteger)],
     );
-    for (function, column, expected_name) in [
-        ("to_bin", "i4", TO_BIN_INT4_FUNCTION),
-        ("to_bin", "i8", TO_BIN_INT8_FUNCTION),
-        ("to_hex", "i4", TO_HEX_INT4_FUNCTION),
-        ("to_hex", "i8", TO_HEX_INT8_FUNCTION),
-        ("to_oct", "i4", TO_OCT_INT4_FUNCTION),
-        ("to_oct", "i8", TO_OCT_INT8_FUNCTION),
+    for (function, column, expected_dispatch) in [
+        ("to_bin", "i4", FunctionDispatch::ToBinInt4),
+        ("to_bin", "i8", FunctionDispatch::ToBinInt8),
+        ("to_hex", "i4", FunctionDispatch::ToHexInt4),
+        ("to_hex", "i8", FunctionDispatch::ToHexInt8),
+        ("to_oct", "i4", FunctionDispatch::ToOctInt4),
+        ("to_oct", "i8", FunctionDispatch::ToOctInt8),
     ] {
         let expression = ScalarExpr::Func {
             name: function.into(),
@@ -518,11 +532,16 @@ fn integer_base_functions_bind_the_declared_overload_before_width_is_erased() {
             order_by: Vec::new(),
             filter: None,
         };
-        let ScalarExpr::Func { name, .. } = bind_type_introspection(expression, &schema, &[])
+        let ScalarExpr::Func { name, binding, .. } =
+            bind_type_introspection(expression, &schema, &[])
         else {
             panic!("{function} must remain a scalar function");
         };
-        assert_eq!(name, expected_name);
+        assert_eq!(name, function);
+        assert_eq!(
+            binding.and_then(|binding| binding.dispatch),
+            Some(expected_dispatch)
+        );
     }
 }
 
@@ -541,11 +560,11 @@ fn random_range_functions_bind_the_promoted_overload_before_width_is_erased() {
             Some(numeric),
         ],
     );
-    for (lower, upper, expected_name) in [
-        ("i4", "i4", RANDOM_INT4_FUNCTION),
-        ("i2", "i4", RANDOM_INT4_FUNCTION),
-        ("i4", "i8", RANDOM_INT8_FUNCTION),
-        ("i8", "n", RANDOM_NUMERIC_FUNCTION),
+    for (lower, upper, expected_dispatch) in [
+        ("i4", "i4", FunctionDispatch::RandomInt4Range),
+        ("i2", "i4", FunctionDispatch::RandomInt4Range),
+        ("i4", "i8", FunctionDispatch::RandomInt8Range),
+        ("i8", "n", FunctionDispatch::RandomNumericRange),
     ] {
         let expression = ScalarExpr::Func {
             name: "random".into(),
@@ -558,24 +577,19 @@ fn random_range_functions_bind_the_promoted_overload_before_width_is_erased() {
             order_by: Vec::new(),
             filter: None,
         };
-        let ScalarExpr::Func { name, .. } = bind_type_introspection(expression, &schema, &[])
+        let ScalarExpr::Func { name, binding, .. } =
+            bind_type_introspection(expression, &schema, &[])
         else {
             panic!("random range must remain a scalar function");
         };
-        assert_eq!(name, expected_name);
+        assert_eq!(name, "random");
+        assert_eq!(
+            binding.and_then(|binding| binding.dispatch),
+            Some(expected_dispatch)
+        );
     }
 
-    let named_max = ScalarExpr::Func {
-        name: uqa_sql::expr::NAMED_ARG_FUNCTION.into(),
-        binding: None,
-        args: vec![
-            ScalarExpr::Literal(Value::Str("max".into())),
-            ScalarExpr::Column("i4".into()),
-        ],
-        distinct: false,
-        order_by: Vec::new(),
-        filter: None,
-    };
+    let named_max = named_argument("max", ScalarExpr::Column("i4".into()));
     let invalid_order = ScalarExpr::Func {
         name: "random".into(),
         binding: None,
@@ -607,14 +621,7 @@ fn array_transforms_bind_polymorphic_types_named_slots_and_boolean_unknowns() {
             }),
         ],
     );
-    let named = |name: &str, value: ScalarExpr| ScalarExpr::Func {
-        name: uqa_sql::expr::NAMED_ARG_FUNCTION.into(),
-        binding: None,
-        args: vec![ScalarExpr::Literal(Value::Str(name.into())), value],
-        distinct: false,
-        order_by: Vec::new(),
-        filter: None,
-    };
+    let named = named_argument;
     let call = |name: &str, args| ScalarExpr::Func {
         name: name.into(),
         binding: None,
@@ -666,10 +673,15 @@ fn array_transforms_bind_polymorphic_types_named_slots_and_boolean_unknowns() {
     ));
 
     let json_sort = call("array_sort", vec![ScalarExpr::Column("documents".into())]);
-    let ScalarExpr::Func { name, .. } = bind_type_introspection(json_sort, &schema, &[]) else {
+    let ScalarExpr::Func { name, binding, .. } = bind_type_introspection(json_sort, &schema, &[])
+    else {
         panic!("json array_sort must remain a scalar function");
     };
-    assert_eq!(name, uqa_sql::expr::ARRAY_SORT_JSON_FUNCTION);
+    assert_eq!(name, "array_sort");
+    assert_eq!(
+        binding.and_then(|binding| binding.dispatch),
+        Some(FunctionDispatch::ArraySortJson)
+    );
 
     let domain_sort = call(
         "array_sort",
@@ -929,22 +941,8 @@ fn explicit_variadic_marker_reaches_catalog_type_resolver() {
     }
 
     let array = ScalarExpr::Array(vec![ScalarExpr::Literal(Value::Int(1))]);
-    let variadic = ScalarExpr::Func {
-        name: uqa_sql::expr::VARIADIC_ARG_FUNCTION.into(),
-        binding: None,
-        args: vec![array],
-        distinct: false,
-        order_by: Vec::new(),
-        filter: None,
-    };
-    let named = ScalarExpr::Func {
-        name: uqa_sql::expr::NAMED_ARG_FUNCTION.into(),
-        binding: None,
-        args: vec![ScalarExpr::Literal(Value::Str("items".into())), variadic],
-        distinct: false,
-        order_by: Vec::new(),
-        filter: None,
-    };
+    let variadic = dispatched(FunctionDispatch::VariadicArgument, vec![array]);
+    let named = named_argument("items", variadic);
     let expression = ScalarExpr::Func {
         name: "application.collect".into(),
         binding: None,
@@ -963,14 +961,7 @@ fn explicit_variadic_marker_reaches_catalog_type_resolver() {
 
 #[test]
 fn explicit_variadic_marker_is_transparent_and_validates_call_position() {
-    let marker = |value| ScalarExpr::Func {
-        name: uqa_sql::expr::VARIADIC_ARG_FUNCTION.into(),
-        binding: None,
-        args: vec![value],
-        distinct: false,
-        order_by: Vec::new(),
-        filter: None,
-    };
+    let marker = |value| dispatched(FunctionDispatch::VariadicArgument, vec![value]);
     let array = ScalarExpr::Array(vec![ScalarExpr::Literal(Value::Int(1))]);
     assert_eq!(
         scalar_type(&marker(array.clone()), &RowSchema::default(), &[]).unwrap(),
@@ -993,14 +984,14 @@ fn explicit_variadic_marker_is_transparent_and_validates_call_position() {
         Err(SQLError::Internal(message)) if message.contains("final call argument")
     ));
 
-    let malformed = ScalarExpr::Func {
-        name: uqa_sql::expr::VARIADIC_ARG_FUNCTION.into(),
-        binding: None,
-        args: vec![ScalarExpr::Array(vec![ScalarExpr::Literal(Value::Int(1))])],
-        distinct: true,
-        order_by: Vec::new(),
-        filter: None,
+    let mut malformed = dispatched(
+        FunctionDispatch::VariadicArgument,
+        vec![ScalarExpr::Array(vec![ScalarExpr::Literal(Value::Int(1))])],
+    );
+    let ScalarExpr::Func { distinct, .. } = &mut malformed else {
+        unreachable!();
     };
+    *distinct = true;
     assert!(matches!(
         scalar_type(&malformed, &RowSchema::default(), &[]),
         Err(SQLError::Internal(message)) if message.contains("syntax marker contains function-call metadata")

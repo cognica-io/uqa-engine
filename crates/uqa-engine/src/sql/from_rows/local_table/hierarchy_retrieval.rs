@@ -120,21 +120,27 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
     {
         columns.push(TABLE_OID_COLUMN.into());
     }
+    let metadata = prune
+        .and_then(|prune| prune.get(qualifier))
+        .map(super::super::SourceProjection::metadata)
+        .unwrap_or_default();
     let estimated_cardinality = physical
         .iter()
         .map(|retrieval| retrieval.entries.len())
         .sum();
+    let score_column = uqa_sql::ast::InternalRelationId::allocate().column(0);
     let mut sources = Vec::with_capacity(physical.len());
     for retrieval in physical {
         let table = engine.require_table(&retrieval.table_name)?;
         sources.push(
-            ScoredDocumentSource::new(
+            ScoredDocumentSource::new_configured(
                 &retrieval.table_name,
                 table,
                 ScoredInput::entries(retrieval.entries, true),
                 columns.clone(),
                 None,
                 None,
+                super::ScoredSourceAttributes::shared_score(score_column, metadata),
             )
             .with_table_oid(crate::sql::catalog::table_relation_oid(
                 engine,

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use super::{
     physical_work_mem_bytes, resolve_fetch_limit_with_ties, resolve_limit_offset_with_ctes,
     resolve_order_expression, CteScope, Engine, OutputColumnMapping, QueryBlockPlan, SQLError,
-    SQLParam, ScalarExpr, SharedExpressionEvaluator, ORDER_SET_COLUMN_PREFIX,
+    SQLParam, SharedExpressionEvaluator,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -130,17 +130,13 @@ pub(in crate::sql) fn attach_order_limit<'a>(
 pub(super) fn resolved_sort_keys(
     statement: &QueryBlockPlan,
     output_columns: &[OutputColumnMapping],
-    hidden_schema: Option<&uqa_execution::RowSchema>,
+    _hidden_schema: Option<&uqa_execution::RowSchema>,
 ) -> Result<Vec<uqa_execution::SortKey>, SQLError> {
-    statement.order_by.iter().enumerate().try_fold(
-        Vec::<uqa_execution::SortKey>::new(),
-        |mut keys, (index, order)| {
-            let hidden = format!("{ORDER_SET_COLUMN_PREFIX}{index}");
-            let expr = if hidden_schema.is_some_and(|schema| schema.position(&hidden).is_some()) {
-                ScalarExpr::Column(hidden)
-            } else {
-                resolve_order_expression(&order.expr, output_columns)?
-            };
+    statement
+        .order_by
+        .iter()
+        .try_fold(Vec::<uqa_execution::SortKey>::new(), |mut keys, order| {
+            let expr = resolve_order_expression(&order.expr, output_columns)?;
             let key = uqa_execution::SortKey {
                 expr,
                 descending: order.descending,
@@ -155,6 +151,5 @@ pub(super) fn resolved_sort_keys(
                 keys.push(key);
             }
             Ok(keys)
-        },
-    )
+        })
 }

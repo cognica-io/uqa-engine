@@ -15,6 +15,7 @@ use super::{
     Engine, FacetExecution, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam,
     ScalarExpr, ScoredDocumentSource, ScoredInput, SingleRelation, TABLE_OID_COLUMN,
 };
+use crate::sql::from_rows::SourceProjection;
 
 pub(in crate::sql) fn run_single_table_select_output(
     engine: &Engine,
@@ -32,18 +33,31 @@ pub(in crate::sql) fn run_single_table_select_output(
     if let Some(filter) = stmt.r#where.as_ref() {
         crate::sql::validate_expr_text_match_fields(engine, table, filter)?;
     }
-    let score_top_k = if matches!(
-        block.access,
-        AccessPathPlan::OperatorTree {
-            score_limit_pushdown: true
-        }
-    ) {
+    let has_stored_score_column = engine
+        .try_describe_table(table)
+        .map_err(|error| SQLError::Internal(format!("read table schema for `{table}`: {error}")))?
+        .is_some_and(|columns| {
+            columns
+                .iter()
+                .any(|column| column.name == super::SCORE_COLUMN)
+        });
+    let score_top_k = if !has_stored_score_column
+        && matches!(
+            block.access,
+            AccessPathPlan::OperatorTree {
+                score_limit_pushdown: true
+            }
+        ) {
         score_order_top_k(stmt, engine, params, ctes)?
             .filter(|_| score_limited_text_filter(stmt.r#where.as_ref()))
     } else {
         None
     };
-    let post_retrieval_top_k = post_retrieval_score_top_k(stmt, engine, params, ctes)?;
+    let post_retrieval_top_k = if has_stored_score_column {
+        None
+    } else {
+        post_retrieval_score_top_k(stmt, engine, params, ctes)?
+    };
     let has_jsonpath_fts_filter = stmt
         .r#where
         .as_ref()
@@ -119,13 +133,19 @@ pub(in crate::sql) fn run_single_table_select_output(
         }
     };
 
-    let source_schema = stmt
+    let source_projection = stmt
         .from
         .as_ref()
         .and_then(|source| {
             column_prune_for_stmt_with_filter(engine, stmt, source, physical_filter.as_ref())
         })
-        .and_then(|prune| prune.get(table).cloned())
+        .and_then(|prune| prune.get(qualifier).cloned());
+    let metadata_projection = source_projection
+        .as_ref()
+        .map(SourceProjection::metadata)
+        .unwrap_or_default();
+    let source_schema = source_projection
+        .and_then(SourceProjection::explicit_columns)
         .map(|columns| columns.into_iter().collect())
         .map_or_else(
             || {
@@ -187,13 +207,14 @@ pub(in crate::sql) fn run_single_table_select_output(
         .and_then(|(origin_qualifier, storage_name)| {
             ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
         });
-    let source = ScoredDocumentSource::new(
+    let source = ScoredDocumentSource::new_with_metadata(
         table,
         table_state,
         scored,
         source_schema,
         ordered_primary_key,
         pushed_predicate,
+        metadata_projection,
     )
     .with_table_oid(crate::sql::catalog::table_relation_oid(engine, table)?)
     .with_qualifier(qualifier)

@@ -41,7 +41,7 @@ impl RowLockManager {
         if let Some(CrossAttachment::Active(coordinator)) = self.cross.as_ref() {
             return coordinator
                 .physical_change_target_after(
-                    table_hash(table),
+                    table_hash(table.as_bytes()),
                     doc_id,
                     baseline.cross_sequence,
                     LockStrength::ForUpdate,
@@ -58,7 +58,7 @@ impl RowLockManager {
                 LocalPhysicalRowChangeTarget::Unchanged => PhysicalRowChangeTarget::Unchanged,
                 LocalPhysicalRowChangeTarget::Deleted => PhysicalRowChangeTarget::Deleted,
                 LocalPhysicalRowChangeTarget::Present(target) => PhysicalRowChangeTarget::Present {
-                    table_hash: table_hash(self.table_name(target.table).as_ref()),
+                    table_hash: table_hash(&self.relation_bytes(target.table)),
                     doc_id: target.doc_id,
                 },
             },

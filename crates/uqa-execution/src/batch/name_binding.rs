@@ -6,11 +6,45 @@
 
 //! Static SQL name and type binding over a physical row schema.
 
-use uqa_sql::ast::ColumnType;
+use uqa_sql::ast::{ColumnType, InternalColumnRef};
 
-use super::{ColumnIdentity, RowSchema, SchemaBuildMetadata, NULL_SLOT};
+use super::{ColumnIdentity, RowSchema, SchemaBuildMetadata, ScoreSource, NULL_SLOT};
 
 impl RowSchema {
+    /// Bind every SQL-visible column to one relation qualifier while preserving executor-only internal attributes and rebinding carried retrieval scores to the same relation boundary.
+    pub fn with_relation_qualifier(input: &Self, qualifier: &str) -> Self {
+        let identities = input
+            .columns()
+            .iter()
+            .cloned()
+            .map(|column| ColumnIdentity::qualified(qualifier, column))
+            .collect();
+        let score_sources = input
+            .index
+            .cold
+            .score_sources
+            .iter()
+            .map(|source| ScoreSource {
+                qualifier: Some(Box::<str>::from(qualifier)),
+                column: source.column,
+            })
+            .collect();
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
+            input.columns().to_vec(),
+            identities,
+            input.column_types().to_vec(),
+            input.index.slots.to_vec(),
+            input.physical_width(),
+            SchemaBuildMetadata {
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
+                score_sources,
+                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
+                ..SchemaBuildMetadata::default()
+            },
+        )
+    }
+
     /// Whether a visible or hidden lookup identity belongs to `qualifier`.
     #[must_use]
     pub fn has_qualifier(&self, qualifier: &str) -> bool {
@@ -129,10 +163,228 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: lookup_aliases,
                 alias_types,
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
+                score_sources: input.index.cold.score_sources.clone(),
+                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
                 ..SchemaBuildMetadata::default()
             },
         )
+    }
+
+    /// Add hidden SQL lookup identities that point at explicit physical slots.
+    /// Unlike [`Self::with_identity_aliases`], these slots do not need a
+    /// SQL-visible logical column owner.
+    pub fn with_physical_identity_aliases(
+        input: &Self,
+        aliases: &[(ColumnIdentity, usize, Option<ColumnType>)],
+    ) -> Self {
+        let mut lookup_aliases = input.index.aliases.clone();
+        let mut alias_types = input.index.cold.aliases.clone();
+        for (identity, slot, ty) in aliases {
+            assert!(
+                *slot < input.physical_width(),
+                "physical identity alias is outside row width"
+            );
+            lookup_aliases.insert(identity.clone(), *slot);
+            alias_types.insert(identity.clone(), ty.clone());
+        }
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
+            input.columns().to_vec(),
+            input.identities().to_vec(),
+            input.column_types().to_vec(),
+            input.index.slots.to_vec(),
+            input.physical_width(),
+            SchemaBuildMetadata {
+                aliases: lookup_aliases,
+                alias_types,
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
+                score_sources: input.index.cold.score_sources.clone(),
+                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
+                binding_only: input.index.cold.binding_only.clone(),
+                ..SchemaBuildMetadata::default()
+            },
+        )
+    }
+
+    /// Add executor-only relation attributes at explicit physical slots.
+    pub fn with_physical_internal_aliases(
+        input: &Self,
+        aliases: &[(InternalColumnRef, usize, Option<ColumnType>)],
+    ) -> Self {
+        let mut internal = input.index.executor_attributes.clone();
+        let mut internal_types = input.index.cold.executor_attribute_types.clone();
+        for (column, slot, ty) in aliases {
+            assert!(
+                *slot < input.physical_width(),
+                "physical internal alias is outside row width"
+            );
+            internal.insert(*column, *slot);
+            internal_types.insert(*column, ty.clone());
+        }
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
+            input.columns().to_vec(),
+            input.identities().to_vec(),
+            input.column_types().to_vec(),
+            input.index.slots.to_vec(),
+            input.physical_width(),
+            SchemaBuildMetadata {
+                aliases: input.index.aliases.clone(),
+                alias_types: input.index.cold.aliases.clone(),
+                internal,
+                internal_types,
+                score_sources: input.index.cold.score_sources.clone(),
+                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
+                binding_only: input.index.cold.binding_only.clone(),
+                ..SchemaBuildMetadata::default()
+            },
+        )
+    }
+
+    /// Mark source-owned logical metadata attributes as explicitly
+    /// addressable but absent from `*` expansion. The identity is positional,
+    /// so an ordinary user column with the same text remains visible.
+    pub fn with_wildcard_hidden_positions(
+        input: &Self,
+        positions: impl IntoIterator<Item = usize>,
+    ) -> Self {
+        let wildcard_hidden = positions.into_iter().collect();
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
+            input.columns().to_vec(),
+            input.identities().to_vec(),
+            input.column_types().to_vec(),
+            input.index.slots.to_vec(),
+            input.physical_width(),
+            SchemaBuildMetadata {
+                aliases: input.index.aliases.clone(),
+                alias_types: input.index.cold.aliases.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
+                score_sources: input.index.cold.score_sources.clone(),
+                wildcard_hidden,
+                binding_only: input.index.cold.binding_only.clone(),
+                ..SchemaBuildMetadata::default()
+            },
+        )
+    }
+
+    #[must_use]
+    pub fn internal_slot(&self, column: InternalColumnRef) -> Option<usize> {
+        self.index
+            .executor_attributes
+            .get(&column)
+            .copied()
+            .filter(|slot| *slot != NULL_SLOT)
+    }
+
+    #[must_use]
+    pub fn internal_type(&self, column: InternalColumnRef) -> Option<&ColumnType> {
+        self.index
+            .cold
+            .executor_attribute_types
+            .get(&column)
+            .and_then(Option::as_ref)
+    }
+
+    /// Mark an existing internal attribute as the score carried by one retrieval relation. This semantic tag is schema metadata and never enters SQL name lookup or wildcard expansion.
+    pub fn with_score_source(
+        input: &Self,
+        qualifier: Option<&str>,
+        column: InternalColumnRef,
+    ) -> Self {
+        assert!(
+            input.index.executor_attributes.contains_key(&column),
+            "score source must reference an existing internal attribute"
+        );
+        let mut score_sources = input.index.cold.score_sources.clone();
+        score_sources.retain(|source| source.column != column);
+        score_sources.push(ScoreSource {
+            qualifier: qualifier.map(Box::<str>::from),
+            column,
+        });
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
+            input.columns().to_vec(),
+            input.identities().to_vec(),
+            input.column_types().to_vec(),
+            input.index.slots.to_vec(),
+            input.physical_width(),
+            SchemaBuildMetadata {
+                aliases: input.index.aliases.clone(),
+                alias_types: input.index.cold.aliases.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
+                score_sources,
+                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
+                binding_only: input.index.cold.binding_only.clone(),
+                ..SchemaBuildMetadata::default()
+            },
+        )
+    }
+
+    /// Rebind every carried score source at a relation-alias boundary while retaining its opaque internal attribute identity.
+    pub fn with_rebound_score_sources(input: &Self, qualifier: Option<&str>) -> Self {
+        let score_sources = input
+            .index
+            .cold
+            .score_sources
+            .iter()
+            .map(|source| ScoreSource {
+                qualifier: qualifier.map(Box::<str>::from),
+                column: source.column,
+            })
+            .collect();
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
+            input.columns().to_vec(),
+            input.identities().to_vec(),
+            input.column_types().to_vec(),
+            input.index.slots.to_vec(),
+            input.physical_width(),
+            SchemaBuildMetadata {
+                aliases: input.index.aliases.clone(),
+                alias_types: input.index.cold.aliases.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
+                score_sources,
+                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
+                binding_only: input.index.cold.binding_only.clone(),
+                ..SchemaBuildMetadata::default()
+            },
+        )
+    }
+
+    fn matching_score_sources<'a>(
+        &'a self,
+        qualifier: Option<&'a str>,
+    ) -> impl Iterator<Item = InternalColumnRef> + 'a {
+        self.index
+            .cold
+            .score_sources
+            .iter()
+            .filter(move |source| {
+                qualifier.is_none_or(|qualifier| source.qualifier.as_deref() == Some(qualifier))
+            })
+            .map(move |source| source.column)
+    }
+
+    #[must_use]
+    pub fn score_source_column(&self, qualifier: Option<&str>) -> Option<InternalColumnRef> {
+        let mut columns = self.matching_score_sources(qualifier);
+        let column = columns.next()?;
+        columns.next().is_none().then_some(column)
+    }
+
+    #[must_use]
+    pub fn score_source_is_ambiguous(&self, qualifier: Option<&str>) -> bool {
+        let mut columns = self.matching_score_sources(qualifier);
+        columns.next().is_some() && columns.next().is_some()
+    }
+
+    #[must_use]
+    pub fn score_source_slot(&self, qualifier: Option<&str>) -> Option<usize> {
+        self.score_source_column(qualifier)
+            .and_then(|column| self.internal_slot(column))
     }
 
     /// Add statically typed hidden lookup identities that have no physical value slot. Visible columns and star expansion remain unchanged, while binders can resolve the identities and their declared SQL types.
@@ -165,6 +417,10 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
+                score_sources: input.index.cold.score_sources.clone(),
+                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only,
                 ..SchemaBuildMetadata::default()
             },
@@ -203,6 +459,10 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
+                score_sources: input.index.cold.score_sources.clone(),
+                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only,
                 extra_ambiguous_unqualified: ambiguous_unqualified,
                 extra_ambiguous_qualified: ambiguous_qualified,

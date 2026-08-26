@@ -25,13 +25,20 @@ pub(super) fn eval_array_functions(name: &str, args: &[Value]) -> Option<Result<
         "array_position",
         "array_reverse",
         "array_sort",
-        super::ARRAY_SORT_JSON_FUNCTION,
         "unnest",
     ];
     if !NAMES.contains(&name) {
         return None;
     }
-    Some((|| -> Result<Value> {
+    Some(eval_array_function(name, args, false))
+}
+
+pub(super) fn eval_dispatched_json_array_sort(args: &[Value]) -> Result<Value> {
+    eval_array_function("array_sort", args, true)
+}
+
+fn eval_array_function(name: &str, args: &[Value], json_sort: bool) -> Result<Value> {
+    (|| -> Result<Value> {
         match name {
             "array_length" | "array_upper" | "array_lower" => {
                 if args.len() != 2 {
@@ -235,7 +242,7 @@ pub(super) fn eval_array_functions(name: &str, args: &[Value]) -> Option<Result<
                     other => Err(not_an_array("array_position", other)),
                 }
             }
-            "array_reverse" | "array_sort" | super::ARRAY_SORT_JSON_FUNCTION => {
+            "array_reverse" | "array_sort" => {
                 if name == "array_reverse" && args.len() != 1 {
                     return Err(SQLError::TypeMismatch("array_reverse takes 1 arg".into()));
                 }
@@ -259,12 +266,7 @@ pub(super) fn eval_array_functions(name: &str, args: &[Value]) -> Option<Result<
                     boolean_option(args.get(1), "array_sort: descending")?.unwrap_or(false);
                 let nulls_first =
                     boolean_option(args.get(2), "array_sort: nulls_first")?.unwrap_or(descending);
-                let elements = order::sorted_elements(
-                    array,
-                    descending,
-                    nulls_first,
-                    name == super::ARRAY_SORT_JSON_FUNCTION,
-                )?;
+                let elements = order::sorted_elements(array, descending, nulls_first, json_sort)?;
                 rebuild_array(array, elements)
             }
             "unnest" => {
@@ -283,7 +285,7 @@ pub(super) fn eval_array_functions(name: &str, args: &[Value]) -> Option<Result<
             }
             _ => unreachable!("function family membership was checked before dispatch"),
         }
-    })())
+    })()
 }
 
 fn dimension_index(value: &Value) -> Result<Option<usize>> {

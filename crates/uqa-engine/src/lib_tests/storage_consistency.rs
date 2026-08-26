@@ -132,9 +132,12 @@ fn sql_update_reports_stale_document_ids() {
         )
         .expect_err("a stale index candidate must not be treated as no matching row");
 
-    assert!(error
-        .to_string()
-        .contains("candidate 99 is missing from the document-field snapshot for table `docs`"));
+    assert!(
+        error.to_string().contains(
+            "candidate 99 is missing from the document-field snapshot for table `public.docs`"
+        ),
+        "unexpected error: {error}"
+    );
     let doc = eng.get_document("docs", 1).unwrap().unwrap();
     assert_eq!(doc.get("content"), Some(&s("old content")));
     assert_eq!(doc.get("status"), Some(&s("queued")));

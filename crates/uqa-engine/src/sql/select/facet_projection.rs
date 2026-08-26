@@ -453,7 +453,8 @@ pub(in crate::sql) fn build_projection_physical_row_with_ctes(
         vec![input.row.clone()],
     ));
     let evaluator = EngineExpressionEvaluator::shared(engine, params, ctes);
-    let mut project = Project::with_evaluator(scan, physical_projections(projections), evaluator);
+    let mut project =
+        Project::with_target_evaluator(scan, physical_projections(projections), evaluator);
     let mut rows = run_to_batches(&mut project)
         .map_err(physical_exec_error)?
         .into_iter()

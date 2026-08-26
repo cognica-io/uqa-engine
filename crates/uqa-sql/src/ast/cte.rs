@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{Expr, SelectStmt};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CTE {
     pub name: String,
     pub columns: Vec<String>,
@@ -42,7 +42,7 @@ pub struct CteSearchClause {
 }
 
 /// `PostgreSQL` recursive-CTE cycle detection metadata.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CteCycleClause {
     pub columns: Vec<String>,
     pub mark_column: String,

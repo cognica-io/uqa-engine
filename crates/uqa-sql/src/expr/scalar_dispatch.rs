@@ -57,12 +57,6 @@ pub(super) fn eval_sequence_function(
 
 pub(super) fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
     let name = name.strip_prefix("pg_catalog.").unwrap_or(name);
-    if let Some(signature) = name.strip_prefix(super::UNDEFINED_FUNCTION_MARKER) {
-        return Err(SQLError::Routine {
-            sqlstate: "42883".into(),
-            message: format!("function {signature} does not exist"),
-        });
-    }
     if super::builtin_scalar_function_strictness(name, args.len()) == Some(true)
         && args.iter().any(|argument| matches!(argument, Value::Null))
     {

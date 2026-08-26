@@ -57,6 +57,7 @@ pub(super) struct AdaptiveAggregateSet {
     compact_text_group_index: Option<CompactTextGroupIndex>,
     retained_bytes: usize,
     partials: Option<SpillBuffer>,
+    partial_relation: uqa_sql::ast::InternalRelationId,
     variable_state: bool,
     projected_group_columns: Option<Vec<super::projected::ProjectedGroupColumn>>,
     projected_aggregate_plans: super::projected_input::ProjectedAggregatePlans,
@@ -137,6 +138,7 @@ impl AdaptiveAggregateSet {
             compact_text_group_index,
             retained_bytes: 0,
             partials: None,
+            partial_relation: uqa_sql::ast::InternalRelationId::allocate(),
             variable_state,
             projected_group_columns,
             projected_aggregate_plans,
@@ -383,7 +385,10 @@ impl AdaptiveAggregateSet {
         if self.groups.is_empty() {
             return Ok(());
         }
-        let schema = super::partial_state::partial_schema(self.statement.group_by.len());
+        let schema = super::partial_state::partial_schema(
+            self.partial_relation,
+            self.statement.group_by.len(),
+        );
         let partials = self
             .partials
             .get_or_insert_with(|| SpillBuffer::new(self.spill_budget));

@@ -92,6 +92,54 @@ fn merge_returning_exposes_postgresql_18_row_images() {
 }
 
 #[test]
+fn merge_action_does_not_collide_with_user_column_name() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE merge_named_target (id INTEGER PRIMARY KEY, _merge_action TEXT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "CREATE TABLE merge_named_source (id INTEGER PRIMARY KEY, _merge_action TEXT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO merge_named_target VALUES (1, 'target-before')",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO merge_named_source VALUES (1, 'source-value')",
+        &[],
+    )
+    .unwrap();
+
+    let result = eng
+        .sql(
+            "MERGE INTO merge_named_target AS target
+             USING merge_named_source AS source ON target.id = source.id
+             WHEN MATCHED THEN UPDATE SET _merge_action = source._merge_action
+             RETURNING merge_action() AS action,
+                       source._merge_action AS source_value,
+                       target._merge_action AS target_value",
+            &[],
+        )
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["action"], Value::Str("UPDATE".into()));
+    assert_eq!(
+        result.rows[0]["source_value"],
+        Value::Str("source-value".into())
+    );
+    assert_eq!(
+        result.rows[0]["target_value"],
+        Value::Str("source-value".into())
+    );
+}
+
+#[test]
 fn merge_when_matched_delete() {
     let eng = setup();
     let r = eng

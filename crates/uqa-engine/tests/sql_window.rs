@@ -72,6 +72,32 @@ fn row_number_over_partition() {
 }
 
 #[test]
+fn window_slots_cannot_alias_user_column_names() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE window_name_collision (id INTEGER, __window_0_0 BIGINT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO window_name_collision VALUES (2, 99), (1, 88)",
+        &[],
+    )
+    .unwrap();
+
+    let result = eng
+        .sql(
+            "SELECT row_number() OVER (ORDER BY id) + __window_0_0 AS total FROM window_name_collision ORDER BY id",
+            &[],
+        )
+        .unwrap();
+
+    assert_eq!(result.rows[0]["total"], Value::Int(89));
+    assert_eq!(result.rows[1]["total"], Value::Int(101));
+    assert!(result.rows.iter().all(|row| row.len() == 1));
+}
+
+#[test]
 fn named_windows_share_and_extend_definitions() {
     let eng = corpus();
     let result = eng

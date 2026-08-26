@@ -9,16 +9,9 @@
 use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::{SQLError, SQLParam};
 
+use crate::{RowSchema, ScalarExpr};
 #[cfg(test)]
 use uqa_core::Value;
-#[cfg(test)]
-use uqa_sql::expr::{
-    RANDOM_INT4_FUNCTION, RANDOM_INT8_FUNCTION, RANDOM_NUMERIC_FUNCTION, TO_BIN_INT4_FUNCTION,
-    TO_BIN_INT8_FUNCTION, TO_HEX_INT4_FUNCTION, TO_HEX_INT8_FUNCTION, TO_OCT_INT4_FUNCTION,
-    TO_OCT_INT8_FUNCTION,
-};
-
-use crate::{RowSchema, ScalarExpr};
 
 mod array_transform;
 mod checksum;
@@ -28,7 +21,6 @@ mod equality;
 mod fixed_builtin;
 mod functions;
 mod gamma;
-mod integer_base;
 mod introspection;
 mod json_strip;
 mod length;
@@ -36,7 +28,6 @@ mod md5;
 mod operators;
 mod overload_resolution;
 mod qualified_column;
-mod random_range;
 mod range;
 mod reverse;
 mod routine_signature;
@@ -50,7 +41,6 @@ pub use common::{
     values_column_types, FunctionCallArgumentSignature,
 };
 pub use equality::{equality_operand_type, foreign_key_operand_type};
-pub(crate) use fixed_builtin::runtime_dispatch_name;
 #[doc(hidden)]
 pub use fixed_builtin::{
     fixed_builtin_return_type, is_function as is_fixed_builtin, resolve_fixed_builtin_call,
@@ -212,10 +202,9 @@ pub(super) fn scalar_type_inner(
 ) -> Result<Option<ColumnType>, SQLError> {
     if matches!(
         expression,
-        ScalarExpr::Func { name, .. }
-            if matches!(
-                name.as_str(),
-                uqa_sql::expr::NAMED_ARG_FUNCTION | uqa_sql::expr::VARIADIC_ARG_FUNCTION
+        ScalarExpr::Func { binding, .. }
+            if binding.as_ref().and_then(|binding| binding.dispatch).is_some_and(
+                uqa_sql::ast::FunctionDispatch::is_call_argument_marker
             )
     ) {
         let argument = crate::scalar_call_argument(expression)?;
@@ -224,6 +213,7 @@ pub(super) fn scalar_type_inner(
     match expression {
         ScalarExpr::Column(column) => Ok(schema.type_of(column).cloned()),
         ScalarExpr::Position(position) => Ok(schema.column_type(*position).cloned()),
+        ScalarExpr::InternalColumn(column) => Ok(schema.internal_type(*column).cloned()),
         ScalarExpr::QualifiedColumn { qualifier, column } => {
             qualified_column::resolve(schema, qualifier, column)
         }
@@ -329,6 +319,16 @@ pub(super) fn scalar_type_inner(
             filter,
             ..
         } => {
+            if let Some(uqa_sql::ast::FunctionResolutionError::UndefinedFunction { signature }) =
+                binding
+                    .as_ref()
+                    .and_then(|binding| binding.resolution_error.as_ref())
+            {
+                return Err(SQLError::Routine {
+                    sqlstate: "42883".into(),
+                    message: format!("function {signature} does not exist"),
+                });
+            }
             if let Some(filter) = filter {
                 scalar_type_inner(filter, schema, params, resolver)?;
             }

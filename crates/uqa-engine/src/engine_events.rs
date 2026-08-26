@@ -7,8 +7,15 @@
 //! Durable row-trigger and rewrite-rule registries with PostgreSQL-compatible lifecycle.
 
 use serde::{Deserialize, Serialize};
+
 use uqa_sql::ast::{CreateRule, CreateTrigger, EventEnableMode};
 use uqa_sql::SQLError;
+
+pub(crate) use rule_binding::{
+    bind_rule_action, bind_rule_expr_scoped, first_rule_row_reference_in_expr,
+    first_rule_row_reference_in_select, rule_action_has_set_operation, rule_expr_references_row,
+    rule_statement_references_row,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct StoredTrigger {
@@ -54,4 +61,5 @@ mod lifecycle;
 mod lookup;
 mod persistence;
 mod registry;
+mod rule_binding;
 mod validation;

@@ -7,12 +7,7 @@
 //! One registry and binding path for implemented fixed-signature `PostgreSQL` built-ins.
 
 use uqa_core::Value;
-use uqa_sql::ast::{ColumnType, FunctionBinding};
-use uqa_sql::expr::{
-    RANDOM_INT4_FUNCTION, RANDOM_INT8_FUNCTION, RANDOM_NUMERIC_FUNCTION, TO_BIN_INT4_FUNCTION,
-    TO_BIN_INT8_FUNCTION, TO_HEX_INT4_FUNCTION, TO_HEX_INT8_FUNCTION, TO_OCT_INT4_FUNCTION,
-    TO_OCT_INT8_FUNCTION, UNDEFINED_FUNCTION_MARKER,
-};
+use uqa_sql::ast::{ColumnType, FunctionBinding, FunctionDispatch};
 use uqa_sql::{SQLError, SQLParam};
 
 use crate::{scalar_call_arguments, RowSchema, ScalarExpr};
@@ -218,10 +213,12 @@ pub(super) fn bind_call(
         explicit_variadic,
         resolver,
     );
-    let selected = match selected {
+    let mut selected = match selected {
         Ok(selected) => selected,
         Err(error) if error.sqlstate() == Some("42883") => {
-            return unresolved_call_name(&name, &names, &argument_types);
+            let signature = unresolved_call_signature(&name, &names, &argument_types);
+            *binding = Some(FunctionBinding::undefined_function(name.clone(), signature));
+            return name;
         }
         Err(_) => return name,
     };
@@ -260,9 +257,9 @@ pub(super) fn bind_call(
             };
         }
     }
-    let dispatch = runtime_dispatch_name(&selected.binding);
+    selected.binding.dispatch = runtime_dispatch(&selected.binding);
     *binding = Some(selected.binding);
-    dispatch.unwrap_or(name)
+    name
 }
 
 fn requires_cast(
@@ -282,30 +279,27 @@ fn requires_cast(
     })
 }
 
-pub(crate) fn runtime_dispatch_name(binding: &FunctionBinding) -> Option<String> {
+pub(crate) fn runtime_dispatch(binding: &FunctionBinding) -> Option<FunctionDispatch> {
     let local = binding.name.rsplit('.').next()?;
     let arguments = binding.argument_types.as_slice();
-    Some(
-        match (local, arguments) {
-            ("to_bin", [ty]) if ty == "integer" => TO_BIN_INT4_FUNCTION,
-            ("to_bin", [ty]) if ty == "bigint" => TO_BIN_INT8_FUNCTION,
-            ("to_hex", [ty]) if ty == "integer" => TO_HEX_INT4_FUNCTION,
-            ("to_hex", [ty]) if ty == "bigint" => TO_HEX_INT8_FUNCTION,
-            ("to_oct", [ty]) if ty == "integer" => TO_OCT_INT4_FUNCTION,
-            ("to_oct", [ty]) if ty == "bigint" => TO_OCT_INT8_FUNCTION,
-            ("random", [left, right]) if left == "integer" && right == "integer" => {
-                RANDOM_INT4_FUNCTION
-            }
-            ("random", [left, right]) if left == "bigint" && right == "bigint" => {
-                RANDOM_INT8_FUNCTION
-            }
-            ("random", [left, right]) if left == "numeric" && right == "numeric" => {
-                RANDOM_NUMERIC_FUNCTION
-            }
-            _ => return None,
+    Some(match (local, arguments) {
+        ("to_bin", [ty]) if ty == "integer" => FunctionDispatch::ToBinInt4,
+        ("to_bin", [ty]) if ty == "bigint" => FunctionDispatch::ToBinInt8,
+        ("to_hex", [ty]) if ty == "integer" => FunctionDispatch::ToHexInt4,
+        ("to_hex", [ty]) if ty == "bigint" => FunctionDispatch::ToHexInt8,
+        ("to_oct", [ty]) if ty == "integer" => FunctionDispatch::ToOctInt4,
+        ("to_oct", [ty]) if ty == "bigint" => FunctionDispatch::ToOctInt8,
+        ("random", [left, right]) if left == "integer" && right == "integer" => {
+            FunctionDispatch::RandomInt4Range
         }
-        .into(),
-    )
+        ("random", [left, right]) if left == "bigint" && right == "bigint" => {
+            FunctionDispatch::RandomInt8Range
+        }
+        ("random", [left, right]) if left == "numeric" && right == "numeric" => {
+            FunctionDispatch::RandomNumericRange
+        }
+        _ => return None,
+    })
 }
 
 fn builtin_binding_is_volatile(binding: &FunctionBinding) -> bool {
@@ -385,7 +379,7 @@ fn effective_argument_types(
         .collect()
 }
 
-fn unresolved_call_name(
+fn unresolved_call_signature(
     name: &str,
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
@@ -405,14 +399,16 @@ fn unresolved_call_name(
         })
         .collect::<Vec<_>>()
         .join(", ");
-    format!("{UNDEFINED_FUNCTION_MARKER}{name}({arguments})")
+    format!("{name}({arguments})")
 }
 
 fn named_argument_value_owned(expression: ScalarExpr) -> ScalarExpr {
     if matches!(
         &expression,
-        ScalarExpr::Func { name, args, .. }
-            if name == uqa_sql::expr::NAMED_ARG_FUNCTION && args.len() == 2
+        ScalarExpr::Func { binding, args, .. }
+            if binding.as_ref().and_then(|binding| binding.dispatch)
+                == Some(FunctionDispatch::NamedArgument)
+                && args.len() == 2
     ) {
         let ScalarExpr::Func { mut args, .. } = expression else {
             unreachable!();

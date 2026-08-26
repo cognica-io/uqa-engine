@@ -53,6 +53,7 @@ pub(in crate::compiler) fn resolve_named_windows_in_expr(
         | Expr::Param(_)
         | Expr::Column(_)
         | Expr::QualifiedColumn { .. }
+        | Expr::InternalColumn(_)
         | Expr::Star
         | Expr::QualifiedStar(_)
         | Expr::ScalarSubquery(_)

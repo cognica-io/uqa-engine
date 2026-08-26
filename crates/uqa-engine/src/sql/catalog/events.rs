@@ -10,7 +10,8 @@ use std::collections::BTreeMap;
 
 use uqa_core::Value;
 use uqa_sql::ast::{
-    BinaryOp, CreateRule, CreateTrigger, Expr, RuleEvent, TriggerEvent, TriggerTiming,
+    BinaryOp, CreateRule, CreateTrigger, Expr, FunctionDispatch, RuleEvent, TriggerEvent,
+    TriggerTiming,
 };
 use uqa_sql::{ResultRow, SQLError};
 
@@ -539,14 +540,20 @@ fn render_pretty_expr(expr: &Expr, parent_precedence: u8) -> String {
                 .join(" AND "),
         ),
         Expr::Not(inner) => match inner.as_ref() {
-            Expr::Func { name, args, .. } if name == "__is_distinct" && args.len() == 2 => (
-                4,
-                format!(
-                    "{} IS NOT DISTINCT FROM {}",
-                    render_pretty_expr(&args[0], 5),
-                    render_pretty_expr(&args[1], 5)
-                ),
-            ),
+            Expr::Func { binding, args, .. }
+                if binding.as_ref().and_then(|binding| binding.dispatch)
+                    == Some(FunctionDispatch::IsDistinct)
+                    && args.len() == 2 =>
+            {
+                (
+                    4,
+                    format!(
+                        "{} IS NOT DISTINCT FROM {}",
+                        render_pretty_expr(&args[0], 5),
+                        render_pretty_expr(&args[1], 5)
+                    ),
+                )
+            }
             _ => (3, format!("NOT {}", render_pretty_expr(inner, 3))),
         },
         Expr::Binary { op, lhs, rhs } => {
@@ -576,14 +583,20 @@ fn render_pretty_expr(expr: &Expr, parent_precedence: u8) -> String {
                 ),
             )
         }
-        Expr::Func { name, args, .. } if name == "__is_distinct" && args.len() == 2 => (
-            4,
-            format!(
-                "{} IS DISTINCT FROM {}",
-                render_pretty_expr(&args[0], 5),
-                render_pretty_expr(&args[1], 5)
-            ),
-        ),
+        Expr::Func { binding, args, .. }
+            if binding.as_ref().and_then(|binding| binding.dispatch)
+                == Some(FunctionDispatch::IsDistinct)
+                && args.len() == 2 =>
+        {
+            (
+                4,
+                format!(
+                    "{} IS DISTINCT FROM {}",
+                    render_pretty_expr(&args[0], 5),
+                    render_pretty_expr(&args[1], 5)
+                ),
+            )
+        }
         Expr::IsNull { expr, negated } => (
             4,
             format!(

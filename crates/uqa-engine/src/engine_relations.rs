@@ -10,7 +10,7 @@ use super::{
 };
 
 impl Engine {
-    fn relation_lookup_candidates(
+    pub(crate) fn relation_lookup_candidates(
         &self,
         name: &str,
     ) -> StorageBackendResult<Vec<RelationIdentity>> {

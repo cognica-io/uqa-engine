@@ -116,9 +116,17 @@ pub(super) fn try_build_streaming_subquery_operator<'a>(
             from,
             qualifier_filters.as_ref(),
         );
-        let operator = crate::sql::select::build_relational_operator(
+        let (mut operator, resjunk) = crate::sql::select::build_relational_operator(
             engine, operator, residual, block, params, ctes,
         )?;
+        if !resjunk.is_empty() {
+            operator = Box::new(
+                uqa_execution::ColumnSelection::dropping_internal_attributes(
+                    operator,
+                    &resjunk.columns(),
+                ),
+            );
+        }
         Ok(Some(operator))
     })();
     ctes.lock_identities = previous_lock_identities;

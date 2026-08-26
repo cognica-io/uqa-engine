@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use uqa_sql::ColumnType;
 
 fn assert_sqlstate(engine: &Engine, sql: &str, expected: &str) {
     let error = engine.sql(sql, &[]).expect_err(sql);
@@ -34,6 +35,280 @@ fn empty_array_growth_and_array_ordering_match_postgresql_18() {
     ] {
         assert_eq!(scalar(&eng, sql), Value::Bool(true), "{sql}");
     }
+}
+
+#[test]
+fn compiler_owned_dispatch_does_not_reserve_user_function_names() {
+    let eng = engine();
+    for name in [
+        "__named_arg",
+        "__variadic_arg",
+        "__subscript",
+        "__array_subscripts",
+        "__is_distinct",
+        "__between_symmetric",
+        "__any_op",
+        "__to_hex_int4",
+        "__random_int4_range",
+        "__array_sort_json",
+        "__range_lower_int4range",
+    ] {
+        let create = format!(
+            "CREATE FUNCTION {name}() RETURNS TEXT LANGUAGE SQL IMMUTABLE AS 'SELECT ''{name}'''"
+        );
+        eng.sql(&create, &[])
+            .unwrap_or_else(|error| panic!("{create}: {error}"));
+        assert_eq!(text(&eng, &format!("SELECT {name}()")), name);
+    }
+    assert_eq!(scalar(&eng, "SELECT (ARRAY[10, 20])[2]"), Value::Int(20));
+    assert_eq!(
+        scalar(&eng, "SELECT 1 IS DISTINCT FROM NULL"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 1 = ANY(ARRAY[0, 1])"),
+        Value::Bool(true)
+    );
+}
+
+fn assert_ordinary_metadata_named_columns(eng: &Engine) {
+    eng.sql(
+        "CREATE TABLE metadata_named_columns (
+            id INTEGER PRIMARY KEY,
+            _score INTEGER,
+            _doc_id TEXT,
+            _merge_action TEXT
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO metadata_named_columns VALUES (1, 42, 'document-user', 'user-value')",
+        &[],
+    )
+    .unwrap();
+
+    let result = eng
+        .sql("SELECT * FROM metadata_named_columns", &[])
+        .unwrap();
+    assert_eq!(
+        result.columns,
+        vec!["id", "_score", "_doc_id", "_merge_action"]
+    );
+    assert_eq!(result.rows[0]["_score"], Value::Int(42));
+    assert_eq!(
+        result.rows[0]["_doc_id"],
+        Value::Str("document-user".into())
+    );
+    assert_eq!(
+        result.rows[0]["_merge_action"],
+        Value::Str("user-value".into())
+    );
+
+    let derived = eng
+        .sql(
+            "SELECT * FROM (
+                SELECT _score, _doc_id, _merge_action FROM metadata_named_columns
+             ) AS projected",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(derived.columns, vec!["_score", "_doc_id", "_merge_action"]);
+    assert_eq!(derived.rows[0]["_score"], Value::Int(42));
+
+    let metadata = eng
+        .sql(
+            "SELECT *, _meta.score AS system_score, _meta.doc_id AS system_doc_id
+             FROM metadata_named_columns",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(metadata.rows[0]["_score"], Value::Int(42));
+    assert_eq!(
+        metadata.rows[0]["_doc_id"],
+        Value::Str("document-user".into())
+    );
+    assert_eq!(metadata.rows[0]["system_score"], Value::Float(0.0));
+    assert_eq!(metadata.rows[0]["system_doc_id"], Value::Int(1));
+    assert_eq!(
+        &metadata.column_types[metadata.column_types.len() - 2..],
+        [
+            Some(ColumnType::DoublePrecision),
+            Some(ColumnType::BigInteger)
+        ]
+    );
+
+    let joined = eng
+        .sql(
+            "SELECT _meta.doc_id AS system_doc_id, _meta.score AS system_score
+             FROM metadata_named_columns AS source
+             CROSS JOIN (VALUES (1)) AS marker(value)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(joined.rows[0]["system_doc_id"], Value::Int(1));
+    assert_eq!(joined.rows[0]["system_score"], Value::Float(0.0));
+
+    let updated = eng
+        .sql(
+            "UPDATE metadata_named_columns
+             SET _doc_id = 'document-after'
+             RETURNING _doc_id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        updated.rows[0]["_doc_id"],
+        Value::Str("document-after".into())
+    );
+}
+
+fn assert_ranked_metadata_named_columns(eng: &Engine) {
+    eng.sql(
+        "CREATE TABLE ranked_metadata_name (
+            id INTEGER PRIMARY KEY,
+            body TEXT,
+            _score INTEGER,
+            _doc_id TEXT
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "CREATE INDEX ranked_metadata_name_body_gin
+         ON ranked_metadata_name USING gin (body)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO ranked_metadata_name VALUES
+            (1, 'alpha alpha alpha', 1, 'ranked-one'),
+            (2, 'alpha', 100, 'ranked-two')",
+        &[],
+    )
+    .unwrap();
+    let ranked = eng
+        .sql(
+            "SELECT _score, _doc_id,
+                    _meta.score AS system_score,
+                    _meta.doc_id AS system_doc_id,
+                    score_bm25(body, 'alpha') AS retrieval_score
+             FROM ranked_metadata_name
+             WHERE text_match(body, 'alpha') AND id = 1",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(ranked.rows[0]["_score"], Value::Int(1));
+    assert_eq!(ranked.rows[0]["_doc_id"], Value::Str("ranked-one".into()));
+    assert_eq!(ranked.rows[0]["system_doc_id"], Value::Int(1));
+    assert_eq!(
+        ranked.rows[0]["system_score"],
+        ranked.rows[0]["retrieval_score"]
+    );
+    assert!(matches!(ranked.rows[0]["system_score"], Value::Float(_)));
+
+    let system_ordered = eng
+        .sql(
+            "SELECT id, _meta.score AS system_score
+             FROM ranked_metadata_name
+             WHERE text_match(body, 'alpha')
+             ORDER BY _meta.score DESC, id",
+            &[],
+        )
+        .unwrap();
+    let first_score = system_ordered.rows[0]["system_score"].clone();
+    let second_score = system_ordered.rows[1]["system_score"].clone();
+    assert!(
+        matches!((first_score, second_score), (Value::Float(first), Value::Float(second)) if first >= second)
+    );
+
+    let aliased = eng
+        .sql(
+            "SELECT hit._score, hit._doc_id,
+                    _meta.score AS system_score,
+                    _meta.doc_id AS system_doc_id
+             FROM ranked_metadata_name AS hit
+             WHERE text_match(hit.body, 'alpha') AND hit.id = 1",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(aliased.rows[0]["_score"], Value::Int(1));
+    assert_eq!(aliased.rows[0]["_doc_id"], Value::Str("ranked-one".into()));
+    assert_eq!(aliased.rows[0]["system_doc_id"], Value::Int(1));
+    assert!(matches!(aliased.rows[0]["system_score"], Value::Float(_)));
+
+    let ordered = eng
+        .sql(
+            "SELECT id, _score FROM ranked_metadata_name
+             WHERE text_match(body, 'alpha')
+             ORDER BY _score DESC LIMIT 1",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(ordered.rows[0]["id"], Value::Int(2));
+    assert_eq!(ordered.rows[0]["_score"], Value::Int(100));
+
+    let mixed = eng
+        .sql(
+            "SELECT id, _doc_id FROM ranked_metadata_name
+             WHERE text_match(body, 'alpha') OR _doc_id = 'absent'
+             ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(mixed.rows[0]["_doc_id"], Value::Str("ranked-one".into()));
+    assert_eq!(mixed.rows[1]["_doc_id"], Value::Str("ranked-two".into()));
+}
+
+#[test]
+fn user_columns_that_resemble_engine_metadata_remain_visible() {
+    let eng = engine();
+    assert_ordinary_metadata_named_columns(&eng);
+    assert_ranked_metadata_named_columns(&eng);
+}
+
+#[test]
+fn a_real_meta_relation_alias_keeps_normal_sql_name_resolution() {
+    let eng = engine();
+    eng.sql(
+        "CREATE TABLE meta_alias_source (id INTEGER, score INTEGER)",
+        &[],
+    )
+    .unwrap();
+    eng.sql("INSERT INTO meta_alias_source VALUES (1, 17)", &[])
+        .unwrap();
+
+    let aliases = eng
+        .sql(
+            "SELECT _doc_id AS legacy_doc_id,
+                    _meta.doc_id AS namespaced_doc_id,
+                    _score AS legacy_score,
+                    _meta.score AS namespaced_score
+             FROM meta_alias_source",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        aliases.rows[0]["legacy_doc_id"],
+        aliases.rows[0]["namespaced_doc_id"]
+    );
+    assert_eq!(
+        aliases.rows[0]["legacy_score"],
+        aliases.rows[0]["namespaced_score"]
+    );
+
+    assert_eq!(
+        scalar(&eng, "SELECT _meta.score FROM meta_alias_source AS _meta"),
+        Value::Int(17)
+    );
+    assert_sqlstate(
+        &eng,
+        "SELECT _meta.doc_id
+         FROM meta_alias_source AS left_source
+         CROSS JOIN meta_alias_source AS right_source",
+        "42P01",
+    );
+    assert_sqlstate(&eng, "SELECT _meta.missing FROM meta_alias_source", "42703");
 }
 
 #[test]

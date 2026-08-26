@@ -7,6 +7,7 @@
 //! Variable binding across expressions, queries, and statements.
 
 use super::{Expr, FromClause, MergeWhen, Projection, Result, SelectStmt, Statement, Value, CTE};
+use crate::ast::InternalColumnRef;
 
 /// Runtime datum value together with the concrete SQL type declared by PL/pgSQL. The type is optional for composite fields and pseudo-types whose runtime carrier already identifies their category.
 #[derive(Debug, Clone)]
@@ -70,6 +71,12 @@ pub trait VariableResolver {
             .resolve_param(index)?
             .map(ResolvedVariable::into_expression))
     }
+
+    /// Observe or replace an executor-only structural column reference. SQL
+    /// variable resolvers normally leave these untouched.
+    fn rewrite_internal(&mut self, _column: InternalColumnRef) -> Result<Option<Expr>> {
+        Ok(None)
+    }
 }
 
 /// Rewrite an expression, substituting resolvable variable references
@@ -87,6 +94,10 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
             None => expr.clone(),
         },
         Expr::Param(index) => match r.rewrite_param(*index)? {
+            Some(value) => value,
+            None => expr.clone(),
+        },
+        Expr::InternalColumn(column) => match r.rewrite_internal(*column)? {
             Some(value) => value,
             None => expr.clone(),
         },
@@ -352,10 +363,14 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             rows,
             alias,
             column_aliases,
+            internal_relation,
+            internal_column_types,
         } => FromClause::Values {
             rows: bind_rows(rows, r)?,
             alias: alias.clone(),
             column_aliases: column_aliases.clone(),
+            internal_relation: *internal_relation,
+            internal_column_types: internal_column_types.clone(),
         },
         FromClause::Function {
             name,

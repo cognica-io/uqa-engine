@@ -111,6 +111,39 @@ fn encoded_rows_size(schema: &RowSchema, rows: &[PhysicalRow]) -> ExecResult<usi
             )));
         }
     }
+    let internal = schema.internal_columns_with_types();
+    add_size(&mut bytes, 8, "schema internal column count")?;
+    for (column, slot, ty) in internal {
+        add_size(&mut bytes, 8, "schema internal relation")?;
+        add_size(&mut bytes, 8, "schema internal attribute")?;
+        add_size(&mut bytes, 8, "schema internal slot")?;
+        add_string_size(
+            &mut bytes,
+            &encoded_column_type(ty)?,
+            "schema internal column type",
+        )?;
+        if slot.is_some_and(|slot| slot >= schema.physical_width()) {
+            return Err(spill_error(format!(
+                "schema internal attribute `{column:?}` is outside physical width {}",
+                schema.physical_width()
+            )));
+        }
+    }
+    let score_sources = schema.score_sources().collect::<Vec<_>>();
+    add_size(&mut bytes, 8, "schema score source count")?;
+    for (qualifier, _) in score_sources {
+        add_size(&mut bytes, 8, "schema score source qualifier flag")?;
+        if let Some(qualifier) = qualifier {
+            add_string_size(&mut bytes, qualifier, "schema score source qualifier")?;
+        }
+        add_size(&mut bytes, 8, "schema score source relation")?;
+        add_size(&mut bytes, 8, "schema score source attribute")?;
+    }
+    let wildcard_hidden = schema.wildcard_hidden_positions().collect::<Vec<_>>();
+    add_size(&mut bytes, 8, "schema wildcard-hidden count")?;
+    for _ in wildcard_hidden {
+        add_size(&mut bytes, 8, "schema wildcard-hidden position")?;
+    }
     let has_lock_origins = rows.iter().any(|row| !row.lock_origins().is_empty());
     add_size(&mut bytes, 8, "row metadata flags")?;
     add_size(&mut bytes, 8, "batch row count")?;
@@ -293,6 +326,38 @@ fn encode_batch(writer: &mut impl Write, batch: &Batch) -> ExecResult<()> {
         write_identity(writer, identity)?;
         write_slot(writer, slot)?;
         write_bytes(writer, encoded_column_type(ty)?.as_bytes())?;
+    }
+    let internal = batch.schema.internal_columns_with_types();
+    write_u64(writer, internal.len())?;
+    for (column, slot, ty) in internal {
+        write_raw(
+            writer,
+            &column.relation().raw().to_le_bytes(),
+            "schema internal relation",
+        )?;
+        write_u64(writer, column.attribute())?;
+        write_slot(writer, slot)?;
+        write_bytes(writer, encoded_column_type(ty)?.as_bytes())?;
+    }
+    let score_sources = batch.schema.score_sources().collect::<Vec<_>>();
+    write_u64(writer, score_sources.len())?;
+    for (qualifier, column) in score_sources {
+        write_u64(writer, usize::from(qualifier.is_some()))?;
+        if let Some(qualifier) = qualifier {
+            write_bytes(writer, qualifier.as_bytes())?;
+        }
+        write_raw(
+            writer,
+            &column.relation().raw().to_le_bytes(),
+            "schema score source relation",
+        )?;
+        write_u64(writer, column.attribute())?;
+    }
+    let mut wildcard_hidden = batch.schema.wildcard_hidden_positions().collect::<Vec<_>>();
+    wildcard_hidden.sort_unstable();
+    write_u64(writer, wildcard_hidden.len())?;
+    for position in wildcard_hidden {
+        write_u64(writer, position)?;
     }
     let has_lock_origins = batch.rows.iter().any(|row| !row.lock_origins().is_empty());
     write_u64(

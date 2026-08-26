@@ -512,7 +512,7 @@ pub(in crate::sql) fn lock_document_key_dependencies(
     let constraints = engine
         .try_key_constraints(&canonical_table)
         .map_err(|error| dml_storage_error("key-lock constraint lookup", error))?;
-    let mut lock_names = std::collections::BTreeSet::new();
+    let mut lock_keys = std::collections::BTreeSet::new();
     for constraint in constraints {
         let Some(values) = key_constraint_values(&constraint, document) else {
             continue;
@@ -542,20 +542,14 @@ pub(in crate::sql) fn lock_document_key_dependencies(
             update_key_lock_digest(&mut digest, column.as_bytes())?;
         }
         update_key_lock_digest(&mut digest, &key)?;
-        let digest = digest.finalize();
-        lock_names.insert(format!("\0uqa-key-lock:{digest:x}"));
+        let digest: [u8; 32] = digest.finalize().into();
+        lock_keys.insert(digest);
     }
 
     let mut acquisitions = Vec::new();
     let mut waited = false;
-    for lock_name in lock_names {
-        match engine.lock_row(
-            &lock_name,
-            0,
-            uqa_sql::ast::LockStrength::ForUpdate,
-            uqa_sql::ast::LockWait::Block,
-            table,
-        )? {
+    for lock_key in lock_keys {
+        match engine.lock_key_reservation(lock_key, table)? {
             crate::row_locks::LockAcquire::Granted {
                 acquisition,
                 waited: lock_waited,

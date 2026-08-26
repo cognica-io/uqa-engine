@@ -15,31 +15,72 @@ use uqa_sql::{SQLError, SQLParam};
 use crate::{Engine, ScoredEntry};
 
 use super::row_functions::execute_function;
-use super::select::{execute_filter_rows, CteScope};
+use super::select::{execute_filter_physical_rows, CteScope};
+
+struct DocumentFilterInput {
+    schema: uqa_execution::RowSchema,
+    document_id: uqa_sql::ast::InternalColumnRef,
+    doc_ids: Vec<DocId>,
+    documents: Vec<uqa_storage::document_store::Document>,
+}
 
 fn filter_documents(
     engine: &Engine,
-    schema: uqa_execution::RowSchema,
+    input: DocumentFilterInput,
     filter: &ScalarExpr,
     params: &[SQLParam],
-    documents: Vec<uqa_storage::document_store::Document>,
     ctes: &CteScope,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
+    let DocumentFilterInput {
+        schema,
+        document_id,
+        doc_ids,
+        documents,
+    } = input;
     // The caller's scope must be used rather than a fresh one: it carries the
     // CTE rows and the scalar-subquery plans this predicate may reference. A
     // fresh scope leaves those slots empty, so a residual predicate combining
     // a retrieval function with `IN (SELECT ...)`, `EXISTS`, or a scalar
     // subquery would fail to resolve slot 0.
-    let rows = execute_filter_rows(engine, schema, documents, filter.clone(), params, ctes)?;
+    if documents.len() != doc_ids.len() {
+        return Err(SQLError::Internal(
+            "physical table filter document/id width mismatch".into(),
+        ));
+    }
+    let rows = documents
+        .into_iter()
+        .zip(doc_ids)
+        .map(|(document, doc_id)| {
+            let mut values = schema
+                .columns()
+                .iter()
+                .map(|column| {
+                    document
+                        .get(column)
+                        .cloned()
+                        .unwrap_or(uqa_core::Value::Null)
+                })
+                .collect::<Vec<_>>();
+            values.push(super::doc_id_value(doc_id)?);
+            Ok(uqa_execution::PhysicalRow::from_values(values))
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    let rows = execute_filter_physical_rows(engine, schema, rows, filter.clone(), params, ctes)?;
     rows.into_iter()
-        .map(|row| match row.get(super::DOC_ID_COLUMN) {
-            Some(uqa_core::Value::Int(doc_id)) if *doc_id >= 0 => Ok(ScoredEntry {
-                doc_id: *doc_id as DocId,
-                score: 0.0,
-            }),
-            _ => Err(SQLError::Internal(
-                "physical table filter lost its document id".into(),
-            )),
+        .map(|row| {
+            match row
+                .schema
+                .internal_slot(document_id)
+                .and_then(|slot| row.physical_value_at(slot))
+            {
+                Some(uqa_core::Value::Int(doc_id)) if *doc_id >= 0 => Ok(ScoredEntry {
+                    doc_id: *doc_id as DocId,
+                    score: 0.0,
+                }),
+                _ => Err(SQLError::Internal(
+                    "physical table filter lost its document id".into(),
+                )),
+            }
         })
         .collect()
 }
@@ -62,7 +103,7 @@ fn filter_table_rows(
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
         let field_values = engine.get_document_fields_multi(table, &doc_ids, &refs)?;
         let mut documents = Vec::with_capacity(doc_ids.len());
-        for doc_id in doc_ids {
+        for &doc_id in &doc_ids {
             let values = field_values.get(&doc_id).ok_or_else(|| {
                 SQLError::Internal(format!(
                     "WHERE scan: document {doc_id} listed by table `{table}` disappeared during the statement"
@@ -72,40 +113,60 @@ fn filter_table_rows(
             for (name, value) in names.iter().zip(values) {
                 document.insert(name.clone(), value.clone());
             }
-            document.insert(super::DOC_ID_COLUMN.into(), super::doc_id_value(doc_id)?);
             documents.push(document);
         }
-        let schema = table_filter_schema(engine, table, qualifier, names)?;
-        return filter_documents(engine, schema, filter, params, documents, ctes);
+        let (schema, document_id) = table_filter_schema(engine, table, qualifier, names)?;
+        return filter_documents(
+            engine,
+            DocumentFilterInput {
+                schema,
+                document_id,
+                doc_ids,
+                documents,
+            },
+            filter,
+            params,
+            ctes,
+        );
     }
     let mut documents = Vec::with_capacity(doc_ids.len());
-    for doc_id in doc_ids {
-        let mut document = engine.get_document(table, doc_id)?.ok_or_else(|| {
+    for &doc_id in &doc_ids {
+        let document = engine.get_document(table, doc_id)?.ok_or_else(|| {
             SQLError::Internal(format!(
                 "WHERE scan: document {doc_id} listed by table `{table}` disappeared during the statement"
             ))
         })?;
-        document.insert(super::DOC_ID_COLUMN.into(), super::doc_id_value(doc_id)?);
         documents.push(document);
     }
     let columns = engine.try_table_columns(table).map_err(|error| {
         SQLError::Internal(format!("read table columns for `{table}`: {error}"))
     })?;
-    let schema = table_filter_schema(engine, table, qualifier, columns)?;
-    filter_documents(engine, schema, filter, params, documents, ctes)
+    let (schema, document_id) = table_filter_schema(engine, table, qualifier, columns)?;
+    filter_documents(
+        engine,
+        DocumentFilterInput {
+            schema,
+            document_id,
+            doc_ids,
+            documents,
+        },
+        filter,
+        params,
+        ctes,
+    )
 }
 
 fn table_filter_schema(
     engine: &Engine,
     table: &str,
     qualifier: &str,
-    mut columns: Vec<String>,
-) -> Result<uqa_execution::RowSchema, SQLError> {
+    columns: Vec<String>,
+) -> Result<(uqa_execution::RowSchema, uqa_sql::ast::InternalColumnRef), SQLError> {
     let definitions = engine
         .try_describe_table(table)
         .map_err(|error| SQLError::Internal(format!("read table schema for `{table}`: {error}")))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    let mut types = columns
+    let types = columns
         .iter()
         .map(|column| {
             definitions
@@ -114,18 +175,17 @@ fn table_filter_schema(
                 .map(|definition| definition.ty.clone())
         })
         .collect::<Vec<_>>();
-    let mut identities = columns
+    let identities = columns
         .iter()
         .map(|column| uqa_execution::ColumnIdentity::qualified(qualifier, column))
         .collect::<Vec<_>>();
-    columns.push(super::DOC_ID_COLUMN.into());
-    identities.push(uqa_execution::ColumnIdentity::unqualified(
-        super::DOC_ID_COLUMN,
-    ));
-    types.push(Some(uqa_sql::ast::ColumnType::BigInteger));
-    Ok(uqa_execution::RowSchema::with_identities(
-        columns, identities, types,
-    ))
+    let document_id = uqa_sql::ast::InternalRelationId::allocate().column(0);
+    let schema = uqa_execution::RowSchema::with_identities(columns, identities, types);
+    let schema = uqa_execution::RowSchema::append_internal_typed(
+        &schema,
+        &[(document_id, Some(uqa_sql::ast::ColumnType::BigInteger))],
+    );
+    Ok((schema, document_id))
 }
 
 pub(super) fn execute_mixed_where(

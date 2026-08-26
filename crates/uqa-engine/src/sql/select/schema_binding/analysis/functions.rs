@@ -121,10 +121,8 @@ pub(super) fn validate_scalar_function(
     } = validation;
     let identity = name.to_ascii_lowercase();
     let lower = crate::sql::builtin_function_dispatch_name(&identity);
-    if matches!(
-        lower.as_str(),
-        uqa_sql::expr::NAMED_ARG_FUNCTION | uqa_sql::expr::VARIADIC_ARG_FUNCTION
-    ) {
+    if binding.and_then(|binding| binding.dispatch).is_some() {
+        uqa_execution::scalar_type_with_resolver(expression, schema, params, resolver)?;
         return Ok(());
     }
     uqa_execution::scalar_call_arguments(args)?;

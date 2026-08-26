@@ -14,6 +14,27 @@ use super::{
 };
 use crate::batch::ProjectedSlot;
 
+/// Identity assigned to one projection result. SQL columns participate in
+/// ordinary name binding and wildcard expansion; internal attributes are
+/// executor-only `resjunk` slots addressed structurally.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ProjectionTarget {
+    Column(String),
+    Internal(uqa_sql::ast::InternalColumnRef),
+}
+
+impl From<String> for ProjectionTarget {
+    fn from(value: String) -> Self {
+        Self::Column(value)
+    }
+}
+
+impl From<&str> for ProjectionTarget {
+    fn from(value: &str) -> Self {
+        Self::Column(value.to_string())
+    }
+}
+
 /// Per-row scalar projection. Each `(alias, expr)` pair is evaluated
 /// against the input row and written under `alias` in the output. The
 /// child schema is replaced with the output aliases.
@@ -27,19 +48,24 @@ pub struct Project<'a> {
 
 fn projection_layout(
     input: &RowSchema,
-    projections: Vec<(String, ScalarExpr)>,
+    projections: Vec<(ProjectionTarget, ScalarExpr)>,
     evaluator: &SharedExpressionEvaluator<'_>,
     pass_through: bool,
 ) -> (RowSchema, Vec<ScalarExpr>) {
     let mut projected = Vec::new();
+    let mut projected_internal = Vec::new();
     let mut computed = Vec::new();
-    for (name, expression) in projections {
+    for (target, expression) in projections {
         if let ScalarExpr::QualifiedStar(qualifier) = &expression {
+            let ProjectionTarget::Column(_) = target else {
+                unreachable!("an internal projection target cannot expand a qualified star");
+            };
             if pass_through {
                 continue;
             }
             for (column, logical, _, ty) in input.qualified_star_position_layout(qualifier) {
-                if !evaluator.star_column_visible(&column) {
+                if logical.is_some_and(|position| !evaluator.star_position_visible(input, position))
+                {
                     continue;
                 }
                 let slot = logical
@@ -54,11 +80,14 @@ fn projection_layout(
             continue;
         }
         if matches!(expression, ScalarExpr::Star) {
+            let ProjectionTarget::Column(_) = target else {
+                unreachable!("an internal projection target cannot expand a star");
+            };
             if pass_through {
                 continue;
             }
             for (logical, column) in input.iter().enumerate() {
-                if !evaluator.star_column_visible(column) {
+                if !evaluator.star_position_visible(input, logical) {
                     continue;
                 }
                 projected.push((
@@ -71,15 +100,29 @@ fn projection_layout(
         }
 
         let ty = evaluator.expression_type(&expression, input).ok().flatten();
-        if let Some(logical) = crate::order_expression_position(input, &expression) {
-            projected.push((name, ty, ProjectedSlot::Input(input.physical_slot(logical))));
+        let source = if let Some(logical) = crate::order_expression_position(input, &expression) {
+            ProjectedSlot::Input(input.physical_slot(logical))
         } else {
-            projected.push((name, ty, ProjectedSlot::Computed));
+            let position = computed.len();
             computed.push(expression);
+            ProjectedSlot::Computed(position)
+        };
+        match target {
+            ProjectionTarget::Column(name) => projected.push((name, ty, source)),
+            ProjectionTarget::Internal(column) => {
+                projected_internal.push((column, ty, source));
+            }
         }
     }
+    let computed_count = computed.len();
     (
-        RowSchema::project_with_sources(input, projected, pass_through),
+        RowSchema::project_with_sources(
+            input,
+            projected,
+            projected_internal,
+            computed_count,
+            pass_through,
+        ),
         computed,
     )
 }
@@ -91,6 +134,18 @@ impl Project<'static> {
         params: Vec<SQLParam>,
     ) -> Self {
         Self::with_evaluator(
+            child,
+            projections,
+            DefaultExpressionEvaluator::shared(params),
+        )
+    }
+
+    pub fn with_targets(
+        child: Box<dyn PhysicalOperator>,
+        projections: Vec<(ProjectionTarget, ScalarExpr)>,
+        params: Vec<SQLParam>,
+    ) -> Self {
+        Self::with_target_evaluator(
             child,
             projections,
             DefaultExpressionEvaluator::shared(params),
@@ -110,6 +165,18 @@ impl Project<'static> {
             DefaultExpressionEvaluator::shared(params),
         )
     }
+
+    pub fn appending_targets(
+        child: Box<dyn PhysicalOperator>,
+        projections: Vec<(ProjectionTarget, ScalarExpr)>,
+        params: Vec<SQLParam>,
+    ) -> Self {
+        Self::appending_target_evaluator(
+            child,
+            projections,
+            DefaultExpressionEvaluator::shared(params),
+        )
+    }
 }
 
 impl<'a> Project<'a> {
@@ -118,11 +185,26 @@ impl<'a> Project<'a> {
         projections: Vec<(String, ScalarExpr)>,
         evaluator: SharedExpressionEvaluator<'a>,
     ) -> Self {
+        Self::with_target_evaluator(
+            child,
+            projections
+                .into_iter()
+                .map(|(name, expression)| (ProjectionTarget::Column(name), expression))
+                .collect(),
+            evaluator,
+        )
+    }
+
+    pub fn with_target_evaluator(
+        child: Box<dyn PhysicalOperator + 'a>,
+        projections: Vec<(ProjectionTarget, ScalarExpr)>,
+        evaluator: SharedExpressionEvaluator<'a>,
+    ) -> Self {
         let projections = projections
             .into_iter()
-            .map(|(name, expression)| {
+            .map(|(target, expression)| {
                 (
-                    name,
+                    target,
                     evaluator.bind_type_introspection(expression, child.row_schema()),
                 )
             })
@@ -143,11 +225,26 @@ impl<'a> Project<'a> {
         projections: Vec<(String, ScalarExpr)>,
         evaluator: SharedExpressionEvaluator<'a>,
     ) -> Self {
+        Self::appending_target_evaluator(
+            child,
+            projections
+                .into_iter()
+                .map(|(name, expression)| (ProjectionTarget::Column(name), expression))
+                .collect(),
+            evaluator,
+        )
+    }
+
+    pub fn appending_target_evaluator(
+        child: Box<dyn PhysicalOperator + 'a>,
+        projections: Vec<(ProjectionTarget, ScalarExpr)>,
+        evaluator: SharedExpressionEvaluator<'a>,
+    ) -> Self {
         let projections = projections
             .into_iter()
-            .map(|(name, expression)| {
+            .map(|(target, expression)| {
                 (
-                    name,
+                    target,
                     evaluator.bind_type_introspection(expression, child.row_schema()),
                 )
             })
@@ -156,7 +253,10 @@ impl<'a> Project<'a> {
             .output_ordering()
             .iter()
             .take_while(|order| {
-                projections.iter().all(|(name, expression)| {
+                projections.iter().all(|(target, expression)| {
+                    let ProjectionTarget::Column(name) = target else {
+                        return true;
+                    };
                     child
                         .row_schema()
                         .columns()

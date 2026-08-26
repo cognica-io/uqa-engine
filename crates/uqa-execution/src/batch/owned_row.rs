@@ -36,6 +36,11 @@ impl OwnedPhysicalRow {
             .and_then(|slot| self.row.value(slot))
     }
 
+    /// Read one flattened executor slot without introducing a SQL name.
+    pub fn physical_value_at(&self, position: usize) -> Option<&Value> {
+        self.row.value(position)
+    }
+
     /// Apply a new logical schema by position while sharing the existing value fragments. Relation aliases and derived-column names therefore do not require an intermediate named row.
     pub fn relabel(self, schema: RowSchema) -> ExecResult<Self> {
         if self.schema.len() != schema.len() {
@@ -79,6 +84,22 @@ impl RowLookup for OwnedPhysicalRow {
         self.schema
             .slot(index)
             .and_then(|slot| self.row.value(slot))
+    }
+
+    fn internal_column(&self, column: uqa_sql::ast::InternalColumnRef) -> Option<&Value> {
+        self.schema
+            .internal_slot(column)
+            .and_then(|slot| self.row.value(slot))
+    }
+
+    fn score_source(&self, qualifier: Option<&str>) -> Option<&Value> {
+        self.schema
+            .score_source_slot(qualifier)
+            .and_then(|slot| self.row.value(slot))
+    }
+
+    fn score_source_is_ambiguous(&self, qualifier: Option<&str>) -> bool {
+        self.schema.score_source_is_ambiguous(qualifier)
     }
 
     fn visit_columns(&self, visitor: &mut dyn FnMut(&str, &Value)) {

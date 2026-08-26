@@ -8,21 +8,20 @@
 
 use uqa_core::Value;
 use uqa_execution::{
-    eval_call_arguments, Batch, ExecResult, OwnedPhysicalRow, PhysicalOperator, PhysicalRow,
-    Project, ProjectRows, RowSchema, ScalarEvalContext, ScalarExpr, SharedExpressionEvaluator,
+    eval_call_arguments, Batch, ExecResult, OwnedPhysicalRow, PhysicalOperator,
+    PhysicalProjectRows, PhysicalRow, Project, ProjectionTarget, RowSchema, ScalarEvalContext,
+    ScalarExpr, SharedExpressionEvaluator,
 };
 use uqa_planner::QueryBlockPlan;
 use uqa_sql::ast::{ColumnType, FunctionBinding};
-use uqa_sql::{ResultRow, SQLError, SQLParam};
+use uqa_sql::{SQLError, SQLParam};
 
 use super::{CteScope, Engine, PhysicalProjection, ScopedEngineHook};
 use crate::sql::scalar::PlanSubqueryArena;
 
-const SET_VALUE_COLUMN_PREFIX: &str = "\0uqa.set_value.";
-
 #[derive(Clone)]
 struct SetFunctionCall {
-    placeholder: String,
+    placeholder: uqa_sql::ast::InternalColumnRef,
     name: String,
     binding: Option<FunctionBinding>,
     args: Vec<ScalarExpr>,
@@ -47,7 +46,11 @@ pub(in crate::sql) struct GroupSetProjectionPlan {
 
 enum SetFunctionState {
     Scalar(Value),
-    Set { rows: ProjectRows, exhausted: bool },
+    Set {
+        columns: Vec<String>,
+        rows: PhysicalProjectRows,
+        exhausted: bool,
+    },
 }
 
 struct SetExpansion {
@@ -80,14 +83,18 @@ impl SetExpansion {
         for call in &mut self.calls {
             match call {
                 SetFunctionState::Scalar(value) => values.push(value.clone()),
-                SetFunctionState::Set { rows, exhausted } => {
+                SetFunctionState::Set {
+                    columns,
+                    rows,
+                    exhausted,
+                } => {
                     if *exhausted {
                         values.push(Value::Null);
                         continue;
                     }
                     if let Some(row) = rows.next() {
                         produced = true;
-                        values.push(set_row_value(row?));
+                        values.push(set_row_value(row?, columns));
                     } else {
                         *exhausted = true;
                         values.push(Value::Null);
@@ -99,11 +106,13 @@ impl SetExpansion {
     }
 }
 
-fn set_row_value(row: ResultRow) -> Value {
-    if row.len() == 1 {
-        return row.into_values().next().unwrap_or(Value::Null);
+fn set_row_value(row: PhysicalRow, columns: &[String]) -> Value {
+    let values = row.into_physical_values();
+    if values.len() == 1 {
+        return values.into_iter().next().unwrap_or(Value::Null);
     }
-    Value::Record(row.into_iter().collect())
+    debug_assert_eq!(columns.len(), values.len());
+    Value::Record(columns.iter().cloned().zip(values).collect())
 }
 
 mod rewrite;
@@ -128,12 +137,21 @@ impl SetProjectionPlan {
         output_batch_size: usize,
     ) -> Result<Self, SQLError> {
         let mut calls = Vec::new();
+        let call_relation = uqa_sql::ast::InternalRelationId::allocate();
         let projections = projections
             .into_iter()
-            .map(|(name, expression)| {
+            .map(|(target, expression)| {
                 Ok((
-                    name,
-                    rewrite_set_calls(engine, resolver, expression, &mut calls, schema, params)?,
+                    target,
+                    rewrite_set_calls(
+                        engine,
+                        resolver,
+                        expression,
+                        &mut calls,
+                        call_relation,
+                        schema,
+                        params,
+                    )?,
                 ))
             })
             .collect::<Result<Vec<_>, SQLError>>()?;
@@ -181,8 +199,8 @@ pub(in crate::sql) fn build_set_projection<'a>(
             .iter()
             .map(|call| {
                 (
-                    call.placeholder.clone(),
-                    ScalarExpr::Column(call.placeholder.clone()),
+                    ProjectionTarget::Internal(call.placeholder),
+                    ScalarExpr::InternalColumn(call.placeholder),
                 )
             })
             .collect();
@@ -201,13 +219,13 @@ pub(in crate::sql) fn build_set_projection<'a>(
         ));
     }
     if pass_through {
-        Ok(Box::new(Project::appending_with_evaluator(
+        Ok(Box::new(Project::appending_target_evaluator(
             operator,
             plan.projections,
             evaluator,
         )))
     } else {
-        Ok(Box::new(Project::with_evaluator(
+        Ok(Box::new(Project::with_target_evaluator(
             operator,
             plan.projections,
             evaluator,

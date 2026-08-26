@@ -7,12 +7,13 @@
 //! AST-independent scalar physical IR shared by the planner and executors.
 
 use uqa_core::{ArrayValue, Value};
-use uqa_sql::ast::{BinaryOp, FrameMode, FunctionBinding, NullsOrder};
+use uqa_sql::ast::{
+    BinaryOp, FrameMode, FunctionBinding, FunctionDispatch, InternalColumnRef, NullsOrder,
+};
 use uqa_sql::expr::{
     cast_value_with_type_resolution, eval_binary_values, eval_binary_values_with_integer_width,
-    eval_builtin_function_call, eval_function_call, integer_width_for_literal,
+    eval_bound_builtin_function_call, eval_function_call, integer_width_for_literal,
     integer_width_for_type, negate_value, truthy, EngineHook, EvalContext, IntegerWidth, RowLookup,
-    NAMED_ARG_FUNCTION, VARIADIC_ARG_FUNCTION,
 };
 use uqa_sql::{ResultRow, SQLError, SQLParam};
 
@@ -29,6 +30,9 @@ pub enum ScalarExpr {
     Column(String),
     /// Logical position in an already-bound physical row schema. This variant is introduced only after relational binding so duplicate SQL labels remain independently addressable.
     Position(usize),
+    /// Structural executor-only attribute, resolved independently of SQL
+    /// relation and column names.
+    InternalColumn(InternalColumnRef),
     QualifiedColumn {
         qualifier: String,
         column: String,
@@ -143,7 +147,7 @@ impl ScalarExpr {
                 output.insert(name.clone());
                 true
             }
-            Self::Literal(_) | Self::Param(_) => true,
+            Self::Literal(_) | Self::Param(_) | Self::InternalColumn(_) => true,
             Self::Func {
                 args,
                 order_by,
@@ -247,6 +251,7 @@ impl ScalarExpr {
             | Self::Column(_)
             | Self::QualifiedColumn { .. }
             | Self::Position(_)
+            | Self::InternalColumn(_)
             | Self::Literal(_)
             | Self::Param(_)
             | Self::ScalarSubquery(_)
@@ -307,6 +312,7 @@ impl ScalarExpr {
             | Self::Column(_)
             | Self::QualifiedColumn { .. }
             | Self::Position(_)
+            | Self::InternalColumn(_)
             | Self::Literal(_)
             | Self::Param(_) => false,
         }
@@ -370,6 +376,7 @@ impl ScalarExpr {
             | Self::Column(_)
             | Self::QualifiedColumn { .. }
             | Self::Position(_)
+            | Self::InternalColumn(_)
             | Self::Literal(_)
             | Self::ScalarSubquery(_)
             | Self::Exists { .. } => false,
@@ -440,6 +447,7 @@ impl ScalarExpr {
             | Self::Column(_)
             | Self::QualifiedColumn { .. }
             | Self::Position(_)
+            | Self::InternalColumn(_)
             | Self::Literal(_)
             | Self::Param(_)
             | Self::ScalarSubquery(_)
@@ -721,6 +729,15 @@ pub fn eval_scalar(
                     "bound physical column position {position} is unavailable"
                 ))
             }),
+        ScalarExpr::InternalColumn(column) => context
+            .row_lookup
+            .and_then(|row| row.internal_column(*column))
+            .cloned()
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "internal relation attribute {column:?} is unavailable"
+                ))
+            }),
         ScalarExpr::QualifiedColumn { qualifier, column } => context
             .sql_context()
             .qualified_column_value(qualifier, column),
@@ -734,6 +751,15 @@ pub fn eval_scalar(
         } => {
             let arguments = eval_call_arguments(args, context)?;
             if let Some(binding) = binding {
+                if let Some(uqa_sql::ast::FunctionResolutionError::UndefinedFunction {
+                    signature,
+                }) = binding.resolution_error.as_ref()
+                {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42883".into(),
+                        message: format!("function {signature} does not exist"),
+                    });
+                }
                 if binding.builtin {
                     if let Some(result) = context
                         .function_hook
@@ -741,9 +767,8 @@ pub fn eval_scalar(
                     {
                         return result;
                     }
-                    let dispatch_name = crate::type_resolution::runtime_dispatch_name(binding);
-                    return eval_builtin_function_call(
-                        dispatch_name.as_deref().unwrap_or(&binding.name),
+                    return eval_bound_builtin_function_call(
+                        binding,
                         arguments,
                         &context.sql_context(),
                     );
@@ -954,9 +979,12 @@ pub fn scalar_call_argument(expression: &ScalarExpr) -> Result<ScalarCallArgumen
             explicit_variadic: false,
         });
     };
-    if name == NAMED_ARG_FUNCTION {
+    if binding.as_ref().and_then(|binding| binding.dispatch)
+        == Some(FunctionDispatch::NamedArgument)
+    {
         validate_marker_shape(
             binding.as_ref(),
+            FunctionDispatch::NamedArgument,
             *distinct,
             order_by,
             filter.as_deref(),
@@ -971,7 +999,9 @@ pub fn scalar_call_argument(expression: &ScalarExpr) -> Result<ScalarCallArgumen
         if !explicit_variadic
             && matches!(
                 value,
-                ScalarExpr::Func { name, .. } if name == NAMED_ARG_FUNCTION
+                ScalarExpr::Func { binding, .. }
+                    if binding.as_ref().and_then(|binding| binding.dispatch)
+                        == Some(FunctionDispatch::NamedArgument)
             )
         {
             return Err(malformed_call_argument(
@@ -1004,11 +1034,14 @@ fn direct_variadic_argument(expression: &ScalarExpr) -> Result<(&ScalarExpr, boo
     else {
         return Ok((expression, false));
     };
-    if name != VARIADIC_ARG_FUNCTION {
+    if binding.as_ref().and_then(|binding| binding.dispatch)
+        != Some(FunctionDispatch::VariadicArgument)
+    {
         return Ok((expression, false));
     }
     validate_marker_shape(
         binding.as_ref(),
+        FunctionDispatch::VariadicArgument,
         *distinct,
         order_by,
         filter.as_deref(),
@@ -1021,8 +1054,11 @@ fn direct_variadic_argument(expression: &ScalarExpr) -> Result<(&ScalarExpr, boo
     };
     if matches!(
         value,
-        ScalarExpr::Func { name, .. }
-            if name == VARIADIC_ARG_FUNCTION || name == NAMED_ARG_FUNCTION
+        ScalarExpr::Func { binding, .. }
+            if matches!(
+                binding.as_ref().and_then(|binding| binding.dispatch),
+                Some(FunctionDispatch::VariadicArgument | FunctionDispatch::NamedArgument)
+            )
     ) {
         return Err(malformed_call_argument(
             "call argument contains nested syntax markers",
@@ -1033,12 +1069,22 @@ fn direct_variadic_argument(expression: &ScalarExpr) -> Result<(&ScalarExpr, boo
 
 fn validate_marker_shape(
     binding: Option<&FunctionBinding>,
+    expected_dispatch: FunctionDispatch,
     distinct: bool,
     order_by: &[ScalarOrder],
     filter: Option<&ScalarExpr>,
     name: &str,
 ) -> Result<(), SQLError> {
-    if binding.is_some() || distinct || !order_by.is_empty() || filter.is_some() {
+    if binding.is_none_or(|binding| {
+        !binding.builtin
+            || binding.dispatch != Some(expected_dispatch)
+            || !binding.argument_types.is_empty()
+            || binding.invocation.is_some()
+            || binding.resolution_error.is_some()
+    }) || distinct
+        || !order_by.is_empty()
+        || filter.is_some()
+    {
         return Err(malformed_call_argument(&format!(
             "{name} syntax marker contains function-call metadata"
         )));
@@ -1248,7 +1294,7 @@ mod tests {
     };
     use crate::{PhysicalRow, RowSchema};
     use uqa_core::Value;
-    use uqa_sql::ast::{BinaryOp, ColumnType};
+    use uqa_sql::ast::{BinaryOp, ColumnType, FunctionBinding, FunctionDispatch};
     use uqa_sql::{SQLError, SQLParam};
 
     #[test]
@@ -1345,11 +1391,11 @@ mod tests {
     #[test]
     fn explicit_variadic_call_argument_is_transparent_to_runtime_evaluation() {
         let arguments = vec![marker(
-            uqa_sql::expr::NAMED_ARG_FUNCTION,
+            FunctionDispatch::NamedArgument,
             vec![
                 ScalarExpr::Literal(Value::Str("items".into())),
                 marker(
-                    uqa_sql::expr::VARIADIC_ARG_FUNCTION,
+                    FunctionDispatch::VariadicArgument,
                     vec![ScalarExpr::Literal(Value::Int(42))],
                 ),
             ],
@@ -1369,11 +1415,11 @@ mod tests {
     fn call_argument_markers_reject_duplicates_and_malformed_nesting() {
         let duplicate = vec![
             marker(
-                uqa_sql::expr::VARIADIC_ARG_FUNCTION,
+                FunctionDispatch::VariadicArgument,
                 vec![ScalarExpr::Literal(Value::Int(1))],
             ),
             marker(
-                uqa_sql::expr::VARIADIC_ARG_FUNCTION,
+                FunctionDispatch::VariadicArgument,
                 vec![ScalarExpr::Literal(Value::Int(2))],
             ),
         ];
@@ -1383,9 +1429,9 @@ mod tests {
         ));
 
         let nested = vec![marker(
-            uqa_sql::expr::VARIADIC_ARG_FUNCTION,
+            FunctionDispatch::VariadicArgument,
             vec![marker(
-                uqa_sql::expr::VARIADIC_ARG_FUNCTION,
+                FunctionDispatch::VariadicArgument,
                 vec![ScalarExpr::Literal(Value::Int(1))],
             )],
         )];
@@ -1395,10 +1441,11 @@ mod tests {
         ));
     }
 
-    fn marker(name: &str, args: Vec<ScalarExpr>) -> ScalarExpr {
+    fn marker(dispatch: FunctionDispatch, args: Vec<ScalarExpr>) -> ScalarExpr {
+        let binding = FunctionBinding::dispatched(dispatch);
         ScalarExpr::Func {
-            name: name.into(),
-            binding: None,
+            name: binding.name.clone(),
+            binding: Some(binding),
             args,
             distinct: false,
             order_by: Vec::new(),

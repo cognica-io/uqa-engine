@@ -47,6 +47,7 @@ pub(in crate::sql) fn expr_contains_function(expression: &ScalarExpr) -> bool {
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
@@ -158,6 +159,7 @@ pub(in crate::sql) fn collect_expr_qualifiers(
         ScalarExpr::Default
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::Star
@@ -227,6 +229,7 @@ pub(in crate::sql) fn expr_has_unqualified_column(expr: &ScalarExpr) -> bool {
         ScalarExpr::InSubquery { expr, .. } => expr_has_unqualified_column(expr),
         ScalarExpr::Default
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Literal(_)
@@ -245,6 +248,7 @@ pub(in crate::sql) fn qualify_unqualified_columns(
         ScalarExpr::Column(column) => ScalarExpr::qualified_column(qualifier, column),
         ScalarExpr::Default
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Literal(_)

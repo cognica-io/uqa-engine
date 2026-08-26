@@ -10,23 +10,17 @@ use super::{
     allocation_error, compile_pg_regex, eval_between, eval_comparison_op, expect_str,
     json_contained_by, json_contains, nonnegative_usize, out_of_range, quote_ident, quote_literal,
     similar_to_regex, to_i64, value_to_string, values_equal, ArrayValue, BinaryOp, DecimalValue,
-    Result, SQLError, Value, TO_BIN_INT4_FUNCTION, TO_BIN_INT8_FUNCTION, TO_HEX_INT4_FUNCTION,
-    TO_HEX_INT8_FUNCTION, TO_OCT_INT4_FUNCTION, TO_OCT_INT8_FUNCTION,
+    Result, SQLError, Value,
 };
+use crate::ast::FunctionDispatch;
 
 pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
     const NAMES: &[&str] = &[
         "factorial",
         "bit_length",
         "to_bin",
-        TO_BIN_INT4_FUNCTION,
-        TO_BIN_INT8_FUNCTION,
         "to_hex",
-        TO_HEX_INT4_FUNCTION,
-        TO_HEX_INT8_FUNCTION,
         "to_oct",
-        TO_OCT_INT4_FUNCTION,
-        TO_OCT_INT8_FUNCTION,
         "string_to_array",
         "string_to_table",
         "quote_ident",
@@ -52,19 +46,38 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
         "array_overlap",
         "contains_op",
         "contained_by_op",
-        "__array_subscripts",
-        "__array_slices",
-        "__subscript",
-        "__slice",
-        "__any_op",
-        "__all_op",
-        "__is_distinct",
-        "__between_symmetric",
     ];
     if !NAMES.contains(&name) {
         return None;
     }
-    Some((|| -> Result<Value> {
+    Some(eval_postgres_function(name, args))
+}
+
+pub(super) fn eval_dispatched_postgres_function(
+    dispatch: FunctionDispatch,
+    args: &[Value],
+) -> Option<Result<Value>> {
+    Some(match dispatch {
+        FunctionDispatch::ArraySubscripts => eval_array_subscripts(args),
+        FunctionDispatch::ArraySlices => eval_array_slices(args),
+        FunctionDispatch::Subscript => eval_subscript(args),
+        FunctionDispatch::Slice => eval_slice(args),
+        FunctionDispatch::AnyOperator => eval_any_all(args, true),
+        FunctionDispatch::AllOperator => eval_any_all(args, false),
+        FunctionDispatch::IsDistinct => eval_is_distinct(args),
+        FunctionDispatch::BetweenSymmetric => eval_between_symmetric(args),
+        FunctionDispatch::ToBinInt4
+        | FunctionDispatch::ToBinInt8
+        | FunctionDispatch::ToHexInt4
+        | FunctionDispatch::ToHexInt8
+        | FunctionDispatch::ToOctInt4
+        | FunctionDispatch::ToOctInt8 => eval_integer_base(dispatch, args),
+        _ => return None,
+    })
+}
+
+fn eval_postgres_function(name: &str, args: &[Value]) -> Result<Value> {
+    (|| -> Result<Value> {
         match name {
             // -------------------------------------------------------------
             // PostgreSQL scalar surface: math, strings, arrays, operators
@@ -112,37 +125,9 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
                 };
                 Ok(Value::Int(octets as i64 * 8))
             }
-            "to_bin" | TO_BIN_INT4_FUNCTION | TO_BIN_INT8_FUNCTION | "to_hex"
-            | TO_HEX_INT4_FUNCTION | TO_HEX_INT8_FUNCTION | "to_oct" | TO_OCT_INT4_FUNCTION
-            | TO_OCT_INT8_FUNCTION => {
-                let [argument] = args else {
-                    return Err(SQLError::TypeMismatch(format!("{name} takes 1 arg")));
-                };
-                if matches!(argument, Value::Null) {
-                    return Ok(Value::Null);
-                }
-                let value = to_i64(argument)?;
-                match name {
-                    TO_BIN_INT4_FUNCTION => {
-                        let value = i32::try_from(value).map_err(|_| out_of_range("integer"))?;
-                        Ok(Value::Str(format!("{:b}", value as u32)))
-                    }
-                    TO_BIN_INT8_FUNCTION => Ok(Value::Str(format!("{:b}", value as u64))),
-                    TO_HEX_INT4_FUNCTION => {
-                        let value = i32::try_from(value).map_err(|_| out_of_range("integer"))?;
-                        Ok(Value::Str(format!("{:x}", value as u32)))
-                    }
-                    TO_HEX_INT8_FUNCTION => Ok(Value::Str(format!("{:x}", value as u64))),
-                    TO_OCT_INT4_FUNCTION => {
-                        let value = i32::try_from(value).map_err(|_| out_of_range("integer"))?;
-                        Ok(Value::Str(format!("{:o}", value as u32)))
-                    }
-                    TO_OCT_INT8_FUNCTION => Ok(Value::Str(format!("{:o}", value as u64))),
-                    _ => Err(SQLError::Internal(format!(
-                        "{name} reached runtime before its integer overload was bound"
-                    ))),
-                }
-            }
+            "to_bin" | "to_hex" | "to_oct" => Err(SQLError::Internal(format!(
+                "{name} reached runtime before its integer overload was bound"
+            ))),
             "string_to_array" | "string_to_table" => {
                 if args.len() < 2 || args.len() > 3 {
                     return Err(SQLError::TypeMismatch(
@@ -562,214 +547,230 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
                 }
             }
             "contains_op" | "contained_by_op" => containment_operator(name, args),
-            "__array_subscripts" => {
-                if args.len() < 2 {
-                    return Err(SQLError::TypeMismatch(
-                        "array subscripting requires at least one index".into(),
-                    ));
-                }
-                if args.iter().any(|argument| matches!(argument, Value::Null)) {
-                    return Ok(Value::Null);
-                }
-                let Value::Array(array) = &args[0] else {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "cannot subscript {:?}",
-                        args[0]
-                    )));
-                };
-                array_subscripts(array, &args[1..])
-            }
-            "__array_slices" => {
-                if args.len() < 3 || args.len().is_multiple_of(2) {
-                    return Err(SQLError::TypeMismatch(
-                        "array slicing requires lower/upper bound pairs".into(),
-                    ));
-                }
-                let Value::Array(array) = &args[0] else {
-                    if matches!(args[0], Value::Null) {
-                        return Ok(Value::Null);
-                    }
-                    return Err(SQLError::TypeMismatch(format!(
-                        "cannot slice {:?}",
-                        args[0]
-                    )));
-                };
-                array_slices(array, &args[1..])
-            }
-            "__subscript" => {
-                // 1-based array subscripting; out-of-range yields NULL.
-                if args.len() != 2 {
-                    return Err(SQLError::TypeMismatch("subscript takes 2 args".into()));
-                }
-                match (&args[0], &args[1]) {
-                    (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
-                    (Value::Array(array), index) => {
-                        let index = to_i64(index)?;
-                        let Some(lower) = array.lower_bound(0).map(i64::from) else {
-                            return Ok(Value::Null);
-                        };
-                        let Some(offset) = index
-                            .checked_sub(lower)
-                            .and_then(|offset| usize::try_from(offset).ok())
-                        else {
-                            return Ok(Value::Null);
-                        };
-                        let Some(value) = array.elements().get(offset) else {
-                            return Ok(Value::Null);
-                        };
-                        if array.dimensions().len() == 1 {
-                            return Ok(value.clone());
-                        }
-                        let Value::List(elements) = value else {
-                            return Err(SQLError::TypeMismatch(
-                                "invalid multidimensional array".into(),
-                            ));
-                        };
-                        ArrayValue::with_lower_bounds(
-                            elements.clone(),
-                            array.lower_bounds()[1..].to_vec(),
-                        )
-                        .map(Value::Array)
-                        .ok_or_else(|| {
-                            SQLError::TypeMismatch("invalid multidimensional array".into())
-                        })
-                    }
-                    (Value::Map(map), key) => Ok(map
-                        .get(&value_to_string(key))
-                        .cloned()
-                        .unwrap_or(Value::Null)),
-                    (other, _) => Err(SQLError::TypeMismatch(format!(
-                        "cannot subscript {other:?}"
-                    ))),
-                }
-            }
-            "__slice" => {
-                // Array slice `arr[lo:hi]`; open bounds arrive as NULL and
-                // clamp to the array, PostgreSQL-style.
-                if args.len() != 3 {
-                    return Err(SQLError::TypeMismatch("slice takes 3 args".into()));
-                }
-                match &args[0] {
-                    Value::Null => Ok(Value::Null),
-                    Value::Array(array) => {
-                        let Some(array_lower) = array.lower_bound(0).map(i64::from) else {
-                            return ArrayValue::try_new(Vec::new())
-                                .map(Value::Array)
-                                .ok_or_else(|| {
-                                    SQLError::TypeMismatch("invalid empty array".into())
-                                });
-                        };
-                        let array_upper = array.upper_bound(0).ok_or_else(|| {
-                            SQLError::TypeMismatch("invalid array dimensions".into())
-                        })?;
-                        let lo = match &args[1] {
-                            Value::Null => array_lower,
-                            other => to_i64(other)?,
-                        }
-                        .max(array_lower);
-                        let hi = match &args[2] {
-                            Value::Null => array_upper,
-                            other => to_i64(other)?,
-                        }
-                        .min(array_upper);
-                        if hi < lo || lo > array_upper {
-                            return ArrayValue::try_new(Vec::new())
-                                .map(Value::Array)
-                                .ok_or_else(|| {
-                                    SQLError::TypeMismatch("invalid empty array".into())
-                                });
-                        }
-                        let start = usize::try_from(lo - array_lower)
-                            .map_err(|_| out_of_range("array slice"))?;
-                        let end = usize::try_from(hi - array_lower + 1)
-                            .map_err(|_| out_of_range("array slice"))?;
-                        let lower_bounds = vec![1; array.lower_bounds().len()];
-                        ArrayValue::with_lower_bounds(
-                            array.elements()[start..end].to_vec(),
-                            lower_bounds,
-                        )
-                        .map(Value::Array)
-                        .ok_or_else(|| SQLError::TypeMismatch("invalid array slice".into()))
-                    }
-                    other => Err(SQLError::TypeMismatch(format!("cannot slice {other:?}"))),
-                }
-            }
-            "__any_op" | "__all_op" => {
-                // `expr op ANY(array)` / `expr op ALL(array)` with Kleene
-                // aggregation over the element comparisons.
-                if args.len() != 3 {
-                    return Err(SQLError::TypeMismatch("ANY/ALL takes 3 args".into()));
-                }
-                let op = match value_to_string(&args[2]).as_str() {
-                    "=" => BinaryOp::Equal,
-                    "<>" | "!=" => BinaryOp::NotEqual,
-                    "<" => BinaryOp::Less,
-                    "<=" => BinaryOp::LessEqual,
-                    ">" => BinaryOp::Greater,
-                    ">=" => BinaryOp::GreaterEqual,
-                    other => {
-                        return Err(SQLError::Unsupported(format!(
-                            "operator `{other}` with ANY/ALL"
-                        )));
-                    }
-                };
-                let Value::Array(array) = &args[1] else {
-                    if matches!(args[1], Value::Null) {
-                        return Ok(Value::Null);
-                    }
-                    return Err(SQLError::TypeMismatch("ANY/ALL requires an array".into()));
-                };
-                let is_any = name == "__any_op";
-                let mut saw_null = false;
-                let mut items = Vec::new();
-                flatten_array_elements(array.elements(), &mut items);
-                for item in items {
-                    match eval_comparison_op(op, &args[0], item)? {
-                        Value::Bool(true) if is_any => return Ok(Value::Bool(true)),
-                        Value::Bool(false) if !is_any => return Ok(Value::Bool(false)),
-                        Value::Null => saw_null = true,
-                        _ => {}
-                    }
-                }
-                if saw_null {
-                    return Ok(Value::Null);
-                }
-                Ok(Value::Bool(!is_any))
-            }
-            "__is_distinct" => {
-                // IS DISTINCT FROM: null-safe inequality (never NULL).
-                if args.len() != 2 {
-                    return Err(SQLError::TypeMismatch(
-                        "IS DISTINCT FROM takes 2 args".into(),
-                    ));
-                }
-                let distinct = match (&args[0], &args[1]) {
-                    (Value::Null, Value::Null) => false,
-                    (Value::Null, _) | (_, Value::Null) => true,
-                    (a, b) => !values_equal(a, b),
-                };
-                Ok(Value::Bool(distinct))
-            }
-            "__between_symmetric" => {
-                // BETWEEN SYMMETRIC: PostgreSQL rewrites to
-                // `(a >= x AND a <= y) OR (a >= y AND a <= x)` and the
-                // three-valued OR of the two window tests.
-                if args.len() != 3 {
-                    return Err(SQLError::TypeMismatch(
-                        "BETWEEN SYMMETRIC takes 3 args".into(),
-                    ));
-                }
-                let forward = eval_between(&args[0], &args[1], &args[2])?;
-                let backward = eval_between(&args[0], &args[2], &args[1])?;
-                Ok(match (&forward, &backward) {
-                    (Value::Bool(true), _) | (_, Value::Bool(true)) => Value::Bool(true),
-                    (Value::Null, _) | (_, Value::Null) => Value::Null,
-                    _ => Value::Bool(false),
-                })
-            }
             _ => unreachable!("function family membership was checked before dispatch"),
         }
-    })())
+    })()
+}
+
+fn eval_integer_base(dispatch: FunctionDispatch, args: &[Value]) -> Result<Value> {
+    let [argument] = args else {
+        return Err(SQLError::TypeMismatch(format!(
+            "{} takes 1 arg",
+            dispatch.label()
+        )));
+    };
+    if matches!(argument, Value::Null) {
+        return Ok(Value::Null);
+    }
+    let value = to_i64(argument)?;
+    Ok(Value::Str(match dispatch {
+        FunctionDispatch::ToBinInt4 => {
+            let value = i32::try_from(value).map_err(|_| out_of_range("integer"))?;
+            format!("{:b}", value as u32)
+        }
+        FunctionDispatch::ToBinInt8 => format!("{:b}", value as u64),
+        FunctionDispatch::ToHexInt4 => {
+            let value = i32::try_from(value).map_err(|_| out_of_range("integer"))?;
+            format!("{:x}", value as u32)
+        }
+        FunctionDispatch::ToHexInt8 => format!("{:x}", value as u64),
+        FunctionDispatch::ToOctInt4 => {
+            let value = i32::try_from(value).map_err(|_| out_of_range("integer"))?;
+            format!("{:o}", value as u32)
+        }
+        FunctionDispatch::ToOctInt8 => format!("{:o}", value as u64),
+        _ => unreachable!("integer-base dispatch was checked by the caller"),
+    }))
+}
+
+fn eval_array_subscripts(args: &[Value]) -> Result<Value> {
+    if args.len() < 2 {
+        return Err(SQLError::TypeMismatch(
+            "array subscripting requires at least one index".into(),
+        ));
+    }
+    if args.iter().any(|argument| matches!(argument, Value::Null)) {
+        return Ok(Value::Null);
+    }
+    let Value::Array(array) = &args[0] else {
+        return Err(SQLError::TypeMismatch(format!(
+            "cannot subscript {:?}",
+            args[0]
+        )));
+    };
+    array_subscripts(array, &args[1..])
+}
+
+fn eval_array_slices(args: &[Value]) -> Result<Value> {
+    if args.len() < 3 || args.len().is_multiple_of(2) {
+        return Err(SQLError::TypeMismatch(
+            "array slicing requires lower/upper bound pairs".into(),
+        ));
+    }
+    let Value::Array(array) = &args[0] else {
+        if matches!(args[0], Value::Null) {
+            return Ok(Value::Null);
+        }
+        return Err(SQLError::TypeMismatch(format!(
+            "cannot slice {:?}",
+            args[0]
+        )));
+    };
+    array_slices(array, &args[1..])
+}
+
+fn eval_subscript(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(SQLError::TypeMismatch("subscript takes 2 args".into()));
+    }
+    match (&args[0], &args[1]) {
+        (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
+        (Value::Array(array), index) => {
+            let index = to_i64(index)?;
+            let Some(lower) = array.lower_bound(0).map(i64::from) else {
+                return Ok(Value::Null);
+            };
+            let Some(offset) = index
+                .checked_sub(lower)
+                .and_then(|offset| usize::try_from(offset).ok())
+            else {
+                return Ok(Value::Null);
+            };
+            let Some(value) = array.elements().get(offset) else {
+                return Ok(Value::Null);
+            };
+            if array.dimensions().len() == 1 {
+                return Ok(value.clone());
+            }
+            let Value::List(elements) = value else {
+                return Err(SQLError::TypeMismatch(
+                    "invalid multidimensional array".into(),
+                ));
+            };
+            ArrayValue::with_lower_bounds(elements.clone(), array.lower_bounds()[1..].to_vec())
+                .map(Value::Array)
+                .ok_or_else(|| SQLError::TypeMismatch("invalid multidimensional array".into()))
+        }
+        (Value::Map(map), key) => Ok(map
+            .get(&value_to_string(key))
+            .cloned()
+            .unwrap_or(Value::Null)),
+        (other, _) => Err(SQLError::TypeMismatch(format!(
+            "cannot subscript {other:?}"
+        ))),
+    }
+}
+
+fn eval_slice(args: &[Value]) -> Result<Value> {
+    if args.len() != 3 {
+        return Err(SQLError::TypeMismatch("slice takes 3 args".into()));
+    }
+    match &args[0] {
+        Value::Null => Ok(Value::Null),
+        Value::Array(array) => {
+            let Some(array_lower) = array.lower_bound(0).map(i64::from) else {
+                return ArrayValue::try_new(Vec::new())
+                    .map(Value::Array)
+                    .ok_or_else(|| SQLError::TypeMismatch("invalid empty array".into()));
+            };
+            let array_upper = array
+                .upper_bound(0)
+                .ok_or_else(|| SQLError::TypeMismatch("invalid array dimensions".into()))?;
+            let lo = match &args[1] {
+                Value::Null => array_lower,
+                other => to_i64(other)?,
+            }
+            .max(array_lower);
+            let hi = match &args[2] {
+                Value::Null => array_upper,
+                other => to_i64(other)?,
+            }
+            .min(array_upper);
+            if hi < lo || lo > array_upper {
+                return ArrayValue::try_new(Vec::new())
+                    .map(Value::Array)
+                    .ok_or_else(|| SQLError::TypeMismatch("invalid empty array".into()));
+            }
+            let start =
+                usize::try_from(lo - array_lower).map_err(|_| out_of_range("array slice"))?;
+            let end =
+                usize::try_from(hi - array_lower + 1).map_err(|_| out_of_range("array slice"))?;
+            let lower_bounds = vec![1; array.lower_bounds().len()];
+            ArrayValue::with_lower_bounds(array.elements()[start..end].to_vec(), lower_bounds)
+                .map(Value::Array)
+                .ok_or_else(|| SQLError::TypeMismatch("invalid array slice".into()))
+        }
+        other => Err(SQLError::TypeMismatch(format!("cannot slice {other:?}"))),
+    }
+}
+
+fn eval_any_all(args: &[Value], is_any: bool) -> Result<Value> {
+    if args.len() != 3 {
+        return Err(SQLError::TypeMismatch("ANY/ALL takes 3 args".into()));
+    }
+    let op = match value_to_string(&args[2]).as_str() {
+        "=" => BinaryOp::Equal,
+        "<>" | "!=" => BinaryOp::NotEqual,
+        "<" => BinaryOp::Less,
+        "<=" => BinaryOp::LessEqual,
+        ">" => BinaryOp::Greater,
+        ">=" => BinaryOp::GreaterEqual,
+        other => {
+            return Err(SQLError::Unsupported(format!(
+                "operator `{other}` with ANY/ALL"
+            )));
+        }
+    };
+    let Value::Array(array) = &args[1] else {
+        if matches!(args[1], Value::Null) {
+            return Ok(Value::Null);
+        }
+        return Err(SQLError::TypeMismatch("ANY/ALL requires an array".into()));
+    };
+    let mut saw_null = false;
+    let mut items = Vec::new();
+    flatten_array_elements(array.elements(), &mut items);
+    for item in items {
+        match eval_comparison_op(op, &args[0], item)? {
+            Value::Bool(true) if is_any => return Ok(Value::Bool(true)),
+            Value::Bool(false) if !is_any => return Ok(Value::Bool(false)),
+            Value::Null => saw_null = true,
+            _ => {}
+        }
+    }
+    if saw_null {
+        return Ok(Value::Null);
+    }
+    Ok(Value::Bool(!is_any))
+}
+
+fn eval_is_distinct(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(SQLError::TypeMismatch(
+            "IS DISTINCT FROM takes 2 args".into(),
+        ));
+    }
+    let distinct = match (&args[0], &args[1]) {
+        (Value::Null, Value::Null) => false,
+        (Value::Null, _) | (_, Value::Null) => true,
+        (left, right) => !values_equal(left, right),
+    };
+    Ok(Value::Bool(distinct))
+}
+
+fn eval_between_symmetric(args: &[Value]) -> Result<Value> {
+    if args.len() != 3 {
+        return Err(SQLError::TypeMismatch(
+            "BETWEEN SYMMETRIC takes 3 args".into(),
+        ));
+    }
+    let forward = eval_between(&args[0], &args[1], &args[2])?;
+    let backward = eval_between(&args[0], &args[2], &args[1])?;
+    Ok(match (&forward, &backward) {
+        (Value::Bool(true), _) | (_, Value::Bool(true)) => Value::Bool(true),
+        (Value::Null, _) | (_, Value::Null) => Value::Null,
+        _ => Value::Bool(false),
+    })
 }
 
 fn array_subscripts(array: &ArrayValue, indices: &[Value]) -> Result<Value> {

@@ -24,6 +24,17 @@ enum RestoredView {
     Legacy(QueryPlan),
 }
 
+fn upgrade_legacy_view_dispatches(plan: &mut QueryPlan) -> bool {
+    let mut changed = false;
+    plan.rewrite_scalar_expressions(&mut |expression| {
+        let uqa_execution::ScalarExpr::Func { name, binding, .. } = expression else {
+            return;
+        };
+        changed |= FunctionBinding::upgrade_legacy_serialized_dispatch(name, binding);
+    });
+    changed
+}
+
 pub(crate) struct ViewRegistration<'a> {
     pub name: &'a str,
     pub column_names: &'a [String],
@@ -696,7 +707,9 @@ impl Engine {
             name: canonical_name.to_string(),
             argument_types: argument_types.to_vec(),
             builtin: false,
+            dispatch: None,
             invocation: None,
+            resolution_error: None,
         };
         let mut dependents = self
             .durable
@@ -813,6 +826,7 @@ impl Engine {
 
         let mut views = BTreeMap::new();
         let mut legacy_views = Vec::new();
+        let mut dispatch_upgraded_views = Vec::new();
         for row in rows {
             let view_name = row.relation.qualified_name();
             let mut view = match serde_json::from_str::<RestoredView>(&row.definition_json)? {
@@ -831,6 +845,9 @@ impl Engine {
                     }
                 }
             };
+            if upgrade_legacy_view_dispatches(&mut view.query) {
+                dispatch_upgraded_views.push(row.relation.clone());
+            }
             bind_stored_view_relations(&mut view.query, &relations).map_err(|error| {
                 StorageBackendError::Other(format!("restore view `{view_name}`: {error}"))
             })?;
@@ -844,6 +861,21 @@ impl Engine {
         }
         views.extend(temporary_views);
         self.migrate_legacy_view_bindings(catalog, &mut views, &legacy_views)?;
+        for relation in dispatch_upgraded_views {
+            if legacy_views.contains(&relation) {
+                continue;
+            }
+            let view = views.get(&relation).ok_or_else(|| {
+                StorageBackendError::Other(format!(
+                    "dispatch-upgraded view `{}` disappeared during restoration",
+                    relation.qualified_name()
+                ))
+            })?;
+            catalog.save_view(&ViewRow {
+                relation,
+                definition_json: serde_json::to_string(view)?,
+            })?;
+        }
         *self.durable.views.write() = views;
         Ok(())
     }

@@ -1,6 +1,6 @@
 # Search and Ranking
 
-UQA Engine provides full-text, vector, tensor, and hybrid retrieval through SQL and typed engine APIs. Retrieval predicates produce ranked document support and expose the score as `_score` in SQL.
+UQA Engine provides full-text, vector, tensor, and hybrid retrieval through SQL and typed engine APIs. Retrieval predicates produce ranked document support and expose the score as `_score` in SQL. In a query block with one unambiguous local-table source, `_meta.score` addresses that engine-owned score and `_meta.doc_id` addresses the storage document identity even when ordinary user columns are named `_score` or `_doc_id`.
 
 ## Full-text setup
 

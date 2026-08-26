@@ -6,6 +6,7 @@
 //! Physical row production for persisted, generated, pinned, and command-overlay table rows.
 
 use super::{Arc, Engine, EngineTableRowSource, ResultRow, SQLError, SharedLockOrigin, Value};
+use crate::sql::doc_id_value;
 
 pub(super) fn table_lock_origin(
     engine: &Engine,
@@ -314,6 +315,16 @@ impl EngineTableRowSource {
     ) -> Result<uqa_execution::PhysicalRow, SQLError> {
         if let Some(table_oid) = self.table_oid.as_ref() {
             row = row.append_values(vec![table_oid.clone()]);
+        }
+        let mut metadata = Vec::with_capacity(2);
+        if self.metadata.includes_doc_id() {
+            metadata.push(doc_id_value(doc_id)?);
+        }
+        if self.metadata.includes_score() {
+            metadata.push(Value::Float(0.0));
+        }
+        if !metadata.is_empty() {
+            row = row.append_values(metadata);
         }
         let Some((qualifier, storage_name)) = self.lock_origin.as_ref() else {
             return Ok(row);

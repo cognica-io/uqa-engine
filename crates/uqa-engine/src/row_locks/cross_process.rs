@@ -91,11 +91,11 @@ pub(super) const fn change_gate_claim(write: bool) -> ByteClaim {
 }
 
 pub(super) fn row_byte_claims(
-    table: &str,
+    relation: &[u8],
     doc_id: uqa_core::DocId,
     strength: LockStrength,
 ) -> Vec<ByteClaim> {
-    let base = ROW_BASE + (stable_hash(&[table.as_bytes(), &doc_id.to_be_bytes()]) % ROW_SPAN) * 2;
+    let base = ROW_BASE + (stable_hash(&[relation, &doc_id.to_be_bytes()]) % ROW_SPAN) * 2;
     match strength {
         LockStrength::ForKeyShare => vec![ByteClaim {
             offset: base,
@@ -122,17 +122,17 @@ pub(super) fn row_byte_claims(
     }
 }
 
-pub(super) fn relation_byte_claims(table: &str, mode: RelationLockMode) -> Vec<ByteClaim> {
-    let offset = RELATION_BASE + stable_hash(&[table.as_bytes()]) % RELATION_SPAN;
+pub(super) fn relation_byte_claims(relation: &[u8], mode: RelationLockMode) -> Vec<ByteClaim> {
+    let offset = RELATION_BASE + stable_hash(&[relation]) % RELATION_SPAN;
     vec![ByteClaim {
         offset,
         write: matches!(mode, RelationLockMode::AccessExclusive),
     }]
 }
 
-/// Stable identity of a relation name shared by every process.
-pub(super) fn table_hash(table: &str) -> u64 {
-    stable_hash(&[table.as_bytes()])
+/// Stable identity of a structural relation lock target shared by every process.
+pub(super) fn table_hash(relation: &[u8]) -> u64 {
+    stable_hash(&[relation])
 }
 
 /// FNV-1a: the offsets must be identical in every process, so the hash key cannot be process-random.

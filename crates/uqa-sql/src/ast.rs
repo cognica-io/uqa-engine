@@ -16,6 +16,7 @@ mod cte;
 mod events;
 mod expressions;
 mod from;
+mod function_binding;
 mod locking;
 mod ranges;
 mod relation_hierarchy;
@@ -28,6 +29,7 @@ pub use cte::*;
 pub use events::*;
 pub use expressions::*;
 pub use from::*;
+pub use function_binding::*;
 pub use locking::*;
 pub use ranges::*;
 pub use relation_hierarchy::*;
@@ -424,80 +426,6 @@ pub struct GeneratedColumn {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub function_dependencies: Vec<GeneratedFunctionDependency>,
 }
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FunctionBinding {
-    pub name: String,
-    pub argument_types: Vec<String>,
-    #[serde(default)]
-    pub builtin: bool,
-    /// Concrete invocation contract selected during routine overload resolution.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub invocation: Option<Box<RoutineInvocationBinding>>,
-}
-
-/// Concrete parameter and result types selected for one routine invocation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RoutineInvocationBinding {
-    /// Zero-based declared parameter index for each call argument, aligned with the call argument list.
-    pub argument_positions: Vec<usize>,
-    /// Concrete coercion target for each call argument, aligned with the call argument list.
-    pub argument_targets: Vec<String>,
-    /// Concrete type for each declared parameter, aligned with [`CreateFunction::params`].
-    pub parameter_types: Vec<String>,
-    /// Concrete invocation result type after polymorphic substitution.
-    pub return_type: Option<String>,
-    /// Whether and where the declared variadic parameter participates in this invocation.
-    pub variadic_mode: RoutineVariadicMode,
-}
-
-/// Call syntax selected for a routine's variadic parameter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum RoutineVariadicMode {
-    /// The invocation does not use a variadic parameter.
-    #[default]
-    None,
-    /// Trailing call arguments are expanded into the declared variadic array parameter.
-    Expanded {
-        /// Zero-based index in [`CreateFunction::params`].
-        parameter_index: usize,
-    },
-    /// An explicit `VARIADIC` array argument supplies the declared variadic parameter.
-    Explicit {
-        /// Zero-based index in [`CreateFunction::params`].
-        parameter_index: usize,
-    },
-}
-
-impl FunctionBinding {
-    /// Construct the identity marker used when `PostgreSQL` parses a polymorphic syntax expression instead of an ordinary function call.
-    #[must_use]
-    pub fn polymorphic_builtin_syntax(name: &str) -> Self {
-        assert!(Self::is_polymorphic_builtin_syntax_name(name));
-        Self {
-            name: name.into(),
-            argument_types: Vec::new(),
-            builtin: true,
-            invocation: None,
-        }
-    }
-
-    /// Return whether this binding marks a polymorphic syntax expression whose argument types must be inferred from its operands.
-    #[must_use]
-    pub fn is_polymorphic_builtin_syntax(&self) -> bool {
-        self.builtin
-            && self.argument_types.is_empty()
-            && Self::is_polymorphic_builtin_syntax_name(&self.name)
-    }
-
-    /// Return whether an unqualified local name belongs to `PostgreSQL`'s polymorphic function-like syntax expressions.
-    #[must_use]
-    pub fn is_polymorphic_builtin_syntax_name(name: &str) -> bool {
-        matches!(name, "coalesce" | "greatest" | "least" | "nullif")
-    }
-}
-
-pub type GeneratedFunctionDependency = FunctionBinding;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateIndex {
@@ -990,7 +918,7 @@ impl Default for ReturningAliases {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OnConflict {
     /// Conflict target columns parsed from the `ON CONFLICT (col, ...)`
     /// list. Empty when the clause uses `ON CONFLICT DO NOTHING` with
@@ -999,7 +927,7 @@ pub struct OnConflict {
     pub action: OnConflictAction,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OnConflictAction {
     /// `DO NOTHING` -- skip conflicting rows silently.
     Nothing,
@@ -1012,7 +940,7 @@ pub enum OnConflictAction {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SelectStmt {
     pub projections: Vec<Projection>,
     /// Rows owned by a `VALUES` query body. `PostgreSQL` represents `VALUES`
@@ -1063,7 +991,7 @@ pub struct SelectStmt {
     pub locking: Vec<LockingClause>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetOp {
     pub kind: SetOpKind,
     pub all: bool,

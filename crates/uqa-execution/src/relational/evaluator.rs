@@ -50,6 +50,16 @@ pub trait ExpressionEvaluator: Send + Sync {
         true
     }
 
+    /// Decide wildcard visibility from the bound logical attribute rather
+    /// than its possibly colliding SQL label.
+    fn star_position_visible(&self, schema: &RowSchema, position: usize) -> bool {
+        schema.wildcard_position_visible(position)
+            && schema
+                .columns()
+                .get(position)
+                .is_none_or(|column| self.star_column_visible(column))
+    }
+
     fn project_star(&self, row: &dyn RowLookup) -> ExecResult<Vec<(String, Value)>> {
         let mut output = Vec::new();
         row.visit_columns(&mut |column, value| {

@@ -7,8 +7,8 @@
 //! Lazy generate-series, regex, string, and JSON value streams.
 
 use super::{
-    json_table_arg, json_table_value_to_text, multi_unnest_internal_columns, ResultRow, SQLError,
-    Value,
+    json_table_arg, json_table_value_to_text, table_function_empty_schema, SQLError,
+    TableFunctionRows, Value,
 };
 
 pub(in crate::sql) fn unnest_row_stream(
@@ -16,7 +16,7 @@ pub(in crate::sql) fn unnest_row_stream(
     output_name: &str,
     alias: Option<&str>,
     column_aliases: &[String],
-) -> Result<uqa_execution::ProjectRows, SQLError> {
+) -> Result<TableFunctionRows, SQLError> {
     if evaluated.is_empty() || column_aliases.len() > evaluated.len() {
         return Err(SQLError::BadArity {
             name: "unnest".into(),
@@ -49,29 +49,26 @@ pub(in crate::sql) fn unnest_row_stream(
             )),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    if arrays.len() == 1 {
-        let column = column_aliases
-            .first()
-            .map_or_else(|| alias.unwrap_or(output_name).to_string(), Clone::clone);
-        let values = arrays.into_iter().next().unwrap_or_default();
-        return Ok(Box::new(values.into_iter().map(move |value| {
-            Ok([(column.clone(), value)].into_iter().collect())
-        })));
-    }
-
-    let columns = multi_unnest_internal_columns(arrays.len());
+    let columns = table_function_empty_schema(
+        "unnest",
+        output_name,
+        alias,
+        column_aliases,
+        arrays.len(),
+        false,
+    );
     let row_count = arrays.iter().map(Vec::len).max().unwrap_or(0);
-    Ok(Box::new((0..row_count).map(move |row_position| {
-        Ok(columns
-            .iter()
-            .cloned()
-            .zip(
+    Ok(TableFunctionRows::new(
+        columns,
+        Box::new((0..row_count).map(move |row_position| {
+            Ok(uqa_execution::PhysicalRow::from_values(
                 arrays
                     .iter()
-                    .map(|array| array.get(row_position).cloned().unwrap_or(Value::Null)),
-            )
-            .collect::<ResultRow>())
-    })))
+                    .map(|array| array.get(row_position).cloned().unwrap_or(Value::Null))
+                    .collect(),
+            ))
+        })),
+    ))
 }
 
 pub(in crate::sql) fn generate_series_values(
@@ -293,7 +290,7 @@ pub(in crate::sql) fn json_each_row_stream(
     evaluated: Vec<Value>,
     _alias: Option<&str>,
     column_aliases: &[String],
-) -> Result<uqa_execution::ProjectRows, SQLError> {
+) -> Result<TableFunctionRows, SQLError> {
     if evaluated.len() != 1 {
         return Err(SQLError::TypeMismatch(format!("{name} takes 1 arg")));
     }
@@ -311,10 +308,13 @@ pub(in crate::sql) fn json_each_row_stream(
         .get(1)
         .cloned()
         .unwrap_or_else(|| "value".into());
-    Ok(Box::new(object.into_iter().map(move |(key, value)| {
-        let mut row = ResultRow::new();
-        row.insert(key_column.clone(), Value::Str(key));
-        row.insert(value_column.clone(), json_table_value_to_text(&value));
-        Ok(row)
-    })))
+    Ok(TableFunctionRows::new(
+        vec![key_column, value_column],
+        Box::new(object.into_iter().map(move |(key, value)| {
+            Ok(uqa_execution::PhysicalRow::from_values(vec![
+                Value::Str(key),
+                json_table_value_to_text(&value),
+            ]))
+        })),
+    ))
 }

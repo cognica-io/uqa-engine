@@ -198,15 +198,15 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         self.store.rollback_transaction()
     }
 
-    fn savepoint(&self, name: &str) -> StorageBackendResult<()> {
-        self.store.savepoint(name)
+    fn savepoint(&self, id: crate::StorageSavepointId) -> StorageBackendResult<()> {
+        self.store.savepoint(&id.backend_name())
     }
 
-    fn release_savepoint(&self, name: &str) -> StorageBackendResult<()> {
-        self.store.release_savepoint(name)
+    fn release_savepoint(&self, id: crate::StorageSavepointId) -> StorageBackendResult<()> {
+        self.store.release_savepoint(&id.backend_name())
     }
 
-    fn rollback_to_savepoint(&self, name: &str) -> StorageBackendResult<()> {
-        self.store.rollback_to_savepoint(name)
+    fn rollback_to_savepoint(&self, id: crate::StorageSavepointId) -> StorageBackendResult<()> {
+        self.store.rollback_to_savepoint(&id.backend_name())
     }
 }

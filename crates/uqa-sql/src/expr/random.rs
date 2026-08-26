@@ -10,12 +10,7 @@ use super::{
     out_of_range, to_decimal, to_i64, validate_named_argument_order, EvalContext, Result, SQLError,
     Value,
 };
-
-/// Physical scalar built-ins selected after overload resolution preserves the
-/// declared SQL result type beyond the shared dynamic integer carrier.
-pub const RANDOM_INT4_FUNCTION: &str = "__random_int4_range";
-pub const RANDOM_INT8_FUNCTION: &str = "__random_int8_range";
-pub const RANDOM_NUMERIC_FUNCTION: &str = "__random_numeric_range";
+use crate::ast::FunctionDispatch;
 
 pub(super) fn eval_random_function(
     name: &str,
@@ -30,9 +25,19 @@ pub(super) fn eval_random_function(
             Err(error) => Some(Err(error)),
         };
     }
+    None
+}
+
+pub(super) fn eval_dispatched_random_function(
+    dispatch: FunctionDispatch,
+    call_args: &[(Option<String>, Value)],
+    ctx: &EvalContext<'_>,
+) -> Option<Result<Value>> {
     if !matches!(
-        name,
-        RANDOM_INT4_FUNCTION | RANDOM_INT8_FUNCTION | RANDOM_NUMERIC_FUNCTION
+        dispatch,
+        FunctionDispatch::RandomInt4Range
+            | FunctionDispatch::RandomInt8Range
+            | FunctionDispatch::RandomNumericRange
     ) {
         return None;
     }
@@ -41,16 +46,16 @@ pub(super) fn eval_random_function(
         if matches!(lower, Value::Null) || matches!(upper, Value::Null) {
             return Ok(Value::Null);
         }
-        match name {
-            RANDOM_INT4_FUNCTION => {
+        match dispatch {
+            FunctionDispatch::RandomInt4Range => {
                 let lower = i32::try_from(to_i64(lower)?).map_err(|_| out_of_range("integer"))?;
                 let upper = i32::try_from(to_i64(upper)?).map_err(|_| out_of_range("integer"))?;
                 uniform_i64(i64::from(lower), i64::from(upper), ctx).map(Value::Int)
             }
-            RANDOM_INT8_FUNCTION => {
+            FunctionDispatch::RandomInt8Range => {
                 uniform_i64(to_i64(lower)?, to_i64(upper)?, ctx).map(Value::Int)
             }
-            RANDOM_NUMERIC_FUNCTION => {
+            FunctionDispatch::RandomNumericRange => {
                 let lower = to_decimal(lower)?;
                 let upper = to_decimal(upper)?;
                 validate_numeric_bound(&lower, "lower")?;
@@ -65,7 +70,7 @@ pub(super) fn eval_random_function(
                         SQLError::Internal("numeric random range is not representable".into())
                     })
             }
-            _ => unreachable!("random range marker was checked above"),
+            _ => unreachable!("random range dispatch was checked above"),
         }
     })())
 }

@@ -5,17 +5,91 @@
 //
 
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use uqa_core::Value;
 
-use super::{FunctionBinding, SelectStmt};
+use super::{
+    FromClause, FunctionBinding, FunctionBody, MergeWhen, OnConflictAction, SelectStmt, Statement,
+    CTE,
+};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Query-local identity for an executor-only row source. Parser-produced SQL
+/// never contains this identity, so internal row carriers cannot collide with
+/// user relation aliases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[doc(hidden)]
+pub struct InternalRelationId(u64);
+
+impl InternalRelationId {
+    /// Allocate an opaque relation identity for an engine-injected row source.
+    #[must_use]
+    pub fn allocate() -> Self {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        let id = NEXT_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .expect("internal relation identity space exhausted");
+        Self(id)
+    }
+
+    /// Address one zero-based attribute of this internal relation.
+    #[must_use]
+    pub fn column(self, attribute: usize) -> InternalColumnRef {
+        InternalColumnRef {
+            relation: self,
+            attribute: u32::try_from(attribute).expect("internal relation attribute exceeds u32"),
+        }
+    }
+
+    #[must_use]
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+
+    #[must_use]
+    pub const fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+}
+
+/// Structural reference to an executor-only relation attribute. This is the
+/// UQA analogue of PostgreSQL's `Var(varno, varattno)` identity: it is never
+/// resolved through SQL text names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[doc(hidden)]
+pub struct InternalColumnRef {
+    relation: InternalRelationId,
+    attribute: u32,
+}
+
+impl InternalColumnRef {
+    #[must_use]
+    pub const fn relation(self) -> InternalRelationId {
+        self.relation
+    }
+
+    #[must_use]
+    pub const fn attribute(self) -> usize {
+        self.attribute as usize
+    }
+
+    #[must_use]
+    pub const fn from_raw(relation: u64, attribute: u32) -> Self {
+        Self {
+            relation: InternalRelationId::from_raw(relation),
+            attribute,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Projection {
     pub expr: Expr,
     pub alias: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OrderBy {
     pub expr: Expr,
     pub descending: bool,
@@ -31,7 +105,7 @@ pub enum NullsOrder {
     Last,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WindowSpec {
     /// Named window referenced by this specification while the SQL compiler resolves a `WINDOW` clause. Compiler-produced plans clear this field before lowering into the unified scalar IR.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -57,7 +131,7 @@ pub enum WindowReferenceKind {
     Copy,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WindowFrame {
     pub mode: FrameMode,
     pub start: FrameBound,
@@ -71,7 +145,7 @@ pub enum FrameMode {
     Groups,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FrameBound {
     UnboundedPreceding,
     UnboundedFollowing,
@@ -81,7 +155,7 @@ pub enum FrameBound {
 }
 
 /// Scalar expression nodes the compiler handles.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Expr {
     Star,
     /// Relation-qualified wildcard projection (`table.*` or `alias.*`).
@@ -97,6 +171,10 @@ pub enum Expr {
         qualifier: String,
         column: String,
     },
+    /// Engine-injected structural column reference. SQL parsing never emits
+    /// this variant and SQL name binding must not rewrite it.
+    #[doc(hidden)]
+    InternalColumn(InternalColumnRef),
     Literal(Value),
     /// A positional bind parameter (`$1`, `$2`, ...).
     Param(usize),
@@ -201,6 +279,117 @@ impl Expr {
         }
     }
 
+    /// Upgrade compiler-owned function markers deserialized from catalogs
+    /// written by releases through 0.1.6.
+    #[doc(hidden)]
+    pub fn upgrade_legacy_serialized_dispatches(&mut self) -> bool {
+        let mut changed = false;
+        match self {
+            Self::Func {
+                name,
+                binding,
+                args,
+                order_by,
+                filter,
+                ..
+            } => {
+                for argument in args {
+                    changed |= argument.upgrade_legacy_serialized_dispatches();
+                }
+                for order in order_by {
+                    changed |= order.expr.upgrade_legacy_serialized_dispatches();
+                }
+                if let Some(filter) = filter {
+                    changed |= filter.upgrade_legacy_serialized_dispatches();
+                }
+                changed |=
+                    super::FunctionBinding::upgrade_legacy_serialized_dispatch(name, binding);
+            }
+            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => {
+                for item in items {
+                    changed |= item.upgrade_legacy_serialized_dispatches();
+                }
+            }
+            Self::Binary { lhs, rhs, .. } => {
+                changed |= lhs.upgrade_legacy_serialized_dispatches();
+                changed |= rhs.upgrade_legacy_serialized_dispatches();
+            }
+            Self::UnaryMinus(inner)
+            | Self::Not(inner)
+            | Self::IsNull { expr: inner, .. }
+            | Self::Cast { expr: inner, .. } => {
+                changed |= inner.upgrade_legacy_serialized_dispatches();
+            }
+            Self::Between { expr, low, high } => {
+                changed |= expr.upgrade_legacy_serialized_dispatches();
+                changed |= low.upgrade_legacy_serialized_dispatches();
+                changed |= high.upgrade_legacy_serialized_dispatches();
+            }
+            Self::InList { expr, list, .. } => {
+                changed |= expr.upgrade_legacy_serialized_dispatches();
+                for item in list {
+                    changed |= item.upgrade_legacy_serialized_dispatches();
+                }
+            }
+            Self::WindowCall { args, spec, .. } => {
+                for argument in args {
+                    changed |= argument.upgrade_legacy_serialized_dispatches();
+                }
+                for partition in &mut spec.partition_by {
+                    changed |= partition.upgrade_legacy_serialized_dispatches();
+                }
+                for order in &mut spec.order_by {
+                    changed |= order.expr.upgrade_legacy_serialized_dispatches();
+                }
+                if let Some(frame) = &mut spec.frame {
+                    for bound in [&mut frame.start, &mut frame.end] {
+                        match bound {
+                            FrameBound::Preceding(expression)
+                            | FrameBound::Following(expression) => {
+                                changed |= expression.upgrade_legacy_serialized_dispatches();
+                            }
+                            FrameBound::UnboundedPreceding
+                            | FrameBound::UnboundedFollowing
+                            | FrameBound::CurrentRow => {}
+                        }
+                    }
+                }
+            }
+            Self::Case {
+                base,
+                when,
+                else_branch,
+            } => {
+                if let Some(base) = base {
+                    changed |= base.upgrade_legacy_serialized_dispatches();
+                }
+                for (condition, result) in when {
+                    changed |= condition.upgrade_legacy_serialized_dispatches();
+                    changed |= result.upgrade_legacy_serialized_dispatches();
+                }
+                if let Some(branch) = else_branch {
+                    changed |= branch.upgrade_legacy_serialized_dispatches();
+                }
+            }
+            Self::InSubquery { expr, body, .. } => {
+                changed |= expr.upgrade_legacy_serialized_dispatches();
+                changed |= body.upgrade_legacy_serialized_dispatches();
+            }
+            Self::ScalarSubquery(body) | Self::Exists { body, .. } => {
+                changed |= body.upgrade_legacy_serialized_dispatches();
+            }
+            Self::Default
+            | Self::Star
+            | Self::QualifiedStar(_)
+            | Self::Column(_)
+            | Self::QualifiedColumn { .. }
+            | Self::InternalColumn(_)
+            | Self::Literal(_)
+            | Self::Param(_) => {}
+        }
+        changed
+    }
+
     /// True when this expression tree contains a window function call.
     #[must_use]
     pub fn contains_window(&self) -> bool {
@@ -227,8 +416,17 @@ impl Expr {
         self.any_node(&|node| {
             matches!(
                 node,
-                Self::Func { name, args, .. }
-                    if crate::expr::builtin_scalar_function_strictness(name, args.len()).is_none()
+                Self::Func {
+                    name,
+                    args,
+                    binding,
+                    ..
+                } if crate::expr::bound_scalar_function_strictness(
+                    name,
+                    binding.as_ref(),
+                    args.len(),
+                )
+                .is_none()
             )
         })
     }
@@ -283,10 +481,250 @@ impl Expr {
             | Self::Default
             | Self::Column(_)
             | Self::QualifiedColumn { .. }
+            | Self::InternalColumn(_)
             | Self::Literal(_)
             | Self::Param(_)
             | Self::ScalarSubquery(_)
             | Self::Exists { .. } => false,
+        }
+    }
+}
+
+fn upgrade_exprs(expressions: &mut [Expr]) -> bool {
+    expressions.iter_mut().fold(false, |changed, expression| {
+        expression.upgrade_legacy_serialized_dispatches() | changed
+    })
+}
+
+fn upgrade_rows(rows: &mut [Vec<Expr>]) -> bool {
+    rows.iter_mut()
+        .fold(false, |changed, row| upgrade_exprs(row) | changed)
+}
+
+fn upgrade_optional(expression: &mut Option<Expr>) -> bool {
+    expression
+        .as_mut()
+        .is_some_and(Expr::upgrade_legacy_serialized_dispatches)
+}
+
+fn upgrade_projections(projections: &mut [Projection]) -> bool {
+    projections.iter_mut().fold(false, |changed, projection| {
+        projection.expr.upgrade_legacy_serialized_dispatches() | changed
+    })
+}
+
+fn upgrade_assignments(assignments: &mut [(String, Expr)]) -> bool {
+    assignments
+        .iter_mut()
+        .fold(false, |changed, (_, expression)| {
+            expression.upgrade_legacy_serialized_dispatches() | changed
+        })
+}
+
+fn upgrade_ctes(ctes: &mut [CTE]) -> bool {
+    ctes.iter_mut().fold(false, |mut changed, cte| {
+        if let Some(cycle) = &mut cte.cycle {
+            changed |= cycle.mark_value.upgrade_legacy_serialized_dispatches();
+            changed |= cycle.mark_default.upgrade_legacy_serialized_dispatches();
+        }
+        changed | cte.query.upgrade_legacy_serialized_dispatches()
+    })
+}
+
+impl FromClause {
+    fn upgrade_legacy_serialized_dispatches(&mut self) -> bool {
+        match self {
+            Self::Table { .. } => false,
+            Self::Join {
+                left, right, on, ..
+            } => {
+                left.upgrade_legacy_serialized_dispatches()
+                    | right.upgrade_legacy_serialized_dispatches()
+                    | upgrade_optional(on)
+            }
+            Self::Values { rows, .. } => upgrade_rows(rows),
+            Self::Function { args, .. } => upgrade_exprs(args),
+            Self::FunctionGroup { functions, .. } => {
+                functions.iter_mut().fold(false, |changed, function| {
+                    upgrade_exprs(&mut function.args) | changed
+                })
+            }
+            Self::Subquery { body, .. } => body.upgrade_legacy_serialized_dispatches(),
+        }
+    }
+}
+
+impl SelectStmt {
+    /// Upgrade every legacy compiler dispatch marker in this complete query tree.
+    #[doc(hidden)]
+    pub fn upgrade_legacy_serialized_dispatches(&mut self) -> bool {
+        let mut changed = upgrade_projections(&mut self.projections);
+        changed |= upgrade_rows(&mut self.values);
+        if let Some(from) = &mut self.from {
+            changed |= from.upgrade_legacy_serialized_dispatches();
+        }
+        changed |= upgrade_optional(&mut self.r#where);
+        changed |= upgrade_exprs(&mut self.group_by);
+        for grouping_set in &mut self.grouping_sets {
+            changed |= upgrade_exprs(grouping_set);
+        }
+        changed |= upgrade_optional(&mut self.having);
+        for order in &mut self.order_by {
+            changed |= order.expr.upgrade_legacy_serialized_dispatches();
+        }
+        changed |= upgrade_optional(&mut self.limit);
+        changed |= upgrade_optional(&mut self.offset);
+        changed |= upgrade_ctes(&mut self.with);
+        if let Some(set_operation) = &mut self.set_op {
+            if let Some(left) = &mut set_operation.left {
+                changed |= left.upgrade_legacy_serialized_dispatches();
+            }
+            changed |= set_operation.right.upgrade_legacy_serialized_dispatches();
+            for order in &mut set_operation.combined_order_by {
+                changed |= order.expr.upgrade_legacy_serialized_dispatches();
+            }
+            changed |= upgrade_optional(&mut set_operation.combined_limit);
+            changed |= upgrade_optional(&mut set_operation.combined_offset);
+        }
+        changed | upgrade_exprs(&mut self.distinct_on)
+    }
+}
+
+impl MergeWhen {
+    fn upgrade_legacy_serialized_dispatches(&mut self) -> bool {
+        match self {
+            Self::UpdateMatched {
+                condition,
+                assignments,
+            }
+            | Self::UpdateNotMatchedBySource {
+                condition,
+                assignments,
+            } => upgrade_optional(condition) | upgrade_assignments(assignments),
+            Self::InsertNotMatched {
+                condition, values, ..
+            } => upgrade_optional(condition) | upgrade_exprs(values),
+            Self::DeleteMatched { condition }
+            | Self::DeleteNotMatchedBySource { condition }
+            | Self::NothingMatched { condition }
+            | Self::NothingNotMatched { condition }
+            | Self::NothingNotMatchedBySource { condition } => upgrade_optional(condition),
+        }
+    }
+}
+
+impl Statement {
+    /// Upgrade legacy compiler dispatch markers without reparsing SQL or changing catalog-bound relation identities.
+    #[doc(hidden)]
+    pub fn upgrade_legacy_serialized_dispatches(&mut self) -> bool {
+        match self {
+            Self::Select(select) => select.upgrade_legacy_serialized_dispatches(),
+            Self::Insert(insert) => {
+                let mut changed = upgrade_ctes(&mut insert.with);
+                changed |= upgrade_rows(&mut insert.rows);
+                if let Some(source) = &mut insert.select_source {
+                    changed |= source.upgrade_legacy_serialized_dispatches();
+                }
+                if let Some(conflict) = &mut insert.on_conflict {
+                    if let OnConflictAction::Update {
+                        assignments,
+                        r#where,
+                    } = &mut conflict.action
+                    {
+                        changed |= upgrade_assignments(assignments);
+                        changed |= upgrade_optional(r#where);
+                    }
+                }
+                changed | upgrade_projections(&mut insert.returning)
+            }
+            Self::Update(update) => {
+                let mut changed = upgrade_assignments(&mut update.assignments);
+                changed |= upgrade_optional(&mut update.r#where);
+                changed |= upgrade_ctes(&mut update.with);
+                if let Some(from) = &mut update.from {
+                    changed |= from.upgrade_legacy_serialized_dispatches();
+                }
+                changed | upgrade_projections(&mut update.returning)
+            }
+            Self::Delete(delete) => {
+                let mut changed = upgrade_optional(&mut delete.r#where);
+                changed |= upgrade_ctes(&mut delete.with);
+                if let Some(using) = &mut delete.using {
+                    changed |= using.upgrade_legacy_serialized_dispatches();
+                }
+                changed | upgrade_projections(&mut delete.returning)
+            }
+            Self::CreateView { body, .. }
+            | Self::CreateMaterializedView { body, .. }
+            | Self::CreateTableAs { body, .. } => body.upgrade_legacy_serialized_dispatches(),
+            Self::Explain { body, .. } | Self::Prepare { body, .. } => {
+                body.upgrade_legacy_serialized_dispatches()
+            }
+            Self::Execute { params, .. } | Self::Call { args: params, .. } => upgrade_exprs(params),
+            Self::Values { rows } => upgrade_rows(rows),
+            Self::Merge(merge) => {
+                let mut changed = merge.source.upgrade_legacy_serialized_dispatches();
+                changed |= merge.join_condition.upgrade_legacy_serialized_dispatches();
+                for clause in &mut merge.when_clauses {
+                    changed |= clause.upgrade_legacy_serialized_dispatches();
+                }
+                changed | upgrade_projections(&mut merge.returning)
+            }
+            Self::CreateFunction(definition) => {
+                let mut changed = definition
+                    .params
+                    .iter_mut()
+                    .fold(false, |changed, parameter| {
+                        parameter
+                            .default
+                            .as_mut()
+                            .is_some_and(Expr::upgrade_legacy_serialized_dispatches)
+                            | changed
+                    });
+                if let FunctionBody::Statements(statements) = &mut definition.body {
+                    for statement in statements {
+                        changed |= statement.upgrade_legacy_serialized_dispatches();
+                    }
+                }
+                changed
+            }
+            Self::CreateTrigger(trigger) => upgrade_optional(&mut trigger.when),
+            Self::CreateRule(rule) => {
+                let mut changed = upgrade_optional(&mut rule.condition);
+                for action in &mut rule.actions {
+                    changed |= action.upgrade_legacy_serialized_dispatches();
+                }
+                changed
+            }
+            Self::CreateTable(_)
+            | Self::CreateIndex(_)
+            | Self::Drop(_)
+            | Self::AlterTable(_)
+            | Self::AlterViewOptions(_)
+            | Self::RefreshMaterializedView { .. }
+            | Self::CreateSchema { .. }
+            | Self::SetVariable { .. }
+            | Self::ShowVariable { .. }
+            | Self::Discard { .. }
+            | Self::Load { .. }
+            | Self::Analyze { .. }
+            | Self::Truncate { .. }
+            | Self::Transaction(_)
+            | Self::CreateSequence(_)
+            | Self::AlterSequence(_)
+            | Self::Deallocate { .. }
+            | Self::CreateForeignServer(_)
+            | Self::CreateForeignTable(_)
+            | Self::DropFunction(_)
+            | Self::AlterRoutine(_)
+            | Self::AlterRoutineOwner(_)
+            | Self::GrantRoutine(_)
+            | Self::CreateRole(_)
+            | Self::AlterRole(_)
+            | Self::DropRole(_)
+            | Self::DropTrigger(_)
+            | Self::DropRule(_)
+            | Self::DoBlock { .. } => false,
         }
     }
 }

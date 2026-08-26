@@ -419,7 +419,7 @@ impl PlanSubqueryArena<'_> {
 mod tests {
     use uqa_core::Value;
     use uqa_planner::ExpressionPlan;
-    use uqa_sql::ast::{BinaryOp, Expr};
+    use uqa_sql::ast::{BinaryOp, Expr, FunctionBinding, FunctionDispatch};
     use uqa_sql::SQLParam;
 
     use super::{
@@ -443,17 +443,19 @@ mod tests {
 
     #[test]
     fn physical_call_arguments_preserve_and_unwrap_explicit_variadic_syntax() {
+        let variadic_binding = FunctionBinding::dispatched(FunctionDispatch::VariadicArgument);
         let variadic = Expr::Func {
-            name: uqa_sql::expr::VARIADIC_ARG_FUNCTION.into(),
-            binding: None,
+            name: variadic_binding.name.clone(),
+            binding: Some(variadic_binding),
             args: vec![Expr::Literal(Value::Int(42))],
             distinct: false,
             order_by: Vec::new(),
             filter: None,
         };
+        let named_binding = FunctionBinding::dispatched(FunctionDispatch::NamedArgument);
         let named = Expr::Func {
-            name: uqa_sql::expr::NAMED_ARG_FUNCTION.into(),
-            binding: None,
+            name: named_binding.name.clone(),
+            binding: Some(named_binding),
             args: vec![Expr::Literal(Value::Str("items".into())), variadic],
             distinct: false,
             order_by: Vec::new(),

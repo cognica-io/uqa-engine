@@ -44,14 +44,9 @@ fn acquire_reports_40p01_on_a_wait_for_cycle() {
     let manager = RowLockManager::new();
     let left = manager.allocate_session();
     let right = manager.allocate_session();
-    let row_one = RowLockKey {
-        table: 1,
-        doc_id: 1,
-    };
-    let row_two = RowLockKey {
-        table: 1,
-        doc_id: 2,
-    };
+    let table = manager.table_key("public.accounts");
+    let row_one = RowLockKey { table, doc_id: 1 };
+    let row_two = RowLockKey { table, doc_id: 2 };
     let cancel = uqa_core::CancellationToken::new();
     let grant = |session_id, key| {
         manager.acquire(&LockRequest {
@@ -94,7 +89,7 @@ fn savepoint_rollback_restores_the_pre_upgrade_strength() {
     let holder = manager.allocate_session();
     let contender = manager.allocate_session();
     let key = RowLockKey {
-        table: 1,
+        table: manager.table_key("public.accounts"),
         doc_id: 1,
     };
     let cancel = uqa_core::CancellationToken::new();
@@ -137,7 +132,7 @@ fn rolling_back_one_candidate_does_not_release_an_earlier_lock() {
     let holder = manager.allocate_session();
     let contender = manager.allocate_session();
     let key = RowLockKey {
-        table: 1,
+        table: manager.table_key("public.accounts"),
         doc_id: 1,
     };
     let cancel = uqa_core::CancellationToken::new();
@@ -248,7 +243,7 @@ fn cancellation_removes_the_registered_wait_edge() {
     let holder = manager.allocate_session();
     let waiter = manager.allocate_session();
     let key = RowLockKey {
-        table: 1,
+        table: manager.table_key("public.accounts"),
         doc_id: 1,
     };
     let holder_cancel = uqa_core::CancellationToken::new();

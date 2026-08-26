@@ -121,6 +121,8 @@ Graph estimates bind live graph size, edge count, label distribution, average de
 
 `RowSchema` maps logical output identities and hidden qualified aliases to flattened slots. `PhysicalRow` stores a small vector of shared value fragments. Selection and renaming usually remap schema slots, while joins concatenate fragment handles instead of rebuilding string-keyed maps and cloning every value.
 
+Executor-only attributes are addressed by `InternalRelationId` and `InternalColumnRef`; wildcard visibility and retrieval-score provenance are likewise structural metadata. The public binding-only `_meta.score` and `_meta.doc_id` identities alias those physical metadata slots without copying values or occupying wildcard positions. This follows PostgreSQL 18's `resjunk`, `resno`, `Var`, and tuple-slot model: the planner does not fabricate SQL-visible labels that can collide with user columns such as `_score`, `_doc_id`, or `_merge_action`, or with the former `__uqa_*` namespace. Catalog restore upgrades version 0.1.6 compiler dispatch markers to structural dispatch values while preserving bound user routines with the same spelling.
+
 Correlated subqueries use a positional `ScopeOverlay`: current-query columns remain visible, one shared outer-row fragment is addressable only through hidden lookup aliases, current names shadow outer names, and ambiguity remains scoped without rebuilding a merged map for every inner row.
 
 Duplicate projected labels remain separate slots through execution and the columnar boundary. `SQLResult` retains its named `BTreeMap<String, Value>` rows for existing callers and, only when labels repeat, also preserves the final positional row values; `SQLResult::value_at`, cursors, columnar batches, the CLI, and wire consumers distinguish those values without materializing maps between operators.
@@ -131,7 +133,7 @@ Physical relational operators are pull-based and exchange batches of dynamic `Va
 
 Sort, distinct, set operations, ordered aggregates, windows, grouping output, joins, and result materialization account against `work_mem`. When a blocking structure exceeds its budget, it uses the execution spill layer instead of retaining unbounded process memory.
 
-Spill format version 1 keeps rows positional: each batch records its exact physical width and logical-column and hidden `(qualifier, column)` alias-to-slot layout once, followed by physical values, while indexed random-access spill retains that exact layout in its owner and writes only row values plus offsets. Spill paths do not construct or serialize `ResultRow` maps, and temporary spill files have no cross-version compatibility contract.
+Spill format version 1 keeps rows positional: each batch records its exact physical width, logical-column and hidden `(qualifier, column)` alias-to-slot layout, internal-attribute layout, wildcard-hidden positions, and structural score sources once, followed by physical values, while indexed random-access spill retains that exact layout in its owner and writes only row values plus offsets. Spill paths do not construct or serialize `ResultRow` maps, and temporary spill files have no cross-version compatibility contract.
 
 Single-consumer derived-table projections can remain pull pipelines. Repeatable, volatile, blocking, or otherwise unsafe derived tables retain materialization, and repeatable CTE readers use `SharedSpill`.
 

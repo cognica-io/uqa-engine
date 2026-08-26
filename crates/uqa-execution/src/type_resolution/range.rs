@@ -6,7 +6,9 @@
 
 //! Bind range-polymorphic functions while declared range identity is available.
 
-use uqa_sql::ast::{ColumnType, RangeSubtype};
+use uqa_sql::ast::{
+    ColumnType, FunctionBinding, FunctionDispatch, RangeFunctionOperation, RangeSubtype,
+};
 use uqa_sql::SQLParam;
 
 use crate::{RowSchema, ScalarExpr};
@@ -15,11 +17,15 @@ use super::{scalar_type_inner, FunctionTypeResolver};
 
 pub(super) fn bind_call(
     name: String,
+    binding: &mut Option<FunctionBinding>,
     args: &[ScalarExpr],
     schema: &RowSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> String {
+    if binding.is_some() {
+        return name;
+    }
     let local = name
         .strip_prefix("pg_catalog.")
         .unwrap_or(&name)
@@ -48,24 +54,57 @@ pub(super) fn bind_call(
     let Ok(Some(first_type)) = scalar_type_inner(first, schema, params, resolver) else {
         return name;
     };
-    let Some((_subtype, type_name)) = range_identity(&first_type) else {
+    let Some((subtype, _type_name, multirange)) = range_identity(&first_type) else {
         return name;
     };
     let operation = match local.as_str() {
-        "range_merge" => "merge",
-        "array_overlap" => "overlap",
-        "contains_op" => "contains",
-        "contained_by_op" => "contained_by",
-        "range_adjacent" => "adjacent",
-        operation => operation,
+        "lower" => RangeFunctionOperation::Lower,
+        "upper" => RangeFunctionOperation::Upper,
+        "isempty" => RangeFunctionOperation::IsEmpty,
+        "lower_inc" => RangeFunctionOperation::LowerInclusive,
+        "upper_inc" => RangeFunctionOperation::UpperInclusive,
+        "lower_inf" => RangeFunctionOperation::LowerInfinite,
+        "upper_inf" => RangeFunctionOperation::UpperInfinite,
+        "range_merge" => RangeFunctionOperation::Merge,
+        "multirange" => RangeFunctionOperation::Multirange,
+        "array_overlap" => RangeFunctionOperation::Overlap,
+        "contains_op" => RangeFunctionOperation::Contains,
+        "contained_by_op" => RangeFunctionOperation::ContainedBy,
+        "range_adjacent" => RangeFunctionOperation::Adjacent,
+        _ => unreachable!("range function name was checked above"),
     };
-    format!("__range_{operation}_{type_name}")
+    *binding = Some(FunctionBinding::dispatched(FunctionDispatch::Range {
+        operation,
+        subtype,
+        multirange,
+    }));
+    name
 }
 
 pub(super) fn function_type(
     name: &str,
+    binding: Option<&FunctionBinding>,
     argument_types: &[Option<ColumnType>],
 ) -> Option<ColumnType> {
+    if let Some(FunctionDispatch::Range {
+        operation, subtype, ..
+    }) = binding.and_then(|binding| binding.dispatch)
+    {
+        return Some(match operation {
+            RangeFunctionOperation::Lower | RangeFunctionOperation::Upper => subtype.scalar_type(),
+            RangeFunctionOperation::Merge => ColumnType::Range(subtype),
+            RangeFunctionOperation::Multirange => ColumnType::Multirange(subtype),
+            RangeFunctionOperation::IsEmpty
+            | RangeFunctionOperation::LowerInclusive
+            | RangeFunctionOperation::UpperInclusive
+            | RangeFunctionOperation::LowerInfinite
+            | RangeFunctionOperation::UpperInfinite
+            | RangeFunctionOperation::Overlap
+            | RangeFunctionOperation::Contains
+            | RangeFunctionOperation::ContainedBy
+            | RangeFunctionOperation::Adjacent => ColumnType::Boolean,
+        });
+    }
     let local = name
         .strip_prefix("pg_catalog.")
         .unwrap_or(name)
@@ -78,32 +117,21 @@ pub(super) fn function_type(
         });
     }
     let first = argument_types.first()?.as_ref()?;
-    let (subtype, _) = range_identity(first)?;
+    let (subtype, _, _) = range_identity(first)?;
     match local.as_str() {
         "lower" | "upper" => Some(subtype.scalar_type()),
         "isempty" | "lower_inc" | "upper_inc" | "lower_inf" | "upper_inf" | "array_overlap"
         | "contains_op" | "contained_by_op" | "range_adjacent" => Some(ColumnType::Boolean),
         "range_merge" => Some(ColumnType::Range(subtype)),
         "multirange" => Some(ColumnType::Multirange(subtype)),
-        _ if local.starts_with("__range_") => {
-            if local.contains("_lower_") || local.contains("_upper_") {
-                Some(subtype.scalar_type())
-            } else if local.contains("_merge_") {
-                Some(ColumnType::Range(subtype))
-            } else if local.contains("_multirange_") {
-                Some(ColumnType::Multirange(subtype))
-            } else {
-                Some(ColumnType::Boolean)
-            }
-        }
         _ => None,
     }
 }
 
-fn range_identity(ty: &ColumnType) -> Option<(RangeSubtype, &'static str)> {
+fn range_identity(ty: &ColumnType) -> Option<(RangeSubtype, &'static str, bool)> {
     match ty {
-        ColumnType::Range(subtype) => Some((*subtype, subtype.range_name())),
-        ColumnType::Multirange(subtype) => Some((*subtype, subtype.multirange_name())),
+        ColumnType::Range(subtype) => Some((*subtype, subtype.range_name(), false)),
+        ColumnType::Multirange(subtype) => Some((*subtype, subtype.multirange_name(), true)),
         ColumnType::Domain { base, .. } => range_identity(base),
         _ => None,
     }

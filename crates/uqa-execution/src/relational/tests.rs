@@ -10,7 +10,7 @@ use super::*;
 use crate::physical::run_to_rows;
 use crate::scan::{RowSource, TableScan};
 use uqa_core::Value;
-use uqa_sql::ast::BinaryOp;
+use uqa_sql::ast::{BinaryOp, InternalRelationId};
 
 fn row<const N: usize>(pairs: [(&str, Value); N]) -> ResultRow {
     pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
@@ -139,6 +139,37 @@ fn mixed_projection_appends_only_computed_values() {
     let view = batch.schema.view(&batch.rows[0]);
     assert_eq!(view.get("second"), Some(&Value::Int(7)));
     assert_eq!(view.get("sum"), Some(&Value::Int(10)));
+}
+
+#[test]
+fn internal_projection_targets_never_enter_the_sql_namespace() {
+    let relation = InternalRelationId::allocate();
+    let internal = relation.column(0);
+    let scan = TableScan::from_physical_rows(
+        RowSchema::new(vec!["value".into()]),
+        vec![crate::PhysicalRow::from_values(vec![Value::Int(7)])],
+    );
+    let mut projection = Project::appending_targets(
+        Box::new(scan),
+        vec![(
+            ProjectionTarget::Internal(internal),
+            bin(
+                BinaryOp::Add,
+                col("value"),
+                ScalarExpr::Literal(Value::Int(1)),
+            ),
+        )],
+        vec![],
+    );
+
+    projection.open().unwrap();
+    let batch = projection.next().unwrap().unwrap();
+    projection.close().unwrap();
+
+    assert_eq!(batch.schema.columns(), ["value"]);
+    assert_eq!(batch.schema.physical_width(), 2);
+    let slot = batch.schema.internal_slot(internal).unwrap();
+    assert_eq!(batch.rows[0].value(slot), Some(&Value::Int(8)));
 }
 
 #[test]
