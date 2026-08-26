@@ -110,17 +110,20 @@ impl RowSchema {
                 })
             })
             .or_else(|| {
-                self.index.internal.iter().find_map(|(column, slot)| {
-                    (*slot == physical)
-                        .then(|| {
-                            self.index
-                                .cold
-                                .internal
-                                .get(column)
-                                .and_then(Option::as_ref)
-                        })
-                        .flatten()
-                })
+                self.index
+                    .executor_attributes
+                    .iter()
+                    .find_map(|(column, slot)| {
+                        (*slot == physical)
+                            .then(|| {
+                                self.index
+                                    .cold
+                                    .executor_attribute_types
+                                    .get(column)
+                                    .and_then(Option::as_ref)
+                            })
+                            .flatten()
+                    })
             })
     }
 

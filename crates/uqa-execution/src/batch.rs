@@ -114,7 +114,7 @@ struct SchemaIndex {
     aliases: HashMap<ColumnIdentity, usize>,
     /// Executor-only relation/attribute identities mapped directly to physical
     /// slots. These never participate in SQL name lookup or wildcard output.
-    internal: HashMap<InternalColumnRef, usize>,
+    executor_attributes: HashMap<InternalColumnRef, usize>,
     /// Visible unqualified names with more than one logical owner.
     ambiguous_unqualified: HashSet<Box<str>>,
     /// Visible qualified identities with more than one logical owner.
@@ -128,7 +128,7 @@ struct SchemaColdMetadata {
     /// `None` is an as-yet unresolved type, not a runtime NULL value.
     columns: Box<[Option<ColumnType>]>,
     aliases: HashMap<ColumnIdentity, Option<ColumnType>>,
-    internal: HashMap<InternalColumnRef, Option<ColumnType>>,
+    executor_attribute_types: HashMap<InternalColumnRef, Option<ColumnType>>,
     score_sources: Vec<ScoreSource>,
     /// Logical attributes omitted from unqualified and qualified wildcard
     /// expansion. Explicit references and projections remain ordinary SQL

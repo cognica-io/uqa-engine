@@ -75,8 +75,8 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: lookup_aliases,
                 alias_types,
-                internal: input.index.internal.clone(),
-                internal_types: input.index.cold.internal.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden,
                 binding_only: input.index.cold.binding_only.clone(),
@@ -131,8 +131,8 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: lookup_aliases,
                 alias_types,
-                internal: input.index.internal.clone(),
-                internal_types: input.index.cold.internal.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden,
                 binding_only: input.index.cold.binding_only.clone(),
@@ -180,8 +180,8 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: HashMap::new(),
                 alias_types: HashMap::new(),
-                internal: input.index.internal.clone(),
-                internal_types: input.index.cold.internal.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden,
                 binding_only: HashMap::new(),

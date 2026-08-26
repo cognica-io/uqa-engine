@@ -119,8 +119,8 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases,
                 alias_types,
-                internal: input.index.internal.clone(),
-                internal_types: input.index.cold.internal.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
@@ -240,15 +240,15 @@ impl RowSchema {
             alias_types.insert(identity, outer.type_of(column).cloned());
         }
 
-        let mut internal = input.index.internal.clone();
-        let mut internal_types = input.index.cold.internal.clone();
-        for (column, slot) in &outer.index.internal {
+        let mut internal = input.index.executor_attributes.clone();
+        let mut internal_types = input.index.cold.executor_attribute_types.clone();
+        for (column, slot) in &outer.index.executor_attributes {
             assert!(
                 internal.insert(*column, shifted_slot(*slot)).is_none(),
                 "duplicate internal relation attribute in outer scope"
             );
         }
-        for (column, ty) in &outer.index.cold.internal {
+        for (column, ty) in &outer.index.cold.executor_attribute_types {
             assert!(
                 internal_types.insert(*column, ty.clone()).is_none(),
                 "duplicate internal relation attribute type in outer scope"

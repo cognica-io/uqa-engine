@@ -36,8 +36,8 @@ impl RowSchema {
             input.index.slots.to_vec(),
             input.physical_width(),
             SchemaBuildMetadata {
-                internal: input.index.internal.clone(),
-                internal_types: input.index.cold.internal.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources,
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 ..SchemaBuildMetadata::default()
@@ -163,8 +163,8 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: lookup_aliases,
                 alias_types,
-                internal: input.index.internal.clone(),
-                internal_types: input.index.cold.internal.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
@@ -199,8 +199,8 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: lookup_aliases,
                 alias_types,
-                internal: input.index.internal.clone(),
-                internal_types: input.index.cold.internal.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
@@ -214,8 +214,8 @@ impl RowSchema {
         input: &Self,
         aliases: &[(InternalColumnRef, usize, Option<ColumnType>)],
     ) -> Self {
-        let mut internal = input.index.internal.clone();
-        let mut internal_types = input.index.cold.internal.clone();
+        let mut internal = input.index.executor_attributes.clone();
+        let mut internal_types = input.index.cold.executor_attribute_types.clone();
         for (column, slot, ty) in aliases {
             assert!(
                 *slot < input.physical_width(),
@@ -260,8 +260,8 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
-                internal: input.index.internal.clone(),
-                internal_types: input.index.cold.internal.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden,
                 binding_only: input.index.cold.binding_only.clone(),
@@ -273,7 +273,7 @@ impl RowSchema {
     #[must_use]
     pub fn internal_slot(&self, column: InternalColumnRef) -> Option<usize> {
         self.index
-            .internal
+            .executor_attributes
             .get(&column)
             .copied()
             .filter(|slot| *slot != NULL_SLOT)
@@ -283,7 +283,7 @@ impl RowSchema {
     pub fn internal_type(&self, column: InternalColumnRef) -> Option<&ColumnType> {
         self.index
             .cold
-            .internal
+            .executor_attribute_types
             .get(&column)
             .and_then(Option::as_ref)
     }
@@ -295,7 +295,7 @@ impl RowSchema {
         column: InternalColumnRef,
     ) -> Self {
         assert!(
-            input.index.internal.contains_key(&column),
+            input.index.executor_attributes.contains_key(&column),
             "score source must reference an existing internal attribute"
         );
         let mut score_sources = input.index.cold.score_sources.clone();
@@ -313,8 +313,8 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
-                internal: input.index.internal.clone(),
-                internal_types: input.index.cold.internal.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources,
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
@@ -344,8 +344,8 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
-                internal: input.index.internal.clone(),
-                internal_types: input.index.cold.internal.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources,
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
@@ -417,8 +417,8 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
-                internal: input.index.internal.clone(),
-                internal_types: input.index.cold.internal.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only,
@@ -459,8 +459,8 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
-                internal: input.index.internal.clone(),
-                internal_types: input.index.cold.internal.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only,

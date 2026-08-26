@@ -54,8 +54,8 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
-                internal: input.index.internal.clone(),
-                internal_types: input.index.cold.internal.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden,
                 binding_only: input.index.cold.binding_only.clone(),
@@ -77,8 +77,8 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: input.index.aliases.clone(),
                 alias_types: input.index.cold.aliases.clone(),
-                internal: input.index.internal.clone(),
-                internal_types: input.index.cold.internal.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
@@ -94,8 +94,8 @@ impl RowSchema {
         columns: &[(uqa_sql::ast::InternalColumnRef, Option<ColumnType>)],
     ) -> Self {
         let base = input.physical_width();
-        let mut internal = input.index.internal.clone();
-        let mut internal_types = input.index.cold.internal.clone();
+        let mut internal = input.index.executor_attributes.clone();
+        let mut internal_types = input.index.cold.executor_attribute_types.clone();
         for (offset, (column, ty)) in columns.iter().enumerate() {
             internal.insert(*column, base + offset);
             internal_types.insert(*column, ty.clone());
@@ -134,8 +134,8 @@ impl RowSchema {
         let right_base = left.physical_width();
         let mut aliases = left.index.aliases.clone();
         let mut alias_types = left.index.cold.aliases.clone();
-        let mut internal = left.index.internal.clone();
-        let mut internal_types = left.index.cold.internal.clone();
+        let mut internal = left.index.executor_attributes.clone();
+        let mut internal_types = left.index.cold.executor_attribute_types.clone();
         let mut score_sources = left.index.cold.score_sources.clone();
         let mut wildcard_hidden = left.index.cold.wildcard_hidden.clone();
         let mut binding_only = left.index.cold.binding_only.clone();
@@ -157,7 +157,7 @@ impl RowSchema {
                 .iter()
                 .map(|(name, ty)| (name.clone(), ty.clone())),
         );
-        for (column, slot) in &right.index.internal {
+        for (column, slot) in &right.index.executor_attributes {
             let shifted = if *slot == NULL_SLOT {
                 NULL_SLOT
             } else {
@@ -168,7 +168,7 @@ impl RowSchema {
                 "duplicate internal relation attribute in joined row"
             );
         }
-        for (column, ty) in &right.index.cold.internal {
+        for (column, ty) in &right.index.cold.executor_attribute_types {
             assert!(
                 internal_types.insert(*column, ty.clone()).is_none(),
                 "duplicate internal relation attribute type in joined row"
@@ -307,7 +307,7 @@ impl RowSchema {
             assign(&mut source_slots, *target_slot, source_slot)?;
         }
 
-        for (column, target_slot) in &target.index.internal {
+        for (column, target_slot) in &target.index.executor_attributes {
             if *target_slot == NULL_SLOT {
                 continue;
             }

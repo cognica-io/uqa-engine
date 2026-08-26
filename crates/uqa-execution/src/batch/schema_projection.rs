@@ -19,8 +19,8 @@ impl RowSchema {
         input: &Self,
         columns: &[uqa_sql::ast::InternalColumnRef],
     ) -> Self {
-        let mut internal = input.index.internal.clone();
-        let mut internal_types = input.index.cold.internal.clone();
+        let mut internal = input.index.executor_attributes.clone();
+        let mut internal_types = input.index.cold.executor_attribute_types.clone();
         for column in columns {
             internal.remove(column);
             internal_types.remove(column);
@@ -81,8 +81,8 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: HashMap::new(),
                 alias_types: HashMap::new(),
-                internal: input.index.internal.clone(),
-                internal_types: input.index.cold.internal.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources: input.index.cold.score_sources.clone(),
                 binding_only: HashMap::new(),
                 ..SchemaBuildMetadata::default()
@@ -107,8 +107,8 @@ impl RowSchema {
             ProjectedSlot::Computed(position) => input.physical_width() + position,
         };
         let physical_width = input.physical_width() + computed_count;
-        let mut internal = input.index.internal.clone();
-        let mut internal_types = input.index.cold.internal.clone();
+        let mut internal = input.index.executor_attributes.clone();
+        let mut internal_types = input.index.cold.executor_attribute_types.clone();
         for (column, ty, source) in projected_internal {
             internal.insert(column, resolve_slot(source));
             internal_types.insert(column, ty);
@@ -222,7 +222,7 @@ impl RowSchema {
                 )
             })
             .collect();
-        let mut source_internal = self.index.internal.iter().collect::<Vec<_>>();
+        let mut source_internal = self.index.executor_attributes.iter().collect::<Vec<_>>();
         source_internal.sort_unstable_by_key(|(column, _)| **column);
         let internal = source_internal
             .into_iter()
@@ -244,7 +244,7 @@ impl RowSchema {
                     aliases,
                     alias_types: self.index.cold.aliases.clone(),
                     internal,
-                    internal_types: self.index.cold.internal.clone(),
+                    internal_types: self.index.cold.executor_attribute_types.clone(),
                     score_sources: self.index.cold.score_sources.clone(),
                     wildcard_hidden: self.index.cold.wildcard_hidden.clone(),
                     binding_only: self.index.cold.binding_only.clone(),
@@ -421,7 +421,7 @@ impl RowSchema {
     )> {
         let mut columns = self
             .index
-            .internal
+            .executor_attributes
             .iter()
             .map(|(column, slot)| {
                 (
@@ -429,7 +429,7 @@ impl RowSchema {
                     (*slot != NULL_SLOT).then_some(*slot),
                     self.index
                         .cold
-                        .internal
+                        .executor_attribute_types
                         .get(column)
                         .and_then(Option::as_ref),
                 )
@@ -513,8 +513,8 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases: lookup_aliases,
                 alias_types,
-                internal: input.index.internal.clone(),
-                internal_types: input.index.cold.internal.clone(),
+                internal: input.index.executor_attributes.clone(),
+                internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden,
                 binding_only: input.index.cold.binding_only.clone(),
