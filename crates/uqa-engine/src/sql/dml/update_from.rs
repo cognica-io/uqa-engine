@@ -52,7 +52,7 @@ pub(in crate::sql) fn run_update_from(
     let snapshot_ctes = ctes.returning_statement_snapshot_scope();
     let overlay = DmlCommandMutationOverlay::new(engine);
     let mut prepared_updates = Vec::new();
-    let mut rewrite_stack = Vec::new();
+    let mut referential_actions = super::ReferentialActionContext::default();
     let mut locked_ids = std::collections::BTreeSet::new();
     for (storage_table, doc_id) in target_rows {
         cancel.check()?;
@@ -159,7 +159,7 @@ pub(in crate::sql) fn run_update_from(
             original_doc,
             doc,
             params,
-            &mut rewrite_stack,
+            &mut referential_actions,
         )? {
             finalize_partition_rewrite(
                 engine,
@@ -169,7 +169,14 @@ pub(in crate::sql) fn run_update_from(
                 stmt.include_descendants,
                 PartitionRewritePolicy::Move,
             )?;
-            let rewritten_doc_id = stage_prepared_document_rewrite(engine, &mut prepared, params)?;
+            let mut after_row_events = Vec::new();
+            let rewritten_doc_id = stage_prepared_document_rewrite(
+                engine,
+                &mut prepared,
+                params,
+                Some(&assigned_columns),
+                &mut after_row_events,
+            )?;
             if !stmt.returning.is_empty() {
                 returning_rows.push(build_returning_row(
                     engine,
@@ -195,7 +202,7 @@ pub(in crate::sql) fn run_update_from(
                 )?);
             }
             affected += 1;
-            prepared_updates.push((prepared, source_context, rewritten_doc_id));
+            prepared_updates.push((prepared, source_context, after_row_events));
         }
     }
     drop(overlay);
@@ -205,20 +212,10 @@ pub(in crate::sql) fn run_update_from(
             apply_validated_prepared_document_rewrite(engine, prepared)?;
         }
     }
-    for (prepared, _, rewritten_doc_id) in &prepared_updates {
-        crate::sql::triggers::fire_after_row_trigger_event(
-            engine,
-            crate::sql::triggers::AfterRowTriggerEvent::new(
-                &prepared.table,
-                uqa_sql::ast::TriggerEvent::Update,
-                prepared.doc_id,
-                *rewritten_doc_id,
-                Some(&prepared.old_document),
-                Some(&prepared.new_document),
-                &assigned_columns,
-            ),
-        )?;
+    for (_, _, events) in prepared_updates {
+        crate::sql::triggers::fire_after_row_trigger_events(engine, &events)?;
     }
+    referential_actions.fire_after_statement_triggers(engine)?;
     if !stmt.returning.is_empty() {
         return dml_returning_result(
             engine,

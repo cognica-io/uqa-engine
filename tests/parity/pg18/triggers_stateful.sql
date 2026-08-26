@@ -49,6 +49,20 @@ END
 $probe$;
 -- @end
 
+-- @case create_visible_count_function ok
+CREATE FUNCTION trigger_visible_count() RETURNS integer LANGUAGE sql VOLATILE AS $probe$
+SELECT count(*)::integer FROM trigger_items
+$probe$;
+-- @end
+
+-- @case reject_integer_when error
+CREATE TRIGGER integer_when BEFORE INSERT ON trigger_items FOR EACH ROW WHEN (NEW.id + 1) EXECUTE FUNCTION trigger_row_probe();
+-- @end
+
+-- @case reject_invalid_text_when error
+CREATE TRIGGER invalid_text_when BEFORE INSERT ON trigger_items FOR EACH ROW WHEN ('not-a-boolean') EXECUTE FUNCTION trigger_row_probe();
+-- @end
+
 -- @case create_a_before ok
 CREATE TRIGGER a_before BEFORE INSERT ON trigger_items FOR EACH ROW EXECUTE FUNCTION trigger_row_probe('first');
 -- @end
@@ -59,6 +73,10 @@ CREATE TRIGGER z_before BEFORE INSERT ON trigger_items FOR EACH ROW EXECUTE FUNC
 
 -- @case create_after_insert ok
 CREATE TRIGGER after_insert AFTER INSERT ON trigger_items FOR EACH ROW EXECUTE FUNCTION trigger_row_probe();
+-- @end
+
+-- @case create_after_when ok
+CREATE TRIGGER after_when AFTER INSERT ON trigger_items FOR EACH ROW WHEN (trigger_visible_count() = NEW.id) EXECUTE FUNCTION trigger_row_probe();
 -- @end
 
 -- @case create_after_update_statement ok
@@ -121,6 +139,38 @@ SELECT t.tgname
 FROM pg_catalog.pg_trigger AS t
 JOIN pg_catalog.pg_class AS c ON c.oid = t.tgrelid
 WHERE c.relname = 'trigger_items' AND t.tgname = 'renamed_before';
+-- @end
+
+-- @case create_utility_items ok
+CREATE TABLE trigger_utility_items (id integer PRIMARY KEY);
+-- @end
+
+-- @case create_replace_trigger_initial ok
+CREATE TRIGGER utility_replace BEFORE INSERT ON trigger_utility_items FOR EACH STATEMENT EXECUTE FUNCTION trigger_statement_probe();
+-- @end
+
+-- @case replace_trigger ok
+CREATE OR REPLACE TRIGGER utility_replace AFTER INSERT ON trigger_utility_items FOR EACH STATEMENT EXECUTE FUNCTION trigger_statement_probe();
+-- @end
+
+-- @case execute_replaced_trigger ok
+INSERT INTO trigger_utility_items VALUES (1);
+-- @end
+
+-- @case replaced_trigger_execution rows
+SELECT message FROM trigger_log ORDER BY id DESC LIMIT 1;
+-- @end
+
+-- @case create_truncate_trigger ok
+CREATE TRIGGER utility_truncate BEFORE TRUNCATE ON trigger_utility_items FOR EACH STATEMENT EXECUTE FUNCTION trigger_statement_probe();
+-- @end
+
+-- @case execute_truncate_trigger ok
+TRUNCATE trigger_utility_items;
+-- @end
+
+-- @case truncate_trigger_execution rows
+SELECT message FROM trigger_log ORDER BY id DESC LIMIT 1;
 -- @end
 
 -- @case function_drop_restrict error

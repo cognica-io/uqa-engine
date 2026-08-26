@@ -354,8 +354,7 @@ pub(in crate::sql) fn run_merge_inner(
     let mut root_deletes = BTreeSet::new();
     let mut has_mutation = false;
     let mut mutated_target_ids = BTreeSet::new();
-    let mut rewrite_stack = Vec::new();
-    let mut delete_stack = Vec::new();
+    let mut referential_actions = super::ReferentialActionContext::default();
     let snapshot_ctes = ctes.returning_statement_snapshot_scope();
     let overlay = DmlCommandMutationOverlay::new(engine);
     let pairing_reader = pairings
@@ -441,11 +440,6 @@ pub(in crate::sql) fn run_merge_inner(
                 let storage_table = pair.storage_table.as_deref().ok_or_else(|| {
                     SQLError::Internal("MERGE update lost its physical target table".into())
                 })?;
-                ensure_merge_target_is_modified_once(
-                    &mut mutated_target_ids,
-                    storage_table,
-                    doc_id,
-                )?;
                 let Some(triggered_document) = crate::sql::triggers::fire_before_row_triggers(
                     engine,
                     storage_table,
@@ -458,6 +452,11 @@ pub(in crate::sql) fn run_merge_inner(
                 else {
                     continue;
                 };
+                ensure_merge_target_is_modified_once(
+                    &mut mutated_target_ids,
+                    storage_table,
+                    doc_id,
+                )?;
                 new_document = triggered_document;
                 let destination_table = if target_is_partitioned {
                     // PostgreSQL's ONLY modifier limits target matching, not the partition routing performed by an action.
@@ -472,7 +471,7 @@ pub(in crate::sql) fn run_merge_inner(
                     old_document,
                     new_document,
                     params,
-                    &mut rewrite_stack,
+                    &mut referential_actions,
                 )?
                 .ok_or_else(|| {
                     SQLError::Internal(
@@ -480,17 +479,13 @@ pub(in crate::sql) fn run_merge_inner(
                     )
                 })?;
                 retarget_prepared_document_rewrite(engine, &mut prepared, &destination_table)?;
-                let rewritten_doc_id =
-                    stage_prepared_document_rewrite(engine, &mut prepared, params)?;
-                after_row_events.push(crate::sql::triggers::AfterRowTriggerEvent::new(
-                    storage_table,
-                    uqa_sql::ast::TriggerEvent::Update,
-                    prepared.doc_id,
-                    rewritten_doc_id,
-                    Some(&prepared.old_document),
-                    Some(&prepared.new_document),
-                    &updated_columns,
-                ));
+                let rewritten_doc_id = stage_prepared_document_rewrite(
+                    engine,
+                    &mut prepared,
+                    params,
+                    Some(&updated_columns),
+                    &mut after_row_events,
+                )?;
                 if !stmt.returning.is_empty() {
                     returning_rows.push(build_merge_returning_row(
                         engine,
@@ -530,11 +525,6 @@ pub(in crate::sql) fn run_merge_inner(
                 let storage_table = pair.storage_table.as_deref().ok_or_else(|| {
                     SQLError::Internal("MERGE delete lost its physical target table".into())
                 })?;
-                ensure_merge_target_is_modified_once(
-                    &mut mutated_target_ids,
-                    storage_table,
-                    doc_id,
-                )?;
                 let old_document = pair
                     .target_document
                     .as_ref()
@@ -552,6 +542,11 @@ pub(in crate::sql) fn run_merge_inner(
                 {
                     continue;
                 }
+                ensure_merge_target_is_modified_once(
+                    &mut mutated_target_ids,
+                    storage_table,
+                    doc_id,
+                )?;
                 root_deletes.insert((storage_table.to_string(), doc_id));
                 let mut prepared = prepare_document_delete(
                     engine,
@@ -559,22 +554,18 @@ pub(in crate::sql) fn run_merge_inner(
                     doc_id,
                     params,
                     &root_deletes,
-                    &mut delete_stack,
-                    &mut rewrite_stack,
+                    &mut referential_actions,
+                    false,
                 )?
                 .ok_or_else(|| {
                     SQLError::Internal("MERGE delete dependency tree was cyclic at its root".into())
                 })?;
-                stage_prepared_document_delete(engine, &mut prepared, params)?;
-                after_row_events.push(crate::sql::triggers::AfterRowTriggerEvent::new(
-                    storage_table,
-                    uqa_sql::ast::TriggerEvent::Delete,
-                    prepared.doc_id,
-                    prepared.doc_id,
-                    Some(&prepared.document),
-                    None,
-                    &[],
-                ));
+                stage_prepared_document_delete(
+                    engine,
+                    &mut prepared,
+                    params,
+                    &mut after_row_events,
+                )?;
                 if !stmt.returning.is_empty() {
                     returning_rows.push(build_merge_returning_row(
                         engine,
@@ -682,15 +673,20 @@ pub(in crate::sql) fn run_merge_inner(
                     lock_document_key_dependencies(engine, &storage_table, &document, None)?;
                 validate_document_constraints(engine, &storage_table, &document, params, None)?;
                 engine.stage_command_document(&storage_table, doc_id, Some(document.clone()))?;
-                after_row_events.push(crate::sql::triggers::AfterRowTriggerEvent::new(
-                    &storage_table,
-                    uqa_sql::ast::TriggerEvent::Insert,
-                    doc_id,
-                    doc_id,
-                    None,
-                    Some(&document),
-                    &[],
-                ));
+                if let Some(event) = crate::sql::triggers::AfterRowTriggerEvent::prepare(
+                    engine,
+                    crate::sql::triggers::AfterRowTriggerInput {
+                        table: &storage_table,
+                        event: uqa_sql::ast::TriggerEvent::Insert,
+                        old_doc_id: doc_id,
+                        new_doc_id: doc_id,
+                        old_document: None,
+                        new_document: Some(&document),
+                        updated_columns: &[],
+                    },
+                )? {
+                    after_row_events.push(event);
+                }
                 if !stmt.returning.is_empty() {
                     returning_rows.push(build_merge_returning_row(
                         engine,
@@ -774,6 +770,7 @@ pub(in crate::sql) fn run_merge_inner(
         }
     }
     crate::sql::triggers::fire_after_row_trigger_events(engine, &after_row_events)?;
+    referential_actions.fire_after_statement_triggers(engine)?;
     for (enabled, event, columns) in [
         (
             has_delete_action,

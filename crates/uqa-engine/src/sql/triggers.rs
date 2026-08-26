@@ -100,15 +100,12 @@ fn trigger_record(
         .map_err(|error| SQLError::Internal(format!("read trigger row type: {error}")))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
     let mut materialized = document.clone();
-    crate::engine_generated::materialize_virtual_generated_columns(
-        &definitions,
-        &mut materialized,
-    )?;
-    if mask_generated {
-        for column in &definitions {
-            if column.generated.is_some() {
-                materialized.insert(column.name.clone(), Value::Null);
-            }
+    for column in &definitions {
+        let unavailable = column.generated.as_ref().is_some_and(|generated| {
+            mask_generated || generated.kind == uqa_sql::ast::GeneratedColumnKind::Virtual
+        });
+        if unavailable {
+            materialized.insert(column.name.clone(), Value::Null);
         }
     }
     if definitions.is_empty() {
@@ -269,6 +266,53 @@ pub(super) fn fire_statement_triggers(
     Ok(())
 }
 
+#[derive(Default)]
+pub(super) struct ReferentialTriggerStatements {
+    seen: BTreeSet<String>,
+    after: Vec<ReferentialStatementTrigger>,
+}
+
+struct ReferentialStatementTrigger {
+    table: String,
+    event: TriggerEvent,
+    updated_columns: Vec<String>,
+}
+
+impl ReferentialTriggerStatements {
+    pub(super) fn begin(
+        &mut self,
+        engine: &Engine,
+        identity: String,
+        table: &str,
+        event: TriggerEvent,
+        updated_columns: &[String],
+    ) -> Result<()> {
+        if !self.seen.insert(identity) {
+            return Ok(());
+        }
+        fire_statement_triggers(engine, table, TriggerTiming::Before, event, updated_columns)?;
+        self.after.push(ReferentialStatementTrigger {
+            table: table.to_string(),
+            event,
+            updated_columns: updated_columns.to_vec(),
+        });
+        Ok(())
+    }
+
+    pub(super) fn fire_after(&self, engine: &Engine) -> Result<()> {
+        for statement in &self.after {
+            fire_statement_triggers(
+                engine,
+                &statement.table,
+                TriggerTiming::After,
+                statement.event,
+                &statement.updated_columns,
+            )?;
+        }
+        Ok(())
+    }
+}
+
 pub(super) fn fire_before_row_triggers(
     engine: &Engine,
     table: &str,
@@ -314,42 +358,17 @@ pub(super) fn fire_before_row_triggers(
 }
 
 fn fire_after_row_trigger(engine: &Engine, event: &AfterRowTriggerEvent) -> Result<()> {
-    let types = trigger_column_types(engine, &event.table)?;
-    let old = trigger_record(
-        engine,
-        &event.table,
-        event.old_doc_id,
-        event.old_document.as_ref(),
-        false,
-    )?;
-    let new = trigger_record(
-        engine,
-        &event.table,
-        event.new_doc_id,
-        event.new_document.as_ref(),
-        false,
-    )?;
-    for trigger in engine.triggers_for(
-        &event.table,
-        TriggerTiming::After,
-        event.event,
-        true,
-        &event.updated_columns,
-    )? {
-        if !trigger_condition_matches(engine, trigger.definition.when.as_ref(), &old, &new, &types)?
-        {
-            continue;
-        }
+    for trigger in &event.triggers {
         let _ = invoke_trigger(
             engine,
             TriggerInvocation {
                 table: &event.table,
-                trigger: &trigger,
+                trigger,
                 timing: TriggerTiming::After,
                 event: event.event,
                 row: true,
-                old: old.clone(),
-                new: new.clone(),
+                old: event.old.clone(),
+                new: event.new.clone(),
             },
         )?;
     }
@@ -359,40 +378,66 @@ fn fire_after_row_trigger(engine: &Engine, event: &AfterRowTriggerEvent) -> Resu
 pub(super) struct AfterRowTriggerEvent {
     table: String,
     event: TriggerEvent,
-    old_doc_id: DocId,
-    new_doc_id: DocId,
-    old_document: Option<Document>,
-    new_document: Option<Document>,
-    updated_columns: Vec<String>,
+    old: Value,
+    new: Value,
+    triggers: Vec<crate::engine_events::StoredTrigger>,
+}
+
+pub(super) struct AfterRowTriggerInput<'a> {
+    pub(super) table: &'a str,
+    pub(super) event: TriggerEvent,
+    pub(super) old_doc_id: DocId,
+    pub(super) new_doc_id: DocId,
+    pub(super) old_document: Option<&'a Document>,
+    pub(super) new_document: Option<&'a Document>,
+    pub(super) updated_columns: &'a [String],
 }
 
 impl AfterRowTriggerEvent {
-    pub(super) fn new(
-        table: &str,
-        event: TriggerEvent,
-        old_doc_id: DocId,
-        new_doc_id: DocId,
-        old_document: Option<&Document>,
-        new_document: Option<&Document>,
-        updated_columns: &[String],
-    ) -> Self {
-        Self {
-            table: table.to_string(),
+    pub(super) fn prepare(
+        engine: &Engine,
+        input: AfterRowTriggerInput<'_>,
+    ) -> Result<Option<Self>> {
+        let AfterRowTriggerInput {
+            table,
             event,
             old_doc_id,
             new_doc_id,
-            old_document: old_document.cloned(),
-            new_document: new_document.cloned(),
-            updated_columns: updated_columns.to_vec(),
+            old_document,
+            new_document,
+            updated_columns,
+        } = input;
+        let candidates =
+            engine.triggers_for(table, TriggerTiming::After, event, true, updated_columns)?;
+        if candidates.is_empty() {
+            return Ok(None);
         }
+        let types = trigger_column_types(engine, table)?;
+        let old = trigger_record(engine, table, old_doc_id, old_document, false)?;
+        let new = trigger_record(engine, table, new_doc_id, new_document, false)?;
+        let mut matching = Vec::new();
+        for trigger in candidates {
+            if trigger_condition_matches(
+                engine,
+                trigger.definition.when.as_ref(),
+                &old,
+                &new,
+                &types,
+            )? {
+                matching.push(trigger);
+            }
+        }
+        if matching.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            table: table.to_string(),
+            event,
+            old,
+            new,
+            triggers: matching,
+        }))
     }
-}
-
-pub(super) fn fire_after_row_trigger_event(
-    engine: &Engine,
-    event: AfterRowTriggerEvent,
-) -> Result<()> {
-    fire_after_row_trigger(engine, &event)
 }
 
 pub(super) fn fire_after_row_trigger_events(

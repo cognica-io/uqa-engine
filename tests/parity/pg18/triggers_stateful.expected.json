@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "5d58967a6069fbafccf32b701c8d081ce35c4a709b1260a2c6005489eec0f4b4",
+  "fixture_sha256": "b3a966639f95720b0dab917ff4941052a9d114a6feb469caf475d7914204081f",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -29,6 +29,20 @@
       "kind": "ok"
     },
     {
+      "name": "create_visible_count_function",
+      "kind": "ok"
+    },
+    {
+      "name": "reject_integer_when",
+      "kind": "error",
+      "sqlstate": "42804"
+    },
+    {
+      "name": "reject_invalid_text_when",
+      "kind": "error",
+      "sqlstate": "22P02"
+    },
+    {
       "name": "create_a_before",
       "kind": "ok"
     },
@@ -38,6 +52,10 @@
     },
     {
       "name": "create_after_insert",
+      "kind": "ok"
+    },
+    {
+      "name": "create_after_when",
       "kind": "ok"
     },
     {
@@ -68,7 +86,13 @@
           "after_insert:AFTER:INSERT:rows=2"
         ],
         [
+          "after_when:AFTER:INSERT:rows=2"
+        ],
+        [
           "after_insert:AFTER:INSERT:rows=2"
+        ],
+        [
+          "after_when:AFTER:INSERT:rows=2"
         ]
       ]
     },
@@ -116,6 +140,13 @@
           "0"
         ],
         [
+          "after_when",
+          "5",
+          "O",
+          "f",
+          "0"
+        ],
+        [
           "z_before",
           "7",
           "O",
@@ -146,10 +177,10 @@
       "kind": "rows",
       "rows": [
         [
-          "after_insert:AFTER:INSERT:rows=3"
+          "after_when:AFTER:INSERT:rows=3"
         ],
         [
-          "z_before:BEFORE:INSERT:g=NULL:arg=last"
+          "after_insert:AFTER:INSERT:rows=3"
         ]
       ]
     },
@@ -163,6 +194,48 @@
       "rows": [
         [
           "renamed_before"
+        ]
+      ]
+    },
+    {
+      "name": "create_utility_items",
+      "kind": "ok"
+    },
+    {
+      "name": "create_replace_trigger_initial",
+      "kind": "ok"
+    },
+    {
+      "name": "replace_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "execute_replaced_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "replaced_trigger_execution",
+      "kind": "rows",
+      "rows": [
+        [
+          "utility_replace:AFTER:INSERT"
+        ]
+      ]
+    },
+    {
+      "name": "create_truncate_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "execute_truncate_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "truncate_trigger_execution",
+      "kind": "rows",
+      "rows": [
+        [
+          "utility_truncate:BEFORE:TRUNCATE"
         ]
       ]
     },

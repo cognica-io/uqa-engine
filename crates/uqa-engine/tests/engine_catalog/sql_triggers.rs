@@ -10,6 +10,9 @@ use tempfile::TempDir;
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "sql_triggers/review_regressions.rs"]
+mod review_regressions;
+
 fn exec(engine: &Engine, sql: &str) -> uqa_engine::SQLResult {
     engine
         .sql(sql, &[])
@@ -197,7 +200,7 @@ fn trigger_catalog_matches_postgresql_18_shape_and_definition_helpers() {
     assert_eq!(definition.len(), 1);
     assert!(definition[0].contains("BEFORE INSERT OR UPDATE OF value"));
     assert!(definition[0].contains("FOR EACH ROW"));
-    assert!(definition[0].contains("EXECUTE FUNCTION public.mutate_item('argument')"));
+    assert!(definition[0].contains("EXECUTE FUNCTION mutate_item('argument')"));
 }
 
 #[test]
@@ -318,6 +321,12 @@ fn trigger_creation_validates_postgresql_18_when_and_update_of_contracts() {
     );
     exec(
         &engine,
+        "CREATE FUNCTION skip_checked_trigger() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN RETURN NULL; END
+         $$",
+    );
+    exec(
+        &engine,
         "CREATE TRIGGER statement_when BEFORE INSERT ON checked_items
          FOR EACH STATEMENT WHEN (true) EXECUTE FUNCTION checked_trigger()",
     );
@@ -339,10 +348,77 @@ fn trigger_creation_validates_postgresql_18_when_and_update_of_contracts() {
             "CREATE TRIGGER before_generated BEFORE INSERT ON checked_items FOR EACH ROW WHEN (NEW.generated_value > 0) EXECUTE FUNCTION checked_trigger()",
             "42P17",
         ),
+        (
+            "CREATE TRIGGER integer_when BEFORE INSERT ON checked_items FOR EACH ROW WHEN (NEW.id + 1) EXECUTE FUNCTION checked_trigger()",
+            "42804",
+        ),
+        (
+            "CREATE TRIGGER invalid_text_when BEFORE INSERT ON checked_items FOR EACH ROW WHEN ('not-a-boolean') EXECUTE FUNCTION checked_trigger()",
+            "22P02",
+        ),
     ] {
         let error = engine.sql(sql, &[]).expect_err("invalid trigger must fail");
         assert_eq!(error.sqlstate(), Some(expected_state), "{sql}: {error}");
     }
+    exec(
+        &engine,
+        "CREATE TRIGGER false_when BEFORE INSERT ON checked_items
+         FOR EACH ROW WHEN ('false') EXECUTE FUNCTION skip_checked_trigger()",
+    );
+    exec(&engine, "INSERT INTO checked_items(id) VALUES (1)");
+    assert_eq!(
+        exec(&engine, "SELECT count(*) AS n FROM checked_items").rows[0].get("n"),
+        Some(&Value::Int(1))
+    );
+}
+
+#[test]
+fn truncate_triggers_cover_cascade_targets_in_statement_order() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE truncate_audit (id BIGSERIAL PRIMARY KEY, message TEXT)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE truncate_parent (id INTEGER PRIMARY KEY)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE truncate_child (parent_id INTEGER REFERENCES truncate_parent(id))",
+    );
+    exec(
+        &engine,
+        "CREATE FUNCTION truncate_probe() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN
+           INSERT INTO truncate_audit(message) VALUES (TG_WHEN || ' ' || TG_TABLE_NAME);
+           RETURN NULL;
+         END
+         $$",
+    );
+    for sql in [
+        "CREATE TRIGGER parent_before BEFORE TRUNCATE ON truncate_parent EXECUTE FUNCTION truncate_probe()",
+        "CREATE TRIGGER parent_after AFTER TRUNCATE ON truncate_parent EXECUTE FUNCTION truncate_probe()",
+        "CREATE TRIGGER child_before BEFORE TRUNCATE ON truncate_child EXECUTE FUNCTION truncate_probe()",
+        "CREATE TRIGGER child_after AFTER TRUNCATE ON truncate_child EXECUTE FUNCTION truncate_probe()",
+    ] {
+        exec(&engine, sql);
+    }
+
+    exec(&engine, "TRUNCATE truncate_parent CASCADE");
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT message FROM truncate_audit ORDER BY id",
+            "message",
+        ),
+        vec![
+            "BEFORE truncate_parent",
+            "BEFORE truncate_child",
+            "AFTER truncate_parent",
+            "AFTER truncate_child",
+        ]
+    );
 }
 
 #[test]
@@ -397,31 +473,29 @@ fn partitioned_table_row_triggers_fire_on_leaf_and_surface_catalog_clones() {
     assert!(matches!(rows[1].get("tgparentid"), Some(Value::Int(value)) if *value != 0));
 }
 
-#[test]
-fn on_conflict_and_merge_fire_action_triggers_in_postgresql_order() {
-    let engine = Engine::new();
+fn install_action_trigger_fixture(engine: &Engine) {
     exec(
-        &engine,
+        engine,
         "CREATE TABLE action_items (id INTEGER PRIMARY KEY, value TEXT)",
     );
     exec(
-        &engine,
+        engine,
         "CREATE TABLE action_source (id INTEGER PRIMARY KEY, value TEXT)",
     );
     exec(
-        &engine,
+        engine,
         "CREATE TABLE action_audit (id BIGSERIAL PRIMARY KEY, message TEXT)",
     );
     exec(
-        &engine,
+        engine,
         "INSERT INTO action_items VALUES (1, 'seed'), (3, 'delete')",
     );
     exec(
-        &engine,
+        engine,
         "INSERT INTO action_source VALUES (1, 'updated'), (2, 'inserted')",
     );
     exec(
-        &engine,
+        engine,
         "CREATE FUNCTION action_trigger() RETURNS trigger LANGUAGE plpgsql AS $$
          BEGIN
            INSERT INTO action_audit(message) VALUES (TG_WHEN || ' ' || TG_LEVEL || ' ' || TG_OP);
@@ -447,8 +521,14 @@ fn on_conflict_and_merge_fire_action_triggers_in_postgresql_order() {
         "CREATE TRIGGER au_s AFTER UPDATE ON action_items FOR EACH STATEMENT EXECUTE FUNCTION action_trigger()",
         "CREATE TRIGGER ad_s AFTER DELETE ON action_items FOR EACH STATEMENT EXECUTE FUNCTION action_trigger()",
     ] {
-        exec(&engine, sql);
+        exec(engine, sql);
     }
+}
+
+#[test]
+fn on_conflict_and_merge_fire_action_triggers_in_postgresql_order() {
+    let engine = Engine::new();
+    install_action_trigger_fixture(&engine);
 
     exec(
         &engine,
@@ -607,11 +687,9 @@ fn before_insert_trigger_primary_key_change_updates_physical_identity() {
         .is_empty());
 }
 
-#[test]
-fn trigger_timing_matches_postgresql_deferred_after_rows_and_generated_images() {
-    let engine = Engine::new();
+fn install_timing_trigger_fixture(engine: &Engine) {
     exec(
-        &engine,
+        engine,
         "CREATE TABLE timing_items (
            id INTEGER PRIMARY KEY,
            value INTEGER,
@@ -619,11 +697,11 @@ fn trigger_timing_matches_postgresql_deferred_after_rows_and_generated_images() 
          )",
     );
     exec(
-        &engine,
+        engine,
         "CREATE TABLE timing_log (id BIGSERIAL PRIMARY KEY, message TEXT)",
     );
     exec(
-        &engine,
+        engine,
         "CREATE FUNCTION timing_row_trigger() RETURNS trigger LANGUAGE plpgsql AS $$
          DECLARE visible_rows INTEGER;
          BEGIN
@@ -640,7 +718,7 @@ fn trigger_timing_matches_postgresql_deferred_after_rows_and_generated_images() 
          $$",
     );
     exec(
-        &engine,
+        engine,
         "CREATE FUNCTION timing_statement_trigger() RETURNS trigger LANGUAGE plpgsql AS $$
          BEGIN
            INSERT INTO timing_log(message) VALUES (TG_NAME || ':' || TG_WHEN || ':' || TG_OP);
@@ -648,14 +726,26 @@ fn trigger_timing_matches_postgresql_deferred_after_rows_and_generated_images() 
          END
          $$",
     );
+    exec(
+        engine,
+        "CREATE FUNCTION timing_visible_count() RETURNS INTEGER LANGUAGE SQL VOLATILE
+         AS 'SELECT count(*)::integer FROM timing_items'",
+    );
     for sql in [
         "CREATE TRIGGER z_before BEFORE INSERT ON timing_items FOR EACH ROW EXECUTE FUNCTION timing_row_trigger()",
         "CREATE TRIGGER a_before BEFORE INSERT ON timing_items FOR EACH ROW EXECUTE FUNCTION timing_row_trigger()",
         "CREATE TRIGGER after_insert AFTER INSERT ON timing_items FOR EACH ROW EXECUTE FUNCTION timing_row_trigger()",
+        "CREATE TRIGGER after_when AFTER INSERT ON timing_items FOR EACH ROW WHEN (timing_visible_count() = NEW.id) EXECUTE FUNCTION timing_row_trigger()",
         "CREATE TRIGGER after_zero_update AFTER UPDATE ON timing_items FOR EACH STATEMENT EXECUTE FUNCTION timing_statement_trigger()",
     ] {
-        exec(&engine, sql);
+        exec(engine, sql);
     }
+}
+
+#[test]
+fn trigger_timing_matches_postgresql_deferred_after_rows_and_generated_images() {
+    let engine = Engine::new();
+    install_timing_trigger_fixture(&engine);
 
     exec(
         &engine,
@@ -677,9 +767,29 @@ fn trigger_timing_matches_postgresql_deferred_after_rows_and_generated_images() 
             "a_before:BEFORE:INSERT:g=NULL",
             "z_before:BEFORE:INSERT:g=NULL",
             "after_insert:AFTER:INSERT:rows=2",
+            "after_when:AFTER:INSERT:rows=2",
             "after_insert:AFTER:INSERT:rows=2",
+            "after_when:AFTER:INSERT:rows=2",
             "after_zero_update:AFTER:UPDATE",
         ]
+    );
+
+    exec(&engine, "TRUNCATE timing_items");
+    exec(&engine, "TRUNCATE timing_log RESTART IDENTITY");
+    exec(
+        &engine,
+        "INSERT INTO timing_items(id, value)
+         SELECT source.id, source.value
+         FROM (VALUES (1, 1), (2, 2)) AS source(id, value)",
+    );
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT count(*) AS n FROM timing_log WHERE message LIKE 'after_when:%'",
+        )
+        .rows[0]
+            .get("n"),
+        Some(&Value::Int(2))
     );
 
     let error = engine

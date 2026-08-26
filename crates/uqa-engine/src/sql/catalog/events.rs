@@ -9,11 +9,11 @@
 use std::collections::BTreeMap;
 
 use uqa_core::Value;
-use uqa_sql::ast::{CreateTrigger, TriggerEvent, TriggerTiming};
+use uqa_sql::ast::{BinaryOp, CreateTrigger, Expr, TriggerEvent, TriggerTiming};
 use uqa_sql::{ResultRow, SQLError};
 
 use crate::engine_events::StoredTrigger;
-use crate::Engine;
+use crate::{Engine, RelationIdentity};
 
 use super::helpers::{
     bool_value, catalog_usize, int_value, row, schema_expr_text, stable_oid, str_value,
@@ -155,20 +155,28 @@ pub(in crate::sql) fn pg_get_triggerdef_value(
     engine: &Engine,
     arguments: &[Value],
 ) -> Result<Value, SQLError> {
-    let oid = definition_oid_argument("pg_get_triggerdef", arguments)?;
-    let Some(oid) = oid else {
+    let definition_arguments = definition_arguments("pg_get_triggerdef", arguments)?;
+    let Some((oid, pretty)) = definition_arguments else {
         return Ok(Value::Null);
     };
-    Ok(catalog_triggers(engine)?
+    let Some(trigger) = catalog_triggers(engine)?
         .into_iter()
         .map(|(trigger, _)| trigger)
         .find(|trigger| trigger_catalog_oid(trigger) == oid)
-        .map_or(Value::Null, |trigger| {
-            str_value(render_trigger_definition(&trigger.definition))
-        }))
+    else {
+        return Ok(Value::Null);
+    };
+    Ok(str_value(render_trigger_definition(
+        engine,
+        &trigger.definition,
+        pretty,
+    )?))
 }
 
-fn definition_oid_argument(function: &str, arguments: &[Value]) -> Result<Option<i64>, SQLError> {
+fn definition_arguments(
+    function: &str,
+    arguments: &[Value],
+) -> Result<Option<(i64, bool)>, SQLError> {
     if !(1..=2).contains(&arguments.len()) {
         return Err(SQLError::BadArity {
             name: function.into(),
@@ -176,19 +184,23 @@ fn definition_oid_argument(function: &str, arguments: &[Value]) -> Result<Option
             actual: arguments.len(),
         });
     }
-    if let Some(pretty) = arguments.get(1) {
-        if !matches!(pretty, Value::Bool(_) | Value::Null) {
+    let pretty = match arguments.get(1) {
+        None => false,
+        Some(Value::Bool(pretty)) => *pretty,
+        Some(Value::Null) => return Ok(None),
+        Some(pretty) => {
             return Err(SQLError::TypeMismatch(format!(
                 "{function} pretty_bool must be boolean, got {pretty:?}"
-            )));
+            )))
         }
-    }
-    match &arguments[0] {
-        Value::Null => Ok(None),
-        Value::Int(oid) => Ok(Some(*oid)),
-        value => Err(SQLError::TypeMismatch(format!(
+    };
+    match arguments.first() {
+        Some(Value::Null) => Ok(None),
+        Some(Value::Int(oid)) => Ok(Some((*oid, pretty))),
+        Some(value) => Err(SQLError::TypeMismatch(format!(
             "{function} trigger oid must be oid, got {value:?}"
         ))),
+        None => unreachable!("arity was validated above"),
     }
 }
 
@@ -208,7 +220,11 @@ fn trigger_type(definition: &CreateTrigger) -> i64 {
     value
 }
 
-fn render_trigger_definition(definition: &CreateTrigger) -> String {
+fn render_trigger_definition(
+    engine: &Engine,
+    definition: &CreateTrigger,
+    pretty: bool,
+) -> Result<String, SQLError> {
     let events = definition
         .events
         .iter()
@@ -243,20 +259,166 @@ fn render_trigger_definition(definition: &CreateTrigger) -> String {
             TriggerTiming::After => "AFTER",
         },
         events,
-        render_qualified_name(&definition.table),
+        render_trigger_relation(engine, &definition.table, pretty)?,
         if definition.row { "ROW" } else { "STATEMENT" }
     );
     if let Some(condition) = &definition.when {
         rendered.push_str(" WHEN (");
-        rendered.push_str(&schema_expr_text(condition));
+        rendered.push_str(&render_trigger_condition(condition, pretty));
         rendered.push(')');
     }
     rendered.push_str(" EXECUTE FUNCTION ");
-    rendered.push_str(&render_qualified_name(&definition.function));
+    rendered.push_str(&render_trigger_function(engine, &definition.function));
     rendered.push('(');
     rendered.push_str(&arguments);
     rendered.push(')');
-    rendered
+    Ok(rendered)
+}
+
+fn render_trigger_relation(engine: &Engine, name: &str, pretty: bool) -> Result<String, SQLError> {
+    let relation = RelationIdentity::from_legacy_name(name).map_err(|error| {
+        SQLError::Internal(format!("decode trigger relation `{name}`: {error}"))
+    })?;
+    if pretty {
+        let local = uqa_sql::expr::quote_ident(&relation.name);
+        let visible = engine.try_resolve_table_name(&local).map_err(|error| {
+            SQLError::Internal(format!("resolve trigger relation `{name}`: {error}"))
+        })?;
+        if visible.as_deref() == Some(name) {
+            return Ok(local);
+        }
+    }
+    Ok(render_qualified_name(name))
+}
+
+fn render_trigger_function(engine: &Engine, name: &str) -> String {
+    let Ok(function) = RelationIdentity::from_legacy_name(name) else {
+        return render_qualified_name(name);
+    };
+    let local = uqa_sql::expr::quote_ident(&function.name);
+    if engine
+        .resolve_trigger_function(&local)
+        .is_ok_and(|visible| visible.def.name == name)
+    {
+        local
+    } else {
+        render_qualified_name(name)
+    }
+}
+
+fn render_trigger_condition(condition: &Expr, pretty: bool) -> String {
+    if pretty {
+        render_pretty_expr(condition, 0)
+    } else {
+        schema_expr_text(condition)
+    }
+}
+
+fn render_pretty_expr(expr: &Expr, parent_precedence: u8) -> String {
+    let (precedence, rendered) = match expr {
+        Expr::Or(items) => (
+            1,
+            items
+                .iter()
+                .map(|item| render_pretty_expr(item, 1))
+                .collect::<Vec<_>>()
+                .join(" OR "),
+        ),
+        Expr::And(items) => (
+            2,
+            items
+                .iter()
+                .map(|item| render_pretty_expr(item, 2))
+                .collect::<Vec<_>>()
+                .join(" AND "),
+        ),
+        Expr::Not(inner) => match inner.as_ref() {
+            Expr::Func { name, args, .. } if name == "__is_distinct" && args.len() == 2 => (
+                4,
+                format!(
+                    "{} IS NOT DISTINCT FROM {}",
+                    render_pretty_expr(&args[0], 5),
+                    render_pretty_expr(&args[1], 5)
+                ),
+            ),
+            _ => (3, format!("NOT {}", render_pretty_expr(inner, 3))),
+        },
+        Expr::Binary { op, lhs, rhs } => {
+            let (precedence, operator) = match op {
+                BinaryOp::Equal => (4, "="),
+                BinaryOp::NotEqual => (4, "<>"),
+                BinaryOp::Less => (4, "<"),
+                BinaryOp::LessEqual => (4, "<="),
+                BinaryOp::Greater => (4, ">"),
+                BinaryOp::GreaterEqual => (4, ">="),
+                BinaryOp::Add => (5, "+"),
+                BinaryOp::Subtract => (5, "-"),
+                BinaryOp::Multiply => (6, "*"),
+                BinaryOp::Divide => (6, "/"),
+            };
+            let rhs_precedence = if matches!(op, BinaryOp::Subtract | BinaryOp::Divide) {
+                precedence + 1
+            } else {
+                precedence
+            };
+            (
+                precedence,
+                format!(
+                    "{} {operator} {}",
+                    render_pretty_expr(lhs, precedence),
+                    render_pretty_expr(rhs, rhs_precedence)
+                ),
+            )
+        }
+        Expr::Func { name, args, .. } if name == "__is_distinct" && args.len() == 2 => (
+            4,
+            format!(
+                "{} IS DISTINCT FROM {}",
+                render_pretty_expr(&args[0], 5),
+                render_pretty_expr(&args[1], 5)
+            ),
+        ),
+        Expr::IsNull { expr, negated } => (
+            4,
+            format!(
+                "{} IS {}NULL",
+                render_pretty_expr(expr, 5),
+                if *negated { "NOT " } else { "" }
+            ),
+        ),
+        Expr::Between { expr, low, high } => (
+            4,
+            format!(
+                "{} BETWEEN {} AND {}",
+                render_pretty_expr(expr, 5),
+                render_pretty_expr(low, 5),
+                render_pretty_expr(high, 5)
+            ),
+        ),
+        Expr::InList {
+            expr,
+            list,
+            negated,
+        } => (
+            4,
+            format!(
+                "{} {}IN ({})",
+                render_pretty_expr(expr, 5),
+                if *negated { "NOT " } else { "" },
+                list.iter()
+                    .map(|item| render_pretty_expr(item, 0))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ),
+        Expr::UnaryMinus(inner) => (7, format!("-{}", render_pretty_expr(inner, 7))),
+        _ => (8, schema_expr_text(expr)),
+    };
+    if precedence < parent_precedence {
+        format!("({rendered})")
+    } else {
+        rendered
+    }
 }
 
 fn render_qualified_name(name: &str) -> String {

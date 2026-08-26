@@ -51,10 +51,10 @@ impl Engine {
         &self,
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
-        let Some(json) = catalog.get_metadata(TRIGGERS_METADATA_KEY)? else {
-            return Ok(());
+        let stored = match catalog.get_metadata(TRIGGERS_METADATA_KEY)? {
+            Some(json) => serde_json::from_str::<StoredTriggerCatalog>(&json)?,
+            None => StoredTriggerCatalog::default(),
         };
-        let stored = serde_json::from_str::<StoredTriggerCatalog>(&json)?;
         let temporary_triggers = self
             .durable
             .triggers

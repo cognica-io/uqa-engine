@@ -158,11 +158,19 @@ pub(super) fn lower_function(function: &JSONValue) -> Result<PLpgSQLFunction> {
     validate_datums(&datums)?;
     let trigger_datum = |field: &str, name: &str| -> Result<Option<usize>> {
         let explicit = match json_optional_i64(function, field)? {
-            Some(index) if index >= 0 => Some(usize::try_from(index).map_err(|_| {
-                SQLError::Internal(format!(
-                    "PL/pgSQL {field} {index} does not fit this platform"
-                ))
-            })?),
+            Some(index) if index >= 0 => {
+                let index = usize::try_from(index).map_err(|_| {
+                    SQLError::Internal(format!(
+                        "PL/pgSQL {field} {index} does not fit this platform"
+                    ))
+                })?;
+                if index >= datums.len() {
+                    return Err(SQLError::Internal(format!(
+                        "PL/pgSQL {field} has out-of-range datum index {index}"
+                    )));
+                }
+                Some(index)
+            }
             Some(index) => {
                 return Err(SQLError::Internal(format!(
                     "PL/pgSQL {field} has invalid datum index {index}"

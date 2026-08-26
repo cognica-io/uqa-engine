@@ -6,13 +6,143 @@
 
 //! Trigger-function resolution and definition validation.
 
-use uqa_sql::ast::{CreateTrigger, FunctionReturns, TriggerEvent, TriggerTiming};
+use uqa_core::Value;
+use uqa_sql::ast::{ColumnType, CreateTrigger, Expr, FunctionReturns, TriggerEvent, TriggerTiming};
+use uqa_sql::plpgsql::{bind_expr, ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
 
 use crate::engine_user_functions::{
     canonical_routine_type_name, routine_signature_types, CompiledFunctionBody, SQLUserFunction,
 };
 use crate::{Arc, Engine, RelationIdentity};
+
+struct TriggerConditionTypeResolver<'a> {
+    columns: &'a [uqa_sql::ast::ColumnDef],
+}
+
+impl VariableResolver for TriggerConditionTypeResolver<'_> {
+    fn resolve_name(&mut self, _name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
+        Ok(None)
+    }
+
+    fn resolve_qualified(
+        &mut self,
+        qualifier: &str,
+        column: &str,
+    ) -> Result<Option<ResolvedVariable>, SQLError> {
+        if !qualifier.eq_ignore_ascii_case("old") && !qualifier.eq_ignore_ascii_case("new") {
+            return Ok(None);
+        }
+        Ok(self
+            .columns
+            .iter()
+            .find(|definition| definition.name == column)
+            .map(|definition| ResolvedVariable {
+                value: Value::Null,
+                declared_type: Some(definition.ty.sql_name()),
+            }))
+    }
+
+    fn resolve_param(&mut self, _index: usize) -> Result<Option<ResolvedVariable>, SQLError> {
+        Ok(None)
+    }
+}
+
+fn is_boolean_type(ty: &ColumnType) -> bool {
+    match ty {
+        ColumnType::Boolean => true,
+        ColumnType::Domain { base, .. } => is_boolean_type(base),
+        _ => false,
+    }
+}
+
+fn validate_trigger_condition_references(
+    definition: &CreateTrigger,
+    columns: &[uqa_sql::ast::ColumnDef],
+    condition: &Expr,
+) -> Result<(), SQLError> {
+    if condition.any_node(&|node| {
+        matches!(
+            node,
+            Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. }
+        )
+    }) {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "cannot use subquery in trigger WHEN condition".into(),
+        });
+    }
+    if condition.any_node(&|node| matches!(node, Expr::Column(_))) {
+        return Err(SQLError::Routine {
+            sqlstate: "42P01".into(),
+            message: "trigger WHEN condition must qualify row columns with OLD or NEW".into(),
+        });
+    }
+    let references_old = condition.any_node(&|node| {
+        matches!(node, Expr::QualifiedColumn { qualifier, .. } if qualifier.eq_ignore_ascii_case("old"))
+    });
+    let references_new = condition.any_node(&|node| {
+        matches!(node, Expr::QualifiedColumn { qualifier, .. } if qualifier.eq_ignore_ascii_case("new"))
+    });
+    if !definition.row && (references_old || references_new) {
+        return Err(SQLError::Routine {
+            sqlstate: "42P01".into(),
+            message: "statement trigger's WHEN condition cannot reference row values".into(),
+        });
+    }
+    if references_old && definition.events.contains(&TriggerEvent::Insert) {
+        return Err(SQLError::Routine {
+            sqlstate: "42P17".into(),
+            message: "INSERT trigger's WHEN condition cannot reference OLD values".into(),
+        });
+    }
+    if references_new && definition.events.contains(&TriggerEvent::Delete) {
+        return Err(SQLError::Routine {
+            sqlstate: "42P17".into(),
+            message: "DELETE trigger's WHEN condition cannot reference NEW values".into(),
+        });
+    }
+    let invalid_qualified_reference = std::cell::RefCell::new(None);
+    let _ = condition.any_node(&|node| {
+        let Expr::QualifiedColumn { qualifier, column } = node else {
+            return false;
+        };
+        if !qualifier.eq_ignore_ascii_case("old") && !qualifier.eq_ignore_ascii_case("new") {
+            *invalid_qualified_reference.borrow_mut() = Some(format!("{qualifier}.{column}"));
+            return true;
+        }
+        if !columns.iter().any(|definition| definition.name == *column) {
+            *invalid_qualified_reference.borrow_mut() = Some(column.clone());
+            return true;
+        }
+        false
+    });
+    if let Some(reference) = invalid_qualified_reference.into_inner() {
+        return Err(SQLError::UnknownColumn(reference));
+    }
+    if definition.timing == TriggerTiming::Before && references_new {
+        let generated = columns
+            .iter()
+            .filter(|column| column.generated.is_some())
+            .map(|column| column.name.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        if condition.any_node(&|node| {
+            matches!(
+                node,
+                Expr::QualifiedColumn { qualifier, column }
+                    if qualifier.eq_ignore_ascii_case("new")
+                        && generated.contains(column.as_str())
+            )
+        }) {
+            return Err(SQLError::Routine {
+                sqlstate: "42P17".into(),
+                message: "BEFORE trigger's WHEN condition cannot reference NEW generated columns"
+                    .into(),
+            });
+        }
+    }
+    Ok(())
+}
 
 impl Engine {
     pub(super) fn resolve_trigger_table(&self, name: &str) -> Result<RelationIdentity, SQLError> {
@@ -119,99 +249,45 @@ impl Engine {
                 });
             }
         }
-        if let Some(condition) = definition.when.as_ref() {
-            Self::validate_trigger_condition(definition, &columns, condition)?;
+        if let Some(mut condition) = definition.when.take() {
+            self.validate_trigger_condition(definition, &columns, &mut condition)?;
+            definition.when = Some(condition);
         }
         Ok(relation)
     }
 
     fn validate_trigger_condition(
+        &self,
         definition: &CreateTrigger,
         columns: &[uqa_sql::ast::ColumnDef],
-        condition: &uqa_sql::ast::Expr,
+        condition: &mut Expr,
     ) -> Result<(), SQLError> {
-        use uqa_sql::ast::Expr;
-
-        if condition.any_node(&|node| {
-            matches!(
-                node,
-                Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. }
-            )
-        }) {
-            return Err(SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: "cannot use subquery in trigger WHEN condition".into(),
-            });
-        }
-        if condition.any_node(&|node| matches!(node, Expr::Column(_))) {
-            return Err(SQLError::Routine {
-                sqlstate: "42P01".into(),
-                message: "trigger WHEN condition must qualify row columns with OLD or NEW".into(),
-            });
-        }
-        let references_old = condition.any_node(&|node| {
-            matches!(node, Expr::QualifiedColumn { qualifier, .. } if qualifier.eq_ignore_ascii_case("old"))
-        });
-        let references_new = condition.any_node(&|node| {
-            matches!(node, Expr::QualifiedColumn { qualifier, .. } if qualifier.eq_ignore_ascii_case("new"))
-        });
-        if !definition.row && (references_old || references_new) {
-            return Err(SQLError::Routine {
-                sqlstate: "42P01".into(),
-                message: "statement trigger's WHEN condition cannot reference row values".into(),
-            });
-        }
-        if references_old && definition.events.contains(&TriggerEvent::Insert) {
-            return Err(SQLError::Routine {
-                sqlstate: "42P17".into(),
-                message: "INSERT trigger's WHEN condition cannot reference OLD values".into(),
-            });
-        }
-        if references_new && definition.events.contains(&TriggerEvent::Delete) {
-            return Err(SQLError::Routine {
-                sqlstate: "42P17".into(),
-                message: "DELETE trigger's WHEN condition cannot reference NEW values".into(),
-            });
-        }
-        let invalid_qualified_reference = std::cell::RefCell::new(None);
-        let _ = condition.any_node(&|node| {
-            let Expr::QualifiedColumn { qualifier, column } = node else {
-                return false;
-            };
-            if !qualifier.eq_ignore_ascii_case("old") && !qualifier.eq_ignore_ascii_case("new") {
-                *invalid_qualified_reference.borrow_mut() = Some(format!("{qualifier}.{column}"));
-                return true;
+        validate_trigger_condition_references(definition, columns, condition)?;
+        let bound = bind_expr(condition, &mut TriggerConditionTypeResolver { columns })?;
+        let lowered = uqa_planner::ExpressionPlan::lower(bound);
+        match uqa_execution::common_context_expression_type(
+            &lowered.scalar,
+            &uqa_execution::RowSchema::default(),
+            &[],
+            Some(self),
+        )? {
+            Some(ty) if !is_boolean_type(&ty) => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "argument of WHEN must be type boolean, not type {}",
+                    ty.sql_name()
+                )))
             }
-            if !columns.iter().any(|definition| definition.name == *column) {
-                *invalid_qualified_reference.borrow_mut() = Some(column.clone());
-                return true;
+            None => {
+                if let Expr::Literal(value @ (Value::Str(_) | Value::FixedChar(_))) = condition {
+                    *value = uqa_sql::expr::cast_value(value, "boolean")?;
+                } else {
+                    *condition = Expr::Cast {
+                        expr: Box::new(condition.clone()),
+                        ty: "boolean".into(),
+                    };
+                }
             }
-            false
-        });
-        if let Some(reference) = invalid_qualified_reference.into_inner() {
-            return Err(SQLError::UnknownColumn(reference));
-        }
-        if definition.timing == TriggerTiming::Before && references_new {
-            let generated = columns
-                .iter()
-                .filter(|column| column.generated.is_some())
-                .map(|column| column.name.as_str())
-                .collect::<std::collections::BTreeSet<_>>();
-            if condition.any_node(&|node| {
-                matches!(
-                    node,
-                    Expr::QualifiedColumn { qualifier, column }
-                        if qualifier.eq_ignore_ascii_case("new")
-                            && generated.contains(column.as_str())
-                )
-            }) {
-                return Err(SQLError::Routine {
-                    sqlstate: "42P17".into(),
-                    message:
-                        "BEFORE trigger's WHEN condition cannot reference NEW generated columns"
-                            .into(),
-                });
-            }
+            Some(_) => {}
         }
         Ok(())
     }

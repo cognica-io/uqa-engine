@@ -5,7 +5,9 @@
 //
 
 use super::lowering_statement::{lower_stmt, lower_stmt_list};
-use super::parsing::{lower_datum, parse_plpgsql_text, synthesize_create_text, validate_datums};
+use super::parsing::{
+    lower_datum, lower_function, parse_plpgsql_text, synthesize_create_text, validate_datums,
+};
 use super::*;
 
 #[test]
@@ -159,6 +161,22 @@ fn pg18_builtin_array_datums_use_sql_array_spelling() {
         .collect::<Vec<_>>();
     assert!(array_types.len() >= 2, "array datums: {array_types:?}");
     assert!(array_types.iter().all(|type_name| *type_name == "int4[]"));
+}
+
+#[test]
+fn trigger_datum_indices_must_reference_existing_datums() {
+    for field in ["new_varno", "old_varno"] {
+        let mut function = serde_json::json!({
+            "datums": [],
+            "action": { "PLpgSQL_stmt_block": { "body": [] } }
+        });
+        function[field] = serde_json::json!(0);
+        let error = lower_function(&function).expect_err("out-of-range trigger datum must fail");
+        assert!(
+            matches!(error, SQLError::Internal(ref message) if message.contains(field) && message.contains("out-of-range")),
+            "{error}"
+        );
+    }
 }
 
 fn scalar_datum(name: &str) -> PLpgSQLDatum {
