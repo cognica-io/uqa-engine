@@ -36,7 +36,7 @@ CRATE_ROLES = {
     "uqa-scoring": "BM25, Bayesian BM25, WAND, calibration, and parameter learning",
     "uqa-fusion": "Bayesian evidence fusion and multi-signal retrieval pooling",
     "uqa-operators": "retrieval, Boolean, hybrid, staged, and fusion operators",
-    "uqa-ml": "model specifications, CPU inference, and optional MLX backends",
+    "uqa-ml": "model specifications, CPU inference, and an experimental MLX probe",
     "uqa-graph": "named graphs, Cypher, regular path queries, and graph algorithms",
     "uqa-joins": "relational and cross-paradigm join algorithms",
     "uqa-planner": "cardinality, cost, DPccp join enumeration, and unified-plan optimization",

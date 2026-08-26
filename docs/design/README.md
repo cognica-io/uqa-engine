@@ -17,6 +17,7 @@ The research-level foundation is developed separately in [A Typed Carrier Algebr
 | [Performance](performance.md) | Benchmark provenance, regression gates, measured bottlenecks, PostgreSQL 17 TPC-H-derived evidence, optimizations, and limitations | Performance contributors and evaluators |
 | [Implementation plans](../plans/README.md) | Plan lifecycle, ownership, and update rules | Contributors and reviewers |
 | [PostgreSQL 18 compatibility plan](../plans/0003-postgresql-18-compatibility.md) | Long-term SQL, catalog, transaction, client, and wire protocol 3.2 parity milestones and gates | Compatibility contributors and reviewers |
+| [MLX runtime support plan](../plans/0004-mlx-runtime-support.md) | Versioned model execution, isolated Apple-Silicon runtime, engine integration, packaging, verification, and rollout gates | ML, engine, binding, and release contributors |
 
 ## Reading paths
 
@@ -26,6 +27,7 @@ The research-level foundation is developed separately in [A Typed Carrier Algebr
 - To change a benchmark or make a performance claim, read [performance](performance.md) and preserve fixture, provenance, and ratio-gate comparability.
 - To change a compatibility or calibration contract, read [parity fixtures](parity.md) and version the affected manifest.
 - To change physical vector indexing, read [vector indexes](vector-indexes.md) and preserve its algorithm, transaction, and reopen invariants.
+- To implement or advertise Apple MLX execution, read the [MLX runtime support plan](../plans/0004-mlx-runtime-support.md) and preserve its no-silent-fallback, process-isolation, package, and actual-backend evidence gates.
 
 ## Plans versus design contracts
 

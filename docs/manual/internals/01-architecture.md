@@ -92,7 +92,7 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 | `uqa-engine` | Composition, SQL lifecycle, sessions, transactions, restore, publication, and public API |
 | `uqa` | Application facade over `uqa-engine` with the core `Value` type re-exported |
 | `uqa-fdw` | Foreign server and table contracts plus DuckDB, Arrow, and memory handlers |
-| `uqa-ml` | Serializable model specifications, inference, analytical training, and optional MLX integration |
+| `uqa-ml` | Serializable model specifications, CPU inference, analytical training, and an experimental direct-crate MLX probe |
 | `uqa-api` | Fluent `QueryBuilder` and result adapters |
 | `uqa-pg-wire` | PostgreSQL v3 message decoding and encoding without server socket ownership |
 | `uqa-cli`, `uqa-python`, `uqa-node`, `uqa-wasm` | User-facing adapters over the engine contract |
