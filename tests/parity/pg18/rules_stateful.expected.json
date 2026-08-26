@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "55ba338e4e3ddd6d4ce5ed74b1fd1d452c6f8c35e09584130b572e226d489c49",
+  "fixture_sha256": "9b2858664e317544b83489d820b0ec7acfdda22c5ed35b74b4f55bc4c9729a25",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -571,6 +571,206 @@
           "UPDATE"
         ]
       ]
+    },
+    {
+      "name": "create_lateral_rule_relations",
+      "kind": "ok"
+    },
+    {
+      "name": "seed_lateral_rule_event",
+      "kind": "ok"
+    },
+    {
+      "name": "create_lateral_rule_action",
+      "kind": "ok"
+    },
+    {
+      "name": "execute_lateral_rule_action",
+      "kind": "ok"
+    },
+    {
+      "name": "lateral_rule_action_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "11"
+        ],
+        [
+          "21"
+        ]
+      ]
+    },
+    {
+      "name": "create_alias_collision_rule_relations",
+      "kind": "ok"
+    },
+    {
+      "name": "seed_alias_collision_rule_relations",
+      "kind": "ok"
+    },
+    {
+      "name": "create_alias_collision_rule_action",
+      "kind": "ok"
+    },
+    {
+      "name": "execute_alias_collision_rule_action",
+      "kind": "ok"
+    },
+    {
+      "name": "alias_collision_rule_action_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "999"
+        ]
+      ]
+    },
+    {
+      "name": "create_lazy_rule_returning_relations",
+      "kind": "ok"
+    },
+    {
+      "name": "create_lazy_rule_returning_provider",
+      "kind": "ok"
+    },
+    {
+      "name": "execute_lazy_rule_returning_without_outer_projection",
+      "kind": "ok"
+    },
+    {
+      "name": "lazy_rule_returning_sequence_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "lazy_rule_returning_action_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "create_action_image_rule_relations",
+      "kind": "ok"
+    },
+    {
+      "name": "seed_action_image_rule_event",
+      "kind": "ok"
+    },
+    {
+      "name": "create_action_image_rule_provider",
+      "kind": "ok"
+    },
+    {
+      "name": "action_image_rule_provider_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "42",
+          "43"
+        ]
+      ]
+    },
+    {
+      "name": "action_image_rule_target_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "42",
+          "43"
+        ]
+      ]
+    },
+    {
+      "name": "create_scoped_rule_relations",
+      "kind": "ok"
+    },
+    {
+      "name": "set_operation_rule_reference_rejected",
+      "kind": "error",
+      "sqlstate": "42P10"
+    },
+    {
+      "name": "create_constant_set_operation_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "conditional_set_operation_rule_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "execute_single_row_set_operation_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "single_row_set_operation_rule_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "1000"
+        ],
+        [
+          "1001"
+        ]
+      ]
+    },
+    {
+      "name": "clear_single_row_set_operation_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "rewritten_set_operation_rule_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "rewritten_set_operation_event_rollback",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "rewritten_set_operation_action_rollback",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "cte_rule_reference_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "conflict_rule_reference_rejected",
+      "kind": "error",
+      "sqlstate": "42P01"
+    },
+    {
+      "name": "returning_event_image_reference_rejected",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "create_rule_action_view",
+      "kind": "ok"
+    },
+    {
+      "name": "create_view_target_rule_action",
+      "kind": "ok"
     },
     {
       "name": "create_insert_returning_event",

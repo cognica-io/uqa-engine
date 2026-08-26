@@ -8,10 +8,10 @@
 
 use uqa_core::Value;
 use uqa_sql::ast::{
-    ColumnType, CreateRule, CreateTrigger, Expr, FunctionReturns, RuleEvent, Statement,
-    TriggerEvent, TriggerTiming,
+    ColumnType, CreateRule, CreateTrigger, Expr, FromClause, FunctionReturns, OnConflictAction,
+    RuleEvent, SelectStmt, Statement, TriggerEvent, TriggerTiming,
 };
-use uqa_sql::plpgsql::{bind_expr, ResolvedVariable, VariableResolver};
+use uqa_sql::plpgsql::{bind_expr, bind_select, ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
 
 use crate::engine_user_functions::{
@@ -173,6 +173,17 @@ fn rule_action_has_returning(action: &Statement) -> bool {
         Statement::Insert(statement) => !statement.returning.is_empty(),
         Statement::Update(statement) => !statement.returning.is_empty(),
         Statement::Delete(statement) => !statement.returning.is_empty(),
+        _ => false,
+    }
+}
+
+fn rule_action_has_set_operation(action: &Statement) -> bool {
+    match action {
+        Statement::Select(select) => select.set_op.is_some(),
+        Statement::Insert(insert) => insert
+            .select_source
+            .as_ref()
+            .is_some_and(|select| select.set_op.is_some()),
         _ => false,
     }
 }
@@ -340,6 +351,321 @@ fn first_invalid_rule_condition_qualifier(condition: &Expr) -> Option<String> {
     invalid.into_inner()
 }
 
+#[derive(Default)]
+struct RuleRowReferenceDetector {
+    qualifier: Option<String>,
+}
+
+impl VariableResolver for RuleRowReferenceDetector {
+    fn resolve_name(&mut self, _name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
+        Ok(None)
+    }
+
+    fn resolve_qualified(
+        &mut self,
+        qualifier: &str,
+        _column: &str,
+    ) -> Result<Option<ResolvedVariable>, SQLError> {
+        if self.qualifier.is_none()
+            && (qualifier.eq_ignore_ascii_case("old") || qualifier.eq_ignore_ascii_case("new"))
+        {
+            self.qualifier = Some(qualifier.to_ascii_lowercase());
+        }
+        Ok(None)
+    }
+
+    fn resolve_param(&mut self, _index: usize) -> Result<Option<ResolvedVariable>, SQLError> {
+        Ok(None)
+    }
+}
+
+fn first_rule_row_reference_in_expr(expr: &Expr) -> Option<String> {
+    let mut detector = RuleRowReferenceDetector::default();
+    let _ = bind_expr(expr, &mut detector);
+    detector.qualifier
+}
+
+fn first_rule_row_reference_in_select(select: &SelectStmt) -> Option<String> {
+    let mut detector = RuleRowReferenceDetector::default();
+    let _ = bind_select(select, &mut detector);
+    detector.qualifier
+}
+
+fn invalid_rule_cte_reference(qualifier: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "0A000".into(),
+        message: format!(
+            "cannot refer to {} within WITH query",
+            qualifier.to_ascii_uppercase()
+        ),
+    }
+}
+
+fn invalid_rule_set_operation_reference() -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42P10".into(),
+        message:
+            "UNION/INTERSECT/EXCEPT member statement cannot refer to other relations of same query level"
+                .into(),
+    }
+}
+
+fn invalid_rule_conflict_reference(qualifier: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42P01".into(),
+        message: format!(
+            "invalid reference to FROM-clause entry for table \"{qualifier}\"\nDETAIL: There is an entry for table \"{qualifier}\", but it cannot be referenced from this part of the query."
+        ),
+    }
+}
+
+fn validate_rule_ctes(ctes: &[uqa_sql::ast::CTE]) -> Result<(), SQLError> {
+    for cte in ctes {
+        if let Some(qualifier) = first_rule_row_reference_in_select(&cte.query) {
+            return Err(invalid_rule_cte_reference(&qualifier));
+        }
+        validate_rule_select_scopes(&cte.query)?;
+    }
+    Ok(())
+}
+
+fn validate_rule_select_scopes(select: &SelectStmt) -> Result<(), SQLError> {
+    validate_rule_ctes(&select.with)?;
+    if let Some(set_op) = &select.set_op {
+        let member_references_rule_row = set_op
+            .left
+            .as_deref()
+            .and_then(first_rule_row_reference_in_select)
+            .or_else(|| first_rule_row_reference_in_select(&set_op.right));
+        if member_references_rule_row.is_some() {
+            return Err(invalid_rule_set_operation_reference());
+        }
+        if let Some(left) = set_op.left.as_deref() {
+            validate_rule_select_scopes(left)?;
+        }
+        validate_rule_select_scopes(&set_op.right)?;
+        for order in &set_op.combined_order_by {
+            validate_rule_expr_scopes(&order.expr)?;
+        }
+        if let Some(limit) = &set_op.combined_limit {
+            validate_rule_expr_scopes(limit)?;
+        }
+        if let Some(offset) = &set_op.combined_offset {
+            validate_rule_expr_scopes(offset)?;
+        }
+    }
+    for projection in &select.projections {
+        validate_rule_expr_scopes(&projection.expr)?;
+    }
+    for expr in select.values.iter().flatten() {
+        validate_rule_expr_scopes(expr)?;
+    }
+    if let Some(from) = &select.from {
+        validate_rule_from_scopes(from)?;
+    }
+    for expr in select
+        .r#where
+        .iter()
+        .chain(select.group_by.iter())
+        .chain(select.grouping_sets.iter().flatten())
+        .chain(select.having.iter())
+        .chain(select.order_by.iter().map(|order| &order.expr))
+        .chain(select.limit.iter())
+        .chain(select.offset.iter())
+        .chain(select.distinct_on.iter())
+    {
+        validate_rule_expr_scopes(expr)?;
+    }
+    Ok(())
+}
+
+fn validate_rule_from_scopes(from: &FromClause) -> Result<(), SQLError> {
+    match from {
+        FromClause::Table { .. } => {}
+        FromClause::Join {
+            left, right, on, ..
+        } => {
+            validate_rule_from_scopes(left)?;
+            validate_rule_from_scopes(right)?;
+            if let Some(on) = on {
+                validate_rule_expr_scopes(on)?;
+            }
+        }
+        FromClause::Values { rows, .. } => {
+            for expr in rows.iter().flatten() {
+                validate_rule_expr_scopes(expr)?;
+            }
+        }
+        FromClause::Function { args, .. } => {
+            for expr in args {
+                validate_rule_expr_scopes(expr)?;
+            }
+        }
+        FromClause::FunctionGroup { functions, .. } => {
+            for expr in functions.iter().flat_map(|function| &function.args) {
+                validate_rule_expr_scopes(expr)?;
+            }
+        }
+        FromClause::Subquery { body, .. } => validate_rule_select_scopes(body)?,
+    }
+    Ok(())
+}
+
+fn validate_rule_expr_scopes(expr: &Expr) -> Result<(), SQLError> {
+    match expr {
+        Expr::Func {
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            for expr in args {
+                validate_rule_expr_scopes(expr)?;
+            }
+            for order in order_by {
+                validate_rule_expr_scopes(&order.expr)?;
+            }
+            if let Some(filter) = filter {
+                validate_rule_expr_scopes(filter)?;
+            }
+        }
+        Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
+            for expr in items {
+                validate_rule_expr_scopes(expr)?;
+            }
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            validate_rule_expr_scopes(lhs)?;
+            validate_rule_expr_scopes(rhs)?;
+        }
+        Expr::UnaryMinus(expr)
+        | Expr::Not(expr)
+        | Expr::IsNull { expr, .. }
+        | Expr::Cast { expr, .. } => validate_rule_expr_scopes(expr)?,
+        Expr::Between { expr, low, high } => {
+            validate_rule_expr_scopes(expr)?;
+            validate_rule_expr_scopes(low)?;
+            validate_rule_expr_scopes(high)?;
+        }
+        Expr::InList { expr, list, .. } => {
+            validate_rule_expr_scopes(expr)?;
+            for item in list {
+                validate_rule_expr_scopes(item)?;
+            }
+        }
+        Expr::WindowCall { args, spec, .. } => {
+            for expr in args.iter().chain(spec.partition_by.iter()) {
+                validate_rule_expr_scopes(expr)?;
+            }
+            for order in &spec.order_by {
+                validate_rule_expr_scopes(&order.expr)?;
+            }
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            if let Some(base) = base {
+                validate_rule_expr_scopes(base)?;
+            }
+            for (condition, result) in when {
+                validate_rule_expr_scopes(condition)?;
+                validate_rule_expr_scopes(result)?;
+            }
+            if let Some(else_branch) = else_branch {
+                validate_rule_expr_scopes(else_branch)?;
+            }
+        }
+        Expr::ScalarSubquery(body) | Expr::Exists { body, .. } => {
+            validate_rule_select_scopes(body)?;
+        }
+        Expr::InSubquery { expr, body, .. } => {
+            validate_rule_expr_scopes(expr)?;
+            validate_rule_select_scopes(body)?;
+        }
+        Expr::Default
+        | Expr::Literal(_)
+        | Expr::Star
+        | Expr::QualifiedStar(_)
+        | Expr::Column(_)
+        | Expr::QualifiedColumn { .. }
+        | Expr::Param(_) => {}
+    }
+    Ok(())
+}
+
+fn validate_rule_action_reference_scopes(action: &Statement) -> Result<(), SQLError> {
+    match action {
+        Statement::Select(select) => validate_rule_select_scopes(select),
+        Statement::Insert(insert) => {
+            validate_rule_ctes(&insert.with)?;
+            for expr in insert.rows.iter().flatten() {
+                validate_rule_expr_scopes(expr)?;
+            }
+            if let Some(select) = &insert.select_source {
+                validate_rule_select_scopes(select)?;
+            }
+            if let Some(conflict) = &insert.on_conflict {
+                if let OnConflictAction::Update {
+                    assignments,
+                    r#where,
+                } = &conflict.action
+                {
+                    let reference = assignments
+                        .iter()
+                        .find_map(|(_, expr)| first_rule_row_reference_in_expr(expr))
+                        .or_else(|| r#where.as_ref().and_then(first_rule_row_reference_in_expr));
+                    if let Some(qualifier) = reference {
+                        return Err(invalid_rule_conflict_reference(&qualifier));
+                    }
+                    for (_, expr) in assignments {
+                        validate_rule_expr_scopes(expr)?;
+                    }
+                    if let Some(r#where) = r#where {
+                        validate_rule_expr_scopes(r#where)?;
+                    }
+                }
+            }
+            for projection in &insert.returning {
+                validate_rule_expr_scopes(&projection.expr)?;
+            }
+            Ok(())
+        }
+        Statement::Update(update) => {
+            validate_rule_ctes(&update.with)?;
+            if let Some(from) = &update.from {
+                validate_rule_from_scopes(from)?;
+            }
+            for expr in update
+                .assignments
+                .iter()
+                .map(|(_, expr)| expr)
+                .chain(update.r#where.iter())
+                .chain(update.returning.iter().map(|projection| &projection.expr))
+            {
+                validate_rule_expr_scopes(expr)?;
+            }
+            Ok(())
+        }
+        Statement::Delete(delete) => {
+            validate_rule_ctes(&delete.with)?;
+            if let Some(using) = &delete.using {
+                validate_rule_from_scopes(using)?;
+            }
+            for expr in delete
+                .r#where
+                .iter()
+                .chain(delete.returning.iter().map(|projection| &projection.expr))
+            {
+                validate_rule_expr_scopes(expr)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 impl Engine {
     pub(crate) fn resolve_rule_relation(&self, name: &str) -> Result<RelationIdentity, SQLError> {
         if let Ok(relation) = RelationIdentity::from_legacy_name(name) {
@@ -366,7 +692,10 @@ impl Engine {
         })
     }
 
-    fn rule_relation_columns(&self, name: &str) -> Result<Vec<(String, ColumnType)>, SQLError> {
+    pub(crate) fn rule_relation_columns(
+        &self,
+        name: &str,
+    ) -> Result<Vec<(String, ColumnType)>, SQLError> {
         if let Some(columns) = self
             .try_describe_table_row_type(name)
             .map_err(|error| SQLError::Internal(format!("read rule columns: {error}")))?
@@ -536,11 +865,9 @@ impl Engine {
             _ => return Ok(std::collections::BTreeSet::new()),
         };
         Ok(self
-            .try_describe_table_row_type(table)
-            .map_err(|error| SQLError::Internal(format!("read rule action columns: {error}")))?
-            .ok_or_else(|| SQLError::UnknownTable(table.clone()))?
+            .rule_relation_columns(table)?
             .into_iter()
-            .map(|column| column.name)
+            .map(|(column, _)| column)
             .collect())
     }
 
@@ -568,6 +895,14 @@ impl Engine {
         if let Some(condition) = definition.condition.as_mut() {
             self.validate_rule_condition(condition, &columns, definition.event)?;
         }
+        if definition.condition.is_some()
+            && definition.actions.iter().any(rule_action_has_set_operation)
+        {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "conditional UNION/INTERSECT/EXCEPT statements are not implemented".into(),
+            });
+        }
         let returning_actions = definition
             .actions
             .iter()
@@ -593,10 +928,10 @@ impl Engine {
         }
         for action in &mut definition.actions {
             self.canonicalize_rule_action_target(action)?;
+            validate_rule_action_reference_scopes(action)?;
             let action_columns = self.rule_action_target_columns(action)?;
             let bound = crate::engine_events::bind_rule_action(
                 action,
-                definition.event,
                 &action_columns,
                 &mut RuleRowTypeResolver {
                     columns: &columns,

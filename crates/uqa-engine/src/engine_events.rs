@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-use uqa_sql::ast::{CreateRule, CreateTrigger, EventEnableMode, Projection, RuleEvent, Statement};
+use uqa_sql::ast::{CreateRule, CreateTrigger, EventEnableMode, Projection, Statement};
 use uqa_sql::plpgsql::{bind_expr, bind_statement, ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
 
@@ -39,12 +39,10 @@ struct StoredRuleCatalog {
     rules: Vec<StoredRule>,
 }
 
-/// Bind an action's event-row OLD/NEW references while preserving DML
-/// RETURNING references that `PostgreSQL` resolves against the action target's
-/// own OLD/NEW images first.
+/// Bind an action body's event-row OLD/NEW references while preserving DML
+/// RETURNING OLD/NEW references for the action target's own row images.
 pub(crate) fn bind_rule_action(
     action: &Statement,
-    event: RuleEvent,
     action_columns: &BTreeSet<String>,
     resolver: &mut dyn VariableResolver,
 ) -> Result<Statement, SQLError> {
@@ -75,10 +73,8 @@ pub(crate) fn bind_rule_action(
     };
     let mut bound = bind_statement(&body, resolver)?;
     let mut returning_resolver = RuleActionReturningResolver {
-        event,
         action_columns,
         aliases: &aliases,
-        event_resolver: resolver,
     };
     let returning = returning
         .iter()
@@ -99,27 +95,25 @@ pub(crate) fn bind_rule_action(
 }
 
 struct RuleActionReturningResolver<'a> {
-    event: RuleEvent,
     action_columns: &'a BTreeSet<String>,
     aliases: &'a uqa_sql::ast::ReturningAliases,
-    event_resolver: &'a mut dyn VariableResolver,
 }
 
 impl RuleActionReturningResolver<'_> {
-    fn action_image_alias(&self, qualifier: &str) -> Option<bool> {
+    fn is_action_image_alias(&self, qualifier: &str) -> bool {
         if qualifier.eq_ignore_ascii_case(&self.aliases.old) {
-            return Some(self.aliases.old_explicit);
+            return true;
         }
         if qualifier.eq_ignore_ascii_case(&self.aliases.new) {
-            return Some(self.aliases.new_explicit);
+            return true;
         }
-        None
+        false
     }
 }
 
 impl VariableResolver for RuleActionReturningResolver<'_> {
-    fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
-        self.event_resolver.resolve_name(name)
+    fn resolve_name(&mut self, _name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
+        Ok(None)
     }
 
     fn resolve_qualified(
@@ -127,23 +121,17 @@ impl VariableResolver for RuleActionReturningResolver<'_> {
         qualifier: &str,
         column: &str,
     ) -> Result<Option<ResolvedVariable>, SQLError> {
-        if let Some(explicit) = self.action_image_alias(qualifier) {
+        if self.is_action_image_alias(qualifier) {
             if self.action_columns.contains(column) {
                 return Ok(None);
             }
-            if explicit || self.event == RuleEvent::Insert {
-                return Err(SQLError::UnknownColumn(format!("{qualifier}.{column}")));
-            }
+            return Err(SQLError::UnknownColumn(format!("{qualifier}.{column}")));
         }
-        self.event_resolver.resolve_qualified(qualifier, column)
+        Ok(None)
     }
 
-    fn resolve_param(&mut self, index: usize) -> Result<Option<ResolvedVariable>, SQLError> {
-        self.event_resolver.resolve_param(index)
-    }
-
-    fn rewrite_name(&mut self, name: &str) -> Result<Option<uqa_sql::ast::Expr>, SQLError> {
-        self.event_resolver.rewrite_name(name)
+    fn resolve_param(&mut self, _index: usize) -> Result<Option<ResolvedVariable>, SQLError> {
+        Ok(None)
     }
 
     fn rewrite_qualified(
@@ -151,19 +139,13 @@ impl VariableResolver for RuleActionReturningResolver<'_> {
         qualifier: &str,
         column: &str,
     ) -> Result<Option<uqa_sql::ast::Expr>, SQLError> {
-        if let Some(explicit) = self.action_image_alias(qualifier) {
+        if self.is_action_image_alias(qualifier) {
             if self.action_columns.contains(column) {
                 return Ok(None);
             }
-            if explicit || self.event == RuleEvent::Insert {
-                return Err(SQLError::UnknownColumn(format!("{qualifier}.{column}")));
-            }
+            return Err(SQLError::UnknownColumn(format!("{qualifier}.{column}")));
         }
-        self.event_resolver.rewrite_qualified(qualifier, column)
-    }
-
-    fn rewrite_param(&mut self, index: usize) -> Result<Option<uqa_sql::ast::Expr>, SQLError> {
-        self.event_resolver.rewrite_param(index)
+        Ok(None)
     }
 }
 

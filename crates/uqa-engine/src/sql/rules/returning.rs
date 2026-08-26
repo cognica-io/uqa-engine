@@ -40,10 +40,6 @@ impl RuleReturningResult {
         }
     }
 
-    pub(super) fn has_rows(&self) -> bool {
-        !self.current.is_empty()
-    }
-
     pub(in crate::sql) fn project(
         self,
         engine: &Engine,
@@ -135,6 +131,15 @@ pub(super) fn statement_has_returning(statement: &Statement) -> bool {
         Statement::Update(statement) => !statement.returning.is_empty(),
         Statement::Delete(statement) => !statement.returning.is_empty(),
         _ => false,
+    }
+}
+
+pub(super) fn clear_statement_returning(statement: &mut Statement) {
+    match statement {
+        Statement::Insert(statement) => statement.returning.clear(),
+        Statement::Update(statement) => statement.returning.clear(),
+        Statement::Delete(statement) => statement.returning.clear(),
+        _ => {}
     }
 }
 

@@ -254,7 +254,7 @@ fn rule_actions_execute_once_over_the_qualified_row_set() {
     );
     exec(
         &engine,
-        "CREATE RULE b_update_once AS ON UPDATE TO set_rule_source DO ALSO UPDATE set_rule_target SET value = NEW.id",
+        "CREATE RULE b_update_once AS ON UPDATE TO set_rule_source DO ALSO UPDATE set_rule_target SET value = NEW.id WHERE NEW.id = 1",
     );
 
     exec(&engine, "UPDATE set_rule_source SET value = value + 1");
@@ -278,6 +278,189 @@ fn rule_actions_execute_once_over_the_qualified_row_set() {
             "event"
         ),
         ["INSERT", "UPDATE"]
+    );
+}
+
+#[test]
+fn rule_action_lateral_sources_see_the_set_oriented_event_relation() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE lateral_rule_event (id INTEGER PRIMARY KEY, value INTEGER)",
+    );
+    exec(&engine, "CREATE TABLE lateral_rule_log (value INTEGER)");
+    exec(
+        &engine,
+        "INSERT INTO lateral_rule_event VALUES (1, 10), (2, 20)",
+    );
+    exec(
+        &engine,
+        "CREATE RULE lateral_rule AS ON UPDATE TO lateral_rule_event DO ALSO INSERT INTO lateral_rule_log SELECT item.value FROM LATERAL (SELECT NEW.value AS value) AS item",
+    );
+
+    exec(&engine, "UPDATE lateral_rule_event SET value = value + 1");
+
+    assert_eq!(
+        exec(&engine, "SELECT value FROM lateral_rule_log ORDER BY value")
+            .rows
+            .iter()
+            .map(|row| row.get("value"))
+            .collect::<Vec<_>>(),
+        [Some(&Value::Int(11)), Some(&Value::Int(21))]
+    );
+}
+
+#[test]
+fn rule_action_internal_source_names_cannot_shadow_user_aliases() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE alias_rule_event (id INTEGER PRIMARY KEY, value INTEGER)",
+    );
+    exec(&engine, "CREATE TABLE alias_rule_source (__new_0 INTEGER)");
+    exec(
+        &engine,
+        "CREATE TABLE alias_rule_log (event_id INTEGER, source_value INTEGER)",
+    );
+    exec(&engine, "INSERT INTO alias_rule_event VALUES (1, 10)");
+    exec(&engine, "INSERT INTO alias_rule_source VALUES (999)");
+    exec(
+        &engine,
+        "CREATE RULE alias_rule AS ON UPDATE TO alias_rule_event DO ALSO INSERT INTO alias_rule_log SELECT NEW.id, __uqa_rule_rows_0_0.__new_0 FROM alias_rule_source AS __uqa_rule_rows_0_0",
+    );
+
+    exec(&engine, "UPDATE alias_rule_event SET value = value + 1");
+
+    let result = exec(&engine, "SELECT event_id, source_value FROM alias_rule_log");
+    assert_eq!(result.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(result.value_at(0, 1), Some(&Value::Int(999)));
+}
+
+#[test]
+fn rule_provider_returning_is_lazy_and_uses_only_action_row_images() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE SEQUENCE rule_returning_side_effect");
+    exec(&engine, "CREATE TABLE lazy_returning_event (id BIGINT)");
+    exec(&engine, "CREATE TABLE lazy_returning_action (id BIGINT)");
+    exec(
+        &engine,
+        "CREATE RULE lazy_returning_rule AS ON INSERT TO lazy_returning_event DO INSTEAD INSERT INTO lazy_returning_action VALUES (NEW.id) RETURNING nextval('rule_returning_side_effect')",
+    );
+
+    exec(&engine, "INSERT INTO lazy_returning_event VALUES (10)");
+
+    assert_eq!(
+        exec(&engine, "SELECT nextval('rule_returning_side_effect')").value_at(0, 0),
+        Some(&Value::Int(1))
+    );
+    assert_eq!(
+        exec(&engine, "SELECT id FROM lazy_returning_action").value_at(0, 0),
+        Some(&Value::Int(10))
+    );
+
+    exec(
+        &engine,
+        "CREATE TABLE action_image_event (x INTEGER, y INTEGER)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE action_image_target (id INTEGER, value INTEGER)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO action_image_event VALUES (1, 10), (2, 20)",
+    );
+    exec(
+        &engine,
+        "CREATE RULE action_image_rule AS ON UPDATE TO action_image_event DO INSTEAD INSERT INTO action_image_target VALUES (42, 43) RETURNING NEW.id, NEW.value",
+    );
+
+    let result = exec(
+        &engine,
+        "UPDATE action_image_event SET y = y + 1 RETURNING x, y",
+    );
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.value_at(0, 0), Some(&Value::Int(42)));
+    assert_eq!(result.value_at(0, 1), Some(&Value::Int(43)));
+    assert_eq!(
+        exec(&engine, "SELECT count(*) FROM action_image_target").value_at(0, 0),
+        Some(&Value::Int(1))
+    );
+}
+
+#[test]
+fn rule_action_query_scope_restrictions_match_postgresql() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE scoped_rule_event (id INTEGER)");
+    exec(
+        &engine,
+        "CREATE TABLE scoped_rule_target (id INTEGER PRIMARY KEY)",
+    );
+
+    let set_operation = engine
+        .sql(
+            "CREATE RULE set_operation_rule AS ON INSERT TO scoped_rule_event DO ALSO INSERT INTO scoped_rule_target SELECT NEW.id UNION ALL SELECT 999",
+            &[],
+        )
+        .expect_err("set-operation members cannot reference the event relation");
+    assert_eq!(set_operation.sqlstate(), Some("42P10"));
+
+    exec(
+        &engine,
+        "CREATE RULE constant_set_operation_rule AS ON INSERT TO scoped_rule_event DO ALSO INSERT INTO scoped_rule_target SELECT 1000 UNION ALL SELECT 1001",
+    );
+    let conditional_set_operation = engine
+        .sql(
+            "CREATE RULE conditional_set_operation_rule AS ON UPDATE TO scoped_rule_event WHERE NEW.id > 0 DO ALSO INSERT INTO scoped_rule_target SELECT 1002 UNION ALL SELECT 1003",
+            &[],
+        )
+        .expect_err("conditional set-operation actions are rejected when the rule is created");
+    assert_eq!(conditional_set_operation.sqlstate(), Some("0A000"));
+    exec(&engine, "INSERT INTO scoped_rule_event VALUES (1)");
+    assert_eq!(
+        exec(&engine, "SELECT id FROM scoped_rule_target ORDER BY id")
+            .rows
+            .iter()
+            .map(|row| row.get("id"))
+            .collect::<Vec<_>>(),
+        [Some(&Value::Int(1000)), Some(&Value::Int(1001))]
+    );
+    exec(&engine, "DELETE FROM scoped_rule_event");
+    exec(&engine, "DELETE FROM scoped_rule_target");
+    let rewritten_set_operation = engine
+        .sql("INSERT INTO scoped_rule_event VALUES (1), (2)", &[])
+        .expect_err("INSERT rewrite makes a set-operation action conditional");
+    assert_eq!(rewritten_set_operation.sqlstate(), Some("0A000"));
+    assert!(exec(&engine, "SELECT * FROM scoped_rule_event")
+        .rows
+        .is_empty());
+    assert!(exec(&engine, "SELECT * FROM scoped_rule_target")
+        .rows
+        .is_empty());
+
+    let cte = engine
+        .sql(
+            "CREATE RULE cte_rule AS ON INSERT TO scoped_rule_event DO ALSO WITH item AS (SELECT NEW.id AS id) INSERT INTO scoped_rule_target SELECT id FROM item",
+            &[],
+        )
+        .expect_err("WITH queries cannot reference the event relation");
+    assert_eq!(cte.sqlstate(), Some("0A000"));
+
+    let conflict = engine
+        .sql(
+            "CREATE RULE conflict_rule AS ON INSERT TO scoped_rule_event DO ALSO INSERT INTO scoped_rule_target VALUES (NEW.id) ON CONFLICT (id) DO UPDATE SET id = NEW.id",
+            &[],
+        )
+        .expect_err("ON CONFLICT DO UPDATE cannot reference the event relation");
+    assert_eq!(conflict.sqlstate(), Some("42P01"));
+
+    exec(
+        &engine,
+        "CREATE VIEW scoped_rule_view AS SELECT scoped_rule_target.id FROM scoped_rule_target",
+    );
+    exec(
+        &engine,
+        "CREATE RULE view_action_rule AS ON INSERT TO scoped_rule_event DO ALSO INSERT INTO scoped_rule_view VALUES (NEW.id)",
     );
 }
 

@@ -348,7 +348,7 @@ CREATE RULE a_set_insert AS ON UPDATE TO set_rule_source DO ALSO INSERT INTO set
 -- @end
 
 -- @case create_set_rule_update_action ok
-CREATE RULE b_set_update AS ON UPDATE TO set_rule_source DO ALSO UPDATE set_rule_target SET value = NEW.id;
+CREATE RULE b_set_update AS ON UPDATE TO set_rule_source DO ALSO UPDATE set_rule_target SET value = NEW.id WHERE NEW.id = 1;
 -- @end
 
 -- @case execute_set_rule_actions ok
@@ -365,6 +365,155 @@ SELECT value FROM set_rule_target;
 
 -- @case set_rule_statement_cardinality rows
 SELECT event FROM set_rule_statements ORDER BY seq;
+-- @end
+
+-- @case create_lateral_rule_relations ok
+CREATE TABLE lateral_rule_event (id integer PRIMARY KEY, value integer);
+CREATE TABLE lateral_rule_log (value integer);
+-- @end
+
+-- @case seed_lateral_rule_event ok
+INSERT INTO lateral_rule_event VALUES (1, 10), (2, 20);
+-- @end
+
+-- @case create_lateral_rule_action ok
+CREATE RULE lateral_rule_action AS ON UPDATE TO lateral_rule_event DO ALSO INSERT INTO lateral_rule_log SELECT item.value FROM LATERAL (SELECT NEW.value AS value) AS item;
+-- @end
+
+-- @case execute_lateral_rule_action ok
+UPDATE lateral_rule_event SET value = value + 1;
+-- @end
+
+-- @case lateral_rule_action_rows rows
+SELECT value FROM lateral_rule_log ORDER BY value;
+-- @end
+
+-- @case create_alias_collision_rule_relations ok
+CREATE TABLE alias_collision_rule_event (id integer PRIMARY KEY, value integer);
+CREATE TABLE alias_collision_rule_source (__new_0 integer);
+CREATE TABLE alias_collision_rule_log (event_id integer, source_value integer);
+-- @end
+
+-- @case seed_alias_collision_rule_relations ok
+INSERT INTO alias_collision_rule_event VALUES (1, 10);
+INSERT INTO alias_collision_rule_source VALUES (999);
+-- @end
+
+-- @case create_alias_collision_rule_action ok
+CREATE RULE alias_collision_rule_action AS ON UPDATE TO alias_collision_rule_event DO ALSO INSERT INTO alias_collision_rule_log SELECT NEW.id, __uqa_rule_rows_0_0.__new_0 FROM alias_collision_rule_source AS __uqa_rule_rows_0_0;
+-- @end
+
+-- @case execute_alias_collision_rule_action ok
+UPDATE alias_collision_rule_event SET value = value + 1;
+-- @end
+
+-- @case alias_collision_rule_action_rows rows
+SELECT event_id, source_value FROM alias_collision_rule_log;
+-- @end
+
+-- @case create_lazy_rule_returning_relations ok
+CREATE SEQUENCE lazy_rule_returning_sequence START 1;
+CREATE TABLE lazy_rule_returning_event (id bigint);
+CREATE TABLE lazy_rule_returning_action (id bigint);
+-- @end
+
+-- @case create_lazy_rule_returning_provider ok
+CREATE RULE lazy_rule_returning_provider AS ON INSERT TO lazy_rule_returning_event DO INSTEAD INSERT INTO lazy_rule_returning_action VALUES (NEW.id) RETURNING nextval('lazy_rule_returning_sequence');
+-- @end
+
+-- @case execute_lazy_rule_returning_without_outer_projection ok
+INSERT INTO lazy_rule_returning_event VALUES (10);
+-- @end
+
+-- @case lazy_rule_returning_sequence_rows rows
+SELECT nextval('lazy_rule_returning_sequence');
+-- @end
+
+-- @case lazy_rule_returning_action_rows rows
+SELECT id FROM lazy_rule_returning_action;
+-- @end
+
+-- @case create_action_image_rule_relations ok
+CREATE TABLE action_image_rule_event (x integer, y integer);
+CREATE TABLE action_image_rule_target (id integer, value integer);
+-- @end
+
+-- @case seed_action_image_rule_event ok
+INSERT INTO action_image_rule_event VALUES (1, 10), (2, 20);
+-- @end
+
+-- @case create_action_image_rule_provider ok
+CREATE RULE action_image_rule_provider AS ON UPDATE TO action_image_rule_event DO INSTEAD INSERT INTO action_image_rule_target VALUES (42, 43) RETURNING NEW.id, NEW.value;
+-- @end
+
+-- @case action_image_rule_provider_rows rows
+UPDATE action_image_rule_event SET y = y + 1 RETURNING x, y;
+-- @end
+
+-- @case action_image_rule_target_rows rows
+SELECT id, value FROM action_image_rule_target;
+-- @end
+
+-- @case create_scoped_rule_relations ok
+CREATE TABLE scoped_rule_event (event_value integer);
+CREATE TABLE scoped_rule_target (action_value integer PRIMARY KEY);
+-- @end
+
+-- @case set_operation_rule_reference_rejected error
+CREATE RULE set_operation_rule AS ON INSERT TO scoped_rule_event DO ALSO INSERT INTO scoped_rule_target SELECT NEW.event_value UNION ALL SELECT 999;
+-- @end
+
+-- @case create_constant_set_operation_rule ok
+CREATE RULE constant_set_operation_rule AS ON INSERT TO scoped_rule_event DO ALSO INSERT INTO scoped_rule_target SELECT 1000 UNION ALL SELECT 1001;
+-- @end
+
+-- @case conditional_set_operation_rule_rejected error
+CREATE RULE conditional_set_operation_rule AS ON UPDATE TO scoped_rule_event WHERE NEW.event_value > 0 DO ALSO INSERT INTO scoped_rule_target SELECT 1002 UNION ALL SELECT 1003;
+-- @end
+
+-- @case execute_single_row_set_operation_rule ok
+INSERT INTO scoped_rule_event VALUES (1);
+-- @end
+
+-- @case single_row_set_operation_rule_rows rows
+SELECT action_value FROM scoped_rule_target ORDER BY action_value;
+-- @end
+
+-- @case clear_single_row_set_operation_rule ok
+DELETE FROM scoped_rule_event;
+DELETE FROM scoped_rule_target;
+-- @end
+
+-- @case rewritten_set_operation_rule_rejected error
+INSERT INTO scoped_rule_event VALUES (1), (2);
+-- @end
+
+-- @case rewritten_set_operation_event_rollback rows
+SELECT count(*) FROM scoped_rule_event;
+-- @end
+
+-- @case rewritten_set_operation_action_rollback rows
+SELECT count(*) FROM scoped_rule_target;
+-- @end
+
+-- @case cte_rule_reference_rejected error
+CREATE RULE cte_rule AS ON INSERT TO scoped_rule_event DO ALSO WITH item AS (SELECT NEW.event_value AS value) INSERT INTO scoped_rule_target SELECT value FROM item;
+-- @end
+
+-- @case conflict_rule_reference_rejected error
+CREATE RULE conflict_rule AS ON INSERT TO scoped_rule_event DO ALSO INSERT INTO scoped_rule_target VALUES (NEW.event_value) ON CONFLICT (action_value) DO UPDATE SET action_value = NEW.event_value;
+-- @end
+
+-- @case returning_event_image_reference_rejected error
+CREATE RULE returning_event_image_rule AS ON UPDATE TO scoped_rule_event DO INSTEAD INSERT INTO scoped_rule_target VALUES (1) RETURNING NEW.event_value;
+-- @end
+
+-- @case create_rule_action_view ok
+CREATE VIEW scoped_rule_view AS SELECT action_value FROM scoped_rule_target;
+-- @end
+
+-- @case create_view_target_rule_action ok
+CREATE RULE view_target_rule_action AS ON INSERT TO scoped_rule_event DO ALSO INSERT INTO scoped_rule_view VALUES (NEW.event_value);
 -- @end
 
 -- @case create_insert_returning_event ok

@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::{DocId, Value};
 use uqa_execution::OwnedPhysicalRow;
 use uqa_sql::ast::{Expr, RuleEvent, Statement};
-use uqa_sql::plpgsql::{bind_expr, bind_statement, ResolvedVariable, VariableResolver};
+use uqa_sql::plpgsql::{bind_expr, ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
 
@@ -23,8 +23,8 @@ use crate::{Engine, RelationIdentity};
 
 use actions::{bind_insert_values_action, bind_set_oriented_action};
 use returning::{
-    augment_rule_returning_action, capture_rule_returning_result, rule_returning_columns,
-    statement_has_returning,
+    augment_rule_returning_action, capture_rule_returning_result, clear_statement_returning,
+    rule_returning_columns, statement_has_returning,
 };
 pub(in crate::sql) use returning::{validate_rule_returning_contract, RuleReturningResult};
 
@@ -91,12 +91,14 @@ impl PreparedRuleBatch {
                     .any(statement_has_returning)
             });
         let mut returning = provider_exists.then(RuleReturningResult::empty);
+        let mut provider_captured = false;
         for (rule_index, prepared) in self.rules.iter().enumerate() {
             for (action_index, action) in prepared.rule.definition.actions.iter().enumerate() {
                 if prepared.matching_rows.is_empty() {
                     continue;
                 }
-                let captures_action = capture_returning && statement_has_returning(action);
+                let action_returns = statement_has_returning(action);
+                let captures_action = capture_returning && action_returns;
                 let captures_source_context = captures_action
                     && matches!(action, Statement::Update(_) | Statement::Delete(_))
                     && prepared.matching_rows.iter().any(|row_index| {
@@ -112,13 +114,23 @@ impl PreparedRuleBatch {
                         .copied()
                         .unwrap_or(false)
                     || captures_source_context;
+                if needs_row_source
+                    && prepared.matching_rows.len() > 1
+                    && statement_has_set_operation(action)
+                {
+                    return Err(SQLError::Routine {
+                        sqlstate: "0A000".into(),
+                        message:
+                            "conditional UNION/INTERSECT/EXCEPT statements are not implemented"
+                                .into(),
+                    });
+                }
                 let (mut bound, source_index) = if needs_row_source
                     && matches!(action, Statement::Insert(insert) if !insert.rows.is_empty())
                 {
                     (
                         bind_insert_values_action(
                             engine,
-                            self.event,
                             action,
                             &prepared.matching_rows,
                             &self.rows,
@@ -129,7 +141,6 @@ impl PreparedRuleBatch {
                 } else if needs_row_source {
                     let bound = bind_set_oriented_action(
                         engine,
-                        self.event,
                         action,
                         &prepared.matching_rows,
                         &self.rows,
@@ -142,7 +153,16 @@ impl PreparedRuleBatch {
                     (action.clone(), None)
                 };
                 if captures_action {
+                    if provider_captured {
+                        return Err(SQLError::Routine {
+                            sqlstate: "0A000".into(),
+                            message: "cannot have RETURNING lists in multiple rules".into(),
+                        });
+                    }
+                    provider_captured = true;
                     augment_rule_returning_action(engine, &mut bound, source_index)?;
+                } else if action_returns {
+                    clear_statement_returning(&mut bound);
                 }
                 let result = super::execute_compiled_statement(engine, bound, &[])?;
                 if captures_action {
@@ -156,20 +176,22 @@ impl PreparedRuleBatch {
                         definitions,
                         captures_source_context.then_some(self.rows.as_slice()),
                     )?;
-                    if returning
-                        .as_ref()
-                        .is_some_and(RuleReturningResult::has_rows)
-                    {
-                        return Err(SQLError::Routine {
-                            sqlstate: "0A000".into(),
-                            message: "cannot have RETURNING lists in multiple rules".into(),
-                        });
-                    }
                     returning = Some(captured);
                 }
             }
         }
         Ok(returning)
+    }
+}
+
+fn statement_has_set_operation(statement: &Statement) -> bool {
+    match statement {
+        Statement::Select(select) => select.set_op.is_some(),
+        Statement::Insert(insert) => insert
+            .select_source
+            .as_ref()
+            .is_some_and(|select| select.set_op.is_some()),
+        _ => false,
     }
 }
 
@@ -184,11 +206,9 @@ fn rule_action_target_columns(
         _ => return Ok(BTreeSet::new()),
     };
     Ok(engine
-        .try_describe_table_row_type(table)
-        .map_err(|error| SQLError::Internal(format!("read rule action row type: {error}")))?
-        .ok_or_else(|| SQLError::UnknownTable(table.clone()))?
+        .rule_relation_columns(table)?
         .into_iter()
-        .map(|column| column.name)
+        .map(|(column, _)| column)
         .collect())
 }
 
@@ -223,8 +243,11 @@ pub(in crate::sql) fn prepare_rule_batch(
             .definition
             .actions
             .iter()
-            .map(statement_references_rule_row)
-            .collect::<Vec<_>>();
+            .map(|action| {
+                let action_columns = rule_action_target_columns(engine, action)?;
+                statement_references_rule_row(action, &action_columns)
+            })
+            .collect::<Result<Vec<_>, SQLError>>()?;
         let mut matching_rows = Vec::new();
         for (index, row) in rows.iter().enumerate() {
             if rule_condition_matches(engine, rule.definition.condition.as_ref(), row, &columns)? {
@@ -448,8 +471,11 @@ impl VariableResolver for RuleReferenceResolver {
     }
 }
 
-fn statement_references_rule_row(statement: &Statement) -> bool {
+fn statement_references_rule_row(
+    statement: &Statement,
+    action_columns: &BTreeSet<String>,
+) -> Result<bool, SQLError> {
     let mut resolver = RuleReferenceResolver { referenced: false };
-    let _ = bind_statement(statement, &mut resolver);
-    resolver.referenced
+    let _ = crate::engine_events::bind_rule_action(statement, action_columns, &mut resolver)?;
+    Ok(resolver.referenced)
 }
