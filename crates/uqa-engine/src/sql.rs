@@ -58,6 +58,7 @@ mod plan_executor;
 mod planning;
 mod plpgsql_exec;
 mod row_functions;
+mod rules;
 mod scalar;
 mod select;
 mod triggers;
@@ -116,6 +117,21 @@ pub(crate) use row_functions::{
     run_calibrated_vector_match_public, run_multi_field_match_in_execution,
     run_multi_field_match_public,
 };
+
+pub(crate) fn call_bound_engine_builtin(
+    engine: &Engine,
+    binding: &uqa_sql::ast::FunctionBinding,
+    arguments: &[(Option<String>, Value)],
+) -> Option<Result<Value, SQLError>> {
+    if !binding.builtin {
+        return None;
+    }
+    let values = arguments
+        .iter()
+        .map(|(_, value)| value.clone())
+        .collect::<Vec<_>>();
+    from_rows::engine_catalog_scalar_value(engine, &binding.name, &values)
+}
 pub(crate) use select::CteScope;
 use select::{
     bind_projection_output_schema, build_projection_physical_row_with_ctes, projection_columns,
@@ -236,6 +252,8 @@ pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
                         | "current_schemas"
                         | "pg_get_expr"
                         | "pg_get_partkeydef"
+                        | "pg_get_triggerdef"
+                        | "pg_get_ruledef"
                 )
         }
         _ => false,

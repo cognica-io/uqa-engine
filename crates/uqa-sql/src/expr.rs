@@ -108,6 +108,18 @@ pub trait EngineHook {
         None
     }
 
+    /// Invoke an engine-backed built-in after an exact catalog binding has
+    /// selected it. Unlike `call_scalar_function`, this path is also available
+    /// when dynamic dispatch is disabled, so runtime callbacks cannot override
+    /// the stored built-in identity.
+    fn call_bound_builtin_function(
+        &self,
+        _binding: &crate::ast::FunctionBinding,
+        _args: &[(Option<String>, Value)],
+    ) -> Option<Result<Value>> {
+        None
+    }
+
     fn has_scalar_functions(&self) -> bool {
         true
     }

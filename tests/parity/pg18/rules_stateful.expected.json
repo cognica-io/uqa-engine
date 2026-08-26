@@ -1,0 +1,499 @@
+{
+  "schema_version": 1,
+  "fixture_sha256": "3b955b4a88c7911f0e28de62656c4443a2381934304c0d7200fc2da4bb6af15e",
+  "oracle": {
+    "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
+    "server_version_num": "180004",
+    "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "age_version": "1.8.0"
+  },
+  "cases": [
+    {
+      "name": "create_schema",
+      "kind": "ok"
+    },
+    {
+      "name": "create_source",
+      "kind": "ok"
+    },
+    {
+      "name": "create_items",
+      "kind": "ok"
+    },
+    {
+      "name": "create_log",
+      "kind": "ok"
+    },
+    {
+      "name": "create_condition_items",
+      "kind": "ok"
+    },
+    {
+      "name": "create_unqualified_insert_condition",
+      "kind": "ok"
+    },
+    {
+      "name": "exercise_unqualified_insert_condition",
+      "kind": "ok"
+    },
+    {
+      "name": "unqualified_insert_condition_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "create_unqualified_delete_condition",
+      "kind": "ok"
+    },
+    {
+      "name": "exercise_unqualified_delete_condition",
+      "kind": "ok"
+    },
+    {
+      "name": "unqualified_delete_condition_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "ambiguous_unqualified_update_condition",
+      "kind": "error",
+      "sqlstate": "42702"
+    },
+    {
+      "name": "create_nullable_rule_items",
+      "kind": "ok"
+    },
+    {
+      "name": "create_nullable_rule_log",
+      "kind": "ok"
+    },
+    {
+      "name": "create_nullable_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_missing_nullable_rule_value",
+      "kind": "ok"
+    },
+    {
+      "name": "missing_nullable_rule_value",
+      "kind": "rows",
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "name": "seed_source",
+      "kind": "ok"
+    },
+    {
+      "name": "create_insert_b",
+      "kind": "ok"
+    },
+    {
+      "name": "create_insert_a",
+      "kind": "ok"
+    },
+    {
+      "name": "create_insert_suppress",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_values",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_value_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "10",
+          "100"
+        ]
+      ]
+    },
+    {
+      "name": "insert_value_actions",
+      "kind": "rows",
+      "rows": [
+        [
+          "a:1:10"
+        ],
+        [
+          "a:2:20"
+        ],
+        [
+          "b:1:10"
+        ],
+        [
+          "b:2:20"
+        ]
+      ]
+    },
+    {
+      "name": "insert_select",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_select_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "10",
+          "100"
+        ],
+        [
+          "3",
+          "30",
+          "300"
+        ],
+        [
+          "4",
+          "40",
+          "400"
+        ]
+      ]
+    },
+    {
+      "name": "insert_select_actions",
+      "kind": "rows",
+      "rows": [
+        [
+          "a:1:10"
+        ],
+        [
+          "a:2:20"
+        ],
+        [
+          "b:1:10"
+        ],
+        [
+          "b:2:20"
+        ],
+        [
+          "a:3:30"
+        ],
+        [
+          "a:4:40"
+        ],
+        [
+          "b:3:30"
+        ],
+        [
+          "b:4:40"
+        ]
+      ]
+    },
+    {
+      "name": "create_update_log",
+      "kind": "ok"
+    },
+    {
+      "name": "create_update_constant",
+      "kind": "ok"
+    },
+    {
+      "name": "update_items",
+      "kind": "ok"
+    },
+    {
+      "name": "update_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "11"
+        ],
+        [
+          "3",
+          "31"
+        ],
+        [
+          "4",
+          "41"
+        ]
+      ]
+    },
+    {
+      "name": "update_actions",
+      "kind": "rows",
+      "rows": [
+        [
+          "update-constant"
+        ],
+        [
+          "u:1:10:11"
+        ],
+        [
+          "u:3:30:31"
+        ],
+        [
+          "u:4:40:41"
+        ]
+      ]
+    },
+    {
+      "name": "create_delete_log",
+      "kind": "ok"
+    },
+    {
+      "name": "create_delete_keep",
+      "kind": "ok"
+    },
+    {
+      "name": "delete_items",
+      "kind": "ok"
+    },
+    {
+      "name": "delete_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "4",
+          "41"
+        ]
+      ]
+    },
+    {
+      "name": "delete_actions",
+      "kind": "rows",
+      "rows": [
+        [
+          "d:1:11"
+        ],
+        [
+          "d:3:31"
+        ],
+        [
+          "d:4:41"
+        ]
+      ]
+    },
+    {
+      "name": "catalog_flags",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "catalog_rule",
+      "kind": "rows",
+      "rows": [
+        [
+          "a_insert",
+          "3",
+          "O",
+          "f",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "catalog_pg_rules",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "rule_items",
+          "a_insert",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "disable_insert_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "replace_disabled_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "disabled_mode_survives_replace",
+      "kind": "rows",
+      "rows": [
+        [
+          "D"
+        ]
+      ]
+    },
+    {
+      "name": "rename_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "enable_renamed_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "create_recursive_table",
+      "kind": "ok"
+    },
+    {
+      "name": "create_recursive_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "recursive_insert",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "recursive_rollback",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "on_conflict_with_rule",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "merge_with_rule",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "insert_old_rejected",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "delete_new_rejected",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "non_select_return_name_rejected",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "create_column_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "create_deparse_literal_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "rename_rule_column",
+      "kind": "ok"
+    },
+    {
+      "name": "renamed_rule_literal_preserved",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "renamed_rule_column_executes",
+      "kind": "ok"
+    },
+    {
+      "name": "renamed_rule_column_action",
+      "kind": "rows",
+      "rows": [
+        [
+          "401"
+        ]
+      ]
+    },
+    {
+      "name": "drop_rule_column_restrict",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "drop_rule_column_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "cascaded_rule_removed",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_view",
+      "kind": "ok"
+    },
+    {
+      "name": "create_materialized_view",
+      "kind": "ok"
+    },
+    {
+      "name": "materialized_view_rule_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "replace_return_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "replaced_view_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "3",
+          "31"
+        ],
+        [
+          "4",
+          "41"
+        ]
+      ]
+    },
+    {
+      "name": "return_rule_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "drop_return_rule_rejected",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "rename_return_rule_rejected",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "disable_return_rule_rejected",
+      "kind": "error",
+      "sqlstate": "42809"
+    }
+  ]
+}

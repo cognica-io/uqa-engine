@@ -67,10 +67,34 @@ pub(in crate::sql) fn run_alter_table(
         .map_err(|err| ddl_storage_error("ALTER TABLE", err))?
     {
         Some((canonical, "table")) => stmt.table = canonical,
+        Some((canonical, "view"))
+            if stmt
+                .actions
+                .iter()
+                .all(|action| matches!(action, AlterTableAction::RenameRule { .. })) =>
+        {
+            stmt.table = canonical;
+            engine.lock_relation(
+                &stmt.table,
+                crate::row_locks::RelationLockMode::AccessExclusive,
+            )?;
+            return engine.with_implicit_transaction(move |engine| {
+                for action in stmt.actions {
+                    match action {
+                        AlterTableAction::RenameRule { from, to } => {
+                            engine.rename_rule(&stmt.table, &from, &to)?;
+                        }
+                        _ => unreachable!("view ALTER was restricted to rule lifecycle actions"),
+                    }
+                }
+                Ok(SQLResult::empty())
+            });
+        }
         Some((canonical, kind)) => {
-            return Err(SQLError::Unsupported(format!(
-                "ALTER TABLE: relation `{canonical}` is a {kind}, not a table"
-            )));
+            return Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!("ALTER TABLE: relation `{canonical}` is a {kind}, not a table"),
+            });
         }
         None if stmt.if_exists => return Ok(SQLResult::empty()),
         None => {
@@ -323,7 +347,7 @@ fn run_alter_table_action(
             if_exists,
             cascade: false,
         } => {
-            engine.handle_drop_column_trigger_dependencies(&stmt.table, &name, false)?;
+            engine.handle_drop_column_event_dependencies(&stmt.table, &name, false)?;
             drop_column_restrict(engine, &stmt.table, &name, if_exists)?;
         }
         AlterTableAction::DropColumn {
@@ -331,7 +355,7 @@ fn run_alter_table_action(
             if_exists,
             cascade: true,
         } => {
-            engine.handle_drop_column_trigger_dependencies(&stmt.table, &name, true)?;
+            engine.handle_drop_column_event_dependencies(&stmt.table, &name, true)?;
             drop_column_cascade(engine, &stmt.table, &name, if_exists)?;
         }
         AlterTableAction::RenameColumn { from, to } => {
@@ -377,12 +401,18 @@ fn run_alter_table_action(
         AlterTableAction::RenameTrigger { from, to } => {
             engine.rename_trigger(&stmt.table, &from, &to)?;
         }
+        AlterTableAction::RenameRule { from, to } => {
+            engine.rename_rule(&stmt.table, &from, &to)?;
+        }
         AlterTableAction::SetTriggerEnableMode {
             name,
             user_only: _,
             mode,
         } => {
             engine.set_trigger_enable_mode(&stmt.table, name.as_deref(), mode)?;
+        }
+        AlterTableAction::SetRuleEnableMode { name, mode } => {
+            engine.set_rule_enable_mode(&stmt.table, &name, mode)?;
         }
         AlterTableAction::SetDefault { name, default } => {
             reject_default_change_on_generated_column(engine, &stmt.table, &name)?;

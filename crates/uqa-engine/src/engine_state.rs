@@ -104,6 +104,9 @@ pub(super) struct DurableCatalogState {
             BTreeMap<String, super::engine_events::StoredTrigger>,
         >,
     >,
+    pub(super) rules: RwLock<
+        BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, super::engine_events::StoredRule>>,
+    >,
 }
 
 #[derive(Clone)]
@@ -127,6 +130,8 @@ pub(super) struct DurableCatalogSnapshot {
         uqa_storage::RelationIdentity,
         BTreeMap<String, super::engine_events::StoredTrigger>,
     >,
+    rules:
+        BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, super::engine_events::StoredRule>>,
 }
 
 impl DurableCatalogState {
@@ -151,6 +156,7 @@ impl DurableCatalogState {
                 super::engine_roles::RoleDefinition::bootstrap(),
             )])),
             triggers: RwLock::new(BTreeMap::new()),
+            rules: RwLock::new(BTreeMap::new()),
         }
     }
 
@@ -175,6 +181,7 @@ impl DurableCatalogState {
             sql_user_functions: self.sql_user_functions.read().clone(),
             roles: self.roles.read().clone(),
             triggers: self.triggers.read().clone(),
+            rules: self.rules.read().clone(),
         }
     }
 
@@ -196,6 +203,7 @@ impl DurableCatalogState {
         *self.sql_user_functions.write() = snapshot.sql_user_functions.clone();
         *self.roles.write() = snapshot.roles.clone();
         *self.triggers.write() = snapshot.triggers.clone();
+        *self.rules.write() = snapshot.rules.clone();
     }
 }
 

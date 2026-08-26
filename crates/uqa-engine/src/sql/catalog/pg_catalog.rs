@@ -42,7 +42,7 @@ pub(super) fn build_pg_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLErro
                         .any(|idx| idx.table_name == name),
                 ),
             ),
-            ("hasrules", bool_value(false)),
+            ("hasrules", bool_value(engine.relation_has_rules(&name)?)),
             (
                 "hastriggers",
                 bool_value(engine.relation_has_triggers(&name)?),

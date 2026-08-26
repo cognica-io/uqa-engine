@@ -436,6 +436,14 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 self.engine.drop_trigger(statement)?;
                 Ok(SQLResult::empty())
             }
+            CommandPlan::CreateRule(statement) => {
+                self.engine.register_rule(statement.clone())?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::DropRule(statement) => {
+                self.engine.drop_rule(statement)?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::AlterTable(statement) => {
                 run_alter_table(self.engine, (**statement).clone())
             }

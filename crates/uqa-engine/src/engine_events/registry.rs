@@ -8,14 +8,167 @@
 
 use std::collections::BTreeMap;
 
-use uqa_sql::ast::{CreateTrigger, DropTrigger, EventEnableMode};
+use uqa_sql::ast::{CreateRule, CreateTrigger, DropRule, DropTrigger, EventEnableMode};
 use uqa_sql::SQLError;
 
 use crate::{Engine, RelationIdentity};
 
-use super::{duplicate_object, undefined_object, StoredTrigger};
+use super::{duplicate_object, undefined_object, StoredRule, StoredTrigger};
 
 impl Engine {
+    pub(crate) fn register_rule(&self, mut definition: CreateRule) -> Result<(), SQLError> {
+        let relation = self.validate_rule_definition(&mut definition)?;
+        if definition.event == uqa_sql::ast::RuleEvent::Select {
+            if !definition.or_replace {
+                return Err(duplicate_object(
+                    "rule",
+                    &definition.name,
+                    &definition.table,
+                ));
+            }
+            let existing = self
+                .view_definition(&definition.table)?
+                .ok_or_else(|| SQLError::UnknownTable(definition.table.clone()))?;
+            let action = definition.actions.into_iter().next().ok_or_else(|| {
+                SQLError::Internal("validated ON SELECT rule lost its action".into())
+            })?;
+            let plan = uqa_planner::UnifiedPlan::lower_with(action, &|name: &str| {
+                self.has_registered_aggregate_function(name)
+            });
+            let plan = crate::sql::optimize_engine_plan(self, plan)?;
+            let uqa_planner::UnifiedPlan::Query(plan) = plan else {
+                return Err(SQLError::Internal(
+                    "ON SELECT rule action lowered to a command".into(),
+                ));
+            };
+            let output_columns = existing.output_columns.unwrap_or_default();
+            self.register_view_plan(crate::engine_session::ViewRegistration {
+                name: &definition.table,
+                column_names: &output_columns,
+                plan: *plan,
+                or_replace: true,
+                persistence: existing.persistence,
+                options: &existing.options,
+                params: &[],
+            })?;
+            return Ok(());
+        }
+        let mut rules = self.durable.rules.write();
+        let mut next = rules.clone();
+        let relation_rules = next.entry(relation).or_default();
+        if relation_rules.contains_key(&definition.name) && !definition.or_replace {
+            return Err(duplicate_object(
+                "rule",
+                &definition.name,
+                &definition.table,
+            ));
+        }
+        let enabled = relation_rules
+            .get(&definition.name)
+            .map_or(EventEnableMode::Origin, |rule| rule.enabled);
+        relation_rules.insert(
+            definition.name.clone(),
+            StoredRule {
+                definition,
+                enabled,
+            },
+        );
+        self.persist_rule_catalog_snapshot(&next)?;
+        *rules = next;
+        drop(rules);
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+
+    pub(crate) fn drop_rule(&self, statement: &DropRule) -> Result<(), SQLError> {
+        let relation = self.resolve_rule_relation(&statement.table)?;
+        let table = relation.qualified_name();
+        if statement.name == "_RETURN" && self.view_definition(&table)?.is_some() {
+            return Err(SQLError::Routine {
+                sqlstate: "2BP01".into(),
+                message: format!(
+                    "cannot drop rule _RETURN on view {} because view {} requires it\nHINT: You can drop view {} instead.",
+                    relation.name, relation.name, relation.name
+                ),
+            });
+        }
+        let mut rules = self.durable.rules.write();
+        let mut next = rules.clone();
+        let removed = next
+            .get_mut(&relation)
+            .and_then(|entries| entries.remove(&statement.name));
+        if removed.is_none() {
+            if statement.if_exists {
+                self.push_sql_notice(
+                    "NOTICE",
+                    &format!(
+                        "rule \"{}\" for relation \"{}\" does not exist, skipping",
+                        statement.name, table
+                    ),
+                );
+                return Ok(());
+            }
+            return Err(undefined_object("rule", &statement.name, &table));
+        }
+        if next.get(&relation).is_some_and(BTreeMap::is_empty) {
+            next.remove(&relation);
+        }
+        self.persist_rule_catalog_snapshot(&next)?;
+        *rules = next;
+        drop(rules);
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+
+    pub(crate) fn rename_rule(&self, table: &str, from: &str, to: &str) -> Result<(), SQLError> {
+        let relation = self.resolve_rule_relation(table)?;
+        let is_view = self.view_definition(&relation.qualified_name())?.is_some();
+        if is_view && from == "_RETURN" {
+            return Err(SQLError::Routine {
+                sqlstate: "42P17".into(),
+                message: "renaming an ON SELECT rule is not allowed".into(),
+            });
+        }
+        if is_view && to == "_RETURN" {
+            return Err(duplicate_object("rule", to, &relation.qualified_name()));
+        }
+        let mut rules = self.durable.rules.write();
+        let mut next = rules.clone();
+        let entries = next.entry(relation).or_default();
+        if entries.contains_key(to) {
+            return Err(duplicate_object("rule", to, table));
+        }
+        let mut rule = entries
+            .remove(from)
+            .ok_or_else(|| undefined_object("rule", from, table))?;
+        rule.definition.name = to.to_string();
+        entries.insert(to.to_string(), rule);
+        self.persist_rule_catalog_snapshot(&next)?;
+        *rules = next;
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+
+    pub(crate) fn set_rule_enable_mode(
+        &self,
+        table: &str,
+        name: &str,
+        mode: EventEnableMode,
+    ) -> Result<(), SQLError> {
+        let relation = self.resolve_rule_relation(table)?;
+        let mut rules = self.durable.rules.write();
+        let mut next = rules.clone();
+        next.entry(relation)
+            .or_default()
+            .get_mut(name)
+            .ok_or_else(|| undefined_object("rule", name, table))?
+            .enabled = mode;
+        self.persist_rule_catalog_snapshot(&next)?;
+        *rules = next;
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+
     pub(crate) fn register_trigger(&self, mut definition: CreateTrigger) -> Result<(), SQLError> {
         let relation = self.validate_trigger_definition(&mut definition)?;
         self.ensure_partition_trigger_name_available(

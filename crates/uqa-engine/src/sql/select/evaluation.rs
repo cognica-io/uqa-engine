@@ -937,6 +937,14 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         self.engine.call_registered_scalar_function(name, args)
     }
 
+    fn call_bound_builtin_function(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+        args: &[(Option<String>, Value)],
+    ) -> Option<std::result::Result<Value, SQLError>> {
+        crate::sql::call_bound_engine_builtin(self.engine, binding, args)
+    }
+
     fn has_scalar_functions(&self) -> bool {
         self.engine.has_registered_scalar_functions()
     }

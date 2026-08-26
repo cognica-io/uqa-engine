@@ -12,7 +12,7 @@ use super::administrative::{
 };
 use super::dml::{compile_delete, compile_update};
 use super::drop_alter::{compile_alter_table, compile_drop, compile_rename};
-use super::events::compile_create_trigger;
+use super::events::{compile_create_rule, compile_create_trigger};
 use super::merge::compile_merge;
 use super::relations::{
     compile_create_foreign_server, compile_create_foreign_table, compile_create_schema,
@@ -72,6 +72,7 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::CreateTrigStmt(stmt) => {
             compile_create_trigger(stmt).map(Statement::CreateTrigger)
         }
+        NodeEnum::RuleStmt(stmt) => compile_create_rule(stmt).map(Statement::CreateRule),
         NodeEnum::AlterTableStmt(stmt) => compile_alter_table(stmt),
         NodeEnum::RenameStmt(stmt) => compile_rename(stmt),
         NodeEnum::ViewStmt(stmt) => compile_create_view(stmt),

@@ -4,10 +4,10 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Durable row-trigger registry and PostgreSQL-compatible lifecycle.
+//! Durable row-trigger and rewrite-rule registries with PostgreSQL-compatible lifecycle.
 
 use serde::{Deserialize, Serialize};
-use uqa_sql::ast::{CreateTrigger, EventEnableMode};
+use uqa_sql::ast::{CreateRule, CreateTrigger, EventEnableMode};
 use uqa_sql::SQLError;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,10 +17,23 @@ pub(crate) struct StoredTrigger {
     pub(crate) enabled: EventEnableMode,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct StoredRule {
+    pub(crate) definition: CreateRule,
+    #[serde(default)]
+    pub(crate) enabled: EventEnableMode,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct StoredTriggerCatalog {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     triggers: Vec<StoredTrigger>,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct StoredRuleCatalog {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    rules: Vec<StoredRule>,
 }
 
 fn duplicate_object(kind: &str, name: &str, table: &str) -> SQLError {

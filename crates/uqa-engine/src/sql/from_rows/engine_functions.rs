@@ -24,6 +24,21 @@ pub(in crate::sql) fn engine_func_intercept(
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Option<Value>, SQLError> {
     let lower = crate::sql::builtin_function_dispatch_name(name);
+    if matches!(
+        lower.as_str(),
+        "pg_get_expr" | "pg_get_partkeydef" | "pg_get_triggerdef" | "pg_get_ruledef"
+    ) {
+        let values = args
+            .iter()
+            .map(evaluate)
+            .collect::<Result<Vec<_>, SQLError>>()?;
+        return engine_catalog_scalar_value(
+            require_projection_engine(engine, &lower)?,
+            &lower,
+            &values,
+        )
+        .transpose();
+    }
     match lower.as_str() {
         "uqa_highlight" => Ok(Some(run_uqa_highlight(row, args, evaluate)?)),
         "score_bm25" | "score_bayesian_bm25" => {
@@ -36,36 +51,6 @@ pub(in crate::sql) fn engine_func_intercept(
             args,
             evaluate,
         )?)),
-        "pg_get_expr" => {
-            let values = args
-                .iter()
-                .map(evaluate)
-                .collect::<Result<Vec<_>, SQLError>>()?;
-            Ok(Some(crate::sql::catalog::pg_get_expr_value(
-                require_projection_engine(engine, "pg_get_expr")?,
-                &values,
-            )?))
-        }
-        "pg_get_partkeydef" => {
-            let values = args
-                .iter()
-                .map(evaluate)
-                .collect::<Result<Vec<_>, SQLError>>()?;
-            Ok(Some(crate::sql::catalog::pg_get_partkeydef_value(
-                require_projection_engine(engine, "pg_get_partkeydef")?,
-                &values,
-            )?))
-        }
-        "pg_get_triggerdef" => {
-            let values = args
-                .iter()
-                .map(evaluate)
-                .collect::<Result<Vec<_>, SQLError>>()?;
-            Ok(Some(crate::sql::catalog::pg_get_triggerdef_value(
-                require_projection_engine(engine, "pg_get_triggerdef")?,
-                &values,
-            )?))
-        }
         "merge_action" => {
             if !args.is_empty() {
                 return Err(SQLError::BadArity {
@@ -131,6 +116,21 @@ pub(in crate::sql) fn engine_func_intercept(
         )?)),
         _ => Ok(None),
     }
+}
+
+pub(in crate::sql) fn engine_catalog_scalar_value(
+    engine: &Engine,
+    name: &str,
+    arguments: &[Value],
+) -> Option<Result<Value, SQLError>> {
+    let lower = crate::sql::builtin_function_dispatch_name(name);
+    Some(match lower.as_str() {
+        "pg_get_expr" => crate::sql::catalog::pg_get_expr_value(engine, arguments),
+        "pg_get_partkeydef" => crate::sql::catalog::pg_get_partkeydef_value(engine, arguments),
+        "pg_get_triggerdef" => crate::sql::catalog::pg_get_triggerdef_value(engine, arguments),
+        "pg_get_ruledef" => crate::sql::catalog::pg_get_ruledef_value(engine, arguments),
+        _ => return None,
+    })
 }
 
 pub(in crate::sql) fn score_projection_value(

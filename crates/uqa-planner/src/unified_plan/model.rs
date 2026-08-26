@@ -466,6 +466,8 @@ pub enum CommandPlan {
     DropRole(uqa_sql::ast::DropRoleStmt),
     CreateTrigger(uqa_sql::ast::CreateTrigger),
     DropTrigger(uqa_sql::ast::DropTrigger),
+    CreateRule(uqa_sql::ast::CreateRule),
+    DropRule(uqa_sql::ast::DropRule),
     DoBlock {
         language: String,
         body: String,

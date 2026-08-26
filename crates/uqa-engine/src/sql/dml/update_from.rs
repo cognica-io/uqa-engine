@@ -51,8 +51,7 @@ pub(in crate::sql) fn run_update_from(
     }
     let snapshot_ctes = ctes.returning_statement_snapshot_scope();
     let overlay = DmlCommandMutationOverlay::new(engine);
-    let mut prepared_updates = Vec::new();
-    let mut referential_actions = super::ReferentialActionContext::default();
+    let mut pending_updates = Vec::new();
     let mut locked_ids = std::collections::BTreeSet::new();
     for (storage_table, doc_id) in target_rows {
         cancel.check()?;
@@ -138,6 +137,46 @@ pub(in crate::sql) fn run_update_from(
             } else {
                 doc.remove(&assignment.column);
             }
+        }
+        pending_updates.push((storage_table, doc_id, original_doc, doc, source_context));
+    }
+    drop(overlay);
+    let rule_batch = crate::sql::rules::prepare_rule_batch(
+        engine,
+        &target,
+        uqa_sql::ast::RuleEvent::Update,
+        pending_updates
+            .iter()
+            .map(|(_, doc_id, old, new, _)| crate::sql::rules::RuleRowImage {
+                old_doc_id: Some(*doc_id),
+                old: Some(old.clone()),
+                new_doc_id: Some(*doc_id),
+                new: Some(new.clone()),
+            })
+            .collect(),
+    )?;
+    rule_batch.execute_actions(engine)?;
+    let update_rules = engine.rules_for(&target, uqa_sql::ast::RuleEvent::Update)?;
+    let update_original_query = !update_rules
+        .iter()
+        .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
+    if !update_rules.is_empty() && update_original_query {
+        crate::sql::triggers::fire_statement_triggers(
+            engine,
+            &target,
+            uqa_sql::ast::TriggerTiming::Before,
+            uqa_sql::ast::TriggerEvent::Update,
+            &assigned_columns,
+        )?;
+    }
+    let overlay = DmlCommandMutationOverlay::new(engine);
+    let mut prepared_updates = Vec::new();
+    let mut referential_actions = super::ReferentialActionContext::default();
+    for (index, (storage_table, doc_id, original_doc, mut doc, source_context)) in
+        pending_updates.into_iter().enumerate()
+    {
+        if rule_batch.suppresses(index) {
+            continue;
         }
         let Some(triggered_document) = crate::sql::triggers::fire_before_row_triggers(
             engine,

@@ -170,6 +170,8 @@ pub(super) fn optimize_command(
         | CommandPlan::DropRole(_)
         | CommandPlan::CreateTrigger(_)
         | CommandPlan::DropTrigger(_)
+        | CommandPlan::CreateRule(_)
+        | CommandPlan::DropRule(_)
         | CommandPlan::DoBlock { .. } => {}
     }
 }

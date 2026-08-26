@@ -33,6 +33,8 @@ pub(super) enum VirtualRelation {
     PgConstraint,
     PgIndex,
     PgTrigger,
+    PgRewrite,
+    PgRules,
     PgTables,
     PgViews,
     PgIndexes,
@@ -102,6 +104,8 @@ pub(super) fn resolve_virtual_relation(engine: &Engine, name: &str) -> Option<Vi
         }
         (_, true, "pg_index") | (false, false, "pg_index") => Some(VirtualRelation::PgIndex),
         (_, true, "pg_trigger") | (false, false, "pg_trigger") => Some(VirtualRelation::PgTrigger),
+        (_, true, "pg_rewrite") | (false, false, "pg_rewrite") => Some(VirtualRelation::PgRewrite),
+        (_, true, "pg_rules") | (false, false, "pg_rules") => Some(VirtualRelation::PgRules),
         (_, true, "pg_tables") | (false, false, "pg_tables") => Some(VirtualRelation::PgTables),
         (_, true, "pg_views") | (false, false, "pg_views") => Some(VirtualRelation::PgViews),
         (_, true, "pg_indexes") | (false, false, "pg_indexes") => Some(VirtualRelation::PgIndexes),
@@ -167,6 +171,7 @@ impl VirtualRelation {
                 | Self::PgConstraint
                 | Self::PgIndex
                 | Self::PgTrigger
+                | Self::PgRewrite
                 | Self::PgType
                 | Self::PgProc
                 | Self::PgDatabase
@@ -471,6 +476,22 @@ impl VirtualRelation {
                 "tgqual" => ColumnType::PgNodeTree,
                 "tgoldtable" => ColumnType::Name,
                 "tgnewtable" => ColumnType::Name,
+            ],
+            Self::PgRewrite => columns![
+                "oid" => ColumnType::Oid,
+                "rulename" => ColumnType::Name,
+                "ev_class" => ColumnType::Oid,
+                "ev_type" => ColumnType::InternalChar,
+                "ev_enabled" => ColumnType::InternalChar,
+                "is_instead" => ColumnType::Boolean,
+                "ev_qual" => ColumnType::PgNodeTree,
+                "ev_action" => ColumnType::PgNodeTree,
+            ],
+            Self::PgRules => columns![
+                "schemaname" => ColumnType::Name,
+                "tablename" => ColumnType::Name,
+                "rulename" => ColumnType::Name,
+                "definition" => ColumnType::Text,
             ],
             Self::PgTables => columns![
                 "schemaname" => ColumnType::Name,

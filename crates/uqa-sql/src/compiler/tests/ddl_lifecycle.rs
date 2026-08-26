@@ -81,6 +81,63 @@ fn unsupported_advanced_trigger_shapes_fail_during_compilation() {
 }
 
 #[test]
+fn rule_statements_preserve_event_actions_and_lifecycle_shape() {
+    let Statement::CreateRule(rule) = first(
+        "CREATE OR REPLACE RULE audit_insert AS ON INSERT TO app.items WHERE NEW.id > 0 DO ALSO (INSERT INTO app.audit VALUES (NEW.id); UPDATE app.stats SET n = n + 1;)",
+    ) else {
+        panic!("expected CREATE RULE");
+    };
+    assert_eq!(rule.name, "audit_insert");
+    assert_eq!(rule.table, "app.items");
+    assert_eq!(rule.event, crate::ast::RuleEvent::Insert);
+    assert!(!rule.instead);
+    assert!(rule.condition.is_some());
+    assert_eq!(rule.actions.len(), 2);
+    assert_eq!(rule.action_sql.len(), 2);
+    assert!(rule.or_replace);
+
+    let Statement::CreateRule(nothing) =
+        first("CREATE RULE suppress_delete AS ON DELETE TO app.items DO INSTEAD NOTHING")
+    else {
+        panic!("expected CREATE RULE DO NOTHING");
+    };
+    assert!(nothing.instead);
+    assert!(nothing.actions.is_empty());
+    assert!(nothing.action_sql.is_empty());
+
+    let Statement::DropRule(drop) = first("DROP RULE IF EXISTS audit_insert ON app.items CASCADE")
+    else {
+        panic!("expected DROP RULE");
+    };
+    assert_eq!(drop.name, "audit_insert");
+    assert_eq!(drop.table, "app.items");
+    assert!(drop.if_exists);
+    assert!(drop.cascade);
+
+    let Statement::AlterTable(rename) =
+        first("ALTER RULE audit_insert ON app.items RENAME TO renamed_audit")
+    else {
+        panic!("expected ALTER RULE");
+    };
+    assert!(matches!(
+        rename.actions.as_slice(),
+        [AlterTableAction::RenameRule { from, to }]
+            if from == "audit_insert" && to == "renamed_audit"
+    ));
+
+    let Statement::AlterTable(enable) =
+        first("ALTER TABLE app.items ENABLE REPLICA RULE renamed_audit")
+    else {
+        panic!("expected ALTER TABLE ENABLE RULE");
+    };
+    assert!(matches!(
+        enable.actions.as_slice(),
+        [AlterTableAction::SetRuleEnableMode { name, mode }]
+            if name == "renamed_audit" && *mode == crate::ast::EventEnableMode::Replica
+    ));
+}
+
+#[test]
 fn alter_table_add_key_constraint_preserves_tuple_shape() {
     let Statement::AlterTable(alter) =
         first("ALTER TABLE labels ADD CONSTRAINT labels_tenant_slug_key UNIQUE (tenant, slug)")

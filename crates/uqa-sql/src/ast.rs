@@ -900,9 +900,17 @@ pub enum AlterTableAction {
         from: String,
         to: String,
     },
+    RenameRule {
+        from: String,
+        to: String,
+    },
     SetTriggerEnableMode {
         name: Option<String>,
         user_only: bool,
+        mode: EventEnableMode,
+    },
+    SetRuleEnableMode {
+        name: String,
         mode: EventEnableMode,
     },
     SetDefault {
@@ -1291,6 +1299,10 @@ pub enum Statement {
     CreateTrigger(CreateTrigger),
     /// `DROP TRIGGER [IF EXISTS] name ON relation`.
     DropTrigger(DropTrigger),
+    /// `CREATE [OR REPLACE] RULE ... ON relation`.
+    CreateRule(CreateRule),
+    /// `DROP RULE [IF EXISTS] name ON relation`.
+    DropRule(DropRule),
     /// `DO [LANGUAGE lang] $$ ... $$` - anonymous code block.
     DoBlock {
         language: String,

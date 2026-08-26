@@ -84,6 +84,10 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
             "relhastriggers".into(),
             bool_value(engine.relation_has_triggers(&name)?),
         );
+        row.insert(
+            "relhasrules".into(),
+            bool_value(engine.relation_has_rules(&name)?),
+        );
         if let Some(bound) = hierarchy.partition_bound.as_ref() {
             row.insert(
                 "relpartbound".into(),
