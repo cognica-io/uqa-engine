@@ -8,6 +8,8 @@ The manual is authoritative for public behavior. Verify ambiguous claims against
 
 Keep each prose paragraph on one physical line. Do not insert line breaks inside paragraphs.
 
+Preserve the established `CPU`, `MLX`, and `UQA` initialisms in Rust identifiers and design pseudocode; do not apply mixed-case acronym normalization to them.
+
 Name feature branches with the `feature/` prefix and bug-fix branches with the `fix/` prefix. Do not use any other branch prefix.
 
 Keep exactly one test executable per crate. Put additional integration-test files in submodules of that crate's single test target; never add another top-level `tests/*.rs` file or `[[test]]` target.
