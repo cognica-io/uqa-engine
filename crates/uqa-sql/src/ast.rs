@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 mod constraints;
 mod cte;
+mod events;
 mod expressions;
 mod from;
 mod locking;
@@ -24,6 +25,7 @@ mod sequence;
 
 pub use constraints::*;
 pub use cte::*;
+pub use events::*;
 pub use expressions::*;
 pub use from::*;
 pub use locking::*;
@@ -894,6 +896,15 @@ pub enum AlterTableAction {
     RenameTable {
         to: String,
     },
+    RenameTrigger {
+        from: String,
+        to: String,
+    },
+    SetTriggerEnableMode {
+        name: Option<String>,
+        user_only: bool,
+        mode: EventEnableMode,
+    },
     SetDefault {
         name: String,
         default: Expr,
@@ -1276,6 +1287,10 @@ pub enum Statement {
     CreateRole(CreateRoleStmt),
     AlterRole(AlterRoleStmt),
     DropRole(DropRoleStmt),
+    /// `CREATE [OR REPLACE] TRIGGER ... ON relation`.
+    CreateTrigger(CreateTrigger),
+    /// `DROP TRIGGER [IF EXISTS] name ON relation`.
+    DropTrigger(DropTrigger),
     /// `DO [LANGUAGE lang] $$ ... $$` - anonymous code block.
     DoBlock {
         language: String,

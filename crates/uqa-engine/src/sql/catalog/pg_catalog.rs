@@ -43,7 +43,10 @@ pub(super) fn build_pg_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLErro
                 ),
             ),
             ("hasrules", bool_value(false)),
-            ("hastriggers", bool_value(false)),
+            (
+                "hastriggers",
+                bool_value(engine.relation_has_triggers(&name)?),
+            ),
             ("rowsecurity", bool_value(false)),
             ("table_catalog", catalog_name()),
             ("table_schema", str_value(schema)),

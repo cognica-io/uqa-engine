@@ -53,6 +53,7 @@ pub(crate) use handlers::{
     resolved_user_function_returns_set,
 };
 pub(super) use handlers::{run_call, run_create_function, run_do_block, run_drop_function};
+pub(super) use routine::{execute_trigger_routine, TriggerRoutineContext};
 
 use diagnostics::{
     arm_matches, catchable, format_raise_message, looks_like_sqlstate, result_row_count,

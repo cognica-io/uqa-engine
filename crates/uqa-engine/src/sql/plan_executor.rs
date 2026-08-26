@@ -150,6 +150,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         restart_identity: bool,
     ) -> Result<SQLResult, SQLError> {
         let mut targets = std::collections::BTreeSet::new();
+        let mut trigger_targets = Vec::new();
         for requested in tables {
             let table = self
                 .engine
@@ -173,21 +174,26 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                     message: "cannot truncate only a partitioned table".into(),
                 });
             }
-            targets.extend(
-                self.engine
-                    .hierarchy_scan_tables(&table, requested.include_descendants)?,
-            );
+            for target in self
+                .engine
+                .hierarchy_scan_tables(&table, requested.include_descendants)?
+            {
+                if targets.insert(target.clone()) {
+                    trigger_targets.push(target);
+                }
+            }
         }
         if cascade {
-            let mut pending = targets.iter().cloned().collect::<Vec<_>>();
-            while let Some(table) = pending.pop() {
+            let mut cursor = 0;
+            while let Some(table) = trigger_targets.get(cursor).cloned() {
+                cursor += 1;
                 for (referrer, _) in self
                     .engine
                     .referrers_to(&table)
                     .map_err(|err| SQLError::Internal(format!("read foreign keys: {err}")))?
                 {
                     if targets.insert(referrer.clone()) {
-                        pending.push(referrer);
+                        trigger_targets.push(referrer);
                     }
                 }
             }
@@ -207,6 +213,15 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             }
         }
         let truncate = |engine: &Engine| {
+            for table in &trigger_targets {
+                crate::sql::triggers::fire_statement_triggers(
+                    engine,
+                    table,
+                    uqa_sql::ast::TriggerTiming::Before,
+                    uqa_sql::ast::TriggerEvent::Truncate,
+                    &[],
+                )?;
+            }
             // Referencing relations first makes the mutation order explicit
             // even though the low-level clear does not evaluate row FKs.
             fn visit(
@@ -237,7 +252,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             let mut ordered = Vec::with_capacity(targets.len());
             let mut visiting = std::collections::BTreeSet::new();
             let mut visited = std::collections::BTreeSet::new();
-            for table in &targets {
+            for table in &trigger_targets {
                 visit(
                     engine,
                     table,
@@ -247,7 +262,17 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                     &mut ordered,
                 )?;
             }
-            engine.truncate_tables_with_identity(&ordered, restart_identity)
+            engine.truncate_tables_with_identity(&ordered, restart_identity)?;
+            for table in &trigger_targets {
+                crate::sql::triggers::fire_statement_triggers(
+                    engine,
+                    table,
+                    uqa_sql::ast::TriggerTiming::After,
+                    uqa_sql::ast::TriggerEvent::Truncate,
+                    &[],
+                )?;
+            }
+            Ok(())
         };
         if self.engine.transaction_depth() == 0 {
             self.engine.transaction(truncate)?;
@@ -401,6 +426,14 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             }
             CommandPlan::DropRole(statement) => {
                 self.engine.drop_roles(statement)?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::CreateTrigger(statement) => {
+                self.engine.register_trigger(statement.clone())?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::DropTrigger(statement) => {
+                self.engine.drop_trigger(statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::AlterTable(statement) => {

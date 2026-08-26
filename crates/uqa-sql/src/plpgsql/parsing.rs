@@ -156,6 +156,38 @@ pub(super) fn lower_function(function: &JSONValue) -> Result<PLpgSQLFunction> {
         datums.push(lower_datum(raw)?);
     }
     validate_datums(&datums)?;
+    let trigger_datum = |field: &str, name: &str| -> Result<Option<usize>> {
+        let explicit = match json_optional_i64(function, field)? {
+            Some(index) if index >= 0 => {
+                let index = usize::try_from(index).map_err(|_| {
+                    SQLError::Internal(format!(
+                        "PL/pgSQL {field} {index} does not fit this platform"
+                    ))
+                })?;
+                if index >= datums.len() {
+                    return Err(SQLError::Internal(format!(
+                        "PL/pgSQL {field} has out-of-range datum index {index}"
+                    )));
+                }
+                Some(index)
+            }
+            Some(index) => {
+                return Err(SQLError::Internal(format!(
+                    "PL/pgSQL {field} has invalid datum index {index}"
+                )))
+            }
+            None => None,
+        };
+        Ok(explicit.or_else(|| {
+            datums.iter().position(|datum| {
+                datum
+                    .name()
+                    .is_some_and(|datum_name| datum_name.eq_ignore_ascii_case(name))
+            })
+        }))
+    };
+    let new_datum = trigger_datum("new_varno", "new")?;
+    let old_datum = trigger_datum("old_varno", "old")?;
     let found_datum = datums
         .iter()
         .position(|d| matches!(d, PLpgSQLDatum::Var(v) if v.name.eq_ignore_ascii_case("found")));
@@ -165,6 +197,8 @@ pub(super) fn lower_function(function: &JSONValue) -> Result<PLpgSQLFunction> {
     Ok(PLpgSQLFunction {
         datums,
         action,
+        new_datum,
+        old_datum,
         found_datum,
     })
 }

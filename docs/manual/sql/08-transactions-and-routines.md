@@ -117,6 +117,31 @@ Bound cursors support `CURSOR [(arguments)] FOR query`, positional or named `OPE
 
 This is a deliberate subset. Validate every routine body during migration instead of assuming all PostgreSQL PL/pgSQL statements or diagnostics exist.
 
+## Triggers
+
+```sql
+CREATE FUNCTION normalize_item() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.title := upper(NEW.title);
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER normalize_item_before
+BEFORE INSERT OR UPDATE OF title ON items
+FOR EACH ROW
+WHEN (NEW.title IS NOT NULL)
+EXECUTE FUNCTION normalize_item();
+```
+
+The implemented trigger surface supports durable PL/pgSQL `BEFORE` and `AFTER` row and statement triggers for `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE`, including `UPDATE OF`, boolean-typed `WHEN`, multiple events, string arguments, executable `CREATE OR REPLACE TRIGGER`, `DROP TRIGGER`, `ALTER TRIGGER ... RENAME`, and `ALTER TABLE ... ENABLE` or `DISABLE TRIGGER`. Row triggers fire in name order. Returning `NULL` from a `BEFORE` row trigger skips that row; returning a modified `NEW` row changes an insert or update. An `AFTER` row trigger's `WHEN` predicate is decided immediately after its logical row change, while the selected function invocation runs after all rows have been changed and before `AFTER` statement triggers. Statement triggers fire even when the command changes zero rows, foreign-key referential actions run the recursive child row and statement trigger lifecycle, and `TRUNCATE` triggers cover every explicit, descendant, and `CASCADE`-added relation in statement discovery order.
+
+Trigger functions declare no ordinary parameters and return `trigger`. They receive `OLD`, `NEW`, `TG_NAME`, `TG_WHEN`, `TG_LEVEL`, `TG_OP`, `TG_RELID`, `TG_TABLE_NAME`, `TG_TABLE_SCHEMA`, `TG_NARGS`, and zero-based `TG_ARGV`; calling a trigger function directly fails with SQLSTATE `0A000`. Stored generated columns are recomputed after `BEFORE` triggers, so their fields in `NEW` are `NULL` during a `BEFORE` trigger and available afterward, while virtual generated fields are `NULL` in every trigger `OLD` and `NEW` image as in PostgreSQL 18. `INSERT ... ON CONFLICT` and `MERGE` invoke the applicable root and referential-action triggers in PostgreSQL order, and a trigger-suppressed `MERGE` action does not consume that target's once-per-row modification identity.
+
+Trigger definitions participate in table, column, and exact zero-argument function dependencies, survive storage reopen, roll back with catalog transactions, preserve temporary triggers across unrelated catalog reloads, and invalidate prepared plans. `pg_trigger`, `pg_class.relhastriggers`, `pg_tables.hastriggers`, and both PostgreSQL 18 `pg_get_triggerdef` overloads expose the implemented catalog; the boolean overload selects compact or pretty rendering and propagates `NULL`. A row trigger created on a partitioned table fires for leaf rows and appears as parent-linked leaf clones in `pg_trigger`.
+
+Constraint and deferred triggers, transition relations, `INSTEAD OF` view triggers, partition-moving update semantics, direct ALTER or DROP operations on generated partition clones, `session_replication_role`, trigger privileges, exact PostgreSQL `pg_node_tree` serialization, dump and restore, and the complete upstream regression schedule remain compatibility bugs. Rewrite rules are not implemented: UQA Engine does not claim executable `CREATE RULE`, `pg_rewrite`, or `pg_get_ruledef` behavior.
+
 ## Procedures and CALL
 
 ```sql
@@ -208,9 +233,9 @@ DROP FUNCTION add_tax(NUMERIC, NUMERIC);
 DROP PROCEDURE record_message(TEXT);
 ```
 
-Signatures disambiguate overloads. `DROP FUNCTION` uses RESTRICT behavior: an unrelated overload may be dropped, but an exact user-function signature referenced by a stored scalar expression, table-function source, `ROWS FROM` member, nested query, generated column, or SQL-standard routine query body is retained and reports `2BP01` with its dependents. SQL-standard query bodies bind exact identities when the routine is created and rebuild those bindings on reopen, while string-literal SQL and PL/pgSQL bodies retain PostgreSQL's dynamic dependency behavior. Multi-target drops preflight the whole set, so an internal dependency is satisfied when both routines are explicit targets, and `CREATE OR REPLACE VIEW` or routine replacement atomically replaces the prior dependency set.
+Signatures disambiguate overloads. `DROP FUNCTION` uses RESTRICT behavior: an unrelated overload may be dropped, but an exact user-function signature referenced by a stored scalar expression, table-function source, `ROWS FROM` member, nested query, generated column, trigger, or SQL-standard routine query body is retained and reports `2BP01` with its dependents. SQL-standard query bodies bind exact identities when the routine is created and rebuild those bindings on reopen, while string-literal SQL and PL/pgSQL bodies retain PostgreSQL's dynamic dependency behavior. Multi-target drops preflight the whole set, so an internal dependency is satisfied when both routines are explicit targets, and `CREATE OR REPLACE VIEW` or routine replacement atomically replaces the prior dependency set.
 
-For the implemented CASCADE graph, `DROP FUNCTION signature CASCADE` removes the exact routine, generated columns and stored views bound to it, transitive stored views, and transitive SQL-standard query-body functions or procedures while retaining unrelated overloads and objects. A single dependent emits PostgreSQL's `drop cascades to ...` notice and multiple dependents emit the object-count notice. Wrong-kind, missing, and RESTRICT failures are atomic, committed dependency bindings survive reopen, and SQL string bodies remain callable until their dynamically resolved target is actually needed. SQL-standard command-body calls and mutations, parameter-default dependencies, and PostgreSQL object kinds outside routines, generated columns, and stored views remain compatibility bugs.
+For the implemented CASCADE graph, `DROP FUNCTION signature CASCADE` removes the exact routine, triggers, generated columns and stored views bound to it, transitive stored views, and transitive SQL-standard query-body functions or procedures while retaining unrelated overloads and objects. A single dependent emits PostgreSQL's `drop cascades to ...` notice and multiple dependents emit the object-count notice. Wrong-kind, missing, and RESTRICT failures are atomic, committed dependency bindings survive reopen, and SQL string bodies remain callable until their dynamically resolved target is actually needed. SQL-standard command-body calls and mutations, parameter-default dependencies, and PostgreSQL object kinds outside routines, triggers, generated columns, and stored views remain compatibility bugs.
 
 Durable SQL and PL/pgSQL routine definitions are restored with the catalog. Rust, Python, Node.js, and browser WASM runtime callbacks are not durable and must be registered after process start.
 

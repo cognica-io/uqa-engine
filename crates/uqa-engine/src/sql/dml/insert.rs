@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use super::{
     apply_validated_prepared_document_rewrite, build_returning_row, coerce_to_column_type,
-    decode_prepared_insert_conflict, dml_returning_result, dml_storage_error,
+    decode_prepared_insert_conflict, dml_returning_result, dml_storage_error, document_supplied_id,
     encode_prepared_insert_conflict, eval_lowered_expression, eval_mutation_assignment,
     index_vectors_for_type, insert_identity_columns, lock_document_key_dependencies,
     lock_existing_document_foreign_key_dependencies, partition_insert_target,
@@ -35,6 +35,7 @@ struct InsertSelectConsumerState {
     snapshot_scope: CteScope,
     auto_id_column: Option<String>,
     id_column: String,
+    conflict_update_columns: Vec<String>,
     columns: Option<Vec<String>>,
     result_width: Option<usize>,
     prepared_schema: uqa_execution::RowSchema,
@@ -42,6 +43,8 @@ struct InsertSelectConsumerState {
     conflict_locks: Option<InsertConflictLocks>,
     affected: u64,
     returning_rows: Vec<uqa_execution::OwnedPhysicalRow>,
+    after_row_events: Vec<crate::sql::triggers::AfterRowTriggerEvent>,
+    referential_actions: super::ReferentialActionContext,
     has_prepared_effect: bool,
     has_prepared_auto_identity: bool,
 }
@@ -51,6 +54,8 @@ struct PreparedInsertSelect {
     conflict_locks: InsertConflictLocks,
     affected: u64,
     returning_rows: Vec<uqa_execution::OwnedPhysicalRow>,
+    after_row_events: Vec<crate::sql::triggers::AfterRowTriggerEvent>,
+    referential_actions: super::ReferentialActionContext,
     has_prepared_effect: bool,
     has_prepared_auto_identity: bool,
 }
@@ -61,6 +66,7 @@ struct PreparedInsertRowContext<'a> {
     storage_table: &'a str,
     document: &'a Document,
     shared_document: Option<&'a Arc<Document>>,
+    conflict_update_columns: &'a [String],
     params: &'a [SQLParam],
     scope: &'a CteScope,
 }
@@ -73,6 +79,7 @@ impl InsertSelectConsumer {
         snapshot_scope: CteScope,
         auto_id_column: Option<String>,
         id_column: String,
+        conflict_update_columns: Vec<String>,
     ) -> Result<Self, SQLError> {
         let prepared_schema = uqa_execution::RowSchema::new(vec![
             "__uqa_insert_table".into(),
@@ -86,6 +93,7 @@ impl InsertSelectConsumer {
                 snapshot_scope,
                 auto_id_column,
                 id_column,
+                conflict_update_columns,
                 columns: None,
                 result_width: None,
                 prepared_schema,
@@ -95,6 +103,8 @@ impl InsertSelectConsumer {
                 conflict_locks: Some(InsertConflictLocks::new(engine)),
                 affected: 0,
                 returning_rows: Vec::new(),
+                after_row_events: Vec::new(),
+                referential_actions: super::ReferentialActionContext::default(),
                 has_prepared_effect: false,
                 has_prepared_auto_identity: false,
             }),
@@ -117,6 +127,8 @@ impl InsertSelectConsumer {
             conflict_locks,
             affected: state.affected,
             returning_rows: std::mem::take(&mut state.returning_rows),
+            after_row_events: std::mem::take(&mut state.after_row_events),
+            referential_actions: std::mem::take(&mut state.referential_actions),
             has_prepared_effect: state.has_prepared_effect,
             has_prepared_auto_identity: state.has_prepared_auto_identity,
         })
@@ -185,6 +197,7 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
             snapshot_scope,
             auto_id_column,
             id_column,
+            conflict_update_columns,
             columns,
             result_width,
             prepared_schema,
@@ -192,6 +205,8 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
             conflict_locks,
             affected,
             returning_rows,
+            after_row_events,
+            referential_actions,
             has_prepared_effect,
             has_prepared_auto_identity,
         } = &mut *state;
@@ -245,7 +260,7 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
             &target_table,
             crate::row_locks::RelationLockMode::RowExclusive,
         )?;
-        let insert_identity = match prepared_auto_identity {
+        let mut insert_identity = match prepared_auto_identity {
             Some(identity) => identity,
             None => prepare_insert_identity(
                 engine,
@@ -256,6 +271,45 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
                 "prepare INSERT SELECT identity",
             )?,
         };
+        let Some(triggered_document) = crate::sql::triggers::fire_before_row_triggers(
+            engine,
+            &target_table,
+            uqa_sql::ast::TriggerEvent::Insert,
+            insert_identity.0,
+            None,
+            Some(&document),
+            &[],
+        )?
+        else {
+            return Ok(crate::sql::select::QueryConsumerControl::Continue);
+        };
+        document = triggered_document;
+        refresh_insert_identity_after_trigger(
+            engine,
+            &target_table,
+            id_column,
+            auto_id_column.as_deref(),
+            &document,
+            &mut insert_identity,
+        )?;
+        crate::sql::generated::refresh_stored_generated_columns(
+            engine,
+            &target_table,
+            &mut document,
+        )?;
+        let trigger_target = partition_insert_target(
+            engine,
+            &stmt.table,
+            &document,
+            params,
+            stmt.include_descendants,
+        )?;
+        if trigger_target != target_table {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "moving row to another partition during a BEFORE FOR EACH ROW trigger is not supported".into(),
+            });
+        }
         lock_existing_document_foreign_key_dependencies(engine, &target_table, &document)?;
         let prepared_conflict = if let Some(on_conflict) = stmt.on_conflict.as_ref() {
             conflict_locks
@@ -263,15 +317,18 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
                 .ok_or_else(|| {
                     SQLError::Internal("INSERT SELECT conflict locks are unavailable".into())
                 })?
-                .prepare_document(InsertConflictPreparation {
-                    engine,
-                    table: &target_table,
-                    target_qualifier: &stmt.target_qualifier,
-                    on_conflict,
-                    document: &document,
-                    params,
-                    scope: snapshot_scope,
-                })?
+                .prepare_document(
+                    InsertConflictPreparation {
+                        engine,
+                        table: &target_table,
+                        target_qualifier: &stmt.target_qualifier,
+                        on_conflict,
+                        document: &document,
+                        params,
+                        scope: snapshot_scope,
+                    },
+                    referential_actions,
+                )?
         } else {
             let _key_locks =
                 lock_document_key_dependencies(engine, &target_table, &document, None)?;
@@ -280,20 +337,23 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
         let mut prepared_conflict =
             attach_prepared_insert_identity(prepared_conflict, insert_identity);
         let prepared_effect = !matches!(&prepared_conflict, PreparedInsertConflict::Skip);
-        if let Some(row) = stage_prepared_insert_row(
+        let (returning, row_after_events) = stage_prepared_insert_row(
             PreparedInsertRowContext {
                 engine,
                 stmt,
                 storage_table: &target_table,
                 document: &document,
                 shared_document: None,
+                conflict_update_columns,
                 params,
                 scope: snapshot_scope,
             },
             &mut prepared_conflict,
-        )? {
+        )?;
+        if let Some(row) = returning {
             returning_rows.push(row);
         }
+        after_row_events.extend(row_after_events);
         prepared_buffer
             .as_mut()
             .ok_or_else(|| {
@@ -342,14 +402,7 @@ pub(in crate::sql) fn run_insert_inner(
     let mut scope = CteScope::new();
     crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut scope)?;
     scope.scalar_subqueries.clone_from(&stmt.subqueries);
-    // Resolve the table's primary-key column name. Auto-increment
-    // (SERIAL / BIGSERIAL) wins; otherwise the scalar PRIMARY KEY
-    // column wins; otherwise use the conventional legacy `id` slot.
-    // Both VALUES and SELECT sources must derive the internal doc id
-    // from this same column or later primary-key rewrites can address a
-    // different row than the one that was inserted.
-    let (auto_id_col, id_column) = insert_identity_columns(engine, &stmt.table, "INSERT")?;
-    if let Some(ConflictPlan {
+    let conflict_update_columns = if let Some(ConflictPlan {
         action: ConflictActionPlan::Update { assignments, .. },
         ..
     }) = stmt.on_conflict.as_ref()
@@ -362,8 +415,38 @@ pub(in crate::sql) fn run_insert_inner(
                 .map(|assignment| assignment.column.as_str()),
             "INSERT ON CONFLICT DO UPDATE",
         )?;
+        Some(
+            assignments
+                .iter()
+                .map(|assignment| assignment.column.clone())
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        None
+    };
+    crate::sql::triggers::fire_statement_triggers(
+        engine,
+        &stmt.table,
+        uqa_sql::ast::TriggerTiming::Before,
+        uqa_sql::ast::TriggerEvent::Insert,
+        &[],
+    )?;
+    if let Some(columns) = conflict_update_columns.as_deref() {
+        crate::sql::triggers::fire_statement_triggers(
+            engine,
+            &stmt.table,
+            uqa_sql::ast::TriggerTiming::Before,
+            uqa_sql::ast::TriggerEvent::Update,
+            columns,
+        )?;
     }
-
+    // Resolve the table's primary-key column name. Auto-increment
+    // (SERIAL / BIGSERIAL) wins; otherwise the scalar PRIMARY KEY
+    // column wins; otherwise use the conventional legacy `id` slot.
+    // Both VALUES and SELECT sources must derive the internal doc id
+    // from this same column or later primary-key rewrites can address a
+    // different row than the one that was inserted.
+    let (auto_id_col, id_column) = insert_identity_columns(engine, &stmt.table, "INSERT")?;
     // INSERT ... SELECT: the query executor feeds each positional physical row directly into the INSERT sink. Ordinary source scans and scalar subqueries retain the statement snapshot, while a VOLATILE callback observes the logical mutations staged by preceding rows of this command.
     if let Some(source) = stmt.source.as_deref() {
         let snapshot_scope = scope.returning_statement_snapshot_scope();
@@ -376,6 +459,7 @@ pub(in crate::sql) fn run_insert_inner(
             snapshot_scope,
             auto_id_col.clone(),
             id_column.clone(),
+            conflict_update_columns.clone().unwrap_or_default(),
         )?);
         let overlay = DmlCommandMutationOverlay::new(engine);
         crate::sql::select::execute_query_plan_output(
@@ -390,6 +474,8 @@ pub(in crate::sql) fn run_insert_inner(
             conflict_locks,
             affected,
             returning_rows,
+            after_row_events,
+            referential_actions,
             has_prepared_effect,
             has_prepared_auto_identity,
         } = consumer.take_prepared()?;
@@ -431,6 +517,24 @@ pub(in crate::sql) fn run_insert_inner(
             )?;
             apply_validated_prepared_insert(engine, &target_table, document, &mut prepared, false)?;
         }
+        crate::sql::triggers::fire_after_row_trigger_events(engine, &after_row_events)?;
+        referential_actions.fire_after_statement_triggers(engine)?;
+        if let Some(columns) = conflict_update_columns.as_deref() {
+            crate::sql::triggers::fire_statement_triggers(
+                engine,
+                &stmt.table,
+                uqa_sql::ast::TriggerTiming::After,
+                uqa_sql::ast::TriggerEvent::Update,
+                columns,
+            )?;
+        }
+        crate::sql::triggers::fire_statement_triggers(
+            engine,
+            &stmt.table,
+            uqa_sql::ast::TriggerTiming::After,
+            uqa_sql::ast::TriggerEvent::Insert,
+            &[],
+        )?;
         if !stmt.returning.is_empty() {
             return dml_returning_result(
                 engine,
@@ -486,6 +590,8 @@ pub(in crate::sql) fn run_insert_inner(
     let mut documents = Vec::with_capacity(stmt.rows.len());
     let mut target_tables = Vec::with_capacity(stmt.rows.len());
     let mut prepared_conflicts = Vec::with_capacity(stmt.rows.len());
+    let mut after_row_events = Vec::with_capacity(stmt.rows.len());
+    let mut referential_actions = super::ReferentialActionContext::default();
     let mut has_prepared_effect = false;
     for row in &stmt.rows {
         cancel.check()?;
@@ -538,7 +644,7 @@ pub(in crate::sql) fn run_insert_inner(
             &target_table,
             crate::row_locks::RelationLockMode::RowExclusive,
         )?;
-        let insert_identity = match prepared_auto_identity {
+        let mut insert_identity = match prepared_auto_identity {
             Some(identity) => identity,
             None => prepare_insert_identity(
                 engine,
@@ -549,17 +655,59 @@ pub(in crate::sql) fn run_insert_inner(
                 "prepare INSERT identity",
             )?,
         };
+        let Some(triggered_document) = crate::sql::triggers::fire_before_row_triggers(
+            engine,
+            &target_table,
+            uqa_sql::ast::TriggerEvent::Insert,
+            insert_identity.0,
+            None,
+            Some(&document),
+            &[],
+        )?
+        else {
+            continue;
+        };
+        document = triggered_document;
+        refresh_insert_identity_after_trigger(
+            engine,
+            &target_table,
+            &id_column,
+            auto_id_col.as_deref(),
+            &document,
+            &mut insert_identity,
+        )?;
+        crate::sql::generated::refresh_stored_generated_columns(
+            engine,
+            &target_table,
+            &mut document,
+        )?;
+        let trigger_target = partition_insert_target(
+            engine,
+            &stmt.table,
+            &document,
+            params,
+            stmt.include_descendants,
+        )?;
+        if trigger_target != target_table {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "moving row to another partition during a BEFORE FOR EACH ROW trigger is not supported".into(),
+            });
+        }
         lock_existing_document_foreign_key_dependencies(engine, &target_table, &document)?;
         let prepared = if let Some(on_conflict) = stmt.on_conflict.as_ref() {
-            conflict_locks.prepare_document(InsertConflictPreparation {
-                engine,
-                table: &target_table,
-                target_qualifier: &stmt.target_qualifier,
-                on_conflict,
-                document: &document,
-                params,
-                scope: &snapshot_scope,
-            })?
+            conflict_locks.prepare_document(
+                InsertConflictPreparation {
+                    engine,
+                    table: &target_table,
+                    target_qualifier: &stmt.target_qualifier,
+                    on_conflict,
+                    document: &document,
+                    params,
+                    scope: &snapshot_scope,
+                },
+                &mut referential_actions,
+            )?
         } else {
             let _key_locks =
                 lock_document_key_dependencies(engine, &target_table, &document, None)?;
@@ -568,20 +716,23 @@ pub(in crate::sql) fn run_insert_inner(
         let mut prepared = attach_prepared_insert_identity(prepared, insert_identity);
         let prepared_effect = !matches!(&prepared, PreparedInsertConflict::Skip);
         let document = Arc::new(document);
-        if let Some(returning) = stage_prepared_insert_row(
+        let (returning, row_after_events) = stage_prepared_insert_row(
             PreparedInsertRowContext {
                 engine,
                 stmt,
                 storage_table: &target_table,
                 document: document.as_ref(),
                 shared_document: Some(&document),
+                conflict_update_columns: conflict_update_columns.as_deref().unwrap_or(&[]),
                 params,
                 scope: &snapshot_scope,
             },
             &mut prepared,
-        )? {
+        )?;
+        if let Some(returning) = returning {
             returning_rows.push(returning);
         }
+        after_row_events.extend(row_after_events);
         if prepared_effect {
             affected += 1;
             has_prepared_effect = true;
@@ -622,6 +773,24 @@ pub(in crate::sql) fn run_insert_inner(
         })?;
         apply_validated_prepared_insert(engine, &target_table, document, prepared, known_new)?;
     }
+    crate::sql::triggers::fire_after_row_trigger_events(engine, &after_row_events)?;
+    referential_actions.fire_after_statement_triggers(engine)?;
+    if let Some(columns) = conflict_update_columns.as_deref() {
+        crate::sql::triggers::fire_statement_triggers(
+            engine,
+            &stmt.table,
+            uqa_sql::ast::TriggerTiming::After,
+            uqa_sql::ast::TriggerEvent::Update,
+            columns,
+        )?;
+    }
+    crate::sql::triggers::fire_statement_triggers(
+        engine,
+        &stmt.table,
+        uqa_sql::ast::TriggerTiming::After,
+        uqa_sql::ast::TriggerEvent::Insert,
+        &[],
+    )?;
     if !stmt.returning.is_empty() {
         return dml_returning_result(
             engine,
@@ -654,18 +823,25 @@ fn attach_prepared_insert_identity(
 fn stage_prepared_insert_row(
     context: PreparedInsertRowContext<'_>,
     prepared: &mut PreparedInsertConflict,
-) -> Result<Option<uqa_execution::OwnedPhysicalRow>, SQLError> {
+) -> Result<
+    (
+        Option<uqa_execution::OwnedPhysicalRow>,
+        Vec<crate::sql::triggers::AfterRowTriggerEvent>,
+    ),
+    SQLError,
+> {
     let PreparedInsertRowContext {
         engine,
         stmt,
         storage_table,
         document,
         shared_document,
+        conflict_update_columns,
         params,
         scope,
     } = context;
     validate_document_non_key_constraints(engine, storage_table, document, params)?;
-    let images = match prepared {
+    let (images, after_row_events) = match prepared {
         PreparedInsertConflict::Insert { doc_id, .. } => {
             validate_key_constraints(engine, storage_table, document, None)?;
             if let Some(shared_document) = shared_document {
@@ -677,52 +853,81 @@ fn stage_prepared_insert_row(
             } else {
                 engine.stage_command_document(storage_table, *doc_id, Some(document.clone()))?;
             }
-            ReturningRowImages {
-                old: None,
-                new: Some(ReturningRowImage {
-                    doc_id: *doc_id,
-                    document,
-                }),
+            let mut after_row_events = Vec::new();
+            if let Some(event) = crate::sql::triggers::AfterRowTriggerEvent::prepare(
+                engine,
+                crate::sql::triggers::AfterRowTriggerInput {
+                    table: storage_table,
+                    event: uqa_sql::ast::TriggerEvent::Insert,
+                    old_doc_id: *doc_id,
+                    new_doc_id: *doc_id,
+                    old_document: None,
+                    new_document: Some(document),
+                    updated_columns: &[],
+                },
+            )? {
+                after_row_events.push(event);
             }
+            (
+                ReturningRowImages {
+                    old: None,
+                    new: Some(ReturningRowImage {
+                        doc_id: *doc_id,
+                        document,
+                    }),
+                },
+                after_row_events,
+            )
         }
         PreparedInsertConflict::Updated(prepared) => {
             let old_doc_id = prepared.doc_id;
-            let doc_id = stage_prepared_document_rewrite(engine, prepared, params)?;
-            ReturningRowImages {
-                old: Some(ReturningRowImage {
-                    doc_id: old_doc_id,
-                    document: &prepared.old_document,
-                }),
-                new: Some(ReturningRowImage {
-                    doc_id,
-                    document: &prepared.new_document,
-                }),
-            }
+            let mut after_row_events = Vec::new();
+            let doc_id = stage_prepared_document_rewrite(
+                engine,
+                prepared,
+                params,
+                Some(conflict_update_columns),
+                &mut after_row_events,
+            )?;
+            (
+                ReturningRowImages {
+                    old: Some(ReturningRowImage {
+                        doc_id: old_doc_id,
+                        document: &prepared.old_document,
+                    }),
+                    new: Some(ReturningRowImage {
+                        doc_id,
+                        document: &prepared.new_document,
+                    }),
+                },
+                after_row_events,
+            )
         }
-        PreparedInsertConflict::Skip => return Ok(None),
+        PreparedInsertConflict::Skip => return Ok((None, Vec::new())),
         PreparedInsertConflict::Unresolved => {
             return Err(SQLError::Internal(
                 "INSERT command overlay has no prepared document identity".into(),
             ))
         }
     };
-    if stmt.returning.is_empty() {
-        return Ok(None);
-    }
-    build_returning_row(
-        engine,
-        ReturningProjectionRow {
-            table: &stmt.table,
-            target_qualifier: &stmt.target_qualifier,
-            images,
-            aliases: &stmt.returning_aliases,
-            context: None,
-        },
-        &stmt.returning,
-        params,
-        scope,
-    )
-    .map(Some)
+    let returning = if stmt.returning.is_empty() {
+        None
+    } else {
+        Some(build_returning_row(
+            engine,
+            ReturningProjectionRow {
+                table: &stmt.table,
+                target_qualifier: &stmt.target_qualifier,
+                images,
+                aliases: &stmt.returning_aliases,
+                context: None,
+            },
+            &stmt.returning,
+            params,
+            scope,
+        )?)
+    };
+    Ok((returning, after_row_events))
 }
 
 fn apply_validated_prepared_insert(
@@ -749,6 +954,30 @@ fn apply_validated_prepared_insert(
             "INSERT reached execution without a prepared document identity".into(),
         )),
     }
+}
+
+pub(in crate::sql) fn refresh_insert_identity_after_trigger(
+    engine: &Engine,
+    table: &str,
+    id_column: &str,
+    auto_id_column: Option<&str>,
+    document: &Document,
+    identity: &mut (DocId, bool),
+) -> Result<(), SQLError> {
+    let Some(doc_id) =
+        document_supplied_id(document, id_column, auto_id_column == Some(id_column))?
+    else {
+        return Ok(());
+    };
+    if doc_id == identity.0 {
+        return Ok(());
+    }
+    let owner = engine.partition_identity_owner(table)?;
+    engine
+        .advance_next_id(&owner, doc_id)
+        .map_err(|error| dml_storage_error("apply BEFORE INSERT trigger identity", error))?;
+    *identity = (doc_id, true);
+    Ok(())
 }
 
 pub(in crate::sql) fn apply_missing_column_defaults(

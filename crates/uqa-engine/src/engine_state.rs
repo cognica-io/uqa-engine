@@ -98,6 +98,12 @@ pub(super) struct DurableCatalogState {
     pub(super) sql_user_functions:
         RwLock<BTreeMap<String, Vec<Arc<super::engine_user_functions::SQLUserFunction>>>>,
     pub(super) roles: RwLock<BTreeMap<String, super::engine_roles::RoleDefinition>>,
+    pub(super) triggers: RwLock<
+        BTreeMap<
+            uqa_storage::RelationIdentity,
+            BTreeMap<String, super::engine_events::StoredTrigger>,
+        >,
+    >,
 }
 
 #[derive(Clone)]
@@ -117,6 +123,10 @@ pub(super) struct DurableCatalogSnapshot {
     foreign_tables: BTreeMap<RelationIdentity, uqa_fdw::ForeignTable>,
     sql_user_functions: BTreeMap<String, Vec<Arc<super::engine_user_functions::SQLUserFunction>>>,
     roles: BTreeMap<String, super::engine_roles::RoleDefinition>,
+    triggers: BTreeMap<
+        uqa_storage::RelationIdentity,
+        BTreeMap<String, super::engine_events::StoredTrigger>,
+    >,
 }
 
 impl DurableCatalogState {
@@ -140,6 +150,7 @@ impl DurableCatalogState {
                 "uqa".to_string(),
                 super::engine_roles::RoleDefinition::bootstrap(),
             )])),
+            triggers: RwLock::new(BTreeMap::new()),
         }
     }
 
@@ -163,6 +174,7 @@ impl DurableCatalogState {
             foreign_tables: self.foreign_tables.read().clone(),
             sql_user_functions: self.sql_user_functions.read().clone(),
             roles: self.roles.read().clone(),
+            triggers: self.triggers.read().clone(),
         }
     }
 
@@ -183,6 +195,7 @@ impl DurableCatalogState {
         *self.foreign_tables.write() = snapshot.foreign_tables.clone();
         *self.sql_user_functions.write() = snapshot.sql_user_functions.clone();
         *self.roles.write() = snapshot.roles.clone();
+        *self.triggers.write() = snapshot.triggers.clone();
     }
 }
 

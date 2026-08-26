@@ -225,6 +225,7 @@ impl Engine {
         if !self.storage.tables.read().contains_key(&relation) {
             return Err(table_not_found(name));
         }
+        self.drop_relation_triggers_inner(&relation)?;
         let temporary = self
             .storage
             .tables

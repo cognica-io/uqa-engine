@@ -23,6 +23,7 @@ impl Engine {
         self.restore_sequences_from_catalog(catalog)?;
         self.restore_roles_from_metadata(catalog)?;
         self.restore_sql_functions_from_metadata(catalog)?;
+        self.restore_triggers_from_metadata(catalog)?;
         self.restore_analyzers_from_catalog(catalog)?;
         self.restore_foreign_registries_from_catalog(catalog)?;
         // Stored view plans are rebound only after every row-producing

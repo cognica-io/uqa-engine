@@ -56,6 +56,16 @@ pub(in crate::sql) fn engine_func_intercept(
                 &values,
             )?))
         }
+        "pg_get_triggerdef" => {
+            let values = args
+                .iter()
+                .map(evaluate)
+                .collect::<Result<Vec<_>, SQLError>>()?;
+            Ok(Some(crate::sql::catalog::pg_get_triggerdef_value(
+                require_projection_engine(engine, "pg_get_triggerdef")?,
+                &values,
+            )?))
+        }
         "merge_action" => {
             if !args.is_empty() {
                 return Err(SQLError::BadArity {

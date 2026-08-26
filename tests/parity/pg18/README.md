@@ -42,6 +42,8 @@ The same runner's `--suite constraints` mode executes `constraints_stateful.sql`
 
 The `--suite type-temporal` mode executes `type_temporal_stateful.sql` and compares it with `type_temporal_stateful.expected.json`. It covers built-in range and multirange identity, canonical values and operators, polymorphic range routine resolution, failure-atomic type rewrites, `WITHOUT OVERLAPS`, aggregate `PERIOD` coverage, catalog persistence, and exact SQLSTATEs.
 
+The `--suite triggers` mode executes the 36 cases in `triggers_stateful.sql` and compares them with `triggers_stateful.expected.json`. It covers trigger creation and executable replacement, row and statement execution, `WHEN` validation and timing, generated-row images, zero-row updates, `TRUNCATE`, catalogs, enable and rename lifecycle, dependency drops, and exact SQLSTATEs.
+
 The PostgreSQL side keeps one generated schema across case-specific `psql` connections. The UQA side keeps one temporary database file and deliberately reopens it for every case, so the same comparison also verifies durable routine, view, generated-column, catalog, and ALTER state. Successful observation cases use COPY text rows; type-sensitive cases project `pg_typeof(...)`; expected failures compare SQLSTATE exactly.
 
 Build the pinned PostgreSQL 18.4 and Apache AGE 1.8.0 oracle from AGE commit `b570cf7c1486863f77c14e9c0e07b0e9bfd01bf4`; `Dockerfile.pg18-age` also pins the PostgreSQL multi-platform image digest used for the checked-in transcript:
@@ -64,6 +66,7 @@ cargo build --release -p uqa-cli --bin usql
 python3 tests/parity/pg18/run_routines_stateful.py
 python3 tests/parity/pg18/run_routines_stateful.py --suite constraints
 python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal
+python3 tests/parity/pg18/run_routines_stateful.py --suite triggers
 ```
 
 The runner executes PostgreSQL and UQA concurrently by default. `--backend postgres` and `--backend uqa` select one side for diagnosis. Canonical transcript updates require the PostgreSQL-only backend and use an atomic file replacement; regenerate only from the pinned PostgreSQL 18.4 + AGE oracle, then review the checked-in JSON diff:
@@ -72,6 +75,7 @@ The runner executes PostgreSQL and UQA concurrently by default. `--backend postg
 python3 tests/parity/pg18/run_routines_stateful.py --backend postgres --update-expected
 python3 tests/parity/pg18/run_routines_stateful.py --suite constraints --backend postgres --update-expected
 python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal --backend postgres --update-expected
+python3 tests/parity/pg18/run_routines_stateful.py --suite triggers --backend postgres --update-expected
 ```
 
 Every fixture case starts with `-- @case <name> <ok|rows|error>` and ends with `-- @end`; this explicit framing allows routine bodies to contain semicolons without making the runner guess SQL statement boundaries. The runner replaces `__UQA_STATEFUL_SCHEMA__` with an isolated generated schema name and rejects an expected transcript whose fixture SHA-256 or ordered case modes are stale.

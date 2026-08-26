@@ -201,7 +201,7 @@ pub(crate) fn schema_expr_references_column(expression: &uqa_sql::ast::Expr, col
     result.is_err() || referenced
 }
 
-fn rename_schema_expr_column(
+pub(crate) fn rename_schema_expr_column(
     expression: &mut uqa_sql::ast::Expr,
     from: &str,
     to: &str,

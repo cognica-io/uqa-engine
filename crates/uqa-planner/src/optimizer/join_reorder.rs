@@ -149,6 +149,8 @@ fn reorder_command_joins(
         | CommandPlan::CreateRole(_)
         | CommandPlan::AlterRole(_)
         | CommandPlan::DropRole(_)
+        | CommandPlan::CreateTrigger(_)
+        | CommandPlan::DropTrigger(_)
         | CommandPlan::DoBlock { .. } => {}
     }
     Ok(())

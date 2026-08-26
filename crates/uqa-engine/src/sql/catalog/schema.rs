@@ -32,6 +32,7 @@ pub(super) enum VirtualRelation {
     PgAttrdef,
     PgConstraint,
     PgIndex,
+    PgTrigger,
     PgTables,
     PgViews,
     PgIndexes,
@@ -100,6 +101,7 @@ pub(super) fn resolve_virtual_relation(engine: &Engine, name: &str) -> Option<Vi
             Some(VirtualRelation::PgConstraint)
         }
         (_, true, "pg_index") | (false, false, "pg_index") => Some(VirtualRelation::PgIndex),
+        (_, true, "pg_trigger") | (false, false, "pg_trigger") => Some(VirtualRelation::PgTrigger),
         (_, true, "pg_tables") | (false, false, "pg_tables") => Some(VirtualRelation::PgTables),
         (_, true, "pg_views") | (false, false, "pg_views") => Some(VirtualRelation::PgViews),
         (_, true, "pg_indexes") | (false, false, "pg_indexes") => Some(VirtualRelation::PgIndexes),
@@ -164,6 +166,7 @@ impl VirtualRelation {
                 | Self::PgAttrdef
                 | Self::PgConstraint
                 | Self::PgIndex
+                | Self::PgTrigger
                 | Self::PgType
                 | Self::PgProc
                 | Self::PgDatabase
@@ -447,6 +450,27 @@ impl VirtualRelation {
                 "indoption" => ColumnType::Int2Vector,
                 "indexprs" => ColumnType::PgNodeTree,
                 "indpred" => ColumnType::PgNodeTree,
+            ],
+            Self::PgTrigger => columns![
+                "oid" => ColumnType::Oid,
+                "tgrelid" => ColumnType::Oid,
+                "tgparentid" => ColumnType::Oid,
+                "tgname" => ColumnType::Name,
+                "tgfoid" => ColumnType::Oid,
+                "tgtype" => ColumnType::SmallInteger,
+                "tgenabled" => ColumnType::InternalChar,
+                "tgisinternal" => ColumnType::Boolean,
+                "tgconstrrelid" => ColumnType::Oid,
+                "tgconstrindid" => ColumnType::Oid,
+                "tgconstraint" => ColumnType::Oid,
+                "tgdeferrable" => ColumnType::Boolean,
+                "tginitdeferred" => ColumnType::Boolean,
+                "tgnargs" => ColumnType::SmallInteger,
+                "tgattr" => ColumnType::Int2Vector,
+                "tgargs" => ColumnType::Bytea,
+                "tgqual" => ColumnType::PgNodeTree,
+                "tgoldtable" => ColumnType::Name,
+                "tgnewtable" => ColumnType::Name,
             ],
             Self::PgTables => columns![
                 "schemaname" => ColumnType::Name,

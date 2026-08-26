@@ -11,8 +11,21 @@ use super::{
     FunctionReturns, Interpreter, PLpgSQLDatum, RoutineOutcome, SQLError, SQLParam, SQLResult,
     SQLUserFunction, UnifiedPlanExecutor, Value,
 };
-use crate::engine_user_functions::routine_returns_anonymous_record;
+use crate::engine_user_functions::{canonical_routine_type_name, routine_returns_anonymous_record};
 use uqa_sql::ast::RoutineInvocationBinding;
+
+pub(in crate::sql) struct TriggerRoutineContext {
+    pub(in crate::sql) old: Value,
+    pub(in crate::sql) new: Value,
+    pub(in crate::sql) name: String,
+    pub(in crate::sql) when: String,
+    pub(in crate::sql) level: String,
+    pub(in crate::sql) operation: String,
+    pub(in crate::sql) relation_oid: i64,
+    pub(in crate::sql) table_name: String,
+    pub(in crate::sql) table_schema: String,
+    pub(in crate::sql) arguments: Vec<String>,
+}
 
 thread_local! {
     static CALL_DEPTH: Cell<usize> = const { Cell::new(0) };
@@ -73,6 +86,16 @@ pub(super) fn execute_routine(
     bound: Vec<Value>,
     invocation: &RoutineInvocationBinding,
 ) -> Result<RoutineOutcome, SQLError> {
+    if matches!(
+        &function.def.returns,
+        FunctionReturns::Scalar { type_name }
+            if canonical_routine_type_name(type_name) == "trigger"
+    ) {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "trigger functions can only be called as triggers".into(),
+        });
+    }
     let _guard = DepthGuard::enter(engine)?;
     let specialized = specialized_definition(&function.def, invocation)?;
     let definition = specialized.as_ref().unwrap_or(&function.def);
@@ -94,6 +117,26 @@ pub(super) fn execute_routine(
         CompiledFunctionBody::SQL(statements) => {
             execute_sql_language(engine, definition, statements, &bound)
         }
+    })
+}
+
+pub(in crate::sql) fn execute_trigger_routine(
+    engine: &Engine,
+    function: &SQLUserFunction,
+    context: &TriggerRoutineContext,
+) -> Result<Value, SQLError> {
+    let _guard = DepthGuard::enter(engine)?;
+    engine.ensure_routine_execute_privilege(&function.def)?;
+    engine.with_routine_context(&function.def, || {
+        let CompiledFunctionBody::PLpgSQL(parsed) = &function.compiled else {
+            return Err(SQLError::Unsupported(
+                "only LANGUAGE plpgsql trigger functions are executable".into(),
+            ));
+        };
+        let mut interpreter = Interpreter::new(engine, &function.def, parsed, Vec::new())?;
+        interpreter.initialize_trigger_context(parsed, context)?;
+        interpreter.run(&parsed.action)?;
+        Ok(interpreter.into_outcome().value)
     })
 }
 

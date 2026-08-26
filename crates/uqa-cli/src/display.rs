@@ -225,7 +225,7 @@ pub(super) fn column_constraints(col: &ColumnDef) -> String {
     if col.not_null {
         flags.push("NOT NULL".to_string());
     }
-    if col.auto_increment {
+    if col.auto_increment.is_some() {
         flags.push("AUTO".to_string());
     }
     if col.unique {

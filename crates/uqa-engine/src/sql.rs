@@ -60,6 +60,7 @@ mod plpgsql_exec;
 mod row_functions;
 mod scalar;
 mod select;
+mod triggers;
 mod volatility;
 mod where_eval;
 mod window;

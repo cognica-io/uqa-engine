@@ -9,6 +9,78 @@
 use super::*;
 
 #[test]
+fn trigger_statements_preserve_postgresql_event_and_lifecycle_shape() {
+    let Statement::CreateTrigger(trigger) = first(
+        "CREATE OR REPLACE TRIGGER normalize_before BEFORE INSERT OR UPDATE OF title, body ON app.items FOR EACH ROW WHEN (NEW.title IS NOT NULL) EXECUTE FUNCTION app.normalize('first', 'second')",
+    ) else {
+        panic!("expected CREATE TRIGGER");
+    };
+    assert_eq!(trigger.name, "normalize_before");
+    assert_eq!(trigger.table, "app.items");
+    assert_eq!(trigger.function, "app.normalize");
+    assert_eq!(trigger.arguments, ["first", "second"]);
+    assert!(trigger.row);
+    assert!(trigger.or_replace);
+    assert_eq!(trigger.timing, crate::ast::TriggerTiming::Before);
+    assert_eq!(
+        trigger.events,
+        [
+            crate::ast::TriggerEvent::Insert,
+            crate::ast::TriggerEvent::Update,
+        ]
+    );
+    assert_eq!(trigger.update_columns, ["title", "body"]);
+    assert!(trigger.when.is_some());
+
+    let Statement::DropTrigger(drop) =
+        first("DROP TRIGGER IF EXISTS normalize_before ON app.items CASCADE")
+    else {
+        panic!("expected DROP TRIGGER");
+    };
+    assert_eq!(drop.name, "normalize_before");
+    assert_eq!(drop.table, "app.items");
+    assert!(drop.if_exists);
+    assert!(drop.cascade);
+
+    let Statement::AlterTable(rename) =
+        first("ALTER TRIGGER normalize_before ON app.items RENAME TO normalized_before")
+    else {
+        panic!("expected ALTER TRIGGER");
+    };
+    assert!(matches!(
+        rename.actions.as_slice(),
+        [AlterTableAction::RenameTrigger { from, to }]
+            if from == "normalize_before" && to == "normalized_before"
+    ));
+
+    let Statement::AlterTable(enable) =
+        first("ALTER TABLE app.items ENABLE ALWAYS TRIGGER normalized_before")
+    else {
+        panic!("expected ALTER TABLE ENABLE TRIGGER");
+    };
+    assert!(matches!(
+        enable.actions.as_slice(),
+        [AlterTableAction::SetTriggerEnableMode {
+            name: Some(name),
+            mode: crate::ast::EventEnableMode::Always,
+            ..
+        }] if name == "normalized_before"
+    ));
+}
+
+#[test]
+fn unsupported_advanced_trigger_shapes_fail_during_compilation() {
+    for sql in [
+        "CREATE CONSTRAINT TRIGGER constrained AFTER INSERT ON items DEFERRABLE FOR EACH ROW EXECUTE FUNCTION probe()",
+        "CREATE TRIGGER transitioning AFTER UPDATE ON items REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION probe()",
+        "CREATE TRIGGER view_instead INSTEAD OF INSERT ON item_view FOR EACH ROW EXECUTE FUNCTION probe()",
+    ] {
+        let error = compile(sql).expect_err("advanced trigger must not compile partially");
+        assert_eq!(error.sqlstate(), Some("0A000"), "{sql}: {error}");
+    }
+}
+
+#[test]
 fn alter_table_add_key_constraint_preserves_tuple_shape() {
     let Statement::AlterTable(alter) =
         first("ALTER TABLE labels ADD CONSTRAINT labels_tenant_slug_key UNIQUE (tenant, slug)")

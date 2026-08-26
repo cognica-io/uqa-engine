@@ -80,6 +80,7 @@ mod async_sql_engine;
 mod engine_analyzers;
 mod engine_cancellation;
 mod engine_catalog_indexes;
+mod engine_events;
 mod engine_fdw;
 mod engine_fts;
 mod engine_generated;
@@ -152,6 +153,7 @@ const SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
 const GRAPH_LABELS_METADATA_PREFIX: &str = "graph_label_registry::";
 const FUNCTIONS_METADATA_KEY: &str = "sql_functions_json";
 const ROLES_METADATA_KEY: &str = "sql_roles_json";
+const TRIGGERS_METADATA_KEY: &str = "sql_triggers_json";
 const SQL_STATEMENT_CACHE_LIMIT: usize = 256;
 /// Default nesting cap for user-defined function calls. Exceeding it
 /// raises `stack depth limit exceeded`, mirroring the `PostgreSQL`

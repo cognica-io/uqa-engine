@@ -7,19 +7,22 @@
 //! Row, key, foreign-key, and referential-action validation.
 
 mod period;
+mod referential_actions;
 
 use super::{
     coerce_to_column_type, dml_storage_error, document_vectors, eval_lowered_expression,
     lock_mutation_row, lock_mutation_target, lock_physical_mutation_target, missing_document_error,
     partition_insert_target, update_lock_strength, ColumnType, DocId, Document, Engine, ForeignKey,
     ForeignKeyAction, ForeignKeyMatch, MutationLockTarget, PhysicalDocumentIdentity,
-    PhysicalMutationLockTarget, PreparedDocumentRewrite, SQLError, SQLParam, Value,
+    PhysicalMutationLockTarget, PreparedDocumentRewrite, ReferentialActionContext,
+    ReferentialRewritePreparation, SQLError, SQLParam, Value,
 };
 use sha2::{Digest, Sha256};
 use uqa_sql::ast::TableKeyConstraint;
 
 pub(in crate::sql) use period::period_foreign_key_coverage;
 use period::period_ranges;
+use referential_actions::prepare_referenced_key_update_actions;
 
 pub(in crate::sql) struct ForeignKeyLookup {
     pub(in crate::sql) values: Vec<Value>,
@@ -825,10 +828,10 @@ pub(in crate::sql) fn prepare_document_rewrite(
     old_document: Document,
     mut new_document: Document,
     params: &[SQLParam],
-    rewrite_stack: &mut Vec<(String, DocId)>,
+    referential_actions: &mut ReferentialActionContext,
 ) -> Result<Option<PreparedDocumentRewrite>, SQLError> {
     let key = (table.to_string(), doc_id);
-    if rewrite_stack.contains(&key) {
+    if referential_actions.rewrite_stack.contains(&key) {
         return Ok(None);
     }
     engine.lock_relation(table, crate::row_locks::RelationLockMode::RowExclusive)?;
@@ -856,7 +859,7 @@ pub(in crate::sql) fn prepare_document_rewrite(
         &old_document,
         &new_document,
     )?;
-    rewrite_stack.push(key);
+    referential_actions.rewrite_stack.push(key);
     let actions = prepare_referenced_key_update_actions(
         engine,
         table,
@@ -864,9 +867,9 @@ pub(in crate::sql) fn prepare_document_rewrite(
         &old_document,
         &new_document,
         params,
-        rewrite_stack,
+        referential_actions,
     );
-    rewrite_stack.pop();
+    referential_actions.rewrite_stack.pop();
     Ok(Some(PreparedDocumentRewrite {
         table: table.to_string(),
         doc_id,
@@ -874,7 +877,50 @@ pub(in crate::sql) fn prepare_document_rewrite(
         old_document,
         new_document,
         actions: actions?,
+        trigger_updated_columns: None,
     }))
+}
+
+pub(in crate::sql) fn prepare_referential_document_rewrite(
+    engine: &Engine,
+    preparation: ReferentialRewritePreparation<'_>,
+    params: &[SQLParam],
+    referential_actions: &mut ReferentialActionContext,
+) -> Result<Option<PreparedDocumentRewrite>, SQLError> {
+    let ReferentialRewritePreparation {
+        table,
+        doc_id,
+        old_document,
+        proposed_document,
+        updated_columns,
+    } = preparation;
+    let Some(new_document) = crate::sql::triggers::fire_before_row_triggers(
+        engine,
+        table,
+        uqa_sql::ast::TriggerEvent::Update,
+        doc_id,
+        Some(&old_document),
+        Some(&proposed_document),
+        &updated_columns,
+    )?
+    else {
+        return Ok(None);
+    };
+    let Some(mut prepared) = prepare_document_rewrite(
+        engine,
+        table,
+        doc_id,
+        old_document,
+        new_document,
+        params,
+        referential_actions,
+    )?
+    else {
+        return Ok(None);
+    };
+    prepared.trigger_updated_columns = Some(updated_columns);
+    finalize_referential_partition_rewrite(engine, &mut prepared, params)?;
+    Ok(Some(prepared))
 }
 
 pub(in crate::sql) fn retarget_prepared_document_rewrite(
@@ -964,47 +1010,68 @@ pub(in crate::sql) fn stage_prepared_document_rewrite(
     engine: &Engine,
     prepared: &mut PreparedDocumentRewrite,
     params: &[SQLParam],
+    root_updated_columns: Option<&[String]>,
+    after_row_events: &mut Vec<crate::sql::triggers::AfterRowTriggerEvent>,
 ) -> Result<DocId, SQLError> {
-    if let Some((destination_table, destination_doc_id)) = prepared.destination.as_ref() {
-        validate_document_non_key_constraints(
-            engine,
-            destination_table,
-            &prepared.new_document,
-            params,
-        )?;
-        validate_key_constraints(engine, destination_table, &prepared.new_document, None)?;
-        engine.stage_command_document(&prepared.table, prepared.doc_id, None)?;
-        engine.stage_command_document(
-            destination_table,
-            *destination_doc_id,
-            Some(prepared.new_document.clone()),
-        )?;
-        for action in &mut prepared.actions {
-            stage_prepared_document_rewrite(engine, action, params)?;
-        }
-        return Ok(*destination_doc_id);
-    }
-    validate_document_rewrite_constraints(
-        engine,
-        &prepared.table,
-        &prepared.old_document,
-        &prepared.new_document,
-        params,
-        prepared.doc_id,
-    )?;
+    let trigger_updated_columns = root_updated_columns
+        .map(<[String]>::to_vec)
+        .or_else(|| prepared.trigger_updated_columns.clone());
     let rewritten_doc_id =
-        integer_primary_key_doc_id(engine, &prepared.table, &prepared.new_document)?
-            .unwrap_or(prepared.doc_id);
-    if rewritten_doc_id != prepared.doc_id {
-        engine.stage_command_document(&prepared.table, prepared.doc_id, None)?;
+        if let Some((destination_table, destination_doc_id)) = prepared.destination.as_ref() {
+            validate_document_non_key_constraints(
+                engine,
+                destination_table,
+                &prepared.new_document,
+                params,
+            )?;
+            validate_key_constraints(engine, destination_table, &prepared.new_document, None)?;
+            engine.stage_command_document(&prepared.table, prepared.doc_id, None)?;
+            engine.stage_command_document(
+                destination_table,
+                *destination_doc_id,
+                Some(prepared.new_document.clone()),
+            )?;
+            *destination_doc_id
+        } else {
+            validate_document_rewrite_constraints(
+                engine,
+                &prepared.table,
+                &prepared.old_document,
+                &prepared.new_document,
+                params,
+                prepared.doc_id,
+            )?;
+            let rewritten_doc_id =
+                integer_primary_key_doc_id(engine, &prepared.table, &prepared.new_document)?
+                    .unwrap_or(prepared.doc_id);
+            if rewritten_doc_id != prepared.doc_id {
+                engine.stage_command_document(&prepared.table, prepared.doc_id, None)?;
+            }
+            engine.stage_command_document(
+                &prepared.table,
+                rewritten_doc_id,
+                Some(prepared.new_document.clone()),
+            )?;
+            rewritten_doc_id
+        };
+    if let Some(updated_columns) = trigger_updated_columns.as_deref() {
+        if let Some(event) = crate::sql::triggers::AfterRowTriggerEvent::prepare(
+            engine,
+            crate::sql::triggers::AfterRowTriggerInput {
+                table: &prepared.table,
+                event: uqa_sql::ast::TriggerEvent::Update,
+                old_doc_id: prepared.doc_id,
+                new_doc_id: rewritten_doc_id,
+                old_document: Some(&prepared.old_document),
+                new_document: Some(&prepared.new_document),
+                updated_columns,
+            },
+        )? {
+            after_row_events.push(event);
+        }
     }
-    engine.stage_command_document(
-        &prepared.table,
-        rewritten_doc_id,
-        Some(prepared.new_document.clone()),
-    )?;
     for action in &mut prepared.actions {
-        stage_prepared_document_rewrite(engine, action, params)?;
+        stage_prepared_document_rewrite(engine, action, params, None, after_row_events)?;
     }
     Ok(rewritten_doc_id)
 }
@@ -1087,167 +1154,6 @@ pub(in crate::sql) fn integer_primary_key_doc_id(
         Some(Value::Int(v)) if *v >= 0 => Some(*v as DocId),
         _ => None,
     })
-}
-
-fn prepare_referenced_key_update_actions(
-    engine: &Engine,
-    table: &str,
-    parent_doc_id: DocId,
-    old_doc: &Document,
-    new_doc: &Document,
-    params: &[SQLParam],
-    rewrite_stack: &mut Vec<(String, DocId)>,
-) -> Result<Vec<PreparedDocumentRewrite>, SQLError> {
-    let mut actions = Vec::new();
-    for (ref_table, fk) in referrers_to_for_actions(engine, table)? {
-        let old_values: Vec<Value> = fk
-            .ref_columns
-            .iter()
-            .map(|c| old_doc.get(c).cloned().unwrap_or(Value::Null))
-            .collect();
-        let new_values: Vec<Value> = fk
-            .ref_columns
-            .iter()
-            .map(|c| new_doc.get(c).cloned().unwrap_or(Value::Null))
-            .collect();
-        if old_values == new_values || old_values.iter().any(|v| matches!(v, Value::Null)) {
-            continue;
-        }
-        engine.lock_relation(&ref_table, crate::row_locks::RelationLockMode::RowExclusive)?;
-        let comparison = foreign_key_comparison_types(engine, &ref_table, &fk)?;
-        let expected = comparison.normalize(old_values.clone())?;
-        if fk.period {
-            let ordinary_len = expected.len().saturating_sub(1);
-            let parent = PhysicalDocumentIdentity {
-                table: table.to_string(),
-                doc_id: parent_doc_id,
-            };
-            for physical_table in engine.hierarchy_scan_tables(&ref_table, true)? {
-                for child_id in engine.table_doc_ids(&physical_table)? {
-                    let Some(child_doc) = engine.get_document(&physical_table, child_id)? else {
-                        continue;
-                    };
-                    let Some(child_lookup) =
-                        foreign_key_lookup_values(engine, &physical_table, &fk, &child_doc)?
-                    else {
-                        continue;
-                    };
-                    if child_lookup.values[..ordinary_len] != expected[..ordinary_len] {
-                        continue;
-                    }
-                    let (covered, _) = period_foreign_key_coverage(
-                        engine,
-                        &fk,
-                        &child_lookup.values,
-                        std::slice::from_ref(&parent),
-                        Some((&parent, new_doc)),
-                    )?;
-                    if covered {
-                        continue;
-                    }
-                    if fk.deferrable && fk.initially_deferred {
-                        engine.defer_foreign_key_row(&physical_table, child_id)?;
-                        continue;
-                    }
-                    return Err(SQLError::Routine {
-                        sqlstate: "23503".into(),
-                        message: format!(
-                            "update on table \"{table}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
-                            fk.name.as_deref().unwrap_or("<unnamed>")
-                        ),
-                    });
-                }
-            }
-            continue;
-        }
-        let referencing = referencing_rows(engine, &ref_table, &fk, &comparison, &expected)?;
-        for (child, _child_doc) in referencing {
-            match fk.on_update {
-                ForeignKeyAction::NoAction if fk.deferrable && fk.initially_deferred => {
-                    engine.defer_foreign_key_row(&child.table, child.doc_id)?;
-                }
-                ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
-                    return Err(SQLError::Routine {
-                        sqlstate: "23503".into(),
-                        message: format!(
-                            "update or delete on table \"{table}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
-                            fk.name.as_deref().unwrap_or("<unnamed>")
-                        ),
-                    });
-                }
-                ForeignKeyAction::Cascade => {
-                    let Some((child, child_doc)) = lock_referencing_child(
-                        engine,
-                        &ref_table,
-                        &child,
-                        &fk.local_columns,
-                        &fk,
-                        &comparison,
-                        &expected,
-                    )?
-                    else {
-                        continue;
-                    };
-                    let mut updated = child_doc.clone();
-                    for (col, value) in fk.local_columns.iter().zip(new_values.iter()) {
-                        updated.insert(
-                            col.clone(),
-                            coerce_to_column_type(engine, &child.table, col, value.clone())?,
-                        );
-                    }
-                    if let Some(mut prepared) = prepare_document_rewrite(
-                        engine,
-                        &child.table,
-                        child.doc_id,
-                        child_doc,
-                        updated,
-                        params,
-                        rewrite_stack,
-                    )? {
-                        finalize_referential_partition_rewrite(engine, &mut prepared, params)?;
-                        actions.push(prepared);
-                    }
-                }
-                ForeignKeyAction::SetNull | ForeignKeyAction::SetDefault => {
-                    let Some((child, child_doc)) = lock_referencing_child(
-                        engine,
-                        &ref_table,
-                        &child,
-                        &fk.local_columns,
-                        &fk,
-                        &comparison,
-                        &expected,
-                    )?
-                    else {
-                        continue;
-                    };
-                    let mut updated = child_doc.clone();
-                    apply_set_action_to_child(
-                        engine,
-                        &child.table,
-                        &child_doc,
-                        &mut updated,
-                        &fk.local_columns,
-                        fk.on_update,
-                        params,
-                    )?;
-                    if let Some(mut prepared) = prepare_document_rewrite(
-                        engine,
-                        &child.table,
-                        child.doc_id,
-                        child_doc,
-                        updated,
-                        params,
-                        rewrite_stack,
-                    )? {
-                        finalize_referential_partition_rewrite(engine, &mut prepared, params)?;
-                        actions.push(prepared);
-                    }
-                }
-            }
-        }
-    }
-    Ok(actions)
 }
 
 pub(in crate::sql) fn referrers_to_for_actions(

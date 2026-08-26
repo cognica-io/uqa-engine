@@ -149,6 +149,56 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    pub(super) fn initialize_trigger_context(
+        &mut self,
+        parsed: &PLpgSQLFunction,
+        context: &super::TriggerRoutineContext,
+    ) -> Result<(), SQLError> {
+        if let Some(index) = parsed.new_datum {
+            self.values[index] = context.new.clone();
+        }
+        if let Some(index) = parsed.old_datum {
+            self.values[index] = context.old.clone();
+        }
+        let argument_values = context
+            .arguments
+            .iter()
+            .cloned()
+            .map(Value::Str)
+            .collect::<Vec<_>>();
+        let arguments = if argument_values.is_empty() {
+            uqa_core::ArrayValue::try_new(argument_values)
+        } else {
+            uqa_core::ArrayValue::with_lower_bounds(argument_values, vec![0])
+        }
+        .ok_or_else(|| SQLError::Internal("trigger arguments are not a valid text array".into()))?;
+        for (index, datum) in self.datums.iter().enumerate() {
+            let Some(name) = datum.name() else {
+                continue;
+            };
+            let value = match name.to_ascii_lowercase().as_str() {
+                "new" => Some(context.new.clone()),
+                "old" => Some(context.old.clone()),
+                "tg_name" => Some(Value::Str(context.name.clone())),
+                "tg_when" => Some(Value::Str(context.when.clone())),
+                "tg_level" => Some(Value::Str(context.level.clone())),
+                "tg_op" => Some(Value::Str(context.operation.clone())),
+                "tg_relid" => Some(Value::Int(context.relation_oid)),
+                "tg_relname" | "tg_table_name" => Some(Value::Str(context.table_name.clone())),
+                "tg_table_schema" => Some(Value::Str(context.table_schema.clone())),
+                "tg_nargs" => Some(Value::Int(i64::try_from(context.arguments.len()).map_err(
+                    |_| SQLError::Internal("trigger argument count exceeds i64".into()),
+                )?)),
+                "tg_argv" => Some(Value::Array(arguments.clone())),
+                _ => None,
+            };
+            if let Some(value) = value {
+                self.values[index] = value;
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn run(&mut self, action: &PLpgSQLBlock) -> Result<(), SQLError> {
         match self.exec_block(action)? {
             Flow::Return => Ok(()),

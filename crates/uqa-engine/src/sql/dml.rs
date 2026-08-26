@@ -91,6 +91,7 @@ pub(in crate::sql) struct PreparedDocumentRewrite {
     pub old_document: Document,
     pub new_document: Document,
     pub actions: Vec<PreparedDocumentRewrite>,
+    pub trigger_updated_columns: Option<Vec<String>>,
 }
 
 pub(in crate::sql) enum PreparedDeleteAction {
@@ -103,6 +104,30 @@ pub(in crate::sql) struct PreparedDocumentDelete {
     pub doc_id: DocId,
     pub document: Document,
     pub actions: Vec<PreparedDeleteAction>,
+}
+
+#[derive(Default)]
+pub(in crate::sql) struct ReferentialActionContext {
+    pub(in crate::sql) delete_stack: Vec<(String, DocId)>,
+    pub(in crate::sql) rewrite_stack: Vec<(String, DocId)>,
+    pub(in crate::sql) trigger_statements: crate::sql::triggers::ReferentialTriggerStatements,
+}
+
+impl ReferentialActionContext {
+    pub(in crate::sql) fn fire_after_statement_triggers(
+        &self,
+        engine: &Engine,
+    ) -> Result<(), SQLError> {
+        self.trigger_statements.fire_after(engine)
+    }
+}
+
+pub(in crate::sql) struct ReferentialRewritePreparation<'a> {
+    pub(in crate::sql) table: &'a str,
+    pub(in crate::sql) doc_id: DocId,
+    pub(in crate::sql) old_document: Document,
+    pub(in crate::sql) proposed_document: Document,
+    pub(in crate::sql) updated_columns: Vec<String>,
 }
 
 pub(in crate::sql) fn encode_prepared_doc_id(doc_id: DocId) -> Value {
@@ -233,6 +258,7 @@ pub(in crate::sql) fn decode_prepared_document_rewrite(
         old_document,
         new_document,
         actions,
+        trigger_updated_columns: None,
     })
 }
 

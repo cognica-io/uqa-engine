@@ -43,6 +43,7 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::PgAttrdef => build_pg_attrdef(engine)?,
         VirtualRelation::PgConstraint => build_pg_constraint(engine)?,
         VirtualRelation::PgIndex => build_pg_index(engine)?,
+        VirtualRelation::PgTrigger => build_pg_trigger(engine)?,
         VirtualRelation::PgTables => build_pg_tables(engine)?,
         VirtualRelation::PgViews => build_pg_views(engine)?,
         VirtualRelation::PgIndexes => build_pg_indexes(engine)?,
@@ -63,6 +64,7 @@ pub(super) fn build_info_schema_rows(
 
 mod ag_catalog;
 mod builtin_routines;
+mod events;
 mod expression_text;
 mod helpers;
 mod information_schema;
@@ -74,6 +76,8 @@ mod schema;
 
 pub(crate) use ag_catalog::resolve_age_label_relation_name;
 use ag_catalog::{build_ag_graph, build_ag_label};
+use events::build_pg_trigger;
+pub(in crate::sql) use events::pg_get_triggerdef_value;
 use information_schema::{
     build_info_catalog_name, build_info_columns, build_info_key_column_usage, build_info_routines,
     build_info_schemata, build_info_sequences, build_info_table_constraints, build_info_tables,

@@ -1,0 +1,261 @@
+{
+  "schema_version": 1,
+  "fixture_sha256": "b3a966639f95720b0dab917ff4941052a9d114a6feb469caf475d7914204081f",
+  "oracle": {
+    "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
+    "server_version_num": "180004",
+    "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "age_version": "1.8.0"
+  },
+  "cases": [
+    {
+      "name": "create_schema",
+      "kind": "ok"
+    },
+    {
+      "name": "create_items",
+      "kind": "ok"
+    },
+    {
+      "name": "create_log",
+      "kind": "ok"
+    },
+    {
+      "name": "create_row_function",
+      "kind": "ok"
+    },
+    {
+      "name": "create_statement_function",
+      "kind": "ok"
+    },
+    {
+      "name": "create_visible_count_function",
+      "kind": "ok"
+    },
+    {
+      "name": "reject_integer_when",
+      "kind": "error",
+      "sqlstate": "42804"
+    },
+    {
+      "name": "reject_invalid_text_when",
+      "kind": "error",
+      "sqlstate": "22P02"
+    },
+    {
+      "name": "create_a_before",
+      "kind": "ok"
+    },
+    {
+      "name": "create_z_before",
+      "kind": "ok"
+    },
+    {
+      "name": "create_after_insert",
+      "kind": "ok"
+    },
+    {
+      "name": "create_after_when",
+      "kind": "ok"
+    },
+    {
+      "name": "create_after_update_statement",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_two_rows",
+      "kind": "ok"
+    },
+    {
+      "name": "row_order_generated_and_after_visibility",
+      "kind": "rows",
+      "rows": [
+        [
+          "a_before:BEFORE:INSERT:g=NULL:arg=first"
+        ],
+        [
+          "z_before:BEFORE:INSERT:g=NULL:arg=last"
+        ],
+        [
+          "a_before:BEFORE:INSERT:g=NULL:arg=first"
+        ],
+        [
+          "z_before:BEFORE:INSERT:g=NULL:arg=last"
+        ],
+        [
+          "after_insert:AFTER:INSERT:rows=2"
+        ],
+        [
+          "after_when:AFTER:INSERT:rows=2"
+        ],
+        [
+          "after_insert:AFTER:INSERT:rows=2"
+        ],
+        [
+          "after_when:AFTER:INSERT:rows=2"
+        ]
+      ]
+    },
+    {
+      "name": "update_zero_rows",
+      "kind": "ok"
+    },
+    {
+      "name": "statement_trigger_on_zero_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "after_update_statement:AFTER:UPDATE"
+        ]
+      ]
+    },
+    {
+      "name": "direct_trigger_call_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "trigger_catalog_shape",
+      "kind": "rows",
+      "rows": [
+        [
+          "a_before",
+          "7",
+          "O",
+          "f",
+          "1"
+        ],
+        [
+          "after_insert",
+          "5",
+          "O",
+          "f",
+          "0"
+        ],
+        [
+          "after_update_statement",
+          "16",
+          "O",
+          "f",
+          "0"
+        ],
+        [
+          "after_when",
+          "5",
+          "O",
+          "f",
+          "0"
+        ],
+        [
+          "z_before",
+          "7",
+          "O",
+          "f",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "disable_a_before",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_with_disabled_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "disabled_mode",
+      "kind": "rows",
+      "rows": [
+        [
+          "D"
+        ]
+      ]
+    },
+    {
+      "name": "remaining_trigger_order",
+      "kind": "rows",
+      "rows": [
+        [
+          "after_when:AFTER:INSERT:rows=3"
+        ],
+        [
+          "after_insert:AFTER:INSERT:rows=3"
+        ]
+      ]
+    },
+    {
+      "name": "rename_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "renamed_trigger_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "renamed_before"
+        ]
+      ]
+    },
+    {
+      "name": "create_utility_items",
+      "kind": "ok"
+    },
+    {
+      "name": "create_replace_trigger_initial",
+      "kind": "ok"
+    },
+    {
+      "name": "replace_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "execute_replaced_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "replaced_trigger_execution",
+      "kind": "rows",
+      "rows": [
+        [
+          "utility_replace:AFTER:INSERT"
+        ]
+      ]
+    },
+    {
+      "name": "create_truncate_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "execute_truncate_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "truncate_trigger_execution",
+      "kind": "rows",
+      "rows": [
+        [
+          "utility_truncate:BEFORE:TRUNCATE"
+        ]
+      ]
+    },
+    {
+      "name": "function_drop_restrict",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "function_drop_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "cascade_removed_dependent_triggers",
+      "kind": "rows",
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    }
+  ]
+}

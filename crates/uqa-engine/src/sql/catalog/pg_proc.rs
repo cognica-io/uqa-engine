@@ -14,7 +14,29 @@ use super::helpers::{
 };
 use super::{canonical_routine_type_name, registered_names, Engine, ResultRow, SQLError, Value};
 use crate::engine_roles::role_oid;
-use crate::engine_user_functions::builtin_routine_support_oid;
+use crate::engine_user_functions::{builtin_routine_support_oid, SQLUserFunction};
+
+pub(super) fn user_routine_catalog_oid(function: &SQLUserFunction) -> i64 {
+    let def = &function.def;
+    let signature = def
+        .identity_params()
+        .iter()
+        .map(|parameter| canonical_routine_type_name(&parameter.type_name))
+        .collect::<Vec<_>>();
+    stable_oid(
+        "proc",
+        &format!(
+            "{}:{}:{}",
+            def.name,
+            if def.is_procedure {
+                "procedure"
+            } else {
+                "function"
+            },
+            signature.join(",")
+        ),
+    )
+}
 
 pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINES
@@ -123,21 +145,6 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
     for function in engine.list_sql_functions() {
         let def = &function.def;
         let (routine_schema, routine_name) = split_schema_name(&def.name)?;
-        let signature = def
-            .identity_params()
-            .iter()
-            .map(|parameter| canonical_routine_type_name(&parameter.type_name))
-            .collect::<Vec<_>>();
-        let identity = format!(
-            "{}:{}:{}",
-            def.name,
-            if def.is_procedure {
-                "procedure"
-            } else {
-                "function"
-            },
-            signature.join(",")
-        );
         let source = match &def.body {
             uqa_sql::ast::FunctionBody::Source(source) => source.clone(),
             uqa_sql::ast::FunctionBody::Statements(_) => String::new(),
@@ -242,7 +249,7 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
             }
         };
         rows.push(row([
-            ("oid", int_value(stable_oid("proc", &identity))),
+            ("oid", int_value(user_routine_catalog_oid(&function))),
             ("proname", str_value(routine_name)),
             ("pronamespace", int_value(schema_oid(&routine_schema))),
             ("proowner", int_value(role_oid(&def.owner))),

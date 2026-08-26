@@ -596,6 +596,7 @@ impl InsertConflictLocks {
     pub(in crate::sql) fn prepare_document(
         &mut self,
         preparation: InsertConflictPreparation<'_>,
+        referential_actions: &mut super::ReferentialActionContext,
     ) -> Result<PreparedInsertConflict, SQLError> {
         let InsertConflictPreparation {
             engine,
@@ -677,9 +678,25 @@ impl InsertConflictLocks {
             BuiltConflictUpdate::Skip => Ok(PreparedInsertConflict::Skip),
             BuiltConflictUpdate::Update {
                 old_document,
-                new_document,
+                mut new_document,
             } => {
-                let mut rewrite_stack = Vec::new();
+                let updated_columns = assignments
+                    .iter()
+                    .map(|assignment| assignment.column.clone())
+                    .collect::<Vec<_>>();
+                let Some(triggered_document) = crate::sql::triggers::fire_before_row_triggers(
+                    engine,
+                    &existing.table,
+                    uqa_sql::ast::TriggerEvent::Update,
+                    existing.doc_id,
+                    Some(&old_document),
+                    Some(&new_document),
+                    &updated_columns,
+                )?
+                else {
+                    return Ok(PreparedInsertConflict::Skip);
+                };
+                new_document = triggered_document;
                 let mut prepared = prepare_document_rewrite(
                     engine,
                     &existing.table,
@@ -687,7 +704,7 @@ impl InsertConflictLocks {
                     old_document,
                     new_document,
                     params,
-                    &mut rewrite_stack,
+                    referential_actions,
                 )?
                 .ok_or_else(|| {
                     SQLError::Internal(

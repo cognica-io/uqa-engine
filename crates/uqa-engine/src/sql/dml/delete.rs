@@ -9,15 +9,15 @@
 use super::{
     apply_set_action_to_child, apply_validated_prepared_document_rewrite,
     build_join_spill_with_ctes, build_returning_row, dml_join_rows, dml_returning_result,
-    dml_target_row, eval_mutation_expr, finalize_referential_partition_rewrite,
-    foreign_key_comparison_types, foreign_key_lookup_values, lock_mutation_target,
-    lock_physical_mutation_target, period_foreign_key_coverage, prepare_document_rewrite,
-    referencing_rows, referrers_to_for_actions, stage_prepared_document_rewrite,
-    validate_dml_expression_qualifiers, validate_returning_alias_relations, BTreeSet, CteScope,
-    DeletePlan, DmlCommandMutationOverlay, DmlReturningShape, DocId, Document, Engine, ForeignKey,
-    ForeignKeyAction, MutationLockTarget, PhysicalMutationLockTarget, PreparedDeleteAction,
-    PreparedDocumentDelete, ReturningProjectionRow, ReturningRowImage, ReturningRowImages,
-    SQLError, SQLParam, SQLResult, Value,
+    dml_target_row, eval_mutation_expr, foreign_key_comparison_types, foreign_key_lookup_values,
+    lock_mutation_target, lock_physical_mutation_target, period_foreign_key_coverage,
+    prepare_referential_document_rewrite, referencing_rows, referrers_to_for_actions,
+    stage_prepared_document_rewrite, validate_dml_expression_qualifiers,
+    validate_returning_alias_relations, BTreeSet, CteScope, DeletePlan, DmlCommandMutationOverlay,
+    DmlReturningShape, DocId, Document, Engine, ForeignKey, ForeignKeyAction, MutationLockTarget,
+    PhysicalMutationLockTarget, PreparedDeleteAction, PreparedDocumentDelete,
+    ReturningProjectionRow, ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult,
+    Value,
 };
 
 pub(in crate::sql) fn run_delete(
@@ -41,6 +41,13 @@ pub(in crate::sql) fn run_delete_inner(
     engine.lock_relation(
         &stmt.table,
         crate::row_locks::RelationLockMode::RowExclusive,
+    )?;
+    crate::sql::triggers::fire_statement_triggers(
+        engine,
+        &stmt.table,
+        uqa_sql::ast::TriggerTiming::Before,
+        uqa_sql::ast::TriggerEvent::Delete,
+        &[],
     )?;
     let mut affected = 0u64;
     let cancel = engine.cancellation_token();
@@ -187,6 +194,19 @@ pub(in crate::sql) fn run_delete_inner(
         if !qualified_ids.insert((storage_table.clone(), doc_id)) {
             continue;
         }
+        if crate::sql::triggers::fire_before_row_triggers(
+            engine,
+            &storage_table,
+            uqa_sql::ast::TriggerEvent::Delete,
+            doc_id,
+            Some(&doc),
+            None,
+            &[],
+        )?
+        .is_none()
+        {
+            continue;
+        }
         engine.stage_command_document(&storage_table, doc_id, None)?;
         qualified_targets.push((storage_table, doc_id, doc, returning_context));
     }
@@ -196,9 +216,9 @@ pub(in crate::sql) fn run_delete_inner(
         .iter()
         .map(|(table, doc_id, _, _)| (table.clone(), *doc_id))
         .collect();
-    let mut delete_stack = Vec::new();
-    let mut rewrite_stack = Vec::new();
     let mut prepared_deletes = Vec::with_capacity(to_delete.len());
+    let mut after_row_events = Vec::new();
+    let mut referential_actions = super::ReferentialActionContext::default();
     let overlay = DmlCommandMutationOverlay::new(engine);
     for (storage_table, doc_id, _doc, returning_context) in to_delete {
         if let Some(mut prepared) = prepare_document_delete(
@@ -207,10 +227,10 @@ pub(in crate::sql) fn run_delete_inner(
             doc_id,
             params,
             &root_deletes,
-            &mut delete_stack,
-            &mut rewrite_stack,
+            &mut referential_actions,
+            false,
         )? {
-            stage_prepared_document_delete(engine, &mut prepared, params)?;
+            stage_prepared_document_delete(engine, &mut prepared, params, &mut after_row_events)?;
             affected += 1;
             if !stmt.returning.is_empty() {
                 returning_rows.push(build_returning_row(
@@ -233,16 +253,25 @@ pub(in crate::sql) fn run_delete_inner(
                     &snapshot_ctes,
                 )?);
             }
-            prepared_deletes.push((prepared, returning_context));
+            prepared_deletes.push(prepared);
         }
     }
     drop(overlay);
     if !prepared_deletes.is_empty() {
         engine.prepare_explicit_transaction_writer()?;
-        for (mut prepared, _) in prepared_deletes {
-            apply_validated_prepared_document_delete(engine, &mut prepared)?;
+        for prepared in &mut prepared_deletes {
+            apply_validated_prepared_document_delete(engine, prepared)?;
         }
     }
+    crate::sql::triggers::fire_after_row_trigger_events(engine, &after_row_events)?;
+    referential_actions.fire_after_statement_triggers(engine)?;
+    crate::sql::triggers::fire_statement_triggers(
+        engine,
+        &stmt.table,
+        uqa_sql::ast::TriggerTiming::After,
+        uqa_sql::ast::TriggerEvent::Delete,
+        &[],
+    )?;
     if !stmt.returning.is_empty() {
         return dml_returning_result(
             engine,
@@ -334,11 +363,11 @@ pub(in crate::sql) fn prepare_document_delete(
     doc_id: DocId,
     params: &[SQLParam],
     root_deletes: &BTreeSet<(String, DocId)>,
-    delete_stack: &mut Vec<(String, DocId)>,
-    rewrite_stack: &mut Vec<(String, DocId)>,
+    referential_actions: &mut super::ReferentialActionContext,
+    fire_row_triggers: bool,
 ) -> Result<Option<PreparedDocumentDelete>, SQLError> {
     let key = (table.to_string(), doc_id);
-    if delete_stack.contains(&key) {
+    if referential_actions.delete_stack.contains(&key) {
         return Ok(None);
     }
     engine.lock_relation(table, crate::row_locks::RelationLockMode::RowExclusive)?;
@@ -358,7 +387,23 @@ pub(in crate::sql) fn prepare_document_delete(
     let Some(target) = engine.get_document(table, doc_id)? else {
         return Ok(None);
     };
-    delete_stack.push((table.to_string(), doc_id));
+    if fire_row_triggers
+        && crate::sql::triggers::fire_before_row_triggers(
+            engine,
+            table,
+            uqa_sql::ast::TriggerEvent::Delete,
+            doc_id,
+            Some(&target),
+            None,
+            &[],
+        )?
+        .is_none()
+    {
+        return Ok(None);
+    }
+    referential_actions
+        .delete_stack
+        .push((table.to_string(), doc_id));
     let actions = prepare_referenced_key_delete_actions(
         engine,
         ReferencedDelete {
@@ -368,10 +413,9 @@ pub(in crate::sql) fn prepare_document_delete(
         },
         params,
         root_deletes,
-        delete_stack,
-        rewrite_stack,
+        referential_actions,
     );
-    delete_stack.pop();
+    referential_actions.delete_stack.pop();
     Ok(Some(PreparedDocumentDelete {
         table: table.to_string(),
         doc_id,
@@ -384,18 +428,34 @@ pub(in crate::sql) fn stage_prepared_document_delete(
     engine: &Engine,
     prepared: &mut PreparedDocumentDelete,
     params: &[SQLParam],
+    after_row_events: &mut Vec<crate::sql::triggers::AfterRowTriggerEvent>,
 ) -> Result<(), SQLError> {
+    engine.stage_command_document(&prepared.table, prepared.doc_id, None)?;
+    if let Some(event) = crate::sql::triggers::AfterRowTriggerEvent::prepare(
+        engine,
+        crate::sql::triggers::AfterRowTriggerInput {
+            table: &prepared.table,
+            event: uqa_sql::ast::TriggerEvent::Delete,
+            old_doc_id: prepared.doc_id,
+            new_doc_id: prepared.doc_id,
+            old_document: Some(&prepared.document),
+            new_document: None,
+            updated_columns: &[],
+        },
+    )? {
+        after_row_events.push(event);
+    }
     for action in &mut prepared.actions {
         match action {
             PreparedDeleteAction::Delete(delete) => {
-                stage_prepared_document_delete(engine, delete, params)?;
+                stage_prepared_document_delete(engine, delete, params, after_row_events)?;
             }
             PreparedDeleteAction::Rewrite(rewrite) => {
-                stage_prepared_document_rewrite(engine, rewrite, params)?;
+                stage_prepared_document_rewrite(engine, rewrite, params, None, after_row_events)?;
             }
         }
     }
-    engine.stage_command_document(&prepared.table, prepared.doc_id, None)
+    Ok(())
 }
 
 pub(in crate::sql) fn apply_validated_prepared_document_delete(
@@ -426,8 +486,7 @@ fn prepare_referenced_key_delete_actions(
     parent: ReferencedDelete<'_>,
     params: &[SQLParam],
     root_deletes: &BTreeSet<(String, DocId)>,
-    delete_stack: &mut Vec<(String, DocId)>,
-    rewrite_stack: &mut Vec<(String, DocId)>,
+    referential_actions: &mut super::ReferentialActionContext,
 ) -> Result<Vec<PreparedDeleteAction>, SQLError> {
     let mut actions = Vec::new();
     for (ref_table, fk) in referrers_to_for_actions(engine, parent.table)? {
@@ -501,6 +560,32 @@ fn prepare_referenced_key_delete_actions(
             }
             continue;
         }
+        let statement_identity = format!(
+            "{}:{}:{}",
+            ref_table,
+            fk.name.as_deref().unwrap_or("<unnamed>"),
+            fk.local_columns.join(",")
+        );
+        match fk.on_delete {
+            ForeignKeyAction::Cascade => referential_actions.trigger_statements.begin(
+                engine,
+                format!("{statement_identity}:on_delete_delete"),
+                &ref_table,
+                uqa_sql::ast::TriggerEvent::Delete,
+                &[],
+            )?,
+            ForeignKeyAction::SetNull | ForeignKeyAction::SetDefault => {
+                let columns = delete_set_columns(&fk);
+                referential_actions.trigger_statements.begin(
+                    engine,
+                    format!("{statement_identity}:on_delete_update"),
+                    &ref_table,
+                    uqa_sql::ast::TriggerEvent::Update,
+                    &columns,
+                )?;
+            }
+            ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {}
+        }
         let referencing = referencing_rows(engine, &ref_table, &fk, &comparison, &expected)?;
         for (child, _child_doc) in referencing {
             if root_deletes.contains(&(child.table.clone(), child.doc_id)) {
@@ -527,8 +612,8 @@ fn prepare_referenced_key_delete_actions(
                         child.doc_id,
                         params,
                         root_deletes,
-                        delete_stack,
-                        rewrite_stack,
+                        referential_actions,
+                        true,
                     )? {
                         actions.push(PreparedDeleteAction::Delete(Box::new(prepared)));
                     }
@@ -557,16 +642,18 @@ fn prepare_referenced_key_delete_actions(
                         fk.on_delete,
                         params,
                     )?;
-                    if let Some(mut prepared) = prepare_document_rewrite(
+                    if let Some(prepared) = prepare_referential_document_rewrite(
                         engine,
-                        &child.table,
-                        child.doc_id,
-                        child_doc,
-                        updated,
+                        super::ReferentialRewritePreparation {
+                            table: &child.table,
+                            doc_id: child.doc_id,
+                            old_document: child_doc,
+                            proposed_document: updated,
+                            updated_columns: columns,
+                        },
                         params,
-                        rewrite_stack,
+                        referential_actions,
                     )? {
-                        finalize_referential_partition_rewrite(engine, &mut prepared, params)?;
                         actions.push(PreparedDeleteAction::Rewrite(Box::new(prepared)));
                     }
                 }
