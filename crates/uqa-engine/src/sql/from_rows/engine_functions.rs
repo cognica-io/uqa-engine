@@ -12,7 +12,7 @@ use super::{
     run_age_create_vlabel_with_evaluator, run_age_drop_graph_with_evaluator,
     run_age_drop_label_with_evaluator, run_age_graph_exists_with_evaluator,
     run_graph_create_with_evaluator, run_graph_drop_with_evaluator, BTreeMap, Engine, SQLError,
-    ScalarExpr, Value, MERGE_ACTION_COLUMN, SCORE_PROVENANCE_COLUMN,
+    ScalarExpr, Value,
 };
 use uqa_sql::expr::RowLookup;
 
@@ -59,9 +59,12 @@ pub(in crate::sql) fn engine_func_intercept(
                     actual: args.len(),
                 });
             }
-            let action = row.column(MERGE_ACTION_COLUMN).cloned().ok_or_else(|| {
-                SQLError::Unsupported("merge_action() is only valid in MERGE RETURNING".into())
-            })?;
+            let action = row
+                .internal_column(crate::sql::merge_action_attribute())
+                .cloned()
+                .ok_or_else(|| {
+                    SQLError::Unsupported("merge_action() is only valid in MERGE RETURNING".into())
+                })?;
             Ok(Some(action))
         }
         // UQA-native helpers keep their lenient semantics.
@@ -138,24 +141,18 @@ pub(in crate::sql) fn score_projection_value(
     args: &[ScalarExpr],
     row: &dyn RowLookup,
 ) -> Result<Value, SQLError> {
-    if args.len() == 2 {
-        if let ScalarExpr::QualifiedColumn { qualifier, .. } = &args[0] {
-            return row
-                .qualified_column(qualifier, SCORE_PROVENANCE_COLUMN)
-                .and_then(|value| match value {
-                    Value::Float(score) => Some(Value::Float(*score)),
-                    _ => None,
-                })
-                .ok_or_else(|| score_projection_context_error(function));
-        }
-    }
-
-    if row.column_is_ambiguous(SCORE_PROVENANCE_COLUMN) {
+    let qualifier = (args.len() == 2)
+        .then(|| match &args[0] {
+            ScalarExpr::QualifiedColumn { qualifier, .. } => Some(qualifier.as_str()),
+            _ => None,
+        })
+        .flatten();
+    if row.score_source_is_ambiguous(qualifier) {
         return Err(SQLError::Unsupported(format!(
             "{function}() has multiple score-bearing retrieval rows; qualify its field argument"
         )));
     }
-    if let Some(Value::Float(score)) = row.column(SCORE_PROVENANCE_COLUMN) {
+    if let Some(Value::Float(score)) = row.score_source(qualifier) {
         return Ok(Value::Float(*score));
     }
     Err(score_projection_context_error(function))

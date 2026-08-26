@@ -86,6 +86,8 @@ pub(in crate::compiler) fn compile_select(
             rows: std::mem::take(&mut values),
             alias: None,
             column_aliases: Vec::new(),
+            internal_relation: None,
+            internal_column_types: Vec::new(),
         });
         projections = vec![Projection {
             expr: Expr::Star,
@@ -366,8 +368,10 @@ fn expression_is_null_with_side(
             distinct: _,
             order_by: _,
             filter: _,
-            binding: _,
-        } if crate::expr::builtin_scalar_function_strictness(name, args.len()) == Some(true) => {
+            binding,
+        } if crate::expr::bound_scalar_function_strictness(name, binding.as_ref(), args.len())
+            == Some(true) =>
+        {
             args.iter()
                 .map(crate::expr::call_argument_value)
                 .any(|argument| expression_is_null_with_side(argument, qualifiers))

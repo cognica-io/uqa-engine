@@ -78,12 +78,13 @@ impl AdaptiveAggregateSet {
         use crate::sql::select::EngineExpressionEvaluator;
 
         let group_count = self.statement.group_by.len();
-        let partial_schema = super::super::partial_state::partial_schema(group_count);
+        let partial_schema =
+            super::super::partial_state::partial_schema(self.partial_relation, group_count);
         let scan: Box<dyn PhysicalOperator + '_> =
-            Box::new(SpillScan::new(partial_schema.columns().to_vec(), partials));
+            Box::new(SpillScan::new(partial_schema, partials));
         let keys = (0..group_count)
             .map(|index| SortKey {
-                expr: ScalarExpr::Column(super::super::partial_state::partial_group_column(index)),
+                expr: ScalarExpr::InternalColumn(self.partial_relation.column(index)),
                 descending: false,
                 nulls_first: None,
             })

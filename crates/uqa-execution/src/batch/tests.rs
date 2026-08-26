@@ -271,23 +271,29 @@ fn canonical_projection_preserves_public_columns_and_hidden_alias_slots() {
 #[test]
 fn physical_relayout_shares_fragments_and_restores_hidden_alias_slots() {
     let identity = ColumnIdentity::qualified("source", "value");
-    let source_schema = RowSchema::from_physical_layout(
-        vec!["value".into()],
-        vec![ColumnIdentity::unqualified("value")],
-        vec![None],
-        vec![Some(0)],
-        2,
-        vec![(identity.clone(), Some(1), None)],
-    )
+    let source_schema = RowSchema::from_physical_layout(PhysicalLayout {
+        columns: vec!["value".into()],
+        identities: vec![ColumnIdentity::unqualified("value")],
+        types: vec![None],
+        slots: vec![Some(0)],
+        physical_width: 2,
+        aliases: vec![(identity.clone(), Some(1), None)],
+        internal: Vec::new(),
+        score_sources: Vec::new(),
+        wildcard_hidden: HashSet::default(),
+    })
     .unwrap();
-    let target_schema = RowSchema::from_physical_layout(
-        vec!["value".into()],
-        vec![ColumnIdentity::unqualified("value")],
-        vec![None],
-        vec![Some(1)],
-        2,
-        vec![(identity, Some(0), None)],
-    )
+    let target_schema = RowSchema::from_physical_layout(PhysicalLayout {
+        columns: vec!["value".into()],
+        identities: vec![ColumnIdentity::unqualified("value")],
+        types: vec![None],
+        slots: vec![Some(1)],
+        physical_width: 2,
+        aliases: vec![(identity, Some(0), None)],
+        internal: Vec::new(),
+        score_sources: Vec::new(),
+        wildcard_hidden: HashSet::default(),
+    })
     .unwrap();
     let row = PhysicalRow::from_values(vec![
         Value::Str("projected".into()),

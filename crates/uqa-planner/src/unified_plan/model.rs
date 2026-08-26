@@ -198,6 +198,10 @@ pub enum SourcePlan {
         rows: Vec<Vec<ScalarExpr>>,
         alias: Option<String>,
         column_aliases: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        internal_relation: Option<uqa_sql::ast::InternalRelationId>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        internal_column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
     },
     Function {
         name: String,

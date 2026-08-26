@@ -6,10 +6,10 @@
 //! Demand-driven local and materialized table scans.
 
 use super::{
-    has_filters_for_qualifier, is_score_provenance_column, qualifier_filter, qualifier_for,
-    table_lock_origin, Arc, ColumnPrune, CteScope, Engine, EngineHierarchyRowSource,
-    EngineTableRowSource, QualifierFilters, SQLError, SQLParam, SourcePlan,
-    StreamingLocalTableScan, Value, TABLE_OID_COLUMN,
+    has_filters_for_qualifier, qualifier_filter, qualifier_for, table_lock_origin, Arc,
+    ColumnPrune, CteScope, Engine, EngineHierarchyRowSource, EngineTableRowSource,
+    QualifierFilters, SQLError, SQLParam, SourcePlan, StreamingLocalTableScan, Value,
+    TABLE_OID_COLUMN,
 };
 
 pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
@@ -41,10 +41,9 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
             .enumerate()
             .filter_map(|(position, identity)| {
                 let column = identity.column();
-                if !is_score_provenance_column(column)
-                    && prune
-                        .and_then(|prune| prune.get(&qualifier))
-                        .is_some_and(|wanted| !wanted.contains(column))
+                if prune
+                    .and_then(|prune| prune.get(&qualifier))
+                    .is_some_and(|wanted| !wanted.contains(column))
                 {
                     return None;
                 }

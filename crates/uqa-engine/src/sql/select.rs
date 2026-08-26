@@ -7,7 +7,6 @@
 //! SQL SELECT, set-operation, `CtePlan`, ordering, and projection execution.
 
 use std::cell::Cell;
-use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,6 +14,7 @@ use std::sync::Arc;
 
 use smallvec::SmallVec;
 use uqa_core::DocId;
+pub(in crate::sql) use uqa_execution::ProjectionTarget;
 use uqa_execution::{
     eval_scalar, ExecResult, ExpressionEvaluator, ScalarEvalContext, ScalarExpr, ScalarFrameBound,
     SharedExpressionEvaluator,
@@ -32,11 +32,10 @@ use super::volatility::{expr_contains_volatile_function, query_contains_volatile
 use super::{
     contains_aggregate, doc_id_value, engine_func_intercept, execute_function,
     execute_function_with_top_k, execute_mixed_where, expect_column_name, has_aggregate,
-    has_window, is_score_provenance_column, optimize_engine_plan, prepare_window_plan,
-    projection_label_at, BTreeMap, BTreeSet, BinaryOp, ColumnPrune, ColumnType, Engine,
-    PhysicalAggregateExecutor, PhysicalWindowExecutor, QualifierFilters, ResultRow, SQLError,
-    SQLParam, SQLResult, ScoredEntry, SetOpKind, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
-    SCORE_COLUMN, SCORE_PROVENANCE_COLUMN, TABLE_OID_COLUMN,
+    has_window, optimize_engine_plan, prepare_window_plan, projection_label_at, BTreeMap, BTreeSet,
+    BinaryOp, ColumnPrune, ColumnType, Engine, PhysicalAggregateExecutor, PhysicalWindowExecutor,
+    QualifierFilters, ResultRow, SQLError, SQLParam, SQLResult, ScoredEntry, SetOpKind, Value,
+    DOC_ID_COLUMN, SCORE_COLUMN, TABLE_OID_COLUMN,
 };
 
 mod cte_execution;
@@ -83,7 +82,7 @@ pub(in crate::sql) use table_access::*;
 // SELECT
 // -------------------------------------------------------------------------
 
-type PhysicalProjection = (String, ScalarExpr);
+type PhysicalProjection = (uqa_execution::ProjectionTarget, ScalarExpr);
 /// Public output label paired with the bound expression that addresses its physical value after relational binding. Positional expressions preserve repeated labels without inventing SQL-visible names.
 type OutputColumnMapping = (String, ScalarExpr);
 
@@ -283,7 +282,7 @@ impl QueryOutput {
     }
 
     pub(super) fn into_sql_result(self) -> Result<SQLResult, SQLError> {
-        let (mut rows, positional_rows) = match self.rows {
+        let (rows, positional_rows) = match self.rows {
             QueryRows::Rows { named, positional } => (named, positional),
             QueryRows::SharedSpill(rows) => {
                 let mut scan = uqa_execution::SharedSpillScan::new(rows);
@@ -300,15 +299,6 @@ impl QueryOutput {
                 ));
             }
         };
-        if self
-            .internal_columns
-            .iter()
-            .any(|column| is_score_provenance_column(column))
-        {
-            for row in &mut rows {
-                row.retain(|column, _| !is_score_provenance_column(column));
-            }
-        }
         Ok(SQLResult::from_typed_rows_with_positions(
             self.columns,
             self.column_types,
@@ -721,16 +711,14 @@ pub(super) fn collect_query_operator<'a>(
             )
         }
         QueryOutputMode::ExistsKeySet => {
-            let key_positions = columns
-                .iter()
-                .map(|column| {
-                    operator.row_schema().position(column).ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "decorrelated EXISTS result is missing key column `{column}`"
-                        ))
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+            if operator.row_schema().len() < columns.len() {
+                return Err(SQLError::Internal(format!(
+                    "decorrelated EXISTS result has {} columns for {} keys",
+                    operator.row_schema().len(),
+                    columns.len()
+                )));
+            }
+            let key_positions = (0..columns.len()).collect::<Vec<_>>();
             let mut keys = uqa_execution::CanonicalRowHashSet::new();
             if let Err(error) = operator.open() {
                 return Err(close_after_physical_failure(

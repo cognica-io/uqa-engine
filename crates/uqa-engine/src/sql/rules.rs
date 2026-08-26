@@ -22,6 +22,7 @@ use uqa_storage::document_store::Document;
 use crate::{Engine, RelationIdentity};
 
 use actions::{bind_insert_values_action, bind_set_oriented_action};
+pub(in crate::sql) use returning::RuleReturningRequest;
 use returning::{
     augment_rule_returning_action, capture_rule_returning_result, clear_statement_returning,
     rule_returning_columns, statement_has_returning,
@@ -48,10 +49,11 @@ struct PreparedRule {
     matching_rows: Vec<usize>,
     condition_references_row: bool,
     action_references_row: Vec<bool>,
+    action_columns: Vec<BTreeSet<String>>,
 }
 
 struct RuleColumnMetadata {
-    declared_type: String,
+    ty: uqa_sql::ast::ColumnType,
     uses_document_id: bool,
 }
 
@@ -71,17 +73,18 @@ impl PreparedRuleBatch {
     pub(in crate::sql) fn execute_actions(
         &self,
         engine: &Engine,
-        capture_returning: bool,
+        request: RuleReturningRequest,
     ) -> Result<Option<RuleReturningResult>, SQLError> {
         if self.rules.is_empty() {
             return Ok(None);
         }
         let _guard = RuleExecutionGuard::enter(&self.table, self.event)?;
         let columns = rule_columns(engine, &self.table)?;
-        let returning_columns = capture_returning
+        let returning_columns = request
+            .captures()
             .then(|| rule_returning_columns(engine, &self.table))
             .transpose()?;
-        let provider_exists = capture_returning
+        let provider_exists = request.captures()
             && self.rules.iter().any(|prepared| {
                 prepared
                     .rule
@@ -92,13 +95,16 @@ impl PreparedRuleBatch {
             });
         let mut returning = provider_exists.then(RuleReturningResult::empty);
         let mut provider_captured = false;
-        for (rule_index, prepared) in self.rules.iter().enumerate() {
+        for prepared in &self.rules {
             for (action_index, action) in prepared.rule.definition.actions.iter().enumerate() {
-                if prepared.matching_rows.is_empty() {
-                    continue;
-                }
+                let action_columns =
+                    prepared.action_columns.get(action_index).ok_or_else(|| {
+                        SQLError::Internal(
+                            "rewrite rule lost its prepared action column contract".into(),
+                        )
+                    })?;
                 let action_returns = statement_has_returning(action);
-                let captures_action = capture_returning && action_returns;
+                let captures_action = request.captures() && action_returns;
                 let captures_source_context = captures_action
                     && matches!(action, Statement::Update(_) | Statement::Delete(_))
                     && prepared.matching_rows.iter().any(|row_index| {
@@ -116,7 +122,7 @@ impl PreparedRuleBatch {
                     || captures_source_context;
                 if needs_row_source
                     && prepared.matching_rows.len() > 1
-                    && statement_has_set_operation(action)
+                    && crate::engine_events::rule_action_has_set_operation(action)
                 {
                     return Err(SQLError::Routine {
                         sqlstate: "0A000".into(),
@@ -130,22 +136,21 @@ impl PreparedRuleBatch {
                 {
                     (
                         bind_insert_values_action(
-                            engine,
                             action,
                             &prepared.matching_rows,
                             &self.rows,
                             &columns,
+                            action_columns,
                         )?,
                         None,
                     )
                 } else if needs_row_source {
                     let bound = bind_set_oriented_action(
-                        engine,
                         action,
                         &prepared.matching_rows,
                         &self.rows,
                         &columns,
-                        &format!("__uqa_rule_rows_{rule_index}_{action_index}"),
+                        action_columns,
                     )?;
                     let source_index = captures_source_context.then_some(bound.source_index);
                     (bound.statement, source_index)
@@ -160,7 +165,14 @@ impl PreparedRuleBatch {
                         });
                     }
                     provider_captured = true;
-                    augment_rule_returning_action(engine, &mut bound, source_index)?;
+                    let event_width = returning_columns.as_ref().map_or(0, Vec::len);
+                    augment_rule_returning_action(
+                        &mut bound,
+                        source_index,
+                        event_width,
+                        request,
+                        action_columns,
+                    )?;
                 } else if action_returns {
                     clear_statement_returning(&mut bound);
                 }
@@ -182,34 +194,6 @@ impl PreparedRuleBatch {
         }
         Ok(returning)
     }
-}
-
-fn statement_has_set_operation(statement: &Statement) -> bool {
-    match statement {
-        Statement::Select(select) => select.set_op.is_some(),
-        Statement::Insert(insert) => insert
-            .select_source
-            .as_ref()
-            .is_some_and(|select| select.set_op.is_some()),
-        _ => false,
-    }
-}
-
-fn rule_action_target_columns(
-    engine: &Engine,
-    action: &Statement,
-) -> Result<BTreeSet<String>, SQLError> {
-    let table = match action {
-        Statement::Insert(statement) => &statement.table,
-        Statement::Update(statement) => &statement.table,
-        Statement::Delete(statement) => &statement.table,
-        _ => return Ok(BTreeSet::new()),
-    };
-    Ok(engine
-        .rule_relation_columns(table)?
-        .into_iter()
-        .map(|(column, _)| column)
-        .collect())
 }
 
 pub(in crate::sql) fn prepare_rule_batch(
@@ -238,14 +222,20 @@ pub(in crate::sql) fn prepare_rule_batch(
             .definition
             .condition
             .as_ref()
-            .is_some_and(expr_references_rule_row);
+            .is_some_and(crate::engine_events::rule_expr_references_row);
+        let action_columns = rule
+            .definition
+            .actions
+            .iter()
+            .map(|action| engine.rule_action_target_columns(action))
+            .collect::<Result<Vec<_>, SQLError>>()?;
         let action_references_row = rule
             .definition
             .actions
             .iter()
-            .map(|action| {
-                let action_columns = rule_action_target_columns(engine, action)?;
-                statement_references_rule_row(action, &action_columns)
+            .zip(&action_columns)
+            .map(|(action, columns)| {
+                crate::engine_events::rule_statement_references_row(action, columns)
             })
             .collect::<Result<Vec<_>, SQLError>>()?;
         let mut matching_rows = Vec::new();
@@ -262,6 +252,7 @@ pub(in crate::sql) fn prepare_rule_batch(
             matching_rows,
             condition_references_row,
             action_references_row,
+            action_columns,
         });
     }
     Ok(PreparedRuleBatch {
@@ -334,7 +325,7 @@ fn rule_columns(
             (
                 column.name,
                 RuleColumnMetadata {
-                    declared_type: column.ty.sql_name(),
+                    ty: column.ty,
                     uses_document_id,
                 },
             )
@@ -376,7 +367,7 @@ impl RuntimeRuleResolver<'_> {
         };
         Ok(ResolvedVariable {
             value,
-            declared_type: Some(metadata.declared_type.clone()),
+            declared_type: Some(metadata.ty.sql_name()),
         })
     }
 }
@@ -434,48 +425,4 @@ fn rule_condition_matches(
         None,
         &[],
     )?))
-}
-
-fn expr_references_rule_row(expr: &Expr) -> bool {
-    expr.any_node(&|node| {
-        matches!(
-            node,
-            Expr::QualifiedColumn { qualifier, .. }
-                if qualifier.eq_ignore_ascii_case("old") || qualifier.eq_ignore_ascii_case("new")
-        )
-    })
-}
-
-struct RuleReferenceResolver {
-    referenced: bool,
-}
-
-impl VariableResolver for RuleReferenceResolver {
-    fn resolve_name(&mut self, _name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
-        Ok(None)
-    }
-
-    fn resolve_qualified(
-        &mut self,
-        qualifier: &str,
-        _column: &str,
-    ) -> Result<Option<ResolvedVariable>, SQLError> {
-        if qualifier.eq_ignore_ascii_case("old") || qualifier.eq_ignore_ascii_case("new") {
-            self.referenced = true;
-        }
-        Ok(None)
-    }
-
-    fn resolve_param(&mut self, _index: usize) -> Result<Option<ResolvedVariable>, SQLError> {
-        Ok(None)
-    }
-}
-
-fn statement_references_rule_row(
-    statement: &Statement,
-    action_columns: &BTreeSet<String>,
-) -> Result<bool, SQLError> {
-    let mut resolver = RuleReferenceResolver { referenced: false };
-    let _ = crate::engine_events::bind_rule_action(statement, action_columns, &mut resolver)?;
-    Ok(resolver.referenced)
 }

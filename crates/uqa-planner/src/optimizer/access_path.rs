@@ -128,6 +128,7 @@ pub fn contains_retrieval(expression: &ScalarExpr) -> bool {
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)

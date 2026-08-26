@@ -29,7 +29,7 @@ pub mod vector_index;
 pub use backend::{
     PersistentStorageBackend, PersistentStorageIdentity, PersistentStorageProvider,
     PersistentStorageSession, SQLiteStorageBackend, SQLiteStorageProvider, StorageBackendError,
-    StorageBackendResult,
+    StorageBackendResult, StorageSavepointId,
 };
 pub use block_max_index::{BlockMaxIndex, BlockMaxScorer, DEFAULT_BLOCK_SIZE};
 pub use btree_index::BTreeIndex;

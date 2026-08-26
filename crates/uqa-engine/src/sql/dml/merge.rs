@@ -24,17 +24,12 @@ use super::{
     validate_mutation_columns, validate_returning_alias_relations, BTreeMap, BTreeSet, CteScope,
     DmlCommandMutationOverlay, DmlReturningShape, Document, Engine, MergePlan, MergeWhenPlan,
     MutationAssignmentTarget, PhysicalMutationLockTarget, ProjectionPlan, ReturningRowImage,
-    ReturningRowImages, SQLError, SQLParam, SQLResult, Value, MERGE_ACTION_COLUMN,
+    ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
 };
 
 const MERGE_PREPARED_UPDATE: i64 = 1;
 const MERGE_PREPARED_DELETE: i64 = 2;
 const MERGE_PREPARED_INSERT: i64 = 3;
-const MERGE_INSERT_DOC_ID: &str = "__uqa_merge_insert_doc_id";
-const MERGE_INSERT_DOCUMENT: &str = "__uqa_merge_insert_document";
-const MERGE_INSERT_STORAGE_TABLE: &str = "__uqa_merge_insert_storage_table";
-const MERGE_RETURNING_SOURCE_QUALIFIER: &str = "\0uqa.merge.returning.source";
-
 type MergeTargetIdentity = (String, uqa_core::DocId);
 
 enum SelectedMergeAction {
@@ -159,6 +154,7 @@ pub(in crate::sql) fn run_merge_inner(
         .into_iter()
         .collect::<Vec<_>>();
     let source_rows = build_join_spill_with_ctes(engine, &stmt.source, params, &mut ctes)?;
+    let returning_source_relation = uqa_sql::ast::InternalRelationId::allocate();
     validate_returning_alias_relations(
         &target_qual,
         &stmt.returning_aliases,
@@ -525,6 +521,7 @@ pub(in crate::sql) fn run_merge_inner(
                             returning_aliases: &stmt.returning_aliases,
                             source_row: &pair.source_row,
                             source_schema: source_rows.row_schema(),
+                            source_relation: returning_source_relation,
                             action: "UPDATE",
                         },
                         &stmt.returning,
@@ -602,6 +599,7 @@ pub(in crate::sql) fn run_merge_inner(
                             returning_aliases: &stmt.returning_aliases,
                             source_row: &pair.source_row,
                             source_schema: source_rows.row_schema(),
+                            source_relation: returning_source_relation,
                             action: "DELETE",
                         },
                         &stmt.returning,
@@ -628,11 +626,6 @@ pub(in crate::sql) fn run_merge_inner(
                     auto_id_col.as_deref(),
                     &mut document,
                     "prepare MERGE INSERT identity",
-                )?;
-                crate::sql::generated::refresh_stored_generated_columns(
-                    engine,
-                    &target_table,
-                    &mut document,
                 )?;
                 // MERGE INTO ONLY excludes descendants from matching, while PostgreSQL still routes INSERT actions through the target's partition tree.
                 let storage_table =
@@ -666,6 +659,11 @@ pub(in crate::sql) fn run_merge_inner(
                     continue;
                 };
                 document = triggered_document;
+                crate::sql::generated::refresh_stored_generated_columns(
+                    engine,
+                    &storage_table,
+                    &mut document,
+                )?;
                 refresh_insert_identity_after_trigger(
                     engine,
                     &storage_table,
@@ -675,11 +673,6 @@ pub(in crate::sql) fn run_merge_inner(
                     &mut insert_identity,
                 )?;
                 let doc_id = insert_identity.0;
-                crate::sql::generated::refresh_stored_generated_columns(
-                    engine,
-                    &storage_table,
-                    &mut document,
-                )?;
                 let trigger_target =
                     partition_insert_target(engine, &target_table, &document, params, true)?;
                 if trigger_target != storage_table {
@@ -723,6 +716,7 @@ pub(in crate::sql) fn run_merge_inner(
                             returning_aliases: &stmt.returning_aliases,
                             source_row: &pair.source_row,
                             source_schema: source_rows.row_schema(),
+                            source_relation: returning_source_relation,
                             action: "INSERT",
                         },
                         &stmt.returning,
@@ -825,9 +819,11 @@ pub(in crate::sql) fn run_merge_inner(
             &target_qual,
             &stmt.returning_aliases,
             source_rows.row_schema(),
+            returning_source_relation,
             &stmt.returning,
         )?;
-        let returning_source_schema = merge_returning_source_schema(source_rows.row_schema());
+        let returning_source_schema =
+            merge_returning_source_schema(source_rows.row_schema(), returning_source_relation);
         return dml_returning_result_with_projections(
             engine,
             DmlReturningShape {
@@ -1129,10 +1125,10 @@ fn select_merge_action(
 }
 
 fn merge_prepared_action_schema() -> uqa_execution::RowSchema {
-    uqa_execution::RowSchema::new(vec![
-        "__uqa_merge_action".into(),
-        "__uqa_merge_payload".into(),
-    ])
+    uqa_execution::RowSchema::with_internal_relation_types(
+        uqa_sql::ast::InternalRelationId::allocate(),
+        vec![Some(uqa_sql::ast::ColumnType::BigInteger), None],
+    )
 }
 
 fn push_merge_prepared_action(
@@ -1156,8 +1152,7 @@ fn push_merge_prepared_action(
 fn decode_merge_prepared_action(
     row: uqa_execution::OwnedPhysicalRow,
 ) -> Result<(i64, Value), SQLError> {
-    let row = row.view();
-    let action = match row.value_at(0) {
+    let action = match row.physical_value_at(0) {
         Some(Value::Int(action)) => *action,
         _ => {
             return Err(SQLError::Internal(
@@ -1166,7 +1161,7 @@ fn decode_merge_prepared_action(
         }
     };
     let payload = row
-        .value_at(1)
+        .physical_value_at(1)
         .cloned()
         .ok_or_else(|| SQLError::Internal("MERGE prepared action spill lost its payload".into()))?;
     Ok((action, payload))
@@ -1177,37 +1172,39 @@ fn encode_merge_prepared_insert(
     doc_id: uqa_core::DocId,
     document: Document,
 ) -> Value {
-    Value::Map(BTreeMap::from([
-        (MERGE_INSERT_STORAGE_TABLE.into(), Value::Str(storage_table)),
-        (MERGE_INSERT_DOC_ID.into(), encode_prepared_doc_id(doc_id)),
-        (MERGE_INSERT_DOCUMENT.into(), Value::Map(document)),
-    ]))
+    Value::List(vec![
+        Value::Str(storage_table),
+        encode_prepared_doc_id(doc_id),
+        Value::Map(document),
+    ])
 }
 
 fn decode_merge_prepared_insert(
     value: Value,
 ) -> Result<(String, uqa_core::DocId, Document), SQLError> {
-    let Value::Map(mut fields) = value else {
+    let Value::List(fields) = value else {
         return Err(SQLError::Internal(
-            "MERGE prepared insert payload is not a map".into(),
+            "MERGE prepared insert payload is not a record".into(),
         ));
     };
-    let storage_table = match fields.remove(MERGE_INSERT_STORAGE_TABLE) {
-        Some(Value::Str(table)) => table,
+    let [storage_table, doc_id, document]: [Value; 3] =
+        fields.try_into().map_err(|fields: Vec<Value>| {
+            SQLError::Internal(format!(
+                "MERGE prepared insert payload has {} fields, expected 3",
+                fields.len()
+            ))
+        })?;
+    let storage_table = match storage_table {
+        Value::Str(table) => table,
         _ => {
             return Err(SQLError::Internal(
                 "MERGE prepared insert payload has no storage table".into(),
             ))
         }
     };
-    let doc_id = decode_prepared_doc_id(
-        fields.remove(MERGE_INSERT_DOC_ID).ok_or_else(|| {
-            SQLError::Internal("MERGE prepared insert payload has no document identity".into())
-        })?,
-        "MERGE prepared insert",
-    )?;
-    let document = match fields.remove(MERGE_INSERT_DOCUMENT) {
-        Some(Value::Map(document)) => document,
+    let doc_id = decode_prepared_doc_id(doc_id, "MERGE prepared insert")?;
+    let document = match document {
+        Value::Map(document) => document,
         _ => {
             return Err(SQLError::Internal(
                 "MERGE prepared insert payload has no document".into(),
@@ -1256,6 +1253,7 @@ pub(in crate::sql) struct MergeReturningRow<'a> {
     returning_aliases: &'a uqa_sql::ast::ReturningAliases,
     source_row: &'a uqa_execution::OwnedPhysicalRow,
     source_schema: &'a uqa_execution::RowSchema,
+    source_relation: uqa_sql::ast::InternalRelationId,
     action: &'a str,
 }
 
@@ -1273,6 +1271,7 @@ pub(in crate::sql) fn build_merge_returning_row(
         input.target_qual,
         input.returning_aliases,
         input.source_schema,
+        input.source_relation,
         returning,
     )?;
     let snapshot_scope = ctes.returning_statement_snapshot_scope();
@@ -1290,39 +1289,40 @@ fn merge_returning_context(
         input.images,
         input.returning_aliases,
     )?;
-    row.schema = uqa_execution::RowSchema::append_typed(
+    row.schema = uqa_execution::RowSchema::append_internal_typed(
         &row.schema,
         &[(
-            MERGE_ACTION_COLUMN.into(),
+            crate::sql::merge_action_attribute(),
             Some(uqa_sql::ast::ColumnType::Text),
         )],
     );
     row.row = row.row.append_values(vec![Value::Str(input.action.into())]);
-    let source_header_width = input
-        .source_row
-        .schema
-        .len()
-        .checked_sub(input.source_schema.len())
-        .ok_or_else(|| {
-            SQLError::Internal("MERGE RETURNING source schema is wider than its pairing".into())
-        })?;
     let aliases = input
         .source_schema
         .columns()
         .iter()
         .enumerate()
         .map(|(position, _)| {
-            (
-                uqa_execution::ColumnIdentity::qualified(
-                    MERGE_RETURNING_SOURCE_QUALIFIER,
-                    position.to_string(),
-                ),
-                source_header_width + position,
-            )
+            let slot = input
+                .source_row
+                .schema
+                .physical_slot(position)
+                .ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "MERGE RETURNING source lost physical column {position}"
+                    ))
+                })?;
+            Ok((
+                input.source_relation.column(position),
+                slot,
+                input.source_schema.column_type(position).cloned(),
+            ))
         })
-        .collect::<Vec<_>>();
-    let source_schema =
-        uqa_execution::RowSchema::with_identity_aliases(&input.source_row.schema, &aliases);
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    let source_schema = uqa_execution::RowSchema::with_physical_internal_aliases(
+        &input.source_row.schema,
+        &aliases,
+    );
     row = uqa_execution::OwnedPhysicalRow::new(
         uqa_execution::RowSchema::join(&row.schema, &source_schema, std::iter::empty()),
         uqa_execution::PhysicalRow::concat(&row.row, &input.source_row.row),
@@ -1332,6 +1332,7 @@ fn merge_returning_context(
 
 fn merge_returning_source_schema(
     source_schema: &uqa_execution::RowSchema,
+    source_relation: uqa_sql::ast::InternalRelationId,
 ) -> uqa_execution::RowSchema {
     let aliases = source_schema
         .columns()
@@ -1339,15 +1340,15 @@ fn merge_returning_source_schema(
         .enumerate()
         .map(|(position, _)| {
             (
-                uqa_execution::ColumnIdentity::qualified(
-                    MERGE_RETURNING_SOURCE_QUALIFIER,
-                    position.to_string(),
-                ),
-                position,
+                source_relation.column(position),
+                source_schema
+                    .physical_slot(position)
+                    .expect("source column has a physical slot"),
+                source_schema.column_type(position).cloned(),
             )
         })
         .collect::<Vec<_>>();
-    uqa_execution::RowSchema::with_identity_aliases(source_schema, &aliases)
+    uqa_execution::RowSchema::with_physical_internal_aliases(source_schema, &aliases)
 }
 
 fn expanded_merge_returning_projections(
@@ -1356,6 +1357,7 @@ fn expanded_merge_returning_projections(
     target_qualifier: &str,
     aliases: &uqa_sql::ast::ReturningAliases,
     source_schema: &uqa_execution::RowSchema,
+    source_relation: uqa_sql::ast::InternalRelationId,
     returning: &[ProjectionPlan],
 ) -> Result<Vec<ProjectionPlan>, SQLError> {
     let target_star = ProjectionPlan {
@@ -1378,14 +1380,16 @@ fn expanded_merge_returning_projections(
                         .columns()
                         .iter()
                         .enumerate()
-                        .filter(|(_, column)| {
-                            crate::sql::select::visible_projection_source_column(column)
+                        .filter(|(position, _)| {
+                            crate::sql::select::visible_projection_source_position(
+                                source_schema,
+                                *position,
+                            )
                         })
                         .map(|(position, column)| ProjectionPlan {
-                            expr: uqa_execution::ScalarExpr::QualifiedColumn {
-                                qualifier: MERGE_RETURNING_SOURCE_QUALIFIER.into(),
-                                column: position.to_string(),
-                            },
+                            expr: uqa_execution::ScalarExpr::InternalColumn(
+                                source_relation.column(position),
+                            ),
                             alias: Some(
                                 source_schema
                                     .public_name(position)

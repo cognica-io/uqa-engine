@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use uqa_core::Value;
 use uqa_execution::ScalarExpr;
 use uqa_graph::agtype;
-use uqa_sql::{ResultRow, SQLError};
+use uqa_sql::SQLError;
 
 use crate::Engine;
 
@@ -31,7 +31,7 @@ pub(super) fn build_rows(
     _qualifier: Option<&str>,
     column_aliases: &[String],
     column_types: &[String],
-) -> Result<Vec<ResultRow>, SQLError> {
+) -> Result<Vec<Vec<Value>>, SQLError> {
     if !(2..=3).contains(&evaluated.len()) {
         return Err(SQLError::TypeMismatch(
             "cypher requires 2-3 args (graph_name, query_string[, parameters])".into(),
@@ -94,7 +94,7 @@ pub(super) fn build_rows(
 
     let mut out = Vec::with_capacity(cypher_rows.len());
     for src in cypher_rows {
-        let mut row = ResultRow::new();
+        let mut row = Vec::with_capacity(column_aliases.len());
         for (idx, target_col) in column_aliases.iter().enumerate() {
             let value = cypher_columns
                 .get(idx)
@@ -103,7 +103,7 @@ pub(super) fn build_rows(
                 .unwrap_or(Value::Null);
             let declared = column_types.get(idx).map_or("agtype", String::as_str);
             let value = coerce_to_column_type(value, declared, target_col)?;
-            row.insert(target_col.clone(), value);
+            row.push(value);
         }
         out.push(row);
     }

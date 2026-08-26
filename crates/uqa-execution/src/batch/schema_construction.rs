@@ -10,6 +10,7 @@ use super::{
     Arc, ColumnIdentity, ColumnType, HashMap, HashSet, RowSchema, SchemaBuildMetadata,
     SchemaColdMetadata, SchemaIndex, NULL_SLOT,
 };
+use uqa_sql::ast::InternalRelationId;
 
 impl Default for RowSchema {
     fn default() -> Self {
@@ -87,6 +88,35 @@ impl RowSchema {
             (0..width).collect(),
             width,
             SchemaBuildMetadata::default(),
+        )
+    }
+
+    /// Build a physical row layout whose values are addressable only through
+    /// an opaque internal relation identity. It contributes no SQL-visible
+    /// columns and therefore cannot affect `*` expansion or name binding.
+    pub fn with_internal_relation_types(
+        relation: InternalRelationId,
+        types: Vec<Option<ColumnType>>,
+    ) -> Self {
+        let internal = (0..types.len())
+            .map(|position| (relation.column(position), position))
+            .collect();
+        let internal_types = types
+            .iter()
+            .enumerate()
+            .map(|(position, ty)| (relation.column(position), ty.clone()))
+            .collect();
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            types.len(),
+            SchemaBuildMetadata {
+                internal,
+                internal_types,
+                ..SchemaBuildMetadata::default()
+            },
         )
     }
 
@@ -170,6 +200,10 @@ impl RowSchema {
         let SchemaBuildMetadata {
             aliases,
             alias_types,
+            internal,
+            internal_types,
+            score_sources,
+            wildcard_hidden,
             binding_only,
             exact_unqualified_precedence,
             extra_ambiguous_unqualified,
@@ -178,6 +212,9 @@ impl RowSchema {
         debug_assert_eq!(columns.len(), slots.len());
         debug_assert_eq!(columns.len(), identities.len());
         debug_assert_eq!(columns.len(), types.len());
+        debug_assert!(wildcard_hidden
+            .iter()
+            .all(|position| *position < columns.len()));
         let identity_layout = physical_width == columns.len()
             && slots
                 .iter()
@@ -203,6 +240,9 @@ impl RowSchema {
             }
         }
         for slot in aliases.values() {
+            debug_assert!(*slot == NULL_SLOT || *slot < physical_width);
+        }
+        for slot in internal.values() {
             debug_assert!(*slot == NULL_SLOT || *slot < physical_width);
         }
         let mut ambiguous_unqualified: HashSet<Box<str>> = unqualified_counts
@@ -232,11 +272,15 @@ impl RowSchema {
                 unqualified,
                 qualified,
                 aliases,
+                internal,
                 ambiguous_unqualified,
                 ambiguous_qualified,
                 cold: Box::new(SchemaColdMetadata {
                     columns: types.into_boxed_slice(),
                     aliases: alias_types,
+                    internal: internal_types,
+                    score_sources,
+                    wildcard_hidden,
                     binding_only,
                     identity_layout,
                 }),

@@ -207,45 +207,9 @@ pub(in crate::sql) fn run_delete_inner(
         if !qualified_ids.insert((storage_table.clone(), doc_id)) {
             continue;
         }
-        qualified_targets.push((storage_table, doc_id, doc, returning_context));
-    }
-    drop(qualification_overlay);
-    let rule_batch = crate::sql::rules::prepare_rule_batch(
-        engine,
-        &stmt.table,
-        uqa_sql::ast::RuleEvent::Delete,
-        qualified_targets
-            .iter()
-            .map(
-                |(_, doc_id, old, returning_context)| crate::sql::rules::RuleRowImage {
-                    old_doc_id: Some(*doc_id),
-                    old: Some(old.clone()),
-                    new_doc_id: None,
-                    new: None,
-                    context: returning_context.clone(),
-                },
-            )
-            .collect(),
-    )?;
-    let rule_returning = rule_batch.execute_actions(engine, !stmt.returning.is_empty())?;
-    if delete_original_query && has_delete_rules {
-        crate::sql::triggers::fire_statement_triggers(
-            engine,
-            &stmt.table,
-            uqa_sql::ast::TriggerTiming::Before,
-            uqa_sql::ast::TriggerEvent::Delete,
-            &[],
-        )?;
-    }
-    let qualification_overlay = DmlCommandMutationOverlay::new(engine);
-    let mut to_delete = Vec::with_capacity(qualified_targets.len());
-    for (index, (storage_table, doc_id, doc, returning_context)) in
-        qualified_targets.into_iter().enumerate()
-    {
-        if rule_batch.suppresses(index) {
-            continue;
-        }
-        if crate::sql::triggers::fire_before_row_triggers(
+        if has_delete_rules {
+            qualified_targets.push((storage_table, doc_id, doc, returning_context));
+        } else if crate::sql::triggers::fire_before_row_triggers(
             engine,
             &storage_table,
             uqa_sql::ast::TriggerEvent::Delete,
@@ -254,14 +218,77 @@ pub(in crate::sql) fn run_delete_inner(
             None,
             &[],
         )?
-        .is_none()
+        .is_some()
         {
-            continue;
+            engine.stage_command_document(&storage_table, doc_id, None)?;
+            qualified_targets.push((storage_table, doc_id, doc, returning_context));
         }
-        engine.stage_command_document(&storage_table, doc_id, None)?;
-        to_delete.push((storage_table, doc_id, doc, returning_context));
     }
     drop(qualification_overlay);
+    let (rule_returning, to_delete) = if has_delete_rules {
+        let rule_batch = crate::sql::rules::prepare_rule_batch(
+            engine,
+            &stmt.table,
+            uqa_sql::ast::RuleEvent::Delete,
+            qualified_targets
+                .iter()
+                .map(
+                    |(_, doc_id, old, returning_context)| crate::sql::rules::RuleRowImage {
+                        old_doc_id: Some(*doc_id),
+                        old: Some(old.clone()),
+                        new_doc_id: None,
+                        new: None,
+                        context: returning_context.clone(),
+                    },
+                )
+                .collect(),
+        )?;
+        let rule_returning = rule_batch.execute_actions(
+            engine,
+            crate::sql::rules::RuleReturningRequest::from_plan(
+                &stmt.returning,
+                &stmt.returning_aliases,
+                &stmt.subqueries,
+            ),
+        )?;
+        if delete_original_query {
+            crate::sql::triggers::fire_statement_triggers(
+                engine,
+                &stmt.table,
+                uqa_sql::ast::TriggerTiming::Before,
+                uqa_sql::ast::TriggerEvent::Delete,
+                &[],
+            )?;
+        }
+        let qualification_overlay = DmlCommandMutationOverlay::new(engine);
+        let mut to_delete = Vec::with_capacity(qualified_targets.len());
+        for (index, (storage_table, doc_id, doc, returning_context)) in
+            qualified_targets.into_iter().enumerate()
+        {
+            if rule_batch.suppresses(index) {
+                continue;
+            }
+            if crate::sql::triggers::fire_before_row_triggers(
+                engine,
+                &storage_table,
+                uqa_sql::ast::TriggerEvent::Delete,
+                doc_id,
+                Some(&doc),
+                None,
+                &[],
+            )?
+            .is_none()
+            {
+                continue;
+            }
+            engine.stage_command_document(&storage_table, doc_id, None)?;
+            to_delete.push((storage_table, doc_id, doc, returning_context));
+        }
+        drop(qualification_overlay);
+        (rule_returning, to_delete)
+    } else {
+        (None, qualified_targets)
+    };
     let root_deletes: BTreeSet<(String, DocId)> = to_delete
         .iter()
         .map(|(table, doc_id, _, _)| (table.clone(), *doc_id))

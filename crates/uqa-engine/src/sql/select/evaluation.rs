@@ -8,13 +8,12 @@
 
 use super::{
     engine_func_intercept, eval_physical_scalar, execute_lateral_subquery_output,
-    execute_query_plan_output, is_score_provenance_column, physical_exec_error,
-    query_contains_volatile_function, recheck_storage_names_match, Arc, AtomicU64, BTreeMap,
-    BTreeSet, CtePlan, Engine, ExecResult, ExpressionEvaluator, Ordering, PhysicalEvalContext,
-    PhysicalOuterRow, PhysicalSubqueryRunner, QueryOutputMode, QueryPlan, QueryRows, RecheckDoc,
-    RecheckSourceRow, ResolvedRowLock, RowLockRecheckPins, SQLError, SQLParam, ScalarExpr,
-    ScalarFrameBound, SharedExpressionEvaluator, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
-    SCORE_COLUMN, TABLE_OID_COLUMN,
+    execute_query_plan_output, physical_exec_error, query_contains_volatile_function,
+    recheck_storage_names_match, Arc, AtomicU64, BTreeMap, BTreeSet, CtePlan, Engine, ExecResult,
+    ExpressionEvaluator, Ordering, PhysicalEvalContext, PhysicalOuterRow, PhysicalSubqueryRunner,
+    QueryOutputMode, QueryPlan, QueryRows, RecheckDoc, RecheckSourceRow, ResolvedRowLock,
+    RowLockRecheckPins, SQLError, SQLParam, ScalarExpr, ScalarFrameBound,
+    SharedExpressionEvaluator, Value,
 };
 use uqa_execution::FunctionTypeResolver;
 use uqa_sql::expr::RowLookup;
@@ -786,13 +785,6 @@ impl ExpressionEvaluator for EngineExpressionEvaluator<'_> {
         self.evaluate_physical_scoped(expression, schema, row)
     }
 
-    fn star_column_visible(&self, column: &str) -> bool {
-        !matches!(
-            column,
-            SCORE_COLUMN | DOC_ID_COLUMN | TABLE_OID_COLUMN | MERGE_ACTION_COLUMN
-        ) && !is_score_provenance_column(column)
-    }
-
     fn parameters(&self) -> &[SQLParam] {
         self.params
     }
@@ -1421,6 +1413,7 @@ pub(in crate::sql) fn expr_contains_subquery(expr: &ScalarExpr) -> bool {
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_) => false,

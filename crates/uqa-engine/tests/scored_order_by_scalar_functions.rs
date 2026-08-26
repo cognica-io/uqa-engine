@@ -85,11 +85,11 @@ fn scored_order_by_uses_registered_scalar_functions() {
         "the registered boost over the unprojected updated_at column must flip the order",
     );
     for row in &boosted.rows {
-        assert!(
-            row.keys().all(|key| !key.starts_with("__uqa_order_key_")),
-            "materialised order keys must not leak into result rows: {row:?}",
+        assert_eq!(
+            row.keys().map(String::as_str).collect::<Vec<_>>(),
+            vec!["_score", "id"],
+            "only projected columns may remain: {row:?}",
         );
-        assert_eq!(row.len(), 2, "only projected columns may remain: {row:?}");
     }
 }
 

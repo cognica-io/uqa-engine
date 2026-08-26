@@ -121,6 +121,17 @@ impl RowLookup for ProjectedRow<'_, '_> {
         Self::positional_column(self, index)
     }
 
+    fn score_source(&self, qualifier: Option<&str>) -> Option<&Value> {
+        let physical = self.schema.score_source_slot(qualifier)?;
+        let logical = (0..self.schema.len())
+            .find(|logical| self.schema.physical_slot(*logical) == Some(physical))?;
+        self.positional_column(logical)
+    }
+
+    fn score_source_is_ambiguous(&self, qualifier: Option<&str>) -> bool {
+        self.schema.score_source_is_ambiguous(qualifier)
+    }
+
     fn visit_columns(&self, visitor: &mut dyn FnMut(&str, &Value)) {
         for (index, column) in self.schema.columns().iter().enumerate() {
             visitor(

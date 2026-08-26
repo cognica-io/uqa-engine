@@ -7,10 +7,10 @@
 //! Source qualification, view output, and table-function schemas.
 
 use super::{
-    execute_query_plan_output, is_score_provenance_column, qualifier_filter, restore_cte_names,
-    save_and_remove_cte_names, BTreeSet, ColumnPrune, CteScope, Engine, EngineExpressionEvaluator,
-    QualifierFilters, QueryOutput, QueryOutputMode, QueryPlan, QueryRows, ResultRow, SQLError,
-    SQLParam, ScalarExpr, Value,
+    execute_query_plan_output, qualifier_filter, restore_cte_names, save_and_remove_cte_names,
+    BTreeSet, ColumnPrune, CteScope, Engine, EngineExpressionEvaluator, QualifierFilters,
+    QueryOutput, QueryOutputMode, QueryPlan, QueryRows, ResultRow, SQLError, SQLParam, ScalarExpr,
+    Value,
 };
 use crate::engine_user_functions::{routine_returns_anonymous_record, SQLUserFunction};
 use std::sync::Arc;
@@ -377,14 +377,9 @@ pub(in crate::sql) fn qualify_source_operator_with_columns<'a>(
         .iter()
         .enumerate()
         .filter_map(|(index, source)| {
-            let source_base = if is_score_provenance_column(source) {
-                source.as_str()
-            } else {
-                operator.row_schema().public_name(index).unwrap_or(source)
-            };
+            let source_base = operator.row_schema().public_name(index).unwrap_or(source);
             let column = aliases.get(index).map_or(source_base, String::as_str);
-            if !is_score_provenance_column(column)
-                && !qualifier.is_empty()
+            if !qualifier.is_empty()
                 && prune
                     .and_then(|prune| prune.get(qualifier))
                     .is_some_and(|wanted| !wanted.contains(column))
@@ -399,7 +394,8 @@ pub(in crate::sql) fn qualify_source_operator_with_columns<'a>(
             Some((column.to_string(), identity, index))
         })
         .collect();
-    let selection = uqa_execution::ColumnSelection::with_identities(operator, mapping);
+    let selection = uqa_execution::ColumnSelection::with_identities(operator, mapping)
+        .rebinding_score_sources(qualifier);
     if rebind_lock_origins {
         Box::new(selection.rebinding_lock_origins(qualifier))
     } else {
@@ -482,7 +478,8 @@ pub(in crate::sql) fn alias_join_operator<'a>(
         })
         .collect();
     Ok(Box::new(
-        uqa_execution::ColumnSelection::with_fresh_identities(operator, mapping),
+        uqa_execution::ColumnSelection::with_fresh_identities(operator, mapping)
+            .rebinding_score_sources(alias),
     ))
 }
 
@@ -602,12 +599,6 @@ pub(in crate::sql) fn validate_table_function_alias_count(
             "table \"{table_alias}\" has {available} columns available but {specified} columns specified"
         ),
     })
-}
-
-pub(in crate::sql) fn multi_unnest_internal_columns(width: usize) -> Vec<String> {
-    (0..width)
-        .map(|position| format!("\0uqa.unnest.{position}"))
-        .collect()
 }
 
 pub(in crate::sql) struct TableFunctionTypeRequest<'a> {

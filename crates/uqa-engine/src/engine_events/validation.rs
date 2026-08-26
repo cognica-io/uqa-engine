@@ -11,9 +11,13 @@ use uqa_sql::ast::{
     ColumnType, CreateRule, CreateTrigger, Expr, FromClause, FunctionReturns, OnConflictAction,
     RuleEvent, SelectStmt, Statement, TriggerEvent, TriggerTiming,
 };
-use uqa_sql::plpgsql::{bind_expr, bind_select, ResolvedVariable, VariableResolver};
+use uqa_sql::plpgsql::{bind_expr, ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
 
+use super::{
+    first_rule_row_reference_in_expr, first_rule_row_reference_in_select,
+    rule_action_has_set_operation,
+};
 use crate::engine_user_functions::{
     canonical_routine_type_name, routine_signature_types, CompiledFunctionBody, SQLUserFunction,
 };
@@ -173,17 +177,6 @@ fn rule_action_has_returning(action: &Statement) -> bool {
         Statement::Insert(statement) => !statement.returning.is_empty(),
         Statement::Update(statement) => !statement.returning.is_empty(),
         Statement::Delete(statement) => !statement.returning.is_empty(),
-        _ => false,
-    }
-}
-
-fn rule_action_has_set_operation(action: &Statement) -> bool {
-    match action {
-        Statement::Select(select) => select.set_op.is_some(),
-        Statement::Insert(insert) => insert
-            .select_source
-            .as_ref()
-            .is_some_and(|select| select.set_op.is_some()),
         _ => false,
     }
 }
@@ -351,46 +344,6 @@ fn first_invalid_rule_condition_qualifier(condition: &Expr) -> Option<String> {
     invalid.into_inner()
 }
 
-#[derive(Default)]
-struct RuleRowReferenceDetector {
-    qualifier: Option<String>,
-}
-
-impl VariableResolver for RuleRowReferenceDetector {
-    fn resolve_name(&mut self, _name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
-        Ok(None)
-    }
-
-    fn resolve_qualified(
-        &mut self,
-        qualifier: &str,
-        _column: &str,
-    ) -> Result<Option<ResolvedVariable>, SQLError> {
-        if self.qualifier.is_none()
-            && (qualifier.eq_ignore_ascii_case("old") || qualifier.eq_ignore_ascii_case("new"))
-        {
-            self.qualifier = Some(qualifier.to_ascii_lowercase());
-        }
-        Ok(None)
-    }
-
-    fn resolve_param(&mut self, _index: usize) -> Result<Option<ResolvedVariable>, SQLError> {
-        Ok(None)
-    }
-}
-
-fn first_rule_row_reference_in_expr(expr: &Expr) -> Option<String> {
-    let mut detector = RuleRowReferenceDetector::default();
-    let _ = bind_expr(expr, &mut detector);
-    detector.qualifier
-}
-
-fn first_rule_row_reference_in_select(select: &SelectStmt) -> Option<String> {
-    let mut detector = RuleRowReferenceDetector::default();
-    let _ = bind_select(select, &mut detector);
-    detector.qualifier
-}
-
 fn invalid_rule_cte_reference(qualifier: &str) -> SQLError {
     SQLError::Routine {
         sqlstate: "0A000".into(),
@@ -417,6 +370,115 @@ fn invalid_rule_conflict_reference(qualifier: &str) -> SQLError {
             "invalid reference to FROM-clause entry for table \"{qualifier}\"\nDETAIL: There is an entry for table \"{qualifier}\", but it cannot be referenced from this part of the query."
         ),
     }
+}
+
+fn duplicate_rule_pseudo_relation(qualifier: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42712".into(),
+        message: format!("table name \"{qualifier}\" specified more than once"),
+    }
+}
+
+fn rule_pseudo_relation_name(name: &str) -> Option<String> {
+    (name.eq_ignore_ascii_case("old") || name.eq_ignore_ascii_case("new"))
+        .then(|| name.to_ascii_lowercase())
+}
+
+fn first_rule_pseudo_relation_in_from(from: &FromClause) -> Option<String> {
+    match from {
+        FromClause::Table {
+            name,
+            qualifier,
+            alias,
+            ..
+        } => alias
+            .as_deref()
+            .and_then(rule_pseudo_relation_name)
+            .or_else(|| rule_pseudo_relation_name(qualifier))
+            .or_else(|| rule_pseudo_relation_name(name))
+            .or_else(|| {
+                name.rsplit_once('.')
+                    .and_then(|(_, local)| rule_pseudo_relation_name(local.trim_matches('"')))
+            }),
+        FromClause::Join {
+            left, right, alias, ..
+        } => alias
+            .as_deref()
+            .and_then(rule_pseudo_relation_name)
+            .or_else(|| first_rule_pseudo_relation_in_from(left))
+            .or_else(|| first_rule_pseudo_relation_in_from(right)),
+        FromClause::Values { alias, .. } | FromClause::Subquery { alias, .. } => {
+            alias.as_deref().and_then(rule_pseudo_relation_name)
+        }
+        FromClause::Function {
+            output_name, alias, ..
+        } => rule_pseudo_relation_name(alias.as_deref().unwrap_or(output_name)),
+        FromClause::FunctionGroup {
+            functions, alias, ..
+        } => alias
+            .as_deref()
+            .and_then(rule_pseudo_relation_name)
+            .or_else(|| {
+                functions
+                    .iter()
+                    .find_map(|function| rule_pseudo_relation_name(&function.output_name))
+            }),
+    }
+}
+
+fn validate_rule_action_select_namespace(select: &SelectStmt) -> Result<(), SQLError> {
+    let duplicate = select
+        .with
+        .iter()
+        .find_map(|cte| rule_pseudo_relation_name(&cte.name))
+        .or_else(|| {
+            select
+                .from
+                .as_ref()
+                .and_then(first_rule_pseudo_relation_in_from)
+        });
+    if let Some(qualifier) = duplicate {
+        return Err(duplicate_rule_pseudo_relation(&qualifier));
+    }
+    Ok(())
+}
+
+fn validate_rule_action_namespace(action: &Statement) -> Result<(), SQLError> {
+    let (ctes, source) = match action {
+        Statement::Select(select) => return validate_rule_action_select_namespace(select),
+        Statement::Insert(insert) => (insert.with.as_slice(), insert.select_source.as_deref()),
+        Statement::Update(update) => {
+            if let Some(qualifier) = update
+                .from
+                .as_ref()
+                .and_then(first_rule_pseudo_relation_in_from)
+            {
+                return Err(duplicate_rule_pseudo_relation(&qualifier));
+            }
+            (update.with.as_slice(), None)
+        }
+        Statement::Delete(delete) => {
+            if let Some(qualifier) = delete
+                .using
+                .as_ref()
+                .and_then(first_rule_pseudo_relation_in_from)
+            {
+                return Err(duplicate_rule_pseudo_relation(&qualifier));
+            }
+            (delete.with.as_slice(), None)
+        }
+        _ => return Ok(()),
+    };
+    if let Some(qualifier) = ctes
+        .iter()
+        .find_map(|cte| rule_pseudo_relation_name(&cte.name))
+    {
+        return Err(duplicate_rule_pseudo_relation(&qualifier));
+    }
+    if let Some(select) = source {
+        validate_rule_action_select_namespace(select)?;
+    }
+    Ok(())
 }
 
 fn validate_rule_ctes(ctes: &[uqa_sql::ast::CTE]) -> Result<(), SQLError> {
@@ -590,12 +652,14 @@ fn validate_rule_expr_scopes(expr: &Expr) -> Result<(), SQLError> {
         | Expr::QualifiedStar(_)
         | Expr::Column(_)
         | Expr::QualifiedColumn { .. }
+        | Expr::InternalColumn(_)
         | Expr::Param(_) => {}
     }
     Ok(())
 }
 
 fn validate_rule_action_reference_scopes(action: &Statement) -> Result<(), SQLError> {
+    validate_rule_action_namespace(action)?;
     match action {
         Statement::Select(select) => validate_rule_select_scopes(select),
         Statement::Insert(insert) => {
@@ -614,8 +678,18 @@ fn validate_rule_action_reference_scopes(action: &Statement) -> Result<(), SQLEr
                 {
                     let reference = assignments
                         .iter()
-                        .find_map(|(_, expr)| first_rule_row_reference_in_expr(expr))
-                        .or_else(|| r#where.as_ref().and_then(first_rule_row_reference_in_expr));
+                        .find_map(|(_, expr)| {
+                            let mut shadowed = std::collections::BTreeSet::new();
+                            shadowed.insert(insert.target_qualifier.to_ascii_lowercase());
+                            first_rule_row_reference_in_expr(expr, &shadowed)
+                        })
+                        .or_else(|| {
+                            r#where.as_ref().and_then(|expr| {
+                                let mut shadowed = std::collections::BTreeSet::new();
+                                shadowed.insert(insert.target_qualifier.to_ascii_lowercase());
+                                first_rule_row_reference_in_expr(expr, &shadowed)
+                            })
+                        });
                     if let Some(qualifier) = reference {
                         return Err(invalid_rule_conflict_reference(&qualifier));
                     }
@@ -668,28 +742,15 @@ fn validate_rule_action_reference_scopes(action: &Statement) -> Result<(), SQLEr
 
 impl Engine {
     pub(crate) fn resolve_rule_relation(&self, name: &str) -> Result<RelationIdentity, SQLError> {
-        if let Ok(relation) = RelationIdentity::from_legacy_name(name) {
-            if self.durable.views.read().contains_key(&relation) {
-                return Ok(relation);
-            }
-        }
-        let table = self.try_resolve_table_name(name).map_err(|error| {
+        let candidates = self.relation_lookup_candidates(name).map_err(|error| {
             SQLError::Internal(format!("resolve rule relation `{name}`: {error}"))
         })?;
-        if let Some(table) = table {
-            return RelationIdentity::from_legacy_name(&table).map_err(|error| {
-                SQLError::Internal(format!("decode rule relation `{table}`: {error}"))
-            });
-        }
-        let canonical = self
-            .try_resolve_view_name(name)
-            .map_err(|error| {
-                SQLError::Internal(format!("resolve rule relation `{name}`: {error}"))
-            })?
-            .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
-        RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
-            SQLError::Internal(format!("decode rule relation `{canonical}`: {error}"))
-        })
+        let tables = self.storage.tables.read();
+        let views = self.durable.views.read();
+        candidates
+            .into_iter()
+            .find(|relation| tables.contains_key(relation) || views.contains_key(relation))
+            .ok_or_else(|| SQLError::UnknownTable(name.to_string()))
     }
 
     pub(crate) fn rule_relation_columns(
@@ -854,7 +915,7 @@ impl Engine {
         Ok(())
     }
 
-    fn rule_action_target_columns(
+    pub(crate) fn rule_action_target_columns(
         &self,
         action: &Statement,
     ) -> Result<std::collections::BTreeSet<String>, SQLError> {

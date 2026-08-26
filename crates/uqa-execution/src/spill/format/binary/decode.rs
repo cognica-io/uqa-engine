@@ -6,12 +6,12 @@
 
 //! Bounded binary spill decoding.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use uqa_core::{ArrayValue, DecimalValue, TemporalValue, Value};
 use uqa_sql::ast::ColumnType;
 
-use crate::batch::{Batch, ColumnIdentity, PhysicalRow, RowSchema};
+use crate::batch::{Batch, ColumnIdentity, PhysicalLayout, PhysicalRow, RowSchema};
 use crate::physical::ExecResult;
 use crate::spill::format::spill_error;
 
@@ -59,9 +59,75 @@ pub(crate) fn decode_batch(record: &[u8]) -> ExecResult<Batch> {
             reader.read_column_type("schema alias type")?,
         ));
     }
-    let schema =
-        RowSchema::from_physical_layout(columns, identities, types, slots, physical_width, aliases)
-            .map_err(|error| spill_error(format!("invalid spill schema: {error}")))?;
+    let internal_count = reader.read_count("schema internal column count", 32)?;
+    let mut internal = Vec::new();
+    internal
+        .try_reserve_exact(internal_count)
+        .map_err(|error| {
+            spill_error(format!(
+                "cannot allocate spill schema internal columns: {error}"
+            ))
+        })?;
+    for _ in 0..internal_count {
+        let relation = reader.read_u64("schema internal relation")?;
+        let attribute = u32::try_from(reader.read_u64("schema internal attribute")?)
+            .map_err(|_| spill_error("schema internal attribute exceeds u32"))?;
+        internal.push((
+            uqa_sql::ast::InternalColumnRef::from_raw(relation, attribute),
+            reader.read_slot("schema internal slot", physical_width)?,
+            reader.read_column_type("schema internal column type")?,
+        ));
+    }
+    let score_source_count = reader.read_count("schema score source count", 24)?;
+    let mut score_sources = Vec::new();
+    score_sources
+        .try_reserve_exact(score_source_count)
+        .map_err(|error| spill_error(format!("cannot allocate spill score sources: {error}")))?;
+    for _ in 0..score_source_count {
+        let qualifier = match reader.read_u64("schema score source qualifier flag")? {
+            0 => None,
+            1 => Some(reader.read_string("schema score source qualifier")?),
+            value => {
+                return Err(spill_error(format!(
+                    "invalid schema score source qualifier flag {value}"
+                )))
+            }
+        };
+        let relation = reader.read_u64("schema score source relation")?;
+        let attribute = u32::try_from(reader.read_u64("schema score source attribute")?)
+            .map_err(|_| spill_error("schema score source attribute exceeds u32"))?;
+        score_sources.push((
+            qualifier,
+            uqa_sql::ast::InternalColumnRef::from_raw(relation, attribute),
+        ));
+    }
+    let wildcard_hidden_count = reader.read_count("schema wildcard-hidden count", 8)?;
+    let mut wildcard_hidden = HashSet::with_capacity(wildcard_hidden_count);
+    for _ in 0..wildcard_hidden_count {
+        let position = reader.read_count("schema wildcard-hidden position", 1)?;
+        if position >= column_count {
+            return Err(spill_error(format!(
+                "schema wildcard-hidden position {position} is outside logical width {column_count}"
+            )));
+        }
+        if !wildcard_hidden.insert(position) {
+            return Err(spill_error(format!(
+                "duplicate schema wildcard-hidden position {position}"
+            )));
+        }
+    }
+    let schema = RowSchema::from_physical_layout(PhysicalLayout {
+        columns,
+        identities,
+        types,
+        slots,
+        physical_width,
+        aliases,
+        internal,
+        score_sources,
+        wildcard_hidden,
+    })
+    .map_err(|error| spill_error(format!("invalid spill schema: {error}")))?;
     let row_metadata = reader.read_u64("row metadata flags")?;
     if row_metadata & !ROW_METADATA_LOCK_ORIGINS != 0 {
         return Err(spill_error(format!(

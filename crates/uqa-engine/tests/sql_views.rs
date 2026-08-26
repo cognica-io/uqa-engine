@@ -14,6 +14,7 @@ use std::sync::{
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult, SQLScalarFunction};
 use uqa_sql::{ColumnType, SQLError};
+use uqa_storage::sqlite::{Catalog, ManagedConnection};
 
 #[path = "sql_views/column_aliases.rs"]
 mod column_aliases;
@@ -602,6 +603,101 @@ fn persisted_view_sequence_binding_survives_reopen() {
     );
     let error = engine.drop_sequence("s1.ids").unwrap_err();
     assert!(error.contains("public.sequence_value"), "{error}");
+}
+
+fn downgrade_serialized_subscript_dispatch(value: &mut serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::Array(values) => values
+            .iter_mut()
+            .map(downgrade_serialized_subscript_dispatch)
+            .sum(),
+        serde_json::Value::Object(object) => {
+            let mut changed = 0;
+            if let Some(serde_json::Value::Object(function)) = object.get_mut("Func") {
+                let legacy_name = match function
+                    .get("binding")
+                    .and_then(|binding| binding.get("dispatch"))
+                    .and_then(serde_json::Value::as_str)
+                {
+                    Some("Subscript") => Some("__subscript"),
+                    Some("ArraySubscripts") => Some("__array_subscripts"),
+                    _ => None,
+                };
+                if let Some(legacy_name) = legacy_name {
+                    function.insert("name".into(), serde_json::Value::String(legacy_name.into()));
+                    function.remove("binding");
+                    changed += 1;
+                }
+            }
+            changed
+                + object
+                    .values_mut()
+                    .map(downgrade_serialized_subscript_dispatch)
+                    .sum::<usize>()
+        }
+        _ => 0,
+    }
+}
+
+#[test]
+fn v016_view_dispatch_markers_migrate_structurally_on_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("legacy-view-dispatch.db");
+    {
+        let engine = Engine::open(&database).unwrap();
+        exec(
+            &engine,
+            "CREATE TABLE legacy_arrays (id INTEGER PRIMARY KEY, values INTEGER[])",
+        );
+        exec(
+            &engine,
+            "INSERT INTO legacy_arrays (id, values) VALUES (1, ARRAY[10, 20])",
+        );
+        exec(
+            &engine,
+            "CREATE VIEW legacy_subscript AS SELECT values[2] AS value FROM legacy_arrays",
+        );
+        assert_eq!(
+            exec(&engine, "SELECT value FROM legacy_subscript").rows[0]["value"],
+            Value::Int(20)
+        );
+    }
+
+    {
+        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let mut views = catalog.load_views().unwrap();
+        let view = views
+            .iter_mut()
+            .find(|view| view.relation.name == "legacy_subscript")
+            .unwrap();
+        let mut definition: serde_json::Value =
+            serde_json::from_str(&view.definition_json).unwrap();
+        assert_eq!(
+            downgrade_serialized_subscript_dispatch(&mut definition),
+            1,
+            "unexpected stored view definition: {definition}"
+        );
+        view.definition_json = serde_json::to_string(&definition).unwrap();
+        catalog.save_view(view).unwrap();
+    }
+
+    let reopened = Engine::open(&database).unwrap();
+    assert_eq!(
+        exec(&reopened, "SELECT value FROM legacy_subscript").rows[0]["value"],
+        Value::Int(20)
+    );
+    drop(reopened);
+
+    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let migrated = catalog
+        .load_views()
+        .unwrap()
+        .into_iter()
+        .find(|view| view.relation.name == "legacy_subscript")
+        .unwrap()
+        .definition_json;
+    assert!(!migrated.contains("__array_subscripts"));
+    assert!(migrated.contains(r#""dispatch":"ArraySubscripts""#));
 }
 
 #[test]

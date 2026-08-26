@@ -32,18 +32,31 @@ pub(in crate::sql) fn run_single_table_select_output(
     if let Some(filter) = stmt.r#where.as_ref() {
         crate::sql::validate_expr_text_match_fields(engine, table, filter)?;
     }
-    let score_top_k = if matches!(
-        block.access,
-        AccessPathPlan::OperatorTree {
-            score_limit_pushdown: true
-        }
-    ) {
+    let has_stored_score_column = engine
+        .try_describe_table(table)
+        .map_err(|error| SQLError::Internal(format!("read table schema for `{table}`: {error}")))?
+        .is_some_and(|columns| {
+            columns
+                .iter()
+                .any(|column| column.name == super::SCORE_COLUMN)
+        });
+    let score_top_k = if !has_stored_score_column
+        && matches!(
+            block.access,
+            AccessPathPlan::OperatorTree {
+                score_limit_pushdown: true
+            }
+        ) {
         score_order_top_k(stmt, engine, params, ctes)?
             .filter(|_| score_limited_text_filter(stmt.r#where.as_ref()))
     } else {
         None
     };
-    let post_retrieval_top_k = post_retrieval_score_top_k(stmt, engine, params, ctes)?;
+    let post_retrieval_top_k = if has_stored_score_column {
+        None
+    } else {
+        post_retrieval_score_top_k(stmt, engine, params, ctes)?
+    };
     let has_jsonpath_fts_filter = stmt
         .r#where
         .as_ref()

@@ -23,9 +23,9 @@ pub(in crate::sql) use routine_binding::bind_query_plan_routines_for_storage;
 use cte_controls::{extend_recursive_cte_binding_schema, hide_recursive_generated_schema};
 
 use super::{
-    cte_references_own_name, expr_contains_subquery, is_score_provenance_column, ordered_plan_ctes,
-    projection_columns, user_function_output_columns, CteScope, Engine, QueryBlockPlan, QueryPlan,
-    RelationalPlan, SQLError, SQLParam, ScalarExpr, SourcePlan, Value,
+    cte_references_own_name, expr_contains_subquery, ordered_plan_ctes, projection_columns,
+    user_function_output_columns, CteScope, Engine, QueryBlockPlan, QueryPlan, RelationalPlan,
+    SQLError, SQLParam, ScalarExpr, SourcePlan, Value,
 };
 use crate::sql::from_rows::{
     alias_join_schema, apply_table_function_aliases, join_using_output_schema, resolve_join_using,
@@ -706,7 +706,15 @@ impl SchemaScope {
                 rows,
                 alias,
                 column_aliases,
+                internal_relation,
+                internal_column_types,
             } => {
+                if let Some(relation) = internal_relation {
+                    return Ok(RowSchema::with_internal_relation_types(
+                        *relation,
+                        internal_column_types.clone(),
+                    ));
+                }
                 let columns = if column_aliases.is_empty() {
                     (1..=rows.first().map_or(0, Vec::len))
                         .map(|index| format!("column{index}"))
@@ -1254,7 +1262,6 @@ fn projection_star_columns(
                 .columns()
                 .iter()
                 .enumerate()
-                .filter(|(_, column)| !is_score_provenance_column(column))
                 .map(|(position, column)| {
                     (
                         schema.public_name(position).unwrap_or(column).to_string(),
@@ -1267,7 +1274,6 @@ fn projection_star_columns(
             let columns = schema
                 .qualified_star_layout(qualifier)
                 .into_iter()
-                .filter(|(column, _, _)| !is_score_provenance_column(column))
                 .map(|(column, _, ty)| (column, ty))
                 .collect::<Vec<_>>();
             if columns.is_empty() {
@@ -1285,15 +1291,10 @@ fn rename_schema(schema: &RowSchema, aliases: &[String], qualifier: Option<&str>
         .iter()
         .enumerate()
         .map(|(position, column)| {
-            let base = if is_score_provenance_column(column) {
-                column.clone()
-            } else {
-                aliases
-                    .get(position)
-                    .cloned()
-                    .unwrap_or_else(|| schema.public_name(position).unwrap_or(column).to_string())
-            };
-            base
+            aliases
+                .get(position)
+                .cloned()
+                .unwrap_or_else(|| schema.public_name(position).unwrap_or(column).to_string())
         })
         .collect();
     let renamed = match qualifier {

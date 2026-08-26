@@ -119,6 +119,10 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases,
                 alias_types,
+                internal: input.index.internal.clone(),
+                internal_types: input.index.cold.internal.clone(),
+                score_sources: input.index.cold.score_sources.clone(),
+                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
                 extra_ambiguous_unqualified: outer_ambiguous,
                 extra_ambiguous_qualified: ambiguous_qualified,
@@ -236,6 +240,23 @@ impl RowSchema {
             alias_types.insert(identity, outer.type_of(column).cloned());
         }
 
+        let mut internal = input.index.internal.clone();
+        let mut internal_types = input.index.cold.internal.clone();
+        for (column, slot) in &outer.index.internal {
+            assert!(
+                internal.insert(*column, shifted_slot(*slot)).is_none(),
+                "duplicate internal relation attribute in outer scope"
+            );
+        }
+        for (column, ty) in &outer.index.cold.internal {
+            assert!(
+                internal_types.insert(*column, ty.clone()).is_none(),
+                "duplicate internal relation attribute type in outer scope"
+            );
+        }
+        let mut score_sources = input.index.cold.score_sources.clone();
+        score_sources.extend(outer.index.cold.score_sources.iter().cloned());
+
         Self::from_typed_parts_with_aliases_and_exact_precedence(
             input.columns().to_vec(),
             input.identities().to_vec(),
@@ -245,6 +266,10 @@ impl RowSchema {
             SchemaBuildMetadata {
                 aliases,
                 alias_types,
+                internal,
+                internal_types,
+                score_sources,
+                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
                 extra_ambiguous_unqualified: ambiguous_unqualified,
                 extra_ambiguous_qualified: ambiguous_qualified,

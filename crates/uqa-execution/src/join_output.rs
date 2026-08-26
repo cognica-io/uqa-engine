@@ -100,26 +100,19 @@ fn compile_layout(
         }
     }
 
-    let computed_names = (0..computed.len())
-        .map(|index| format!("\0uqa.join_using.{index}"))
-        .collect::<Vec<_>>();
-    let computed_columns = computed_names
-        .iter()
-        .cloned()
-        .zip(computed.iter().map(source_type))
-        .collect::<Vec<_>>();
-    let intermediate = RowSchema::append_typed(input, &computed_columns);
+    let computed_types = computed.iter().map(source_type).collect::<Vec<_>>();
+    let intermediate = RowSchema::append_hidden_typed(input, &computed_types);
     let source_position = |source: &JoinOutputSource| -> usize {
         match source {
-            JoinOutputSource::Input(position) => *position,
+            JoinOutputSource::Input(position) => input
+                .physical_slot(*position)
+                .expect("validated join output input position has a physical slot"),
             JoinOutputSource::Cast { .. } | JoinOutputSource::Coalesce { .. } => {
                 let index = computed
                     .iter()
                     .position(|candidate| candidate == source)
                     .expect("computed join output source was registered");
-                intermediate
-                    .position(&computed_names[index])
-                    .expect("computed join output column exists")
+                input.physical_width() + index
             }
         }
     };
@@ -137,9 +130,17 @@ fn compile_layout(
         .collect::<Vec<_>>();
     let aliases = aliases
         .iter()
-        .map(|(name, source)| (name.clone(), source_position(source)))
+        .map(|(name, source)| {
+            let ty = match source {
+                JoinOutputSource::Input(position) => input.column_type(*position).cloned(),
+                JoinOutputSource::Cast { .. } | JoinOutputSource::Coalesce { .. } => {
+                    source_type(source)
+                }
+            };
+            (name.clone(), source_position(source), ty)
+        })
         .collect::<Vec<_>>();
-    let schema = RowSchema::remap_typed_identities(&intermediate, &columns, &aliases);
+    let schema = RowSchema::remap_typed_physical_identities(&intermediate, &columns, &aliases);
     Ok((schema, computed))
 }
 

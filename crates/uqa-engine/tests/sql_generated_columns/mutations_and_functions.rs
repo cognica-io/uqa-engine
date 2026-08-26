@@ -273,6 +273,33 @@ fn stored_generation_expression_is_evaluated_once_per_row_write() {
         .unwrap();
     assert_eq!(int(&updated.rows[0], "derived"), 2);
     assert_eq!(int(&updated.rows[0], "calls"), 2);
+
+    engine
+        .sql(
+            "INSERT INTO generated_evaluation_rows (id, source) SELECT 2, 30",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "MERGE INTO generated_evaluation_rows AS target USING (VALUES (3, 40)) AS source(id, value) ON target.id = source.id WHEN NOT MATCHED THEN INSERT (id, source) VALUES (source.id, source.value)",
+            &[],
+        )
+        .unwrap();
+    let inserted = engine
+        .sql(
+            "SELECT array_agg(derived ORDER BY id) AS derived, currval('generated_evaluation_count') AS calls FROM generated_evaluation_rows",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        inserted.rows[0]["derived"],
+        Value::Array(
+            uqa_core::ArrayValue::try_new(vec![Value::Int(2), Value::Int(3), Value::Int(4),])
+                .unwrap()
+        )
+    );
+    assert_eq!(int(&inserted.rows[0], "calls"), 4);
 }
 
 #[test]

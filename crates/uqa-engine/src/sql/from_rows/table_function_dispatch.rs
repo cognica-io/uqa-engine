@@ -10,8 +10,8 @@ use super::{
     age_cypher, checked_integer_value, doc_id_value, eval_call_arguments, execute_tree_entries,
     expect_optional_graph_value, generate_series_values, graph_betweenness_entries,
     graph_hits_entries, graph_pagerank_entries, json_table_arg, json_table_value_to_text,
-    unnest_row_stream, PlanSubqueryArena, ResultRow, SQLError, SQLTableFunctionResult,
-    SQLTableFunctionStream, ScalarEvalContext, SourceEvalContext, TableFunctionCall, Value,
+    unnest_row_stream, PlanSubqueryArena, SQLError, SQLTableFunctionResult, SQLTableFunctionStream,
+    ScalarEvalContext, SourceEvalContext, TableFunctionCall, TableFunctionRows, Value,
 };
 
 #[allow(clippy::similar_names)]
@@ -19,7 +19,7 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
     context: &SourceEvalContext<'_>,
     call: TableFunctionCall<'_>,
     row: Option<&uqa_execution::OwnedPhysicalRow>,
-) -> Result<Vec<ResultRow>, SQLError> {
+) -> Result<TableFunctionRows, SQLError> {
     let TableFunctionCall {
         name,
         binding,
@@ -63,12 +63,8 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
         .first()
         .cloned()
         .unwrap_or_else(|| alias.unwrap_or(output_name).to_string());
-    let mut out: Vec<ResultRow> = Vec::new();
-    let push_scalar = |out: &mut Vec<ResultRow>, value: Value| {
-        let mut r = ResultRow::new();
-        r.insert(default_col.clone(), value);
-        out.push(r);
-    };
+    let mut out: Vec<Vec<Value>> = Vec::new();
+    let push_scalar = |out: &mut Vec<Vec<Value>>, value: Value| out.push(vec![value]);
     if !has_named_args && binding.is_none_or(|binding| binding.builtin) {
         if let Some(result) = engine.call_registered_table_function(&identity, &evaluated) {
             return registered_table_function_rows(name, result?, alias, column_aliases);
@@ -114,11 +110,9 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
             for value in generate_series_values(evaluated)? {
                 push_scalar(&mut out, value);
             }
-            Ok(out)
+            Ok(TableFunctionRows::materialized(vec![default_col], out))
         }
-        "unnest" => unnest_row_stream(evaluated, output_name, alias, column_aliases)?
-            .collect::<uqa_execution::ExecResult<Vec<_>>>()
-            .map_err(crate::sql::select::physical_exec_error),
+        "unnest" => unnest_row_stream(evaluated, output_name, alias, column_aliases),
         "regexp_split_to_table" => {
             if evaluated.len() != 2 {
                 return Err(SQLError::TypeMismatch(
@@ -138,7 +132,7 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
             for piece in re.split(&s) {
                 push_scalar(&mut out, Value::Str(piece.to_string()));
             }
-            Ok(out)
+            Ok(TableFunctionRows::materialized(vec![default_col], out))
         }
         "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
             if evaluated.len() != 1 {
@@ -159,12 +153,9 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
                 .cloned()
                 .unwrap_or_else(|| "value".into());
             for (k, v) in obj {
-                let mut r = ResultRow::new();
-                r.insert(key_col.clone(), Value::Str(k));
-                r.insert(val_col.clone(), json_table_value_to_text(&v));
-                out.push(r);
+                out.push(vec![Value::Str(k), json_table_value_to_text(&v)]);
             }
-            Ok(out)
+            Ok(TableFunctionRows::materialized(vec![key_col, val_col], out))
         }
         "json_array_elements"
         | "jsonb_array_elements"
@@ -184,11 +175,9 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
                 .cloned()
                 .unwrap_or_else(|| "value".into());
             for v in arr {
-                let mut r = ResultRow::new();
-                r.insert(col.clone(), json_table_value_to_text(&v));
-                out.push(r);
+                out.push(vec![json_table_value_to_text(&v)]);
             }
-            Ok(out)
+            Ok(TableFunctionRows::materialized(vec![col], out))
         }
         // -------------------------------------------------------------
         // Analyzer DDL exposed as table functions: create, drop, list,
@@ -213,15 +202,16 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
             engine
                 .register_named_analyzer(&analyzer_name, &config_json)
                 .map_err(SQLError::Unsupported)?;
-            let mut r = ResultRow::new();
-            r.insert(
-                column_aliases
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| "create_analyzer".into()),
-                Value::Str(format!("analyzer '{analyzer_name}' created")),
-            );
-            Ok(vec![r])
+            let column = column_aliases
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "create_analyzer".into());
+            Ok(TableFunctionRows::materialized(
+                vec![column],
+                vec![vec![Value::Str(format!(
+                    "analyzer '{analyzer_name}' created"
+                ))]],
+            ))
         }
         "drop_analyzer" => {
             if evaluated.len() != 1 {
@@ -243,15 +233,16 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
                     "analyzer `{analyzer_name}` does not exist"
                 )));
             }
-            let mut r = ResultRow::new();
-            r.insert(
-                column_aliases
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| "drop_analyzer".into()),
-                Value::Str(format!("analyzer '{analyzer_name}' dropped")),
-            );
-            Ok(vec![r])
+            let column = column_aliases
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "drop_analyzer".into());
+            Ok(TableFunctionRows::materialized(
+                vec![column],
+                vec![vec![Value::Str(format!(
+                    "analyzer '{analyzer_name}' dropped"
+                ))]],
+            ))
         }
         "list_analyzers" => {
             if !evaluated.is_empty() {
@@ -277,11 +268,9 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
                 .cloned()
                 .unwrap_or_else(|| "analyzer_name".into());
             for n in names {
-                let mut r = ResultRow::new();
-                r.insert(key.clone(), Value::Str(n));
-                out.push(r);
+                out.push(vec![Value::Str(n)]);
             }
-            Ok(out)
+            Ok(TableFunctionRows::materialized(vec![key], out))
         }
         "fts_index_stats" => {
             if evaluated.len() > 1 {
@@ -295,33 +284,30 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
                 None => None,
             };
             for stat in engine.fts_index_stats(table_filter)? {
-                let mut r = ResultRow::new();
-                r.insert("table_name".into(), Value::Str(stat.table_name));
-                r.insert("field".into(), Value::Str(stat.field));
-                r.insert("analyzer".into(), Value::Str(stat.analyzer));
-                r.insert(
-                    "posting_count".into(),
+                out.push(vec![
+                    Value::Str(stat.table_name),
+                    Value::Str(stat.field),
+                    Value::Str(stat.analyzer),
                     checked_integer_value(stat.posting_count, "posting count")?,
-                );
-                r.insert(
-                    "doc_length_count".into(),
                     checked_integer_value(stat.doc_length_count, "document-length count")?,
-                );
-                r.insert(
-                    "indexed_doc_count".into(),
                     checked_integer_value(stat.indexed_doc_count, "indexed-document count")?,
-                );
-                r.insert(
-                    "term_count".into(),
                     checked_integer_value(stat.term_count, "term count")?,
-                );
-                r.insert(
-                    "total_field_length".into(),
                     checked_integer_value(stat.total_field_length, "total field length")?,
-                );
-                out.push(r);
+                ]);
             }
-            Ok(out)
+            Ok(TableFunctionRows::materialized(
+                vec![
+                    "table_name".into(),
+                    "field".into(),
+                    "analyzer".into(),
+                    "posting_count".into(),
+                    "doc_length_count".into(),
+                    "indexed_doc_count".into(),
+                    "term_count".into(),
+                    "total_field_length".into(),
+                ],
+                out,
+            ))
         }
         "set_table_analyzer" => {
             if !(3..=4).contains(&evaluated.len()) {
@@ -363,15 +349,14 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
                 use std::fmt::Write as _;
                 let _ = write!(msg, " (phase={phase})");
             }
-            let mut r = ResultRow::new();
-            r.insert(
-                column_aliases
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| "set_table_analyzer".into()),
-                Value::Str(msg),
-            );
-            Ok(vec![r])
+            let column = column_aliases
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "set_table_analyzer".into());
+            Ok(TableFunctionRows::materialized(
+                vec![column],
+                vec![vec![Value::Str(msg)]],
+            ))
         }
         "pagerank" | "graph_pagerank" | "hits" | "graph_hits" | "betweenness"
         | "graph_betweenness" => {
@@ -400,21 +385,24 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
                 .cloned()
                 .unwrap_or_else(|| "_score".into());
             for entry in entries {
-                let mut r = ResultRow::new();
-                r.insert(id_col.clone(), doc_id_value(entry.doc_id)?);
-                r.insert(score_col.clone(), Value::Float(entry.score));
-                out.push(r);
+                out.push(vec![doc_id_value(entry.doc_id)?, Value::Float(entry.score)]);
             }
-            Ok(out)
+            Ok(TableFunctionRows::materialized(
+                vec![id_col, score_col],
+                out,
+            ))
         }
-        "cypher" => age_cypher::build_rows(
-            engine,
-            args,
-            &evaluated,
-            alias,
-            column_aliases,
-            column_types,
-        ),
+        "cypher" => Ok(TableFunctionRows::materialized(
+            column_aliases.to_vec(),
+            age_cypher::build_rows(
+                engine,
+                args,
+                &evaluated,
+                alias,
+                column_aliases,
+                column_types,
+            )?,
+        )),
         "rpq" => {
             if !(2..=3).contains(&evaluated.len()) {
                 return Err(SQLError::TypeMismatch(
@@ -445,11 +433,9 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
                 .cloned()
                 .unwrap_or_else(|| "vertex_id".into());
             for entry in entries {
-                let mut r = ResultRow::new();
-                r.insert(id_col.clone(), doc_id_value(entry.doc_id)?);
-                out.push(r);
+                out.push(vec![doc_id_value(entry.doc_id)?]);
             }
-            Ok(out)
+            Ok(TableFunctionRows::materialized(vec![id_col], out))
         }
         other => Err(SQLError::Unsupported(format!(
             "table function `{other}` in FROM"
@@ -461,7 +447,7 @@ fn operator_join_rows(
     tuples: uqa_core::GeneralizedPostingList,
     _alias: Option<&str>,
     column_aliases: &[String],
-) -> Result<Vec<ResultRow>, SQLError> {
+) -> Result<TableFunctionRows, SQLError> {
     let left_column = column_aliases
         .first()
         .cloned()
@@ -482,21 +468,21 @@ fn operator_join_rows(
                 tuple.doc_ids.len()
             )));
         };
-        let mut row = ResultRow::new();
-        row.insert(left_column.clone(), doc_id_value(*left_doc_id)?);
-        row.insert(right_column.clone(), doc_id_value(*right_doc_id)?);
-        row.insert(
-            score_column.clone(),
+        rows.push(vec![
+            doc_id_value(*left_doc_id)?,
+            doc_id_value(*right_doc_id)?,
             tuple
                 .payload
                 .fields
                 .get("_score")
                 .cloned()
                 .unwrap_or(Value::Null),
-        );
-        rows.push(row);
+        ]);
     }
-    Ok(rows)
+    Ok(TableFunctionRows::materialized(
+        vec![left_column, right_column, score_column],
+        rows,
+    ))
 }
 
 pub(in crate::sql) fn registered_table_function_rows(
@@ -504,7 +490,7 @@ pub(in crate::sql) fn registered_table_function_rows(
     result: SQLTableFunctionResult,
     _alias: Option<&str>,
     column_aliases: &[String],
-) -> Result<Vec<ResultRow>, SQLError> {
+) -> Result<TableFunctionRows, SQLError> {
     if result.columns.is_empty() {
         return Err(SQLError::TypeMismatch(format!(
             "table function `{name}` returned no columns"
@@ -530,13 +516,9 @@ pub(in crate::sql) fn registered_table_function_rows(
                 result.columns.len()
             )));
         }
-        let mut row = ResultRow::new();
-        for (column, value) in columns.iter().zip(values) {
-            row.insert(column.clone(), value);
-        }
-        out.push(row);
+        out.push(values);
     }
-    Ok(out)
+    Ok(TableFunctionRows::materialized(columns, out))
 }
 
 pub(in crate::sql) fn registered_table_function_row_stream(
@@ -544,7 +526,7 @@ pub(in crate::sql) fn registered_table_function_row_stream(
     result: SQLTableFunctionStream,
     _alias: Option<&str>,
     column_aliases: &[String],
-) -> Result<uqa_execution::ProjectRows, SQLError> {
+) -> Result<TableFunctionRows, SQLError> {
     if result.columns.is_empty() {
         return Err(SQLError::TypeMismatch(format!(
             "table function `{name}` returned no columns"
@@ -563,21 +545,20 @@ pub(in crate::sql) fn registered_table_function_row_stream(
         })
         .collect::<Vec<_>>();
     let function_name = name.to_string();
-    Ok(Box::new(result.rows.map(
-        move |values| -> uqa_execution::ExecResult<ResultRow> {
-            let values = values.map_err(uqa_execution::ExecError::from)?;
-            if values.len() != expected_width {
-                return Err(SQLError::TypeMismatch(format!(
+    Ok(TableFunctionRows::new(
+        columns,
+        Box::new(result.rows.map(
+            move |values| -> uqa_execution::ExecResult<uqa_execution::PhysicalRow> {
+                let values = values.map_err(uqa_execution::ExecError::from)?;
+                if values.len() != expected_width {
+                    return Err(SQLError::TypeMismatch(format!(
                 "table function `{function_name}` row has {} values for {expected_width} columns",
                 values.len()
             ))
-                .into());
-            }
-            let mut row = ResultRow::new();
-            for (column, value) in columns.iter().zip(values) {
-                row.insert(column.clone(), value);
-            }
-            Ok(row)
-        },
-    )))
+                    .into());
+                }
+                Ok(uqa_execution::PhysicalRow::from_values(values))
+            },
+        )),
+    ))
 }

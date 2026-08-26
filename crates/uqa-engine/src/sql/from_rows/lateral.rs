@@ -8,11 +8,11 @@
 
 use super::{
     build_join_operator_with_ctes, build_table_function_row_stream_with_row, eval_scalar,
-    multi_unnest_internal_columns, projection_columns, query_output_shared,
-    resolve_user_table_function, validate_table_function_column_definition, AccessPathPlan,
-    ComputePlan, CteScope, Engine, PlanSubqueryArena, QueryBlockPlan, QueryOutput, QueryOutputMode,
-    QueryPlan, RelationalPlan, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, ScopedEngineHook,
-    SourceEvalContext, SourcePlan, TableFunctionCall, TABLE_FUNCTION_ORDINALITY_COLUMN,
+    projection_columns, query_output_shared, resolve_user_table_function,
+    validate_table_function_column_definition, AccessPathPlan, ComputePlan, CteScope, Engine,
+    PlanSubqueryArena, QueryBlockPlan, QueryOutput, QueryOutputMode, QueryPlan, RelationalPlan,
+    SQLError, SQLParam, ScalarEvalContext, ScalarExpr, ScopedEngineHook, SourceEvalContext,
+    SourcePlan, TableFunctionCall,
 };
 use crate::sql::select::{expand_from_star_columns, resolve_row_locks};
 
@@ -108,38 +108,18 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
                 ordinality: *ordinality,
                 column_types,
             };
-            let rows = build_table_function_row_stream_with_row(&context, call, Some(left_row))?;
+            let output = build_table_function_row_stream_with_row(&context, call, Some(left_row))?;
             let schema = self.right_schema.clone();
-            let multi_unnest = crate::sql::builtin_function_dispatch_name(name) == "unnest"
-                && args.len() > 1
-                && resolved.is_none()
-                && binding.as_ref().is_none_or(|binding| binding.builtin);
-            let input_schema = if multi_unnest || *ordinality {
-                let mut columns = if multi_unnest {
-                    multi_unnest_internal_columns(args.len())
-                } else {
-                    schema.columns().to_vec()
-                };
-                if *ordinality {
-                    if multi_unnest {
-                        columns.push(TABLE_FUNCTION_ORDINALITY_COLUMN.into());
-                    } else if let Some(column) = columns.last_mut() {
-                        *column = TABLE_FUNCTION_ORDINALITY_COLUMN.into();
-                    }
-                }
-                uqa_execution::RowSchema::with_identities(
-                    columns,
-                    schema.identities().to_vec(),
-                    schema.column_types().to_vec(),
-                )
-            } else {
-                schema.clone()
-            };
-            return Ok(Box::new(rows.map(move |row| {
-                row.map(|row| {
-                    let physical = uqa_execution::PhysicalRow::from_result_row(&input_schema, row);
-                    uqa_execution::OwnedPhysicalRow::new(schema.clone(), physical)
-                })
+            if output.columns.len() != schema.len() {
+                return Err(SQLError::Internal(format!(
+                    "lateral table function produced {} columns for a {}-column source",
+                    output.columns.len(),
+                    schema.len()
+                ))
+                .into());
+            }
+            return Ok(Box::new(output.rows.map(move |row| {
+                row.map(|row| uqa_execution::OwnedPhysicalRow::new(schema.clone(), row))
             })));
         }
         match &self.right {

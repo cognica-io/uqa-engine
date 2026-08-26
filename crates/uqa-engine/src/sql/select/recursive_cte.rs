@@ -8,10 +8,10 @@
 
 use super::{
     analyze_recursive_control_step, collect_query_operator, eval_scalar, execute_query_plan_output,
-    is_score_provenance_column, materialize_plan_ctes, physical_exec_error,
-    physical_work_mem_bytes, push_output_filter_into_query_plan, query_plan_output_columns,
-    CtePlan, CteScope, Engine, ProjectionPlan, QueryOutput, QueryOutputMode, QueryRows,
-    RelationalPlan, SQLError, SQLParam, ScalarExpr, SetOpKind, SourcePlan, Value,
+    materialize_plan_ctes, physical_exec_error, physical_work_mem_bytes,
+    push_output_filter_into_query_plan, query_plan_output_columns, CtePlan, CteScope, Engine,
+    ProjectionPlan, QueryOutput, QueryOutputMode, QueryRows, RelationalPlan, SQLError, SQLParam,
+    ScalarExpr, SetOpKind, SourcePlan, Value,
 };
 use uqa_core::ArrayValue;
 
@@ -326,14 +326,14 @@ fn controlled_recursive_step_plan(
         let search = cte.search.as_ref().expect("depth-first SEARCH");
         block.projections.push(ProjectionPlan {
             expr: ScalarExpr::qualified_column(&qualifier, &search.sequence_column),
-            alias: Some("__uqa_recursive_parent_search".into()),
+            alias: None,
         });
     }
     if parent_cycle_path {
         let cycle = cte.cycle.as_ref().expect("CYCLE clause");
         block.projections.push(ProjectionPlan {
             expr: ScalarExpr::qualified_column(qualifier, &cycle.path_column),
-            alias: Some("__uqa_recursive_parent_cycle_path".into()),
+            alias: None,
         });
     }
     Ok(ControlledRecursiveStep {
@@ -741,14 +741,10 @@ pub(in crate::sql) fn alias_query_output_to_shared(
             .iter()
             .enumerate()
             .map(|(index, source)| {
-                let output = if is_score_provenance_column(source) {
-                    source.clone()
-                } else {
-                    columns
-                        .get(index)
-                        .cloned()
-                        .unwrap_or_else(|| source.clone())
-                };
+                let output = columns
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(|| source.clone());
                 (output, index)
             })
             .collect::<Vec<_>>();

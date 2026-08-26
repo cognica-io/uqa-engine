@@ -47,9 +47,10 @@ fn literal_passthrough() {
 
 #[test]
 fn variadic_argument_helpers_preserve_names_and_evaluate_marker_values() {
+    let binding = FunctionBinding::dispatched(FunctionDispatch::NamedArgument);
     let named = Expr::Func {
-        binding: None,
-        name: NAMED_ARG_FUNCTION.into(),
+        name: binding.name.clone(),
+        binding: Some(binding),
         args: vec![
             Expr::Literal(Value::Str("items".into())),
             Expr::Literal(Value::Int(42)),
@@ -59,13 +60,18 @@ fn variadic_argument_helpers_preserve_names_and_evaluate_marker_values() {
         filter: None,
     };
     let named_variadic = wrap_variadic_argument(named);
-    let Expr::Func { name, args, .. } = &named_variadic else {
+    let Expr::Func { binding, args, .. } = &named_variadic else {
         panic!("expected named argument marker");
     };
-    assert_eq!(name, NAMED_ARG_FUNCTION);
+    assert_eq!(
+        binding.as_ref().and_then(|binding| binding.dispatch),
+        Some(FunctionDispatch::NamedArgument)
+    );
     assert!(matches!(
         &args[1],
-        Expr::Func { name, .. } if name == VARIADIC_ARG_FUNCTION
+        Expr::Func { binding, .. }
+            if binding.as_ref().and_then(|binding| binding.dispatch)
+                == Some(FunctionDispatch::VariadicArgument)
     ));
     assert!(matches!(
         variadic_argument_value(&named_variadic),
@@ -487,14 +493,25 @@ fn collection_and_string_sizes_fail_without_wrapping_or_panicking() {
     let values = Value::Array(ArrayValue::try_new(vec![Value::Int(1), Value::Int(2)]).unwrap());
     assert!(eval_scalar_function("trim_array", &[values.clone(), Value::Int(i64::MAX)]).is_err());
     assert!(eval_scalar_function("array_sample", &[values.clone(), Value::Int(i64::MAX)]).is_err());
+    let context = EvalContext::new(None, &[]);
     assert_eq!(
-        eval_scalar_function("__subscript", &[values.clone(), Value::Int(i64::MAX)]).unwrap(),
+        eval_bound_builtin_function_call(
+            &FunctionBinding::dispatched(FunctionDispatch::Subscript),
+            vec![(None, values.clone()), (None, Value::Int(i64::MAX))],
+            &context,
+        )
+        .unwrap(),
         Value::Null
     );
     assert_eq!(
-        eval_scalar_function(
-            "__slice",
-            &[values, Value::Int(i64::MAX), Value::Int(i64::MAX)],
+        eval_bound_builtin_function_call(
+            &FunctionBinding::dispatched(FunctionDispatch::Slice),
+            vec![
+                (None, values),
+                (None, Value::Int(i64::MAX)),
+                (None, Value::Int(i64::MAX)),
+            ],
+            &context,
         )
         .unwrap(),
         Value::Array(ArrayValue::try_new(Vec::new()).unwrap())
@@ -539,6 +556,24 @@ fn builtin_strictness_matches_null_call_semantics() {
     );
     assert_eq!(builtin_scalar_function_strictness("to_bin", 1), Some(true));
     assert_eq!(builtin_scalar_function_strictness("to_oct", 1), Some(true));
+    assert_eq!(
+        bound_scalar_function_strictness(
+            "BETWEEN SYMMETRIC",
+            Some(&FunctionBinding::dispatched(
+                FunctionDispatch::BetweenSymmetric
+            )),
+            3,
+        ),
+        Some(true)
+    );
+    assert_eq!(
+        bound_scalar_function_strictness(
+            "IS DISTINCT FROM",
+            Some(&FunctionBinding::dispatched(FunctionDispatch::IsDistinct)),
+            2,
+        ),
+        Some(false)
+    );
     assert_eq!(
         eval_scalar_function("abs", &[Value::Null]).unwrap(),
         Value::Null

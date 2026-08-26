@@ -561,7 +561,9 @@ fn resolved_builtin_overload(
                 .map(ColumnType::sql_name)
                 .collect(),
             builtin: true,
+            dispatch: None,
             invocation: None,
+            resolution_error: None,
         },
         return_type: matched.overload.return_type,
         exact_matches: matched.exact_matches,

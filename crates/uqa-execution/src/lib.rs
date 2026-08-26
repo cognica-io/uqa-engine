@@ -106,8 +106,8 @@ pub use projected_predicate::ProjectedPredicate;
 pub use projected_row::{ProjectedRow, ProjectedValueSlot};
 pub use relational::{
     AggregateExecutor, AggregateKind, AggregateSpec, ExpressionEvaluator, Filter, HashAggregate,
-    Limit, Project, RowPredicate, SetOperation, SharedExpressionEvaluator, SharedRowPredicate,
-    Sort, SortKey, Window, WindowExecutor, WindowKind,
+    Limit, Project, ProjectionTarget, RowPredicate, SetOperation, SharedExpressionEvaluator,
+    SharedRowPredicate, Sort, SortKey, Window, WindowExecutor, WindowKind,
 };
 pub use scalar::{
     eval_call_arguments, eval_scalar, scalar_call_argument, scalar_call_arguments,
@@ -115,7 +115,7 @@ pub use scalar::{
     ScalarFrameBound, ScalarOrder, ScalarSubqueryRunner, ScalarWindowFrame, ScalarWindowSpec,
     SubqueryId, SubqueryResult,
 };
-pub use scan::{RowIteratorScan, RowSource, TableScan};
+pub use scan::{PhysicalRowIteratorScan, RowIteratorScan, RowSource, TableScan};
 pub use scope_overlay::ScopeOverlay;
 pub use set_operation::ExternalSetOperation;
 pub use spill::{IndexedSpill, SharedSpill, SharedSpillReader, SpillBuffer};

@@ -59,12 +59,7 @@ impl ScoredDocumentSource {
                         }
                     }
                     let metadata = self.row_metadata(doc_id, 0.0);
-                    let extras = [
-                        metadata.doc_id()?,
-                        metadata.score(),
-                        metadata.score_provenance(),
-                        metadata.table_oid(),
-                    ];
+                    let extras = [metadata.doc_id()?, metadata.score(), metadata.table_oid()];
                     let row = uqa_execution::ProjectedRow::new(
                         &self.schema,
                         &self.projected_slots,
@@ -176,7 +171,8 @@ impl ScoredDocumentSource {
     ) -> ExecResult<uqa_execution::PhysicalRow> {
         let (values, projection) = shared.into_parts();
         let source = uqa_execution::PhysicalRow::from_shared_values(values, projection);
-        if self
+        if self.appended_score_attribute.is_none()
+            && self
             .projected_slots
             .iter()
             .enumerate()
@@ -187,33 +183,27 @@ impl ScoredDocumentSource {
             return Ok(source);
         }
         let metadata = self.row_metadata(doc_id, score);
-        let extras = [
-            metadata.doc_id()?,
-            metadata.score(),
-            metadata.score_provenance(),
-            metadata.table_oid(),
-        ];
-        Ok(
-            source.project_with_values(self.projected_slots.iter().map(|slot| {
-                match slot {
-                    uqa_execution::ProjectedValueSlot::Field(index) => {
-                        uqa_execution::RowProjectionValue::InputSlot(*index)
-                    }
-                    uqa_execution::ProjectedValueSlot::Extra(index) => {
-                        uqa_execution::RowProjectionValue::Owned(
-                            extras
-                                .get(*index)
-                                .and_then(Option::as_ref)
-                                .cloned()
-                                .unwrap_or(Value::Null),
-                        )
-                    }
-                    uqa_execution::ProjectedValueSlot::Missing => {
-                        uqa_execution::RowProjectionValue::Owned(Value::Null)
-                    }
+        let extras = [metadata.doc_id()?, metadata.score(), metadata.table_oid()];
+        let row = source.project_with_values(self.projected_slots.iter().map(|slot| {
+            match slot {
+                uqa_execution::ProjectedValueSlot::Field(index) => {
+                    uqa_execution::RowProjectionValue::InputSlot(*index)
                 }
-            })),
-        )
+                uqa_execution::ProjectedValueSlot::Extra(index) => {
+                    uqa_execution::RowProjectionValue::Owned(
+                        extras
+                            .get(*index)
+                            .and_then(Option::as_ref)
+                            .cloned()
+                            .unwrap_or(Value::Null),
+                    )
+                }
+                uqa_execution::ProjectedValueSlot::Missing => {
+                    uqa_execution::RowProjectionValue::Owned(Value::Null)
+                }
+            }
+        }));
+        Ok(self.append_score_attribute(row, score))
     }
 
     pub(super) fn materialize_entries(
@@ -252,19 +242,15 @@ impl ScoredDocumentSource {
         let mut rows = Vec::with_capacity(entries.len());
         self.for_each_kept_entry(entries, &mut |doc_id, entry, _fields, values| {
             let metadata = self.row_metadata(doc_id, entry.score);
-            let extras = [
-                metadata.doc_id()?,
-                metadata.score(),
-                metadata.score_provenance(),
-                metadata.table_oid(),
-            ];
+            let extras = [metadata.doc_id()?, metadata.score(), metadata.table_oid()];
             let row = uqa_execution::ProjectedRow::new(
                 &self.schema,
                 &self.projected_slots,
                 values,
                 &extras,
             );
-            rows.push(uqa_execution::PhysicalRow::from_values(row.into_values()));
+            let row = uqa_execution::PhysicalRow::from_values(row.into_values());
+            rows.push(self.append_score_attribute(row, entry.score));
             Ok(())
         })?;
         Ok(rows)
@@ -280,27 +266,24 @@ impl ScoredDocumentSource {
         let mut rows = Vec::with_capacity(entries.len());
         self.for_each_kept_entry(entries, &mut |doc_id, entry, _fields, values| {
             let metadata = self.row_metadata(doc_id, entry.score);
-            let extras = [
-                metadata.doc_id()?,
-                metadata.score(),
-                metadata.score_provenance(),
-                metadata.table_oid(),
-            ];
+            let extras = [metadata.doc_id()?, metadata.score(), metadata.table_oid()];
             let row = uqa_execution::ProjectedRow::new(
                 &self.schema,
                 &self.projected_slots,
                 values,
                 &extras,
             );
-            rows.push(
-                uqa_execution::PhysicalRow::from_values(row.into_values()).with_lock_origin(
-                    uqa_execution::RowLockOrigin::from_shared(
-                        std::sync::Arc::clone(qualifier),
-                        std::sync::Arc::clone(storage_name),
-                        doc_id,
-                    ),
-                ),
-            );
+            let row = self
+                .append_score_attribute(
+                    uqa_execution::PhysicalRow::from_values(row.into_values()),
+                    entry.score,
+                )
+                .with_lock_origin(uqa_execution::RowLockOrigin::from_shared(
+                    std::sync::Arc::clone(qualifier),
+                    std::sync::Arc::clone(storage_name),
+                    doc_id,
+                ));
+            rows.push(row);
             Ok(())
         })?;
         Ok(rows)
@@ -513,12 +496,7 @@ impl ScoredDocumentSource {
     ) -> ExecResult<()> {
         self.for_each_kept_entry(entries, &mut |doc_id, entry, _fields, values| {
             let metadata = self.row_metadata(doc_id, entry.score);
-            let extras = [
-                metadata.doc_id()?,
-                metadata.score(),
-                metadata.score_provenance(),
-                metadata.table_oid(),
-            ];
+            let extras = [metadata.doc_id()?, metadata.score(), metadata.table_oid()];
             let row = uqa_execution::ProjectedRow::new(
                 &self.schema,
                 &self.projected_slots,

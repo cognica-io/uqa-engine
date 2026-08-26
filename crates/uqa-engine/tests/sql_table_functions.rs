@@ -362,6 +362,38 @@ fn multi_array_unnest_zips_to_the_longest_input_and_null_pads() {
 }
 
 #[test]
+fn table_function_rows_preserve_duplicate_aliases_and_physical_attribute_order() {
+    let eng = Engine::new();
+    let duplicates = eng
+        .sql(
+            "SELECT * FROM unnest(ARRAY[1], ARRAY[2]) WITH ORDINALITY AS u(x, x, x)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(duplicates.columns, ["x", "x", "x"]);
+    assert_eq!(duplicates.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(duplicates.value_at(0, 1), Some(&Value::Int(2)));
+    assert_eq!(duplicates.value_at(0, 2), Some(&Value::Int(1)));
+
+    let wide = eng
+        .sql(
+            "SELECT * FROM unnest(ARRAY[0], ARRAY[1], ARRAY[2], ARRAY[3], ARRAY[4], ARRAY[5], ARRAY[6], ARRAY[7], ARRAY[8], ARRAY[9], ARRAY[10], ARRAY[11]) AS u(c0,c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        wide.columns,
+        ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c10", "c11"]
+    );
+    for position in 0..12 {
+        assert_eq!(
+            wide.value_at(0, position),
+            Some(&Value::Int(position as i64))
+        );
+    }
+}
+
+#[test]
 fn multi_array_unnest_is_rejected_outside_from() {
     let eng = Engine::new();
     let error = eng

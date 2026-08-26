@@ -6,6 +6,39 @@
 
 use super::*;
 
+fn downgrade_serialized_array_subscripts(value: &mut serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::Array(values) => values
+            .iter_mut()
+            .map(downgrade_serialized_array_subscripts)
+            .sum(),
+        serde_json::Value::Object(object) => {
+            let mut changed = 0;
+            if let Some(serde_json::Value::Object(function)) = object.get_mut("Func") {
+                let is_array_subscript = function
+                    .get("binding")
+                    .and_then(|binding| binding.get("dispatch"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some("ArraySubscripts");
+                if is_array_subscript {
+                    function.insert(
+                        "name".into(),
+                        serde_json::Value::String("__array_subscripts".into()),
+                    );
+                    function.remove("binding");
+                    changed += 1;
+                }
+            }
+            changed
+                + object
+                    .values_mut()
+                    .map(downgrade_serialized_array_subscripts)
+                    .sum::<usize>()
+        }
+        _ => 0,
+    }
+}
+
 // ---------------------------------------------------------------------
 // LANGUAGE sql functions
 // ---------------------------------------------------------------------
@@ -101,6 +134,49 @@ fn sql_language_standard_body() {
          END",
     );
     assert_eq!(scalar(&eng, "SELECT std_atomic(5) AS v"), Value::Int(105));
+}
+
+#[test]
+fn v016_sql_standard_body_dispatch_markers_migrate_before_catalog_binding() {
+    use uqa_storage::{Catalog, ManagedConnection};
+
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("legacy-function-dispatch.db");
+    {
+        let engine = Engine::open(&database).unwrap();
+        exec(
+            &engine,
+            "CREATE FUNCTION legacy_array_pick(items integer[]) RETURNS integer
+             LANGUAGE SQL IMMUTABLE RETURN items[2]",
+        );
+        assert_eq!(
+            scalar(&engine, "SELECT legacy_array_pick(ARRAY[4, 9]) AS v"),
+            Value::Int(9)
+        );
+    }
+
+    {
+        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let encoded = catalog.get_metadata("sql_functions_json").unwrap().unwrap();
+        let mut definitions: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(
+            downgrade_serialized_array_subscripts(&mut definitions),
+            1,
+            "unexpected stored function definitions: {definitions}"
+        );
+        catalog
+            .set_metadata(
+                "sql_functions_json",
+                &serde_json::to_string(&definitions).unwrap(),
+            )
+            .unwrap();
+    }
+
+    let reopened = Engine::open(&database).unwrap();
+    assert_eq!(
+        scalar(&reopened, "SELECT legacy_array_pick(ARRAY[11, 42]) AS v",),
+        Value::Int(42)
+    );
 }
 
 #[test]

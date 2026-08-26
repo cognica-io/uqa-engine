@@ -146,11 +146,17 @@ impl Engine {
                 } else {
                     serde_json::from_str(&schema.constraints_json)?
                 };
-            if crate::engine_table_storage::materialize_constraint_names(
+            let dispatches_changed =
+                crate::engine_table_storage::upgrade_legacy_schema_function_dispatches(
+                    &mut columns,
+                    &mut constraints,
+                );
+            let names_changed = crate::engine_table_storage::materialize_constraint_names(
                 &schema.relation,
                 &mut columns,
                 &mut constraints,
-            )? {
+            )?;
+            if dispatches_changed || names_changed {
                 schema.columns_json = serde_json::to_string(&columns)?;
                 schema.constraints_json = serde_json::to_string(&constraints)?;
                 catalog.save_table(&schema)?;

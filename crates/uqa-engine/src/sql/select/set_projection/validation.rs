@@ -43,10 +43,7 @@ pub(super) fn function_may_return_set(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<bool, SQLError> {
-    if matches!(
-        name,
-        uqa_sql::expr::NAMED_ARG_FUNCTION | uqa_sql::expr::VARIADIC_ARG_FUNCTION
-    ) {
+    if binding.and_then(|binding| binding.dispatch).is_some() {
         return Ok(false);
     }
     if binding.is_some_and(FunctionBinding::is_polymorphic_builtin_syntax) {
@@ -302,6 +299,7 @@ pub(in crate::sql) fn expression_may_return_set(
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
@@ -542,6 +540,7 @@ fn validate_set_context(
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)

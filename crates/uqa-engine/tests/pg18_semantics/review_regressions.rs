@@ -37,6 +37,164 @@ fn empty_array_growth_and_array_ordering_match_postgresql_18() {
 }
 
 #[test]
+fn compiler_owned_dispatch_does_not_reserve_user_function_names() {
+    let eng = engine();
+    for name in [
+        "__named_arg",
+        "__variadic_arg",
+        "__subscript",
+        "__array_subscripts",
+        "__is_distinct",
+        "__between_symmetric",
+        "__any_op",
+        "__to_hex_int4",
+        "__random_int4_range",
+        "__array_sort_json",
+        "__range_lower_int4range",
+    ] {
+        let create = format!(
+            "CREATE FUNCTION {name}() RETURNS TEXT LANGUAGE SQL IMMUTABLE AS 'SELECT ''{name}'''"
+        );
+        eng.sql(&create, &[])
+            .unwrap_or_else(|error| panic!("{create}: {error}"));
+        assert_eq!(text(&eng, &format!("SELECT {name}()")), name);
+    }
+    assert_eq!(scalar(&eng, "SELECT (ARRAY[10, 20])[2]"), Value::Int(20));
+    assert_eq!(
+        scalar(&eng, "SELECT 1 IS DISTINCT FROM NULL"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 1 = ANY(ARRAY[0, 1])"),
+        Value::Bool(true)
+    );
+}
+
+fn assert_ordinary_metadata_named_columns(eng: &Engine) {
+    eng.sql(
+        "CREATE TABLE metadata_named_columns (
+            id INTEGER PRIMARY KEY,
+            _score INTEGER,
+            _doc_id TEXT,
+            _merge_action TEXT
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO metadata_named_columns VALUES (1, 42, 'document-user', 'user-value')",
+        &[],
+    )
+    .unwrap();
+
+    let result = eng
+        .sql("SELECT * FROM metadata_named_columns", &[])
+        .unwrap();
+    assert_eq!(
+        result.columns,
+        vec!["id", "_score", "_doc_id", "_merge_action"]
+    );
+    assert_eq!(result.rows[0]["_score"], Value::Int(42));
+    assert_eq!(
+        result.rows[0]["_doc_id"],
+        Value::Str("document-user".into())
+    );
+    assert_eq!(
+        result.rows[0]["_merge_action"],
+        Value::Str("user-value".into())
+    );
+
+    let derived = eng
+        .sql(
+            "SELECT * FROM (
+                SELECT _score, _doc_id, _merge_action FROM metadata_named_columns
+             ) AS projected",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(derived.columns, vec!["_score", "_doc_id", "_merge_action"]);
+    assert_eq!(derived.rows[0]["_score"], Value::Int(42));
+
+    let updated = eng
+        .sql(
+            "UPDATE metadata_named_columns
+             SET _doc_id = 'document-after'
+             RETURNING _doc_id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        updated.rows[0]["_doc_id"],
+        Value::Str("document-after".into())
+    );
+}
+
+fn assert_ranked_metadata_named_columns(eng: &Engine) {
+    eng.sql(
+        "CREATE TABLE ranked_metadata_name (
+            id INTEGER PRIMARY KEY,
+            body TEXT,
+            _score INTEGER,
+            _doc_id TEXT
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "CREATE INDEX ranked_metadata_name_body_gin
+         ON ranked_metadata_name USING gin (body)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO ranked_metadata_name VALUES
+            (1, 'alpha alpha alpha', 1, 'ranked-one'),
+            (2, 'alpha', 100, 'ranked-two')",
+        &[],
+    )
+    .unwrap();
+    let ranked = eng
+        .sql(
+            "SELECT _score, score_bm25(body, 'alpha') AS retrieval_score
+             FROM ranked_metadata_name
+             WHERE text_match(body, 'alpha') AND id = 1",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(ranked.rows[0]["_score"], Value::Int(1));
+    assert!(matches!(ranked.rows[0]["retrieval_score"], Value::Float(_)));
+
+    let ordered = eng
+        .sql(
+            "SELECT id, _score FROM ranked_metadata_name
+             WHERE text_match(body, 'alpha')
+             ORDER BY _score DESC LIMIT 1",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(ordered.rows[0]["id"], Value::Int(2));
+    assert_eq!(ordered.rows[0]["_score"], Value::Int(100));
+
+    let mixed = eng
+        .sql(
+            "SELECT id, _doc_id FROM ranked_metadata_name
+             WHERE text_match(body, 'alpha') OR _doc_id = 'absent'
+             ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(mixed.rows[0]["_doc_id"], Value::Str("ranked-one".into()));
+    assert_eq!(mixed.rows[1]["_doc_id"], Value::Str("ranked-two".into()));
+}
+
+#[test]
+fn user_columns_that_resemble_engine_metadata_remain_visible() {
+    let eng = engine();
+    assert_ordinary_metadata_named_columns(&eng);
+    assert_ranked_metadata_named_columns(&eng);
+}
+
+#[test]
 fn array_element_cast_uses_the_declared_source_width() {
     let eng = engine();
     assert_eq!(

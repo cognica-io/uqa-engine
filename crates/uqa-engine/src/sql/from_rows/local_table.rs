@@ -7,22 +7,20 @@
 //! Local table scans and recursive physical source assembly.
 
 use super::{
-    alias_join_operator, apply_table_function_aliases, attach_qualifier_filter,
-    build_info_schema_rows, build_table_function_row_stream_with_row, build_values_physical_rows,
-    combine_filters, decide_join_sides, execute_query_plan_output,
-    execute_view_plan_output_with_parent_cache, has_filters_for_qualifier,
-    is_score_provenance_column, join_conjuncts, join_using_predicate, null_row_for_schema,
+    alias_join_operator, attach_qualifier_filter, build_info_schema_rows,
+    build_table_function_row_stream_with_row, build_values_physical_rows, combine_filters,
+    decide_join_sides, execute_query_plan_output, execute_view_plan_output_with_parent_cache,
+    has_filters_for_qualifier, join_conjuncts, join_using_predicate, null_row_for_schema,
     physical_work_mem_bytes, propagated_join_filters, push_output_filter_into_query_plan,
     qualifier_filter, qualifier_for, qualify_source_operator, qualify_source_operator_with_columns,
     query_contains_volatile_function, query_cte_names, query_output_shared, resolve_join_using,
     resolve_user_table_function, shape_join_using_output, table_function_column_types,
-    table_function_empty_schema, validate_table_function_alias_count,
-    validate_table_function_column_definition, ColumnPrune, CteScope, Engine,
-    EngineExpressionEvaluator, EngineLateralSource, HierarchyScoredDocumentSource,
-    JoinExecutionStrategy, JoinKind, QualifierFilters, QueryOutputMode, ResultRow, SQLError,
-    SQLParam, ScalarExpr, ScopedEngineHook, ScoredDocumentSource, ScoredInput, SourceEvalContext,
-    SourcePlan, TableFunctionCall, TableFunctionTypeRequest, Value,
-    TABLE_FUNCTION_ORDINALITY_COLUMN, TABLE_OID_COLUMN,
+    validate_table_function_alias_count, validate_table_function_column_definition, ColumnPrune,
+    CteScope, Engine, EngineExpressionEvaluator, EngineLateralSource,
+    HierarchyScoredDocumentSource, JoinExecutionStrategy, JoinKind, QualifierFilters,
+    QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
+    ScoredDocumentSource, ScoredInput, SourceEvalContext, SourcePlan, TableFunctionCall,
+    TableFunctionTypeRequest, Value, TABLE_OID_COLUMN,
 };
 
 use crate::sql::select::{

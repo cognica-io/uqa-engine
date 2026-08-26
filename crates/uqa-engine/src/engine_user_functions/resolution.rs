@@ -53,7 +53,9 @@ impl StaticFunctionMatch {
             name: self.function.def.name.clone(),
             argument_types: routine_signature_types(&self.function.def),
             builtin: false,
+            dispatch: None,
             invocation: Some(self.invocation.clone()),
+            resolution_error: None,
         }
     }
 }

@@ -300,7 +300,8 @@ fn scalar_function_is_strict(
     if engine.has_registered_scalar_function(&runtime_name) {
         return Ok(false);
     }
-    if let Some(strict) = uqa_sql::expr::builtin_scalar_function_strictness(name, args.len()) {
+    if let Some(strict) = uqa_sql::expr::bound_scalar_function_strictness(name, binding, args.len())
+    {
         return Ok(strict);
     }
     if engine.lookup_sql_functions(name).is_none() {

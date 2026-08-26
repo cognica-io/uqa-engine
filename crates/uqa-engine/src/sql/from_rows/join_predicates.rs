@@ -50,6 +50,7 @@ fn expression_binding(expression: &ScalarExpr, schema: &RowSchema) -> (bool, boo
             (schema.qualified_position(qualifier, column).is_some(), true)
         }
         ScalarExpr::Position(position) => (*position < schema.len(), true),
+        ScalarExpr::InternalColumn(column) => (schema.internal_slot(*column).is_some(), true),
         ScalarExpr::Literal(_) | ScalarExpr::Param(_) => (true, false),
         ScalarExpr::Func {
             args,

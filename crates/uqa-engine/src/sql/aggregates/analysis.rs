@@ -29,6 +29,8 @@ pub(in crate::sql) fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
         | (ScalarExpr::QualifiedColumn { column, .. }, ScalarExpr::Column(c)) => c == column,
         (ScalarExpr::Literal(a), ScalarExpr::Literal(b)) => literals_equal(a, b),
         (ScalarExpr::Param(a), ScalarExpr::Param(b)) => a == b,
+        (ScalarExpr::Position(a), ScalarExpr::Position(b)) => a == b,
+        (ScalarExpr::InternalColumn(a), ScalarExpr::InternalColumn(b)) => a == b,
         (
             ScalarExpr::Func {
                 name: an,
@@ -241,6 +243,7 @@ pub(in crate::sql) fn collect_aggregate_exprs<'a>(
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
@@ -266,6 +269,7 @@ pub(in crate::sql) fn expr_references_columns(expr: &ScalarExpr) -> bool {
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. } => true,
         ScalarExpr::Func { args, filter, .. } => {
             args.iter().any(expr_references_columns)

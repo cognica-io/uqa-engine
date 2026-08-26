@@ -142,10 +142,33 @@ fn walk_schema_expr_mut(
         | Expr::QualifiedStar(_)
         | Expr::Column(_)
         | Expr::QualifiedColumn { .. }
+        | Expr::InternalColumn(_)
         | Expr::Literal(_)
         | Expr::Param(_) => {}
     }
     Ok(())
+}
+
+pub(crate) fn upgrade_legacy_schema_function_dispatches(
+    columns: &mut [uqa_sql::ast::ColumnDef],
+    constraints: &mut uqa_sql::ast::TableConstraintSet,
+) -> bool {
+    let mut changed = false;
+    for column in columns {
+        for expression in [column.default.as_mut(), column.check.as_mut()]
+            .into_iter()
+            .flatten()
+        {
+            changed |= expression.upgrade_legacy_serialized_dispatches();
+        }
+        if let Some(generated) = &mut column.generated {
+            changed |= generated.expression.upgrade_legacy_serialized_dispatches();
+        }
+    }
+    for check in &mut constraints.checks {
+        changed |= check.expr.upgrade_legacy_serialized_dispatches();
+    }
+    changed
 }
 
 fn rewrite_sequence_function_references(

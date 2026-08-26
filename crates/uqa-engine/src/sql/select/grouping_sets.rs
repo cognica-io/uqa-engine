@@ -276,6 +276,7 @@ fn normalize_expression(
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Default
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)

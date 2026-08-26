@@ -158,7 +158,14 @@ pub(in crate::sql) fn run_update_from(
             )
             .collect(),
     )?;
-    let rule_returning = rule_batch.execute_actions(engine, !stmt.returning.is_empty())?;
+    let rule_returning = rule_batch.execute_actions(
+        engine,
+        crate::sql::rules::RuleReturningRequest::from_plan(
+            &stmt.returning,
+            &stmt.returning_aliases,
+            &stmt.subqueries,
+        ),
+    )?;
     let update_rules = engine.rules_for(&target, uqa_sql::ast::RuleEvent::Update)?;
     let update_original_query = !update_rules
         .iter()

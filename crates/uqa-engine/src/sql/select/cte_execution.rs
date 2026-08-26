@@ -69,14 +69,10 @@ pub(in crate::sql) fn materialize_plan_ctes_with_filters<'a>(
                 .iter()
                 .enumerate()
                 .map(|(index, source)| {
-                    let output = if is_score_provenance_column(source) {
-                        source.clone()
-                    } else {
-                        renamed_columns
-                            .get(index)
-                            .cloned()
-                            .unwrap_or_else(|| source.clone())
-                    };
+                    let output = renamed_columns
+                        .get(index)
+                        .cloned()
+                        .unwrap_or_else(|| source.clone());
                     (output, index)
                 })
                 .collect();

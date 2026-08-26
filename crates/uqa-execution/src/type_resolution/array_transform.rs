@@ -11,8 +11,7 @@ use super::functions::named_argument_value;
 use super::{FunctionTypeResolver, ResolvedFunctionOverload};
 use crate::{scalar_call_arguments, RowSchema, ScalarExpr};
 use uqa_core::Value;
-use uqa_sql::ast::{ColumnType, FunctionBinding};
-use uqa_sql::expr::ARRAY_SORT_JSON_FUNCTION;
+use uqa_sql::ast::{ColumnType, FunctionBinding, FunctionDispatch};
 use uqa_sql::{SQLError, SQLParam};
 
 pub(super) fn resolve_type(
@@ -52,6 +51,9 @@ fn select_overload(
     explicit_variadic: bool,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<SelectedOverload, SQLError> {
+    if binding.and_then(|binding| binding.dispatch) == Some(FunctionDispatch::ArraySortJson) {
+        return resolve_builtin_type(name, args, argument_types).map(SelectedOverload::Builtin);
+    }
     let builtin = if explicit_variadic
         && args
             .iter()
@@ -192,10 +194,6 @@ pub(super) fn is_function(name: &str) -> bool {
     )
 }
 
-pub(super) fn is_bound_function(name: &str) -> bool {
-    name == ARRAY_SORT_JSON_FUNCTION
-}
-
 pub(super) fn bind_call(
     name: String,
     binding: &mut Option<FunctionBinding>,
@@ -273,10 +271,9 @@ pub(super) fn bind_call(
             .as_ref()
             .is_some_and(is_json_array_type)
     {
-        ARRAY_SORT_JSON_FUNCTION.into()
-    } else {
-        name
+        *binding = Some(FunctionBinding::dispatched(FunctionDispatch::ArraySortJson));
     }
+    name
 }
 
 fn named_argument_name(expression: &ScalarExpr) -> Option<&str> {
@@ -288,8 +285,10 @@ fn named_argument_name(expression: &ScalarExpr) -> Option<&str> {
 fn named_argument_value_owned(expression: ScalarExpr) -> ScalarExpr {
     if matches!(
         &expression,
-        ScalarExpr::Func { name, args, .. }
-            if name == uqa_sql::expr::NAMED_ARG_FUNCTION && args.len() == 2
+        ScalarExpr::Func { binding, args, .. }
+            if binding.as_ref().and_then(|binding| binding.dispatch)
+                == Some(FunctionDispatch::NamedArgument)
+                && args.len() == 2
     ) {
         let ScalarExpr::Func { mut args, .. } = expression else {
             unreachable!();

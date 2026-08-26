@@ -34,7 +34,7 @@ enum ProjectedAggregateInput {
     Slot(usize),
     IntegerExpression {
         expression: ProjectedIntegerExpression,
-        fallback: ScalarExpr,
+        fallback: Box<ScalarExpr>,
     },
 }
 
@@ -189,7 +189,7 @@ fn compile_plan(
     };
     ProjectedAggregatePlan::Direct(ProjectedAggregateInput::IntegerExpression {
         expression: integer,
-        fallback: argument.clone(),
+        fallback: Box::new(argument.clone()),
     })
 }
 

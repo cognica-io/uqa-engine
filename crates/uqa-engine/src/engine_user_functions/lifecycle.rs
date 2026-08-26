@@ -20,7 +20,8 @@ use crate::{
 };
 
 use super::declaration::{
-    compile_function_body, resolve_alter_routine_identity_types, resolve_routine_type_references,
+    compile_function_body, compile_persisted_function_body, resolve_alter_routine_identity_types,
+    resolve_routine_type_references,
 };
 use super::resolution::{routine_kind, routine_signature_types};
 use super::{canonical_routine_type_name, CompiledFunctionBody, SQLUserFunction};
@@ -70,7 +71,9 @@ impl RoutineDropTarget {
             name: self.name.clone(),
             argument_types: self.argument_types.clone(),
             builtin: false,
+            dispatch: None,
             invocation: None,
+            resolution_error: None,
         }
     }
 }
@@ -1004,25 +1007,21 @@ impl Engine {
         def: &CreateFunction,
     ) -> Result<CompiledFunctionBody, SQLError> {
         if !matches!(def.body, FunctionBody::Statements(_)) || def.creation_search_path.is_empty() {
-            return compile_function_body(self, def);
+            return compile_persisted_function_body(self, def);
         }
         let previous = {
             let mut state = self.session.state.write();
             std::mem::replace(&mut state.search_path, def.creation_search_path.clone())
         };
-        let compiled = compile_function_body(self, def);
+        let compiled = compile_persisted_function_body(self, def);
         self.session.state.write().search_path = previous;
         compiled
     }
 
-    pub(crate) fn restore_sql_functions_from_metadata(
+    fn canonicalize_persisted_sql_functions(
         &self,
-        catalog: &dyn CatalogFacade,
-    ) -> StorageBackendResult<()> {
-        let Some(json) = catalog.get_metadata(FUNCTIONS_METADATA_KEY)? else {
-            return Ok(());
-        };
-        let defs = serde_json::from_str::<BTreeMap<String, Vec<CreateFunction>>>(&json)?;
+        defs: BTreeMap<String, Vec<CreateFunction>>,
+    ) -> StorageBackendResult<BTreeMap<String, Vec<CreateFunction>>> {
         let mut canonical_defs: BTreeMap<String, Vec<CreateFunction>> = BTreeMap::new();
         for (stored_name, overloads) in defs {
             let stored_relation =
@@ -1044,6 +1043,11 @@ impl Engine {
             }
             let canonical_name = stored_relation.qualified_name();
             for mut def in overloads {
+                for parameter in &mut def.params {
+                    if let Some(default) = &mut parameter.default {
+                        default.upgrade_legacy_serialized_dispatches();
+                    }
+                }
                 let definition_relation =
                     RelationIdentity::from_legacy_name(&def.name).map_err(|error| {
                         StorageBackendError::Other(format!(
@@ -1072,6 +1076,18 @@ impl Engine {
                 definitions.push(def);
             }
         }
+        Ok(canonical_defs)
+    }
+
+    pub(crate) fn restore_sql_functions_from_metadata(
+        &self,
+        catalog: &dyn CatalogFacade,
+    ) -> StorageBackendResult<()> {
+        let Some(json) = catalog.get_metadata(FUNCTIONS_METADATA_KEY)? else {
+            return Ok(());
+        };
+        let defs = serde_json::from_str::<BTreeMap<String, Vec<CreateFunction>>>(&json)?;
+        let canonical_defs = self.canonicalize_persisted_sql_functions(defs)?;
 
         // Install definition-only placeholders before compiling stored SQL-standard bodies so every exact routine identity is visible while durable function bindings are rebuilt. No routine can execute during engine construction, and any compile failure restores the previous registry atomically.
         let placeholders = canonical_defs

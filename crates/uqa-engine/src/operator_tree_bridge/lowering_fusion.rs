@@ -210,7 +210,10 @@ fn parse_attention_options<'a>(
                 _ => unreachable!("valid attention option was matched above"),
             }
         } else {
-            if matches!(argument, ScalarExpr::Func { name, .. } if name == "__named_arg") {
+            if uqa_execution::scalar_call_argument(argument)
+                .ok()
+                .is_some_and(|argument| argument.name.is_some())
+            {
                 return Err(SQLError::TypeMismatch(format!(
                     "malformed named option for {function_name}"
                 )));

@@ -43,10 +43,9 @@ fn remap_ordering(
 pub struct ColumnSelection<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
     schema: RowSchema,
-    /// `(output_name, input_name)` pairs. Keeping the physical input name
-    /// separate lets a preceding projection expose SELECT-list expressions
-    /// under collision-free internal names while this final, non-evaluating
-    /// operator restores the public SQL column names.
+    /// Physical ordering after the selected positions have been remapped.
+    /// Executor-only projection attributes are addressed structurally and
+    /// never enter the public SQL column namespace.
     ordering: Vec<PhysicalOrder>,
     rebind_lock_qualifier: Option<Arc<str>>,
     discard_lock_origins: bool,
@@ -54,6 +53,24 @@ pub struct ColumnSelection<'a> {
 }
 
 impl<'a> ColumnSelection<'a> {
+    /// Keep the visible layout unchanged while retiring consumed executor-only
+    /// attributes from the schema namespace.
+    pub fn dropping_internal_attributes(
+        child: Box<dyn PhysicalOperator + 'a>,
+        columns: &[uqa_sql::ast::InternalColumnRef],
+    ) -> Self {
+        let schema = RowSchema::without_internal_attributes(child.row_schema(), columns);
+        let ordering = child.output_ordering().to_vec();
+        Self {
+            child,
+            schema,
+            ordering,
+            rebind_lock_qualifier: None,
+            discard_lock_origins: false,
+            compact_slots: None,
+        }
+    }
+
     pub fn new(child: Box<dyn PhysicalOperator + 'a>, columns: Vec<String>) -> Self {
         let columns = columns
             .into_iter()
@@ -95,6 +112,43 @@ impl<'a> ColumnSelection<'a> {
             .collect::<Vec<_>>();
         let ordering = remap_ordering(child.output_ordering(), &input_positions);
         let schema = RowSchema::remap_positions(child.row_schema(), &columns, &[]);
+        Self {
+            child,
+            schema,
+            ordering,
+            rebind_lock_qualifier: None,
+            discard_lock_origins: false,
+            compact_slots: None,
+        }
+    }
+
+    /// Select flattened physical slots, including executor-only internal
+    /// attributes that deliberately have no SQL-visible logical position.
+    pub fn with_physical_positions(
+        child: Box<dyn PhysicalOperator + 'a>,
+        columns: Vec<(String, usize)>,
+    ) -> Self {
+        let input_positions = columns
+            .iter()
+            .map(|(_, physical)| {
+                (0..child.row_schema().len())
+                    .find(|logical| child.row_schema().physical_slot(*logical) == Some(*physical))
+            })
+            .collect::<Vec<_>>();
+        let ordering = remap_ordering(child.output_ordering(), &input_positions);
+        let columns = columns
+            .into_iter()
+            .map(|(label, physical)| {
+                let ty = child.row_schema().physical_type(physical).cloned();
+                (
+                    label.clone(),
+                    ColumnIdentity::unqualified(label),
+                    physical,
+                    ty,
+                )
+            })
+            .collect::<Vec<_>>();
+        let schema = RowSchema::remap_typed_physical_identities(child.row_schema(), &columns, &[]);
         Self {
             child,
             schema,
@@ -212,30 +266,20 @@ impl<'a> ColumnSelection<'a> {
             .map(|(_, position)| Some(*position))
             .collect::<Vec<_>>();
         let ordering = remap_ordering(child.output_ordering(), &input_positions);
-        let names = columns
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect::<Vec<_>>();
-        let types = columns
-            .iter()
-            .map(|(_, position)| child.row_schema().column_type(*position).cloned())
-            .collect::<Vec<_>>();
-        let slots = columns
-            .iter()
-            .map(|(_, position)| child.row_schema().physical_slot(*position))
-            .collect::<Vec<_>>();
-        let identity_layout = child.row_schema().physical_width() == slots.len()
-            && slots
+        let selected = RowSchema::remap_positions(child.row_schema(), &columns, &[]);
+        let (schema, source_slots) = selected.canonical_projection();
+        let identity_layout = child.row_schema().physical_width() == source_slots.len()
+            && source_slots
                 .iter()
                 .enumerate()
-                .all(|(position, slot)| *slot == Some(position));
+                .all(|(position, slot)| *slot == position);
         Self {
             child,
-            schema: RowSchema::with_types(names, types),
+            schema,
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: true,
-            compact_slots: (!identity_layout).then_some(slots),
+            compact_slots: (!identity_layout).then(|| source_slots.into_iter().map(Some).collect()),
         }
     }
 
@@ -246,6 +290,17 @@ impl<'a> ColumnSelection<'a> {
         if !qualifier.is_empty() {
             self.rebind_lock_qualifier = Some(Arc::from(qualifier));
         }
+        self
+    }
+
+    /// Attribute every structurally carried retrieval score to this relation alias without introducing a hidden SQL column name.
+    #[must_use]
+    pub fn rebinding_score_sources(mut self, qualifier: impl Into<String>) -> Self {
+        let qualifier = qualifier.into();
+        self.schema = RowSchema::with_rebound_score_sources(
+            &self.schema,
+            (!qualifier.is_empty()).then_some(qualifier.as_str()),
+        );
         self
     }
 

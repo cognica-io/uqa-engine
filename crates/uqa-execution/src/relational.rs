@@ -37,7 +37,7 @@ pub use evaluator::{
 };
 pub use filter::Filter;
 pub use limit::Limit;
-pub use project::Project;
+pub use project::{Project, ProjectionTarget};
 pub use set_operation::SetOperation;
 pub(crate) use sort::compare_sort_key_values_by;
 pub use sort::{compare_sort_key_values, Sort, SortKey};

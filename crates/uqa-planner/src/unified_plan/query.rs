@@ -339,7 +339,15 @@ impl SourcePlan {
                     .first()
                     .map(|function| function.output_name.as_str())
             }),
-            Self::Values { alias, .. } | Self::Subquery { alias, .. } => alias.as_deref(),
+            Self::Values {
+                alias,
+                internal_relation,
+                ..
+            } => internal_relation
+                .is_none()
+                .then_some(alias.as_deref())
+                .flatten(),
+            Self::Subquery { alias, .. } => alias.as_deref(),
             Self::Join { alias, .. } => alias.as_deref(),
         }
     }
@@ -387,6 +395,8 @@ impl SourcePlan {
                 rows,
                 alias,
                 column_aliases,
+                internal_relation,
+                internal_column_types,
             } => Self::Values {
                 rows: rows
                     .into_iter()
@@ -398,6 +408,8 @@ impl SourcePlan {
                     .collect(),
                 alias,
                 column_aliases,
+                internal_relation,
+                internal_column_types,
             },
             FromClause::Function {
                 name,

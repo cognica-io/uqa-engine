@@ -55,7 +55,9 @@ fn explicit_variadic_marker_survives_scalar_from_and_call_lowering() {
     };
     assert!(matches!(
         &args[0],
-        Expr::Func { name, .. } if name == crate::expr::NAMED_ARG_FUNCTION
+        Expr::Func { binding, .. }
+            if binding.as_ref().and_then(|binding| binding.dispatch)
+                == Some(crate::ast::FunctionDispatch::NamedArgument)
     ));
     assert!(matches!(variadic_value(&args[0]), Expr::Array(values) if values.len() == 2));
 
@@ -77,7 +79,7 @@ fn explicit_variadic_marker_survives_scalar_from_and_call_lowering() {
 fn explicit_variadic_call_marker_survives_serde() {
     let statement = first("SELECT f(VARIADIC ARRAY[1, 2])");
     let encoded = serde_json::to_string(&statement).unwrap();
-    assert!(encoded.contains(crate::expr::VARIADIC_ARG_FUNCTION));
+    assert!(encoded.contains("VariadicArgument"));
     let decoded: Statement = serde_json::from_str(&encoded).unwrap();
     let Statement::Select(select) = decoded else {
         panic!("expected SELECT after round trip");

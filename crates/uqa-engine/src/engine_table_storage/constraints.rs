@@ -250,6 +250,7 @@ fn collect_constraint_columns(expression: &uqa_sql::ast::Expr, output: &mut Vec<
         Expr::Default
         | Expr::Star
         | Expr::QualifiedStar(_)
+        | Expr::InternalColumn(_)
         | Expr::Literal(_)
         | Expr::Param(_)
         | Expr::ScalarSubquery(_)

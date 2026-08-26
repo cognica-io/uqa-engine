@@ -282,6 +282,49 @@ fn rule_actions_execute_once_over_the_qualified_row_set() {
 }
 
 #[test]
+fn empty_event_sets_still_execute_rule_actions_once() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE empty_rule_event (id INTEGER PRIMARY KEY, value INTEGER)",
+    );
+    exec(&engine, "CREATE TABLE empty_rule_constant (value TEXT)");
+    exec(&engine, "CREATE TABLE empty_rule_rows (id INTEGER)");
+    exec(&engine, "CREATE TABLE empty_rule_statements (event TEXT)");
+    exec(
+        &engine,
+        "CREATE FUNCTION log_empty_rule_statement() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO empty_rule_statements VALUES (TG_OP); RETURN NULL; END $$",
+    );
+    exec(
+        &engine,
+        "CREATE TRIGGER empty_rule_statement AFTER INSERT ON empty_rule_rows FOR EACH STATEMENT EXECUTE FUNCTION log_empty_rule_statement()",
+    );
+    exec(
+        &engine,
+        "CREATE RULE a_empty_constant AS ON UPDATE TO empty_rule_event DO ALSO INSERT INTO empty_rule_constant VALUES ('ran')",
+    );
+    exec(
+        &engine,
+        "CREATE RULE b_empty_rows AS ON UPDATE TO empty_rule_event DO ALSO INSERT INTO empty_rule_rows VALUES (NEW.id)",
+    );
+
+    let result = exec(&engine, "UPDATE empty_rule_event SET value = value + 1");
+
+    assert_eq!(result.affected_rows, 0);
+    assert_eq!(
+        exec(&engine, "SELECT value FROM empty_rule_constant").value_at(0, 0),
+        Some(&Value::Str("ran".into()))
+    );
+    assert!(exec(&engine, "SELECT id FROM empty_rule_rows")
+        .rows
+        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT event FROM empty_rule_statements").value_at(0, 0),
+        Some(&Value::Str("INSERT".into()))
+    );
+}
+
+#[test]
 fn rule_action_lateral_sources_see_the_set_oriented_event_relation() {
     let engine = Engine::new();
     exec(
@@ -386,6 +429,103 @@ fn rule_provider_returning_is_lazy_and_uses_only_action_row_images() {
         exec(&engine, "SELECT count(*) FROM action_image_target").value_at(0, 0),
         Some(&Value::Int(1))
     );
+
+    exec(&engine, "CREATE SEQUENCE literal_returning_side_effect");
+    exec(&engine, "CREATE TABLE literal_returning_event (id BIGINT)");
+    exec(&engine, "CREATE TABLE literal_returning_action (id BIGINT)");
+    exec(
+        &engine,
+        "CREATE RULE literal_returning_rule AS ON INSERT TO literal_returning_event DO INSTEAD INSERT INTO literal_returning_action VALUES (NEW.id) RETURNING nextval('literal_returning_side_effect')",
+    );
+    let literal = exec(
+        &engine,
+        "INSERT INTO literal_returning_event VALUES (10) RETURNING 42 AS answer",
+    );
+    assert_eq!(literal.value_at(0, 0), Some(&Value::Int(42)));
+    assert_eq!(
+        exec(&engine, "SELECT nextval('literal_returning_side_effect')").value_at(0, 0),
+        Some(&Value::Int(1))
+    );
+
+    exec(&engine, "CREATE SEQUENCE all_images_side_effect");
+    exec(&engine, "CREATE TABLE all_images_event (id BIGINT)");
+    exec(&engine, "CREATE TABLE all_images_action (id BIGINT)");
+    exec(
+        &engine,
+        "CREATE RULE all_images_rule AS ON INSERT TO all_images_event DO INSTEAD INSERT INTO all_images_action VALUES (NEW.id) RETURNING nextval('all_images_side_effect')",
+    );
+    let all_images = exec(
+        &engine,
+        "INSERT INTO all_images_event VALUES (10) RETURNING id AS current_id, old.id AS old_id, new.id AS new_id",
+    );
+    assert_eq!(all_images.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(all_images.value_at(0, 1), Some(&Value::Null));
+    assert_eq!(all_images.value_at(0, 2), Some(&Value::Int(2)));
+
+    exec(&engine, "CREATE SEQUENCE missing_new_side_effect");
+    exec(&engine, "CREATE TABLE missing_new_event (id BIGINT)");
+    exec(&engine, "CREATE TABLE missing_new_action (id BIGINT)");
+    exec(&engine, "INSERT INTO missing_new_event VALUES (10)");
+    exec(&engine, "INSERT INTO missing_new_action VALUES (10)");
+    exec(
+        &engine,
+        "CREATE RULE missing_new_rule AS ON DELETE TO missing_new_event DO INSTEAD DELETE FROM missing_new_action WHERE id = OLD.id RETURNING nextval('missing_new_side_effect')",
+    );
+    let missing_new = exec(
+        &engine,
+        "DELETE FROM missing_new_event RETURNING new.id AS new_id",
+    );
+    assert_eq!(missing_new.value_at(0, 0), Some(&Value::Null));
+    assert_eq!(
+        exec(&engine, "SELECT nextval('missing_new_side_effect')").value_at(0, 0),
+        Some(&Value::Int(1))
+    );
+}
+
+#[test]
+fn rule_pseudo_relations_yield_to_local_sql_scopes() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE shadow_rule_event (id INTEGER)");
+    exec(&engine, "CREATE TABLE shadow_rule_log (id INTEGER)");
+    let duplicate = engine
+        .sql(
+            "CREATE RULE shadow_cte_rule AS ON INSERT TO shadow_rule_event DO ALSO WITH old AS (SELECT 77 AS id) INSERT INTO shadow_rule_log SELECT old.id FROM old",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(duplicate.sqlstate(), Some("42712"));
+    assert!(duplicate
+        .to_string()
+        .contains("table name \"old\" specified more than once"));
+    exec(
+        &engine,
+        "CREATE TABLE shadow_conflict_target (id INTEGER PRIMARY KEY, value INTEGER)",
+    );
+    exec(
+        &engine,
+        "CREATE RULE shadow_target_rule AS ON INSERT TO shadow_rule_event DO ALSO INSERT INTO shadow_conflict_target AS new VALUES (NEW.id, 1) ON CONFLICT (id) DO UPDATE SET value = new.value + 1",
+    );
+    exec(&engine, "INSERT INTO shadow_rule_event VALUES (1)");
+    exec(&engine, "INSERT INTO shadow_rule_event VALUES (1)");
+    assert!(exec(&engine, "SELECT id FROM shadow_rule_log")
+        .rows
+        .is_empty());
+    assert_eq!(
+        exec(&engine, "SELECT value FROM shadow_conflict_target").value_at(0, 0),
+        Some(&Value::Int(2))
+    );
+
+    exec(&engine, "CREATE TABLE nested_alias_event (id INTEGER)");
+    exec(&engine, "CREATE TABLE nested_alias_action (id INTEGER)");
+    exec(
+        &engine,
+        "CREATE RULE nested_alias_provider AS ON INSERT TO nested_alias_event DO INSTEAD INSERT INTO nested_alias_action VALUES (NEW.id) RETURNING (SELECT old.id FROM (SELECT 99 AS id) AS old)",
+    );
+    let nested = exec(
+        &engine,
+        "INSERT INTO nested_alias_event VALUES (1) RETURNING id",
+    );
+    assert_eq!(nested.value_at(0, 0), Some(&Value::Int(99)));
 }
 
 #[test]
@@ -1081,6 +1221,40 @@ fn returning_rule_action_targets_restore_without_session_search_path() {
         exec(&engine, "SELECT id FROM action_rows").value_at(0, 0),
         Some(&Value::Int(7))
     );
+}
+
+#[test]
+fn rule_action_targets_follow_search_path_before_public_views() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE public.rule_path_event (id INTEGER)");
+    exec(
+        &engine,
+        "CREATE TABLE public.rule_path_view_base (id INTEGER)",
+    );
+    exec(
+        &engine,
+        "CREATE VIEW public.rule_path_target AS SELECT id FROM public.rule_path_view_base",
+    );
+    exec(&engine, "CREATE SCHEMA rule_path_first");
+    exec(
+        &engine,
+        "CREATE TABLE rule_path_first.rule_path_target (id INTEGER)",
+    );
+    exec(&engine, "SET search_path = rule_path_first, public");
+    exec(
+        &engine,
+        "CREATE RULE rule_path_action AS ON INSERT TO public.rule_path_event DO ALSO INSERT INTO rule_path_target VALUES (NEW.id)",
+    );
+
+    exec(&engine, "INSERT INTO public.rule_path_event VALUES (7)");
+
+    assert_eq!(
+        exec(&engine, "SELECT id FROM rule_path_first.rule_path_target").value_at(0, 0),
+        Some(&Value::Int(7))
+    );
+    assert!(exec(&engine, "SELECT id FROM public.rule_path_view_base")
+        .rows
+        .is_empty());
 }
 
 #[test]

@@ -124,17 +124,19 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
         .iter()
         .map(|retrieval| retrieval.entries.len())
         .sum();
+    let score_column = uqa_sql::ast::InternalRelationId::allocate().column(0);
     let mut sources = Vec::with_capacity(physical.len());
     for retrieval in physical {
         let table = engine.require_table(&retrieval.table_name)?;
         sources.push(
-            ScoredDocumentSource::new(
+            ScoredDocumentSource::new_with_score_column(
                 &retrieval.table_name,
                 table,
                 ScoredInput::entries(retrieval.entries, true),
                 columns.clone(),
                 None,
                 None,
+                Some(score_column),
             )
             .with_table_oid(crate::sql::catalog::table_relation_oid(
                 engine,

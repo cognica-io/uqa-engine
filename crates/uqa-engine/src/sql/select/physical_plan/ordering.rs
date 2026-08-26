@@ -11,12 +11,11 @@ use std::sync::Arc;
 
 use super::{
     attach_order_limit, build_set_projection, identity_order_columns, projection_columns,
-    projection_set_batch_size, projections_may_return_set, resolve_order_expression, CteScope,
-    Engine, OutputColumnMapping, PhysicalProjection, QueryBlockPlan, RowAtATime, SQLError,
-    SQLParam, ScalarExpr, ScopedEngineHook, SharedExpressionEvaluator, Value,
+    projection_set_batch_size, projection_target_expression, projections_may_return_set,
+    resolve_order_expression, CteScope, Engine, OutputColumnMapping, PhysicalProjection,
+    ProjectionTarget, QueryBlockPlan, RowAtATime, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
+    SharedExpressionEvaluator, Value,
 };
-
-const DEFERRED_ORDER_COLUMN_PREFIX: &str = "\0uqa.deferred_order_value.";
 
 #[derive(Clone, Copy)]
 pub(super) struct OutputTarget {
@@ -210,23 +209,31 @@ pub(super) fn split_locking_order_projections(
     let mut required = HashSet::new();
     for (index, order) in statement.order_by.iter().enumerate() {
         let expression = resolve_order_expression(&order.expr, output)?;
+        if let Some((target, _)) = physical.iter().find(|(target, _)| {
+            crate::sql::aggregates::exprs_match(&projection_target_expression(target), &expression)
+        }) {
+            required.insert(target.clone());
+            sort_statement.order_by[index].expr = projection_target_expression(target);
+            continue;
+        }
         if let ScalarExpr::Column(column) = &expression {
-            if physical.iter().any(|(name, _)| name == column) {
-                required.insert(column.clone());
+            let target = ProjectionTarget::Column(column.clone());
+            if physical.iter().any(|(candidate, _)| candidate == &target) {
+                required.insert(target);
                 continue;
             }
         }
-        if let Some((column, _)) = physical
+        if let Some((target, _)) = physical
             .iter()
             .find(|(_, projected)| crate::sql::aggregates::exprs_match(projected, &expression))
         {
-            required.insert(column.clone());
-            sort_statement.order_by[index].expr = ScalarExpr::Column(column.clone());
+            required.insert(target.clone());
+            sort_statement.order_by[index].expr = projection_target_expression(target);
         }
     }
     let (before_sort, after_sort) = physical
         .into_iter()
-        .partition(|(column, _)| required.contains(column));
+        .partition(|(target, _)| required.contains(target));
     Ok((sort_statement, before_sort, after_sort))
 }
 
@@ -238,7 +245,7 @@ pub(super) fn append_row_at_time_projection<'a>(
     if projections.is_empty() {
         return operator;
     }
-    Box::new(uqa_execution::Project::appending_with_evaluator(
+    Box::new(uqa_execution::Project::appending_target_evaluator(
         Box::new(RowAtATime::new(operator)),
         projections,
         evaluator,
@@ -291,7 +298,7 @@ pub(super) fn attach_final_projection_order<'a>(
         if batch_size == 1 {
             operator = Box::new(RowAtATime::new(operator));
         }
-        Box::new(uqa_execution::Project::with_evaluator(
+        Box::new(uqa_execution::Project::with_target_evaluator(
             operator,
             projections,
             Arc::clone(&evaluator),
@@ -314,7 +321,9 @@ fn attach_deferred_order_projection<'a>(
     evaluator: SharedExpressionEvaluator<'a>,
 ) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
     let mut sort_statement = statement.clone();
-    let mut sort_projections = Vec::<(Option<usize>, ScalarExpr, String)>::new();
+    let sort_relation = uqa_sql::ast::InternalRelationId::allocate();
+    let mut sort_projections =
+        Vec::<(Option<usize>, ScalarExpr, uqa_sql::ast::InternalColumnRef)>::new();
     for (order_index, order) in statement.order_by.iter().enumerate() {
         let resolved = resolve_order_expression(&order.expr, output)?;
         let direct_target = match &order.expr {
@@ -341,24 +350,24 @@ fn attach_deferred_order_projection<'a>(
                     && (target.is_some()
                         || crate::sql::aggregates::exprs_match(existing, &expression))
             })
-            .map(|(_, _, column)| column.clone());
+            .map(|(_, _, column)| *column);
         let column = if let Some(column) = existing_column {
             column
         } else {
-            let column = format!("{DEFERRED_ORDER_COLUMN_PREFIX}{order_index}");
-            sort_projections.push((target, expression, column.clone()));
+            let column = sort_relation.column(sort_projections.len());
+            sort_projections.push((target, expression, column));
             column
         };
-        sort_statement.order_by[order_index].expr = ScalarExpr::Column(column.clone());
+        sort_statement.order_by[order_index].expr = ScalarExpr::InternalColumn(column);
         if let Some(target) = target {
-            projections[target].1 = ScalarExpr::Column(column);
+            projections[target].1 = ScalarExpr::InternalColumn(column);
         }
     }
     let sort_projections = sort_projections
         .into_iter()
-        .map(|(_, expression, column)| (column, expression))
+        .map(|(_, expression, column)| (ProjectionTarget::Internal(column), expression))
         .collect();
-    operator = Box::new(uqa_execution::Project::appending_with_evaluator(
+    operator = Box::new(uqa_execution::Project::appending_target_evaluator(
         operator,
         sort_projections,
         Arc::clone(&evaluator),
@@ -374,7 +383,7 @@ fn attach_deferred_order_projection<'a>(
         None,
     )?;
     operator = Box::new(RowAtATime::new(operator));
-    Ok(Box::new(uqa_execution::Project::with_evaluator(
+    Ok(Box::new(uqa_execution::Project::with_target_evaluator(
         operator,
         projections,
         evaluator,

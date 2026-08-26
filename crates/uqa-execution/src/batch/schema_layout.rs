@@ -9,6 +9,12 @@
 use super::{ColumnIdentity, ColumnType, HashSet, RowSchema, NULL_SLOT};
 
 impl RowSchema {
+    /// Whether one logical source attribute participates in `*` expansion.
+    #[must_use]
+    pub fn wildcard_position_visible(&self, position: usize) -> bool {
+        position < self.len() && !self.index.cold.wildcard_hidden.contains(&position)
+    }
+
     pub fn columns(&self) -> &[String] {
         &self.index.columns
     }
@@ -80,6 +86,42 @@ impl RowSchema {
     /// Resolve one logical output position to its flattened physical slot.
     pub fn physical_slot(&self, logical: usize) -> Option<usize> {
         self.slot(logical)
+    }
+
+    /// Static type attached to one flattened physical slot, including
+    /// executor-only internal attributes that have no logical SQL position.
+    pub fn physical_type(&self, physical: usize) -> Option<&ColumnType> {
+        self.index
+            .slots
+            .iter()
+            .position(|slot| *slot == physical)
+            .and_then(|logical| self.column_type(logical))
+            .or_else(|| {
+                self.index.aliases.iter().find_map(|(identity, slot)| {
+                    (*slot == physical)
+                        .then(|| {
+                            self.index
+                                .cold
+                                .aliases
+                                .get(identity)
+                                .and_then(Option::as_ref)
+                        })
+                        .flatten()
+                })
+            })
+            .or_else(|| {
+                self.index.internal.iter().find_map(|(column, slot)| {
+                    (*slot == physical)
+                        .then(|| {
+                            self.index
+                                .cold
+                                .internal
+                                .get(column)
+                                .and_then(Option::as_ref)
+                        })
+                        .flatten()
+                })
+            })
     }
 
     /// Resolve a structured SQL identity, including a hidden JOIN USING alias, to its flattened physical slot. Ambiguous identities deliberately return `None` rather than selecting an arbitrary source value.

@@ -39,10 +39,9 @@ impl HierarchyScoredDocumentSource {
             .ok_or_else(|| SQLError::Internal("scored source has no physical schema".into()))?;
         for source in sources.iter().skip(1) {
             if source.schema() != schema
-                || source.physical_schema().is_none_or(|candidate| {
-                    candidate.identities() != physical_schema.identities()
-                        || candidate.column_types() != physical_schema.column_types()
-                })
+                || source
+                    .physical_schema()
+                    .is_none_or(|candidate| candidate != &physical_schema)
             {
                 return Err(SQLError::Internal(
                     "hierarchy retrieval sources do not share one logical row type".into(),

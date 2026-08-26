@@ -38,6 +38,28 @@ enum ManagerIdentity {
     Provider(usize),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum LockRelationIdentity {
+    Table(Arc<str>),
+    BackendWriter,
+    KeyReservation([u8; 32]),
+}
+
+impl LockRelationIdentity {
+    fn stable_bytes(&self) -> Vec<u8> {
+        match self {
+            Self::Table(name) => name.as_bytes().to_vec(),
+            Self::BackendWriter => b"\xffbackend-writer".to_vec(),
+            Self::KeyReservation(digest) => {
+                let mut bytes = Vec::with_capacity(1 + "key-reservation".len() + digest.len());
+                bytes.extend_from_slice(b"\xffkey-reservation");
+                bytes.extend_from_slice(digest);
+                bytes
+            }
+        }
+    }
+}
+
 static DATABASE_MANAGERS: OnceLock<Mutex<HashMap<ManagerIdentity, Weak<RowLockManager>>>> =
     OnceLock::new();
 
@@ -161,8 +183,8 @@ enum CrossAttachment {
 
 pub(crate) struct RowLockManager {
     next_session: AtomicU64,
-    table_ids: Mutex<HashMap<String, u64>>,
-    table_names: Mutex<HashMap<u64, Arc<str>>>,
+    relation_ids: Mutex<HashMap<LockRelationIdentity, u64>>,
+    relation_identities: Mutex<HashMap<u64, LockRelationIdentity>>,
     next_table: AtomicU64,
     next_acquisition: AtomicU64,
     change_gate: RwLock<()>,
@@ -270,8 +292,8 @@ impl RowLockManager {
     fn with_cross_attachment(cross: Option<CrossAttachment>) -> Self {
         Self {
             next_session: AtomicU64::new(1),
-            table_ids: Mutex::new(HashMap::new()),
-            table_names: Mutex::new(HashMap::new()),
+            relation_ids: Mutex::new(HashMap::new()),
+            relation_identities: Mutex::new(HashMap::new()),
             next_table: AtomicU64::new(1),
             next_acquisition: AtomicU64::new(1),
             change_gate: RwLock::new(()),
@@ -311,26 +333,46 @@ impl RowLockManager {
     }
 
     pub(crate) fn table_key(&self, table: &str) -> u64 {
-        let mut tables = self.table_ids.lock();
-        if let Some(id) = tables.get(table) {
+        self.relation_key(LockRelationIdentity::Table(Arc::from(table)))
+    }
+
+    pub(crate) fn backend_writer_key(&self) -> u64 {
+        self.relation_key(LockRelationIdentity::BackendWriter)
+    }
+
+    pub(crate) fn key_reservation_key(&self, digest: [u8; 32]) -> u64 {
+        self.relation_key(LockRelationIdentity::KeyReservation(digest))
+    }
+
+    fn relation_key(&self, identity: LockRelationIdentity) -> u64 {
+        let mut relations = self.relation_ids.lock();
+        if let Some(id) = relations.get(&identity) {
             return *id;
         }
         let id = self.next_table.fetch_add(1, Ordering::Relaxed);
-        tables.insert(table.to_string(), id);
-        self.table_names.lock().insert(id, Arc::from(table));
+        relations.insert(identity.clone(), id);
+        self.relation_identities.lock().insert(id, identity);
         id
     }
 
     pub(crate) fn stable_table_hash(table: &str) -> u64 {
-        table_hash(table)
+        table_hash(table.as_bytes())
     }
 
     pub(crate) fn table_name(&self, table: u64) -> Arc<str> {
-        self.table_names
+        match self.relation_identities.lock().get(&table).cloned() {
+            Some(LockRelationIdentity::Table(name)) => name,
+            Some(_) => panic!("internal lock identity has no SQL table name"),
+            None => panic!("unknown relation lock identity"),
+        }
+    }
+
+    fn relation_bytes(&self, table: u64) -> Vec<u8> {
+        self.relation_identities
             .lock()
             .get(&table)
-            .cloned()
-            .unwrap_or_else(|| Arc::from(""))
+            .unwrap_or_else(|| panic!("unknown relation lock identity"))
+            .stable_bytes()
     }
 
     fn coordinator(&self) -> Result<Option<&FileLockCoordinator>, SQLError> {
@@ -423,19 +465,18 @@ impl RowLockManager {
 
     fn release_row_claims(&self, session_id: u64, key: RowLockKey, strength: LockStrength) {
         if let Some(CrossAttachment::Active(coordinator)) = self.cross.as_ref() {
+            let relation = self.relation_bytes(key.table);
             coordinator.release(
                 session_id,
-                &row_byte_claims(self.table_name(key.table).as_ref(), key.doc_id, strength),
+                &row_byte_claims(&relation, key.doc_id, strength),
             );
         }
     }
 
     fn release_relation_claims(&self, session_id: u64, table: u64, mode: RelationLockMode) {
         if let Some(CrossAttachment::Active(coordinator)) = self.cross.as_ref() {
-            coordinator.release(
-                session_id,
-                &relation_byte_claims(self.table_name(table).as_ref(), mode),
-            );
+            let relation = self.relation_bytes(table);
+            coordinator.release(session_id, &relation_byte_claims(&relation, mode));
         }
     }
 
@@ -460,9 +501,9 @@ impl RowLockManager {
 
     pub(crate) fn acquire(&self, request: &LockRequest<'_>) -> Result<LockAcquire, SQLError> {
         let coordinator = self.coordinator()?;
-        let table_name = self.table_name(request.key.table);
+        let relation = self.relation_bytes(request.key.table);
         let claims = coordinator
-            .map(|_| row_byte_claims(table_name.as_ref(), request.key.doc_id, request.strength))
+            .map(|_| row_byte_claims(&relation, request.key.doc_id, request.strength))
             .unwrap_or_default();
         let cross_wait = CrossWaitGuard::new(self, coordinator, request.session_id);
         let mut waited = false;
@@ -508,7 +549,7 @@ impl RowLockManager {
                         &state,
                         request.session_id,
                         request.key,
-                        table_name.as_ref(),
+                        &relation,
                         &claims,
                     )
                 }),
@@ -560,8 +601,9 @@ impl RowLockManager {
         cancel: &uqa_core::CancellationToken,
     ) -> Result<(), SQLError> {
         let coordinator = self.coordinator()?;
+        let relation = self.relation_bytes(table);
         let claims = coordinator
-            .map(|_| relation_byte_claims(self.table_name(table).as_ref(), mode))
+            .map(|_| relation_byte_claims(&relation, mode))
             .unwrap_or_default();
         let cross_wait = CrossWaitGuard::new(self, coordinator, session_id);
         loop {
@@ -723,14 +765,14 @@ fn locally_contended_row_claim(
     state: &LockTable,
     session_id: u64,
     key: RowLockKey,
-    table_name: &str,
+    relation: &[u8],
     wanted_claims: &[ByteClaim],
 ) -> Option<ByteClaim> {
     state.rows.get(&key)?.iter().find_map(|grant| {
         if grant.session_id == session_id {
             return None;
         }
-        row_byte_claims(table_name, key.doc_id, grant.effective_strength())
+        row_byte_claims(relation, key.doc_id, grant.effective_strength())
             .into_iter()
             .find_map(|held| {
                 wanted_claims
@@ -1042,7 +1084,12 @@ impl RowLockManager {
         };
         if let Some(CrossAttachment::Active(coordinator)) = self.cross.as_ref() {
             return coordinator
-                .change_target_after(table_hash(table), doc_id, baseline.cross_sequence, wanted)
+                .change_target_after(
+                    table_hash(table.as_bytes()),
+                    doc_id,
+                    baseline.cross_sequence,
+                    wanted,
+                )
                 .map_err(SQLError::Internal);
         }
         Ok(resolve_local_change_target(
@@ -1067,7 +1114,7 @@ impl RowLockManager {
         if let Some(CrossAttachment::Active(coordinator)) = self.cross.as_ref() {
             return coordinator
                 .change_target_after(
-                    table_hash(table),
+                    table_hash(table.as_bytes()),
                     doc_id,
                     baseline.cross_sequence,
                     LockStrength::ForUpdate,
@@ -1121,40 +1168,39 @@ impl RowLockManager {
                 })
             })
             .collect::<Vec<_>>();
-        let publication_result =
-            if let Some(CrossAttachment::Active(coordinator)) = self.cross.as_ref() {
-                let published = committed
-                    .iter()
-                    .map(|change| cross_process::PublishedRowChange {
-                        table_hash: table_hash(self.table_name(change.key.table).as_ref()),
-                        doc_id: change.key.doc_id,
-                        kind: match change.kind {
-                            CommittedRowChangeKind::Update => {
-                                cross_process::PublishedRowChangeKind::Update
-                            }
-                            CommittedRowChangeKind::Delete => {
-                                cross_process::PublishedRowChangeKind::Delete
-                            }
-                            CommittedRowChangeKind::Rewrite(successor) => {
-                                cross_process::PublishedRowChangeKind::Rewrite(
-                                    cross_process::PublishedRowIdentity {
-                                        table_hash: table_hash(
-                                            self.table_name(successor.table).as_ref(),
-                                        ),
-                                        doc_id: successor.doc_id,
-                                    },
-                                )
-                            }
-                        },
-                        strength: change.strength,
-                    })
-                    .collect::<Vec<_>>();
-                coordinator
-                    .publish_changes(&published)
-                    .map_err(SQLError::Internal)
-            } else {
-                Ok(())
-            };
+        let publication_result = if let Some(CrossAttachment::Active(coordinator)) =
+            self.cross.as_ref()
+        {
+            let published = committed
+                .iter()
+                .map(|change| cross_process::PublishedRowChange {
+                    table_hash: table_hash(&self.relation_bytes(change.key.table)),
+                    doc_id: change.key.doc_id,
+                    kind: match change.kind {
+                        CommittedRowChangeKind::Update => {
+                            cross_process::PublishedRowChangeKind::Update
+                        }
+                        CommittedRowChangeKind::Delete => {
+                            cross_process::PublishedRowChangeKind::Delete
+                        }
+                        CommittedRowChangeKind::Rewrite(successor) => {
+                            cross_process::PublishedRowChangeKind::Rewrite(
+                                cross_process::PublishedRowIdentity {
+                                    table_hash: table_hash(&self.relation_bytes(successor.table)),
+                                    doc_id: successor.doc_id,
+                                },
+                            )
+                        }
+                    },
+                    strength: change.strength,
+                })
+                .collect::<Vec<_>>();
+            coordinator
+                .publish_changes(&published)
+                .map_err(SQLError::Internal)
+        } else {
+            Ok(())
+        };
         for change in committed {
             let key = change.key;
             if state.active_change_observers != 0

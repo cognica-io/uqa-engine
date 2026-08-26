@@ -71,6 +71,22 @@ impl RowLookup for PhysicalRowView<'_> {
         self.value_at(index)
     }
 
+    fn internal_column(&self, column: uqa_sql::ast::InternalColumnRef) -> Option<&Value> {
+        self.schema
+            .internal_slot(column)
+            .and_then(|slot| self.row.value(slot))
+    }
+
+    fn score_source(&self, qualifier: Option<&str>) -> Option<&Value> {
+        self.schema
+            .score_source_slot(qualifier)
+            .and_then(|slot| self.row.value(slot))
+    }
+
+    fn score_source_is_ambiguous(&self, qualifier: Option<&str>) -> bool {
+        self.schema.score_source_is_ambiguous(qualifier)
+    }
+
     fn visit_columns(&self, visitor: &mut dyn FnMut(&str, &Value)) {
         for (column, value) in self.iter() {
             visitor(column, value);

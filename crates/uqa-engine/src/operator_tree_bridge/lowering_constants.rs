@@ -154,14 +154,6 @@ pub(super) fn const_gating(expr: &ScalarExpr, params: &[SQLParam]) -> Option<Gat
 }
 
 pub(super) fn named_arg_expr(expr: &ScalarExpr) -> Option<(&str, &ScalarExpr)> {
-    let ScalarExpr::Func { name, args, .. } = expr else {
-        return None;
-    };
-    if name != "__named_arg" || args.len() != 2 {
-        return None;
-    }
-    let ScalarExpr::Literal(Value::Str(arg_name)) = &args[0] else {
-        return None;
-    };
-    Some((arg_name.as_str(), &args[1]))
+    let argument = uqa_execution::scalar_call_argument(expr).ok()?;
+    Some((argument.name?, argument.value))
 }

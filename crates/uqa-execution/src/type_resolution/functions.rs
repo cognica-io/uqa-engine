@@ -5,7 +5,7 @@
 //
 
 use uqa_core::Value;
-use uqa_sql::ast::{ColumnType, FunctionBinding};
+use uqa_sql::ast::{ColumnType, FunctionBinding, FunctionDispatch};
 use uqa_sql::{SQLError, SQLParam};
 
 use crate::{scalar_call_argument, scalar_call_arguments, RowSchema, ScalarExpr};
@@ -14,8 +14,7 @@ use super::common::{
     base_type, common_numeric_type, common_type, merge_optional_types, numeric_type,
 };
 use super::{
-    array_transform, containment, fixed_builtin, integer_base, random_range, range,
-    scalar_type_inner, FunctionTypeResolver,
+    array_transform, containment, fixed_builtin, range, scalar_type_inner, FunctionTypeResolver,
 };
 
 pub fn builtin_function_type(
@@ -107,7 +106,33 @@ pub(super) fn builtin_function_type_inner(
     let argument = |position: usize| argument_types.get(position).cloned().flatten();
     let ordered_argument = || ordered_argument_types.first().cloned().flatten();
     let first = || argument(0);
-    if let Some(ty) = range::function_type(name, &argument_types) {
+    if let Some(dispatch) = binding.and_then(|binding| binding.dispatch) {
+        match dispatch {
+            FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => {
+                return Ok(first());
+            }
+            FunctionDispatch::ArraySubscripts | FunctionDispatch::Subscript => {
+                return Ok(first().and_then(array_element_type));
+            }
+            FunctionDispatch::ArraySlices | FunctionDispatch::Slice => return Ok(first()),
+            FunctionDispatch::AnyOperator
+            | FunctionDispatch::AllOperator
+            | FunctionDispatch::IsDistinct
+            | FunctionDispatch::BetweenSymmetric => return Ok(Some(ColumnType::Boolean)),
+            FunctionDispatch::ToBinInt4
+            | FunctionDispatch::ToBinInt8
+            | FunctionDispatch::ToHexInt4
+            | FunctionDispatch::ToHexInt8
+            | FunctionDispatch::ToOctInt4
+            | FunctionDispatch::ToOctInt8
+            | FunctionDispatch::RandomInt4Range
+            | FunctionDispatch::RandomInt8Range
+            | FunctionDispatch::RandomNumericRange
+            | FunctionDispatch::ArraySortJson
+            | FunctionDispatch::Range { .. } => {}
+        }
+    }
+    if let Some(ty) = range::function_type(name, binding, &argument_types) {
         return Ok(Some(ty));
     }
     if fixed_builtin::is_function(name) {
@@ -169,11 +194,6 @@ pub(super) fn builtin_function_type_inner(
         | "jsonb_array_elements_text"
         | "json_extract_path_text"
         | "jsonb_extract_path_text" => Ok(Some(ColumnType::Text)),
-        name if integer_base::is_bound_function(name) => Ok(Some(ColumnType::Text)),
-        name if random_range::bound_function_type(name).is_some() => {
-            Ok(random_range::bound_function_type(name))
-        }
-        name if array_transform::is_bound_function(name) => Ok(first()),
         "array_sort" | "array_reverse" => array_transform::resolve_type(
             original_name,
             binding,
@@ -192,7 +212,7 @@ pub(super) fn builtin_function_type_inner(
         }
         "min" | "max" | "lag" | "lead" | "first_value" | "last_value" | "nth_value" | "nullif"
         | "array_cat" | "array_remove" | "array_replace" | "trim_array" | "array_sample"
-        | "__slice" | "__array_slices" | "array_append" | "generate_series" => Ok(first()),
+        | "array_append" | "generate_series" => Ok(first()),
         "mode" | "percentile_disc" => Ok(ordered_argument()),
         "percentile_cont" => Ok(ordered_argument().map(|ty| match base_type(&ty) {
             ColumnType::Interval => ColumnType::Interval,
@@ -230,31 +250,10 @@ pub(super) fn builtin_function_type_inner(
         "contains_op" | "contained_by_op" => {
             containment::resolve_operator_type(name, args, &argument_types)
         }
-        "bool_and"
-        | "bool_or"
-        | "every"
-        | "starts_with"
-        | "like"
-        | "ilike"
-        | "similar_to"
-        | "regexp_like"
-        | "isfinite"
-        | "json_contains"
-        | "json_contained_by"
-        | "json_has_key"
-        | "json_has_any_key"
-        | "json_has_all_keys"
-        | "jsonb_path_exists"
-        | "jsonpath_exists"
-        | "jsonb_path_match"
-        | "jsonpath_match"
-        | "array_overlap"
-        | "__any_op"
-        | "__all_op"
-        | "__is_distinct"
-        | "__between_symmetric"
-        | "st_within"
-        | "st_dwithin"
+        "bool_and" | "bool_or" | "every" | "starts_with" | "like" | "ilike" | "similar_to"
+        | "regexp_like" | "isfinite" | "json_contains" | "json_contained_by" | "json_has_key"
+        | "json_has_any_key" | "json_has_all_keys" | "jsonb_path_exists" | "jsonpath_exists"
+        | "jsonb_path_match" | "jsonpath_match" | "array_overlap" | "st_within" | "st_dwithin"
         | "overlaps" => Ok(Some(ColumnType::Boolean)),
         "coalesce" | "greatest" | "least" => common_argument_type(args, &argument_types),
         "concat_op" => concat_type(argument(0), argument(1)),
@@ -281,7 +280,7 @@ pub(super) fn builtin_function_type_inner(
         "decode" => Ok(Some(ColumnType::Bytea)),
         "array_prepend" => Ok(argument(1)),
         "array_fill" => Ok(first().map(|ty| ColumnType::Array(Box::new(ty)))),
-        "__subscript" | "__array_subscripts" | "unnest" => Ok(first().and_then(array_element_type)),
+        "unnest" => Ok(first().and_then(array_element_type)),
         "now" | "current_timestamp" | "clock_timestamp" | "statement_timestamp" => {
             Ok(Some(ColumnType::TimestampTz))
         }

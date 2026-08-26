@@ -430,10 +430,11 @@ impl SchemaScope {
             else {
                 return;
             };
-            if matches!(
-                name.as_str(),
-                uqa_sql::expr::NAMED_ARG_FUNCTION | uqa_sql::expr::VARIADIC_ARG_FUNCTION
-            ) {
+            if binding
+                .as_ref()
+                .and_then(|binding| binding.dispatch)
+                .is_some()
+            {
                 return;
             }
             if let Err(error) = self.bind_scalar_function_for_storage(

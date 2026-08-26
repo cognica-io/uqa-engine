@@ -106,6 +106,15 @@ pub struct RowIteratorScan<'a> {
     exhausted: bool,
 }
 
+/// Physical scan over a fallible positional-row iterator. This is the native
+/// adapter for producers whose output can contain duplicate or unnamed SQL
+/// columns and therefore cannot be represented by [`ResultRow`].
+pub struct PhysicalRowIteratorScan<'a> {
+    schema: RowSchema,
+    rows: Box<dyn Iterator<Item = ExecResult<PhysicalRow>> + Send + 'a>,
+    exhausted: bool,
+}
+
 impl<'a> RowIteratorScan<'a> {
     pub fn new(
         schema: Vec<String>,
@@ -171,6 +180,57 @@ impl PhysicalOperator for RowIteratorScan<'_> {
             Ok(None)
         } else {
             Ok(Some(Batch::new(self.schema.clone(), batch)))
+        }
+    }
+
+    fn close(&mut self) -> ExecResult<()> {
+        self.exhausted = true;
+        Ok(())
+    }
+}
+
+impl<'a> PhysicalRowIteratorScan<'a> {
+    pub fn new(
+        schema: RowSchema,
+        rows: Box<dyn Iterator<Item = ExecResult<PhysicalRow>> + Send + 'a>,
+    ) -> Self {
+        Self {
+            schema,
+            rows,
+            exhausted: false,
+        }
+    }
+}
+
+impl PhysicalOperator for PhysicalRowIteratorScan<'_> {
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
+    }
+
+    fn open(&mut self) -> ExecResult<()> {
+        self.exhausted = false;
+        Ok(())
+    }
+
+    fn next(&mut self) -> ExecResult<Option<Batch>> {
+        if self.exhausted {
+            return Ok(None);
+        }
+        let mut batch = Vec::with_capacity(DEFAULT_BATCH_SIZE);
+        while batch.len() < DEFAULT_BATCH_SIZE {
+            match self.rows.next() {
+                Some(Ok(row)) => batch.push(row),
+                Some(Err(error)) => return Err(error),
+                None => {
+                    self.exhausted = true;
+                    break;
+                }
+            }
+        }
+        if batch.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(Batch::from_physical_rows(self.schema.clone(), batch)))
         }
     }
 

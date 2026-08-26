@@ -72,6 +72,12 @@ impl Engine {
             .collect::<BTreeMap<_, _>>();
         let mut rules = temporary_rules;
         for mut rule in stored.rules {
+            if let Some(condition) = &mut rule.definition.condition {
+                condition.upgrade_legacy_serialized_dispatches();
+            }
+            for action in &mut rule.definition.actions {
+                action.upgrade_legacy_serialized_dispatches();
+            }
             let relation = self
                 .validate_rule_definition(&mut rule.definition)
                 .map_err(|error| {
@@ -145,6 +151,9 @@ impl Engine {
             .collect::<BTreeMap<_, _>>();
         let mut triggers = temporary_triggers;
         for mut trigger in stored.triggers {
+            if let Some(condition) = &mut trigger.definition.when {
+                condition.upgrade_legacy_serialized_dispatches();
+            }
             let relation = self
                 .validate_trigger_definition(&mut trigger.definition)
                 .map_err(|error| {

@@ -10,17 +10,8 @@ use super::{fold, AggregateSpec, ExecError, ExecResult, RowSchema, Value};
 use crate::PhysicalRow;
 use fold::{AggFold, GroupState};
 
-const PARTIAL_GROUP_PREFIX: &str = "__uqa_builtin_group_";
-const PARTIAL_STATE_COLUMN: &str = "__uqa_builtin_state";
-
-pub(super) fn group_column(index: usize) -> String {
-    format!("{PARTIAL_GROUP_PREFIX}{index}")
-}
-
-pub(super) fn schema(group_count: usize) -> RowSchema {
-    let mut columns = (0..group_count).map(group_column).collect::<Vec<_>>();
-    columns.push(PARTIAL_STATE_COLUMN.into());
-    RowSchema::new(columns)
+pub(super) fn schema(relation: uqa_sql::ast::InternalRelationId, group_count: usize) -> RowSchema {
+    RowSchema::with_internal_relation_types(relation, vec![None; group_count + 1])
 }
 
 pub(super) fn encode_group(state: GroupState) -> PhysicalRow {

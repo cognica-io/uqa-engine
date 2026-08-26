@@ -1307,6 +1307,7 @@ fn collect_expression_columns(expression: &Expr, output: &mut Vec<String>) {
         Expr::Default
         | Expr::Star
         | Expr::QualifiedStar(_)
+        | Expr::InternalColumn(_)
         | Expr::Literal(_)
         | Expr::Param(_)
         | Expr::ScalarSubquery(_)

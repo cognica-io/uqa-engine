@@ -101,7 +101,11 @@ pub(super) fn bind_operator_argument(
             distinct,
             order_by,
             filter,
-        } if name == "__named_arg" || uqa_sql::registry::lookup(name).is_some() => {
+        } if uqa_execution::scalar_call_argument(expression)
+            .ok()
+            .is_some_and(|argument| argument.name.is_some())
+            || uqa_sql::registry::lookup(name).is_some() =>
+        {
             if *distinct || !order_by.is_empty() || filter.is_some() {
                 return Err(SQLError::TypeMismatch(format!(
                     "operator function `{name}` does not accept aggregate modifiers"

@@ -7,13 +7,11 @@
 //! Physical assembly for table-function sources and `ROWS FROM` groups.
 
 use super::{
-    apply_table_function_aliases, attach_qualifier_filter,
-    build_table_function_row_stream_with_row, qualify_source_operator_with_columns,
-    resolve_user_table_function, table_function_column_types, table_function_empty_schema,
+    attach_qualifier_filter, build_table_function_row_stream_with_row,
+    qualify_source_operator_with_columns, resolve_user_table_function, table_function_column_types,
     validate_table_function_alias_count, validate_table_function_column_definition, ColumnPrune,
     CteScope, Engine, QualifierFilters, RowsFromOperator, SQLError, SQLParam, ScopedEngineHook,
     SourceEvalContext, SourcePlan, TableFunctionCall, TableFunctionTypeRequest,
-    TABLE_FUNCTION_ORDINALITY_COLUMN,
 };
 use uqa_execution::PhysicalOperator;
 use uqa_planner::TableFunctionPlan;
@@ -180,31 +178,6 @@ fn build_table_function_operator<'a>(
         resolved.as_ref().map(|resolved| resolved.function.as_ref()),
         source.column_types,
     )?;
-    let bound_columns = resolved
-        .as_ref()
-        .and_then(|resolved| {
-            crate::sql::from_rows::user_function_output_columns_for(&resolved.function)
-        })
-        .map_or_else(
-            || {
-                table_function_empty_schema(
-                    source.name,
-                    source.output_name,
-                    source.alias,
-                    source.column_aliases,
-                    source.args.len(),
-                    source.ordinality,
-                )
-            },
-            |columns| {
-                apply_table_function_aliases(columns, source.column_aliases, source.ordinality)
-            },
-        );
-    validate_table_function_alias_count(
-        source.alias.unwrap_or(source.output_name),
-        bound_columns.len(),
-        source.column_aliases.len(),
-    )?;
     let context = SourceEvalContext::new(engine, params, &hook, &hook, &ctes.scalar_subqueries);
     let call = TableFunctionCall {
         name: source.name,
@@ -220,54 +193,14 @@ fn build_table_function_operator<'a>(
         ordinality: source.ordinality,
         column_types: source.column_types,
     };
-    let mut rows = build_table_function_row_stream_with_row(&context, call, outer_row.as_ref())?;
-    let first = rows
-        .next()
-        .transpose()
-        .map_err(crate::sql::select::physical_exec_error)?;
-    let columns = if source.ordinality {
-        first.as_ref().map_or(bound_columns.clone(), |row| {
-            if row.len() == bound_columns.len() {
-                return bound_columns.clone();
-            }
-            let mut columns = row
-                .keys()
-                .filter(|column| column.as_str() != TABLE_FUNCTION_ORDINALITY_COLUMN)
-                .cloned()
-                .collect::<Vec<_>>();
-            let ordinality_column = source
-                .column_aliases
-                .get(columns.len())
-                .cloned()
-                .unwrap_or_else(|| "ordinality".into());
-            columns.push(ordinality_column);
-            columns
-        })
-    } else if source.column_aliases.is_empty() {
-        first.as_ref().map_or_else(
-            || {
-                table_function_empty_schema(
-                    source.name,
-                    source.output_name,
-                    source.alias,
-                    source.column_aliases,
-                    source.args.len(),
-                    false,
-                )
-            },
-            |row| row.keys().cloned().collect(),
-        )
-    } else {
-        table_function_empty_schema(
-            source.name,
-            source.output_name,
-            source.alias,
-            source.column_aliases,
-            source.args.len(),
-            false,
-        )
-    };
-    let rows = first.into_iter().map(Ok).chain(rows);
+    let output = build_table_function_row_stream_with_row(&context, call, outer_row.as_ref())?;
+    let columns = output.columns;
+    let rows = output.rows;
+    validate_table_function_alias_count(
+        source.alias.unwrap_or(source.output_name),
+        columns.len(),
+        source.column_aliases.len(),
+    )?;
     let types = table_function_column_types(
         engine,
         TableFunctionTypeRequest {
@@ -285,36 +218,10 @@ fn build_table_function_operator<'a>(
         params,
         &hook,
     );
-    let (operator, source_columns): (Box<dyn PhysicalOperator + 'a>, Vec<String>) = if source
-        .ordinality
-    {
-        let mut internal_columns = columns.clone();
-        if let Some(column) = internal_columns.last_mut() {
-            *column = TABLE_FUNCTION_ORDINALITY_COLUMN.into();
-        }
-        let identities = columns
-            .into_iter()
-            .map(uqa_execution::ColumnIdentity::unqualified)
-            .collect();
-        let schema =
-            uqa_execution::RowSchema::with_identities(internal_columns.clone(), identities, types);
-        (
-            Box::new(uqa_execution::RowIteratorScan::with_row_schema(
-                schema,
-                Box::new(rows),
-            )),
-            internal_columns,
-        )
-    } else {
-        (
-            Box::new(uqa_execution::RowIteratorScan::with_types(
-                columns.clone(),
-                types,
-                Box::new(rows),
-            )),
-            columns,
-        )
-    };
+    let schema = uqa_execution::RowSchema::with_types(columns.clone(), types);
+    let operator: Box<dyn PhysicalOperator + 'a> =
+        Box::new(uqa_execution::PhysicalRowIteratorScan::new(schema, rows));
+    let source_columns = columns;
     let qualifier = source.alias.unwrap_or(source.output_name);
     let operator = qualify_source_operator_with_columns(
         operator,

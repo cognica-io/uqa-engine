@@ -416,6 +416,21 @@ pub(super) fn compile_function_body(
     engine: &Engine,
     def: &CreateFunction,
 ) -> Result<CompiledFunctionBody, SQLError> {
+    compile_function_body_inner(engine, def, false)
+}
+
+pub(super) fn compile_persisted_function_body(
+    engine: &Engine,
+    def: &CreateFunction,
+) -> Result<CompiledFunctionBody, SQLError> {
+    compile_function_body_inner(engine, def, true)
+}
+
+fn compile_function_body_inner(
+    engine: &Engine,
+    def: &CreateFunction,
+    upgrade_legacy_dispatches: bool,
+) -> Result<CompiledFunctionBody, SQLError> {
     validate_routine_declaration(engine, def)?;
     match def.language.as_str() {
         "plpgsql" => {
@@ -438,6 +453,7 @@ pub(super) fn compile_function_body(
                 def,
                 statements,
                 bind_catalog_dependencies,
+                upgrade_legacy_dispatches && matches!(def.body, FunctionBody::Statements(_)),
             )?))
         }
         other => Err(SQLError::Routine {
@@ -452,6 +468,7 @@ fn compile_sql_routine_plans(
     def: &CreateFunction,
     statements: Vec<Statement>,
     bind_catalog_dependencies: bool,
+    upgrade_legacy_dispatches: bool,
 ) -> Result<Vec<UnifiedPlan>, SQLError> {
     let local_name = routine_local_name(&def.name)?;
     let signature_params = def.signature_params();
@@ -486,6 +503,16 @@ fn compile_sql_routine_plans(
             let mut plan = UnifiedPlan::lower_with(statement, &|name: &str| {
                 engine.has_registered_aggregate_function(name)
             });
+            if upgrade_legacy_dispatches {
+                plan.rewrite_scalar_expressions(&mut |expression| {
+                    let ScalarExpr::Func { name, binding, .. } = expression else {
+                        return;
+                    };
+                    uqa_sql::ast::FunctionBinding::upgrade_legacy_serialized_dispatch(
+                        name, binding,
+                    );
+                });
+            }
             if bind_catalog_dependencies {
                 if let UnifiedPlan::Query(query) = &mut plan {
                     crate::sql::bind_catalog_query_routines_with_outer(

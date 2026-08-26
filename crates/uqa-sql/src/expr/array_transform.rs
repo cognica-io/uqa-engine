@@ -8,9 +8,6 @@
 
 use super::{validate_named_argument_order, Result, Value};
 
-/// Physical marker preserving a one-dimensional `json[]` input after the polymorphic `array_sort(anyarray, ...)` call has been bound.
-pub const ARRAY_SORT_JSON_FUNCTION: &str = "__array_sort_json";
-
 /// Map call-order arguments onto the declared `array_sort` and `array_reverse` slots. `None` means the arity or a named argument does not select a catalogued overload.
 pub fn argument_positions(
     name: &str,

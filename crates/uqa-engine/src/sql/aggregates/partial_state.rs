@@ -11,19 +11,11 @@ use super::{
     Value,
 };
 
-pub(super) const PARTIAL_STATE_COLUMN: &str = "__uqa_partial_aggregate_state";
-const PARTIAL_GROUP_PREFIX: &str = "__uqa_partial_group_";
-
-pub(super) fn partial_group_column(index: usize) -> String {
-    format!("{PARTIAL_GROUP_PREFIX}{index}")
-}
-
-pub(super) fn partial_schema(group_count: usize) -> uqa_execution::RowSchema {
-    let mut columns = (0..group_count)
-        .map(partial_group_column)
-        .collect::<Vec<_>>();
-    columns.push(PARTIAL_STATE_COLUMN.to_string());
-    uqa_execution::RowSchema::new(columns)
+pub(super) fn partial_schema(
+    relation: uqa_sql::ast::InternalRelationId,
+    group_count: usize,
+) -> uqa_execution::RowSchema {
+    uqa_execution::RowSchema::with_internal_relation_types(relation, vec![None; group_count + 1])
 }
 
 pub(super) fn encode_partial_group(

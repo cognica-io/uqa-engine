@@ -32,6 +32,7 @@ pub(super) struct AdaptiveBuiltinAggregate<'a> {
     groups: BTreeMap<Vec<Value>, GroupState>,
     retained_bytes: usize,
     partials: Option<crate::spill::SpillBuffer>,
+    partial_relation: uqa_sql::ast::InternalRelationId,
     variable_state: bool,
 }
 
@@ -62,6 +63,7 @@ impl<'a> AdaptiveBuiltinAggregate<'a> {
             groups: BTreeMap::new(),
             retained_bytes: 0,
             partials: None,
+            partial_relation: uqa_sql::ast::InternalRelationId::allocate(),
             variable_state,
         }
     }
@@ -134,7 +136,7 @@ impl<'a> AdaptiveBuiltinAggregate<'a> {
         if self.groups.is_empty() {
             return Ok(());
         }
-        let schema = partial::schema(self.group_keys.len());
+        let schema = partial::schema(self.partial_relation, self.group_keys.len());
         let partials = self
             .partials
             .get_or_insert_with(|| crate::spill::SpillBuffer::new(self.io_budget));
@@ -195,13 +197,12 @@ impl<'a> AdaptiveBuiltinAggregate<'a> {
         partials: crate::spill::SpillBuffer,
     ) -> ExecResult<crate::spill::SpillBuffer> {
         let group_count = self.group_keys.len();
-        let scan: Box<dyn PhysicalOperator> = Box::new(crate::spill_scan::SpillScan::new(
-            partial::schema(group_count).columns().to_vec(),
-            partials,
-        ));
+        let partial_schema = partial::schema(self.partial_relation, group_count);
+        let scan: Box<dyn PhysicalOperator> =
+            Box::new(crate::spill_scan::SpillScan::new(partial_schema, partials));
         let keys = (0..group_count)
             .map(|index| SortKey {
-                expr: ScalarExpr::Column(partial::group_column(index)),
+                expr: ScalarExpr::InternalColumn(self.partial_relation.column(index)),
                 descending: false,
                 nulls_first: None,
             })

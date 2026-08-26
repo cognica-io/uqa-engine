@@ -837,7 +837,7 @@ fn returning_image_values(
     columns
         .iter()
         .map(|column| {
-            if column == DOC_ID_COLUMN
+            if super::is_virtual_document_id_column(column, definitions)
                 || definitions.iter().any(|definition| {
                     definition.name == *column
                         && definition.primary_key
@@ -860,15 +860,12 @@ fn returning_context_schema(
 ) -> RowSchema {
     let target =
         RowSchema::with_qualified_types(target_qualifier, columns.to_vec(), types.to_vec());
-    let hidden = ["old", "new"]
-        .into_iter()
-        .flat_map(|image| {
-            types.iter().enumerate().map(move |(position, ty)| {
-                (format!("\0uqa.returning.{image}.{position}"), ty.clone())
-            })
-        })
+    let hidden_types = types
+        .iter()
+        .cloned()
+        .chain(types.iter().cloned())
         .collect::<Vec<_>>();
-    let schema = RowSchema::append_typed(&target, &hidden);
+    let schema = RowSchema::append_hidden_typed(&target, &hidden_types);
     let width = columns.len();
     let identity_aliases = columns
         .iter()
@@ -878,15 +875,17 @@ fn returning_context_schema(
                 (
                     ColumnIdentity::qualified(&aliases.old, column),
                     width + position,
+                    types[position].clone(),
                 ),
                 (
                     ColumnIdentity::qualified(&aliases.new, column),
                     width * 2 + position,
+                    types[position].clone(),
                 ),
             ]
         })
         .collect::<Vec<_>>();
-    RowSchema::with_identity_aliases(&schema, &identity_aliases)
+    RowSchema::with_physical_identity_aliases(&schema, &identity_aliases)
 }
 
 #[derive(Clone, Copy)]

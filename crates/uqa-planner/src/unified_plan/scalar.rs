@@ -24,6 +24,7 @@ pub(super) fn lower_scalar_expression(
         Expr::QualifiedColumn { qualifier, column } => {
             ScalarExpr::QualifiedColumn { qualifier, column }
         }
+        Expr::InternalColumn(column) => ScalarExpr::InternalColumn(column),
         Expr::Literal(value) => ScalarExpr::Literal(value),
         Expr::Param(index) => ScalarExpr::Param(index),
         Expr::Func {

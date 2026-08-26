@@ -30,6 +30,17 @@ pub(super) fn validate_expression(
                 Err(SQLError::UnknownColumn((position + 1).to_string()))
             }
         }
+        ScalarExpr::InternalColumn(column) => {
+            if schema.internal_slot(*column).is_some()
+                || fallback.is_some_and(|fallback| fallback.internal_slot(*column).is_some())
+            {
+                Ok(())
+            } else {
+                Err(SQLError::Internal(format!(
+                    "internal relation attribute {column:?} is outside the bound row scope"
+                )))
+            }
+        }
         ScalarExpr::QualifiedColumn { qualifier, column } => {
             validate_qualified_column(schema, fallback, qualifier, column)
         }

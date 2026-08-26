@@ -232,6 +232,9 @@ fn validate_generation_expression(
         Expr::Star | Expr::QualifiedStar(_) => Err(SQLError::TypeMismatch(
             "whole-row references are not allowed in column generation expressions".into(),
         )),
+        Expr::InternalColumn(_) => Err(SQLError::Internal(
+            "executor-only column reached generation expression validation".into(),
+        )),
         Expr::WindowCall { .. } => Err(SQLError::TypeMismatch(
             "window functions are not allowed in column generation expressions".into(),
         )),
@@ -317,6 +320,7 @@ fn bind_generation_column_references(expression: &mut Expr, qualifier: &str) {
         | Expr::Default
         | Expr::Column(_)
         | Expr::QualifiedColumn { .. }
+        | Expr::InternalColumn(_)
         | Expr::Literal(_)
         | Expr::Param(_)
         | Expr::WindowCall { .. }

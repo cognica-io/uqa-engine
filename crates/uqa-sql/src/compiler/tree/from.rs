@@ -260,6 +260,8 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                         rows,
                         alias,
                         column_aliases,
+                        internal_relation: None,
+                        internal_column_types: Vec::new(),
                     });
                 }
             }

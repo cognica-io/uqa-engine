@@ -11,13 +11,26 @@ use super::{
     compile_null_test, compile_select, compile_type_cast, extract_strings, Expr, Node, NodeEnum,
     Result, SQLError, Value,
 };
-use crate::ast::FunctionBinding;
+use crate::ast::{FunctionBinding, FunctionDispatch};
 
 /// Mark a dedicated `PostgreSQL` syntax expression as a polymorphic built-in call; the empty argument signature is inferred from the expression operands instead of representing a fixed overload.
 pub(super) fn builtin_syntax_call(name: &str, args: Vec<Expr>) -> Expr {
     Expr::Func {
         binding: Some(FunctionBinding::polymorphic_builtin_syntax(name)),
         name: name.into(),
+        args,
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    }
+}
+
+/// Lower parser-owned syntax to a structurally tagged executor call. The label stored in `name` is diagnostic only and can never collide with a SQL routine identity.
+pub(super) fn dispatched_call(dispatch: FunctionDispatch, args: Vec<Expr>) -> Expr {
+    let binding = FunctionBinding::dispatched(dispatch);
+    Expr::Func {
+        name: binding.name.clone(),
+        binding: Some(binding),
         args,
         distinct: false,
         order_by: Vec::new(),
@@ -57,17 +70,13 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
             let Some(value_node) = arg.arg.as_ref() else {
                 return Err(SQLError::Internal("NamedArgExpr without value".into()));
             };
-            Ok(Expr::Func {
-                binding: None,
-                name: crate::expr::NAMED_ARG_FUNCTION.into(),
-                args: vec![
+            Ok(dispatched_call(
+                FunctionDispatch::NamedArgument,
+                vec![
                     Expr::Literal(Value::Str(arg.name.clone())),
                     compile_expr(value_node)?,
                 ],
-                distinct: false,
-                order_by: Vec::new(),
-                filter: None,
-            })
+            ))
         }
         NodeEnum::AArrayExpr(a) => {
             let elements: Vec<Expr> = a
@@ -217,18 +226,14 @@ pub(in crate::compiler) fn compile_indirection(
                         );
                     }
                 }
-                current = Expr::Func {
-                    binding: None,
-                    name: if has_slice {
-                        "__array_slices".into()
+                current = dispatched_call(
+                    if has_slice {
+                        FunctionDispatch::ArraySlices
                     } else {
-                        "__array_subscripts".into()
+                        FunctionDispatch::ArraySubscripts
                     },
                     args,
-                    distinct: false,
-                    order_by: Vec::new(),
-                    filter: None,
-                };
+                );
                 continue;
             }
             NodeEnum::String(field) => {
@@ -238,14 +243,10 @@ pub(in crate::compiler) fn compile_indirection(
                     ));
                 }
                 // `(composite).field` access on map values.
-                current = Expr::Func {
-                    binding: None,
-                    name: "__subscript".into(),
-                    args: vec![current, Expr::Literal(Value::Str(field.sval.clone()))],
-                    distinct: false,
-                    order_by: Vec::new(),
-                    filter: None,
-                };
+                current = dispatched_call(
+                    FunctionDispatch::Subscript,
+                    vec![current, Expr::Literal(Value::Str(field.sval.clone()))],
+                );
             }
             other => {
                 return Err(SQLError::Unsupported(format!(

@@ -174,6 +174,8 @@ pub(in crate::sql) fn run_update_inner(
     let snapshot_ctes = ctes.returning_statement_snapshot_scope();
     let overlay = DmlCommandMutationOverlay::new(engine);
     let mut pending_updates = Vec::new();
+    let mut prepared_updates = Vec::new();
+    let mut referential_actions = super::ReferentialActionContext::default();
     let mut locked_ids = BTreeSet::new();
     for (storage_table, doc_id) in candidates {
         cancel.check()?;
@@ -261,110 +263,93 @@ pub(in crate::sql) fn run_update_inner(
                 doc.remove(&assignment.column);
             }
         }
-        pending_updates.push((storage_table, doc_id, original_doc, doc));
-    }
-    drop(overlay);
-    let rule_batch = crate::sql::rules::prepare_rule_batch(
-        engine,
-        &stmt.table,
-        uqa_sql::ast::RuleEvent::Update,
-        pending_updates
-            .iter()
-            .map(|(_, doc_id, old, new)| crate::sql::rules::RuleRowImage {
-                old_doc_id: Some(*doc_id),
-                old: Some(old.clone()),
-                new_doc_id: Some(*doc_id),
-                new: Some(new.clone()),
-                context: None,
-            })
-            .collect(),
-    )?;
-    let rule_returning = rule_batch.execute_actions(engine, !stmt.returning.is_empty())?;
-    if update_original_query && has_update_rules {
-        crate::sql::triggers::fire_statement_triggers(
+        if has_update_rules {
+            pending_updates.push((storage_table, doc_id, original_doc, doc));
+        } else if let Some(prepared) = prepare_update_row(
             engine,
-            &stmt.table,
-            uqa_sql::ast::TriggerTiming::Before,
-            uqa_sql::ast::TriggerEvent::Update,
+            stmt,
+            params,
+            &snapshot_ctes,
             &assigned_columns,
-        )?;
-    }
-    let overlay = DmlCommandMutationOverlay::new(engine);
-    let mut prepared_updates = Vec::new();
-    let mut referential_actions = super::ReferentialActionContext::default();
-    for (index, (storage_table, doc_id, original_doc, mut doc)) in
-        pending_updates.into_iter().enumerate()
-    {
-        if rule_batch.suppresses(index) {
-            continue;
-        }
-        let Some(triggered_document) = crate::sql::triggers::fire_before_row_triggers(
-            engine,
-            &storage_table,
-            uqa_sql::ast::TriggerEvent::Update,
-            doc_id,
-            Some(&original_doc),
-            Some(&doc),
-            &assigned_columns,
-        )?
-        else {
-            continue;
-        };
-        doc = triggered_document;
-        if let Some(mut prepared) = prepare_document_rewrite(
-            engine,
             &storage_table,
             doc_id,
             original_doc,
             doc,
-            params,
             &mut referential_actions,
         )? {
-            finalize_partition_rewrite(
-                engine,
-                &mut prepared,
-                &stmt.table,
-                params,
-                stmt.include_descendants,
-                PartitionRewritePolicy::Move,
-            )?;
-            let mut after_row_events = Vec::new();
-            let rewritten_doc_id = stage_prepared_document_rewrite(
-                engine,
-                &mut prepared,
-                params,
-                Some(&assigned_columns),
-                &mut after_row_events,
-            )?;
-            if !stmt.returning.is_empty() {
-                returning_rows.push(build_returning_row(
-                    engine,
-                    ReturningProjectionRow {
-                        table: &stmt.table,
-                        target_qualifier: &stmt.target_qualifier,
-                        images: ReturningRowImages {
-                            old: Some(ReturningRowImage {
-                                doc_id: prepared.doc_id,
-                                document: &prepared.old_document,
-                            }),
-                            new: Some(ReturningRowImage {
-                                doc_id: rewritten_doc_id,
-                                document: &prepared.new_document,
-                            }),
-                        },
-                        aliases: &stmt.returning_aliases,
-                        context: None,
-                    },
-                    &stmt.returning,
-                    params,
-                    &snapshot_ctes,
-                )?);
+            if let Some(returning) = prepared.returning {
+                returning_rows.push(returning);
             }
             affected += 1;
-            prepared_updates.push((prepared, after_row_events));
+            prepared_updates.push((prepared.rewrite, prepared.after_row_events));
         }
     }
     drop(overlay);
+    let rule_returning = if has_update_rules {
+        let rule_batch = crate::sql::rules::prepare_rule_batch(
+            engine,
+            &stmt.table,
+            uqa_sql::ast::RuleEvent::Update,
+            pending_updates
+                .iter()
+                .map(|(_, doc_id, old, new)| crate::sql::rules::RuleRowImage {
+                    old_doc_id: Some(*doc_id),
+                    old: Some(old.clone()),
+                    new_doc_id: Some(*doc_id),
+                    new: Some(new.clone()),
+                    context: None,
+                })
+                .collect(),
+        )?;
+        let rule_returning = rule_batch.execute_actions(
+            engine,
+            crate::sql::rules::RuleReturningRequest::from_plan(
+                &stmt.returning,
+                &stmt.returning_aliases,
+                &stmt.subqueries,
+            ),
+        )?;
+        if update_original_query {
+            crate::sql::triggers::fire_statement_triggers(
+                engine,
+                &stmt.table,
+                uqa_sql::ast::TriggerTiming::Before,
+                uqa_sql::ast::TriggerEvent::Update,
+                &assigned_columns,
+            )?;
+        }
+        let overlay = DmlCommandMutationOverlay::new(engine);
+        for (index, (storage_table, doc_id, original_doc, doc)) in
+            pending_updates.into_iter().enumerate()
+        {
+            if rule_batch.suppresses(index) {
+                continue;
+            }
+            if let Some(prepared) = prepare_update_row(
+                engine,
+                stmt,
+                params,
+                &snapshot_ctes,
+                &assigned_columns,
+                &storage_table,
+                doc_id,
+                original_doc,
+                doc,
+                &mut referential_actions,
+            )? {
+                if let Some(returning) = prepared.returning {
+                    returning_rows.push(returning);
+                }
+                affected += 1;
+                prepared_updates.push((prepared.rewrite, prepared.after_row_events));
+            }
+        }
+        drop(overlay);
+        rule_returning
+    } else {
+        debug_assert!(pending_updates.is_empty());
+        None
+    };
     if !prepared_updates.is_empty() {
         engine.prepare_explicit_transaction_writer()?;
         for (prepared, _) in &mut prepared_updates {
@@ -400,6 +385,98 @@ pub(in crate::sql) fn run_update_inner(
         return dml_returning_result(engine, shape, returning_rows, affected);
     }
     Ok(SQLResult::from_affected(affected))
+}
+
+struct PreparedUpdateRow {
+    rewrite: super::PreparedDocumentRewrite,
+    after_row_events: Vec<crate::sql::triggers::AfterRowTriggerEvent>,
+    returning: Option<uqa_execution::OwnedPhysicalRow>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_update_row(
+    engine: &Engine,
+    stmt: &UpdatePlan,
+    params: &[SQLParam],
+    snapshot_ctes: &CteScope,
+    assigned_columns: &[String],
+    storage_table: &str,
+    doc_id: uqa_core::DocId,
+    original_document: super::Document,
+    document: super::Document,
+    referential_actions: &mut super::ReferentialActionContext,
+) -> Result<Option<PreparedUpdateRow>, SQLError> {
+    let Some(triggered_document) = crate::sql::triggers::fire_before_row_triggers(
+        engine,
+        storage_table,
+        uqa_sql::ast::TriggerEvent::Update,
+        doc_id,
+        Some(&original_document),
+        Some(&document),
+        assigned_columns,
+    )?
+    else {
+        return Ok(None);
+    };
+    let Some(mut rewrite) = prepare_document_rewrite(
+        engine,
+        storage_table,
+        doc_id,
+        original_document,
+        triggered_document,
+        params,
+        referential_actions,
+    )?
+    else {
+        return Ok(None);
+    };
+    finalize_partition_rewrite(
+        engine,
+        &mut rewrite,
+        &stmt.table,
+        params,
+        stmt.include_descendants,
+        PartitionRewritePolicy::Move,
+    )?;
+    let mut after_row_events = Vec::new();
+    let rewritten_doc_id = stage_prepared_document_rewrite(
+        engine,
+        &mut rewrite,
+        params,
+        Some(assigned_columns),
+        &mut after_row_events,
+    )?;
+    let returning = if stmt.returning.is_empty() {
+        None
+    } else {
+        Some(build_returning_row(
+            engine,
+            ReturningProjectionRow {
+                table: &stmt.table,
+                target_qualifier: &stmt.target_qualifier,
+                images: ReturningRowImages {
+                    old: Some(ReturningRowImage {
+                        doc_id: rewrite.doc_id,
+                        document: &rewrite.old_document,
+                    }),
+                    new: Some(ReturningRowImage {
+                        doc_id: rewritten_doc_id,
+                        document: &rewrite.new_document,
+                    }),
+                },
+                aliases: &stmt.returning_aliases,
+                context: None,
+            },
+            &stmt.returning,
+            params,
+            snapshot_ctes,
+        )?)
+    };
+    Ok(Some(PreparedUpdateRow {
+        rewrite,
+        after_row_events,
+        returning,
+    }))
 }
 
 pub(in crate::sql) fn try_run_point_update(
@@ -574,6 +651,7 @@ pub(in crate::sql) fn expr_is_row_independent(expr: &ScalarExpr) -> bool {
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Column(_)
         | ScalarExpr::Position(_)
+        | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Func { .. }
         | ScalarExpr::WindowCall { .. }
