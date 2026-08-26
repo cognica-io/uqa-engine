@@ -30,6 +30,7 @@ impl Engine {
         // relation kind is present. Legacy unqualified sources may refer to a
         // foreign table and must not be classified as missing during reopen.
         self.restore_views_from_catalog(catalog)?;
+        self.restore_rules_from_metadata(catalog)?;
         self.restore_catalog_indexes_from_catalog(catalog)?;
         self.restore_path_indexes_from_catalog(catalog)?;
         Ok(())

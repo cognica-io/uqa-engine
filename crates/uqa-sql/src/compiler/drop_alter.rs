@@ -30,6 +30,9 @@ pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statem
     if stmt.remove_type() == ObjectType::ObjectTrigger {
         return super::events::compile_drop_trigger(stmt).map(Statement::DropTrigger);
     }
+    if stmt.remove_type() == ObjectType::ObjectRule {
+        return super::events::compile_drop_rule(stmt).map(Statement::DropRule);
+    }
     let kind = match stmt.remove_type() {
         ObjectType::ObjectTable => DropKind::Table,
         ObjectType::ObjectIndex => DropKind::Index,
@@ -206,6 +209,19 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                     AlterTableType::AtEnableReplicaTrig => EventEnableMode::Replica,
                     AlterTableType::AtDisableTrig => EventEnableMode::Disabled,
                     _ => unreachable!("trigger enable modes were matched above"),
+                },
+            },
+            AlterTableType::AtEnableRule
+            | AlterTableType::AtEnableAlwaysRule
+            | AlterTableType::AtEnableReplicaRule
+            | AlterTableType::AtDisableRule => AlterTableAction::SetRuleEnableMode {
+                name: cmd.name.clone(),
+                mode: match cmd.subtype() {
+                    AlterTableType::AtEnableRule => EventEnableMode::Origin,
+                    AlterTableType::AtEnableAlwaysRule => EventEnableMode::Always,
+                    AlterTableType::AtEnableReplicaRule => EventEnableMode::Replica,
+                    AlterTableType::AtDisableRule => EventEnableMode::Disabled,
+                    _ => unreachable!("rule enable modes were matched above"),
                 },
             },
             AlterTableType::AtEnableTrigAll
@@ -641,6 +657,10 @@ pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<St
             to: render_relation_component(&stmt.newname),
         },
         ObjectType::ObjectTrigger => AlterTableAction::RenameTrigger {
+            from: stmt.subname.clone(),
+            to: stmt.newname.clone(),
+        },
+        ObjectType::ObjectRule => AlterTableAction::RenameRule {
             from: stmt.subname.clone(),
             to: stmt.newname.clone(),
         },

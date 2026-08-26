@@ -8,14 +8,52 @@
 
 use std::collections::BTreeMap;
 
-use uqa_sql::ast::{TriggerEvent, TriggerTiming};
+use uqa_sql::ast::{RuleEvent, TriggerEvent, TriggerTiming};
 use uqa_sql::SQLError;
 
 use crate::{Engine, RelationIdentity};
 
-use super::StoredTrigger;
+use super::{StoredRule, StoredTrigger};
 
 impl Engine {
+    pub(crate) fn rules_for(
+        &self,
+        table: &str,
+        event: RuleEvent,
+    ) -> Result<Vec<StoredRule>, SQLError> {
+        let relation = self.resolve_rule_relation(table)?;
+        Ok(self
+            .durable
+            .rules
+            .read()
+            .get(&relation)
+            .into_iter()
+            .flat_map(BTreeMap::values)
+            .filter(|rule| rule.enabled.fires_in_origin() && rule.definition.event == event)
+            .cloned()
+            .collect())
+    }
+
+    pub(crate) fn relation_has_rules(&self, table: &str) -> Result<bool, SQLError> {
+        let relation = self.resolve_rule_relation(table)?;
+        Ok(self
+            .durable
+            .rules
+            .read()
+            .get(&relation)
+            .is_some_and(|entries| !entries.is_empty()))
+    }
+
+    pub(crate) fn list_rules(&self) -> Vec<StoredRule> {
+        self.durable
+            .rules
+            .read()
+            .values()
+            .flat_map(BTreeMap::values)
+            .cloned()
+            .collect()
+    }
+
     pub(crate) fn triggers_for(
         &self,
         table: &str,

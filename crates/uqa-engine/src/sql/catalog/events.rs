@@ -4,19 +4,22 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `pg_trigger` and `pg_get_triggerdef` catalog support.
+//! `pg_trigger`, `pg_rewrite`, and their definition helpers.
 
 use std::collections::BTreeMap;
 
 use uqa_core::Value;
-use uqa_sql::ast::{BinaryOp, CreateTrigger, Expr, TriggerEvent, TriggerTiming};
+use uqa_sql::ast::{
+    BinaryOp, CreateRule, CreateTrigger, Expr, RuleEvent, TriggerEvent, TriggerTiming,
+};
 use uqa_sql::{ResultRow, SQLError};
 
-use crate::engine_events::StoredTrigger;
+use crate::engine_events::{StoredRule, StoredTrigger};
 use crate::{Engine, RelationIdentity};
 
 use super::helpers::{
-    bool_value, catalog_usize, int_value, row, schema_expr_text, stable_oid, str_value,
+    bool_value, catalog_usize, int_value, relation_oid, row, schema_expr_text, split_schema_name,
+    stable_oid, str_value,
 };
 use super::pg_catalog::table_relation_oid;
 use super::pg_proc::user_routine_catalog_oid;
@@ -32,6 +35,13 @@ pub(super) fn trigger_catalog_oid(trigger: &StoredTrigger) -> i64 {
     stable_oid(
         "trigger",
         &format!("{}.{}", trigger.definition.table, trigger.definition.name),
+    )
+}
+
+pub(super) fn rule_catalog_oid(rule: &StoredRule) -> i64 {
+    stable_oid(
+        "rule",
+        &format!("{}.{}", rule.definition.table, rule.definition.name),
     )
 }
 
@@ -151,6 +161,104 @@ fn pg_trigger_row(
     ]))
 }
 
+fn rule_relation_oid(engine: &Engine, relation: &str) -> Result<i64, SQLError> {
+    if engine
+        .try_resolve_table_name(relation)
+        .map_err(|error| {
+            SQLError::Internal(format!("resolve rule relation `{relation}`: {error}"))
+        })?
+        .is_some()
+    {
+        return table_relation_oid(engine, relation);
+    }
+    let canonical = engine
+        .try_resolve_view_name(relation)
+        .map_err(|error| {
+            SQLError::Internal(format!("resolve rule relation `{relation}`: {error}"))
+        })?
+        .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
+    let (schema, name) = split_schema_name(&canonical)?;
+    Ok(relation_oid("v", &schema, &name))
+}
+
+pub(super) fn build_pg_rewrite(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+    let mut rows = engine
+        .list_rules()
+        .into_iter()
+        .map(|rule| {
+            let definition = &rule.definition;
+            Ok(row([
+                ("oid", int_value(rule_catalog_oid(&rule))),
+                ("rulename", str_value(definition.name.clone())),
+                (
+                    "ev_class",
+                    int_value(rule_relation_oid(engine, &definition.table)?),
+                ),
+                ("ev_type", str_value(rule_event_code(definition.event))),
+                ("ev_enabled", str_value(rule.enabled.catalog_code())),
+                ("is_instead", bool_value(definition.instead)),
+                (
+                    "ev_qual",
+                    definition.condition.as_ref().map_or_else(
+                        || str_value("<>"),
+                        |condition| str_value(schema_expr_text(condition)),
+                    ),
+                ),
+                (
+                    "ev_action",
+                    str_value(serde_json::to_string(&definition.actions).map_err(|error| {
+                        SQLError::Internal(format!("serialize rule action catalog: {error}"))
+                    })?),
+                ),
+            ]))
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    for name in engine.list_views()? {
+        rows.push(row([
+            (
+                "oid",
+                int_value(stable_oid("rule", &format!("{name}._RETURN"))),
+            ),
+            ("rulename", str_value("_RETURN")),
+            ("ev_class", int_value(rule_relation_oid(engine, &name)?)),
+            ("ev_type", str_value("1")),
+            ("ev_enabled", str_value("O")),
+            ("is_instead", bool_value(true)),
+            ("ev_qual", str_value("<>")),
+            (
+                "ev_action",
+                str_value(
+                    engine
+                        .view(&name)?
+                        .map_or_else(|| "<>".to_string(), |query| format!("{query:?}")),
+                ),
+            ),
+        ]));
+    }
+    Ok(rows)
+}
+
+pub(super) fn build_pg_rules(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+    engine
+        .list_rules()
+        .into_iter()
+        .filter(|rule| rule.definition.name != "_RETURN")
+        .map(|rule| {
+            let definition = &rule.definition;
+            let (schema, table) = split_schema_name(&definition.table)?;
+            Ok(row([
+                ("schemaname", str_value(schema)),
+                ("tablename", str_value(table)),
+                ("rulename", str_value(definition.name.clone())),
+                (
+                    "definition",
+                    str_value(render_rule_definition(engine, definition, false)?),
+                ),
+            ]))
+        })
+        .collect()
+}
+
 pub(in crate::sql) fn pg_get_triggerdef_value(
     engine: &Engine,
     arguments: &[Value],
@@ -171,6 +279,36 @@ pub(in crate::sql) fn pg_get_triggerdef_value(
         &trigger.definition,
         pretty,
     )?))
+}
+
+pub(in crate::sql) fn pg_get_ruledef_value(
+    engine: &Engine,
+    arguments: &[Value],
+) -> Result<Value, SQLError> {
+    let definition_arguments = definition_arguments("pg_get_ruledef", arguments)?;
+    let Some((oid, pretty)) = definition_arguments else {
+        return Ok(Value::Null);
+    };
+    if let Some(rule) = engine
+        .list_rules()
+        .into_iter()
+        .find(|rule| rule_catalog_oid(rule) == oid)
+    {
+        return Ok(str_value(render_rule_definition(
+            engine,
+            &rule.definition,
+            pretty,
+        )?));
+    }
+    for name in engine.list_views()? {
+        if stable_oid("rule", &format!("{name}._RETURN")) == oid {
+            return Ok(str_value(format!(
+                "CREATE RULE \"_RETURN\" AS ON SELECT TO {} DO INSTEAD SELECT ...",
+                render_rule_relation(engine, &name, pretty)?
+            )));
+        }
+    }
+    Ok(Value::Null)
 }
 
 fn definition_arguments(
@@ -198,7 +336,7 @@ fn definition_arguments(
         Some(Value::Null) => Ok(None),
         Some(Value::Int(oid)) => Ok(Some((*oid, pretty))),
         Some(value) => Err(SQLError::TypeMismatch(format!(
-            "{function} trigger oid must be oid, got {value:?}"
+            "{function} object oid must be oid, got {value:?}"
         ))),
         None => unreachable!("arity was validated above"),
     }
@@ -218,6 +356,74 @@ fn trigger_type(definition: &CreateTrigger) -> i64 {
         };
     }
     value
+}
+
+const fn rule_event_code(event: RuleEvent) -> &'static str {
+    match event {
+        RuleEvent::Select => "1",
+        RuleEvent::Update => "2",
+        RuleEvent::Insert => "3",
+        RuleEvent::Delete => "4",
+    }
+}
+
+fn render_rule_definition(
+    engine: &Engine,
+    definition: &CreateRule,
+    pretty: bool,
+) -> Result<String, SQLError> {
+    let mut rendered = format!(
+        "CREATE RULE {} AS ON {} TO {}",
+        uqa_sql::expr::quote_ident(&definition.name),
+        match definition.event {
+            RuleEvent::Select => "SELECT",
+            RuleEvent::Insert => "INSERT",
+            RuleEvent::Update => "UPDATE",
+            RuleEvent::Delete => "DELETE",
+        },
+        render_rule_relation(engine, &definition.table, pretty)?
+    );
+    if let Some(condition) = &definition.condition {
+        rendered.push_str(" WHERE (");
+        rendered.push_str(&render_trigger_condition(condition, pretty));
+        rendered.push(')');
+    }
+    rendered.push_str(if definition.instead {
+        " DO INSTEAD"
+    } else {
+        " DO ALSO"
+    });
+    match definition.action_sql.as_slice() {
+        [] => rendered.push_str(" NOTHING"),
+        [action] => {
+            rendered.push(' ');
+            rendered.push_str(action);
+        }
+        actions => {
+            rendered.push_str(" (");
+            rendered.push_str(&actions.join("; "));
+            rendered.push_str(";)");
+        }
+    }
+    Ok(rendered)
+}
+
+fn render_rule_relation(engine: &Engine, name: &str, pretty: bool) -> Result<String, SQLError> {
+    let relation = RelationIdentity::from_legacy_name(name)
+        .map_err(|error| SQLError::Internal(format!("decode rule relation `{name}`: {error}")))?;
+    if pretty {
+        let local = uqa_sql::expr::quote_ident(&relation.name);
+        let visible_table = engine.try_resolve_table_name(&local).map_err(|error| {
+            SQLError::Internal(format!("resolve rule relation `{name}`: {error}"))
+        })?;
+        let visible_view = engine.try_resolve_view_name(&local).map_err(|error| {
+            SQLError::Internal(format!("resolve rule relation `{name}`: {error}"))
+        })?;
+        if visible_table.as_deref() == Some(name) || visible_view.as_deref() == Some(name) {
+            return Ok(local);
+        }
+    }
+    Ok(render_qualified_name(name))
 }
 
 fn render_trigger_definition(

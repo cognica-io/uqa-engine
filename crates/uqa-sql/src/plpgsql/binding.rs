@@ -49,24 +49,45 @@ pub trait VariableResolver {
     ) -> Result<Option<ResolvedVariable>>;
     /// Value of a positional `$n` reference (function arguments).
     fn resolve_param(&mut self, index: usize) -> Result<Option<ResolvedVariable>>;
+
+    /// Optional expression-level rewrite hook. The default preserves the variable-substitution behavior used by PL/pgSQL while allowing catalog lifecycle code to rewrite a reference without fabricating a literal value.
+    fn rewrite_name(&mut self, name: &str) -> Result<Option<Expr>> {
+        Ok(self
+            .resolve_name(name)?
+            .map(ResolvedVariable::into_expression))
+    }
+
+    /// Expression-level counterpart of [`Self::resolve_qualified`].
+    fn rewrite_qualified(&mut self, qualifier: &str, column: &str) -> Result<Option<Expr>> {
+        Ok(self
+            .resolve_qualified(qualifier, column)?
+            .map(ResolvedVariable::into_expression))
+    }
+
+    /// Expression-level counterpart of [`Self::resolve_param`].
+    fn rewrite_param(&mut self, index: usize) -> Result<Option<Expr>> {
+        Ok(self
+            .resolve_param(index)?
+            .map(ResolvedVariable::into_expression))
+    }
 }
 
 /// Rewrite an expression, substituting resolvable variable references
 /// with literals. References the resolver declines stay untouched.
 pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
     Ok(match expr {
-        Expr::Column(name) => match r.resolve_name(name)? {
-            Some(value) => value.into_expression(),
+        Expr::Column(name) => match r.rewrite_name(name)? {
+            Some(value) => value,
             None => expr.clone(),
         },
         Expr::QualifiedColumn {
             qualifier, column, ..
-        } => match r.resolve_qualified(qualifier, column)? {
-            Some(value) => value.into_expression(),
+        } => match r.rewrite_qualified(qualifier, column)? {
+            Some(value) => value,
             None => expr.clone(),
         },
-        Expr::Param(index) => match r.resolve_param(*index)? {
-            Some(value) => value.into_expression(),
+        Expr::Param(index) => match r.rewrite_param(*index)? {
+            Some(value) => value,
             None => expr.clone(),
         },
         Expr::Default | Expr::Literal(_) | Expr::Star | Expr::QualifiedStar(_) => expr.clone(),

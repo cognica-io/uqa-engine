@@ -4,12 +4,16 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `CREATE/DROP TRIGGER` lowering.
+//! `CREATE/DROP TRIGGER` and `CREATE/DROP RULE` lowering.
 
-use pg_query::protobuf::DropBehavior;
+use pg_query::protobuf::{CmdType, DropBehavior};
 use pg_query::TriggerType;
 
-use crate::ast::{CreateTrigger, DropTrigger, TriggerEvent, TriggerTiming};
+use crate::ast::{
+    CreateRule, CreateTrigger, DropRule, DropTrigger, RuleEvent, TriggerEvent, TriggerTiming,
+};
+
+use super::dispatch::compile_stmt;
 
 use super::{
     compile_expr, compile_qualified_name, extract_string, range_var_name, NodeEnum, Result,
@@ -86,6 +90,62 @@ pub(super) fn compile_create_trigger(
     })
 }
 
+pub(super) fn compile_create_rule(stmt: &pg_query::protobuf::RuleStmt) -> Result<CreateRule> {
+    let relation = stmt
+        .relation
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("CREATE RULE without relation".into()))?;
+    let event = match stmt.event() {
+        CmdType::CmdSelect => RuleEvent::Select,
+        CmdType::CmdInsert => RuleEvent::Insert,
+        CmdType::CmdUpdate => RuleEvent::Update,
+        CmdType::CmdDelete => RuleEvent::Delete,
+        other => {
+            return Err(SQLError::Unsupported(format!(
+                "CREATE RULE event {other:?} is not implemented"
+            )))
+        }
+    };
+    let condition = stmt.where_clause.as_deref().map(compile_expr).transpose()?;
+    let actions = stmt
+        .actions
+        .iter()
+        .map(compile_stmt)
+        .collect::<Result<Vec<_>>>()?;
+    let action_sql = stmt
+        .actions
+        .iter()
+        .map(|action| {
+            action
+                .deparse()
+                .map_err(|error| SQLError::Internal(format!("deparse CREATE RULE action: {error}")))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    for action in &actions {
+        if !matches!(
+            action,
+            crate::ast::Statement::Select(_)
+                | crate::ast::Statement::Insert(_)
+                | crate::ast::Statement::Update(_)
+                | crate::ast::Statement::Delete(_)
+        ) {
+            return Err(SQLError::Unsupported(
+                "rewrite-rule actions currently support SELECT, INSERT, UPDATE, and DELETE".into(),
+            ));
+        }
+    }
+    Ok(CreateRule {
+        name: stmt.rulename.clone(),
+        table: range_var_name(relation),
+        event,
+        instead: stmt.instead,
+        condition,
+        actions,
+        action_sql,
+        or_replace: stmt.replace,
+    })
+}
+
 fn compile_drop_relation_component(
     stmt: &pg_query::protobuf::DropStmt,
     statement: &str,
@@ -132,6 +192,16 @@ fn compile_drop_relation_component(
 pub(super) fn compile_drop_trigger(stmt: &pg_query::protobuf::DropStmt) -> Result<DropTrigger> {
     let (name, table) = compile_drop_relation_component(stmt, "DROP TRIGGER")?;
     Ok(DropTrigger {
+        name,
+        table,
+        if_exists: stmt.missing_ok,
+        cascade: matches!(stmt.behavior(), DropBehavior::DropCascade),
+    })
+}
+
+pub(super) fn compile_drop_rule(stmt: &pg_query::protobuf::DropStmt) -> Result<DropRule> {
+    let (name, table) = compile_drop_relation_component(stmt, "DROP RULE")?;
+    Ok(DropRule {
         name,
         table,
         if_exists: stmt.missing_ok,

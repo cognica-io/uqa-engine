@@ -154,6 +154,7 @@ const GRAPH_LABELS_METADATA_PREFIX: &str = "graph_label_registry::";
 const FUNCTIONS_METADATA_KEY: &str = "sql_functions_json";
 const ROLES_METADATA_KEY: &str = "sql_roles_json";
 const TRIGGERS_METADATA_KEY: &str = "sql_triggers_json";
+const RULES_METADATA_KEY: &str = "sql_rules_json";
 const SQL_STATEMENT_CACHE_LIMIT: usize = 256;
 /// Default nesting cap for user-defined function calls. Exceeding it
 /// raises `stack depth limit exceeded`, mirroring the `PostgreSQL`
@@ -740,6 +741,13 @@ impl uqa_sql::expr::EngineHook for Engine {
         args: &[Value],
     ) -> Option<std::result::Result<Value, SQLError>> {
         self.call_registered_scalar_function(name, args)
+    }
+    fn call_bound_builtin_function(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+        args: &[(Option<String>, Value)],
+    ) -> Option<std::result::Result<Value, SQLError>> {
+        crate::sql::call_bound_engine_builtin(self, binding, args)
     }
     fn has_scalar_functions(&self) -> bool {
         self.has_registered_scalar_functions()

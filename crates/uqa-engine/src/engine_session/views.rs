@@ -516,6 +516,8 @@ impl Engine {
     fn drop_view_state_inner(&self, name: &str) -> Result<(), SQLError> {
         let relation = RelationIdentity::from_legacy_name(name)
             .map_err(|err| SQLError::Internal(format!("invalid canonical view name: {err}")))?;
+        self.drop_relation_events_inner(&relation)
+            .map_err(|error| SQLError::Internal(format!("drop view rules: {error}")))?;
         let mut views = self.durable.views.write();
         let temporary = views
             .get(&relation)
@@ -545,7 +547,10 @@ impl Engine {
         }
     }
 
-    fn stored_view_schema(&self, view: &StoredView) -> Result<uqa_execution::RowSchema, SQLError> {
+    pub(crate) fn stored_view_schema(
+        &self,
+        view: &StoredView,
+    ) -> Result<uqa_execution::RowSchema, SQLError> {
         if view.kind == StoredViewKind::Materialized {
             let output_columns = view.output_columns.clone().unwrap_or_default();
             if output_columns.len() != view.materialized_column_types.len() {

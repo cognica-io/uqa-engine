@@ -58,13 +58,20 @@ pub(in crate::sql) fn run_update_inner(
         .iter()
         .map(|assignment| assignment.column.clone())
         .collect::<Vec<_>>();
-    crate::sql::triggers::fire_statement_triggers(
-        engine,
-        &stmt.table,
-        uqa_sql::ast::TriggerTiming::Before,
-        uqa_sql::ast::TriggerEvent::Update,
-        &assigned_columns,
-    )?;
+    let update_rules = engine.rules_for(&stmt.table, uqa_sql::ast::RuleEvent::Update)?;
+    let has_update_rules = !update_rules.is_empty();
+    let update_original_query = !update_rules
+        .iter()
+        .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
+    if update_original_query && !has_update_rules {
+        crate::sql::triggers::fire_statement_triggers(
+            engine,
+            &stmt.table,
+            uqa_sql::ast::TriggerTiming::Before,
+            uqa_sql::ast::TriggerEvent::Update,
+            &assigned_columns,
+        )?;
+    }
 
     if stmt.source.is_none() {
         let allowed = BTreeSet::from([stmt.target_qualifier.clone()]);
@@ -81,13 +88,15 @@ pub(in crate::sql) fn run_update_inner(
     // matching target rows.
     if let Some(source) = stmt.source.as_deref() {
         let result = run_update_from(engine, stmt, source, params, &mut ctes)?;
-        crate::sql::triggers::fire_statement_triggers(
-            engine,
-            &stmt.table,
-            uqa_sql::ast::TriggerTiming::After,
-            uqa_sql::ast::TriggerEvent::Update,
-            &assigned_columns,
-        )?;
+        if update_original_query {
+            crate::sql::triggers::fire_statement_triggers(
+                engine,
+                &stmt.table,
+                uqa_sql::ast::TriggerTiming::After,
+                uqa_sql::ast::TriggerEvent::Update,
+                &assigned_columns,
+            )?;
+        }
         return Ok(result);
     }
     let target_tables = engine.hierarchy_scan_tables(&stmt.table, stmt.include_descendants)?;
@@ -101,15 +110,18 @@ pub(in crate::sql) fn run_update_inner(
         && target_tables.len() == 1
         && !target_is_partitioned
         && !engine.has_row_triggers(&stmt.table, uqa_sql::ast::TriggerEvent::Update)?
+        && !engine.relation_has_rules(&stmt.table)?
     {
         if let Some(result) = try_run_point_update(engine, stmt, params)? {
-            crate::sql::triggers::fire_statement_triggers(
-                engine,
-                &stmt.table,
-                uqa_sql::ast::TriggerTiming::After,
-                uqa_sql::ast::TriggerEvent::Update,
-                &assigned_columns,
-            )?;
+            if update_original_query {
+                crate::sql::triggers::fire_statement_triggers(
+                    engine,
+                    &stmt.table,
+                    uqa_sql::ast::TriggerTiming::After,
+                    uqa_sql::ast::TriggerEvent::Update,
+                    &assigned_columns,
+                )?;
+            }
             return Ok(result);
         }
     }
@@ -155,8 +167,7 @@ pub(in crate::sql) fn run_update_inner(
     };
     let snapshot_ctes = ctes.returning_statement_snapshot_scope();
     let overlay = DmlCommandMutationOverlay::new(engine);
-    let mut prepared_updates = Vec::new();
-    let mut referential_actions = super::ReferentialActionContext::default();
+    let mut pending_updates = Vec::new();
     let mut locked_ids = BTreeSet::new();
     for (storage_table, doc_id) in candidates {
         cancel.check()?;
@@ -244,6 +255,42 @@ pub(in crate::sql) fn run_update_inner(
                 doc.remove(&assignment.column);
             }
         }
+        pending_updates.push((storage_table, doc_id, original_doc, doc));
+    }
+    drop(overlay);
+    let rule_batch = crate::sql::rules::prepare_rule_batch(
+        engine,
+        &stmt.table,
+        uqa_sql::ast::RuleEvent::Update,
+        pending_updates
+            .iter()
+            .map(|(_, doc_id, old, new)| crate::sql::rules::RuleRowImage {
+                old_doc_id: Some(*doc_id),
+                old: Some(old.clone()),
+                new_doc_id: Some(*doc_id),
+                new: Some(new.clone()),
+            })
+            .collect(),
+    )?;
+    rule_batch.execute_actions(engine)?;
+    if update_original_query && has_update_rules {
+        crate::sql::triggers::fire_statement_triggers(
+            engine,
+            &stmt.table,
+            uqa_sql::ast::TriggerTiming::Before,
+            uqa_sql::ast::TriggerEvent::Update,
+            &assigned_columns,
+        )?;
+    }
+    let overlay = DmlCommandMutationOverlay::new(engine);
+    let mut prepared_updates = Vec::new();
+    let mut referential_actions = super::ReferentialActionContext::default();
+    for (index, (storage_table, doc_id, original_doc, mut doc)) in
+        pending_updates.into_iter().enumerate()
+    {
+        if rule_batch.suppresses(index) {
+            continue;
+        }
         let Some(triggered_document) = crate::sql::triggers::fire_before_row_triggers(
             engine,
             &storage_table,
@@ -321,13 +368,15 @@ pub(in crate::sql) fn run_update_inner(
         crate::sql::triggers::fire_after_row_trigger_events(engine, &events)?;
     }
     referential_actions.fire_after_statement_triggers(engine)?;
-    crate::sql::triggers::fire_statement_triggers(
-        engine,
-        &stmt.table,
-        uqa_sql::ast::TriggerTiming::After,
-        uqa_sql::ast::TriggerEvent::Update,
-        &assigned_columns,
-    )?;
+    if update_original_query {
+        crate::sql::triggers::fire_statement_triggers(
+            engine,
+            &stmt.table,
+            uqa_sql::ast::TriggerTiming::After,
+            uqa_sql::ast::TriggerEvent::Update,
+            &assigned_columns,
+        )?;
+    }
     if !stmt.returning.is_empty() {
         return dml_returning_result(
             engine,

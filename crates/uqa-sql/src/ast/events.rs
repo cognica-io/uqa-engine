@@ -4,11 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Row-trigger catalog statements.
+//! Row-trigger and rewrite-rule catalog statements.
 
 use serde::{Deserialize, Serialize};
 
-use super::Expr;
+use super::{Expr, Statement};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TriggerTiming {
@@ -40,6 +40,35 @@ pub struct CreateTrigger {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DropTrigger {
+    pub name: String,
+    pub table: String,
+    pub if_exists: bool,
+    pub cascade: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RuleEvent {
+    Select,
+    Insert,
+    Update,
+    Delete,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateRule {
+    pub name: String,
+    pub table: String,
+    pub event: RuleEvent,
+    pub instead: bool,
+    pub condition: Option<Expr>,
+    pub actions: Vec<Statement>,
+    #[serde(default)]
+    pub action_sql: Vec<String>,
+    pub or_replace: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DropRule {
     pub name: String,
     pub table: String,
     pub if_exists: bool,

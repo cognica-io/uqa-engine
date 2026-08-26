@@ -78,6 +78,26 @@ pub(in crate::sql) fn run_merge_inner(
         &target_table,
         crate::row_locks::RelationLockMode::RowExclusive,
     )?;
+    if [
+        uqa_sql::ast::RuleEvent::Insert,
+        uqa_sql::ast::RuleEvent::Update,
+        uqa_sql::ast::RuleEvent::Delete,
+    ]
+    .into_iter()
+    .map(|event| engine.rules_for(&target_table, event))
+    .collect::<Result<Vec<_>, SQLError>>()?
+    .iter()
+    .any(|rules| !rules.is_empty())
+    {
+        let relation =
+            crate::RelationIdentity::from_legacy_name(&target_table).map_err(|error| {
+                SQLError::Internal(format!("decode MERGE relation `{target_table}`: {error}"))
+            })?;
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: format!("cannot execute MERGE on relation \"{}\"", relation.name),
+        });
+    }
     let target_qual = stmt.target_qualifier.clone();
     let target_tables = engine.hierarchy_scan_tables(&target_table, stmt.include_descendants)?;
     let target_hierarchy = engine

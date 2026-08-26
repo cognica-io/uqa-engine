@@ -735,6 +735,12 @@ pub fn eval_scalar(
             let arguments = eval_call_arguments(args, context)?;
             if let Some(binding) = binding {
                 if binding.builtin {
+                    if let Some(result) = context
+                        .function_hook
+                        .and_then(|hook| hook.call_bound_builtin_function(binding, &arguments))
+                    {
+                        return result;
+                    }
                     let dispatch_name = crate::type_resolution::runtime_dispatch_name(binding);
                     return eval_builtin_function_call(
                         dispatch_name.as_deref().unwrap_or(&binding.name),

@@ -130,6 +130,7 @@ pub(super) fn function_volatility(
                 | "pg_get_expr"
                 | "pg_get_partkeydef"
                 | "pg_get_triggerdef"
+                | "pg_get_ruledef"
         )
     {
         FunctionVolatility::Stable

@@ -8,6 +8,8 @@
     "differential_probes": "tests/parity/pg18/probes.sql",
     "stateful_routines": "tests/parity/pg18/routines_stateful.expected.json",
     "stateful_constraints": "tests/parity/pg18/constraints_stateful.expected.json",
+    "stateful_triggers": "tests/parity/pg18/triggers_stateful.expected.json",
+    "stateful_rules": "tests/parity/pg18/rules_stateful.expected.json",
     "tpch_fixture": "benchmarks/tpch/expected/pg18.json"
   },
   "parser_chain": {
@@ -576,11 +578,11 @@
     },
     {
       "id": "ddl.rewrite-rules",
-      "postgresql_reference": "PostgreSQL 18 CREATE RULE, rewrite, view-rule, catalog, dependency, and regression behavior",
-      "uqa_test": "No rewrite-rule execution harness yet",
-      "supported_version": "No executable CREATE RULE surface",
-      "status": "not_audited",
-      "open_issue": "CREATE RULE parsing, OLD and NEW rewrite binding, DO ALSO, DO INSTEAD, DO NOTHING, recursion, view _RETURN rules, pg_rewrite, pg_get_ruledef, enable modes, dependencies, and the PostgreSQL 18 rule regression schedule remain to be implemented and differentially verified."
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE stateful table-rule DDL, rewrite execution, ordering, cardinality, catalog, dependency, persistence, view _RETURN, ON CONFLICT, MERGE, and SQLSTATE behavior in tests/parity/pg18/rules_stateful.expected.json plus official rewrite-rule regression cases",
+      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::ddl_lifecycle::rule_statements; cargo test -p uqa-engine --test integration engine_catalog::sql_rules::; env UQA_USQL=target/debug/usql python3 tests/parity/pg18/run_routines_stateful.py --suite rules",
+      "supported_version": "Durable PostgreSQL 18.4 table rewrite rules for INSERT VALUES, INSERT SELECT, UPDATE, and DELETE with OLD and NEW row binding including nullable integer images, unqualified INSERT and DELETE conditions, alphabetical ALSO and conditional or unconditional INSTEAD action ordering, DO NOTHING suppression, statement-constant action cardinality, canonical recursion detection, active-rule ON CONFLICT and MERGE rejection, CREATE OR REPLACE state retention, enable modes, rename and drop lifecycle, relation and token-safe target-column dependencies, reserved _RETURN naming, view _RETURN replacement and protection, materialized-view rejection, pg_rewrite, pg_rules, relhasrules, hasrules, and compact or pretty pg_get_ruledef",
+      "status": "partial",
+      "open_issue": "Set-oriented action execution and statement-trigger cardinality, DML rules that make views writable, rule-condition subqueries, OLD.* and NEW.* record expansion, RETURNING propagation and restrictions, NOTIFY actions, cross-relation and routine dependencies, inheritance and partition routing, session_replication_role execution modes, privileges and rule-owner security, exact pg_node_tree serialization and deparsing, dump/restore, and the complete PostgreSQL 18 rewrite-rule regression schedule remain."
     },
     {
       "id": "graph.age-default-label-drop",
