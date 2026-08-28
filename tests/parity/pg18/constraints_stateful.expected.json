@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "0ddff5faa27bea1e792f07b8d5c6d3a728fb45cad693cb715e702d8cc7fff3a7",
+  "fixture_sha256": "0a6fff0a14784798ef14ab2f7e5a8f6bad7c0788691b4e9597295b83a467977c",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -212,8 +212,300 @@
       "kind": "ok"
     },
     {
+      "name": "set_constraints_force_initially_deferred_immediate",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "set_constraints_immediate_failure_rolls_back",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
       "name": "restore_immediate_fk",
       "kind": "ok"
+    },
+    {
+      "name": "make_fk_deferrable_initially_immediate",
+      "kind": "ok"
+    },
+    {
+      "name": "set_constraints_deferred_child_before_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "set_constraints_implicit_batch_child_before_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "set_constraints_retroactive_check",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "set_constraints_retroactive_failure_rolls_back",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "set_constraints_all_ignores_nondeferrable",
+      "kind": "ok"
+    },
+    {
+      "name": "set_constraints_missing_name",
+      "kind": "error",
+      "sqlstate": "42704"
+    },
+    {
+      "name": "set_constraints_nondeferrable_name",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "set_constraints_nondeferrable_immediate",
+      "kind": "ok"
+    },
+    {
+      "name": "set_constraints_missing_schema",
+      "kind": "error",
+      "sqlstate": "3F000"
+    },
+    {
+      "name": "set_constraints_all_applies_to_later_constraint",
+      "kind": "ok"
+    },
+    {
+      "name": "set_constraints_replaced_constraint_uses_initial_mode",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "set_constraints_drop_column_replacement_uses_initial_mode",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "create_set_constraints_autocommit_procedure",
+      "kind": "ok"
+    },
+    {
+      "name": "set_constraints_inside_autocommit_procedure",
+      "kind": "ok"
+    },
+    {
+      "name": "create_set_constraints_nested_check_procedure",
+      "kind": "ok"
+    },
+    {
+      "name": "set_constraints_nested_check_still_fails_outer_commit",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "set_constraints_nested_failure_rolls_back",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "set_constraints_allocated_pg_temp_reports_missing_constraint",
+      "kind": "error",
+      "sqlstate": "42704"
+    },
+    {
+      "name": "create_deferred_event_identity_tables",
+      "kind": "ok"
+    },
+    {
+      "name": "seed_deferred_event_identity_rows",
+      "kind": "ok"
+    },
+    {
+      "name": "add_later_deferred_event_constraint",
+      "kind": "ok"
+    },
+    {
+      "name": "deferred_event_does_not_transfer_to_later_mode",
+      "kind": "ok"
+    },
+    {
+      "name": "pending_event_blocks_deferrability_change",
+      "kind": "error",
+      "sqlstate": "55006"
+    },
+    {
+      "name": "pending_event_failure_rolls_back",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "pending_event_blocks_enforceability_change",
+      "kind": "error",
+      "sqlstate": "55006"
+    },
+    {
+      "name": "pending_enforceability_failure_rolls_back",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_parent_event_relation_constraint",
+      "kind": "ok"
+    },
+    {
+      "name": "parent_event_allows_child_constraint_alter",
+      "kind": "ok"
+    },
+    {
+      "name": "restore_parent_event_constraint_deferrability",
+      "kind": "ok"
+    },
+    {
+      "name": "parent_event_blocks_foreign_key_drop",
+      "kind": "error",
+      "sqlstate": "55006"
+    },
+    {
+      "name": "queued_parent_event_follows_row_rewrite_for_all_immediate",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "queued_parent_event_rewrite_failure_rolls_back",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "queued_parent_event_survives_not_deferrable_change",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "queued_parent_event_failure_rolls_back",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "parent_event_blocks_parent_relation_alter",
+      "kind": "error",
+      "sqlstate": "55006"
+    },
+    {
+      "name": "parent_event_failure_rolls_back",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "create_empty_and_drop_parent_event_tables",
+      "kind": "ok"
+    },
+    {
+      "name": "empty_parent_delete_still_queues_event",
+      "kind": "error",
+      "sqlstate": "55006"
+    },
+    {
+      "name": "empty_parent_update_still_queues_event",
+      "kind": "error",
+      "sqlstate": "55006"
+    },
+    {
+      "name": "drop_restrict_dependency_precedes_parent_event",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "drop_cascade_observes_pending_parent_event",
+      "kind": "error",
+      "sqlstate": "55006"
+    },
+    {
+      "name": "pending_event_blocks_add_column",
+      "kind": "error",
+      "sqlstate": "55006"
+    },
+    {
+      "name": "pending_event_blocks_drop_constraint",
+      "kind": "error",
+      "sqlstate": "55006"
+    },
+    {
+      "name": "pending_event_blocks_drop_table",
+      "kind": "error",
+      "sqlstate": "55006"
+    },
+    {
+      "name": "pending_event_blocks_truncate",
+      "kind": "error",
+      "sqlstate": "55006"
+    },
+    {
+      "name": "pending_event_ddl_failures_leave_relation_unchanged",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "unrelated_deferred_update_does_not_queue_event",
+      "kind": "ok"
+    },
+    {
+      "name": "child_delete_does_not_queue_foreign_key_event",
+      "kind": "ok"
+    },
+    {
+      "name": "harmless_event_operations_committed",
+      "kind": "rows",
+      "rows": [
+        [
+          "0",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "deferred_temp_child_is_checked_before_on_commit_drop",
+      "kind": "error",
+      "sqlstate": "23503"
     },
     {
       "name": "invalid_check_deferrability",
@@ -485,6 +777,96 @@
           "t"
         ]
       ]
+    },
+    {
+      "name": "create_simple_query_control",
+      "kind": "ok"
+    },
+    {
+      "name": "simple_query_rollback_controls_implicit_transaction",
+      "kind": "ok"
+    },
+    {
+      "name": "simple_query_rollback_removed_prefix",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "simple_query_savepoint_rejects_implicit_transaction",
+      "kind": "error",
+      "sqlstate": "25P01"
+    },
+    {
+      "name": "simple_query_savepoint_error_rolls_back_prefix",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "simple_query_begin_promotes_implicit_transaction",
+      "kind": "ok"
+    },
+    {
+      "name": "simple_query_begin_rollback_removed_prefix",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "set_constraints_outside_transaction_resolves_missing_name",
+      "kind": "error",
+      "sqlstate": "42704"
+    },
+    {
+      "name": "set_constraints_outside_transaction_rejects_nondeferrable",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "recreated_foreign_key_trigger_resets_named_mode",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "recreated_foreign_key_trigger_preserves_all_mode",
+      "kind": "ok"
+    },
+    {
+      "name": "create_partition_event_identity_tables",
+      "kind": "ok"
+    },
+    {
+      "name": "partition_event_survives_unrelated_constraint_ddl",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "partition_event_failure_rolls_back",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_pending_view_dependency_tables",
+      "kind": "ok"
+    },
+    {
+      "name": "drop_restrict_view_dependency_precedes_pending_event",
+      "kind": "error",
+      "sqlstate": "2BP01"
     }
   ]
 }

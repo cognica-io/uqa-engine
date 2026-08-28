@@ -207,5 +207,5 @@ pub(crate) fn execute_compiled_statement(
         engine.has_registered_aggregate_function(name)
     });
     let plan = optimize_engine_plan(engine, plan)?;
-    UnifiedPlanExecutor::new(engine, params).execute(&plan)
+    UnifiedPlanExecutor::new_nested(engine, params).execute(&plan)
 }

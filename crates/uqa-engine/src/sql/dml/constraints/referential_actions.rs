@@ -41,6 +41,11 @@ pub(super) fn prepare_referenced_key_update_actions(
         engine.lock_relation(&ref_table, crate::row_locks::RelationLockMode::RowExclusive)?;
         let comparison = foreign_key_comparison_types(engine, &ref_table, &fk)?;
         let expected = comparison.normalize(old_values.clone())?;
+        let defer_no_action = matches!(fk.on_update, ForeignKeyAction::NoAction)
+            && engine.foreign_key_is_deferred(&ref_table, &fk)?;
+        if defer_no_action {
+            engine.defer_foreign_key_parent_event(&ref_table, table, &fk)?;
+        }
         if fk.period {
             let ordinary_len = expected.len().saturating_sub(1);
             let parent = PhysicalDocumentIdentity {
@@ -70,8 +75,14 @@ pub(super) fn prepare_referenced_key_update_actions(
                     if covered {
                         continue;
                     }
-                    if fk.deferrable && fk.initially_deferred {
-                        engine.defer_foreign_key_row(&physical_table, child_id)?;
+                    if defer_no_action {
+                        engine.defer_foreign_key_check(
+                            &ref_table,
+                            table,
+                            &physical_table,
+                            child_id,
+                            &fk,
+                        )?;
                         continue;
                     }
                     return Err(SQLError::Routine {
@@ -106,8 +117,14 @@ pub(super) fn prepare_referenced_key_update_actions(
         let referencing = referencing_rows(engine, &ref_table, &fk, &comparison, &expected)?;
         for (child, _child_doc) in referencing {
             match fk.on_update {
-                ForeignKeyAction::NoAction if fk.deferrable && fk.initially_deferred => {
-                    engine.defer_foreign_key_row(&child.table, child.doc_id)?;
+                ForeignKeyAction::NoAction if defer_no_action => {
+                    engine.defer_foreign_key_check(
+                        &ref_table,
+                        table,
+                        &child.table,
+                        child.doc_id,
+                        &fk,
+                    )?;
                 }
                 ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
                     return Err(SQLError::Routine {

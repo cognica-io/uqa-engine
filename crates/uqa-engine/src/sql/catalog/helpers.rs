@@ -934,6 +934,7 @@ pub(super) struct ConstraintCatalogRow {
     pub(super) schema: String,
     pub(super) table: String,
     pub(super) name: String,
+    pub(super) object_id: Option<[u8; 16]>,
     pub(super) kind: ConstraintCatalogKind,
     pub(super) columns: Vec<ConstraintCatalogColumn>,
     pub(super) state: ConstraintCatalogState,
@@ -1037,6 +1038,7 @@ struct PendingConstraintCatalogRow {
     schema: String,
     table: String,
     requested_name: Option<String>,
+    object_id: Option<[u8; 16]>,
     kind: ConstraintCatalogKind,
     columns: Vec<ConstraintCatalogColumn>,
     state: ConstraintCatalogState,
@@ -1066,6 +1068,7 @@ pub(super) fn constraint_catalog_rows(
                     schema: schema.clone(),
                     table: table.clone(),
                     requested_name: col.not_null_name.clone(),
+                    object_id: None,
                     kind: ConstraintCatalogKind::NotNull,
                     columns: vec![ConstraintCatalogColumn {
                         name: col.name.clone(),
@@ -1085,6 +1088,7 @@ pub(super) fn constraint_catalog_rows(
                     schema: schema.clone(),
                     table: table.clone(),
                     requested_name: col.check_name.clone(),
+                    object_id: None,
                     kind: ConstraintCatalogKind::Check,
                     columns: check_constraint_columns(expr, &columns, &table_name)?,
                     state: ConstraintCatalogState::new(
@@ -1099,6 +1103,7 @@ pub(super) fn constraint_catalog_rows(
             if let Some(reference) = &col.references {
                 let foreign_key = ForeignKey {
                     name: reference.name.clone(),
+                    object_id: reference.object_id,
                     local_columns: vec![col.name.clone()],
                     ref_table: reference.table.clone(),
                     ref_columns: reference.column.iter().cloned().collect(),
@@ -1131,6 +1136,7 @@ pub(super) fn constraint_catalog_rows(
                 schema: schema.clone(),
                 table: table.clone(),
                 requested_name: constraint.name,
+                object_id: None,
                 kind: match constraint.kind {
                     TableKeyConstraintKind::PrimaryKey => ConstraintCatalogKind::PrimaryKey,
                     TableKeyConstraintKind::Unique => ConstraintCatalogKind::Unique {
@@ -1153,6 +1159,7 @@ pub(super) fn constraint_catalog_rows(
                 schema: schema.clone(),
                 table: table.clone(),
                 requested_name: constraint.name,
+                object_id: None,
                 kind: ConstraintCatalogKind::Check,
                 columns: check_constraint_columns(&constraint.expr, &columns, &table_name)?,
                 state: ConstraintCatalogState::new(
@@ -1187,6 +1194,7 @@ pub(super) fn constraint_catalog_rows(
                 schema: constraint.schema,
                 table: constraint.table,
                 name,
+                object_id: constraint.object_id,
                 kind: constraint.kind,
                 columns: constraint.columns,
                 state: constraint.state,
@@ -1390,6 +1398,7 @@ fn foreign_key_catalog_row(
         schema: schema.to_string(),
         table: table.to_string(),
         requested_name: foreign_key.name.clone(),
+        object_id: foreign_key.object_id,
         kind: ConstraintCatalogKind::ForeignKey,
         columns: local_columns,
         state: ConstraintCatalogState::new(

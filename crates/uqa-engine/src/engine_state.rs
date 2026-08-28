@@ -228,6 +228,7 @@ impl SessionContext {
     pub(super) fn new(random_state: super::SessionRandomState) -> Self {
         let state = super::SessionStateSnapshot {
             search_path: vec!["public".to_string()],
+            temporary_namespace_allocated: false,
             session_vars: BTreeMap::new(),
             sequence_currvals: BTreeMap::new(),
             prepared: BTreeMap::new(),
@@ -280,6 +281,7 @@ impl RuntimeExtensions {
 
 pub(super) struct QueryRuntime {
     pub(super) statement_gate: ReentrantMutex<()>,
+    pub(super) sql_execution_depth: AtomicUsize,
     pub(super) cancellation: uqa_core::CancellationToken,
     pub(super) notices: Mutex<Vec<(String, String)>>,
     pub(super) function_depth_limit: AtomicUsize,
@@ -292,6 +294,7 @@ impl QueryRuntime {
     pub(super) fn new(function_depth_limit: usize) -> Self {
         Self {
             statement_gate: ReentrantMutex::new(()),
+            sql_execution_depth: AtomicUsize::new(0),
             cancellation: uqa_core::CancellationToken::new(),
             notices: Mutex::new(Vec::new()),
             function_depth_limit: AtomicUsize::new(function_depth_limit),

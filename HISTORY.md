@@ -6,8 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Implemented PostgreSQL 18 `SET CONSTRAINTS` for deferrable foreign keys, including persistent transaction-wide `ALL` state, schema and exact search-path name resolution, duplicate-name fanout, durable constraint-object identities, exact constraint-bound row events, retroactive `IMMEDIATE` validation, selective multi-constraint checks, savepoints, SQL routines, dynamic PL/pgSQL, reentrant host callbacks, PostgreSQL simple-query transaction-control semantics, cross-session constraint replacement and table-rename lifecycle, allocated `pg_temp` lifetime, PostgreSQL SQLSTATEs including pending trigger-event changes, and top-level outside-transaction warning followed by normal name and deferrability resolution.
+
 ### Fixed
 
+- Matched PostgreSQL 18 deferred-trigger lifecycle behavior by creating child-side events only for inserts and foreign-key-value changes, recording parent-side key-change events even when no child currently matches, following queued events across row-identity rewrites, identifying the exact physical partition that fired each event, retaining already queued checks across later deferrability changes, firing former-deferrable events for `SET CONSTRAINTS ALL IMMEDIATE`, resetting a named mode when disabled foreign-key triggers are recreated while retaining an `ALL` mode, preserving full view, schema-expression, and foreign-key `2BP01` RESTRICT dependency precedence before pending-event checks while blocking event-sensitive ALTER, DROP, and TRUNCATE operations including referenced-parent trigger removal with `55006`, synchronizing legacy partition-inherited foreign-key identities during reopen, continuing simple-query atomic segments after a pre-existing transaction closes, and validating deferred foreign keys exactly once before temporary-table `ON COMMIT` actions can remove their events.
 - Made live crates.io release dispatches fail when registry credentials are absent, retry crates.io rate limits, and record the live or dry-run outcome in release notes instead of silently falling back to dry-run.
 
 ## [0.1.7] - 2026-08-28

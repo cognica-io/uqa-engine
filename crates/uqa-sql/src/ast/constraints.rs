@@ -81,6 +81,10 @@ pub struct ColumnDef {
 pub struct ForeignKeyRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Durable identity of the catalog constraint object. The engine assigns
+    /// this when the constraint is published; parsed SQL leaves it unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub object_id: Option<[u8; 16]>,
     pub table: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub column: Option<String>,
@@ -209,6 +213,10 @@ pub struct DetachedPartitionConstraint {
 #[allow(clippy::struct_excessive_bools)]
 pub struct ForeignKey {
     pub name: Option<String>,
+    /// Durable identity of the catalog constraint object. The engine assigns
+    /// this when the constraint is published; parsed SQL leaves it unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub object_id: Option<[u8; 16]>,
     pub local_columns: Vec<String>,
     pub ref_table: String,
     pub ref_columns: Vec<String>,

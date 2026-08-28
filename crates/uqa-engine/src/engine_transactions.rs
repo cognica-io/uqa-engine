@@ -5,10 +5,10 @@
 //
 
 use super::{
-    BTreeSet, BackendTransactionMode, Engine, EngineDataSnapshot, SQLError, SQLParam, SQLResult,
-    SessionStateSnapshot, StorageBackendError, StorageBackendResult, StorageSavepointId,
-    TransactionDirtyState, TransactionFrame, TransactionIntent, TransactionSavepoint,
-    TransactionStatus,
+    BTreeSet, BackendTransactionMode, ConstraintModeState, Engine, EngineDataSnapshot, SQLError,
+    SQLParam, SQLResult, SessionStateSnapshot, StorageBackendError, StorageBackendResult,
+    StorageSavepointId, TransactionDirtyState, TransactionFrame, TransactionIntent,
+    TransactionSavepoint, TransactionStatus,
 };
 use uqa_sql::ast::TransactionStmt;
 
@@ -20,6 +20,45 @@ fn panic_description(payload: &(dyn std::any::Any + Send)) -> &str {
         .copied()
         .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
         .unwrap_or("<non-string panic payload>")
+}
+
+struct StatementAbortSnapshot {
+    storage_savepoint: Option<StorageSavepointId>,
+    session: SessionStateSnapshot,
+    data: Option<EngineDataSnapshot>,
+    dirty: TransactionDirtyState,
+    keep_mark: Option<u32>,
+    row_changes: Vec<crate::row_locks::PendingRowChange>,
+    deferred_foreign_key_checks: Vec<crate::DeferredForeignKeyCheck>,
+    constraint_modes: ConstraintModeState,
+}
+
+fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot {
+    if let Some(savepoint) = frame.savepoints.last() {
+        return StatementAbortSnapshot {
+            storage_savepoint: Some(savepoint.storage_savepoint),
+            session: savepoint.session_snapshot.clone(),
+            data: savepoint.data_snapshot.clone(),
+            dirty: savepoint.dirty,
+            keep_mark: Some(savepoint.lock_mark),
+            row_changes: savepoint.row_changes.clone(),
+            deferred_foreign_key_checks: savepoint.deferred_foreign_key_checks.clone(),
+            constraint_modes: savepoint.constraint_modes.clone(),
+        };
+    }
+    StatementAbortSnapshot {
+        storage_savepoint: None,
+        session: frame.session_snapshot.clone(),
+        data: frame.data_snapshot.clone(),
+        dirty: frame.dirty_at_begin,
+        keep_mark: frame
+            .storage_savepoint
+            .as_ref()
+            .map(|_| frame.begin_lock_mark.saturating_sub(1)),
+        row_changes: Vec::new(),
+        deferred_foreign_key_checks: Vec::new(),
+        constraint_modes: ConstraintModeState::default(),
+    }
 }
 
 impl Engine {
@@ -349,7 +388,7 @@ impl Engine {
         self.session.transactions.lock().len()
     }
 
-    pub(crate) fn in_explicit_transaction(&self) -> bool {
+    pub(crate) fn in_transaction_block(&self) -> bool {
         self.session
             .transactions
             .lock()
@@ -391,6 +430,11 @@ impl Engine {
             false
         };
         if apply_on_commit {
+            let validation = {
+                let mut stack = self.session.transactions.lock();
+                self.validate_deferred_constraints_before_commit(&mut stack, false)
+            };
+            validation?;
             if let Err(error) = self.apply_temporary_on_commit_actions() {
                 return Err(self.abort_sql_transaction_after_error(error));
             }
@@ -410,7 +454,7 @@ impl Engine {
                 self.begin_transaction_frame(&mut guard, false, true, false)
             }
             TransactionStmt::Begin => self.begin_transaction_frame(&mut guard, false, false, false),
-            TransactionStmt::Commit => self.commit_transaction_frame(&mut guard),
+            TransactionStmt::Commit => self.commit_transaction_frame(&mut guard, apply_on_commit),
             TransactionStmt::Savepoint(name) => self.save_transaction_savepoint(&mut guard, name),
             TransactionStmt::ReleaseSavepoint(name) => {
                 self.release_transaction_savepoint(&mut guard, &name)
@@ -490,6 +534,17 @@ impl Engine {
         self.begin_transaction_frame(&mut stack, read_only, true, true)
     }
 
+    pub(crate) fn begin_implicit_transaction_block(&self) -> Result<(), SQLError> {
+        let _statement = self.runtime.statement_gate.lock();
+        let mut stack = self.session.transactions.lock();
+        if !stack.is_empty() {
+            return Err(SQLError::Internal(
+                "implicit transaction block started inside another transaction".into(),
+            ));
+        }
+        self.begin_transaction_frame(&mut stack, false, true, false)
+    }
+
     fn begin_transaction_frame(
         &self,
         stack: &mut Vec<TransactionFrame>,
@@ -519,6 +574,15 @@ impl Engine {
                 (Some(savepoint), self.snapshot_transaction_data()?, baseline)
             }
         };
+        let (constraint_modes, deferred_foreign_key_checks) = stack.last().map_or_else(
+            || (ConstraintModeState::default(), Vec::new()),
+            |frame| {
+                (
+                    frame.constraint_modes.clone(),
+                    frame.deferred_foreign_key_checks.clone(),
+                )
+            },
+        );
         let (lock_mark, next_lock_mark) = stack.last_mut().map_or((0, 1), |frame| {
             let lock_mark = frame.next_lock_mark;
             frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
@@ -549,7 +613,8 @@ impl Engine {
             next_lock_mark,
             snapshot_change_baseline,
             row_changes: Vec::new(),
-            deferred_foreign_key_rows: BTreeSet::new(),
+            deferred_foreign_key_checks,
+            constraint_modes,
         });
         self.update_statement_row_lock_baseline(snapshot_change_baseline);
         Ok(())
@@ -670,12 +735,18 @@ impl Engine {
         }
     }
 
-    fn commit_transaction_frame(&self, stack: &mut Vec<TransactionFrame>) -> Result<(), SQLError> {
+    fn commit_transaction_frame(
+        &self,
+        stack: &mut Vec<TransactionFrame>,
+        deferred_constraints_validated: bool,
+    ) -> Result<(), SQLError> {
         let storage_savepoint = stack
             .last()
             .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?
             .storage_savepoint;
-        self.validate_deferred_constraints_before_commit(stack, storage_savepoint.is_some())?;
+        if !deferred_constraints_validated {
+            self.validate_deferred_constraints_before_commit(stack, storage_savepoint.is_some())?;
+        }
         let frame = stack
             .last()
             .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?;
@@ -747,10 +818,9 @@ impl Engine {
         }
         if let Some(parent) = stack.last_mut() {
             parent.next_lock_mark = parent.next_lock_mark.max(committed.next_lock_mark);
+            parent.constraint_modes = committed.constraint_modes;
             parent.row_changes.extend(committed.row_changes);
-            parent
-                .deferred_foreign_key_rows
-                .extend(committed.deferred_foreign_key_rows);
+            parent.deferred_foreign_key_checks = committed.deferred_foreign_key_checks;
         }
         Ok(())
     }
@@ -904,36 +974,22 @@ impl Engine {
             return error;
         }
 
-        let savepoint = frame.savepoints.last().map(|savepoint| {
-            (
-                savepoint.storage_savepoint,
-                savepoint.session_snapshot.clone(),
-                savepoint.data_snapshot.clone(),
-                savepoint.dirty,
-                savepoint.lock_mark,
-                savepoint.row_changes.clone(),
-                savepoint.deferred_foreign_key_rows.clone(),
-            )
-        });
-        let transaction_snapshot = (
-            frame.session_snapshot.clone(),
-            frame.data_snapshot.clone(),
-            frame.dirty_at_begin,
-        );
+        let rollback_state = statement_abort_snapshot(frame);
         // A nested frame owns a backend savepoint of its own; aborting the statement rolls the storage back to that savepoint so the outer frames' writes and locks survive, exactly like a PostgreSQL subtransaction abort. Only the outermost frame aborts the whole backend transaction.
         let frame_storage_savepoint = frame.storage_savepoint;
-        let frame_begin_lock_mark = frame.begin_lock_mark;
         let savepoints_deferred = Self::backend_savepoints_deferred(&stack);
         let mut cleanup_errors = Vec::new();
         let mut backend_aborted = false;
 
         if let Some(backend) = self.storage.backend.as_ref() {
             // A deferred outer transaction has written nothing to storage, so its backend savepoints exist only logically and there is nothing to roll back at the backend for a savepoint or nested frame; the outermost abort still ends the read transaction.
-            let rollback = if savepoint.is_some() || frame_storage_savepoint.is_some() {
+            let rollback = if rollback_state.storage_savepoint.is_some()
+                || frame_storage_savepoint.is_some()
+            {
                 if savepoints_deferred {
                     Ok(())
-                } else if let Some((storage_savepoint, ..)) = savepoint.as_ref() {
-                    backend.rollback_to_savepoint(*storage_savepoint)
+                } else if let Some(storage_savepoint) = rollback_state.storage_savepoint {
+                    backend.rollback_to_savepoint(storage_savepoint)
                 } else if let Some(frame_savepoint) = frame_storage_savepoint {
                     backend.rollback_to_savepoint(frame_savepoint)
                 } else {
@@ -948,33 +1004,12 @@ impl Engine {
             }
         }
 
-        let (
-            session_snapshot,
-            data_snapshot,
-            dirty,
-            keep_mark,
-            row_changes,
-            deferred_foreign_key_rows,
-        ) = if let Some((_, session, data, dirty, mark, row_changes, deferred_rows)) = savepoint {
-            (session, data, dirty, Some(mark), row_changes, deferred_rows)
-        } else {
-            (
-                transaction_snapshot.0,
-                transaction_snapshot.1,
-                transaction_snapshot.2,
-                frame_storage_savepoint
-                    .as_ref()
-                    .map(|_| frame_begin_lock_mark.saturating_sub(1)),
-                Vec::new(),
-                BTreeSet::new(),
-            )
-        };
-        if let Some(snapshot) = data_snapshot.as_ref() {
+        if let Some(snapshot) = rollback_state.data.as_ref() {
             if let Err(restore_error) = self.restore_transaction_data(snapshot) {
                 cleanup_errors.push(format!("memory restore: {restore_error}"));
             }
         }
-        self.restore_transaction_dirty_state(dirty);
+        self.restore_transaction_dirty_state(rollback_state.dirty);
         if let Err(restore_error) = self.reload_persistent_value_indexes() {
             cleanup_errors.push(format!("btree restore: {restore_error}"));
         }
@@ -986,16 +1021,17 @@ impl Engine {
                 cleanup_errors.push(format!("registry restore: {restore_error}"));
             }
         }
-        self.restore_session_state(&session_snapshot);
-        self.release_aborted_statement_locks(keep_mark);
+        self.restore_session_state(&rollback_state.session);
+        self.release_aborted_statement_locks(rollback_state.keep_mark);
         if let Some(frame) = stack.last_mut() {
             frame.status = if backend_aborted {
                 TransactionStatus::FailedBackendAborted
             } else {
                 TransactionStatus::Failed
             };
-            frame.row_changes = row_changes;
-            frame.deferred_foreign_key_rows = deferred_foreign_key_rows;
+            frame.row_changes = rollback_state.row_changes;
+            frame.deferred_foreign_key_checks = rollback_state.deferred_foreign_key_checks;
+            frame.constraint_modes = rollback_state.constraint_modes;
         }
         transaction_abort_result(error, &cleanup_errors)
     }
@@ -1039,7 +1075,8 @@ impl Engine {
         frame.lock_mark = frame.next_lock_mark;
         frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
         let row_changes = frame.row_changes.clone();
-        let deferred_foreign_key_rows = frame.deferred_foreign_key_rows.clone();
+        let deferred_foreign_key_checks = frame.deferred_foreign_key_checks.clone();
+        let constraint_modes = frame.constraint_modes.clone();
         frame.savepoints.push(TransactionSavepoint {
             name,
             storage_savepoint,
@@ -1048,7 +1085,8 @@ impl Engine {
             dirty: self.transaction_dirty_state(),
             lock_mark: keep_mark,
             row_changes,
-            deferred_foreign_key_rows,
+            deferred_foreign_key_checks,
+            constraint_modes,
         });
         Ok(())
     }
@@ -1120,8 +1158,11 @@ impl Engine {
         let keep_mark = savepoint.lock_mark;
         frame.row_changes.clone_from(&savepoint.row_changes);
         frame
-            .deferred_foreign_key_rows
-            .clone_from(&savepoint.deferred_foreign_key_rows);
+            .deferred_foreign_key_checks
+            .clone_from(&savepoint.deferred_foreign_key_checks);
+        frame
+            .constraint_modes
+            .clone_from(&savepoint.constraint_modes);
         frame.savepoints.truncate(position + 1);
         self.row_locks
             .release_mark_above(self.session_id, keep_mark);
@@ -1380,6 +1421,7 @@ fn transaction_abort_result(error: SQLError, cleanup_errors: &[String]) -> SQLEr
 
 mod completion;
 mod constraints;
+pub(crate) use constraints::constraint_identities_match;
 mod row_locks_session;
 
 #[cfg(test)]

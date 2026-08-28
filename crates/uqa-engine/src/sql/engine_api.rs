@@ -6,12 +6,36 @@
 
 use uqa_execution::ColumnarBatch;
 
-use super::{cursor, execute, Engine, SQLCursor, SQLCursorSummary, SQLError, SQLParam, SQLResult};
+use super::{
+    cursor, execute, execute_nested, Engine, SQLCursor, SQLCursorSummary, SQLError, SQLParam,
+    SQLResult,
+};
+
+struct SQLExecutionScope<'a> {
+    depth: &'a std::sync::atomic::AtomicUsize,
+}
+
+impl<'a> SQLExecutionScope<'a> {
+    fn enter(depth: &'a std::sync::atomic::AtomicUsize) -> (Self, bool) {
+        let nested = depth.fetch_add(1, std::sync::atomic::Ordering::Relaxed) != 0;
+        (Self { depth }, nested)
+    }
+}
+
+impl Drop for SQLExecutionScope<'_> {
+    fn drop(&mut self) {
+        let previous = self
+            .depth
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        debug_assert!(previous != 0, "SQL execution depth underflow");
+    }
+}
 
 impl Engine {
     /// Run a single SQL statement against the engine.
     pub fn sql(&self, query: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
         let _statement = self.runtime.statement_gate.lock();
+        let (_execution, nested) = SQLExecutionScope::enter(&self.runtime.sql_execution_depth);
         self.synchronize_table_catalog()
             .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
         self.synchronize_table_data()
@@ -19,7 +43,11 @@ impl Engine {
         self.synchronize_catalog_registries().map_err(|err| {
             SQLError::Internal(format!("refresh durable catalog registries: {err}"))
         })?;
-        execute(self, query, params)
+        if nested {
+            execute_nested(self, query, params)
+        } else {
+            execute(self, query, params)
+        }
     }
 
     /// Execute one read query into a bounded spill and return a columnar batch
@@ -28,6 +56,7 @@ impl Engine {
     /// snapshot is committed before the cursor is returned.
     pub fn sql_cursor(&self, query: &str, params: &[SQLParam]) -> Result<SQLCursor, SQLError> {
         let _statement = self.runtime.statement_gate.lock();
+        let (_execution, _) = SQLExecutionScope::enter(&self.runtime.sql_execution_depth);
         self.synchronize_table_catalog()
             .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
         self.synchronize_table_data()

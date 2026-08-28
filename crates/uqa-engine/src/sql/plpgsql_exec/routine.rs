@@ -228,7 +228,7 @@ fn execute_sql_language(
         .collect::<Result<Vec<_>, SQLError>>()?;
     let mut last = SQLResult::empty();
     for plan in plans {
-        last = UnifiedPlanExecutor::new(engine, &params).execute(plan)?;
+        last = UnifiedPlanExecutor::new_nested(engine, &params).execute(plan)?;
     }
     let out_params = def.output_params();
     let returns_anonymous_record = routine_returns_anonymous_record(def);

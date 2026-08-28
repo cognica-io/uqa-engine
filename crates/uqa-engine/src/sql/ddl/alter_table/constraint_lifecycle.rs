@@ -142,7 +142,7 @@ fn materialize_constraint_candidate(
     let relation = crate::RelationIdentity::from_legacy_name(&canonical).map_err(|message| {
         SQLError::Internal(format!("constraint relation identity: {message}"))
     })?;
-    crate::engine_table_storage::materialize_constraint_names(&relation, columns, constraints)
+    crate::engine_table_storage::materialize_constraint_metadata(&relation, columns, constraints)
         .map_err(|error| ddl_storage_error("ALTER TABLE constraint naming", error))?;
     Ok(())
 }
@@ -155,7 +155,8 @@ pub(super) fn publish_constraint_state(
 ) -> Result<(), SQLError> {
     engine
         .replace_constraint_state(table, columns, constraints)
-        .map_err(|error| ddl_storage_error("ALTER TABLE constraint catalog", error))
+        .map_err(|error| ddl_storage_error("ALTER TABLE constraint catalog", error))?;
+    engine.prune_constraint_modes()
 }
 
 pub(super) fn find_constraint(
@@ -520,6 +521,28 @@ pub(super) fn alter_constraint(
             format!("constraint \"{name}\" of relation \"{table}\" is not a not-null constraint"),
         ));
     }
+    let recreated_foreign_key = if enforceability == Some(true) {
+        match location {
+            ConstraintLocation::ColumnForeignKey(index) => columns[index]
+                .references
+                .as_ref()
+                .filter(|foreign_key| !foreign_key.enforced)
+                .map(|foreign_key| column_foreign_key(&columns[index], foreign_key)),
+            ConstraintLocation::TableForeignKey(index) => constraints
+                .foreign_keys
+                .get(index)
+                .filter(|foreign_key| !foreign_key.enforced)
+                .cloned(),
+            ConstraintLocation::NotNull(_)
+            | ConstraintLocation::ColumnCheck(_)
+            | ConstraintLocation::TableCheck(_)
+            | ConstraintLocation::Key(_) => None,
+        }
+        .map(|foreign_key| engine.foreign_key_constraint_identity(table, &foreign_key))
+        .transpose()?
+    } else {
+        None
+    };
     let mut validate_after_publish = false;
     match location {
         ConstraintLocation::NotNull(index) => {
@@ -571,6 +594,9 @@ pub(super) fn alter_constraint(
     publish_constraint_state(engine, table, columns, constraints)?;
     if validate_after_publish {
         validate_and_mark_constraint(engine, table, name)?;
+    }
+    if let Some(identity) = &recreated_foreign_key {
+        engine.forget_named_constraint_mode(identity);
     }
     Ok(())
 }

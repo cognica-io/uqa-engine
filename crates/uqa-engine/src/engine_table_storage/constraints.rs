@@ -18,7 +18,7 @@ pub(crate) fn table_next_id_metadata_key(table: &str) -> String {
     format!("{TABLE_NEXT_ID_METADATA_PREFIX}{table}")
 }
 
-pub(crate) fn materialize_constraint_names(
+pub(crate) fn materialize_constraint_metadata(
     relation: &RelationIdentity,
     columns: &mut [uqa_sql::ast::ColumnDef],
     constraints: &mut uqa_sql::ast::TableConstraintSet,
@@ -67,6 +67,7 @@ pub(crate) fn materialize_constraint_names(
                 format!("{}_{}_fkey", relation.name, column.name),
                 &mut used,
             )?;
+            changed |= assign_constraint_object_id(&mut reference.object_id)?;
         }
     }
     for constraint in &mut constraints.key_constraints {
@@ -92,6 +93,7 @@ pub(crate) fn materialize_constraint_names(
         };
         changed |= assign_constraint_name(&mut constraint.name, base, &mut used)?;
     }
+    changed |= synchronize_partition_inherited_foreign_key_ids(constraints);
     for constraint in &mut constraints.foreign_keys {
         let component = constraint_column_component(&constraint.local_columns, relation)?;
         changed |= assign_constraint_name(
@@ -99,8 +101,64 @@ pub(crate) fn materialize_constraint_names(
             format!("{}_{}_fkey", relation.name, component),
             &mut used,
         )?;
+        changed |= assign_constraint_object_id(&mut constraint.object_id)?;
     }
+    changed |= synchronize_partition_inherited_foreign_key_ids(constraints);
     Ok(changed)
+}
+
+pub(crate) fn foreign_keys_match_without_object_id(
+    left: &uqa_sql::ast::ForeignKey,
+    right: &uqa_sql::ast::ForeignKey,
+) -> bool {
+    let mut left = left.clone();
+    let mut right = right.clone();
+    left.object_id = None;
+    right.object_id = None;
+    left == right
+}
+
+pub(crate) fn synchronize_partition_inherited_foreign_key_ids(
+    constraints: &mut uqa_sql::ast::TableConstraintSet,
+) -> bool {
+    let mut changed = false;
+    for inherited_index in 0..constraints.hierarchy.partition_inherited_foreign_keys.len() {
+        let inherited = &constraints.hierarchy.partition_inherited_foreign_keys[inherited_index];
+        let Some(foreign_key_index) = constraints
+            .foreign_keys
+            .iter()
+            .position(|foreign_key| foreign_keys_match_without_object_id(foreign_key, inherited))
+        else {
+            continue;
+        };
+        let object_id = constraints.foreign_keys[foreign_key_index]
+            .object_id
+            .or(inherited.object_id);
+        if constraints.foreign_keys[foreign_key_index].object_id != object_id {
+            constraints.foreign_keys[foreign_key_index].object_id = object_id;
+            changed = true;
+        }
+        if constraints.hierarchy.partition_inherited_foreign_keys[inherited_index].object_id
+            != object_id
+        {
+            constraints.hierarchy.partition_inherited_foreign_keys[inherited_index].object_id =
+                object_id;
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn assign_constraint_object_id(target: &mut Option<[u8; 16]>) -> StorageBackendResult<bool> {
+    if target.is_some() {
+        return Ok(false);
+    }
+    let mut object_id = [0_u8; 16];
+    getrandom::fill(&mut object_id).map_err(|error| {
+        StorageBackendError::Other(format!("allocate foreign-key object identity: {error}"))
+    })?;
+    *target = Some(object_id);
+    Ok(true)
 }
 
 fn record_constraint_name(
@@ -295,7 +353,7 @@ impl Engine {
         }
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
-        materialize_constraint_names(&relation, &mut columns, &mut constraints)?;
+        materialize_constraint_metadata(&relation, &mut columns, &mut constraints)?;
         if self.is_persistent() {
             self.try_save_table_schema_with_components(
                 &table_name,
@@ -440,7 +498,7 @@ impl Engine {
         };
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
-        materialize_constraint_names(&relation, &mut next, &mut constraints)?;
+        materialize_constraint_metadata(&relation, &mut next, &mut constraints)?;
         self.mark_column_stats_dirty(&table_name, &t)?;
         if self.is_persistent() {
             self.try_save_table_schema_with_components(&table_name, &t, &next, &constraints)?;
@@ -535,7 +593,7 @@ impl Engine {
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
         let mut columns = t.columns.read().clone();
-        materialize_constraint_names(&relation, &mut columns, &mut constraints)?;
+        materialize_constraint_metadata(&relation, &mut columns, &mut constraints)?;
         if self.is_persistent() {
             self.try_save_table_schema_with_components(&table_name, &t, &columns, &constraints)?;
         }
@@ -578,7 +636,7 @@ impl Engine {
         };
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
-        materialize_constraint_names(&relation, &mut columns, &mut constraints)?;
+        materialize_constraint_metadata(&relation, &mut columns, &mut constraints)?;
         if self.is_persistent() {
             self.try_save_table_schema_with_components(
                 &table_name,
@@ -642,7 +700,7 @@ impl Engine {
         };
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
-        materialize_constraint_names(&relation, &mut columns, &mut constraints)?;
+        materialize_constraint_metadata(&relation, &mut columns, &mut constraints)?;
         if self.is_persistent() {
             self.try_save_table_schema_with_components(&table_name, &t, &columns, &constraints)?;
         }
@@ -753,6 +811,7 @@ impl Engine {
                         .name
                         .clone()
                         .or_else(|| Some(format!("{}_fkey", col.name))),
+                    object_id: reference.object_id,
                     local_columns: vec![col.name.clone()],
                     ref_table: reference.table,
                     ref_columns: reference.column.into_iter().collect(),

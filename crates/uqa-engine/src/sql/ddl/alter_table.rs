@@ -45,7 +45,7 @@ pub(in crate::sql) fn run_alter_table(
     engine: &Engine,
     mut stmt: AlterTableStmt,
 ) -> Result<SQLResult, SQLError> {
-    if engine.in_explicit_transaction()
+    if engine.in_transaction_block()
         && stmt.actions.iter().any(|action| {
             matches!(
                 action,
@@ -156,6 +156,15 @@ fn run_alter_table_action(
     stmt: AlterTableStmt,
     action: AlterTableAction,
 ) -> Result<(), SQLError> {
+    if !matches!(
+        action,
+        AlterTableAction::RenameColumn { .. }
+            | AlterTableAction::RenameTable { .. }
+            | AlterTableAction::RenameTrigger { .. }
+            | AlterTableAction::RenameRule { .. }
+    ) {
+        engine.ensure_no_pending_trigger_events(&stmt.table, "ALTER TABLE")?;
+    }
     match action {
         action @ (AlterTableAction::AddInheritance { .. }
         | AlterTableAction::DropInheritance { .. }

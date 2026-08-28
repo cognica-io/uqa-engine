@@ -229,7 +229,7 @@ fn lock_document_foreign_key_dependencies(
         if !fk.enforced {
             continue;
         }
-        if !allow_missing && fk.deferrable && fk.initially_deferred {
+        if !allow_missing && engine.foreign_key_is_deferred(table, &fk)? {
             continue;
         }
         if old_document.is_some_and(|old_document| {
@@ -325,86 +325,126 @@ fn lock_document_foreign_key_dependencies(
     Ok(())
 }
 
-pub(crate) fn validate_deferred_foreign_key_rows(
+struct DeferredForeignKeyValidation {
+    foreign_key: ForeignKey,
+    comparison: Option<ForeignKeyComparison>,
+    cross_type_parent_keys: Option<std::collections::BTreeSet<Vec<Value>>>,
+}
+
+pub(crate) fn validate_deferred_foreign_key_checks(
     engine: &Engine,
-    rows: &std::collections::BTreeSet<crate::row_locks::RowLockKey>,
+    checks: &[crate::DeferredForeignKeyCheck],
+    targets: Option<&std::collections::BTreeSet<crate::ConstraintIdentity>>,
 ) -> Result<(), SQLError> {
-    let mut rows_by_table = std::collections::BTreeMap::<String, Vec<DocId>>::new();
-    for row in rows {
-        rows_by_table
-            .entry(engine.row_lock_manager().table_name(row.table).to_string())
-            .or_default()
-            .push(row.doc_id);
-    }
-    for (table, doc_ids) in rows_by_table {
-        for foreign_key in engine
-            .try_foreign_keys(&table)
-            .map_err(|error| dml_storage_error("deferred constraint validation", error))?
-        {
-            if !foreign_key.enforced || !foreign_key.deferrable || !foreign_key.initially_deferred {
-                continue;
-            }
-            if foreign_key.period {
-                for doc_id in &doc_ids {
-                    let Some(document) = engine.get_document(&table, *doc_id)? else {
-                        continue;
-                    };
-                    let Some(lookup) =
-                        foreign_key_lookup_values(engine, &table, &foreign_key, &document)?
-                    else {
-                        continue;
-                    };
-                    if !period_foreign_key_coverage(
-                        engine,
-                        &foreign_key,
-                        &lookup.values,
-                        &[],
-                        None,
-                    )?
-                    .0
-                    {
-                        return Err(SQLError::Routine {
-                            sqlstate: "23503".into(),
-                            message: format!(
-                                "insert or update on table \"{table}\" violates foreign key constraint \"{}\"",
-                                foreign_key.name.as_deref().unwrap_or("<unnamed>")
-                            ),
-                        });
-                    }
-                }
-                continue;
-            }
-            let comparison = foreign_key_comparison_types(engine, &table, &foreign_key)?;
-            let cross_type_parent_keys = if comparison.exact_reference_lookup {
-                None
-            } else {
-                Some(foreign_key_parent_index(engine, &foreign_key, &comparison)?)
-            };
-            for doc_id in &doc_ids {
-                let Some(document) = engine.get_document(&table, *doc_id)? else {
-                    continue;
-                };
-                let Some(values) = foreign_key_values(&foreign_key, &document, &comparison)? else {
-                    continue;
-                };
-                let parent_exists = if comparison.exact_reference_lookup {
-                    find_exact_foreign_key_parent(engine, &foreign_key, &values)?.is_some()
+    let mut validation_by_constraint = std::collections::BTreeMap::new();
+    for check in checks {
+        let selected = targets.is_none_or(|targets| {
+            targets.iter().any(|target| {
+                crate::engine_transactions::constraint_identities_match(target, &check.constraint)
+            })
+        });
+        if !selected {
+            continue;
+        }
+        let Some(row) = check.row else {
+            continue;
+        };
+        let table = engine.row_lock_manager().table_name(row.table).to_string();
+        let cache_key = (check.constraint.clone(), table.clone());
+        if !validation_by_constraint.contains_key(&cache_key) {
+            let constraint_table = check.constraint.relation.qualified_name();
+            let foreign_key = engine
+                .try_foreign_keys(&constraint_table)
+                .map_err(|error| dml_storage_error("deferred constraint validation", error))?
+                .into_iter()
+                .find(|foreign_key| {
+                    foreign_key.name.as_deref() == Some(&check.constraint.name)
+                        && foreign_key.object_id == check.constraint.object_id
+                });
+            let validation = if let Some(foreign_key) =
+                foreign_key.filter(|foreign_key| foreign_key.enforced)
+            {
+                if foreign_key.period {
+                    Some(DeferredForeignKeyValidation {
+                        foreign_key,
+                        comparison: None,
+                        cross_type_parent_keys: None,
+                    })
                 } else {
-                    cross_type_parent_keys
-                        .as_ref()
-                        .is_some_and(|keys| keys.contains(&values))
-                };
-                if !parent_exists {
-                    return Err(SQLError::Routine {
-                        sqlstate: "23503".into(),
-                        message: format!(
-                            "insert or update on table \"{table}\" violates foreign key constraint \"{}\"",
-                            foreign_key.name.as_deref().unwrap_or("<unnamed>")
-                        ),
-                    });
+                    let comparison = foreign_key_comparison_types(engine, &table, &foreign_key)?;
+                    let cross_type_parent_keys = if comparison.exact_reference_lookup {
+                        None
+                    } else {
+                        Some(foreign_key_parent_index(engine, &foreign_key, &comparison)?)
+                    };
+                    Some(DeferredForeignKeyValidation {
+                        foreign_key,
+                        comparison: Some(comparison),
+                        cross_type_parent_keys,
+                    })
                 }
+            } else {
+                None
+            };
+            validation_by_constraint.insert(cache_key.clone(), validation);
+        }
+        let Some(validation) = validation_by_constraint
+            .get(&cache_key)
+            .and_then(Option::as_ref)
+        else {
+            continue;
+        };
+        let Some(document) = engine.get_document(&table, row.doc_id)? else {
+            continue;
+        };
+        if validation.foreign_key.period {
+            let Some(lookup) =
+                foreign_key_lookup_values(engine, &table, &validation.foreign_key, &document)?
+            else {
+                continue;
+            };
+            if period_foreign_key_coverage(
+                engine,
+                &validation.foreign_key,
+                &lookup.values,
+                &[],
+                None,
+            )?
+            .0
+            {
+                continue;
+            }
+        } else {
+            let comparison = validation.comparison.as_ref().ok_or_else(|| {
+                SQLError::Internal("deferred foreign-key comparison was not prepared".into())
+            })?;
+            let Some(values) = foreign_key_values(&validation.foreign_key, &document, comparison)?
+            else {
+                continue;
+            };
+            let parent_exists = if comparison.exact_reference_lookup {
+                find_exact_foreign_key_parent(engine, &validation.foreign_key, &values)?.is_some()
+            } else {
+                validation
+                    .cross_type_parent_keys
+                    .as_ref()
+                    .is_some_and(|keys| keys.contains(&values))
+            };
+            if parent_exists {
+                continue;
             }
         }
+        return Err(SQLError::Routine {
+            sqlstate: "23503".into(),
+            message: format!(
+                "insert or update on table \"{table}\" violates foreign key constraint \"{}\"",
+                validation
+                    .foreign_key
+                    .name
+                    .as_deref()
+                    .unwrap_or("<unnamed>")
+            ),
+        });
     }
     Ok(())
 }
@@ -1092,6 +1132,12 @@ pub(in crate::sql) fn apply_validated_prepared_document_rewrite(
             destination_table,
             *destination_doc_id,
         )?;
+        engine.defer_rewritten_foreign_key_checks(
+            destination_table,
+            *destination_doc_id,
+            None,
+            &prepared.new_document,
+        )?;
         for action in &mut prepared.actions {
             apply_validated_prepared_document_rewrite(engine, action)?;
         }
@@ -1113,6 +1159,12 @@ pub(in crate::sql) fn apply_validated_prepared_document_rewrite(
                     .advance_next_id(&prepared.table, new_id)
                     .map_err(|err| dml_storage_error("UPDATE primary key", err))?;
                 engine.note_row_rewritten(&prepared.table, prepared.doc_id, new_id)?;
+                engine.defer_rewritten_foreign_key_checks(
+                    &prepared.table,
+                    new_id,
+                    Some(&prepared.old_document),
+                    &prepared.new_document,
+                )?;
                 new_id
             }
             _ => {
@@ -1120,6 +1172,12 @@ pub(in crate::sql) fn apply_validated_prepared_document_rewrite(
                     &prepared.table,
                     prepared.doc_id,
                     prepared.new_document.clone(),
+                )?;
+                engine.defer_rewritten_foreign_key_checks(
+                    &prepared.table,
+                    prepared.doc_id,
+                    Some(&prepared.old_document),
+                    &prepared.new_document,
                 )?;
                 prepared.doc_id
             }

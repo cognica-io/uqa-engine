@@ -1066,6 +1066,13 @@ pub struct DeleteStmt {
     pub returning_aliases: ReturningAliases,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetConstraintName {
+    pub catalog: Option<String>,
+    pub schema: Option<String>,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Statement {
     CreateTable(CreateTable),
@@ -1125,6 +1132,11 @@ pub enum Statement {
     SetVariable {
         name: String,
         value: String,
+    },
+    /// `SET CONSTRAINTS { ALL | name [, ...] } { DEFERRED | IMMEDIATE }`. An empty constraint list represents `ALL`; qualified names retain their SQL spelling so execution can apply schema-search semantics.
+    SetConstraints {
+        constraints: Vec<SetConstraintName>,
+        deferred: bool,
     },
     /// `SHOW <variable>` - return the runtime parameter as one
     /// `(name -> value)` row.

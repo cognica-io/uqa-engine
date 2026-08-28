@@ -146,6 +146,105 @@ fn begin_atomic_only_nests_inside_a_routine_declaration() {
 }
 
 #[test]
+fn command_text_uses_one_implicit_transaction_for_multiple_statements() {
+    let engine = Engine::new();
+    engine
+        .sql("CREATE TABLE parent (id INTEGER PRIMARY KEY)", &[])
+        .unwrap();
+    engine
+        .sql(
+            "CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER, CONSTRAINT child_parent_fk FOREIGN KEY (parent_id) REFERENCES parent(id) DEFERRABLE INITIALLY IMMEDIATE)",
+            &[],
+        )
+        .unwrap();
+    let mut session = Session {
+        engine,
+        db_path: None,
+        db_key: None,
+        location: ":memory:".into(),
+        history: Vec::new(),
+        history_path: None,
+        show_timing: false,
+        expanded: false,
+        copy_text: false,
+        output_path: None,
+    };
+    let mut out = Vec::new();
+    session
+        .execute_command_text_with_history(
+            "SET CONSTRAINTS child_parent_fk DEFERRED; INSERT INTO child VALUES (1, 101); INSERT INTO parent VALUES (101); COMMIT;",
+            &mut out,
+            false,
+        )
+        .unwrap();
+    assert_eq!(
+        session
+            .engine
+            .sql("SELECT parent_id FROM child WHERE id = 1", &[])
+            .unwrap()
+            .rows[0]["parent_id"],
+        Value::Int(101)
+    );
+    let duplicate = session
+        .execute_command_text_with_history(
+            "INSERT INTO parent VALUES (303); INSERT INTO parent VALUES (303); COMMIT;",
+            &mut out,
+            false,
+        )
+        .unwrap_err();
+    assert!(duplicate.starts_with("23505:"), "{duplicate}");
+    assert!(session
+        .engine
+        .sql("SELECT id FROM parent WHERE id = 303", &[])
+        .unwrap()
+        .rows
+        .is_empty());
+
+    session
+        .execute_command_text_with_history(
+            "INSERT INTO parent VALUES (404); ROLLBACK;",
+            &mut out,
+            false,
+        )
+        .unwrap();
+    assert!(session
+        .engine
+        .sql("SELECT id FROM parent WHERE id = 404", &[])
+        .unwrap()
+        .rows
+        .is_empty());
+
+    let savepoint = session
+        .execute_command_text_with_history(
+            "INSERT INTO parent VALUES (405); SAVEPOINT command_savepoint;",
+            &mut out,
+            false,
+        )
+        .unwrap_err();
+    assert!(savepoint.starts_with("25P01:"), "{savepoint}");
+    assert!(session
+        .engine
+        .sql("SELECT id FROM parent WHERE id = 405", &[])
+        .unwrap()
+        .rows
+        .is_empty());
+
+    session
+        .execute_command_text_with_history(
+            "INSERT INTO parent VALUES (406); BEGIN; INSERT INTO parent VALUES (407); ROLLBACK;",
+            &mut out,
+            false,
+        )
+        .unwrap();
+    assert!(session
+        .engine
+        .sql("SELECT id FROM parent WHERE id IN (406, 407)", &[])
+        .unwrap()
+        .rows
+        .is_empty());
+}
+
+#[test]
 fn terminator_detection_waits_for_dollar_quote_close() {
     assert!(!contains_statement_terminator(
         "CREATE FUNCTION f() AS $$ BEGIN RETURN 1;"

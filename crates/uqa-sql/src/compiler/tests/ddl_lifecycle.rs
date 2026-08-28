@@ -284,6 +284,43 @@ fn alter_table_constraint_lifecycle_preserves_every_ordered_action() {
 }
 
 #[test]
+fn set_constraints_preserves_all_named_qualified_and_mode_shapes() {
+    let Statement::SetConstraints {
+        constraints,
+        deferred,
+    } = first("SET CONSTRAINTS ALL DEFERRED")
+    else {
+        panic!("expected SET CONSTRAINTS");
+    };
+    assert!(constraints.is_empty());
+    assert!(deferred);
+
+    let Statement::SetConstraints {
+        constraints,
+        deferred,
+    } = first("SET CONSTRAINTS child_fk, app.\"Mixed FK\" IMMEDIATE")
+    else {
+        panic!("expected SET CONSTRAINTS");
+    };
+    assert_eq!(
+        constraints,
+        [
+            crate::ast::SetConstraintName {
+                catalog: None,
+                schema: None,
+                name: "child_fk".into(),
+            },
+            crate::ast::SetConstraintName {
+                catalog: None,
+                schema: Some("app".into()),
+                name: "Mixed FK".into(),
+            },
+        ]
+    );
+    assert!(!deferred);
+}
+
+#[test]
 fn named_table_not_null_can_replace_implicit_column_nullability() {
     for sql in [
         "CREATE TABLE keyed (id INTEGER PRIMARY KEY, CONSTRAINT keyed_id_nn NOT NULL id)",

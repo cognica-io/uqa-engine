@@ -154,6 +154,28 @@ pub(super) fn compile_variable_set(
     })
 }
 
+pub(super) fn compile_set_constraints(
+    stmt: &pg_query::protobuf::ConstraintsSetStmt,
+) -> Result<Statement> {
+    let mut constraints = Vec::with_capacity(stmt.constraints.len());
+    for constraint in &stmt.constraints {
+        let Some(NodeEnum::RangeVar(name)) = constraint.node.as_ref() else {
+            return Err(SQLError::Internal(
+                "SET CONSTRAINTS contains a malformed constraint name".into(),
+            ));
+        };
+        constraints.push(crate::ast::SetConstraintName {
+            catalog: (!name.catalogname.is_empty()).then(|| name.catalogname.clone()),
+            schema: (!name.schemaname.is_empty()).then(|| name.schemaname.clone()),
+            name: name.relname.clone(),
+        });
+    }
+    Ok(Statement::SetConstraints {
+        constraints,
+        deferred: stmt.deferred,
+    })
+}
+
 pub(super) fn compile_explain(stmt: &pg_query::protobuf::ExplainStmt) -> Result<Statement> {
     let body = stmt
         .query

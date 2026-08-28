@@ -704,6 +704,7 @@ impl Statement {
             | Self::RefreshMaterializedView { .. }
             | Self::CreateSchema { .. }
             | Self::SetVariable { .. }
+            | Self::SetConstraints { .. }
             | Self::ShowVariable { .. }
             | Self::Discard { .. }
             | Self::Load { .. }

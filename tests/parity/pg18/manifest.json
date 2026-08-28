@@ -266,11 +266,11 @@
     },
     {
       "id": "ddl.constraint-lifecycle",
-      "postgresql_reference": "PostgreSQL 18.4 constraint validation, ALTER CONSTRAINT, dependency, dump, restore, and reopen behavior",
+      "postgresql_reference": "PostgreSQL 18.4 SET CONSTRAINTS, constraint validation, ALTER CONSTRAINT, dependency, dump, restore, and reopen behavior",
       "uqa_test": "python3 tests/parity/pg18/run_routines_stateful.py --suite constraints; cargo test -p uqa-sql --lib compiler::tests::ddl_lifecycle::; cargo test -p uqa-engine --test integration engine_catalog::pg18_constraint_lifecycle::",
-      "supported_version": "PostgreSQL 18.4 named CHECK, foreign-key, and NOT NULL NOT VALID and validation lifecycle; supported ALTER CONSTRAINT enforcement, deferrability, and inheritance transitions; initially-deferred foreign-key outer-commit and savepoint behavior; multi-action ALTER atomicity; bounded dependency-aware drop; catalog flags; and durable reopen",
+      "supported_version": "PostgreSQL 18.4 named CHECK, foreign-key, and NOT NULL NOT VALID and validation lifecycle; supported ALTER CONSTRAINT enforcement, deferrability, and inheritance transitions; initially-deferred foreign-key validation before outer-commit temporary actions; per-transaction SET CONSTRAINTS with persistent ALL state, schema, effective-search-path, and allocated temporary-namespace resolution, duplicate-name fanout, operation-sensitive durable constraint-object, target-row identity, and exact firing-relation-bound events, retroactive and selective immediate validation across nested frames, routine, reentrant callback, PostgreSQL simple-query transaction control, and savepoint rollback behavior, queued-event survival across deferrability changes, pending-event ALTER, DROP, and TRUNCATE protection with referenced-parent checks and rename continuity, current- and cross-session object replacement, table-rename continuity, and exact statement SQLSTATEs; multi-action ALTER atomicity; bounded dependency-aware drop; catalog flags; and durable reopen",
       "status": "partial",
-      "open_issue": "Per-transaction SET CONSTRAINTS, inheritance and partition propagation, the complete dependency graph, pg_dump/pg_restore, and the upstream constraint regression matrix remain."
+      "open_issue": "Inheritance and partition propagation, the complete dependency graph, pg_dump/pg_restore, and the upstream constraint regression matrix remain."
     },
     {
       "id": "ddl.relation-forms-and-options",

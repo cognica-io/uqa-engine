@@ -364,6 +364,26 @@ enum TransactionStatus {
     FailedBackendAborted,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct ConstraintIdentity {
+    pub(crate) relation: RelationIdentity,
+    pub(crate) name: String,
+    pub(crate) object_id: Option<[u8; 16]>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ConstraintModeState {
+    all: Option<bool>,
+    named: BTreeMap<ConstraintIdentity, bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DeferredForeignKeyCheck {
+    pub(crate) constraint: ConstraintIdentity,
+    pub(crate) firing_relation: RelationIdentity,
+    pub(crate) row: Option<row_locks::RowLockKey>,
+}
+
 struct TransactionFrame {
     /// Whether this outer frame is the SQL driver's per-statement autocommit boundary rather than a user-visible `BEGIN` block.
     implicit_statement: bool,
@@ -381,7 +401,8 @@ struct TransactionFrame {
     next_lock_mark: u32,
     snapshot_change_baseline: row_locks::RowChangeBaseline,
     row_changes: Vec<row_locks::PendingRowChange>,
-    deferred_foreign_key_rows: BTreeSet<row_locks::RowLockKey>,
+    deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
+    constraint_modes: ConstraintModeState,
 }
 
 struct TransactionSavepoint {
@@ -392,7 +413,8 @@ struct TransactionSavepoint {
     dirty: TransactionDirtyState,
     lock_mark: u32,
     row_changes: Vec<row_locks::PendingRowChange>,
-    deferred_foreign_key_rows: BTreeSet<row_locks::RowLockKey>,
+    deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
+    constraint_modes: ConstraintModeState,
 }
 
 #[derive(Clone, Default)]
@@ -413,6 +435,7 @@ struct CommandExactIndex {
 #[derive(Clone, Default)]
 struct SessionStateSnapshot {
     search_path: Vec<String>,
+    temporary_namespace_allocated: bool,
     session_vars: BTreeMap<String, String>,
     sequence_currvals: BTreeMap<RelationIdentity, i64>,
     prepared: BTreeMap<String, PreparedStatementPlan>,

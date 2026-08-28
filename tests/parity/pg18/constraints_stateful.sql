@@ -137,8 +137,220 @@ SELECT count(*) FROM parent WHERE id = 99;
 BEGIN; SAVEPOINT before_bad_child; INSERT INTO child VALUES (8, 999, 5); ROLLBACK TO SAVEPOINT before_bad_child; COMMIT;
 -- @end
 
+-- @case set_constraints_force_initially_deferred_immediate error
+BEGIN; SET CONSTRAINTS child_parent_fk IMMEDIATE; INSERT INTO child VALUES (9, 909, 5);
+-- @end
+
+-- @case set_constraints_immediate_failure_rolls_back rows
+SELECT count(*) FROM child WHERE id = 9;
+-- @end
+
 -- @case restore_immediate_fk ok
 ALTER TABLE child ALTER CONSTRAINT child_parent_fk NOT DEFERRABLE INITIALLY IMMEDIATE;
+-- @end
+
+-- @case make_fk_deferrable_initially_immediate ok
+ALTER TABLE child ALTER CONSTRAINT child_parent_fk DEFERRABLE INITIALLY IMMEDIATE;
+-- @end
+
+-- @case set_constraints_deferred_child_before_parent ok
+BEGIN; SET CONSTRAINTS child_parent_fk DEFERRED; INSERT INTO child VALUES (10, 1010, 5); INSERT INTO parent VALUES (1010); COMMIT;
+-- @end
+
+-- @case set_constraints_implicit_batch_child_before_parent ok
+SET CONSTRAINTS child_parent_fk DEFERRED; INSERT INTO child VALUES (17, 1717, 5); INSERT INTO parent VALUES (1717); COMMIT;
+-- @end
+
+-- @case set_constraints_retroactive_check error
+BEGIN; SET CONSTRAINTS child_parent_fk DEFERRED; INSERT INTO child VALUES (11, 1111, 5); SET CONSTRAINTS child_parent_fk IMMEDIATE;
+-- @end
+
+-- @case set_constraints_retroactive_failure_rolls_back rows
+SELECT count(*) FROM child WHERE id = 11;
+-- @end
+
+-- @case set_constraints_all_ignores_nondeferrable ok
+BEGIN; SET CONSTRAINTS ALL DEFERRED; INSERT INTO child VALUES (12, 1212, 5); INSERT INTO parent VALUES (1212); SET CONSTRAINTS ALL IMMEDIATE; COMMIT;
+-- @end
+
+-- @case set_constraints_missing_name error
+BEGIN; SET CONSTRAINTS missing_constraint DEFERRED;
+-- @end
+
+-- @case set_constraints_nondeferrable_name error
+BEGIN; SET CONSTRAINTS score_positive DEFERRED;
+-- @end
+
+-- @case set_constraints_nondeferrable_immediate ok
+BEGIN; SET CONSTRAINTS score_positive IMMEDIATE; COMMIT;
+-- @end
+
+-- @case set_constraints_missing_schema error
+BEGIN; SET CONSTRAINTS absent_schema.child_parent_fk DEFERRED;
+-- @end
+
+-- @case set_constraints_all_applies_to_later_constraint ok
+BEGIN; SET CONSTRAINTS ALL DEFERRED; CREATE TABLE set_later_child (id INTEGER PRIMARY KEY, parent_id INTEGER, CONSTRAINT set_later_fk FOREIGN KEY (parent_id) REFERENCES parent(id) DEFERRABLE INITIALLY IMMEDIATE); INSERT INTO set_later_child VALUES (1, 1313); INSERT INTO parent VALUES (1313); COMMIT;
+-- @end
+
+-- @case set_constraints_replaced_constraint_uses_initial_mode error
+BEGIN; SET CONSTRAINTS child_parent_fk DEFERRED; ALTER TABLE child DROP CONSTRAINT child_parent_fk; ALTER TABLE child ADD CONSTRAINT child_parent_fk FOREIGN KEY (parent_id) REFERENCES parent(id) DEFERRABLE INITIALLY IMMEDIATE; INSERT INTO child VALUES (13, 1414, 5);
+-- @end
+
+-- @case set_constraints_drop_column_replacement_uses_initial_mode error
+BEGIN; SET CONSTRAINTS child_parent_fk DEFERRED; ALTER TABLE child DROP COLUMN parent_id; ALTER TABLE child ADD COLUMN parent_id INTEGER; ALTER TABLE child ADD CONSTRAINT child_parent_fk FOREIGN KEY (parent_id) REFERENCES parent(id) DEFERRABLE INITIALLY IMMEDIATE; INSERT INTO child VALUES (16, 1616, 5);
+-- @end
+
+-- @case create_set_constraints_autocommit_procedure ok
+CREATE PROCEDURE set_constraints_insert_pair() LANGUAGE plpgsql AS $$ BEGIN EXECUTE 'SET CONSTRAINTS child_parent_fk DEFERRED'; INSERT INTO child VALUES (14, 1515, 5); INSERT INTO parent VALUES (1515); END $$;
+-- @end
+
+-- @case set_constraints_inside_autocommit_procedure ok
+CALL set_constraints_insert_pair();
+-- @end
+
+-- @case create_set_constraints_nested_check_procedure ok
+CREATE PROCEDURE set_constraints_catch_check() LANGUAGE plpgsql AS $$ BEGIN BEGIN SET CONSTRAINTS child_parent_fk IMMEDIATE; EXCEPTION WHEN foreign_key_violation THEN NULL; END; END $$;
+-- @end
+
+-- @case set_constraints_nested_check_still_fails_outer_commit error
+BEGIN; SET CONSTRAINTS child_parent_fk DEFERRED; INSERT INTO child VALUES (15, 1616, 5); CALL set_constraints_catch_check(); COMMIT;
+-- @end
+
+-- @case set_constraints_nested_failure_rolls_back rows
+SELECT count(*) FROM child WHERE id = 15;
+-- @end
+
+-- @case set_constraints_allocated_pg_temp_reports_missing_constraint error
+CREATE TEMP TABLE temp_constraint_lifetime (id INTEGER); DROP TABLE temp_constraint_lifetime; BEGIN; SET CONSTRAINTS pg_temp.missing_constraint DEFERRED;
+-- @end
+
+-- @case create_deferred_event_identity_tables ok
+CREATE TABLE event_parent_a (id INTEGER PRIMARY KEY); CREATE TABLE event_parent_b (id INTEGER PRIMARY KEY); CREATE TABLE event_child (id INTEGER PRIMARY KEY, a_id INTEGER, b_id INTEGER, marker INTEGER, CONSTRAINT event_a_fk FOREIGN KEY (a_id) REFERENCES event_parent_a(id) DEFERRABLE INITIALLY DEFERRED);
+-- @end
+
+-- @case seed_deferred_event_identity_rows ok
+INSERT INTO event_parent_a VALUES (1); INSERT INTO event_child VALUES (1, 1, 999, 0);
+-- @end
+
+-- @case add_later_deferred_event_constraint ok
+ALTER TABLE event_child ADD CONSTRAINT event_b_fk FOREIGN KEY (b_id) REFERENCES event_parent_b(id) DEFERRABLE INITIALLY IMMEDIATE NOT VALID;
+-- @end
+
+-- @case deferred_event_does_not_transfer_to_later_mode ok
+BEGIN; SET CONSTRAINTS event_b_fk DEFERRED; UPDATE event_child SET marker = 1 WHERE id = 1; COMMIT;
+-- @end
+
+-- @case pending_event_blocks_deferrability_change error
+BEGIN; SET CONSTRAINTS event_a_fk DEFERRED; INSERT INTO event_child VALUES (2, 202, NULL, 0); ALTER TABLE event_child ALTER CONSTRAINT event_a_fk NOT DEFERRABLE;
+-- @end
+
+-- @case pending_event_failure_rolls_back rows
+SELECT count(*) FROM event_child WHERE id = 2;
+-- @end
+
+-- @case pending_event_blocks_enforceability_change error
+BEGIN; SET CONSTRAINTS event_a_fk DEFERRED; INSERT INTO event_child VALUES (3, 303, NULL, 0); ALTER TABLE event_child ALTER CONSTRAINT event_a_fk NOT ENFORCED;
+-- @end
+
+-- @case pending_enforceability_failure_rolls_back rows
+SELECT count(*) FROM event_child WHERE id = 3;
+-- @end
+
+-- @case create_parent_event_relation_constraint ok
+CREATE TABLE event_root (id INTEGER PRIMARY KEY); ALTER TABLE event_parent_a ADD COLUMN root_id INTEGER; ALTER TABLE event_parent_a ADD CONSTRAINT event_parent_root_fk FOREIGN KEY (root_id) REFERENCES event_root(id) DEFERRABLE INITIALLY IMMEDIATE; INSERT INTO event_root VALUES (10); UPDATE event_parent_a SET root_id = 10 WHERE id = 1;
+-- @end
+
+-- @case parent_event_allows_child_constraint_alter ok
+BEGIN; SET CONSTRAINTS event_a_fk DEFERRED; DELETE FROM event_parent_a WHERE id = 1; ALTER TABLE event_child ALTER CONSTRAINT event_a_fk NOT DEFERRABLE; INSERT INTO event_parent_a VALUES (1, 10); COMMIT;
+-- @end
+
+-- @case restore_parent_event_constraint_deferrability ok
+ALTER TABLE event_child ALTER CONSTRAINT event_a_fk DEFERRABLE INITIALLY DEFERRED;
+-- @end
+
+-- @case parent_event_blocks_foreign_key_drop error
+BEGIN; SET CONSTRAINTS event_a_fk DEFERRED; DELETE FROM event_parent_a WHERE id = 1; ALTER TABLE event_child DROP CONSTRAINT event_a_fk;
+-- @end
+
+-- @case queued_parent_event_follows_row_rewrite_for_all_immediate error
+BEGIN; SET CONSTRAINTS event_a_fk DEFERRED; DELETE FROM event_parent_a WHERE id = 1; ALTER TABLE event_child ALTER CONSTRAINT event_a_fk NOT DEFERRABLE; UPDATE event_child SET id = 11 WHERE id = 1; SET CONSTRAINTS ALL IMMEDIATE;
+-- @end
+
+-- @case queued_parent_event_rewrite_failure_rolls_back rows
+SELECT id, (SELECT condeferrable FROM pg_catalog.pg_constraint WHERE conrelid = 'event_child'::regclass AND conname = 'event_a_fk') FROM event_child WHERE id = 1;
+-- @end
+
+-- @case queued_parent_event_survives_not_deferrable_change error
+BEGIN; SET CONSTRAINTS event_a_fk DEFERRED; DELETE FROM event_parent_a WHERE id = 1; ALTER TABLE event_child ALTER CONSTRAINT event_a_fk NOT DEFERRABLE; COMMIT;
+-- @end
+
+-- @case queued_parent_event_failure_rolls_back rows
+SELECT count(*), bool_and(condeferrable) FROM event_parent_a, pg_catalog.pg_constraint WHERE conrelid = 'event_child'::regclass AND conname = 'event_a_fk';
+-- @end
+
+-- @case parent_event_blocks_parent_relation_alter error
+BEGIN; SET CONSTRAINTS event_a_fk DEFERRED; DELETE FROM event_parent_a WHERE id = 1; ALTER TABLE event_parent_a ALTER CONSTRAINT event_parent_root_fk NOT DEFERRABLE;
+-- @end
+
+-- @case parent_event_failure_rolls_back rows
+SELECT count(*), bool_and(condeferrable) FROM event_parent_a, pg_catalog.pg_constraint WHERE conrelid = 'event_parent_a'::regclass AND conname = 'event_parent_root_fk';
+-- @end
+
+-- @case create_empty_and_drop_parent_event_tables ok
+CREATE TABLE empty_event_parent (id INTEGER PRIMARY KEY); CREATE TABLE empty_event_child (parent_id INTEGER, CONSTRAINT empty_event_fk FOREIGN KEY (parent_id) REFERENCES empty_event_parent(id) DEFERRABLE INITIALLY IMMEDIATE); INSERT INTO empty_event_parent VALUES (1); CREATE TABLE drop_event_parent (id INTEGER PRIMARY KEY); CREATE TABLE drop_event_child (parent_id INTEGER, CONSTRAINT drop_event_fk FOREIGN KEY (parent_id) REFERENCES drop_event_parent(id) DEFERRABLE INITIALLY IMMEDIATE); INSERT INTO drop_event_parent VALUES (1); INSERT INTO drop_event_child VALUES (1);
+-- @end
+
+-- @case empty_parent_delete_still_queues_event error
+BEGIN; SET CONSTRAINTS empty_event_fk DEFERRED; DELETE FROM empty_event_parent WHERE id = 1; ALTER TABLE empty_event_parent ADD COLUMN blocked INTEGER;
+-- @end
+
+-- @case empty_parent_update_still_queues_event error
+BEGIN; SET CONSTRAINTS empty_event_fk DEFERRED; UPDATE empty_event_parent SET id = 2 WHERE id = 1; ALTER TABLE empty_event_parent ADD COLUMN blocked INTEGER;
+-- @end
+
+-- @case drop_restrict_dependency_precedes_parent_event error
+BEGIN; SET CONSTRAINTS drop_event_fk DEFERRED; DELETE FROM drop_event_parent WHERE id = 1; DROP TABLE drop_event_parent;
+-- @end
+
+-- @case drop_cascade_observes_pending_parent_event error
+BEGIN; SET CONSTRAINTS drop_event_fk DEFERRED; DELETE FROM drop_event_parent WHERE id = 1; DROP TABLE drop_event_parent CASCADE;
+-- @end
+
+-- @case pending_event_blocks_add_column error
+BEGIN; SET CONSTRAINTS event_a_fk DEFERRED; INSERT INTO event_child VALUES (4, 404, NULL, 0); ALTER TABLE event_child ADD COLUMN added INTEGER;
+-- @end
+
+-- @case pending_event_blocks_drop_constraint error
+BEGIN; SET CONSTRAINTS event_a_fk DEFERRED; INSERT INTO event_child VALUES (4, 404, NULL, 0); ALTER TABLE event_child DROP CONSTRAINT event_a_fk;
+-- @end
+
+-- @case pending_event_blocks_drop_table error
+BEGIN; SET CONSTRAINTS event_a_fk DEFERRED; INSERT INTO event_child VALUES (4, 404, NULL, 0); DROP TABLE event_child;
+-- @end
+
+-- @case pending_event_blocks_truncate error
+BEGIN; SET CONSTRAINTS event_a_fk DEFERRED; INSERT INTO event_child VALUES (4, 404, NULL, 0); TRUNCATE event_child;
+-- @end
+
+-- @case pending_event_ddl_failures_leave_relation_unchanged rows
+SELECT count(*), EXISTS (SELECT 1 FROM pg_catalog.pg_constraint WHERE conrelid = 'event_child'::regclass AND conname = 'event_a_fk') FROM event_child;
+-- @end
+
+-- @case unrelated_deferred_update_does_not_queue_event ok
+BEGIN; SET CONSTRAINTS event_b_fk DEFERRED; UPDATE event_child SET marker = marker + 1 WHERE id = 1; ALTER TABLE event_child ADD COLUMN update_safe INTEGER; COMMIT;
+-- @end
+
+-- @case child_delete_does_not_queue_foreign_key_event ok
+BEGIN; SET CONSTRAINTS event_a_fk DEFERRED; DELETE FROM event_child WHERE id = 1; ALTER TABLE event_child ADD COLUMN delete_safe INTEGER; COMMIT;
+-- @end
+
+-- @case harmless_event_operations_committed rows
+SELECT count(*), EXISTS (SELECT 1 FROM pg_catalog.pg_attribute WHERE attrelid = 'event_child'::regclass AND attname = 'update_safe' AND NOT attisdropped), EXISTS (SELECT 1 FROM pg_catalog.pg_attribute WHERE attrelid = 'event_child'::regclass AND attname = 'delete_safe' AND NOT attisdropped) FROM event_child;
+-- @end
+
+-- @case deferred_temp_child_is_checked_before_on_commit_drop error
+BEGIN; CREATE TEMP TABLE event_temp_parent (id INTEGER PRIMARY KEY) ON COMMIT PRESERVE ROWS; CREATE TEMP TABLE event_temp_child (id INTEGER PRIMARY KEY, parent_id INTEGER, CONSTRAINT event_temp_fk FOREIGN KEY (parent_id) REFERENCES event_temp_parent(id) DEFERRABLE INITIALLY IMMEDIATE) ON COMMIT DROP; SET CONSTRAINTS event_temp_fk DEFERRED; INSERT INTO event_temp_child VALUES (1, 101); COMMIT;
 -- @end
 
 -- @case invalid_check_deferrability error
@@ -335,4 +547,68 @@ UPDATE timestamp_key_parent SET id = TIMESTAMP '2024-02-02 00:00:00';
 
 -- @case temporal_update_cascade_rows rows
 SELECT parent_id = DATE '2024-02-02' FROM date_key_child;
+-- @end
+
+-- @case create_simple_query_control ok
+CREATE TABLE simple_query_control (id INTEGER PRIMARY KEY);
+-- @end
+
+-- @case simple_query_rollback_controls_implicit_transaction ok
+INSERT INTO simple_query_control VALUES (1); ROLLBACK;
+-- @end
+
+-- @case simple_query_rollback_removed_prefix rows
+SELECT count(*) FROM simple_query_control;
+-- @end
+
+-- @case simple_query_savepoint_rejects_implicit_transaction error
+INSERT INTO simple_query_control VALUES (2); SAVEPOINT simple_query_savepoint;
+-- @end
+
+-- @case simple_query_savepoint_error_rolls_back_prefix rows
+SELECT count(*) FROM simple_query_control;
+-- @end
+
+-- @case simple_query_begin_promotes_implicit_transaction ok
+INSERT INTO simple_query_control VALUES (3); BEGIN; INSERT INTO simple_query_control VALUES (4); ROLLBACK;
+-- @end
+
+-- @case simple_query_begin_rollback_removed_prefix rows
+SELECT count(*) FROM simple_query_control;
+-- @end
+
+-- @case set_constraints_outside_transaction_resolves_missing_name error
+SET CONSTRAINTS missing_constraint DEFERRED;
+-- @end
+
+-- @case set_constraints_outside_transaction_rejects_nondeferrable error
+SET CONSTRAINTS score_positive DEFERRED;
+-- @end
+
+-- @case recreated_foreign_key_trigger_resets_named_mode error
+BEGIN; SET CONSTRAINTS child_parent_fk DEFERRED; ALTER TABLE child ALTER CONSTRAINT child_parent_fk NOT ENFORCED; ALTER TABLE child ALTER CONSTRAINT child_parent_fk ENFORCED; INSERT INTO child VALUES (18, 1818, 5);
+-- @end
+
+-- @case recreated_foreign_key_trigger_preserves_all_mode ok
+BEGIN; SET CONSTRAINTS ALL DEFERRED; ALTER TABLE child ALTER CONSTRAINT child_parent_fk NOT ENFORCED; ALTER TABLE child ALTER CONSTRAINT child_parent_fk ENFORCED; INSERT INTO child VALUES (19, 1919, 5); INSERT INTO parent VALUES (1919); COMMIT;
+-- @end
+
+-- @case create_partition_event_identity_tables ok
+CREATE TABLE partition_event_parent (id INTEGER PRIMARY KEY); CREATE TABLE partition_event_child (id INTEGER PRIMARY KEY, parent_id INTEGER, CONSTRAINT partition_event_fk FOREIGN KEY (parent_id) REFERENCES partition_event_parent(id) DEFERRABLE INITIALLY IMMEDIATE) PARTITION BY RANGE (id); CREATE TABLE partition_event_child_low PARTITION OF partition_event_child FOR VALUES FROM (0) TO (10); CREATE TABLE partition_event_unrelated (id INTEGER);
+-- @end
+
+-- @case partition_event_survives_unrelated_constraint_ddl error
+BEGIN; SET CONSTRAINTS partition_event_fk DEFERRED; INSERT INTO partition_event_child VALUES (1, 101); ALTER TABLE partition_event_unrelated ADD CONSTRAINT partition_event_positive CHECK (id > 0); COMMIT;
+-- @end
+
+-- @case partition_event_failure_rolls_back rows
+SELECT count(*) FROM partition_event_child;
+-- @end
+
+-- @case create_pending_view_dependency_tables ok
+CREATE TABLE pending_view_parent (id INTEGER PRIMARY KEY); CREATE TABLE pending_view_child (parent_id INTEGER, CONSTRAINT pending_view_fk FOREIGN KEY (parent_id) REFERENCES pending_view_parent(id) DEFERRABLE INITIALLY IMMEDIATE); CREATE VIEW pending_view AS SELECT * FROM pending_view_child;
+-- @end
+
+-- @case drop_restrict_view_dependency_precedes_pending_event error
+BEGIN; SET CONSTRAINTS pending_view_fk DEFERRED; INSERT INTO pending_view_child VALUES (999); DROP TABLE pending_view_child;
 -- @end

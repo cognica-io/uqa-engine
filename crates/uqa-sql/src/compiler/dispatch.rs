@@ -7,8 +7,8 @@
 //! Parser entry point and exhaustive statement-family dispatch.
 
 use super::administrative::{
-    compile_analyze, compile_explain, compile_transaction, compile_truncate, compile_variable_set,
-    discard_target,
+    compile_analyze, compile_explain, compile_set_constraints, compile_transaction,
+    compile_truncate, compile_variable_set, discard_target,
 };
 use super::dml::{compile_delete, compile_update};
 use super::drop_alter::{compile_alter_table, compile_drop, compile_rename};
@@ -111,6 +111,7 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::AlterRoleStmt(stmt) => compile_alter_role(stmt),
         NodeEnum::DropRoleStmt(stmt) => compile_drop_role(stmt),
         NodeEnum::VariableSetStmt(stmt) => compile_variable_set(stmt),
+        NodeEnum::ConstraintsSetStmt(stmt) => compile_set_constraints(stmt),
         NodeEnum::VariableShowStmt(stmt) => Ok(Statement::ShowVariable {
             name: stmt.name.clone(),
         }),

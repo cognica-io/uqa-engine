@@ -32,11 +32,28 @@ use super::{
 pub(super) struct UnifiedPlanExecutor<'engine, 'params> {
     engine: &'engine Engine,
     params: &'params [SQLParam],
+    nested_statement: bool,
 }
 
 impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     pub(super) fn new(engine: &'engine Engine, params: &'params [SQLParam]) -> Self {
-        Self { engine, params }
+        Self::with_nested_statement(engine, params, false)
+    }
+
+    pub(super) fn new_nested(engine: &'engine Engine, params: &'params [SQLParam]) -> Self {
+        Self::with_nested_statement(engine, params, true)
+    }
+
+    pub(super) fn with_nested_statement(
+        engine: &'engine Engine,
+        params: &'params [SQLParam],
+        nested_statement: bool,
+    ) -> Self {
+        Self {
+            engine,
+            params,
+            nested_statement,
+        }
     }
 
     pub(super) fn execute(&mut self, plan: &UnifiedPlan) -> Result<SQLResult, SQLError> {
@@ -129,7 +146,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     ) -> Result<SQLResult, SQLError> {
         let analysis = if analyze {
             let started = std::time::Instant::now();
-            let result = UnifiedPlanExecutor::new(self.engine, self.params).execute(body)?;
+            let result = UnifiedPlanExecutor::new_nested(self.engine, self.params).execute(body)?;
             let rows = u64::try_from(result.rows.len())
                 .map_err(|_| SQLError::Internal("EXPLAIN ANALYZE row count exceeds u64".into()))?;
             Some(super::select::ExplainAnalysis {
@@ -197,7 +214,12 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                     }
                 }
             }
-        } else {
+        }
+        for table in &trigger_targets {
+            self.engine
+                .ensure_no_pending_trigger_events(table, "TRUNCATE")?;
+        }
+        if !cascade {
             for table in &targets {
                 if let Some((referrer, _)) = self
                     .engine
@@ -310,7 +332,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             .iter()
             .map(|expression| eval_physical(expression, &context).map(SQLParam::Scalar))
             .collect::<Result<_, _>>()?;
-        UnifiedPlanExecutor::new(self.engine, &bound).execute(&plan)
+        UnifiedPlanExecutor::new_nested(self.engine, &bound).execute(&plan)
     }
 
     fn execute_deallocate(&self, name: Option<&str>) -> Result<SQLResult, SQLError> {
@@ -512,6 +534,14 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 } else {
                     self.engine.set_variable(name, value)?;
                 }
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::SetConstraints {
+                constraints,
+                deferred,
+            } => {
+                self.engine
+                    .set_constraints(constraints, *deferred, self.nested_statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::ShowVariable { name } => self.execute_show_variable(name),

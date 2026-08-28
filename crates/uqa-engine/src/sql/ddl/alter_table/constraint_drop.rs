@@ -28,6 +28,19 @@ pub(super) fn drop_constraint(
             format!("constraint \"{name}\" of relation \"{table}\" does not exist"),
         ));
     };
+    let referenced_table = match location {
+        ConstraintLocation::ColumnForeignKey(index) => columns[index]
+            .references
+            .as_ref()
+            .map(|reference| reference.table.clone()),
+        ConstraintLocation::TableForeignKey(index) => {
+            Some(constraints.foreign_keys[index].ref_table.clone())
+        }
+        _ => None,
+    };
+    if let Some(referenced_table) = referenced_table {
+        engine.ensure_no_pending_trigger_events(&referenced_table, "ALTER TABLE")?;
+    }
     match location {
         ConstraintLocation::NotNull(index) => {
             let column = columns[index].name.clone();

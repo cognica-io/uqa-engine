@@ -51,7 +51,12 @@ impl Engine {
         {
             return Err("temporary relations cannot specify a schema name".into());
         }
+        self.session.state.write().temporary_namespace_allocated = true;
         Ok(RelationIdentity::new(temporary_schema, relation).qualified_name())
+    }
+
+    pub(crate) fn temporary_namespace_allocated(&self) -> bool {
+        self.session.state.read().temporary_namespace_allocated
     }
 
     pub(crate) fn temporary_schema_name(&self) -> String {

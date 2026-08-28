@@ -72,7 +72,7 @@ pub(super) fn materialize_recursive_action_names(
     match action {
         AlterTableAction::AddColumn { column, .. } => {
             columns.push(column.clone());
-            crate::engine_table_storage::materialize_constraint_names(
+            crate::engine_table_storage::materialize_constraint_metadata(
                 &relation,
                 &mut columns,
                 &mut constraints,
@@ -86,7 +86,7 @@ pub(super) fn materialize_recursive_action_names(
             if !constraint.no_inherit && constraint.name.is_none() =>
         {
             constraints.checks.push(constraint.clone());
-            crate::engine_table_storage::materialize_constraint_names(
+            crate::engine_table_storage::materialize_constraint_metadata(
                 &relation,
                 &mut columns,
                 &mut constraints,
@@ -110,7 +110,7 @@ pub(super) fn materialize_recursive_action_names(
                 definition.not_null = true;
                 definition.not_null_explicit = true;
                 definition.not_null_validated = *validated;
-                crate::engine_table_storage::materialize_constraint_names(
+                crate::engine_table_storage::materialize_constraint_metadata(
                     &relation,
                     &mut columns,
                     &mut constraints,

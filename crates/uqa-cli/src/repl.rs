@@ -8,6 +8,15 @@
 
 use super::*;
 
+fn explicit_block_command(transaction: &uqa_sql::ast::TransactionStmt) -> Option<&'static str> {
+    match transaction {
+        uqa_sql::ast::TransactionStmt::Savepoint(_) => Some("SAVEPOINT"),
+        uqa_sql::ast::TransactionStmt::ReleaseSavepoint(_) => Some("RELEASE SAVEPOINT"),
+        uqa_sql::ast::TransactionStmt::RollbackToSavepoint(_) => Some("ROLLBACK TO SAVEPOINT"),
+        _ => None,
+    }
+}
+
 impl Session {
     pub(super) fn run_repl(&mut self, out: &mut impl Write) -> ExitCode {
         if let Err(error) = self.print_banner(out) {
@@ -375,6 +384,112 @@ impl Session {
             self.run_statement_with_history(&stmt, out, record_history)?;
         }
         Ok(())
+    }
+
+    fn rollback_implicit_segment(&self, error: String) -> Result<(), String> {
+        match self.engine.sql("ROLLBACK", &[]) {
+            Ok(_) => Err(error),
+            Err(rollback_error) => Err(format!(
+                "{error}; implicit transaction rollback also failed: {rollback_error}"
+            )),
+        }
+    }
+
+    /// Execute one simple-query command string. `PostgreSQL` parses the whole string before running it and keeps its implicit transaction open until COMMIT or ROLLBACK, while BEGIN promotes that transaction without committing preceding statements and `psql` still displays each statement's result separately.
+    pub(super) fn execute_command_text_with_history(
+        &mut self,
+        text: &str,
+        out: &mut impl Write,
+        record_history: bool,
+    ) -> Result<(), String> {
+        let compiled = uqa_sql::compile(text)
+            .map_err(|error| format!("{}: {error}", error.sqlstate().unwrap_or("XX000")))?;
+        if compiled.len() <= 1 {
+            return self.execute_text_with_history(text, out, record_history);
+        }
+        let statements = split_statements(text)
+            .into_iter()
+            .filter(|statement| !statement_is_pure_comment(statement))
+            .collect::<Vec<_>>();
+        if statements.len() != compiled.len() {
+            return Err("XX000: simple-query statement segmentation mismatch".into());
+        }
+
+        let mut implicit_segment_open = false;
+        for (statement, compiled_statement) in statements.into_iter().zip(compiled) {
+            let transaction = match compiled_statement {
+                uqa_sql::ast::Statement::Transaction(transaction) => Some(transaction),
+                _ => None,
+            };
+            if implicit_segment_open || self.engine.transaction_depth() == 0 {
+                if let Some(command) = transaction.as_ref().and_then(explicit_block_command) {
+                    if record_history {
+                        self.record_statement(&statement)?;
+                    }
+                    let error = format!("25P01: {command} can only be used in transaction blocks");
+                    if implicit_segment_open && self.engine.transaction_depth() != 0 {
+                        return self.rollback_implicit_segment(error);
+                    }
+                    return Err(error);
+                }
+            }
+            if implicit_segment_open
+                && transaction.as_ref().is_some_and(|transaction| {
+                    matches!(transaction, uqa_sql::ast::TransactionStmt::Begin)
+                })
+            {
+                if record_history {
+                    self.record_statement(&statement)?;
+                }
+                implicit_segment_open = false;
+                continue;
+            }
+            if transaction.is_none()
+                && self.engine.transaction_depth() == 0
+                && !implicit_segment_open
+            {
+                self.engine
+                    .sql("BEGIN", &[])
+                    .map_err(|error| format!("{}: {error}", error.sqlstate().unwrap_or("XX000")))?;
+                implicit_segment_open = true;
+            }
+            if self.engine.transaction_depth() == 0
+                && transaction.as_ref().is_some_and(|transaction| {
+                    matches!(
+                        transaction,
+                        uqa_sql::ast::TransactionStmt::Commit
+                            | uqa_sql::ast::TransactionStmt::Rollback
+                    )
+                })
+            {
+                if record_history {
+                    self.record_statement(&statement)?;
+                }
+                continue;
+            }
+            if let Err(error) = self.run_statement_with_history(&statement, out, record_history) {
+                if implicit_segment_open && self.engine.transaction_depth() != 0 {
+                    return self.rollback_implicit_segment(error);
+                }
+                return Err(error);
+            }
+            if transaction.as_ref().is_some_and(|transaction| {
+                matches!(
+                    transaction,
+                    uqa_sql::ast::TransactionStmt::Commit | uqa_sql::ast::TransactionStmt::Rollback
+                )
+            }) {
+                implicit_segment_open = false;
+            }
+        }
+        if implicit_segment_open {
+            self.engine
+                .sql("COMMIT", &[])
+                .map(|_| ())
+                .map_err(|error| format!("{}: {error}", error.sqlstate().unwrap_or("XX000")))
+        } else {
+            Ok(())
+        }
     }
 
     pub(super) fn run_statement_with_history(

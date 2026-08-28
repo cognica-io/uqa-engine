@@ -7,7 +7,7 @@
 //! Column registration, index rebuild, and table or column rename.
 
 use super::{
-    materialize_constraint_names, schema_expr_references_column, table_next_id_metadata_key,
+    materialize_constraint_metadata, schema_expr_references_column, table_next_id_metadata_key,
     table_not_found, Engine, RelationIdentity, StorageBackendError, StorageBackendResult,
 };
 use crate::VectorIndexSpec;
@@ -76,7 +76,7 @@ impl Engine {
         };
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
-        materialize_constraint_names(&relation, &mut columns, &mut constraints)?;
+        materialize_constraint_metadata(&relation, &mut columns, &mut constraints)?;
         self.mark_column_stats_dirty(&table_name, &t)?;
         if self.is_persistent() {
             self.try_save_table_schema_with_components(&table_name, &t, &columns, &constraints)?;
@@ -202,6 +202,8 @@ impl Engine {
         }
         self.mark_column_stats_dirty(&table_name, &t)?;
         self.refresh_value_indexes_for_table(&table_name)?;
+        self.prune_constraint_modes()
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         Ok(true)
     }
 
@@ -482,6 +484,7 @@ impl Engine {
         }
         self.mark_column_stats_dirty(&to, &state)?;
         self.refresh_value_indexes_for_table(&to)?;
+        self.rename_constraint_transaction_relation(&from_relation, &to_relation);
         Ok(true)
     }
 }

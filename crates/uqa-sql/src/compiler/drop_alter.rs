@@ -424,6 +424,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                         )?;
                         let foreign_key = ForeignKey {
                             name,
+                            object_id: None,
                             local_columns,
                             ref_table,
                             ref_columns,

@@ -173,7 +173,7 @@ fn run_cli(args: CliArgs) -> ExitCode {
     let mut out = TrackedWriter::new(stdout.lock());
 
     let exit = if let Some(command) = args.command {
-        match session.execute_text_with_history(&command, &mut out, false) {
+        match session.execute_command_text_with_history(&command, &mut out, false) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 let _ = writeln!(out, "ERROR: {err}");
