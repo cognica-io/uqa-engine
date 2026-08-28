@@ -197,6 +197,7 @@ impl Engine {
             self.try_save_table_schema(&name, &table_arc)?;
         }
         self.storage.tables.write().insert(relation, table_arc);
+        self.clear_regtype_output_cache();
         if persistence == uqa_sql::ast::RelationPersistence::Temporary {
             self.note_table_catalog_changed();
         }

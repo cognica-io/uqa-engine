@@ -1195,3 +1195,58 @@ fn postgresql_18_regtype_aliases_use_catalog_aware_text_output() {
         Value::Str("pg_catalog.pg_class".into())
     );
 }
+
+#[test]
+fn regtype_output_cache_invalidates_for_table_ddl_and_rollback() {
+    let engine = Engine::new();
+    engine
+        .sql("SELECT (1259::regclass)::text AS name", &[])
+        .unwrap();
+    engine
+        .sql(
+            "CREATE TABLE public.regclass_cache_committed (id INTEGER)",
+            &[],
+        )
+        .unwrap();
+    let committed = engine
+        .sql(
+            "SELECT ('regclass_cache_committed'::regclass)::text AS name",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        committed.rows[0]["name"],
+        Value::Str("regclass_cache_committed".into())
+    );
+    engine.sql("BEGIN", &[]).unwrap();
+    engine
+        .sql(
+            "CREATE TABLE public.regclass_cache_rollback (id INTEGER)",
+            &[],
+        )
+        .unwrap();
+    let cached = engine
+        .sql(
+            "SELECT 'regclass_cache_rollback'::regclass AS oid, ('regclass_cache_rollback'::regclass)::text AS name",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        cached.rows[0]["name"],
+        Value::Str("regclass_cache_rollback".into())
+    );
+    let Value::Int(rolled_back_oid) = cached.rows[0]["oid"] else {
+        panic!("regclass OID must use its integer carrier");
+    };
+    engine.sql("ROLLBACK", &[]).unwrap();
+    let after_rollback = engine
+        .sql(
+            &format!("SELECT ({rolled_back_oid}::regclass)::text AS name"),
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        after_rollback.rows[0]["name"],
+        Value::Str(rolled_back_oid.to_string())
+    );
+}

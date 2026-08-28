@@ -163,6 +163,7 @@ impl Engine {
             );
         }
         self.durable.restore(&snapshot.durable);
+        self.clear_regtype_output_cache();
         *self.extensions.foreign_memory_tables.write() = snapshot.foreign_memory_tables.clone();
         Ok(())
     }
