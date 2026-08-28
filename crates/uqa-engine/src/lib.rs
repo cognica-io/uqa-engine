@@ -727,6 +727,14 @@ impl uqa_sql::expr::EngineHook for Engine {
         crate::sql::resolve_regclass_oid(self, name)
     }
 
+    fn resolve_regtype_output(
+        &self,
+        ty: &uqa_sql::ast::ColumnType,
+        oid: i64,
+    ) -> std::result::Result<Option<String>, String> {
+        crate::sql::resolve_regtype_output(self, ty, oid)
+    }
+
     fn nextval(&self, name: &str) -> std::result::Result<i64, SQLError> {
         self.nextval_sql(name)
     }

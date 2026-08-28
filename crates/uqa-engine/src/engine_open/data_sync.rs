@@ -13,6 +13,7 @@ impl Engine {
     /// sessions. Their physical stores are rebuilt lazily from their own
     /// session-bound backend on the next table lookup.
     pub(crate) fn note_table_catalog_changed(&self) {
+        self.clear_regtype_output_cache();
         self.clear_bayesian_params_cache();
         if !self.session.transactions.lock().is_empty() {
             self.epochs

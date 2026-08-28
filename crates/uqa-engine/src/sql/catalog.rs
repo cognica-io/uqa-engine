@@ -6,7 +6,8 @@
 
 //! `information_schema` and `pg_catalog` virtual row synthesis.
 
-use std::sync::LazyLock;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, LazyLock};
 
 use uqa_core::Value;
 use uqa_sql::ast::{ColumnDef as SQLColumnDef, ColumnType, Expr};
@@ -147,6 +148,9 @@ pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> O
 }
 
 pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, String> {
+    if let Some((oid, _, _)) = resolve_virtual_regclass(engine, name)? {
+        return Ok(Some(oid));
+    }
     let Some((canonical, kind)) = engine
         .try_resolve_relation_kind(name)
         .map_err(|error| error.to_string())?
@@ -155,12 +159,405 @@ pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option
     };
     let (schema, relation) =
         helpers::split_schema_name(&canonical).map_err(|error| error.to_string())?;
+    if kind == "table" {
+        return pg_catalog::table_relation_oid(engine, &canonical)
+            .map(Some)
+            .map_err(|error| error.to_string());
+    }
     let relkind = match kind {
-        "table" => "r",
         "view" => "v",
+        "materialized view" => "m",
         "sequence" => "S",
         "foreign table" => "f",
         other => return Err(format!("unknown relation kind `{other}` for `{canonical}`")),
     };
     Ok(Some(helpers::relation_oid(relkind, &schema, &relation)))
+}
+
+const VIRTUAL_REGCLASSES: &[(&str, &str, i64)] = &[
+    ("pg_catalog", "pg_namespace", 2615),
+    ("pg_catalog", "pg_class", 1259),
+    ("pg_catalog", "pg_inherits", 2611),
+    ("pg_catalog", "pg_partitioned_table", 3350),
+    ("pg_catalog", "pg_attribute", 1249),
+    ("pg_catalog", "pg_attrdef", 2604),
+    ("pg_catalog", "pg_constraint", 2606),
+    ("pg_catalog", "pg_index", 2610),
+    ("pg_catalog", "pg_trigger", 2620),
+    ("pg_catalog", "pg_rewrite", 2618),
+    ("pg_catalog", "pg_rules", 12023),
+    ("pg_catalog", "pg_tables", 12033),
+    ("pg_catalog", "pg_views", 12028),
+    ("pg_catalog", "pg_indexes", 12043),
+    ("pg_catalog", "pg_type", 1247),
+    ("pg_catalog", "pg_range", 3541),
+    ("pg_catalog", "pg_proc", 1255),
+    ("pg_catalog", "pg_database", 1262),
+    ("pg_catalog", "pg_roles", 12000),
+    ("pg_catalog", "pg_user", 12014),
+    ("pg_catalog", "pg_settings", 12104),
+    ("pg_catalog", "pg_description", 2609),
+    ("pg_catalog", "pg_matviews", 12038),
+    ("pg_catalog", "pg_sequences", 12048),
+    (
+        "information_schema",
+        "information_schema_catalog_name",
+        13313,
+    ),
+    ("information_schema", "columns", 13381),
+    ("information_schema", "key_column_usage", 13414),
+    ("information_schema", "routines", 13462),
+    ("information_schema", "schemata", 13467),
+    ("information_schema", "sequences", 13471),
+    ("information_schema", "table_constraints", 13496),
+    ("information_schema", "tables", 13510),
+    ("information_schema", "views", 13568),
+];
+
+fn resolve_virtual_regclass(
+    engine: &Engine,
+    name: &str,
+) -> Result<Option<(i64, &'static str, &'static str)>, String> {
+    let normalized = name.trim().to_ascii_lowercase();
+    if let Some((schema, local)) = normalized.rsplit_once('.') {
+        return Ok(VIRTUAL_REGCLASSES
+            .iter()
+            .find(|(candidate_schema, candidate_local, _)| {
+                *candidate_schema == schema.trim_matches('"')
+                    && *candidate_local == local.trim_matches('"')
+            })
+            .map(|(schema, local, oid)| (*oid, *schema, *local)));
+    }
+    let local = normalized.trim_matches('"');
+    let Some(visible_schema) =
+        visible_relation_schema(engine, local).map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
+    Ok(VIRTUAL_REGCLASSES
+        .iter()
+        .find(|(schema, candidate_local, _)| *schema == visible_schema && *candidate_local == local)
+        .map(|(schema, local, oid)| (*oid, *schema, *local)))
+}
+
+fn catalog_int(row: &ResultRow, column: &str) -> Option<i64> {
+    match row.get(column) {
+        Some(Value::Int(value)) => Some(*value),
+        _ => None,
+    }
+}
+
+fn catalog_str<'a>(row: &'a ResultRow, column: &str) -> Option<&'a str> {
+    match row.get(column) {
+        Some(Value::Str(value) | Value::FixedChar(value)) => Some(value),
+        _ => None,
+    }
+}
+
+#[derive(Debug)]
+struct RegtypeCatalogEntry {
+    name: String,
+    namespace_oid: i64,
+    overloaded: bool,
+}
+
+/// One immutable catalog snapshot shared by every `reg*` value formatted until catalog state changes.
+#[derive(Debug)]
+pub(crate) struct RegtypeOutputCatalog {
+    namespaces: BTreeMap<i64, String>,
+    classes: BTreeMap<i64, RegtypeCatalogEntry>,
+    procs: BTreeMap<i64, RegtypeCatalogEntry>,
+    proc_names_by_namespace: BTreeMap<i64, BTreeSet<String>>,
+    types: BTreeMap<i64, RegtypeCatalogEntry>,
+}
+
+impl RegtypeOutputCatalog {
+    fn build(engine: &Engine) -> Result<Self, SQLError> {
+        let namespaces = build_pg_namespace(engine)?
+            .into_iter()
+            .filter_map(|row| {
+                Some((
+                    catalog_int(&row, "oid")?,
+                    catalog_str(&row, "nspname")?.to_string(),
+                ))
+            })
+            .collect();
+        let classes = build_pg_class(engine)?
+            .into_iter()
+            .filter_map(|row| {
+                Some((
+                    catalog_int(&row, "oid")?,
+                    RegtypeCatalogEntry {
+                        name: catalog_str(&row, "relname")?.to_string(),
+                        namespace_oid: catalog_int(&row, "relnamespace")?,
+                        overloaded: false,
+                    },
+                ))
+            })
+            .collect();
+
+        let mut procs = BTreeMap::new();
+        let mut proc_name_counts = BTreeMap::new();
+        let mut proc_names_by_namespace = BTreeMap::<i64, BTreeSet<String>>::new();
+        for row in build_pg_proc(engine)? {
+            let Some(oid) = catalog_int(&row, "oid") else {
+                continue;
+            };
+            let Some(name) = catalog_str(&row, "proname").map(str::to_string) else {
+                continue;
+            };
+            let Some(namespace_oid) = catalog_int(&row, "pronamespace") else {
+                continue;
+            };
+            *proc_name_counts
+                .entry((namespace_oid, name.clone()))
+                .or_insert(0_usize) += 1;
+            proc_names_by_namespace
+                .entry(namespace_oid)
+                .or_default()
+                .insert(name.clone());
+            procs.insert(
+                oid,
+                RegtypeCatalogEntry {
+                    name,
+                    namespace_oid,
+                    overloaded: false,
+                },
+            );
+        }
+        for entry in procs.values_mut() {
+            entry.overloaded = proc_name_counts
+                .get(&(entry.namespace_oid, entry.name.clone()))
+                .is_some_and(|count| *count > 1);
+        }
+
+        let types = build_pg_type()
+            .into_iter()
+            .filter_map(|row| {
+                Some((
+                    catalog_int(&row, "oid")?,
+                    RegtypeCatalogEntry {
+                        name: catalog_str(&row, "typname")?.to_string(),
+                        namespace_oid: catalog_int(&row, "typnamespace")?,
+                        overloaded: false,
+                    },
+                ))
+            })
+            .collect();
+        Ok(Self {
+            namespaces,
+            classes,
+            procs,
+            proc_names_by_namespace,
+            types,
+        })
+    }
+}
+
+fn regtype_output_catalog(engine: &Engine) -> Result<Arc<RegtypeOutputCatalog>, SQLError> {
+    loop {
+        if let Some(catalog) = engine.runtime.regtype_output_cache.lock().clone() {
+            return Ok(catalog);
+        }
+        let revision = engine
+            .runtime
+            .regtype_output_cache_revision
+            .load(std::sync::atomic::Ordering::Acquire);
+        let built = Arc::new(RegtypeOutputCatalog::build(engine)?);
+        let mut cache = engine.runtime.regtype_output_cache.lock();
+        if engine
+            .runtime
+            .regtype_output_cache_revision
+            .load(std::sync::atomic::Ordering::Acquire)
+            != revision
+        {
+            drop(cache);
+            continue;
+        }
+        return Ok(cache.get_or_insert(built).clone());
+    }
+}
+
+impl Engine {
+    pub(crate) fn clear_regtype_output_cache(&self) {
+        self.runtime
+            .regtype_output_cache_revision
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        self.runtime.regtype_output_cache.lock().take();
+    }
+}
+
+fn namespace_name(catalog: &RegtypeOutputCatalog, oid: i64) -> Option<&str> {
+    catalog.namespaces.get(&oid).map(String::as_str)
+}
+
+fn qualified_name(schema: &str, local: &str) -> String {
+    format!(
+        "{}.{}",
+        uqa_sql::expr::quote_ident(schema),
+        uqa_sql::expr::quote_ident(local)
+    )
+}
+
+fn visible_relation_schema(engine: &Engine, local: &str) -> Result<Option<String>, SQLError> {
+    let physical = engine
+        .try_resolve_relation_kind(local)
+        .map_err(|error| SQLError::Internal(error.to_string()))?;
+    if let Some((canonical, _)) = physical.as_ref() {
+        if let Some((schema, _)) = canonical.rsplit_once('.') {
+            if schema.starts_with("pg_temp_") {
+                return Ok(Some(schema.to_string()));
+            }
+        }
+    }
+    for schema in engine
+        .current_schema_names(true)
+        .map_err(|error| SQLError::Internal(error.to_string()))?
+    {
+        if VIRTUAL_REGCLASSES
+            .iter()
+            .any(|(candidate_schema, candidate_local, _)| {
+                *candidate_schema == schema && *candidate_local == local
+            })
+        {
+            return Ok(Some(schema));
+        }
+        if engine
+            .relation_kind_at(&format!("{schema}.{local}"))
+            .map_err(|error| SQLError::Internal(error.to_string()))?
+            .is_some()
+        {
+            return Ok(Some(schema));
+        }
+    }
+    Ok(physical.and_then(|(canonical, _)| {
+        canonical
+            .rsplit_once('.')
+            .map(|(schema, _)| schema.to_string())
+    }))
+}
+
+fn relation_name_is_visible(engine: &Engine, schema: &str, local: &str) -> Result<bool, SQLError> {
+    Ok(visible_relation_schema(engine, local)?.as_deref() == Some(schema))
+}
+
+fn format_regclass(
+    engine: &Engine,
+    catalog: &RegtypeOutputCatalog,
+    oid: i64,
+) -> Result<Option<String>, SQLError> {
+    if let Some((schema, local, _)) = VIRTUAL_REGCLASSES
+        .iter()
+        .find(|(_, _, candidate_oid)| *candidate_oid == oid)
+    {
+        return Ok(Some(if relation_name_is_visible(engine, schema, local)? {
+            uqa_sql::expr::quote_ident(local)
+        } else {
+            qualified_name(schema, local)
+        }));
+    }
+    let Some(entry) = catalog.classes.get(&oid) else {
+        return Ok(None);
+    };
+    let Some(schema) = namespace_name(catalog, entry.namespace_oid) else {
+        return Ok(None);
+    };
+    Ok(Some(
+        if relation_name_is_visible(engine, schema, &entry.name)? {
+            uqa_sql::expr::quote_ident(&entry.name)
+        } else {
+            qualified_name(schema, &entry.name)
+        },
+    ))
+}
+
+fn format_regproc(
+    engine: &Engine,
+    catalog: &RegtypeOutputCatalog,
+    oid: i64,
+) -> Result<Option<String>, SQLError> {
+    let Some(entry) = catalog.procs.get(&oid) else {
+        return Ok(None);
+    };
+    let Some(schema) = namespace_name(catalog, entry.namespace_oid) else {
+        return Ok(None);
+    };
+    let schemas = engine
+        .current_schema_names(true)
+        .map_err(|error| SQLError::Internal(error.to_string()))?;
+    let visible_schema = schemas.into_iter().find(|candidate_schema| {
+        let candidate_oid = helpers::schema_oid(candidate_schema);
+        catalog
+            .proc_names_by_namespace
+            .get(&candidate_oid)
+            .is_some_and(|names| names.contains(entry.name.as_str()))
+    });
+    Ok(Some(
+        if !entry.overloaded && visible_schema.as_deref() == Some(schema) {
+            uqa_sql::expr::quote_ident(&entry.name)
+        } else {
+            qualified_name(schema, &entry.name)
+        },
+    ))
+}
+
+fn pg_catalog_type_output(typname: &str) -> String {
+    if let Some(element) = typname.strip_prefix('_') {
+        return format!("{}[]", pg_catalog_type_output(element));
+    }
+    match typname {
+        "char" => "\"char\"".into(),
+        "bpchar" => "character".into(),
+        other => ColumnType::from_sql_name(other)
+            .map_or_else(|_| uqa_sql::expr::quote_ident(other), |ty| ty.sql_name()),
+    }
+}
+
+fn format_regtype(
+    engine: &Engine,
+    catalog: &RegtypeOutputCatalog,
+    oid: i64,
+) -> Result<Option<String>, SQLError> {
+    let Some(entry) = catalog.types.get(&oid) else {
+        return Ok(None);
+    };
+    let Some(schema) = namespace_name(catalog, entry.namespace_oid) else {
+        return Ok(None);
+    };
+    let local = if schema == "pg_catalog" {
+        pg_catalog_type_output(&entry.name)
+    } else {
+        uqa_sql::expr::quote_ident(&entry.name)
+    };
+    Ok(Some(
+        if schema == "pg_catalog" || engine.search_path_contains(schema) {
+            local
+        } else {
+            format!("{}.{}", uqa_sql::expr::quote_ident(schema), local)
+        },
+    ))
+}
+
+pub(crate) fn resolve_regtype_output(
+    engine: &Engine,
+    ty: &ColumnType,
+    oid: i64,
+) -> Result<Option<String>, String> {
+    if !matches!(
+        ty,
+        ColumnType::Regproc | ColumnType::Regclass | ColumnType::Regnamespace | ColumnType::Regtype
+    ) {
+        return Ok(None);
+    }
+    let catalog = regtype_output_catalog(engine).map_err(|error| error.to_string())?;
+    let output = match ty {
+        ColumnType::Regproc => format_regproc(engine, &catalog, oid),
+        ColumnType::Regclass => format_regclass(engine, &catalog, oid),
+        ColumnType::Regnamespace => {
+            Ok(namespace_name(&catalog, oid).map(uqa_sql::expr::quote_ident))
+        }
+        ColumnType::Regtype => format_regtype(engine, &catalog, oid),
+        _ => unreachable!(),
+    };
+    output.map_err(|error| error.to_string())
 }

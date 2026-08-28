@@ -1089,3 +1089,164 @@ fn postgresql_18_database_catalog_matches_builtin_unicode_behavior() {
         .unwrap();
     assert_eq!(folded.rows[0]["folded"], Value::Str("strasse".into()));
 }
+
+#[test]
+fn postgresql_18_regtype_aliases_use_catalog_aware_text_output() {
+    let engine = Engine::new();
+    let result = engine
+        .sql(
+            "SELECT (0::regproc)::text AS zero_proc, (0::regclass)::text AS zero_class, \
+                    (0::regnamespace)::text AS zero_namespace, (0::regtype)::text AS zero_type, \
+                    (1574::regproc)::text AS sequence_proc_name, (1598::regproc)::text AS proc_name, \
+                    (1259::regclass)::text AS class_name, \
+                    (11::regnamespace)::text AS namespace_name, (23::regtype)::text AS type_name, \
+                    (999999::regclass)::text AS missing_name, 'pg_class'::regclass AS class_oid, \
+                    NULL::regproc::text AS null_proc, \
+                    ARRAY[0::regproc, 1598::regproc, 999999::regproc]::text AS proc_array",
+            &[],
+        )
+        .unwrap();
+    let row = &result.rows[0];
+    for column in ["zero_proc", "zero_class", "zero_namespace", "zero_type"] {
+        assert_eq!(row[column], Value::Str("-".into()), "{column}");
+    }
+    assert_eq!(row["sequence_proc_name"], Value::Str("nextval".into()));
+    assert_eq!(row["proc_name"], Value::Str("pg_catalog.random".into()));
+    assert_eq!(row["class_name"], Value::Str("pg_class".into()));
+    assert_eq!(row["namespace_name"], Value::Str("pg_catalog".into()));
+    assert_eq!(row["type_name"], Value::Str("integer".into()));
+    assert_eq!(row["missing_name"], Value::Str("999999".into()));
+    assert_eq!(row["class_oid"], Value::Int(1259));
+    assert_eq!(row["null_proc"], Value::Null);
+    assert_eq!(
+        row["proc_array"],
+        Value::Str("{-,pg_catalog.random,999999}".into())
+    );
+
+    let sequence_routines = engine
+        .sql(
+            "SELECT oid, proname, prorettype, proargtypes, proisstrict, provolatile, proparallel, prosrc FROM pg_proc WHERE oid IN (1574, 1575, 1576, 1765) ORDER BY oid",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(sequence_routines.rows.len(), 4);
+    assert_eq!(
+        sequence_routines.rows[0]["proname"],
+        Value::Str("nextval".into())
+    );
+    assert_eq!(
+        sequence_routines.rows[1]["proname"],
+        Value::Str("currval".into())
+    );
+    for row in &sequence_routines.rows {
+        assert_eq!(row["prorettype"], Value::Int(20));
+        assert_eq!(row["proisstrict"], Value::Bool(true));
+        assert_eq!(row["provolatile"], Value::Str("v".into()));
+        assert_eq!(row["proparallel"], Value::Str("u".into()));
+    }
+    assert_eq!(
+        sequence_routines.rows[0]["proargtypes"],
+        Value::List(vec![Value::Int(2205)])
+    );
+    assert_eq!(
+        sequence_routines.rows[2]["proargtypes"],
+        Value::List(vec![Value::Int(2205), Value::Int(20)])
+    );
+    assert_eq!(
+        sequence_routines.rows[3]["proargtypes"],
+        Value::List(vec![Value::Int(2205), Value::Int(20), Value::Int(16)])
+    );
+
+    let mut copy = Vec::new();
+    engine
+        .copy_to(
+            "COPY (SELECT 0::regproc, 1598::regproc, 1259::regclass, 11::regnamespace, 23::regtype, ARRAY[0::regclass, 1259::regclass, 999999::regclass]) TO STDOUT",
+            &mut copy,
+        )
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(copy).unwrap(),
+        "-\tpg_catalog.random\tpg_class\tpg_catalog\tinteger\t{-,pg_class,999999}\n"
+    );
+
+    engine
+        .sql("CREATE TABLE public.pg_class (id INTEGER)", &[])
+        .unwrap();
+    let implicit_catalog = engine
+        .sql("SELECT 'pg_class'::regclass AS oid", &[])
+        .unwrap();
+    assert_eq!(implicit_catalog.rows[0]["oid"], Value::Int(1259));
+    engine
+        .sql("SET search_path TO public, pg_catalog", &[])
+        .unwrap();
+    let shadowed = engine
+        .sql(
+            "SELECT 'pg_class'::regclass AS oid, ('pg_class'::regclass)::text AS visible_name, (1259::regclass)::text AS catalog_name",
+            &[],
+        )
+        .unwrap();
+    assert_ne!(shadowed.rows[0]["oid"], Value::Int(1259));
+    assert_eq!(
+        shadowed.rows[0]["visible_name"],
+        Value::Str("pg_class".into())
+    );
+    assert_eq!(
+        shadowed.rows[0]["catalog_name"],
+        Value::Str("pg_catalog.pg_class".into())
+    );
+}
+
+#[test]
+fn regtype_output_cache_invalidates_for_table_ddl_and_rollback() {
+    let engine = Engine::new();
+    engine
+        .sql("SELECT (1259::regclass)::text AS name", &[])
+        .unwrap();
+    engine
+        .sql(
+            "CREATE TABLE public.regclass_cache_committed (id INTEGER)",
+            &[],
+        )
+        .unwrap();
+    let committed = engine
+        .sql(
+            "SELECT ('regclass_cache_committed'::regclass)::text AS name",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        committed.rows[0]["name"],
+        Value::Str("regclass_cache_committed".into())
+    );
+    engine.sql("BEGIN", &[]).unwrap();
+    engine
+        .sql(
+            "CREATE TABLE public.regclass_cache_rollback (id INTEGER)",
+            &[],
+        )
+        .unwrap();
+    let cached = engine
+        .sql(
+            "SELECT 'regclass_cache_rollback'::regclass AS oid, ('regclass_cache_rollback'::regclass)::text AS name",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        cached.rows[0]["name"],
+        Value::Str("regclass_cache_rollback".into())
+    );
+    let Value::Int(rolled_back_oid) = cached.rows[0]["oid"] else {
+        panic!("regclass OID must use its integer carrier");
+    };
+    engine.sql("ROLLBACK", &[]).unwrap();
+    let after_rollback = engine
+        .sql(
+            &format!("SELECT ({rolled_back_oid}::regclass)::text AS name"),
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        after_rollback.rows[0]["name"],
+        Value::Str(rolled_back_oid.to_string())
+    );
+}

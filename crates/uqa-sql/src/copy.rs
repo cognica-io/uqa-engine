@@ -19,7 +19,7 @@ use crate::SQLError;
 
 mod codec;
 
-pub use codec::{decode_copy_input, encode_copy_result};
+pub use codec::{decode_copy_input, encode_copy_result, encode_copy_result_with_engine};
 
 /// COPY stream direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

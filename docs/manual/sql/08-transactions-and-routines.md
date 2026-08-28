@@ -119,6 +119,18 @@ This is a deliberate subset. Validate every routine body during migration instea
 
 ## Triggers
 
+### Syntax
+
+The implemented creation form is `CREATE [OR REPLACE] TRIGGER name { BEFORE | AFTER } event [ OR event ... ] ON relation [ FOR EACH { ROW | STATEMENT } ] [ WHEN (condition) ] EXECUTE FUNCTION function_name([argument, ...])`, where an event is `INSERT`, `UPDATE [ OF column [, ...] ]`, `DELETE`, or `TRUNCATE`. Lifecycle forms are `DROP TRIGGER [ IF EXISTS ] name ON relation`, `ALTER TRIGGER name ON relation RENAME TO new_name`, and `ALTER TABLE relation { ENABLE | DISABLE } TRIGGER { name | ALL | USER }`.
+
+### Arguments
+
+The relation, trigger, function, and `UPDATE OF` column names are identifiers. The `WHEN` clause is a Boolean expression over the event row images allowed at that timing and level. Function arguments are stored string values exposed through `TG_ARGV`; the trigger function itself has no declared ordinary arguments and returns `trigger`.
+
+### Result, effects, and errors
+
+Creation, replacement, rename, enable state, and removal update the durable trigger catalog transactionally and invalidate affected prepared plans. Trigger DDL has no row result. Invalid timing/event combinations, non-Boolean or out-of-scope `WHEN` expressions, wrong function signatures, dependency violations, and unsupported trigger kinds fail before partial catalog publication with the PostgreSQL-shaped SQLSTATE documented by the compatibility tests.
+
 ```sql
 CREATE FUNCTION normalize_item() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -143,6 +155,32 @@ Trigger definitions participate in table, column, and exact zero-argument functi
 Constraint and deferred triggers, transition relations, `INSTEAD OF` view triggers, partition-moving update semantics, direct ALTER or DROP operations on generated partition clones, `session_replication_role`, trigger privileges, exact PostgreSQL `pg_node_tree` serialization, dump and restore, and the complete upstream trigger regression schedule remain compatibility bugs.
 
 ## Rewrite rules
+
+### Syntax
+
+The implemented creation form is `CREATE [OR REPLACE] RULE name AS ON { INSERT | UPDATE | DELETE } TO relation [ WHERE condition ] DO [ ALSO | INSTEAD ] { NOTHING | action | (action; ...) }`. Lifecycle forms are `DROP RULE [ IF EXISTS ] name ON relation`, `ALTER RULE name ON relation RENAME TO new_name`, and `ALTER TABLE relation { ENABLE | DISABLE } RULE { name | ALL | USER }`.
+
+### Arguments
+
+The rule and relation names are identifiers. `OLD` and `NEW` expose the event-row fields valid for the selected event, the optional condition is a Boolean expression over the supported event scope, and each action is an implemented `INSERT`, `UPDATE`, or `DELETE` statement. `ALSO` preserves the original command; `INSTEAD` conditionally or unconditionally replaces it; `NOTHING` suppresses it for matching rows.
+
+### Result and effects
+
+Rule DDL has no row result. Definitions, enable state, rename, replacement, and removal are durable and transactional, update `pg_rewrite` and `pg_rules`, participate in relation and column lifecycle, and invalidate affected prepared plans. Active actions execute once over the qualified OLD/NEW row set rather than once as an independent SQL statement per event row.
+
+### Errors
+
+Creation rejects invalid OLD/NEW scope, result-column or type mismatches for a DML `RETURNING` provider, multiple providers, recursive definitions, reserved `_RETURN` misuse, and unsupported targets before publishing the definition. Active rules reject `ON CONFLICT` and `MERGE`; unsupported conditional set-operation and multi-row rewritten action shapes report their PostgreSQL 18 SQLSTATEs.
+
+### Example
+
+```sql execute
+CREATE TABLE manual_rule_items (id INTEGER PRIMARY KEY, value TEXT);
+CREATE TABLE manual_rule_log (item_id INTEGER, value TEXT);
+CREATE RULE manual_rule_insert_log AS ON INSERT TO manual_rule_items DO ALSO INSERT INTO manual_rule_log VALUES (NEW.id, NEW.value);
+INSERT INTO manual_rule_items VALUES (1, 'created');
+SELECT item_id, value FROM manual_rule_log ORDER BY item_id;
+```
 
 Durable table rewrite rules execute INSERT VALUES, INSERT SELECT, UPDATE, and DELETE actions once over each qualified OLD/NEW row set, so an action's statement trigger fires once rather than once per event row. The implemented surface includes collision-free internal row sources, correlated LATERAL action sources, PostgreSQL query-scope rejection for event-row references in CTEs, set-operation members, and `ON CONFLICT DO UPDATE`, unqualified INSERT and DELETE conditions, alphabetical `ALSO` and conditional or unconditional `INSTEAD` ordering, `NOTHING`, recursion protection, replacement with enable-state retention, rename/drop and target-column lifecycle, view `_RETURN` replacement and protection, and PostgreSQL-shaped `pg_rewrite`, `pg_rules`, rule flags, and `pg_get_ruledef`. As in PostgreSQL 18, an unconditional `ON INSERT` action containing `UNION`, `INTERSECT`, or `EXCEPT` succeeds for a one-row insert but returns `0A000` when a multi-row insert makes the rewritten action conditional. An unconditional `INSTEAD` rule can provide DML `RETURNING` positionally with PostgreSQL-compatible creation-time row type and type-modifier checks, single-provider restrictions, lazily evaluated provider projections, provider action current/OLD/NEW images, outer row-image aliases, outer `UPDATE FROM` source columns for UPDATE-provider actions, and outer `DELETE USING` source columns for DELETE-provider actions. Active rules reject `ON CONFLICT` and `MERGE` with the PostgreSQL SQLSTATEs. Writable-view DML rules, condition subqueries, OLD/NEW record expansion, `NOTIFY` actions, complete dependencies, inheritance and partition behavior, `session_replication_role`, privileges, exact node trees and deparsing, dump/restore, and the complete upstream rule schedule remain compatibility bugs.
 

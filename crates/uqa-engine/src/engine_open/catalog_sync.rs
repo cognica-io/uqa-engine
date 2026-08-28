@@ -13,6 +13,7 @@ impl Engine {
     /// the generation private until their outer COMMIT; autocommit operations
     /// publish immediately.
     pub(crate) fn note_catalog_registry_changed(&self) {
+        self.clear_regtype_output_cache();
         self.clear_bayesian_params_cache();
         if !self.session.transactions.lock().is_empty() {
             self.epochs
@@ -113,6 +114,7 @@ impl Engine {
     }
 
     pub(super) fn reload_table_catalog(&self, target_epoch: u64) -> StorageBackendResult<()> {
+        self.clear_regtype_output_cache();
         let previous_epoch = self
             .epochs
             .table_catalog
@@ -244,6 +246,7 @@ impl Engine {
     }
 
     pub(super) fn reload_catalog_registries(&self, target_epoch: u64) -> StorageBackendResult<()> {
+        self.clear_regtype_output_cache();
         self.clear_bayesian_params_cache();
         let previous_epoch = self
             .epochs

@@ -284,6 +284,8 @@ pub(super) struct QueryRuntime {
     pub(super) notices: Mutex<Vec<(String, String)>>,
     pub(super) function_depth_limit: AtomicUsize,
     pub(super) bayesian_params_cache: RwLock<BTreeMap<String, BayesianBM25Params>>,
+    pub(super) regtype_output_cache: Mutex<Option<Arc<crate::sql::RegtypeOutputCatalog>>>,
+    pub(super) regtype_output_cache_revision: AtomicU64,
 }
 
 impl QueryRuntime {
@@ -294,6 +296,8 @@ impl QueryRuntime {
             notices: Mutex::new(Vec::new()),
             function_depth_limit: AtomicUsize::new(function_depth_limit),
             bayesian_params_cache: RwLock::new(BTreeMap::new()),
+            regtype_output_cache: Mutex::new(None),
+            regtype_output_cache_revision: AtomicU64::new(0),
         }
     }
 }

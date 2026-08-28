@@ -34,7 +34,7 @@ When generating SQL:
 - [Analyzer SQL](docs/manual/sql/05-analyzers.md): Exact analyzer JSON, built-ins including `standard_cjk`, lifecycle functions, GIN binding, and diagnostics.
 - [Retrieval SQL](docs/manual/sql/06-retrieval.md): Text, vector, hybrid, fusion, model retrieval, and tuple-producing operator joins.
 - [Graph SQL and Cypher](docs/manual/sql/07-graph.md): Named graphs, Cypher, regular paths, traversal, and centrality.
-- [Transactions and routines](docs/manual/sql/08-transactions-and-routines.md): Transactions, prepared SQL, functions, PL/pgSQL, and procedures.
+- [Transactions and routines](docs/manual/sql/08-transactions-and-routines.md): Transactions, prepared SQL, functions, PL/pgSQL, procedures, triggers, and rewrite rules.
 
 ## Guides and APIs
 

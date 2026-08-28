@@ -12,8 +12,8 @@ use std::io::{Read, Write};
 use uqa_core::Value;
 use uqa_sql::ast::{Expr, InsertStmt, ReturningAliases, Statement};
 use uqa_sql::copy::{
-    compile_copy, decode_copy_input, encode_copy_result, CopyDirection, CopyEndpoint, CopyFormat,
-    CopyStatement, CopyTarget,
+    compile_copy, decode_copy_input, encode_copy_result_with_engine, CopyDirection, CopyEndpoint,
+    CopyFormat, CopyStatement, CopyTarget,
 };
 use uqa_sql::{SQLError, SQLParam};
 
@@ -136,7 +136,7 @@ impl Engine {
             sqlstate: "54000".into(),
             message: "COPY output row count exceeds u64".into(),
         })?;
-        let bytes = encode_copy_result(&result, &copy.options)?;
+        let bytes = encode_copy_result_with_engine(&result, &copy.options, self)?;
         output
             .write_all(&bytes)
             .map_err(|error| copy_io_error("write COPY TO stream", error))?;

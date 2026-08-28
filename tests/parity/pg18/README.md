@@ -28,7 +28,7 @@ python3 tests/parity/pg18/run_diff.py
 
 Manifest schema version 2 records the pinned parser chain, oracle provenance, milestone titles and exit gates, exact single ownership of every evidence item, positive evidence, and every currently tracked incomplete gate. The validator derives milestone states from owned item statuses, synchronizes the plan ledger and manual snapshot, rejects malformed ownership, stale wrapper revisions, duplicate or orphaned items, verified items with open issues, and any complete-compatibility claim made before M6 and every item are complete.
 
-The differential summary line reports `total/match/diff`, and any difference makes the runner exit nonzero. Error rows match only when their SQLSTATE codes match; message text is not compared. Update `probes.sql` freely: one probe per line, `--` comments skipped; probes must be side-effect-free single statements. Set `UQA_PG_CONTAINER`, `UQA_PG_DATABASE`, or `UQA_USQL` to override the defaults while keeping both systems under test in equivalent contexts.
+The differential summary line reports `total/match/diff`, and any difference makes the runner exit nonzero. Error rows match only when their SQLSTATE codes match; message text is not compared. At this revision `probes.sql` contains 793 probes. Update it freely: one probe per line, `--` comments skipped; probes must be side-effect-free single statements. Set `UQA_PG_CONTAINER`, `UQA_PG_DATABASE`, or `UQA_USQL` to override the defaults while keeping both systems under test in equivalent contexts.
 
 ## MERGE and RETURNING oracle
 
@@ -36,7 +36,7 @@ The differential summary line reports `total/match/diff`, and any difference mak
 
 ## Stateful routine oracle
 
-`run_routines_stateful.py` executes the delimited cases in `routines_stateful.sql` against PostgreSQL 18.4 with Apache AGE and UQA, then compares both results with `routines_stateful.expected.json`. It covers polymorphic and variadic resolution, pseudo-type declaration validation, user `pg_proc` identity, ALTER lifecycle, persisted concrete bindings, bounded function `DROP CASCADE` effects, and no-dependent procedure CASCADE removal.
+`run_routines_stateful.py` executes the 129 delimited cases in `routines_stateful.sql` against PostgreSQL 18.4 with Apache AGE and UQA, then compares both results with `routines_stateful.expected.json`. It covers polymorphic and variadic resolution, pseudo-type declaration validation, user `pg_proc` identity, ALTER lifecycle, persisted concrete bindings, routine ownership and security, session portals, transitive function and procedure `DROP CASCADE` effects, and exact SQLSTATEs.
 
 The same runner's `--suite constraints` mode executes `constraints_stateful.sql` and compares it with `constraints_stateful.expected.json`. The 84-case transcript covers named CHECK, foreign-key, and `NOT NULL` `NOT VALID` state, validation and enforcement failure atomicity, supported ALTER forms, inferred primary-key references, exact referenced-key identity, directional and temporal cross-type keys, initially-deferred outer-commit and savepoint behavior, dependency-aware drops, multi-action rollback, catalog flags, and exact SQLSTATEs.
 

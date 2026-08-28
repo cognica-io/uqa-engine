@@ -239,6 +239,7 @@ impl Engine {
             }
         }
         self.storage.tables.write().remove(&relation);
+        self.clear_regtype_output_cache();
         if temporary {
             self.note_table_catalog_changed();
         }
