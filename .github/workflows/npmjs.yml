@@ -189,7 +189,7 @@ jobs:
             dist/*.tgz
           while IFS= read -r filename; do
             [ -n "$filename" ] || continue
-            npm publish "dist/$filename" --access public
+            npm publish "./dist/$filename" --access public
           done < "$pending"
 
       - name: Verify the published npm release
