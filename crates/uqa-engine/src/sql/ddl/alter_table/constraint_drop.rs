@@ -18,7 +18,11 @@ pub(super) fn drop_constraint(
     if_exists: bool,
     cascade: bool,
 ) -> Result<(), SQLError> {
-    drop_constraint_group(engine, table, name, if_exists, cascade, true)
+    let table = engine
+        .try_resolve_table_name(table)
+        .map_err(|error| ddl_storage_error("DROP CONSTRAINT relation lookup", error))?
+        .unwrap_or_else(|| table.to_string());
+    drop_constraint_group(engine, &table, name, if_exists, cascade, true)
 }
 
 fn drop_constraint_dependency(engine: &Engine, table: &str, name: &str) -> Result<(), SQLError> {
