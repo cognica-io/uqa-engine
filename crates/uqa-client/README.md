@@ -86,7 +86,7 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 
 ## Embed it in Rust
 
-`uqa` is the primary Rust package. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public Rust crates are packaged for crates.io but are not on the registry until the next crates.io publish step. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
+`uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
 
 ```rust
 use uqa::Engine;
