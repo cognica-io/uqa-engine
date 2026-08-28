@@ -15,7 +15,7 @@ use uqa_sql::registry::registered_names;
 use uqa_sql::{ResultRow, SQLError};
 
 use crate::engine_user_functions::{canonical_routine_type_name, routine_signature_types};
-use crate::{Engine, RelationIdentity};
+use crate::{ConstraintIdentity, Engine, RelationIdentity};
 
 use super::{column_type_name, value_to_text};
 
@@ -76,6 +76,28 @@ mod pg_catalog;
 mod pg_proc;
 mod relation_catalog;
 mod schema;
+
+#[derive(Debug, Clone)]
+pub(crate) struct RuntimeConstraint {
+    pub(crate) identity: ConstraintIdentity,
+    pub(crate) deferrable: bool,
+}
+
+pub(crate) fn runtime_constraints(engine: &Engine) -> Result<Vec<RuntimeConstraint>, SQLError> {
+    helpers::constraint_catalog_rows(engine)?
+        .into_iter()
+        .map(|constraint| {
+            Ok(RuntimeConstraint {
+                identity: ConstraintIdentity {
+                    relation: RelationIdentity::new(constraint.schema, constraint.table),
+                    name: constraint.name,
+                    object_id: constraint.object_id,
+                },
+                deferrable: constraint.state.deferrable(),
+            })
+        })
+        .collect()
+}
 
 pub(crate) use ag_catalog::resolve_age_label_relation_name;
 use ag_catalog::{build_ag_graph, build_ag_label};

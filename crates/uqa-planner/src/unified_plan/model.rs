@@ -411,6 +411,10 @@ pub enum CommandPlan {
         name: String,
         value: String,
     },
+    SetConstraints {
+        constraints: Vec<uqa_sql::ast::SetConstraintName>,
+        deferred: bool,
+    },
     ShowVariable {
         name: String,
     },

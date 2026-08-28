@@ -15,6 +15,189 @@ use super::{
 };
 use crate::{VectorIndexOpenMode, VectorIndexSpec};
 
+fn metadata_foreign_keys(
+    columns: &[uqa_sql::ast::ColumnDef],
+    constraints: &uqa_sql::ast::TableConstraintSet,
+) -> Vec<uqa_sql::ast::ForeignKey> {
+    let mut foreign_keys = constraints.foreign_keys.clone();
+    for column in columns {
+        let Some(reference) = &column.references else {
+            continue;
+        };
+        foreign_keys.push(uqa_sql::ast::ForeignKey {
+            name: reference.name.clone(),
+            object_id: reference.object_id,
+            local_columns: vec![column.name.clone()],
+            ref_table: reference.table.clone(),
+            ref_columns: reference.column.clone().into_iter().collect(),
+            on_update: reference.on_update,
+            on_delete: reference.on_delete,
+            on_delete_set_columns: Vec::new(),
+            match_type: reference.match_type,
+            enforced: reference.enforced,
+            validated: reference.validated,
+            deferrable: reference.deferrable,
+            initially_deferred: reference.initially_deferred,
+            period: reference.period,
+        });
+    }
+    foreign_keys
+}
+
+struct ConstraintMetadataMigration {
+    schema: TableSchema,
+    columns: Vec<uqa_sql::ast::ColumnDef>,
+    constraints: uqa_sql::ast::TableConstraintSet,
+    changed: bool,
+}
+
+fn load_constraint_metadata_migrations(
+    catalog: &dyn CatalogFacade,
+) -> StorageBackendResult<Vec<ConstraintMetadataMigration>> {
+    let mut migrations = Vec::new();
+    for schema in catalog.load_tables()? {
+        let mut columns = if schema.columns_json.is_empty() {
+            Vec::new()
+        } else {
+            serde_json::from_str(&schema.columns_json)?
+        };
+        let mut constraints = if schema.constraints_json.is_empty() {
+            uqa_sql::ast::TableConstraintSet::default()
+        } else {
+            serde_json::from_str(&schema.constraints_json)?
+        };
+        let dispatches_changed =
+            crate::engine_table_storage::upgrade_legacy_schema_function_dispatches(
+                &mut columns,
+                &mut constraints,
+            );
+        let metadata_changed = crate::engine_table_storage::materialize_constraint_metadata(
+            &schema.relation,
+            &mut columns,
+            &mut constraints,
+        )?;
+        migrations.push(ConstraintMetadataMigration {
+            schema,
+            columns,
+            constraints,
+            changed: dispatches_changed || metadata_changed,
+        });
+    }
+    Ok(migrations)
+}
+
+fn inherited_parent_object_id(
+    parent_foreign_keys: &BTreeMap<String, Vec<uqa_sql::ast::ForeignKey>>,
+    parents: &[String],
+    inherited: &uqa_sql::ast::ForeignKey,
+) -> Option<[u8; 16]> {
+    parents.iter().find_map(|parent| {
+        parent_foreign_keys.get(parent).and_then(|foreign_keys| {
+            foreign_keys
+                .iter()
+                .find(|foreign_key| {
+                    crate::engine_table_storage::foreign_keys_match_without_object_id(
+                        foreign_key,
+                        inherited,
+                    )
+                })
+                .and_then(|foreign_key| foreign_key.object_id)
+        })
+    })
+}
+
+fn apply_inherited_object_id(
+    migration: &mut ConstraintMetadataMigration,
+    inherited_index: usize,
+    object_id: [u8; 16],
+) -> bool {
+    let inherited = migration
+        .constraints
+        .hierarchy
+        .partition_inherited_foreign_keys[inherited_index]
+        .clone();
+    let mut changed = false;
+    if inherited.object_id != Some(object_id) {
+        migration
+            .constraints
+            .hierarchy
+            .partition_inherited_foreign_keys[inherited_index]
+            .object_id = Some(object_id);
+        changed = true;
+    }
+    if let Some(foreign_key) = migration
+        .constraints
+        .foreign_keys
+        .iter_mut()
+        .find(|foreign_key| {
+            crate::engine_table_storage::foreign_keys_match_without_object_id(
+                foreign_key,
+                &inherited,
+            )
+        })
+    {
+        if foreign_key.object_id != Some(object_id) {
+            foreign_key.object_id = Some(object_id);
+            changed = true;
+        }
+    }
+    migration.changed |= changed;
+    changed
+}
+
+fn synchronize_inherited_constraint_object_ids(migrations: &mut [ConstraintMetadataMigration]) {
+    for _ in 0..migrations.len() {
+        let parent_foreign_keys = migrations
+            .iter()
+            .map(|migration| {
+                (
+                    migration.schema.relation.qualified_name(),
+                    metadata_foreign_keys(&migration.columns, &migration.constraints),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut pass_changed = false;
+        for migration in &mut *migrations {
+            let parents = migration.constraints.hierarchy.parents.clone();
+            let inherited_count = migration
+                .constraints
+                .hierarchy
+                .partition_inherited_foreign_keys
+                .len();
+            for inherited_index in 0..inherited_count {
+                let inherited = &migration
+                    .constraints
+                    .hierarchy
+                    .partition_inherited_foreign_keys[inherited_index];
+                let Some(object_id) =
+                    inherited_parent_object_id(&parent_foreign_keys, &parents, inherited)
+                else {
+                    continue;
+                };
+                pass_changed |= apply_inherited_object_id(migration, inherited_index, object_id);
+            }
+        }
+        if !pass_changed {
+            break;
+        }
+    }
+}
+
+fn save_constraint_metadata_migrations(
+    catalog: &dyn CatalogFacade,
+    migrations: Vec<ConstraintMetadataMigration>,
+) -> StorageBackendResult<()> {
+    for mut migration in migrations {
+        if !migration.changed {
+            continue;
+        }
+        migration.schema.columns_json = serde_json::to_string(&migration.columns)?;
+        migration.schema.constraints_json = serde_json::to_string(&migration.constraints)?;
+        catalog.save_table(&migration.schema)?;
+    }
+    Ok(())
+}
+
 impl Engine {
     pub(super) fn restore_from_catalog(
         &mut self,
@@ -48,8 +231,8 @@ impl Engine {
         if !schemas.iter().any(|name| name == "public") {
             catalog.save_schema("public")?;
         }
-        Self::migrate_constraint_names_from_metadata(catalog)?;
         Self::repair_dangling_hierarchy_parents(catalog)?;
+        Self::migrate_constraint_names_from_metadata(catalog)?;
         Self::migrate_legacy_sequences_from_metadata(catalog)
     }
 
@@ -77,7 +260,7 @@ impl Engine {
                     sequence_numbers.push(hierarchy.parent_sequence_number(index));
                 }
             }
-            if parents.len() == hierarchy.parents.len() {
+            if parents == hierarchy.parents {
                 continue;
             }
             hierarchy.parents = parents;
@@ -134,35 +317,9 @@ impl Engine {
     fn migrate_constraint_names_from_metadata(
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
-        for mut schema in catalog.load_tables()? {
-            let mut columns: Vec<uqa_sql::ast::ColumnDef> = if schema.columns_json.is_empty() {
-                Vec::new()
-            } else {
-                serde_json::from_str(&schema.columns_json)?
-            };
-            let mut constraints: uqa_sql::ast::TableConstraintSet =
-                if schema.constraints_json.is_empty() {
-                    uqa_sql::ast::TableConstraintSet::default()
-                } else {
-                    serde_json::from_str(&schema.constraints_json)?
-                };
-            let dispatches_changed =
-                crate::engine_table_storage::upgrade_legacy_schema_function_dispatches(
-                    &mut columns,
-                    &mut constraints,
-                );
-            let names_changed = crate::engine_table_storage::materialize_constraint_names(
-                &schema.relation,
-                &mut columns,
-                &mut constraints,
-            )?;
-            if dispatches_changed || names_changed {
-                schema.columns_json = serde_json::to_string(&columns)?;
-                schema.constraints_json = serde_json::to_string(&constraints)?;
-                catalog.save_table(&schema)?;
-            }
-        }
-        Ok(())
+        let mut migrations = load_constraint_metadata_migrations(catalog)?;
+        synchronize_inherited_constraint_object_ids(&mut migrations);
+        save_constraint_metadata_migrations(catalog, migrations)
     }
 
     pub(super) fn load_session_table(

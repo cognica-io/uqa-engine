@@ -155,6 +155,24 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                     ),
                 });
             }
+            if !stmt.cascade {
+                let restrict_dependents = engine
+                    .try_drop_table_restrict_dependents(&tables)
+                    .map_err(|err| ddl_storage_error("DROP TABLE dependency preflight", err))?;
+                if !restrict_dependents.is_empty() {
+                    return Err(SQLError::Routine {
+                        sqlstate: "2BP01".into(),
+                        message: format!(
+                            "cannot drop table {} because other objects depend on it: {}",
+                            tables.join(", "),
+                            restrict_dependents.join(", ")
+                        ),
+                    });
+                }
+            }
+            for table in &tables {
+                engine.ensure_no_pending_trigger_events(table, "DROP TABLE")?;
+            }
             engine
                 .try_drop_tables(&tables, stmt.cascade)
                 .map_err(|err| ddl_storage_error("DROP TABLE", err))?;

@@ -775,6 +775,7 @@ pub(in crate::sql) fn run_merge_inner(
                     document_vectors(engine, &storage_table, &document)?,
                     false,
                 )?;
+                engine.defer_inserted_foreign_key_checks(&storage_table, doc_id)?;
             }
             _ => {
                 return Err(SQLError::Internal(format!(

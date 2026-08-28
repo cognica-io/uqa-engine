@@ -236,18 +236,48 @@ impl Engine {
         Ok(table)
     }
 
-    fn table_has_initially_deferred_foreign_key(&self, table: &str) -> Result<bool, SQLError> {
-        self.try_foreign_keys(table)
-            .map(|foreign_keys| {
-                foreign_keys.iter().any(|foreign_key| {
-                    foreign_key.enforced && foreign_key.deferrable && foreign_key.initially_deferred
-                })
-            })
-            .map_err(|error| {
+    fn deferred_foreign_key_checks_for_row(
+        &self,
+        table: &str,
+        row: crate::row_locks::RowLockKey,
+        rewrite: Option<(&crate::Document, &crate::Document)>,
+    ) -> Result<Vec<crate::DeferredForeignKeyCheck>, SQLError> {
+        let firing_relation =
+            crate::RelationIdentity::from_legacy_name(table).map_err(|error| {
                 SQLError::Internal(format!(
-                    "read deferred foreign keys for table `{table}`: {error}"
+                    "decode deferred foreign-key firing relation '{table}': {error}"
                 ))
-            })
+            })?;
+        let foreign_keys = self.try_foreign_keys(table).map_err(|error| {
+            SQLError::Internal(format!(
+                "read deferred foreign keys for table `{table}`: {error}"
+            ))
+        })?;
+        let mut checks = Vec::new();
+        for foreign_key in foreign_keys {
+            if rewrite.is_some_and(|(old_document, new_document)| {
+                foreign_key.local_columns.iter().all(|column| {
+                    old_document
+                        .get(column)
+                        .cloned()
+                        .unwrap_or(crate::Value::Null)
+                        == new_document
+                            .get(column)
+                            .cloned()
+                            .unwrap_or(crate::Value::Null)
+                })
+            }) {
+                continue;
+            }
+            if foreign_key.enforced && self.foreign_key_is_deferred(table, &foreign_key)? {
+                checks.push(crate::DeferredForeignKeyCheck {
+                    constraint: self.foreign_key_constraint_identity(table, &foreign_key)?,
+                    firing_relation: firing_relation.clone(),
+                    row: Some(row),
+                });
+            }
+        }
+        Ok(checks)
     }
 
     fn note_row_change(
@@ -261,15 +291,10 @@ impl Engine {
             table: self.row_locks.table_key(&canonical),
             doc_id,
         };
-        let track_deferred_foreign_key = !self.session.transactions.lock().is_empty()
-            && self.table_has_initially_deferred_foreign_key(&canonical)?;
         let mut stack = self.session.transactions.lock();
         let change = crate::row_locks::PendingRowChange { key, kind };
         if let Some(frame) = stack.last_mut() {
             frame.row_changes.push(change);
-            if track_deferred_foreign_key {
-                frame.deferred_foreign_key_rows.insert(key);
-            }
             Ok(())
         } else {
             drop(stack);
@@ -320,21 +345,104 @@ impl Engine {
         )
     }
 
-    pub(crate) fn defer_foreign_key_row(
+    pub(crate) fn defer_inserted_foreign_key_checks(
         &self,
         table: &str,
         doc_id: uqa_core::DocId,
     ) -> Result<(), SQLError> {
+        if self.session.transactions.lock().is_empty() {
+            return Ok(());
+        }
         let canonical = self.row_lock_table_name(table)?;
-        let key = crate::row_locks::RowLockKey {
+        let row = crate::row_locks::RowLockKey {
             table: self.row_locks.table_key(&canonical),
             doc_id,
         };
+        let checks = self.deferred_foreign_key_checks_for_row(&canonical, row, None)?;
+        if let Some(frame) = self.session.transactions.lock().last_mut() {
+            frame.deferred_foreign_key_checks.extend(checks);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn defer_rewritten_foreign_key_checks(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+        old_document: Option<&crate::Document>,
+        new_document: &crate::Document,
+    ) -> Result<(), SQLError> {
+        if self.session.transactions.lock().is_empty() {
+            return Ok(());
+        }
+        let canonical = self.row_lock_table_name(table)?;
+        let row = crate::row_locks::RowLockKey {
+            table: self.row_locks.table_key(&canonical),
+            doc_id,
+        };
+        let rewrite = old_document.map(|old_document| (old_document, new_document));
+        let checks = self.deferred_foreign_key_checks_for_row(&canonical, row, rewrite)?;
+        if let Some(frame) = self.session.transactions.lock().last_mut() {
+            frame.deferred_foreign_key_checks.extend(checks);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn defer_foreign_key_check(
+        &self,
+        constraint_table: &str,
+        firing_table: &str,
+        row_table: &str,
+        doc_id: uqa_core::DocId,
+        foreign_key: &uqa_sql::ast::ForeignKey,
+    ) -> Result<(), SQLError> {
+        let canonical_row_table = self.row_lock_table_name(row_table)?;
+        let canonical_firing_table = self.row_lock_table_name(firing_table)?;
+        let firing_relation = crate::RelationIdentity::from_legacy_name(&canonical_firing_table)
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "decode deferred foreign-key firing relation '{canonical_firing_table}': {error}"
+                ))
+            })?;
+        let check = crate::DeferredForeignKeyCheck {
+            constraint: self.foreign_key_constraint_identity(constraint_table, foreign_key)?,
+            firing_relation,
+            row: Some(crate::row_locks::RowLockKey {
+                table: self.row_locks.table_key(&canonical_row_table),
+                doc_id,
+            }),
+        };
         let mut stack = self.session.transactions.lock();
         let frame = stack.last_mut().ok_or_else(|| {
-            SQLError::Internal("deferred foreign-key row outside a transaction".into())
+            SQLError::Internal("deferred foreign-key check outside a transaction".into())
         })?;
-        frame.deferred_foreign_key_rows.insert(key);
+        frame.deferred_foreign_key_checks.push(check);
+        Ok(())
+    }
+
+    pub(crate) fn defer_foreign_key_parent_event(
+        &self,
+        constraint_table: &str,
+        firing_table: &str,
+        foreign_key: &uqa_sql::ast::ForeignKey,
+    ) -> Result<(), SQLError> {
+        let canonical_firing_table = self.row_lock_table_name(firing_table)?;
+        let firing_relation = crate::RelationIdentity::from_legacy_name(&canonical_firing_table)
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "decode deferred foreign-key firing relation '{canonical_firing_table}': {error}"
+                ))
+            })?;
+        let check = crate::DeferredForeignKeyCheck {
+            constraint: self.foreign_key_constraint_identity(constraint_table, foreign_key)?,
+            firing_relation,
+            row: None,
+        };
+        let mut stack = self.session.transactions.lock();
+        let frame = stack.last_mut().ok_or_else(|| {
+            SQLError::Internal("deferred foreign-key event outside a transaction".into())
+        })?;
+        frame.deferred_foreign_key_checks.push(check);
         Ok(())
     }
 
@@ -364,20 +472,18 @@ impl Engine {
             table: self.row_locks.table_key(&new_table),
             doc_id: new_doc_id,
         };
-        let track_deferred_foreign_key = !self.session.transactions.lock().is_empty()
-            && (self.table_has_initially_deferred_foreign_key(&old_table)?
-                || self.table_has_initially_deferred_foreign_key(&new_table)?);
         let mut stack = self.session.transactions.lock();
         let change = crate::row_locks::PendingRowChange {
             key: old,
             kind: crate::row_locks::PendingRowChangeKind::Rewrite(new),
         };
         if let Some(frame) = stack.last_mut() {
-            frame.row_changes.push(change);
-            if track_deferred_foreign_key {
-                frame.deferred_foreign_key_rows.insert(old);
-                frame.deferred_foreign_key_rows.insert(new);
+            for check in &mut frame.deferred_foreign_key_checks {
+                if check.row == Some(old) {
+                    check.row = Some(new);
+                }
             }
+            frame.row_changes.push(change);
             Ok(())
         } else {
             drop(stack);

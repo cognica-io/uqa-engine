@@ -89,7 +89,7 @@ Aliases shown by `\help` are accepted in addition to this compact list.
 
 ## Script execution and transactions
 
-A script can contain multiple SQL statements. Use explicit transaction SQL when the entire script must be atomic:
+A script can contain multiple SQL statements. One `-c` command string follows PostgreSQL simple-query boundaries: statements share an implicit transaction until `COMMIT` or `ROLLBACK` closes it, `BEGIN` promotes that implicit transaction without committing preceding work, and `SAVEPOINT`, `RELEASE SAVEPOINT`, or `ROLLBACK TO SAVEPOINT` requires a block made explicit by an earlier `BEGIN`; subsequent statements after a completed `COMMIT` or `ROLLBACK` start another atomic implicit segment, including when the command began inside a pre-existing transaction. File and interactive input execute each submitted terminated statement independently, so use explicit transaction SQL when the entire script must be atomic:
 
 ```sql
 BEGIN;

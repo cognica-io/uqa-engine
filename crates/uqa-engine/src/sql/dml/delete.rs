@@ -579,6 +579,11 @@ fn prepare_referenced_key_delete_actions(
         engine.lock_relation(&ref_table, crate::row_locks::RelationLockMode::RowExclusive)?;
         let comparison = foreign_key_comparison_types(engine, &ref_table, &fk)?;
         let expected = comparison.normalize(key_values.clone())?;
+        let defer_no_action = matches!(fk.on_delete, ForeignKeyAction::NoAction)
+            && engine.foreign_key_is_deferred(&ref_table, &fk)?;
+        if defer_no_action {
+            engine.defer_foreign_key_parent_event(&ref_table, parent.table, &fk)?;
+        }
         if fk.period {
             let ordinary_len = expected.len().saturating_sub(1);
             let mut excluded_parents = root_deletes
@@ -622,8 +627,14 @@ fn prepare_referenced_key_delete_actions(
                     {
                         continue;
                     }
-                    if fk.deferrable && fk.initially_deferred {
-                        engine.defer_foreign_key_row(&physical_table, child_id)?;
+                    if defer_no_action {
+                        engine.defer_foreign_key_check(
+                            &ref_table,
+                            parent.table,
+                            &physical_table,
+                            child_id,
+                            &fk,
+                        )?;
                         continue;
                     }
                     return Err(SQLError::Routine {
@@ -670,8 +681,14 @@ fn prepare_referenced_key_delete_actions(
                 continue;
             }
             match fk.on_delete {
-                ForeignKeyAction::NoAction if fk.deferrable && fk.initially_deferred => {
-                    engine.defer_foreign_key_row(&child.table, child.doc_id)?;
+                ForeignKeyAction::NoAction if defer_no_action => {
+                    engine.defer_foreign_key_check(
+                        &ref_table,
+                        parent.table,
+                        &child.table,
+                        child.doc_id,
+                        &fk,
+                    )?;
                 }
                 ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
                     return Err(SQLError::Routine {

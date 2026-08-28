@@ -67,7 +67,7 @@ mod where_eval;
 mod window;
 
 pub use cursor::{SQLCursor, SQLCursorSummary};
-pub(crate) use driver::execute;
+pub(crate) use driver::{execute, execute_nested};
 use mutability::{is_transaction_control, query_may_mutate_engine};
 #[cfg(test)]
 use planning::compile_logical_plans;
@@ -84,7 +84,7 @@ use aggregates::{
 use catalog::build_info_schema_rows;
 pub(crate) use catalog::{
     resolve_age_label_relation_name, resolve_catalog_column_type, resolve_regclass_oid,
-    resolve_regtype_output, RegtypeOutputCatalog,
+    resolve_regtype_output, runtime_constraints, RegtypeOutputCatalog,
 };
 pub(in crate::sql) use catalog::{virtual_relation_accepts_row_lock, virtual_relation_schema};
 use ddl::{

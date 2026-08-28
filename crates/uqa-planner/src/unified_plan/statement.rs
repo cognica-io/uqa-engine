@@ -227,6 +227,13 @@ impl UnifiedPlan {
             Statement::SetVariable { name, value } => {
                 Self::Command(Box::new(CommandPlan::SetVariable { name, value }))
             }
+            Statement::SetConstraints {
+                constraints,
+                deferred,
+            } => Self::Command(Box::new(CommandPlan::SetConstraints {
+                constraints,
+                deferred,
+            })),
             Statement::ShowVariable { name } => {
                 Self::Command(Box::new(CommandPlan::ShowVariable { name }))
             }
@@ -408,6 +415,7 @@ impl CommandPlan {
             Self::RefreshMaterializedView { .. } => "RefreshMaterializedView",
             Self::CreateSchema { .. } => "CreateSchema",
             Self::SetVariable { .. } => "SetVariable",
+            Self::SetConstraints { .. } => "SetConstraints",
             Self::ShowVariable { .. } => "ShowVariable",
             Self::Discard { .. } => "Discard",
             Self::Load { .. } => "Load",

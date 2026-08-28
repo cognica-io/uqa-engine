@@ -149,6 +149,7 @@ pub(super) fn optimize_command(
         | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::CreateSchema { .. }
         | CommandPlan::SetVariable { .. }
+        | CommandPlan::SetConstraints { .. }
         | CommandPlan::ShowVariable { .. }
         | CommandPlan::Discard { .. }
         | CommandPlan::Load { .. }

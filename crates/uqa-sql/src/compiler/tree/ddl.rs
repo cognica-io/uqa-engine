@@ -151,6 +151,7 @@ pub(in crate::compiler) fn compile_create_table(
                         )?;
                         foreign_keys.push(ForeignKey {
                             name: cname,
+                            object_id: None,
                             local_columns,
                             ref_table,
                             ref_columns,
@@ -510,6 +511,7 @@ pub(in crate::compiler) fn compile_column_def(
                     }
                     references = Some(crate::ast::ForeignKeyRef {
                         name: constraint_name(&cstr.conname),
+                        object_id: None,
                         table,
                         column: columns.into_iter().next(),
                         on_update: compile_foreign_key_action(&cstr.fk_upd_action)?,

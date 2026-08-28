@@ -228,6 +228,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::CreateSchema { .. }
         | CommandPlan::SetVariable { .. }
+        | CommandPlan::SetConstraints { .. }
         | CommandPlan::ShowVariable { .. }
         | CommandPlan::Discard { .. }
         | CommandPlan::Load { .. }

@@ -130,6 +130,7 @@ fn reorder_command_joins(
         | CommandPlan::AlterViewOptions(_)
         | CommandPlan::CreateSchema { .. }
         | CommandPlan::SetVariable { .. }
+        | CommandPlan::SetConstraints { .. }
         | CommandPlan::ShowVariable { .. }
         | CommandPlan::Discard { .. }
         | CommandPlan::Load { .. }

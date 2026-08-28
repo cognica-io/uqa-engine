@@ -1161,6 +1161,7 @@ fn apply_validated_prepared_insert(
             engine.add_prepared_document_with_vector_values(
                 table, *doc_id, document, vectors, known_new,
             )?;
+            engine.defer_inserted_foreign_key_checks(table, *doc_id)?;
             Ok(true)
         }
         PreparedInsertConflict::Unresolved => Err(SQLError::Internal(

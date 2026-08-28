@@ -149,6 +149,7 @@ pub(in crate::sql::ddl) fn column_foreign_key(
 ) -> uqa_sql::ast::ForeignKey {
     uqa_sql::ast::ForeignKey {
         name: reference.name.clone(),
+        object_id: reference.object_id,
         local_columns: vec![column.name.clone()],
         ref_table: reference.table.clone(),
         ref_columns: reference.column.iter().cloned().collect(),

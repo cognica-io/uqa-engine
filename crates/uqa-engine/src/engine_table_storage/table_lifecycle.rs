@@ -75,19 +75,85 @@ impl Engine {
         Ok(())
     }
 
-    pub(super) fn try_drop_tables_inner(
+    fn drop_table_restrict_dependents(
+        &self,
+        canonical_names: &[String],
+        target_names: &std::collections::BTreeSet<String>,
+        targets: &[RelationIdentity],
+        entries: &[(String, Arc<TableState>)],
+    ) -> StorageBackendResult<Vec<String>> {
+        let mut dependents = Vec::new();
+        for name in canonical_names {
+            dependents.extend(
+                self.views_depending_on_relation(name)?
+                    .into_iter()
+                    .map(|view| format!("view {view}")),
+            );
+        }
+        for (candidate_name, table) in entries {
+            if target_names.contains(candidate_name) {
+                continue;
+            }
+            if targets
+                .iter()
+                .any(|target| Self::table_schema_references_relation(table, target))
+            {
+                dependents.push(format!("schema expression on {candidate_name}"));
+            }
+            let table_foreign_key = table.foreign_keys.read().iter().any(|foreign_key| {
+                targets
+                    .iter()
+                    .any(|target| Self::foreign_key_targets(foreign_key, target))
+            });
+            let column_foreign_key = table.columns.read().iter().any(|column| {
+                column.references.as_ref().is_some_and(|reference| {
+                    targets
+                        .iter()
+                        .any(|target| stored_relation_reference_matches(&reference.table, target))
+                })
+            });
+            if table_foreign_key || column_foreign_key {
+                dependents.push(format!("foreign key on {candidate_name}"));
+            }
+        }
+        dependents.sort_unstable();
+        dependents.dedup();
+        Ok(dependents)
+    }
+
+    pub(crate) fn try_drop_table_restrict_dependents(
         &self,
         names: &[String],
-        cascade: bool,
-    ) -> StorageBackendResult<()> {
-        let canonical_names = self.canonical_hierarchy_drop_targets(names, cascade)?;
+    ) -> StorageBackendResult<Vec<String>> {
+        let canonical_names = self.canonical_drop_table_names(names)?;
         let (target_names, targets) = Self::drop_target_sets(&canonical_names)?;
-
-        // Finish every dependency check before mutating a referrer or target.
-        self.ensure_no_drop_view_dependencies(&canonical_names)?;
         let entries = self.table_entries();
-        Self::ensure_drop_targets_unreferenced(&target_names, &targets, &entries)?;
-        let owned_sequences = entries
+        self.drop_table_restrict_dependents(&canonical_names, &target_names, &targets, &entries)
+    }
+
+    fn ensure_no_drop_restrict_dependents(
+        &self,
+        canonical_names: &[String],
+        target_names: &std::collections::BTreeSet<String>,
+        targets: &[RelationIdentity],
+        entries: &[(String, Arc<TableState>)],
+    ) -> StorageBackendResult<()> {
+        let dependents =
+            self.drop_table_restrict_dependents(canonical_names, target_names, targets, entries)?;
+        if dependents.is_empty() {
+            return Ok(());
+        }
+        Err(StorageBackendError::Other(format!(
+            "DROP TABLE rejected: other objects depend on the target(s): `{}`; use CASCADE",
+            dependents.join("`, `")
+        )))
+    }
+
+    fn owned_sequences_for_drop(
+        target_names: &std::collections::BTreeSet<String>,
+        entries: &[(String, Arc<TableState>)],
+    ) -> std::collections::BTreeSet<String> {
+        entries
             .iter()
             .filter(|(table, _)| target_names.contains(table))
             .flat_map(|(table, state)| {
@@ -98,15 +164,37 @@ impl Engine {
                     .filter_map(|column| {
                         let provenance = column.auto_increment.as_ref()?;
                         let owner = provenance.owner.as_ref()?;
-                        if owner.table == *table && owner.column == column.name {
-                            provenance.sequence.clone()
-                        } else {
-                            None
-                        }
+                        (owner.table == *table && owner.column == column.name)
+                            .then(|| provenance.sequence.clone())
+                            .flatten()
                     })
                     .collect::<Vec<_>>()
             })
-            .collect::<std::collections::BTreeSet<_>>();
+            .collect()
+    }
+
+    pub(super) fn try_drop_tables_inner(
+        &self,
+        names: &[String],
+        cascade: bool,
+    ) -> StorageBackendResult<()> {
+        let canonical_names = self.canonical_hierarchy_drop_targets(names, cascade)?;
+        let (target_names, targets) = Self::drop_target_sets(&canonical_names)?;
+        let entries = self.table_entries();
+
+        if !cascade {
+            self.ensure_no_drop_restrict_dependents(
+                &canonical_names,
+                &target_names,
+                &targets,
+                &entries,
+            )?;
+        }
+
+        // Finish every dependency check before mutating a referrer or target.
+        self.ensure_no_drop_view_dependencies(&canonical_names)?;
+        Self::ensure_drop_targets_unreferenced(&target_names, &targets, &entries)?;
+        let owned_sequences = Self::owned_sequences_for_drop(&target_names, &entries);
 
         let mut inbound = Vec::new();
         let mut updates = Vec::new();
@@ -175,6 +263,8 @@ impl Engine {
         for name in canonical_names {
             self.drop_table_state_inner(&name)?;
         }
+        self.prune_constraint_modes()
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         for sequence in owned_sequences {
             self.drop_owned_sequence(&sequence)?;
         }
@@ -239,6 +329,7 @@ impl Engine {
             }
         }
         self.storage.tables.write().remove(&relation);
+        self.forget_constraint_transaction_relation(&relation);
         self.clear_regtype_output_cache();
         if temporary {
             self.note_table_catalog_changed();

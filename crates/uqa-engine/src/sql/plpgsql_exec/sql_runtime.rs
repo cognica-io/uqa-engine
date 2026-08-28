@@ -97,7 +97,7 @@ impl Interpreter<'_> {
         for param in params {
             bound_params.push(SQLParam::Scalar(self.eval_expr(param)?));
         }
-        crate::sql::execute(self.engine, &text, &bound_params)
+        crate::sql::execute_nested(self.engine, &text, &bound_params)
     }
 
     /// Post-process an embedded SQL statement's result: `ROW_COUNT`,
