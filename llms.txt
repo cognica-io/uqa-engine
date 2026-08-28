@@ -1,6 +1,6 @@
 # UQA Engine
 
-> UQA Engine 0.1.6 is an embedded Rust database that combines PostgreSQL-oriented relational SQL, full-text and vector retrieval, graph queries, ranked fusion, and host-language SQL callbacks in one runtime, with a direct authenticated HTTP client that native applications can initialize by local or Cloud project name through the installed `uqa` CLI.
+> UQA Engine 0.1.7 is an embedded Rust database that combines PostgreSQL-oriented relational SQL, full-text and vector retrieval, graph queries, ranked fusion, and host-language SQL callbacks in one runtime, with a direct authenticated HTTP client that native applications can initialize by local or Cloud project name through the installed `uqa` CLI.
 
 The manual is the canonical product contract. Parser acceptance alone does not prove execution support; follow the documented argument shape, result schema, state effects, and errors, then verify executable claims against tests or the engine.
 
