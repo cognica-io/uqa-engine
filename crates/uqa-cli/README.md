@@ -24,7 +24,7 @@ It is designed for applications that need more than a relational table but do no
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
 > [!NOTE]
-> UQA Engine is under active development at version 0.1.7. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
+> UQA Engine is under active development at version 0.1.8. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
 
 ## Mathematical foundation
 

@@ -4,17 +4,17 @@ The `uqa-client` crate provides `HttpEngine`, an asynchronous Rust SQL interface
 
 ## Install a released binding
 
-UQA Engine release artifacts are attached to the [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.1.7). Public Rust crates are published separately to crates.io, the Python package is published to PyPI as `uqa`, and tagged Node.js and Browser WASM releases are published to npm as `@cognica-io/uqa` and `@cognica-io/uqa-wasm`. The GitHub release notes record the independent registry publication status for the exact version. To use the Rust source from GitHub, pin an application to the same release tag:
+UQA Engine release artifacts are attached to the [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.1.8). Public Rust crates are published separately to crates.io, the Python package is published to PyPI as `uqa`, and tagged Node.js and Browser WASM releases are published to npm as `@cognica-io/uqa` and `@cognica-io/uqa-wasm`. The GitHub release notes record the independent registry publication status for the exact version. To use the Rust source from GitHub, pin an application to the same release tag:
 
 ```toml
 [dependencies]
-uqa-client = { git = "https://github.com/cognica-io/uqa-engine", tag = "v0.1.7" }
+uqa-client = { git = "https://github.com/cognica-io/uqa-engine", tag = "v0.1.8" }
 ```
 
-The same version can be taken from the registry as `uqa = "0.1.7"`, `uqa-client = "0.1.7"`, or `uqa-engine = "0.1.7"`.
+The same version can be taken from the registry as `uqa = "0.1.8"`, `uqa-client = "0.1.8"`, or `uqa-engine = "0.1.8"`.
 
 ```sh
-python -m pip install uqa==0.1.7
+python -m pip install uqa==0.1.8
 npm install @cognica-io/uqa
 npm install @cognica-io/uqa-wasm
 ```
