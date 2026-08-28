@@ -266,6 +266,16 @@ The repository includes a deterministic TPC-H-derived scale-factor `0.001` fixtu
 cargo test -p uqa-engine --test integration sql_tpch::
 ```
 
+The broader PostgreSQL 18.4 gate validates the compatibility manifest and compares every checked-in value or SQLSTATE probe with a live server. Build `usql` in release mode before running it:
+
+```sh
+cargo build --release -p uqa-cli
+python3 tests/parity/pg18/run_diff.py --validate-manifest
+python3 tests/parity/pg18/run_diff.py
+```
+
+Stateful routine, constraint, type-and-temporal, trigger, and rewrite-rule oracles plus the pinned psycopg, pgx, and node-postgres matrix are documented in [PG18 differential probes](tests/parity/pg18/README.md). The current milestone and open-gate ledger is the [PostgreSQL 18 compatibility plan](docs/plans/0003-postgresql-18-compatibility.md).
+
 Release-mode timing uses a machine-readable runner rather than test-profile execution:
 
 ```sh
