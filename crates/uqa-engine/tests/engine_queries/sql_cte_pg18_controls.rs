@@ -231,17 +231,17 @@ fn recursive_control_step_runs_once_per_working_table() {
 }
 
 #[test]
-fn recursive_control_validation_matches_postgresql_18_ordering() {
+fn recursive_control_validation_matches_postgresql_18_sqlstates() {
     let engine = Engine::new();
     for (sql, state, message) in [
         (
             "WITH RECURSIVE t(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM t WHERE n<2) SEARCH DEPTH FIRST BY n,n SET ord SELECT * FROM t",
-            "42601",
+            "42701",
             "search column \"n\" specified more than once",
         ),
         (
             "WITH RECURSIVE t(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM t WHERE n<2) CYCLE n,n SET c USING p SELECT * FROM t",
-            "42601",
+            "42701",
             "cycle column \"n\" specified more than once",
         ),
         (

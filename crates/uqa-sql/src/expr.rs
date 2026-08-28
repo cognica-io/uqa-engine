@@ -134,6 +134,15 @@ pub trait EngineHook {
         Ok(None)
     }
 
+    /// Resolve one OID-backed alias type to its `PostgreSQL` text output.
+    fn resolve_regtype_output(
+        &self,
+        _ty: &ColumnType,
+        _oid: i64,
+    ) -> std::result::Result<Option<String>, String> {
+        Ok(None)
+    }
+
     /// Resolve the first existing schema on the logical session's search
     /// path. `None` lets standalone expression evaluation use its `public`
     /// compatibility default.
@@ -197,6 +206,72 @@ pub trait EngineHook {
     }
 }
 
+/// Format a scalar or array OID carrier using the catalog-aware output function of a `reg*` type. `None` means the declared type is not one of the supported alias types or the value is SQL NULL.
+pub fn format_regtype_value(
+    value: &Value,
+    ty: &ColumnType,
+    engine: Option<&dyn EngineHook>,
+) -> Result<Option<String>> {
+    if matches!(value, Value::Null) {
+        return Ok(None);
+    }
+    if let ColumnType::Array(element) = ty {
+        if !matches!(
+            element.as_ref(),
+            ColumnType::Regproc
+                | ColumnType::Regclass
+                | ColumnType::Regnamespace
+                | ColumnType::Regtype
+        ) {
+            return Ok(None);
+        }
+        let Value::Array(array) = value else {
+            return Ok(Some(value_to_string(value)));
+        };
+        let elements = format_regtype_array_elements(array.elements(), element, engine)?;
+        let formatted = array.with_elements(elements).ok_or_else(|| {
+            SQLError::Internal("regtype array output changed the array dimensions".into())
+        })?;
+        return Ok(Some(array_value_to_string(&formatted)));
+    }
+    if !matches!(
+        ty,
+        ColumnType::Regproc | ColumnType::Regclass | ColumnType::Regnamespace | ColumnType::Regtype
+    ) {
+        return Ok(None);
+    }
+    let Value::Int(oid) = value else {
+        return Ok(Some(value_to_string(value)));
+    };
+    if *oid == 0 {
+        return Ok(Some("-".into()));
+    }
+    let resolved = engine
+        .map(|engine| engine.resolve_regtype_output(ty, *oid))
+        .transpose()
+        .map_err(SQLError::Internal)?
+        .flatten();
+    Ok(Some(resolved.unwrap_or_else(|| oid.to_string())))
+}
+
+fn format_regtype_array_elements(
+    values: &[Value],
+    element: &ColumnType,
+    engine: Option<&dyn EngineHook>,
+) -> Result<Vec<Value>> {
+    values
+        .iter()
+        .map(|value| match value {
+            Value::Null => Ok(Value::Null),
+            Value::List(nested) => {
+                format_regtype_array_elements(nested, element, engine).map(Value::List)
+            }
+            other => format_regtype_value(other, element, engine)
+                .map(|text| text.map_or_else(|| other.clone(), Value::Str)),
+        })
+        .collect()
+}
+
 /// Cast a value after resolving catalog-owned source and target types and flattening domains to their coercion types.
 pub fn cast_value_with_type_resolution(
     value: &Value,
@@ -221,6 +296,14 @@ pub fn cast_value_with_type_resolution(
         || Cow::Borrowed(target_ty),
         |ty| Cow::Owned(coercion_type_name(ty)),
     );
+    if target_ty.eq_ignore_ascii_case("text") {
+        if let Some(source_ty) = source_ty.and_then(|source| ColumnType::from_sql_name(source).ok())
+        {
+            if let Some(text) = format_regtype_value(value, &source_ty, engine)? {
+                return Ok(Value::Str(text));
+            }
+        }
+    }
     if target_ty.eq_ignore_ascii_case("regclass") {
         if let (Some(engine), Value::Str(name) | Value::FixedChar(name)) = (engine, value) {
             return engine

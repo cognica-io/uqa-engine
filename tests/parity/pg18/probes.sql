@@ -668,6 +668,11 @@ SELECT reverse(1)
 SELECT reverse('abc', 'def')
 SELECT reverse(string => 'abc')
 SELECT oid, prorettype, proargtypes, proargnames, pronargs, pronargdefaults, proisstrict, provolatile, proparallel, proleakproof, prosrc FROM pg_catalog.pg_proc WHERE oid IN (3062, 6382) ORDER BY oid
+SELECT 0::regproc, 0::regclass, 0::regnamespace, 0::regtype
+SELECT 1574::regproc, 1598::regproc, 1259::regclass, 11::regnamespace, 23::regtype, 999999::regclass
+SELECT (1598::regproc)::text, (1259::regclass)::text, (11::regnamespace)::text, (23::regtype)::text
+SELECT ARRAY[0::regproc,1598::regproc,999999::regproc], ARRAY[0::regclass,1259::regclass,999999::regclass], ARRAY[0::regnamespace,11::regnamespace,999999::regnamespace], ARRAY[0::regtype,23::regtype,999999::regtype], NULL::regproc::text
+SELECT 'pg_class'::regclass
 -- recursive CTE controls and materialization
 WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n<3) SEARCH DEPTH FIRST BY n SET ord SELECT n, pg_typeof(ord), cardinality(ord) FROM t ORDER BY ord
 WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n<3) SEARCH BREADTH FIRST BY n SET ord SELECT n, pg_typeof(ord) FROM t ORDER BY ord
@@ -676,6 +681,7 @@ WITH RECURSIVE t(n) AS (VALUES (1),(2) UNION ALL (SELECT n+10 FROM t WHERE n<15 
 WITH c AS MATERIALIZED (SELECT * FROM (VALUES (1),(2)) AS v(n)) SELECT a.n,b.n FROM c a JOIN c b ON a.n=b.n ORDER BY a.n
 WITH c AS NOT MATERIALIZED (SELECT * FROM (VALUES (1),(2)) AS v(n)) SELECT a.n,b.n FROM c a JOIN c b ON a.n=b.n ORDER BY a.n
 WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n<2) SEARCH DEPTH FIRST BY n,n SET ord SELECT * FROM t
+WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n<2) CYCLE n,n SET c USING p SELECT * FROM t
 -- qualified joins
 SELECT * FROM (VALUES (1, 'left-value')) AS l(id, shared) JOIN (VALUES (1, 'right-value')) AS r(id, shared) USING (id)
 SELECT * FROM (VALUES (1, 'l1'), (2, 'l2')) AS l(id, lval) FULL JOIN (VALUES (1, 'r1'), (3, 'r3')) AS r(id, rval) USING (id) ORDER BY id

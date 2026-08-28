@@ -392,11 +392,11 @@ impl Session {
         let result = match outcome {
             Ok(result) => self.write_query_output(out, |writer| {
                 if self.copy_text {
-                    print_result_copy_text(&result, writer);
+                    print_result_copy_text_with_engine(&result, &self.engine, writer);
                 } else if self.expanded {
-                    print_result_expanded(&result, writer);
+                    print_result_expanded_with_engine(&result, &self.engine, writer);
                 } else {
-                    print_result(&result, writer);
+                    print_result_with_engine(&result, &self.engine, writer);
                 }
             }),
             Err(err) => Err(format!("{}: {err}", err.sqlstate().unwrap_or("XX000"))),

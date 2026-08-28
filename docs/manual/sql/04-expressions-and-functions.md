@@ -194,7 +194,7 @@ Implemented helpers include `current_database`, `current_catalog`, `current_user
 
 ## Sequence functions
 
-`nextval`, `currval`, and `setval` operate on named sequences. `currval` requires the sequence to have produced or received a value in the relevant session context.
+`nextval`, `currval`, and `setval` operate on named sequences. `currval` requires the sequence to have produced or received a value in the relevant session context. `pg_proc` exposes their PostgreSQL 18 OIDs, signatures, volatility, parallel-safety, strictness, and source identities, so their `regproc` output uses the PostgreSQL routine names.
 
 ## Aggregate functions
 

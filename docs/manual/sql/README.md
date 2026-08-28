@@ -13,7 +13,7 @@ UQA Engine parses PostgreSQL-oriented SQL with `libpg_query`, compiles it into U
 | [Analyzer SQL](05-analyzers.md) | Analyzer JSON, lifecycle functions, field phases, GIN binding, and diagnostics |
 | [Retrieval SQL](06-retrieval.md) | Full-text, vector, hybrid, learned, and model retrieval functions |
 | [Graph SQL and Cypher](07-graph.md) | Named graphs, Cypher, RPQ, traversal, and centrality |
-| [Transactions and routines](08-transactions-and-routines.md) | Transactions, prepared statements, session settings, SQL functions, PL/pgSQL, and procedures |
+| [Transactions and routines](08-transactions-and-routines.md) | Transactions, prepared statements, session settings, SQL functions, PL/pgSQL, procedures, triggers, and rewrite rules |
 | [Compatibility](09-compatibility.md) | PostgreSQL alignment, deliberate differences, limits, and unsupported syntax |
 
 ## Statement summary
@@ -31,6 +31,7 @@ UQA Engine parses PostgreSQL-oriented SQL with `libpg_query`, compiles it into U
 | Transactions | `BEGIN`, `START TRANSACTION`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`, `ROLLBACK TO SAVEPOINT` |
 | Prepared SQL | `PREPARE`, `EXECUTE`, `DEALLOCATE` |
 | Routines and roles | `CREATE FUNCTION`, `CREATE PROCEDURE`, `CREATE OR REPLACE`, implemented `ALTER FUNCTION`/`PROCEDURE`/`ROUTINE` attributes and ownership, routine `GRANT`/`REVOKE`, `CREATE`/`ALTER`/`DROP ROLE`, `CREATE USER`, `SET ROLE`, `RESET ROLE`, `DROP FUNCTION`, `DROP PROCEDURE`, `DO`, `CALL` |
+| Triggers and rewrite rules | `CREATE`/`CREATE OR REPLACE`/`DROP TRIGGER`, `ALTER TRIGGER ... RENAME`, `ALTER TABLE ... ENABLE`/`DISABLE TRIGGER`, `CREATE`/`CREATE OR REPLACE`/`DROP RULE`, `ALTER RULE ... RENAME`, `ALTER TABLE ... ENABLE`/`DISABLE RULE` |
 
 Unsupported statement shapes fail with an error instead of silently discarding clauses.
 

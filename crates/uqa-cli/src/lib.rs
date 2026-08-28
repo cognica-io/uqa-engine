@@ -102,7 +102,8 @@ use migration_io::{
     open_engine, open_engine_with_key, print_migration_report, print_migration_report_stdout,
 };
 use output::{
-    history_path, print_result, print_result_copy_text, print_result_expanded, value_to_display,
+    history_path, print_result, print_result_copy_text_with_engine,
+    print_result_expanded_with_engine, print_result_with_engine, value_to_display,
 };
 use repl::{PromptLineOutcome, Session};
 use statements::{contains_statement_terminator, split_statements, statement_is_pure_comment};

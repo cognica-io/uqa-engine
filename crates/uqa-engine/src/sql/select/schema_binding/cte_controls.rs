@@ -57,7 +57,7 @@ fn extend_cte_generated_schema_mode(
         for column in requested {
             if !seen.insert(column) {
                 return Err(SQLError::Routine {
-                    sqlstate: "42601".into(),
+                    sqlstate: "42701".into(),
                     message: format!("{kind} column \"{column}\" specified more than once"),
                 });
             }

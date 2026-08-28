@@ -147,6 +147,9 @@ pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> O
 }
 
 pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, String> {
+    if let Some((oid, _, _)) = resolve_virtual_regclass(engine, name)? {
+        return Ok(Some(oid));
+    }
     let Some((canonical, kind)) = engine
         .try_resolve_relation_kind(name)
         .map_err(|error| error.to_string())?
@@ -155,12 +158,286 @@ pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option
     };
     let (schema, relation) =
         helpers::split_schema_name(&canonical).map_err(|error| error.to_string())?;
+    if kind == "table" {
+        return pg_catalog::table_relation_oid(engine, &canonical)
+            .map(Some)
+            .map_err(|error| error.to_string());
+    }
     let relkind = match kind {
-        "table" => "r",
         "view" => "v",
+        "materialized view" => "m",
         "sequence" => "S",
         "foreign table" => "f",
         other => return Err(format!("unknown relation kind `{other}` for `{canonical}`")),
     };
     Ok(Some(helpers::relation_oid(relkind, &schema, &relation)))
+}
+
+const VIRTUAL_REGCLASSES: &[(&str, &str, i64)] = &[
+    ("pg_catalog", "pg_namespace", 2615),
+    ("pg_catalog", "pg_class", 1259),
+    ("pg_catalog", "pg_inherits", 2611),
+    ("pg_catalog", "pg_partitioned_table", 3350),
+    ("pg_catalog", "pg_attribute", 1249),
+    ("pg_catalog", "pg_attrdef", 2604),
+    ("pg_catalog", "pg_constraint", 2606),
+    ("pg_catalog", "pg_index", 2610),
+    ("pg_catalog", "pg_trigger", 2620),
+    ("pg_catalog", "pg_rewrite", 2618),
+    ("pg_catalog", "pg_rules", 12023),
+    ("pg_catalog", "pg_tables", 12033),
+    ("pg_catalog", "pg_views", 12028),
+    ("pg_catalog", "pg_indexes", 12043),
+    ("pg_catalog", "pg_type", 1247),
+    ("pg_catalog", "pg_range", 3541),
+    ("pg_catalog", "pg_proc", 1255),
+    ("pg_catalog", "pg_database", 1262),
+    ("pg_catalog", "pg_roles", 12000),
+    ("pg_catalog", "pg_user", 12014),
+    ("pg_catalog", "pg_settings", 12104),
+    ("pg_catalog", "pg_description", 2609),
+    ("pg_catalog", "pg_matviews", 12038),
+    ("pg_catalog", "pg_sequences", 12048),
+    (
+        "information_schema",
+        "information_schema_catalog_name",
+        13313,
+    ),
+    ("information_schema", "columns", 13381),
+    ("information_schema", "key_column_usage", 13414),
+    ("information_schema", "routines", 13462),
+    ("information_schema", "schemata", 13467),
+    ("information_schema", "sequences", 13471),
+    ("information_schema", "table_constraints", 13496),
+    ("information_schema", "tables", 13510),
+    ("information_schema", "views", 13568),
+];
+
+fn resolve_virtual_regclass(
+    engine: &Engine,
+    name: &str,
+) -> Result<Option<(i64, &'static str, &'static str)>, String> {
+    let normalized = name.trim().to_ascii_lowercase();
+    if let Some((schema, local)) = normalized.rsplit_once('.') {
+        return Ok(VIRTUAL_REGCLASSES
+            .iter()
+            .find(|(candidate_schema, candidate_local, _)| {
+                *candidate_schema == schema.trim_matches('"')
+                    && *candidate_local == local.trim_matches('"')
+            })
+            .map(|(schema, local, oid)| (*oid, *schema, *local)));
+    }
+    let local = normalized.trim_matches('"');
+    let Some(visible_schema) =
+        visible_relation_schema(engine, local).map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
+    Ok(VIRTUAL_REGCLASSES
+        .iter()
+        .find(|(schema, candidate_local, _)| *schema == visible_schema && *candidate_local == local)
+        .map(|(schema, local, oid)| (*oid, *schema, *local)))
+}
+
+fn catalog_int(row: &ResultRow, column: &str) -> Option<i64> {
+    match row.get(column) {
+        Some(Value::Int(value)) => Some(*value),
+        _ => None,
+    }
+}
+
+fn catalog_str<'a>(row: &'a ResultRow, column: &str) -> Option<&'a str> {
+    match row.get(column) {
+        Some(Value::Str(value) | Value::FixedChar(value)) => Some(value),
+        _ => None,
+    }
+}
+
+fn namespace_name(engine: &Engine, oid: i64) -> Result<Option<String>, SQLError> {
+    Ok(build_pg_namespace(engine)?
+        .into_iter()
+        .find(|row| catalog_int(row, "oid") == Some(oid))
+        .and_then(|row| catalog_str(&row, "nspname").map(str::to_string)))
+}
+
+fn qualified_name(schema: &str, local: &str) -> String {
+    format!(
+        "{}.{}",
+        uqa_sql::expr::quote_ident(schema),
+        uqa_sql::expr::quote_ident(local)
+    )
+}
+
+fn visible_relation_schema(engine: &Engine, local: &str) -> Result<Option<String>, SQLError> {
+    let physical = engine
+        .try_resolve_relation_kind(local)
+        .map_err(|error| SQLError::Internal(error.to_string()))?;
+    if let Some((canonical, _)) = physical.as_ref() {
+        if let Some((schema, _)) = canonical.rsplit_once('.') {
+            if schema.starts_with("pg_temp_") {
+                return Ok(Some(schema.to_string()));
+            }
+        }
+    }
+    for schema in engine
+        .current_schema_names(true)
+        .map_err(|error| SQLError::Internal(error.to_string()))?
+    {
+        if VIRTUAL_REGCLASSES
+            .iter()
+            .any(|(candidate_schema, candidate_local, _)| {
+                *candidate_schema == schema && *candidate_local == local
+            })
+        {
+            return Ok(Some(schema));
+        }
+        if engine
+            .relation_kind_at(&format!("{schema}.{local}"))
+            .map_err(|error| SQLError::Internal(error.to_string()))?
+            .is_some()
+        {
+            return Ok(Some(schema));
+        }
+    }
+    Ok(physical.and_then(|(canonical, _)| {
+        canonical
+            .rsplit_once('.')
+            .map(|(schema, _)| schema.to_string())
+    }))
+}
+
+fn relation_name_is_visible(engine: &Engine, schema: &str, local: &str) -> Result<bool, SQLError> {
+    Ok(visible_relation_schema(engine, local)?.as_deref() == Some(schema))
+}
+
+fn format_regclass(engine: &Engine, oid: i64) -> Result<Option<String>, SQLError> {
+    if let Some((schema, local, _)) = VIRTUAL_REGCLASSES
+        .iter()
+        .find(|(_, _, candidate_oid)| *candidate_oid == oid)
+    {
+        return Ok(Some(if relation_name_is_visible(engine, schema, local)? {
+            uqa_sql::expr::quote_ident(local)
+        } else {
+            qualified_name(schema, local)
+        }));
+    }
+    let Some(row) = build_pg_class(engine)?
+        .into_iter()
+        .find(|row| catalog_int(row, "oid") == Some(oid))
+    else {
+        return Ok(None);
+    };
+    let Some(local) = catalog_str(&row, "relname") else {
+        return Ok(None);
+    };
+    let Some(namespace_oid) = catalog_int(&row, "relnamespace") else {
+        return Ok(None);
+    };
+    let Some(schema) = namespace_name(engine, namespace_oid)? else {
+        return Ok(None);
+    };
+    Ok(Some(if relation_name_is_visible(engine, &schema, local)? {
+        uqa_sql::expr::quote_ident(local)
+    } else {
+        qualified_name(&schema, local)
+    }))
+}
+
+fn format_regproc(engine: &Engine, oid: i64) -> Result<Option<String>, SQLError> {
+    let rows = build_pg_proc(engine)?;
+    let Some(row) = rows.iter().find(|row| catalog_int(row, "oid") == Some(oid)) else {
+        return Ok(None);
+    };
+    let Some(local) = catalog_str(row, "proname") else {
+        return Ok(None);
+    };
+    let Some(namespace_oid) = catalog_int(row, "pronamespace") else {
+        return Ok(None);
+    };
+    let Some(schema) = namespace_name(engine, namespace_oid)? else {
+        return Ok(None);
+    };
+    let overloaded = rows
+        .iter()
+        .filter(|candidate| {
+            catalog_str(candidate, "proname") == Some(local)
+                && catalog_int(candidate, "pronamespace") == Some(namespace_oid)
+        })
+        .count()
+        > 1;
+    let schemas = engine
+        .current_schema_names(true)
+        .map_err(|error| SQLError::Internal(error.to_string()))?;
+    let visible_schema = schemas.into_iter().find(|candidate_schema| {
+        let candidate_oid = helpers::schema_oid(candidate_schema);
+        rows.iter().any(|candidate| {
+            catalog_str(candidate, "proname") == Some(local)
+                && catalog_int(candidate, "pronamespace") == Some(candidate_oid)
+        })
+    });
+    Ok(Some(
+        if !overloaded && visible_schema.as_deref() == Some(schema.as_str()) {
+            uqa_sql::expr::quote_ident(local)
+        } else {
+            qualified_name(&schema, local)
+        },
+    ))
+}
+
+fn pg_catalog_type_output(typname: &str) -> String {
+    if let Some(element) = typname.strip_prefix('_') {
+        return format!("{}[]", pg_catalog_type_output(element));
+    }
+    match typname {
+        "char" => "\"char\"".into(),
+        "bpchar" => "character".into(),
+        other => ColumnType::from_sql_name(other)
+            .map_or_else(|_| uqa_sql::expr::quote_ident(other), |ty| ty.sql_name()),
+    }
+}
+
+fn format_regtype(engine: &Engine, oid: i64) -> Result<Option<String>, SQLError> {
+    let Some(row) = build_pg_type()
+        .into_iter()
+        .find(|row| catalog_int(row, "oid") == Some(oid))
+    else {
+        return Ok(None);
+    };
+    let Some(typname) = catalog_str(&row, "typname") else {
+        return Ok(None);
+    };
+    let Some(namespace_oid) = catalog_int(&row, "typnamespace") else {
+        return Ok(None);
+    };
+    let Some(schema) = namespace_name(engine, namespace_oid)? else {
+        return Ok(None);
+    };
+    let local = if schema == "pg_catalog" {
+        pg_catalog_type_output(typname)
+    } else {
+        uqa_sql::expr::quote_ident(typname)
+    };
+    Ok(Some(
+        if schema == "pg_catalog" || engine.search_path_contains(&schema) {
+            local
+        } else {
+            format!("{}.{}", uqa_sql::expr::quote_ident(&schema), local)
+        },
+    ))
+}
+
+pub(crate) fn resolve_regtype_output(
+    engine: &Engine,
+    ty: &ColumnType,
+    oid: i64,
+) -> Result<Option<String>, String> {
+    let output = match ty {
+        ColumnType::Regproc => format_regproc(engine, oid),
+        ColumnType::Regclass => format_regclass(engine, oid),
+        ColumnType::Regnamespace => namespace_name(engine, oid)
+            .map(|name| name.map(|name| uqa_sql::expr::quote_ident(&name))),
+        ColumnType::Regtype => format_regtype(engine, oid),
+        _ => return Ok(None),
+    };
+    output.map_err(|error| error.to_string())
 }

@@ -381,6 +381,23 @@ fn copy_encoding_error(line: Option<usize>) -> SQLError {
 
 /// Encode one SQL result using `PostgreSQL` COPY text or CSV representation.
 pub fn encode_copy_result(result: &SQLResult, options: &CopyOptions) -> Result<Vec<u8>, SQLError> {
+    encode_copy_result_impl(result, options, None)
+}
+
+/// Encode one SQL result while resolving catalog-backed `reg*` text output through the engine hook.
+pub fn encode_copy_result_with_engine(
+    result: &SQLResult,
+    options: &CopyOptions,
+    engine: &dyn crate::expr::EngineHook,
+) -> Result<Vec<u8>, SQLError> {
+    encode_copy_result_impl(result, options, Some(engine))
+}
+
+fn encode_copy_result_impl(
+    result: &SQLResult,
+    options: &CopyOptions,
+    engine: Option<&dyn crate::expr::EngineHook>,
+) -> Result<Vec<u8>, SQLError> {
     if options.format == CopyFormat::Binary {
         return Err(SQLError::Unsupported(
             "binary COPY format is not implemented".into(),
@@ -395,14 +412,22 @@ pub fn encode_copy_result(result: &SQLResult, options: &CopyOptions) -> Result<V
         );
     }
     for row_index in 0..result.rows.len() {
-        let values = result.columns.iter().enumerate().map(|(column, _)| {
-            result.value_at(row_index, column).and_then(|value| {
-                copy_value_text(
-                    value,
-                    result.column_types.get(column).and_then(Option::as_ref),
-                )
+        let values = result
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(column, _)| {
+                result
+                    .value_at(row_index, column)
+                    .map_or(Ok(None), |value| {
+                        copy_value_text(
+                            value,
+                            result.column_types.get(column).and_then(Option::as_ref),
+                            engine,
+                        )
+                    })
             })
-        });
+            .collect::<Result<Vec<_>, SQLError>>()?;
         match options.format {
             CopyFormat::Text => encode_text_value_row(values, options, &mut output),
             CopyFormat::Csv => encode_csv_value_row(values, options, &mut output),
@@ -412,14 +437,25 @@ pub fn encode_copy_result(result: &SQLResult, options: &CopyOptions) -> Result<V
     Ok(output)
 }
 
-fn copy_value_text(value: &Value, ty: Option<&ColumnType>) -> Option<String> {
+fn copy_value_text(
+    value: &Value,
+    ty: Option<&ColumnType>,
+    engine: Option<&dyn crate::expr::EngineHook>,
+) -> Result<Option<String>, SQLError> {
     if matches!(value, Value::Null) {
-        return None;
+        return Ok(None);
+    }
+    if let Some(text) = ty
+        .map(|ty| crate::expr::format_regtype_value(value, ty, engine))
+        .transpose()?
+        .flatten()
+    {
+        return Ok(Some(text));
     }
     if matches!(ty, Some(ColumnType::Int2Vector | ColumnType::OidVector)) {
-        return crate::expr::vector_value_to_string(value);
+        return Ok(crate::expr::vector_value_to_string(value));
     }
-    Some(match value {
+    Ok(Some(match value {
         Value::Bool(true) => "t".into(),
         Value::Bool(false) => "f".into(),
         Value::Float(value) if value.is_nan() => "NaN".into(),
@@ -427,7 +463,7 @@ fn copy_value_text(value: &Value, ty: Option<&ColumnType>) -> Option<String> {
         Value::Float(value) if *value == f64::NEG_INFINITY => "-Infinity".into(),
         Value::FixedChar(value) => value.clone(),
         other => crate::expr::value_to_string(other),
-    })
+    }))
 }
 
 fn encode_text_value_row(

@@ -7,10 +7,23 @@
 //! Tabular and expanded query-result rendering.
 
 use super::{ColumnType, PathBuf, SQLResult, Value, Write, HISTORY_FILE};
+use uqa_sql::expr::EngineHook;
 
 /// Render the result one column per line per row -- mirrors
 /// `PostgreSQL` `psql`'s `\x` expanded display mode.
-pub(super) fn print_result_expanded(result: &SQLResult, out: &mut (impl Write + ?Sized)) {
+pub(super) fn print_result_expanded_with_engine(
+    result: &SQLResult,
+    engine: &dyn EngineHook,
+    out: &mut (impl Write + ?Sized),
+) {
+    print_result_expanded_impl(result, Some(engine), out);
+}
+
+fn print_result_expanded_impl(
+    result: &SQLResult,
+    engine: Option<&dyn EngineHook>,
+    out: &mut (impl Write + ?Sized),
+) {
     if result.rows.is_empty() && result.columns.is_empty() {
         if result.affected_rows > 0 {
             let _ = writeln!(out, "{} row(s) affected", result.affected_rows);
@@ -35,6 +48,7 @@ pub(super) fn print_result_expanded(result: &SQLResult, out: &mut (impl Write + 
             let value = value_to_display_typed(
                 result.value_at(idx, column),
                 result.column_types.get(column).and_then(Option::as_ref),
+                engine,
             );
             let _ = writeln!(out, "{col:<label_width$} | {value}");
         }
@@ -43,6 +57,22 @@ pub(super) fn print_result_expanded(result: &SQLResult, out: &mut (impl Write + 
 }
 
 pub(super) fn print_result(result: &SQLResult, out: &mut (impl Write + ?Sized)) {
+    print_result_impl(result, None, out);
+}
+
+pub(super) fn print_result_with_engine(
+    result: &SQLResult,
+    engine: &dyn EngineHook,
+    out: &mut (impl Write + ?Sized),
+) {
+    print_result_impl(result, Some(engine), out);
+}
+
+fn print_result_impl(
+    result: &SQLResult,
+    engine: Option<&dyn EngineHook>,
+    out: &mut (impl Write + ?Sized),
+) {
     if result.rows.is_empty() && result.columns.is_empty() {
         if result.affected_rows > 0 {
             let _ = writeln!(out, "{} row(s) affected", result.affected_rows);
@@ -78,6 +108,7 @@ pub(super) fn print_result(result: &SQLResult, out: &mut (impl Write + ?Sized)) 
                             .column_types
                             .get(column_index)
                             .and_then(Option::as_ref),
+                        engine,
                     )
                 })
                 .collect()
@@ -106,7 +137,24 @@ pub(super) fn print_result(result: &SQLResult, out: &mut (impl Write + ?Sized)) 
 }
 
 /// Emit rows in `PostgreSQL` `COPY TO STDOUT` text format.
-pub(super) fn print_result_copy_text(result: &SQLResult, out: &mut (impl Write + ?Sized)) {
+#[cfg(test)]
+fn print_result_copy_text(result: &SQLResult, out: &mut (impl Write + ?Sized)) {
+    print_result_copy_text_impl(result, None, out);
+}
+
+pub(super) fn print_result_copy_text_with_engine(
+    result: &SQLResult,
+    engine: &dyn EngineHook,
+    out: &mut (impl Write + ?Sized),
+) {
+    print_result_copy_text_impl(result, Some(engine), out);
+}
+
+fn print_result_copy_text_impl(
+    result: &SQLResult,
+    engine: Option<&dyn EngineHook>,
+    out: &mut (impl Write + ?Sized),
+) {
     let columns: Vec<String> = if result.columns.is_empty() {
         let mut keys: std::collections::BTreeSet<&String> = std::collections::BTreeSet::new();
         for row in &result.rows {
@@ -127,6 +175,7 @@ pub(super) fn print_result_copy_text(result: &SQLResult, out: &mut (impl Write +
                         .column_types
                         .get(column_index)
                         .and_then(Option::as_ref),
+                    engine,
                 )
             })
             .collect::<Vec<_>>();
@@ -136,17 +185,21 @@ pub(super) fn print_result_copy_text(result: &SQLResult, out: &mut (impl Write +
 
 #[cfg(test)]
 fn copy_text_cell(value: Option<&Value>) -> String {
-    copy_text_cell_typed(value, None)
+    copy_text_cell_typed(value, None, None)
 }
 
-fn copy_text_cell_typed(value: Option<&Value>, ty: Option<&ColumnType>) -> String {
+fn copy_text_cell_typed(
+    value: Option<&Value>,
+    ty: Option<&ColumnType>,
+    engine: Option<&dyn EngineHook>,
+) -> String {
     let Some(value) = value.filter(|value| !matches!(value, Value::Null)) else {
         return "\\N".to_string();
     };
     let text = match value {
         Value::Bool(true) => "t".to_string(),
         Value::Bool(false) => "f".to_string(),
-        other => value_to_display_typed(Some(other), ty),
+        other => value_to_display_typed(Some(other), ty, engine),
     };
     let mut escaped = String::new();
     for character in text.chars() {
@@ -164,7 +217,18 @@ fn copy_text_cell_typed(value: Option<&Value>, ty: Option<&ColumnType>) -> Strin
     escaped
 }
 
-fn value_to_display_typed(value: Option<&Value>, ty: Option<&ColumnType>) -> String {
+fn value_to_display_typed(
+    value: Option<&Value>,
+    ty: Option<&ColumnType>,
+    engine: Option<&dyn EngineHook>,
+) -> String {
+    if let Some(text) = value
+        .zip(ty)
+        .and_then(|(value, ty)| uqa_sql::expr::format_regtype_value(value, ty, engine).ok())
+        .flatten()
+    {
+        return text;
+    }
     if matches!(ty, Some(ColumnType::Int2Vector | ColumnType::OidVector)) {
         if let Some(value) = value.and_then(uqa_sql::expr::vector_value_to_string) {
             return value;
@@ -313,8 +377,12 @@ pub(super) fn json_value_display(v: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_text_cell, print_result_copy_text, value_to_display};
+    use super::{
+        copy_text_cell, print_result_copy_text, print_result_copy_text_with_engine,
+        value_to_display,
+    };
     use uqa_core::Value;
+    use uqa_engine::Engine;
     use uqa_sql::{ColumnType, SQLResult};
 
     #[test]
@@ -359,5 +427,22 @@ mod tests {
         let mut output = Vec::new();
         print_result_copy_text(&result, &mut output);
         assert_eq!(String::from_utf8(output).unwrap(), "23 25\t1 3\n");
+    }
+
+    #[test]
+    fn copy_text_uses_catalog_aware_regtype_output() {
+        let engine = Engine::new();
+        let result = engine
+            .sql(
+                "SELECT 0::regproc, 1598::regproc, 1259::regclass, 11::regnamespace, 23::regtype, ARRAY[0::regtype, 23::regtype, 999999::regtype]",
+                &[],
+            )
+            .unwrap();
+        let mut output = Vec::new();
+        print_result_copy_text_with_engine(&result, &engine, &mut output);
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "-\tpg_catalog.random\tpg_class\tpg_catalog\tinteger\t{-,integer,999999}\n"
+        );
     }
 }

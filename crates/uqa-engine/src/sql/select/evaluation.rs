@@ -909,6 +909,14 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         crate::sql::resolve_regclass_oid(self.engine, name)
     }
 
+    fn resolve_regtype_output(
+        &self,
+        ty: &uqa_sql::ast::ColumnType,
+        oid: i64,
+    ) -> std::result::Result<Option<String>, String> {
+        crate::sql::resolve_regtype_output(self.engine, ty, oid)
+    }
+
     fn nextval(&self, name: &str) -> std::result::Result<i64, SQLError> {
         self.engine.nextval_sql(name)
     }
