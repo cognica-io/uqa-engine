@@ -87,7 +87,7 @@ python3 tests/parity/pg18/run_diff.py --validate-manifest
 python3 tests/parity/pg18/run_diff.py
 ```
 
-Stateful compatibility suites keep one PostgreSQL schema while reopening the UQA database between cases. They cover 129 routine cases, 153 constraint cases, 49 type-and-temporal cases, 36 trigger cases, and 177 rewrite-rule cases:
+Stateful compatibility suites keep one PostgreSQL schema while reopening the UQA database between cases. They cover 129 routine cases, 162 constraint cases, 49 type-and-temporal cases, 36 trigger cases, and 177 rewrite-rule cases:
 
 ```sh
 python3 tests/parity/pg18/run_routines_stateful.py

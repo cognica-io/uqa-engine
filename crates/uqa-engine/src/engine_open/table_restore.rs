@@ -231,8 +231,8 @@ impl Engine {
         if !schemas.iter().any(|name| name == "public") {
             catalog.save_schema("public")?;
         }
-        Self::migrate_constraint_names_from_metadata(catalog)?;
         Self::repair_dangling_hierarchy_parents(catalog)?;
+        Self::migrate_constraint_names_from_metadata(catalog)?;
         Self::migrate_legacy_sequences_from_metadata(catalog)
     }
 
@@ -260,7 +260,7 @@ impl Engine {
                     sequence_numbers.push(hierarchy.parent_sequence_number(index));
                 }
             }
-            if parents.len() == hierarchy.parents.len() {
+            if parents == hierarchy.parents {
                 continue;
             }
             hierarchy.parents = parents;

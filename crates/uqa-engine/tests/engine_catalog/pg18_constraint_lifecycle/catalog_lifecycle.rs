@@ -322,3 +322,129 @@ fn create_table_not_valid_state_and_check_null_semantics_match_pg18() {
     );
     exec(&engine, "INSERT INTO created VALUES (NULL, NULL)");
 }
+
+#[test]
+fn partition_foreign_key_drop_follows_pg18_inheritance_and_pending_events() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE referenced (id INTEGER PRIMARY KEY)");
+    exec(
+        &engine,
+        "CREATE TABLE partitioned_child (id INTEGER, parent_id INTEGER, CONSTRAINT partitioned_fk FOREIGN KEY (parent_id) REFERENCES referenced(id) DEFERRABLE INITIALLY IMMEDIATE) PARTITION BY RANGE (id)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE partitioned_child_low PARTITION OF partitioned_child FOR VALUES FROM (0) TO (10)",
+    );
+
+    error(
+        &engine,
+        "ALTER TABLE partitioned_child_low DROP CONSTRAINT partitioned_fk",
+        "42P16",
+        "cannot drop inherited constraint \"partitioned_fk\"",
+    );
+
+    exec(&engine, "BEGIN");
+    exec(&engine, "SET CONSTRAINTS partitioned_fk DEFERRED");
+    exec(&engine, "INSERT INTO partitioned_child VALUES (1, 999)");
+    error(
+        &engine,
+        "ALTER TABLE partitioned_child DROP CONSTRAINT partitioned_fk",
+        "55006",
+        "cannot ALTER TABLE \"partitioned_child_low\" because it has pending trigger events",
+    );
+    exec(&engine, "ROLLBACK");
+
+    exec(
+        &engine,
+        "ALTER TABLE partitioned_child DROP CONSTRAINT partitioned_fk",
+    );
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT count(*) AS count FROM pg_catalog.pg_constraint WHERE conname = 'partitioned_fk'",
+                &[],
+            )
+            .unwrap()
+            .rows[0]["count"],
+        Value::Int(0)
+    );
+    exec(&engine, "INSERT INTO partitioned_child VALUES (1, 999)");
+}
+
+#[test]
+fn dependency_cascades_discard_child_events_like_pg18() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE partition_reference (id INTEGER, CONSTRAINT partition_reference_key UNIQUE (id))",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE partition_root (id INTEGER, parent_id INTEGER, CONSTRAINT partition_fk FOREIGN KEY (parent_id) REFERENCES partition_reference(id)) PARTITION BY RANGE (id)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE partition_low PARTITION OF partition_root FOR VALUES FROM (0) TO (10)",
+    );
+    exec(
+        &engine,
+        "ALTER TABLE partition_reference DROP CONSTRAINT partition_reference_key CASCADE",
+    );
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT count(*) AS count FROM pg_catalog.pg_constraint WHERE conname = 'partition_fk'",
+                &[],
+            )
+            .unwrap()
+            .rows[0]["count"],
+        Value::Int(0)
+    );
+
+    exec(
+        &engine,
+        "CREATE TABLE key_parent (id INTEGER, CONSTRAINT key_parent_key UNIQUE (id))",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE key_child (parent_id INTEGER, CONSTRAINT key_child_fk FOREIGN KEY (parent_id) REFERENCES key_parent(id) DEFERRABLE INITIALLY IMMEDIATE)",
+    );
+    exec(&engine, "BEGIN");
+    exec(&engine, "SET CONSTRAINTS key_child_fk DEFERRED");
+    exec(&engine, "INSERT INTO key_child VALUES (999)");
+    exec(
+        &engine,
+        "ALTER TABLE key_parent DROP CONSTRAINT key_parent_key CASCADE",
+    );
+    exec(&engine, "COMMIT");
+    assert!(!constraint_exists(&engine, "key_child_fk"));
+    assert_eq!(
+        engine
+            .sql("SELECT count(*) AS count FROM key_child", &[])
+            .unwrap()
+            .rows[0]["count"],
+        Value::Int(1)
+    );
+
+    exec(
+        &engine,
+        "CREATE TABLE table_parent (id INTEGER PRIMARY KEY)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE table_child (parent_id INTEGER, CONSTRAINT table_child_fk FOREIGN KEY (parent_id) REFERENCES table_parent(id) DEFERRABLE INITIALLY IMMEDIATE)",
+    );
+    exec(&engine, "BEGIN");
+    exec(&engine, "SET CONSTRAINTS table_child_fk DEFERRED");
+    exec(&engine, "INSERT INTO table_child VALUES (999)");
+    exec(&engine, "DROP TABLE table_parent CASCADE");
+    exec(&engine, "COMMIT");
+    assert!(!constraint_exists(&engine, "table_child_fk"));
+    assert_eq!(
+        engine
+            .sql("SELECT count(*) AS count FROM table_child", &[])
+            .unwrap()
+            .rows[0]["count"],
+        Value::Int(1)
+    );
+}

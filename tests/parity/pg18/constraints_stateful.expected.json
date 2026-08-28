@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "0a6fff0a14784798ef14ab2f7e5a8f6bad7c0788691b4e9597295b83a467977c",
+  "fixture_sha256": "9f0260d2b77090c4c196b0c4542dc97f748ef588f790b8961fb84ad4e6b09e24",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -856,6 +856,62 @@
       "rows": [
         [
           "0"
+        ]
+      ]
+    },
+    {
+      "name": "partition_child_rejects_inherited_fk_drop",
+      "kind": "error",
+      "sqlstate": "42P16"
+    },
+    {
+      "name": "partition_root_fk_drop_observes_child_event",
+      "kind": "error",
+      "sqlstate": "55006"
+    },
+    {
+      "name": "partition_root_fk_drop_cascades_to_children",
+      "kind": "ok"
+    },
+    {
+      "name": "partition_fk_drop_removed_every_clone",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_pending_dependency_cascade_tables",
+      "kind": "ok"
+    },
+    {
+      "name": "referenced_key_cascade_discards_child_event",
+      "kind": "ok"
+    },
+    {
+      "name": "referenced_key_cascade_keeps_child_row",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "referenced_table_cascade_discards_child_event",
+      "kind": "ok"
+    },
+    {
+      "name": "referenced_table_cascade_keeps_child_row",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "t",
+          "f"
         ]
       ]
     },

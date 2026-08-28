@@ -18,6 +18,139 @@ pub(super) fn drop_constraint(
     if_exists: bool,
     cascade: bool,
 ) -> Result<(), SQLError> {
+    drop_constraint_group(engine, table, name, if_exists, cascade, true)
+}
+
+fn drop_constraint_dependency(engine: &Engine, table: &str, name: &str) -> Result<(), SQLError> {
+    drop_constraint_group(engine, table, name, true, true, false)
+}
+
+fn drop_constraint_group(
+    engine: &Engine,
+    table: &str,
+    name: &str,
+    if_exists: bool,
+    cascade: bool,
+    direct: bool,
+) -> Result<(), SQLError> {
+    let targets = constraint_drop_targets(engine, table, name, if_exists, direct)?;
+    if direct {
+        for target in targets.iter().filter(|target| target.as_str() != table) {
+            engine.ensure_no_pending_trigger_events(target, "ALTER TABLE")?;
+        }
+    }
+    for target in targets {
+        drop_constraint_one(engine, &target, name, true, cascade)?;
+    }
+    Ok(())
+}
+
+fn constraint_drop_targets(
+    engine: &Engine,
+    table: &str,
+    name: &str,
+    if_exists: bool,
+    direct: bool,
+) -> Result<Vec<String>, SQLError> {
+    let (columns, constraints) = table_constraint_state(engine, table)?;
+    let Some(location) = find_constraint(&columns, &constraints, name) else {
+        if if_exists {
+            return Ok(Vec::new());
+        }
+        return Err(constraint_error(
+            "42704",
+            format!("constraint \"{name}\" of relation \"{table}\" does not exist"),
+        ));
+    };
+    let object_id = foreign_key_object_id(&columns, &constraints, location);
+    let mut inherited = object_id.is_some_and(|object_id| {
+        constraints
+            .hierarchy
+            .partition_inherited_foreign_keys
+            .iter()
+            .any(|foreign_key| foreign_key.object_id == Some(object_id))
+    });
+    if let Some(object_id) = object_id {
+        for parent in &constraints.hierarchy.parents {
+            let (parent_columns, parent_constraints) = table_constraint_state(engine, parent)?;
+            let Some(parent_location) = find_constraint(&parent_columns, &parent_constraints, name)
+            else {
+                continue;
+            };
+            if foreign_key_object_id(&parent_columns, &parent_constraints, parent_location)
+                == Some(object_id)
+            {
+                inherited = true;
+                break;
+            }
+        }
+    }
+    if direct && inherited {
+        let relation = crate::RelationIdentity::from_legacy_name(table).map_err(|error| {
+            SQLError::Internal(format!(
+                "decode inherited constraint relation '{table}': {error}"
+            ))
+        })?;
+        return Err(constraint_error(
+            "42P16",
+            format!(
+                "cannot drop inherited constraint \"{name}\" of relation \"{}\"",
+                relation.name
+            ),
+        ));
+    }
+    let Some(object_id) = object_id else {
+        return Ok(vec![table.to_string()]);
+    };
+    let mut targets = vec![table.to_string()];
+    for candidate in engine
+        .table_names()
+        .map_err(|error| ddl_storage_error("DROP CONSTRAINT partition lookup", error))?
+    {
+        if candidate == table {
+            continue;
+        }
+        let (candidate_columns, candidate_constraints) =
+            table_constraint_state(engine, &candidate)?;
+        let Some(candidate_location) =
+            find_constraint(&candidate_columns, &candidate_constraints, name)
+        else {
+            continue;
+        };
+        let candidate_object_id = foreign_key_object_id(
+            &candidate_columns,
+            &candidate_constraints,
+            candidate_location,
+        );
+        if candidate_object_id == Some(object_id) {
+            targets.push(candidate);
+        }
+    }
+    Ok(targets)
+}
+
+fn foreign_key_object_id(
+    columns: &[uqa_sql::ast::ColumnDef],
+    constraints: &uqa_sql::ast::TableConstraintSet,
+    location: ConstraintLocation,
+) -> Option<[u8; 16]> {
+    match location {
+        ConstraintLocation::ColumnForeignKey(index) => columns[index]
+            .references
+            .as_ref()
+            .and_then(|reference| reference.object_id),
+        ConstraintLocation::TableForeignKey(index) => constraints.foreign_keys[index].object_id,
+        _ => None,
+    }
+}
+
+fn drop_constraint_one(
+    engine: &Engine,
+    table: &str,
+    name: &str,
+    if_exists: bool,
+    cascade: bool,
+) -> Result<(), SQLError> {
     let (mut columns, mut constraints) = table_constraint_state(engine, table)?;
     let Some(location) = find_constraint(&columns, &constraints, name) else {
         if if_exists {
@@ -163,7 +296,7 @@ fn drop_key_constraint_dependencies(
         if referrer == canonical {
             local_dependents.insert(name);
         } else {
-            drop_constraint(engine, &referrer, &name, false, true)?;
+            drop_constraint_dependency(engine, &referrer, &name)?;
         }
     }
     Ok(local_dependents)
@@ -180,7 +313,7 @@ pub(super) fn drop_column_cascade(
     }
     let dependents = foreign_keys_referencing_column(engine, table, column)?;
     for (referrer, name) in dependents {
-        drop_constraint(engine, &referrer, &name, false, true)?;
+        drop_constraint_dependency(engine, &referrer, &name)?;
     }
     engine
         .try_drop_column(table, column)

@@ -22,11 +22,15 @@ pub(crate) fn constraint_identities_match(
 
 fn find_live_constraint_identity<'a>(
     live: &'a [ConstraintIdentity],
+    live_relations: &BTreeSet<RelationIdentity>,
     identity: &ConstraintIdentity,
 ) -> Option<&'a ConstraintIdentity> {
     live.iter()
         .find(|current| *current == identity)
         .or_else(|| {
+            if live_relations.contains(&identity.relation) {
+                return None;
+            }
             live.iter()
                 .find(|current| constraint_identities_match(identity, current))
         })
@@ -364,16 +368,30 @@ impl Engine {
             .into_iter()
             .map(|constraint| constraint.identity)
             .collect::<Vec<_>>();
+        let live_relations = self
+            .table_names()
+            .map_err(|error| SQLError::Internal(format!("read live constraint tables: {error}")))?
+            .into_iter()
+            .map(|table| {
+                RelationIdentity::from_legacy_name(&table).map_err(|error| {
+                    SQLError::Internal(format!("decode live constraint table '{table}': {error}"))
+                })
+            })
+            .collect::<Result<BTreeSet<_>, _>>()?;
         if let Some(frame) = self.session.transactions.lock().last_mut() {
             let mut reconciled = std::collections::BTreeMap::new();
             for (identity, deferred) in std::mem::take(&mut frame.constraint_modes.named) {
-                if let Some(current) = find_live_constraint_identity(&live, &identity) {
+                if let Some(current) =
+                    find_live_constraint_identity(&live, &live_relations, &identity)
+                {
                     reconciled.insert(current.clone(), deferred);
                 }
             }
             frame.constraint_modes.named = reconciled;
             frame.deferred_foreign_key_checks.retain_mut(|check| {
-                let Some(current) = find_live_constraint_identity(&live, &check.constraint) else {
+                let Some(current) =
+                    find_live_constraint_identity(&live, &live_relations, &check.constraint)
+                else {
                     return false;
                 };
                 let previous_relation = check.constraint.relation.clone();

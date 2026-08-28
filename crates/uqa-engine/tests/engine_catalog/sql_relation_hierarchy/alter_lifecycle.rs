@@ -23,6 +23,74 @@ fn strip_constraint_object_ids(value: &mut serde_json::Value) -> usize {
     }
 }
 
+fn named_constraint_object_ids(
+    value: &serde_json::Value,
+    name: &str,
+    object_ids: &mut Vec<serde_json::Value>,
+) {
+    match value {
+        serde_json::Value::Array(values) => {
+            for value in values {
+                named_constraint_object_ids(value, name, object_ids);
+            }
+        }
+        serde_json::Value::Object(values) => {
+            if values.get("name").and_then(serde_json::Value::as_str) == Some(name) {
+                if let Some(object_id) = values.get("object_id") {
+                    object_ids.push(object_id.clone());
+                }
+            }
+            for value in values.values() {
+                named_constraint_object_ids(value, name, object_ids);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn assert_constraint_object_ids_match(
+    path: &std::path::Path,
+    parent: &str,
+    child: &str,
+    constraint: &str,
+) {
+    let connection = rusqlite::Connection::open(path).unwrap();
+    let mut statement = connection
+        .prepare("SELECT relation_name, columns, constraints FROM _tables WHERE relation_name IN (?1, ?2) ORDER BY relation_name")
+        .unwrap();
+    let rows = statement
+        .query_map(rusqlite::params![parent, child], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    let mut parent_object_id = None;
+    let mut child_object_ids = Vec::new();
+    for (relation, columns, constraints) in rows {
+        let columns: serde_json::Value = serde_json::from_str(&columns).unwrap();
+        let constraints: serde_json::Value = serde_json::from_str(&constraints).unwrap();
+        let mut object_ids = Vec::new();
+        named_constraint_object_ids(&columns, constraint, &mut object_ids);
+        named_constraint_object_ids(&constraints, constraint, &mut object_ids);
+        if relation == parent {
+            assert_eq!(object_ids.len(), 1);
+            parent_object_id = object_ids.pop();
+        } else {
+            child_object_ids = object_ids;
+        }
+    }
+    let parent_object_id = parent_object_id.unwrap();
+    assert!(!child_object_ids.is_empty());
+    assert!(child_object_ids
+        .iter()
+        .all(|object_id| object_id == &parent_object_id));
+}
+
 #[test]
 fn ordinary_inheritance_edges_are_atomic_ordered_rename_safe_and_durable() {
     let directory = tempfile::tempdir().unwrap();
@@ -554,6 +622,14 @@ fn legacy_partition_foreign_key_ids_are_synchronized_before_detach() {
             let mut constraints: serde_json::Value = serde_json::from_str(&constraints).unwrap();
             removed += strip_constraint_object_ids(&mut columns);
             removed += strip_constraint_object_ids(&mut constraints);
+            if relation == "legacy_child" {
+                let parents = constraints
+                    .pointer_mut("/hierarchy/parents")
+                    .and_then(serde_json::Value::as_array_mut)
+                    .unwrap();
+                assert_eq!(parents, &[serde_json::json!("public.legacy_parent")]);
+                parents[0] = serde_json::json!("legacy_parent");
+            }
             connection
                 .execute(
                     "UPDATE _tables SET columns = ?1, constraints = ?2 WHERE schema_name = ?3 AND relation_name = ?4",
@@ -568,6 +644,7 @@ fn legacy_partition_foreign_key_ids_are_synchronized_before_detach() {
     }
 
     let reopened = Engine::open(&path).unwrap();
+    assert_constraint_object_ids_match(&path, "legacy_parent", "legacy_child", "legacy_parent_fk");
     exec(
         &reopened,
         "ALTER TABLE legacy_parent DETACH PARTITION legacy_child",

@@ -605,6 +605,42 @@ BEGIN; SET CONSTRAINTS partition_event_fk DEFERRED; INSERT INTO partition_event_
 SELECT count(*) FROM partition_event_child;
 -- @end
 
+-- @case partition_child_rejects_inherited_fk_drop error
+ALTER TABLE partition_event_child_low DROP CONSTRAINT partition_event_fk;
+-- @end
+
+-- @case partition_root_fk_drop_observes_child_event error
+BEGIN; SET CONSTRAINTS partition_event_fk DEFERRED; INSERT INTO partition_event_child VALUES (1, 101); ALTER TABLE partition_event_child DROP CONSTRAINT partition_event_fk;
+-- @end
+
+-- @case partition_root_fk_drop_cascades_to_children ok
+ALTER TABLE partition_event_child DROP CONSTRAINT partition_event_fk;
+-- @end
+
+-- @case partition_fk_drop_removed_every_clone rows
+SELECT count(*) FROM pg_catalog.pg_constraint WHERE conname = 'partition_event_fk';
+-- @end
+
+-- @case create_pending_dependency_cascade_tables ok
+CREATE TABLE pending_key_parent (id INTEGER, CONSTRAINT pending_key_parent_key UNIQUE (id)); CREATE TABLE pending_key_child (parent_id INTEGER, CONSTRAINT pending_key_child_fk FOREIGN KEY (parent_id) REFERENCES pending_key_parent(id) DEFERRABLE INITIALLY IMMEDIATE); CREATE TABLE pending_table_parent (id INTEGER PRIMARY KEY); CREATE TABLE pending_table_child (parent_id INTEGER, CONSTRAINT pending_table_child_fk FOREIGN KEY (parent_id) REFERENCES pending_table_parent(id) DEFERRABLE INITIALLY IMMEDIATE);
+-- @end
+
+-- @case referenced_key_cascade_discards_child_event ok
+BEGIN; SET CONSTRAINTS pending_key_child_fk DEFERRED; INSERT INTO pending_key_child VALUES (999); ALTER TABLE pending_key_parent DROP CONSTRAINT pending_key_parent_key CASCADE; COMMIT;
+-- @end
+
+-- @case referenced_key_cascade_keeps_child_row rows
+SELECT count(*), EXISTS (SELECT 1 FROM pg_catalog.pg_constraint WHERE conrelid = 'pending_key_child'::regclass AND conname = 'pending_key_child_fk') FROM pending_key_child;
+-- @end
+
+-- @case referenced_table_cascade_discards_child_event ok
+BEGIN; SET CONSTRAINTS pending_table_child_fk DEFERRED; INSERT INTO pending_table_child VALUES (999); DROP TABLE pending_table_parent CASCADE; COMMIT;
+-- @end
+
+-- @case referenced_table_cascade_keeps_child_row rows
+SELECT count(*), to_regclass('__UQA_STATEFUL_SCHEMA__.pending_table_parent') IS NULL, EXISTS (SELECT 1 FROM pg_catalog.pg_constraint WHERE conrelid = '__UQA_STATEFUL_SCHEMA__.pending_table_child'::regclass AND conname = 'pending_table_child_fk') FROM __UQA_STATEFUL_SCHEMA__.pending_table_child;
+-- @end
+
 -- @case create_pending_view_dependency_tables ok
 CREATE TABLE pending_view_parent (id INTEGER PRIMARY KEY); CREATE TABLE pending_view_child (parent_id INTEGER, CONSTRAINT pending_view_fk FOREIGN KEY (parent_id) REFERENCES pending_view_parent(id) DEFERRABLE INITIALLY IMMEDIATE); CREATE VIEW pending_view AS SELECT * FROM pending_view_child;
 -- @end
