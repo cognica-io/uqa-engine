@@ -46,6 +46,17 @@ The `--suite triggers` mode executes the 36 cases in `triggers_stateful.sql` and
 
 The `--suite rules` mode executes the 177 rewrite-rule cases in `rules_stateful.sql` and compares them with `rules_stateful.expected.json`. It covers `OLD` and `NEW` binding including nullable integer row images, collision-free and correlated LATERAL action sources, PostgreSQL CTE, set-operation member, conditional set-operation action, and `ON CONFLICT` reference-scope errors, qualified and unqualified conditions, alphabetical action ordering, `ALSO`, conditional and unconditional `INSTEAD`, `NOTHING`, set-oriented action and statement-trigger cardinality, INSERT SELECT, positional DML `RETURNING` provider validation, lazy projection evaluation, action row images, aliases, UPDATE-provider `UPDATE FROM` source columns, DELETE-provider `DELETE USING` source columns, view-target action validation, canonical recursion detection, DML restrictions, `pg_rewrite` and `pg_rules`, enable and rename lifecycle, persistence-safe replacement, token-safe column dependency rewrites, reserved `_RETURN` naming, view `_RETURN` replacement and protection, materialized-view rejection, and exact SQLSTATEs.
 
+The `--suite transactions` mode executes the 55 cases in `transaction_stateful.sql` and compares them with `transaction_stateful.expected.json`. It covers execution-free relation and column validation at `DECLARE`, lazy row evaluation, deferred execution errors and transaction cleanup, typed zero-movement and one-row incremental portal execution, declaration-time relation, virtual-catalog, view-name, nested-view-plan, literal-regclass sequence, routine-definition, and inheritance binding, `AccessShare` relation locking, `DECLARE`-time snapshots including this transaction's own changes, fixed-snapshot relation lifetimes and transaction-local writes across transactional DDL, volatile cursor routines observing earlier cursor writes, stable relation OIDs across rename and `TRUNCATE` with replacement after drop and recreation, PostgreSQL holdable-cursor rewind and materialization timing, deferred-constraint revalidation after materialization, targeted `VACUUM FULL`, read-only and post-write nontransactional `ANALYZE`, snapshot acquisition by `PREPARE`, and `pg_attribute` missing-value behavior for fast and volatile added-column defaults.
+
+## Transaction catalog visibility oracle
+
+`transaction_catalog_visibility_oracle.sql` uses `dblink` to commit catalog and storage changes from a sibling PostgreSQL 18.4 session after a `REPEATABLE READ` snapshot is established. The checked-in transcript verifies that the fixed snapshot uses current committed view and routine definitions, resolves a relation created after snapshot acquisition with no snapshot-visible rows, and treats a concurrently truncated relation as empty. The paired `pg18_fixed_snapshot_*` Rust integration tests exercise the same catalog identities and row-visibility boundaries in UQA, including transaction-local DDL and rollback.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/transaction_catalog_visibility_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/transaction_catalog_visibility_oracle.expected.txt -
+cargo test --locked -p uqa-engine --test integration pg18_fixed_snapshot
+```
+
 The PostgreSQL side keeps one generated schema across case-specific `psql` connections. The UQA side keeps one temporary database file and deliberately reopens it for every case, so the same comparison also verifies durable routine, view, generated-column, catalog, and ALTER state. Successful observation cases use COPY text rows; type-sensitive cases project `pg_typeof(...)`; expected failures compare SQLSTATE exactly.
 
 Build the pinned PostgreSQL 18.4 and Apache AGE 1.8.0 oracle from AGE commit `b570cf7c1486863f77c14e9c0e07b0e9bfd01bf4`; `Dockerfile.pg18-age` also pins the PostgreSQL multi-platform image digest used for the checked-in transcript:
@@ -70,6 +81,7 @@ python3 tests/parity/pg18/run_routines_stateful.py --suite constraints
 python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal
 python3 tests/parity/pg18/run_routines_stateful.py --suite triggers
 python3 tests/parity/pg18/run_routines_stateful.py --suite rules
+python3 tests/parity/pg18/run_routines_stateful.py --suite transactions
 ```
 
 The runner executes PostgreSQL and UQA concurrently by default. `--backend postgres` and `--backend uqa` select one side for diagnosis. Canonical transcript updates require the PostgreSQL-only backend and use an atomic file replacement; regenerate only from the pinned PostgreSQL 18.4 + AGE oracle, then review the checked-in JSON diff:
@@ -80,6 +92,7 @@ python3 tests/parity/pg18/run_routines_stateful.py --suite constraints --backend
 python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal --backend postgres --update-expected
 python3 tests/parity/pg18/run_routines_stateful.py --suite triggers --backend postgres --update-expected
 python3 tests/parity/pg18/run_routines_stateful.py --suite rules --backend postgres --update-expected
+python3 tests/parity/pg18/run_routines_stateful.py --suite transactions --backend postgres --update-expected
 ```
 
 Every fixture case starts with `-- @case <name> <ok|rows|error>` and ends with `-- @end`; this explicit framing allows routine bodies to contain semicolons without making the runner guess SQL statement boundaries. The runner replaces `__UQA_STATEFUL_SCHEMA__` with an isolated generated schema name and rejects an expected transcript whose fixture SHA-256 or ordered case modes are stale.

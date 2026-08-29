@@ -12,17 +12,18 @@ use super::helpers::{
     default_expr_text, index_columns, indexdef, int_value, pg_type_align, pg_type_array_oid,
     pg_type_by_value, pg_type_collation_oid, pg_type_element_oid, pg_type_len, pg_type_modifier,
     pg_type_oid, pg_type_routine_oids, pg_type_storage, pg_type_subscript_handler, relation_oid,
-    row, schema_oid, split_index_name, split_schema_name, stable_oid, str_value, table_columns_for,
-    view_columns_for, PgTypeRoutineOids,
+    row, schema_oid, split_index_name, split_schema_name, stable_object_oid, stable_oid, str_value,
+    table_columns_for, view_columns_for, PgTypeRoutineOids,
 };
 use super::{value_to_text, ColumnType, Engine, ResultRow, SQLColumnDef, SQLError, Value};
+use uqa_core::ArrayValue;
 use uqa_sql::ast::RangeSubtype;
 use uqa_sql::ast::RoleAttribute;
 
 pub(super) fn build_pg_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
     let mut names = engine
-        .table_names()
+        .query_table_names()
         .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?;
     names.sort();
     for name in names {
@@ -42,10 +43,13 @@ pub(super) fn build_pg_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLErro
                         .any(|idx| idx.table_name == name),
                 ),
             ),
-            ("hasrules", bool_value(engine.relation_has_rules(&name)?)),
+            (
+                "hasrules",
+                bool_value(engine.query_relation_has_rules(&name)?),
+            ),
             (
                 "hastriggers",
-                bool_value(engine.relation_has_triggers(&name)?),
+                bool_value(engine.query_relation_has_triggers(&name)?),
             ),
             ("rowsecurity", bool_value(false)),
             ("table_catalog", catalog_name()),
@@ -70,28 +74,20 @@ pub(super) fn build_pg_namespace(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
         .collect())
 }
 
-fn table_relkind(engine: &Engine, table: &str) -> Result<&'static str, SQLError> {
-    let hierarchy = engine
-        .try_table_hierarchy(table)
-        .map_err(|error| SQLError::Internal(format!("read table hierarchy: {error}")))?;
-    Ok(if hierarchy.partition_spec.is_some() {
-        "p"
-    } else {
-        "r"
-    })
-}
-
 pub(in crate::sql) fn table_relation_oid(engine: &Engine, table: &str) -> Result<i64, SQLError> {
-    let canonical = engine
-        .try_resolve_table_name(table)
+    let table_state = engine
+        .try_query_table(table)
         .map_err(|error| SQLError::Internal(format!("resolve catalog table `{table}`: {error}")))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    let (schema, local) = split_schema_name(&canonical)?;
-    Ok(relation_oid(
-        table_relkind(engine, &canonical)?,
-        &schema,
-        &local,
-    ))
+    Ok(stable_object_oid("relation", &table_state.object_id()))
+}
+
+pub(in crate::sql) fn table_rowtype_oid(engine: &Engine, table: &str) -> Result<i64, SQLError> {
+    let table_state = engine
+        .try_query_table(table)
+        .map_err(|error| SQLError::Internal(format!("resolve catalog table `{table}`: {error}")))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    Ok(stable_object_oid("rowtype", &table_state.object_id()))
 }
 
 #[derive(Debug, Clone)]
@@ -421,7 +417,7 @@ pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
         ("attmissingval", Value::Null),
     ])];
     for table_name in engine
-        .table_names()
+        .query_table_names()
         .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
     {
         let relid = table_relation_oid(engine, &table_name)?;
@@ -492,6 +488,8 @@ pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
             let col = SQLColumnDef {
                 name,
                 ty,
+                object_id: None,
+                missing_value: None,
                 primary_key: false,
                 not_null: false,
                 not_null_explicit: false,
@@ -521,6 +519,12 @@ pub(super) fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
 }
 
 pub(super) fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> ResultRow {
+    let missing_value = col.missing_value.clone().map_or(Value::Null, |value| {
+        Value::Array(
+            ArrayValue::try_new(vec![value])
+                .expect("a single PostgreSQL missing value always forms a rectangular array"),
+        )
+    });
     row([
         ("attrelid", int_value(relid)),
         ("attname", str_value(col.name.clone())),
@@ -546,7 +550,7 @@ pub(super) fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> R
                         .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy),
             ),
         ),
-        ("atthasmissing", bool_value(false)),
+        ("atthasmissing", bool_value(col.missing_value.is_some())),
         (
             "attidentity",
             str_value(match col.auto_increment.as_ref().map(|value| value.kind) {
@@ -576,14 +580,14 @@ pub(super) fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> R
         ("attacl", Value::Null),
         ("attoptions", Value::Null),
         ("attfdwoptions", Value::Null),
-        ("attmissingval", Value::Null),
+        ("attmissingval", missing_value),
     ])
 }
 
 pub(super) fn build_pg_attrdef(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
     for table_name in engine
-        .table_names()
+        .query_table_names()
         .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
     {
         let (_, table) = split_schema_name(&table_name)?;

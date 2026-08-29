@@ -17,7 +17,7 @@ use uqa_sql::ast::{Expr, PartitionBound, PartitionRangeDatum, PartitionSpec, Par
 pub(super) fn build_pg_partitioned_table(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::new();
     for table in engine
-        .table_names()
+        .query_table_names()
         .map_err(|error| SQLError::Internal(format!("read partition catalog: {error}")))?
     {
         let hierarchy = engine
@@ -132,7 +132,7 @@ pub(in crate::sql) fn pg_get_expr_value(
         }
     }
     for table in engine
-        .table_names()
+        .query_table_names()
         .map_err(|error| SQLError::Internal(format!("read pg_get_expr catalog: {error}")))?
     {
         if table_relation_oid(engine, &table)? != relation_oid {
@@ -169,7 +169,7 @@ pub(in crate::sql) fn pg_get_partkeydef_value(
     }
     let relation_oid = expect_oid("pg_get_partkeydef", argument)?;
     for table in engine
-        .table_names()
+        .query_table_names()
         .map_err(|error| SQLError::Internal(format!("read partition catalog: {error}")))?
     {
         if table_relation_oid(engine, &table)? != relation_oid {

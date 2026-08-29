@@ -220,7 +220,7 @@ pub(in crate::sql) fn run_update_inner(
         if recheck {
             engine.refresh_explicit_statement_snapshot()?;
         }
-        let Some(mut doc) = engine.get_document(&storage_table, doc_id)? else {
+        let Some(mut doc) = engine.get_document_for_mutation(&storage_table, doc_id)? else {
             continue;
         };
         let original_doc = doc.clone();

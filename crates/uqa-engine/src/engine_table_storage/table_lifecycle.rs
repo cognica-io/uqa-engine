@@ -329,6 +329,7 @@ impl Engine {
             }
         }
         self.storage.tables.write().remove(&relation);
+        self.row_locks.invalidate_column_stats(name);
         self.forget_constraint_transaction_relation(&relation);
         self.clear_regtype_output_cache();
         if temporary {
@@ -363,6 +364,10 @@ impl Engine {
         Ok(self.try_resolve_table_name(name)?.is_some())
     }
 
+    pub(crate) fn try_query_has_table(&self, name: &str) -> StorageBackendResult<bool> {
+        Ok(self.try_resolve_query_table_name(name)?.is_some())
+    }
+
     /// All schema-declared columns for `table`, in declaration order.
     pub fn table_columns(&self, table: &str) -> StorageBackendResult<Vec<String>> {
         self.try_table_columns(table)
@@ -371,6 +376,19 @@ impl Engine {
     pub fn try_table_columns(&self, table: &str) -> StorageBackendResult<Vec<String>> {
         let table_state = self
             .try_table(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let columns = table_state
+            .columns
+            .read()
+            .iter()
+            .map(|column| column.name.clone())
+            .collect();
+        Ok(columns)
+    }
+
+    pub(crate) fn try_query_table_columns(&self, table: &str) -> StorageBackendResult<Vec<String>> {
+        let table_state = self
+            .try_query_table(table)?
             .ok_or_else(|| table_not_found(table))?;
         let columns = table_state
             .columns
@@ -391,6 +409,22 @@ impl Engine {
             .ok_or_else(|| table_not_found(table))?;
         let cols = t.columns.read();
         Ok(cols.iter().any(|c| c.name == column))
+    }
+
+    pub(crate) fn try_query_table_has_column(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> StorageBackendResult<bool> {
+        let table = self
+            .try_query_table(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let found = table
+            .columns
+            .read()
+            .iter()
+            .any(|candidate| candidate.name == column);
+        Ok(found)
     }
 
     pub(crate) fn column_type(
@@ -454,6 +488,17 @@ impl Engine {
             .collect())
     }
 
+    /// Sorted list of tables visible through the active query snapshot.
+    pub(crate) fn query_table_names(&self) -> StorageBackendResult<Vec<String>> {
+        if let Some(snapshot) = self.query_table_snapshots.as_ref() {
+            return Ok(snapshot
+                .keys()
+                .map(RelationIdentity::qualified_name)
+                .collect());
+        }
+        self.table_names()
+    }
+
     /// Snapshot the column schema of `table`. Returns `None` when no
     /// table by that name is registered.
     pub fn describe_table(
@@ -468,6 +513,25 @@ impl Engine {
         table: &str,
     ) -> StorageBackendResult<Option<Vec<uqa_sql::ast::ColumnDef>>> {
         let Some(table) = self.try_table(table)? else {
+            return Ok(None);
+        };
+        let mut columns = table.columns.read().clone();
+        for column in &mut columns {
+            if let Some(default) = &mut column.default {
+                self.resolve_stored_sequence_references_in_expr(default)?;
+            }
+            if let Some(generated) = &mut column.generated {
+                self.resolve_stored_sequence_references_in_expr(&mut generated.expression)?;
+            }
+        }
+        Ok(Some(columns))
+    }
+
+    pub(crate) fn try_describe_query_table(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Option<Vec<uqa_sql::ast::ColumnDef>>> {
+        let Some(table) = self.try_query_table(table)? else {
             return Ok(None);
         };
         let mut columns = table.columns.read().clone();

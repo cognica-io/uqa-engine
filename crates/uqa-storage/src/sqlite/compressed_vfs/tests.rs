@@ -48,6 +48,92 @@ fn vfs_delete_nonexistent_file_with_missing_parent_skips_dir_sync() {
 }
 
 #[test]
+fn failed_exclusive_upgrade_preserves_the_existing_shared_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let lock_path = dir.path().join("upgrade.lock");
+    let data_path = dir.path().join("upgrade.data");
+    let open = || {
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .unwrap()
+    };
+    let data = || PlainFile {
+        path: data_path.clone(),
+        file: OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&data_path)
+            .unwrap(),
+    };
+    let mut first_handle = Box::new(FileHandle {
+        file: VfsFile::Plain(data()),
+        lock_file: open(),
+        read_only: false,
+        delete_on_close: false,
+        lock_state: SQLITE_LOCK_NONE,
+    });
+    let mut second_handle = Box::new(FileHandle {
+        file: VfsFile::Plain(data()),
+        lock_file: open(),
+        read_only: false,
+        delete_on_close: false,
+        lock_state: SQLITE_LOCK_NONE,
+    });
+    let mut first = CompressedSQLiteFile {
+        base: ffi::sqlite3_file {
+            pMethods: &raw const IO_METHODS,
+        },
+        handle: &raw mut *first_handle,
+    };
+    let mut second = CompressedSQLiteFile {
+        base: ffi::sqlite3_file {
+            pMethods: &raw const IO_METHODS,
+        },
+        handle: &raw mut *second_handle,
+    };
+    let lock = IO_METHODS.xLock.unwrap();
+    let unlock = IO_METHODS.xUnlock.unwrap();
+
+    // SAFETY: both SQLite file wrappers and their boxed handles remain valid throughout every callback invocation.
+    unsafe {
+        assert_eq!(
+            lock(&raw mut first.base, SQLITE_LOCK_SHARED),
+            ffi::SQLITE_OK
+        );
+        assert_eq!(
+            lock(&raw mut second.base, SQLITE_LOCK_SHARED),
+            ffi::SQLITE_OK
+        );
+        assert_eq!(
+            lock(&raw mut first.base, SQLITE_LOCK_RESERVED),
+            ffi::SQLITE_BUSY
+        );
+        assert_eq!(
+            unlock(&raw mut second.base, SQLITE_LOCK_NONE),
+            ffi::SQLITE_OK
+        );
+    }
+    let contender = open();
+    assert!(FileExt::try_lock_exclusive(&contender).is_err());
+
+    // SAFETY: `first` and its handle are still valid and currently own the shared lock being released.
+    unsafe {
+        assert_eq!(
+            unlock(&raw mut first.base, SQLITE_LOCK_NONE),
+            ffi::SQLITE_OK
+        );
+    }
+    FileExt::try_lock_exclusive(&contender).unwrap();
+    FileExt::unlock(&contender).unwrap();
+}
+
+#[test]
 fn parent_dir_sync_succeeds_for_real_temp_directory() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("directory-entry");
@@ -214,6 +300,36 @@ fn flush_appends_only_dirty_chunk_records() {
     let mut out = [0_u8; 3];
     assert_eq!(reopened.read_at(update_offset, &mut out).unwrap(), 3);
     assert_eq!(&out, b"xyz");
+}
+
+#[test]
+fn unchanged_refresh_retains_the_decompressed_chunk_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("unchanged-refresh.uqac.sqlite3");
+    let options = OpenOptionsEntry {
+        compression: SQLiteCompressionOptions {
+            codec: SQLiteCompressionCodec::Zstd,
+            page_size: 512,
+            chunk_pages: 1,
+            level: 1,
+        },
+        key: None,
+        trusted_anchor: None,
+    };
+    let mut writer = ContainerFile::open(path.clone(), options.clone()).unwrap();
+    writer.write_at(0, &[b'a'; 512]).unwrap();
+    writer.flush().unwrap();
+    drop(writer);
+
+    let mut reader = ContainerFile::open(path, options).unwrap();
+    let mut byte = [0_u8; 1];
+    reader.read_at(0, &mut byte).unwrap();
+    assert_eq!(byte, [b'a']);
+    assert_eq!(reader.cache.len(), 1);
+
+    reader.refresh_committed_state().unwrap();
+    reader.refresh_committed_state().unwrap();
+    assert_eq!(reader.cache.len(), 1);
 }
 
 #[test]

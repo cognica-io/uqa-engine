@@ -70,7 +70,7 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         return Ok(None);
     }
     let Some(root_table) = engine
-        .try_table(name)
+        .try_query_table(name)
         .map_err(|error| SQLError::Internal(format!("resolve table `{name}`: {error}")))?
     else {
         return Ok(None);
@@ -81,7 +81,7 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         .map(super::super::SourceProjection::metadata)
         .unwrap_or_default();
     let table_columns = engine
-        .try_table_columns(name)
+        .try_query_table_columns(name)
         .map_err(|error| SQLError::Internal(format!("read table columns for `{name}`: {error}")))?;
     // An unqualified reference is conservatively requested from every FROM source during pruning. The scan schema must still describe only real table columns: advertising those over-inclusive requests as columns can make later joins bind an unqualified name to a non-existent value.
     let mut columns = match wanted.as_ref() {
@@ -205,12 +205,12 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         physical_schema =
             uqa_execution::RowSchema::with_physical_identity_aliases(&physical_schema, &aliases);
     }
-    let table_names = engine.hierarchy_scan_tables(name, *include_descendants)?;
+    let table_names = engine.query_hierarchy_scan_tables(name, *include_descendants)?;
     let mut sources = Vec::with_capacity(table_names.len());
     let mut filter_pushed = false;
     for table_name in table_names {
         let table = engine
-            .try_table(&table_name)
+            .try_query_table(&table_name)
             .map_err(|error| {
                 SQLError::Internal(format!("resolve inherited table `{table_name}`: {error}"))
             })?

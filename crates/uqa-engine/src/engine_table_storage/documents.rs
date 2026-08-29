@@ -73,7 +73,17 @@ impl Engine {
     }
 
     pub(crate) fn command_mutation_overlay_active(&self) -> bool {
-        !self.session.command_mutation_overlays.lock().is_empty()
+        if !self.session.command_mutation_overlays.lock().is_empty() {
+            return true;
+        }
+        if let Some(overlay) = self.query_transaction_overlay.as_ref() {
+            return !overlay.is_empty();
+        }
+        self.session
+            .transactions
+            .lock()
+            .iter()
+            .any(|frame| !frame.row_changes.is_empty())
     }
 
     pub(crate) fn stage_command_document(
@@ -244,11 +254,13 @@ impl Engine {
         table: &str,
     ) -> Result<Option<BTreeMap<DocId, Option<Document>>>, SQLError> {
         let canonical = self.command_overlay_table_name(table)?;
+        let mut changes = self
+            .fixed_transaction_row_changes(&canonical)?
+            .unwrap_or_default();
         let overlays = self.session.command_mutation_overlays.lock();
-        if overlays.is_empty() {
+        if overlays.is_empty() && changes.is_empty() {
             return Ok(None);
         }
-        let mut changes = BTreeMap::new();
         for overlay in overlays.iter() {
             if let Some(documents) = overlay.documents.get(&canonical) {
                 changes.extend(documents.iter().map(|(doc_id, document)| {
@@ -259,6 +271,100 @@ impl Engine {
                 }));
             }
         }
+        Ok(Some(changes))
+    }
+
+    pub(crate) fn fixed_transaction_row_changes(
+        &self,
+        canonical_table: &str,
+    ) -> Result<Option<BTreeMap<DocId, Option<Document>>>, SQLError> {
+        let mut changes = self
+            .query_transaction_overlay
+            .as_ref()
+            .and_then(|overlay| overlay.get(canonical_table).cloned())
+            .unwrap_or_default();
+        if self.query_transaction_overlay.is_some() && self.query_transaction_origin.is_none() {
+            return Ok((!changes.is_empty()).then_some(changes));
+        }
+        let relation = crate::RelationIdentity::from_legacy_name(canonical_table)
+            .map_err(SQLError::Internal)?;
+        let query_table = self
+            .query_table_snapshots
+            .as_ref()
+            .and_then(|snapshots| snapshots.get(&relation))
+            .cloned()
+            .or_else(|| self.storage.tables.read().get(&relation).cloned());
+        let generation = query_table.map(|table| table.storage_generation());
+        let Some(generation) = generation else {
+            return Ok((!changes.is_empty()).then_some(changes));
+        };
+        let desired = {
+            let stack = self.session.transactions.lock();
+            if self.query_transaction_overlay.is_none()
+                && stack
+                    .first()
+                    .is_none_or(|frame| frame.fixed_snapshot.is_none())
+            {
+                return Ok(None);
+            }
+            let mut desired = BTreeMap::new();
+            for change in stack.iter().flat_map(|frame| frame.row_changes.iter()) {
+                if self
+                    .query_transaction_origin
+                    .is_some_and(|origin| change.query_origin != Some(origin))
+                {
+                    continue;
+                }
+                if change.source_generation == generation {
+                    desired.insert(
+                        change.pending.key.doc_id,
+                        !matches!(
+                            change.pending.kind,
+                            crate::row_locks::PendingRowChangeKind::Delete
+                                | crate::row_locks::PendingRowChangeKind::Rewrite(_)
+                        ),
+                    );
+                }
+                if let crate::row_locks::PendingRowChangeKind::Rewrite(successor) =
+                    change.pending.kind
+                {
+                    if change.successor_generation == Some(generation) {
+                        desired.insert(successor.doc_id, true);
+                    }
+                }
+            }
+            desired
+        };
+        if desired.is_empty() {
+            return Ok((!changes.is_empty()).then_some(changes));
+        }
+        let live = self
+            .storage
+            .tables
+            .read()
+            .values()
+            .find(|table| table.storage_generation() == generation)
+            .cloned()
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "transaction row changes refer to unavailable relation generation for `{canonical_table}`"
+                ))
+            })?;
+        let present = desired
+            .iter()
+            .filter_map(|(doc_id, present)| present.then_some(*doc_id))
+            .collect::<Vec<_>>();
+        let documents = live
+            .document_store
+            .read()
+            .get_many(&present)
+            .map_err(|error| {
+                document_store_read_error("read fixed-snapshot transaction changes", &error)
+            })?;
+        changes.extend(desired.into_iter().map(|(doc_id, present)| {
+            let document = present.then(|| documents.get(&doc_id).cloned()).flatten();
+            (doc_id, document)
+        }));
         Ok(Some(changes))
     }
 
@@ -287,6 +393,43 @@ impl Engine {
                 &t.columns.read(),
                 document,
             )?;
+            document.remove(crate::sql::XMIN_STORAGE_COLUMN);
+            document.remove(crate::sql::XMIN_USER_STORAGE_COLUMN);
+        }
+        Ok(document)
+    }
+
+    /// Read a command-visible document for a tuple rewrite while retaining collision-free system metadata. Public document APIs remove these keys, but DML must carry them into `stamp_tuple_xmin` so a schemaless compatibility mirror is never mistaken for a user-defined `xmin` field.
+    pub(crate) fn get_document_for_mutation(
+        &self,
+        table: &str,
+        doc_id: DocId,
+    ) -> Result<Option<Document>, SQLError> {
+        let state = self.require_table(table)?;
+        let mut document = self.raw_command_visible_document(table, &state, doc_id)?;
+        if let Some(document) = document.as_mut() {
+            crate::engine_generated::materialize_virtual_generated_columns(
+                &state.columns.read(),
+                document,
+            )?;
+        }
+        Ok(document)
+    }
+
+    pub(crate) fn get_query_document(
+        &self,
+        table: &str,
+        doc_id: DocId,
+    ) -> Result<Option<Document>, SQLError> {
+        let table_state = self.require_query_table(table)?;
+        let mut document = self.raw_command_visible_document(table, &table_state, doc_id)?;
+        if let Some(document) = document.as_mut() {
+            crate::engine_generated::materialize_virtual_generated_columns(
+                &table_state.columns.read(),
+                document,
+            )?;
+            document.remove(crate::sql::XMIN_STORAGE_COLUMN);
+            document.remove(crate::sql::XMIN_USER_STORAGE_COLUMN);
         }
         Ok(document)
     }
@@ -320,6 +463,8 @@ impl Engine {
                 &table.columns.read(),
                 document,
             )?;
+            document.remove(crate::sql::XMIN_STORAGE_COLUMN);
+            document.remove(crate::sql::XMIN_USER_STORAGE_COLUMN);
         }
         Ok(document)
     }
@@ -401,18 +546,14 @@ impl Engine {
         Ok(documents)
     }
 
-    /// Fetch a column projection for many documents in one round trip.
-    /// The value vector aligns with `fields`; missing fields are Null.
-    /// Persistent backends extract the fields inside the storage scan
-    /// so whole documents never materialise.
-    pub(crate) fn get_document_fields_multi(
+    pub(crate) fn get_query_document_fields_multi(
         &self,
         table: &str,
         doc_ids: &[DocId],
         fields: &[&str],
     ) -> Result<BTreeMap<DocId, Vec<Value>>, SQLError> {
-        let t = self.require_table(table)?;
-        let columns = t.columns.read().clone();
+        let table_state = self.require_query_table(table)?;
+        let columns = table_state.columns.read().clone();
         let requested = fields
             .iter()
             .map(|field| (*field).to_string())
@@ -420,12 +561,13 @@ impl Engine {
         if crate::engine_generated::projection_contains_virtual_generated_column(
             &columns, &requested,
         ) {
-            let documents =
-                self.get_documents_with_virtual_projection(table, doc_ids, &requested)?;
             let mut projected = BTreeMap::new();
-            for (doc_id, document) in documents {
+            for doc_id in doc_ids {
+                let Some(document) = self.get_query_document(table, *doc_id)? else {
+                    continue;
+                };
                 projected.insert(
-                    doc_id,
+                    *doc_id,
                     fields
                         .iter()
                         .map(|field| document.get(*field).cloned().unwrap_or(Value::Null))
@@ -440,11 +582,11 @@ impl Engine {
                 .filter(|doc_id| !changes.contains_key(doc_id))
                 .copied()
                 .collect::<Vec<_>>();
-            let mut projected = t
+            let mut projected = table_state
                 .document_store
                 .read()
                 .get_fields_multi(&persisted_ids, fields)
-                .map_err(|error| document_store_read_error("read document fields", &error))?;
+                .map_err(|error| document_store_read_error("read query document fields", &error))?;
             for doc_id in doc_ids {
                 if let Some(Some(document)) = changes.get(doc_id) {
                     projected.insert(
@@ -458,8 +600,12 @@ impl Engine {
             }
             return Ok(projected);
         }
-        let result = t.document_store.read().get_fields_multi(doc_ids, fields);
-        result.map_err(|error| document_store_read_error("read document fields", &error))
+        let result = table_state
+            .document_store
+            .read()
+            .get_fields_multi(doc_ids, fields)
+            .map_err(|error| document_store_read_error("read query document fields", &error));
+        result
     }
 
     pub(crate) fn get_document_fields(
@@ -468,7 +614,7 @@ impl Engine {
         doc_ids: &[DocId],
         field: &str,
     ) -> Result<BTreeMap<DocId, Value>, SQLError> {
-        let rows = self.get_document_fields_multi(table, doc_ids, &[field])?;
+        let rows = self.get_query_document_fields_multi(table, doc_ids, &[field])?;
         let mut out = BTreeMap::new();
         for (doc_id, mut values) in rows {
             if values.len() != 1 {
@@ -1131,7 +1277,7 @@ mod tests {
         assert!(!documents.contains_key(&2));
         assert_eq!(documents[&3]["source"], Value::Int(3));
         let fields = engine
-            .get_document_fields_multi("overlay_virtual", &[1, 2, 3], &["source"])
+            .get_query_document_fields_multi("overlay_virtual", &[1, 2, 3], &["source"])
             .unwrap();
         assert_eq!(fields[&1], [Value::Int(0)]);
         assert!(!fields.contains_key(&2));

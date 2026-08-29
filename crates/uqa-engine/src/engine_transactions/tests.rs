@@ -9,6 +9,17 @@ use std::time::Duration;
 
 use super::*;
 
+fn integer_column(result: &SQLResult, name: &str) -> Vec<i64> {
+    result
+        .rows
+        .iter()
+        .map(|row| match row.get(name) {
+            Some(crate::Value::Int(value)) => *value,
+            other => panic!("expected integer column {name}, got {other:?}"),
+        })
+        .collect()
+}
+
 fn end_backend_transaction_early(engine: &Engine) {
     engine
         .storage
@@ -178,6 +189,73 @@ fn compressed_write_refresh_uses_the_pinned_transaction_connection() {
         .unwrap();
     let result = engine.sql("SELECT id FROM items", &[]).unwrap();
     assert_eq!(result.rows.len(), 1);
+}
+
+#[test]
+fn compressed_fixed_snapshot_releases_reader_locks_and_preserves_repeatable_read() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = Engine::open_compressed(
+        &directory.path().join("compressed-fixed-snapshot.db"),
+        uqa_storage::SQLiteCompressionOptions::default(),
+    )
+    .unwrap();
+    root.sql(
+        "CREATE TABLE items (id INTEGER PRIMARY KEY, value INTEGER)",
+        &[],
+    )
+    .unwrap();
+    root.sql("INSERT INTO items VALUES (1, 10), (2, 20)", &[])
+        .unwrap();
+    let reader = root.new_session().unwrap();
+    let writer = root.new_session().unwrap();
+
+    reader
+        .sql("BEGIN ISOLATION LEVEL REPEATABLE READ", &[])
+        .unwrap();
+    assert_eq!(
+        integer_column(
+            &reader
+                .sql("SELECT value FROM items ORDER BY id", &[])
+                .unwrap(),
+            "value",
+        ),
+        [10, 20]
+    );
+    writer
+        .sql("UPDATE items SET value = 11 WHERE id = 1", &[])
+        .unwrap();
+    assert_eq!(
+        integer_column(
+            &writer
+                .sql("SELECT value FROM items ORDER BY id", &[])
+                .unwrap(),
+            "value",
+        ),
+        [11, 20]
+    );
+    reader
+        .sql("UPDATE items SET value = 21 WHERE id = 2", &[])
+        .unwrap();
+    assert_eq!(
+        integer_column(
+            &reader
+                .sql("SELECT value FROM items ORDER BY id", &[])
+                .unwrap(),
+            "value",
+        ),
+        [10, 21]
+    );
+    reader.sql("COMMIT", &[]).unwrap();
+    let observer = root.new_session().unwrap();
+    assert_eq!(
+        integer_column(
+            &observer
+                .sql("SELECT value FROM items ORDER BY id", &[])
+                .unwrap(),
+            "value",
+        ),
+        [11, 21]
+    );
 }
 
 #[test]

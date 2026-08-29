@@ -155,11 +155,9 @@ impl Engine {
                     ));
                 }
                 frame.characteristics.read_only = read_only;
-                frame.intent = if read_only {
-                    TransactionIntent::ReadOnly
-                } else {
-                    TransactionIntent::ReadWrite
-                };
+                if !read_only {
+                    frame.intent = TransactionIntent::ReadWrite;
+                }
             }
         }
         if let Some(deferrable) = options.deferrable {
@@ -267,15 +265,29 @@ impl Engine {
     }
 
     pub(crate) fn current_transaction_is_read_only(&self) -> bool {
+        self.session.transactions.lock().last().map_or_else(
+            || self.default_transaction_characteristics().read_only,
+            |frame| frame.characteristics.read_only,
+        )
+    }
+
+    pub(crate) fn current_transaction_uses_fixed_snapshot(&self) -> bool {
         self.session
             .transactions
             .lock()
             .last()
-            .is_some_and(|frame| frame.characteristics.read_only)
+            .is_some_and(|frame| {
+                matches!(
+                    frame.characteristics.isolation,
+                    TransactionIsolationLevel::RepeatableRead
+                        | TransactionIsolationLevel::Serializable
+                )
+            })
     }
 
     pub(crate) fn mark_transaction_snapshot_set(&self) {
-        if let Some(frame) = self.session.transactions.lock().last_mut() {
+        // PostgreSQL's FirstSnapshotSet belongs to the top transaction. A nested Engine frame models a subtransaction and must not acquire a newer snapshot merely because the first query happened below it.
+        if let Some(frame) = self.session.transactions.lock().first_mut() {
             frame.first_snapshot_set = true;
         }
     }

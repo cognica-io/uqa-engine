@@ -91,14 +91,14 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
             );
         }
         let local_table = engine
-            .try_table(name)
+            .try_query_table(name)
             .map_err(|err| SQLError::Internal(format!("resolve table `{name}`: {err}")))?;
         let is_virtual = name.contains('.') || (local_table.is_none() && foreign_table.is_none());
         let command_overlay =
             ctes.reads_command_overlay() && engine.command_mutation_overlay_active();
         let has_hierarchy_descendants = local_table.is_some()
             && engine
-                .hierarchy_scan_tables(name, *include_descendants)?
+                .query_hierarchy_scan_tables(name, *include_descendants)?
                 .len()
                 > 1;
         if alias.is_none() && !is_virtual && !command_overlay && !has_hierarchy_descendants {
@@ -309,7 +309,7 @@ fn single_local_table_metadata_binding(
                 alias,
                 ..
             } => {
-                if engine.try_table(name).ok().flatten().is_some() {
+                if engine.try_query_table(name).ok().flatten().is_some() {
                     relations.insert((
                         alias.as_deref().unwrap_or(qualifier).to_string(),
                         name.clone(),
@@ -332,7 +332,7 @@ fn single_local_table_metadata_binding(
     if !relations.is_empty() {
         return None;
     }
-    let columns = engine.try_table_columns(&name).ok()?;
+    let columns = engine.try_query_table_columns(&name).ok()?;
     Some(LocalTableMetadataBinding {
         qualifier,
         legacy_doc_id: !columns.iter().any(|column| column == DOC_ID_COLUMN),
@@ -404,7 +404,7 @@ fn add_all_source_columns_to_prune(engine: &Engine, source: &SourcePlan, prune: 
             ..
         } => {
             let qualifier = alias.as_deref().unwrap_or(qualifier);
-            match engine.try_table_columns(name) {
+            match engine.try_query_table_columns(name) {
                 Ok(table_columns) => {
                     if let Some(columns) = prune.get_mut(qualifier) {
                         columns.extend(table_columns);

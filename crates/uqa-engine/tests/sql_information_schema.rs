@@ -1300,6 +1300,78 @@ fn information_schema_catalog_name_preserves_its_pg18_attribute_identity() {
 }
 
 #[test]
+fn pg_attribute_exposes_fast_defaults_and_volatile_rewrites() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE SEQUENCE attribute_default_sequence START 10;
+         CREATE TABLE attribute_defaults (id INTEGER PRIMARY KEY);
+         INSERT INTO attribute_defaults VALUES (1), (2);
+         ALTER TABLE attribute_defaults ADD COLUMN fast_default INTEGER DEFAULT 7",
+        &[],
+    )
+    .unwrap();
+
+    let fast_attribute = eng
+        .sql(
+            "SELECT atthasmissing, attmissingval
+             FROM pg_catalog.pg_attribute
+             WHERE attrelid = 'attribute_defaults'::regclass
+               AND attname = 'fast_default'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(fast_attribute.rows[0]["atthasmissing"], Value::Bool(true));
+    assert_eq!(
+        fast_attribute.rows[0]["attmissingval"],
+        array(vec![Value::Int(7)])
+    );
+
+    eng.sql(
+        "ALTER TABLE attribute_defaults ADD COLUMN volatile_default BIGINT DEFAULT nextval('attribute_default_sequence')",
+        &[],
+    )
+    .unwrap();
+
+    let attributes = eng
+        .sql(
+            "SELECT attname, atthasmissing, attmissingval
+             FROM pg_catalog.pg_attribute
+             WHERE attrelid = 'attribute_defaults'::regclass
+               AND attname IN ('fast_default', 'volatile_default')
+             ORDER BY attname",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(attributes.rows.len(), 2);
+    assert_eq!(
+        attributes.rows[0]["attname"],
+        Value::Str("fast_default".into())
+    );
+    assert_eq!(attributes.rows[0]["atthasmissing"], Value::Bool(false));
+    assert_eq!(attributes.rows[0]["attmissingval"], Value::Null);
+    assert_eq!(
+        attributes.rows[1]["attname"],
+        Value::Str("volatile_default".into())
+    );
+    assert_eq!(attributes.rows[1]["atthasmissing"], Value::Bool(false));
+    assert_eq!(attributes.rows[1]["attmissingval"], Value::Null);
+
+    let rows = eng
+        .sql(
+            "SELECT volatile_default FROM attribute_defaults ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        rows.rows
+            .iter()
+            .map(|row| row["volatile_default"].clone())
+            .collect::<Vec<_>>(),
+        [Value::Int(10), Value::Int(11)]
+    );
+}
+
+#[test]
 fn information_schema_catalog_name_preserves_its_pg18_type_identity() {
     let eng = Engine::new();
     let types = eng

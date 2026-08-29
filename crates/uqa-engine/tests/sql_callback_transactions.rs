@@ -255,6 +255,45 @@ fn nested_view_mutations_are_writer_classified_and_rolled_back() {
     );
 }
 
+#[test]
+fn cursor_worker_allows_same_statement_registered_callback_reentry() {
+    let engine = Arc::new(Engine::new());
+    let callback_engine = Arc::downgrade(&engine);
+    engine
+        .register_scalar_function("cursor_mutate", move |_args: &[Value]| {
+            mutate_scoring_params(&callback_engine, "callback.cursor")?;
+            Ok(Value::Int(1))
+        })
+        .unwrap();
+
+    engine.sql("BEGIN", &[]).unwrap();
+    engine
+        .sql(
+            "DECLARE callback_cursor CURSOR FOR SELECT cursor_mutate() AS value",
+            &[],
+        )
+        .unwrap();
+    let fetch_engine = Arc::clone(&engine);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let fetch = std::thread::spawn(move || {
+        sender
+            .send(fetch_engine.sql("FETCH ALL FROM callback_cursor", &[]))
+            .unwrap();
+    });
+    let result = receiver
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("cursor callback reentry deadlocked")
+        .unwrap();
+    fetch.join().unwrap();
+    assert_eq!(result.rows[0]["value"], Value::Int(1));
+    assert!(engine
+        .load_scoring_params("callback.cursor")
+        .unwrap()
+        .is_some());
+    engine.sql("ROLLBACK", &[]).unwrap();
+    assert_scoring_params_absent(&engine, "callback.cursor");
+}
+
 fn assert_explicit_sequence_currval_rollback(engine: &Engine) -> i64 {
     engine
         .sql("CREATE SEQUENCE explicit_rollback_sequence START 10", &[])

@@ -125,6 +125,8 @@ fn python_array_types_preserve_elements_and_dimensions() {
         ColumnDef {
             name: "tags".into(),
             ty: ColumnType::Array(Box::new(ColumnType::Text)),
+            object_id: None,
+            missing_value: None,
             primary_key: false,
             not_null: false,
             not_null_explicit: false,
@@ -145,6 +147,8 @@ fn python_array_types_preserve_elements_and_dimensions() {
         ColumnDef {
             name: "numbers".into(),
             ty: ColumnType::Array(Box::new(ColumnType::Integer)),
+            object_id: None,
+            missing_value: None,
             primary_key: false,
             not_null: false,
             not_null_explicit: false,

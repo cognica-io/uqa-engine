@@ -5,10 +5,11 @@
 //
 
 use super::{
-    BTreeSet, BackendTransactionMode, ConstraintModeState, Engine, EngineDataSnapshot, SQLError,
-    SQLParam, SQLResult, SessionStateSnapshot, StorageBackendError, StorageBackendResult,
-    StorageSavepointId, TransactionCharacteristicsState, TransactionDirtyState, TransactionFrame,
-    TransactionIntent, TransactionSavepoint, TransactionStatus,
+    BTreeSet, BackendTransactionMode, ConstraintModeState, Engine, EngineDataSnapshot,
+    FixedTransactionSnapshot, NontransactionalColumnStats, SQLError, SQLParam, SQLResult,
+    SessionStateSnapshot, StorageBackendError, StorageBackendResult, StorageSavepointId,
+    TransactionCharacteristicsState, TransactionDirtyState, TransactionFrame, TransactionIntent,
+    TransactionRelationStates, TransactionRowChange, TransactionSavepoint, TransactionStatus,
 };
 
 mod characteristics;
@@ -27,9 +28,10 @@ struct StatementAbortSnapshot {
     storage_savepoint: Option<StorageSavepointId>,
     session: SessionStateSnapshot,
     data: Option<EngineDataSnapshot>,
+    relation_states: TransactionRelationStates,
     dirty: TransactionDirtyState,
     keep_mark: Option<u32>,
-    row_changes: Vec<crate::row_locks::PendingRowChange>,
+    row_changes: Vec<TransactionRowChange>,
     deferred_foreign_key_checks: Vec<crate::DeferredForeignKeyCheck>,
     constraint_modes: ConstraintModeState,
     intent: TransactionIntent,
@@ -43,6 +45,7 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
             storage_savepoint: Some(savepoint.storage_savepoint),
             session: savepoint.session_snapshot.clone(),
             data: savepoint.data_snapshot.clone(),
+            relation_states: savepoint.relation_states_at_begin.clone(),
             dirty: savepoint.dirty,
             keep_mark: Some(savepoint.lock_mark),
             row_changes: savepoint.row_changes.clone(),
@@ -58,6 +61,7 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
         storage_savepoint: None,
         session: frame.session_snapshot.clone(),
         data: frame.data_snapshot.clone(),
+        relation_states: frame.relation_states_at_begin.clone(),
         dirty: frame.dirty_at_begin,
         keep_mark: frame
             .storage_savepoint
@@ -91,6 +95,15 @@ impl Engine {
                 .dirty
                 .load(std::sync::atomic::Ordering::Acquire),
         }
+    }
+
+    fn transaction_relation_states(&self) -> TransactionRelationStates {
+        self.storage
+            .tables
+            .read()
+            .iter()
+            .map(|(relation, table)| (relation.clone(), table.lifecycle_id()))
+            .collect()
     }
 
     fn restore_transaction_dirty_state(&self, state: TransactionDirtyState) {
@@ -202,6 +215,12 @@ impl Engine {
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
         let _statement = self.runtime.statement_gate.lock();
+        if self.current_transaction_is_read_only() {
+            return Err(SQLError::Routine {
+                sqlstate: "25006".into(),
+                message: "cannot execute direct mutation in a read-only transaction".into(),
+            });
+        }
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()?;
             self.prepare_explicit_transaction_writer()?;
@@ -229,6 +248,11 @@ impl Engine {
         E: std::fmt::Display,
     {
         let _statement = self.runtime.statement_gate.lock();
+        if self.current_transaction_is_read_only() {
+            return Err(map_transaction_error(
+                "cannot execute direct mutation in a read-only transaction".into(),
+            ));
+        }
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
                 .map_err(|error| map_transaction_error(error.to_string()))?;
@@ -290,6 +314,32 @@ impl Engine {
         &self,
         f: impl FnOnce(&Self) -> StorageBackendResult<R>,
     ) -> StorageBackendResult<R> {
+        if self.current_transaction_is_read_only() {
+            return Err(StorageBackendError::Other(
+                "cannot execute storage mutation in a read-only transaction".into(),
+            ));
+        }
+        self.with_implicit_storage_transaction_inner(false, f)
+    }
+
+    /// Run storage maintenance that `PostgreSQL` permits in a read-only transaction. The transaction remains logically read-only, while its physical backend is allowed to persist maintenance metadata such as ANALYZE statistics.
+    pub(crate) fn with_read_only_compatible_storage_transaction<R>(
+        &self,
+        f: impl FnOnce(&Self) -> StorageBackendResult<R>,
+    ) -> StorageBackendResult<R> {
+        if self.transaction_depth() != 0 && self.current_transaction_is_read_only() {
+            self.ensure_transaction_usable()
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            return f(self);
+        }
+        self.with_implicit_storage_transaction_inner(true, f)
+    }
+
+    fn with_implicit_storage_transaction_inner<R>(
+        &self,
+        maintenance_can_override_default_read_only: bool,
+        f: impl FnOnce(&Self) -> StorageBackendResult<R>,
+    ) -> StorageBackendResult<R> {
         let _statement = self.runtime.statement_gate.lock();
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
@@ -305,6 +355,12 @@ impl Engine {
         self.begin().map_err(|error| {
             StorageBackendError::Other(format!("begin implicit engine transaction failed: {error}"))
         })?;
+        if maintenance_can_override_default_read_only {
+            if let Some(frame) = self.session.transactions.lock().last_mut() {
+                frame.intent = TransactionIntent::ReadWrite;
+                frame.characteristics.read_only = false;
+            }
+        }
         if let Err(error) = self.prepare_explicit_transaction_writer() {
             let error = StorageBackendError::Other(format!(
                 "promote implicit engine transaction failed: {error}"
@@ -558,6 +614,7 @@ impl Engine {
         } else {
             BackendTransactionMode::Writer
         };
+        let relation_states_at_begin = self.transaction_relation_states();
         stack.push(TransactionFrame {
             implicit_statement,
             storage_savepoint,
@@ -570,10 +627,13 @@ impl Engine {
             status: TransactionStatus::Active,
             characteristics,
             first_snapshot_set: false,
+            fixed_snapshot: None,
+            fixed_catalog_baseline: None,
             xid_levels: vec![None],
             savepoints: Vec::new(),
             session_snapshot,
             data_snapshot,
+            relation_states_at_begin,
             dirty_at_begin: self.transaction_dirty_state(),
             begin_lock_mark: lock_mark,
             lock_mark,
@@ -582,6 +642,7 @@ impl Engine {
             row_changes: Vec::new(),
             deferred_foreign_key_checks,
             constraint_modes,
+            nontransactional_column_stats: NontransactionalColumnStats::new(),
         });
         self.update_statement_row_lock_baseline(snapshot_change_baseline);
         Ok(())
@@ -733,8 +794,10 @@ impl Engine {
             .last()
             .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?
             .storage_savepoint;
-        if !deferred_constraints_validated {
-            self.validate_deferred_constraints_before_commit(stack, storage_savepoint.is_some())?;
+        if !deferred_constraints_validated && storage_savepoint.is_none() {
+            return Err(SQLError::Internal(
+                "outer COMMIT skipped deferred-constraint preparation".into(),
+            ));
         }
         let frame = stack
             .last()
@@ -796,9 +859,10 @@ impl Engine {
             .pop()
             .ok_or_else(|| SQLError::Internal("COMMIT lost its transaction frame".into()))?;
         if storage_savepoint.is_none() {
-            let publication_result = self
-                .row_locks
-                .publish_row_changes(self.session_id, committed.row_changes.iter().copied());
+            let publication_result = self.row_locks.publish_row_changes(
+                self.session_id,
+                committed.row_changes.iter().map(|change| change.pending),
+            );
             drop(change_publication);
             self.row_locks.release_session(self.session_id);
             self.publish_committed_transaction_epochs();
@@ -829,6 +893,18 @@ impl Engine {
         nested: bool,
         finish_error: SQLError,
     ) -> SQLError {
+        let raw_nontransactional_column_stats = stack
+            .first()
+            .map(|frame| frame.nontransactional_column_stats.clone())
+            .unwrap_or_default();
+        let rollback_relation_states = stack
+            .first()
+            .map(|frame| frame.relation_states_at_begin.clone())
+            .unwrap_or_default();
+        let nontransactional_column_stats = self.nontransactional_column_stats_after_rollback(
+            &raw_nontransactional_column_stats,
+            &rollback_relation_states,
+        );
         let session_snapshot = stack.first().map(|frame| frame.session_snapshot.clone());
         let snapshot = stack.first().and_then(|frame| frame.data_snapshot.clone());
         let dirty_at_begin = stack
@@ -861,6 +937,16 @@ impl Engine {
                 cleanup_errors.push(format!("registry restore: {error}"));
             }
         }
+        if let Err(error) = self.persist_nontransactional_column_stats_after_rollback(
+            &nontransactional_column_stats,
+            true,
+        ) {
+            cleanup_errors.push(format!("ANALYZE statistics restore: {error}"));
+        }
+        if let Err(error) = self.apply_nontransactional_column_stats(&nontransactional_column_stats)
+        {
+            cleanup_errors.push(format!("ANALYZE statistics cache restore: {error}"));
+        }
         if let Some(snapshot) = session_snapshot.as_ref() {
             self.restore_session_state(snapshot);
         }
@@ -874,10 +960,74 @@ impl Engine {
         }
     }
 
+    fn retain_nontransactional_stats_for_rollback(
+        &self,
+        stack: &mut [TransactionFrame],
+        relation_states: &TransactionRelationStates,
+    ) -> NontransactionalColumnStats {
+        let raw_nontransactional_column_stats = stack
+            .first()
+            .map(|frame| frame.nontransactional_column_stats.clone())
+            .unwrap_or_default();
+        let nontransactional_column_stats = self.nontransactional_column_stats_after_rollback(
+            &raw_nontransactional_column_stats,
+            relation_states,
+        );
+        if let Some(frame) = stack.first_mut() {
+            frame
+                .nontransactional_column_stats
+                .clone_from(&nontransactional_column_stats);
+        }
+        nontransactional_column_stats
+    }
+
+    fn rollback_backend_transaction_frame(
+        &self,
+        stack: &mut Vec<TransactionFrame>,
+        storage_savepoint: Option<StorageSavepointId>,
+        backend_aborted: bool,
+    ) -> Result<(), SQLError> {
+        let savepoints_deferred = Self::backend_savepoints_deferred(stack);
+        let Some(backend) = self.storage.backend.as_ref().filter(|_| !backend_aborted) else {
+            return Ok(());
+        };
+        let rollback_result = if let Some(savepoint) = storage_savepoint {
+            if savepoints_deferred {
+                Ok(())
+            } else {
+                backend
+                    .rollback_to_savepoint(savepoint)
+                    .map_err(|error| Self::storage_tx_error("nested ROLLBACK savepoint", &error))
+                    .and_then(|()| {
+                        backend.release_savepoint(savepoint).map_err(|error| {
+                            Self::storage_tx_error("nested ROLLBACK release", &error)
+                        })
+                    })
+            }
+        } else {
+            backend
+                .rollback_transaction()
+                .map_err(|error| Self::storage_tx_error("ROLLBACK", &error))
+        };
+        rollback_result.map_err(|rollback_error| {
+            self.recover_failed_transaction_finish(
+                stack,
+                storage_savepoint.is_some(),
+                rollback_error,
+            )
+        })
+    }
+
     fn rollback_transaction_frame(
         &self,
         stack: &mut Vec<TransactionFrame>,
     ) -> Result<(), SQLError> {
+        let rollback_relation_states = stack
+            .last()
+            .map(|frame| frame.relation_states_at_begin.clone())
+            .unwrap_or_default();
+        let nontransactional_column_stats =
+            self.retain_nontransactional_stats_for_rollback(stack, &rollback_relation_states);
         let storage_savepoint = stack
             .last()
             .ok_or_else(|| SQLError::Internal("ROLLBACK without an open transaction".into()))?
@@ -885,34 +1035,7 @@ impl Engine {
         let backend_aborted = stack
             .last()
             .is_some_and(|frame| frame.status == TransactionStatus::FailedBackendAborted);
-        let savepoints_deferred = Self::backend_savepoints_deferred(stack);
-        if let Some(backend) = self.storage.backend.as_ref().filter(|_| !backend_aborted) {
-            let rollback_result = if let Some(savepoint) = storage_savepoint {
-                if savepoints_deferred {
-                    Ok(())
-                } else {
-                    backend
-                        .rollback_to_savepoint(savepoint)
-                        .map_err(|err| Self::storage_tx_error("nested ROLLBACK savepoint", &err))
-                        .and_then(|()| {
-                            backend.release_savepoint(savepoint).map_err(|err| {
-                                Self::storage_tx_error("nested ROLLBACK release", &err)
-                            })
-                        })
-                }
-            } else {
-                backend
-                    .rollback_transaction()
-                    .map_err(|err| Self::storage_tx_error("ROLLBACK", &err))
-            };
-            if let Err(rollback_error) = rollback_result {
-                return Err(self.recover_failed_transaction_finish(
-                    stack,
-                    storage_savepoint.is_some(),
-                    rollback_error,
-                ));
-            }
-        }
+        self.rollback_backend_transaction_frame(stack, storage_savepoint, backend_aborted)?;
         let frame = stack.last().ok_or_else(|| {
             SQLError::Internal("ROLLBACK lost its checked transaction frame".into())
         })?;
@@ -927,6 +1050,12 @@ impl Engine {
             .last()
             .map_or_else(TransactionDirtyState::default, |frame| frame.dirty_at_begin);
         self.restore_transaction_dirty_state(dirty_at_begin);
+        if let Err(error) = self.persist_nontransactional_column_stats_after_rollback(
+            &nontransactional_column_stats,
+            storage_savepoint.is_none(),
+        ) {
+            cleanup_errors.push(format!("ANALYZE statistics restore: {error}"));
+        }
         if let Err(error) = self.reload_persistent_value_indexes() {
             cleanup_errors.push(format!("btree restore: {error}"));
         }
@@ -937,6 +1066,10 @@ impl Engine {
             if let Err(error) = self.reload_catalog_registries_after_rollback() {
                 cleanup_errors.push(format!("registry restore: {error}"));
             }
+        }
+        if let Err(error) = self.apply_nontransactional_column_stats(&nontransactional_column_stats)
+        {
+            cleanup_errors.push(format!("ANALYZE statistics cache restore: {error}"));
         }
         self.restore_session_state(&session_snapshot);
         let begin_lock_mark = frame.begin_lock_mark;
@@ -961,6 +1094,103 @@ impl Engine {
         }
     }
 
+    fn persist_nontransactional_column_stats_after_rollback(
+        &self,
+        stats: &NontransactionalColumnStats,
+        outer: bool,
+    ) -> StorageBackendResult<()> {
+        if !stats
+            .iter()
+            .any(|entry| entry.persistent && !entry.autonomous)
+        {
+            return Ok(());
+        }
+        if !outer {
+            let catalog = self.storage.catalog.as_ref().ok_or_else(|| {
+                StorageBackendError::Other("persistent ANALYZE statistics require a catalog".into())
+            })?;
+            for entry in stats
+                .iter()
+                .filter(|entry| entry.persistent && !entry.autonomous)
+            {
+                Self::persist_column_stats(catalog.as_ref(), &entry.table_name, &entry.stats)?;
+            }
+            return Ok(());
+        }
+        let provider = self.storage.provider.as_ref().ok_or_else(|| {
+            StorageBackendError::Other(
+                "nontransactional ANALYZE statistics require an independent session".into(),
+            )
+        })?;
+        let session = provider.open_session()?;
+        session.backend.begin_transaction()?;
+        let result = (|| {
+            for entry in stats
+                .iter()
+                .filter(|entry| entry.persistent && !entry.autonomous)
+            {
+                Self::persist_column_stats(
+                    session.catalog.as_ref(),
+                    &entry.table_name,
+                    &entry.stats,
+                )?;
+            }
+            Ok(())
+        })();
+        match result {
+            Ok(()) => session.backend.commit_transaction(),
+            Err(error) => match session.backend.rollback_transaction() {
+                Ok(()) => Err(error),
+                Err(rollback_error) => Err(StorageBackendError::Other(format!(
+                    "restore nontransactional ANALYZE statistics failed: {error}; rollback also failed: {rollback_error}"
+                ))),
+            },
+        }
+    }
+
+    fn apply_nontransactional_column_stats(
+        &self,
+        stats: &NontransactionalColumnStats,
+    ) -> StorageBackendResult<()> {
+        for entry in stats {
+            let Some(table) = self.try_table(&entry.table_name)? else {
+                continue;
+            };
+            *table.column_stats.write() = entry.stats.clone();
+            table
+                .column_stats_loaded
+                .store(true, std::sync::atomic::Ordering::Release);
+            table
+                .column_stats_dirty
+                .store(false, std::sync::atomic::Ordering::Release);
+            if entry.persistent {
+                self.row_locks
+                    .publish_column_stats(entry.table_name.clone(), entry.stats.clone());
+            }
+        }
+        Ok(())
+    }
+
+    fn nontransactional_column_stats_after_rollback(
+        &self,
+        stats: &NontransactionalColumnStats,
+        relation_states: &TransactionRelationStates,
+    ) -> NontransactionalColumnStats {
+        for entry in stats {
+            self.row_locks.invalidate_column_stats(&entry.table_name);
+        }
+        stats
+            .iter()
+            .filter(|entry| {
+                relation_states.iter().any(|(relation, lifecycle_id)| {
+                    relation.qualified_name() == entry.table_name
+                        && *lifecycle_id == entry.table_lifecycle_id
+                })
+            })
+            .cloned()
+            .collect()
+    }
+
     pub(crate) fn abort_sql_transaction_after_error(&self, error: SQLError) -> SQLError {
         let _statement = self.runtime.statement_gate.lock();
         let mut stack = self.session.transactions.lock();
@@ -972,8 +1202,21 @@ impl Engine {
         }
 
         let rollback_state = statement_abort_snapshot(frame);
-        // A nested frame owns a backend savepoint of its own; aborting the statement rolls the storage back to that savepoint so the outer frames' writes and locks survive, exactly like a PostgreSQL subtransaction abort. Only the outermost frame aborts the whole backend transaction.
         let frame_storage_savepoint = frame.storage_savepoint;
+        let raw_nontransactional_column_stats = stack
+            .first()
+            .map(|frame| frame.nontransactional_column_stats.clone())
+            .unwrap_or_default();
+        let nontransactional_column_stats = self.nontransactional_column_stats_after_rollback(
+            &raw_nontransactional_column_stats,
+            &rollback_state.relation_states,
+        );
+        if let Some(frame) = stack.first_mut() {
+            frame
+                .nontransactional_column_stats
+                .clone_from(&nontransactional_column_stats);
+        }
+        // A nested frame owns a backend savepoint of its own; aborting the statement rolls the storage back to that savepoint so the outer frames' writes and locks survive, exactly like a PostgreSQL subtransaction abort. Only the outermost frame aborts the whole backend transaction.
         let savepoints_deferred = Self::backend_savepoints_deferred(&stack);
         let mut cleanup_errors = Vec::new();
         let mut backend_aborted = false;
@@ -1007,6 +1250,12 @@ impl Engine {
             }
         }
         self.restore_transaction_dirty_state(rollback_state.dirty);
+        if let Err(restore_error) = self.persist_nontransactional_column_stats_after_rollback(
+            &nontransactional_column_stats,
+            backend_aborted,
+        ) {
+            cleanup_errors.push(format!("ANALYZE statistics restore: {restore_error}"));
+        }
         if let Err(restore_error) = self.reload_persistent_value_indexes() {
             cleanup_errors.push(format!("btree restore: {restore_error}"));
         }
@@ -1017,6 +1266,11 @@ impl Engine {
             if let Err(restore_error) = self.reload_catalog_registries_after_rollback() {
                 cleanup_errors.push(format!("registry restore: {restore_error}"));
             }
+        }
+        if let Err(restore_error) =
+            self.apply_nontransactional_column_stats(&nontransactional_column_stats)
+        {
+            cleanup_errors.push(format!("ANALYZE statistics cache restore: {restore_error}"));
         }
         self.restore_session_state(&rollback_state.session);
         self.release_aborted_statement_locks(rollback_state.keep_mark);
@@ -1064,6 +1318,7 @@ impl Engine {
         }
         let session_snapshot = self.snapshot_session_state();
         let data_snapshot = self.snapshot_transaction_data()?;
+        let relation_states_at_begin = self.transaction_relation_states();
         let deferred = Self::backend_savepoints_deferred(stack);
         let storage_savepoint = StorageSavepointId::allocate();
         let frame = stack.last_mut().ok_or_else(|| {
@@ -1087,6 +1342,7 @@ impl Engine {
             characteristics: frame.characteristics,
             session_snapshot,
             data_snapshot,
+            relation_states_at_begin,
             dirty: self.transaction_dirty_state(),
             lock_mark: keep_mark,
             row_changes,
@@ -1135,12 +1391,12 @@ impl Engine {
         stack: &mut [TransactionFrame],
         name: &str,
     ) -> Result<(), SQLError> {
-        let deferred = Self::backend_savepoints_deferred(stack);
-        let frame = stack.last_mut().ok_or_else(|| SQLError::Routine {
-            sqlstate: "25P01".into(),
-            message: "ROLLBACK TO SAVEPOINT can only be used in transaction blocks".into(),
-        })?;
-        let position = frame
+        let position = stack
+            .last()
+            .ok_or_else(|| SQLError::Routine {
+                sqlstate: "25P01".into(),
+                message: "ROLLBACK TO SAVEPOINT can only be used in transaction blocks".into(),
+            })?
             .savepoints
             .iter()
             .rposition(|savepoint| savepoint.name == name)
@@ -1148,6 +1404,18 @@ impl Engine {
                 sqlstate: "3B001".into(),
                 message: format!("savepoint \"{name}\" does not exist"),
             })?;
+        let rollback_relation_states = stack
+            .last()
+            .and_then(|frame| frame.savepoints.get(position))
+            .map(|savepoint| savepoint.relation_states_at_begin.clone())
+            .unwrap_or_default();
+        let nontransactional_column_stats =
+            self.retain_nontransactional_stats_for_rollback(stack, &rollback_relation_states);
+        let deferred = Self::backend_savepoints_deferred(stack);
+        let frame = stack.last_mut().ok_or_else(|| SQLError::Routine {
+            sqlstate: "25P01".into(),
+            message: "ROLLBACK TO SAVEPOINT can only be used in transaction blocks".into(),
+        })?;
         let storage_savepoint = frame.savepoints[position].storage_savepoint;
         if let Some(backend) = self.storage.backend.as_ref().filter(|_| !deferred) {
             backend
@@ -1162,6 +1430,12 @@ impl Engine {
             }
         }
         self.restore_transaction_dirty_state(savepoint.dirty);
+        if let Err(error) = self.persist_nontransactional_column_stats_after_rollback(
+            &nontransactional_column_stats,
+            false,
+        ) {
+            cleanup_errors.push(format!("ANALYZE statistics restore: {error}"));
+        }
         if let Err(error) = self.reload_persistent_value_indexes() {
             cleanup_errors.push(format!("btree restore: {error}"));
         }
@@ -1172,6 +1446,10 @@ impl Engine {
             if let Err(error) = self.reload_catalog_registries_after_rollback() {
                 cleanup_errors.push(format!("registry restore: {error}"));
             }
+        }
+        if let Err(error) = self.apply_nontransactional_column_stats(&nontransactional_column_stats)
+        {
+            cleanup_errors.push(format!("ANALYZE statistics cache restore: {error}"));
         }
         self.restore_session_state(&savepoint.session_snapshot);
         let keep_mark = savepoint.lock_mark;
@@ -1217,7 +1495,11 @@ impl Engine {
             .map_or(0, |frame| frame.lock_mark)
     }
 
-    pub(crate) fn refresh_explicit_statement_snapshot(&self) -> Result<(), SQLError> {
+    /// Select the storage snapshot for one explicit SQL statement. READ COMMITTED refreshes an unwritten deferred transaction per statement. REPEATABLE READ and SERIALIZABLE pin an independent read session at the first snapshot-bearing statement so later writer promotion cannot discard the fixed view.
+    pub(crate) fn prepare_explicit_statement_snapshot(
+        &self,
+        sets_transaction_snapshot: bool,
+    ) -> Result<(), SQLError> {
         let Some(backend) = self.storage.backend.as_ref() else {
             return Ok(());
         };
@@ -1227,6 +1509,12 @@ impl Engine {
         }
         let _statement = self.runtime.statement_gate.lock();
         let mut stack = self.session.transactions.lock();
+        let fixed_snapshot_already_set = stack
+            .first()
+            .is_some_and(|frame| frame.fixed_snapshot.is_some());
+        if fixed_snapshot_already_set {
+            return Ok(());
+        }
         if !stack
             .first()
             .is_some_and(|frame| frame.backend_mode == BackendTransactionMode::Deferred)
@@ -1242,11 +1530,30 @@ impl Engine {
         let snapshot_gate = self
             .row_locks
             .begin_change_snapshot(&self.runtime.cancellation)?;
-        self.replace_unwritten_backend_transaction(
-            &mut stack,
-            true,
-            "refresh READ COMMITTED statement snapshot",
-        )?;
+        let establish_fixed_snapshot = sets_transaction_snapshot
+            && stack.first().is_some_and(|frame| {
+                matches!(
+                    frame.characteristics.isolation,
+                    uqa_sql::ast::TransactionIsolationLevel::RepeatableRead
+                        | uqa_sql::ast::TransactionIsolationLevel::Serializable
+                )
+            });
+        self.replace_unwritten_backend_transaction(&mut stack, true, "refresh statement snapshot")?;
+        if establish_fixed_snapshot {
+            let catalog_baseline = self.capture_fixed_transaction_catalog_baseline()?;
+            let snapshot = if backend.supports_concurrent_pinned_read_and_write() {
+                FixedTransactionSnapshot::Pinned(self.open_independent_pinned_read_snapshot()?)
+            } else {
+                let snapshot = self.capture_detached_fixed_transaction_snapshot()?;
+                self.restart_backend_after_detached_snapshot(&mut stack)?;
+                FixedTransactionSnapshot::Detached(snapshot)
+            };
+            let frame = stack.first_mut().ok_or_else(|| {
+                SQLError::Internal("fixed snapshot transaction frame disappeared".into())
+            })?;
+            frame.fixed_snapshot = Some(snapshot);
+            frame.fixed_catalog_baseline = Some(catalog_baseline);
+        }
         let baseline = match snapshot_gate.baseline() {
             Ok(baseline) => baseline,
             Err(error) => {
@@ -1260,6 +1567,102 @@ impl Engine {
         stack[0].snapshot_change_baseline = baseline;
         self.update_statement_row_lock_baseline(baseline);
         Ok(())
+    }
+
+    /// A detached fixed snapshot no longer needs the backend read transaction that produced it. Restart a bare deferred transaction without pinning or reloading caches so rollback-journal backends release their read lock while the logical transaction stays open.
+    fn restart_backend_after_detached_snapshot(
+        &self,
+        stack: &mut Vec<TransactionFrame>,
+    ) -> Result<(), SQLError> {
+        let backend = self.storage.backend.as_ref().ok_or_else(|| {
+            SQLError::Internal("detached fixed snapshot requires persistent storage".into())
+        })?;
+        if let Err(error) = backend.rollback_transaction() {
+            let failure = Self::storage_tx_error("release detached fixed snapshot reader", &error);
+            return Err(self.abort_failed_backend_transaction_replacement(
+                stack,
+                backend.as_ref(),
+                failure,
+            ));
+        }
+        if let Err(error) = backend.begin_read_transaction() {
+            let failure =
+                Self::storage_tx_error("restart detached fixed snapshot transaction", &error);
+            return Err(self.abort_failed_backend_transaction_replacement(
+                stack,
+                backend.as_ref(),
+                failure,
+            ));
+        }
+        stack[0].backend_mode = BackendTransactionMode::Deferred;
+        Ok(())
+    }
+
+    /// Release an unwritten backend reader before an autonomous maintenance write. The replacement is a bare deferred transaction, so the SQL transaction remains open without retaining a rollback-journal read lock.
+    pub(crate) fn release_backend_reader_for_independent_maintenance(
+        &self,
+    ) -> Result<(), SQLError> {
+        let _statement = self.runtime.statement_gate.lock();
+        let mut stack = self.session.transactions.lock();
+        let backend = self.storage.backend.as_ref().ok_or_else(|| {
+            SQLError::Internal("independent maintenance requires persistent storage".into())
+        })?;
+        if backend
+            .transaction_has_written()
+            .map_err(|error| Self::storage_tx_error("inspect maintenance reader", &error))?
+        {
+            return Err(SQLError::Internal(
+                "cannot release a backend transaction that already contains writes".into(),
+            ));
+        }
+        self.restart_backend_after_detached_snapshot(&mut stack)
+    }
+
+    pub(crate) fn open_independent_pinned_read_snapshot(&self) -> Result<Box<Engine>, SQLError> {
+        let snapshot = self.new_session().map_err(|error| {
+            SQLError::Internal(format!("open fixed transaction snapshot session: {error}"))
+        })?;
+        let backend = snapshot.storage.backend.as_ref().ok_or_else(|| {
+            SQLError::Internal("fixed transaction snapshot requires persistent storage".into())
+        })?;
+        backend.begin_read_transaction().map_err(|error| {
+            SQLError::Internal(format!("begin fixed transaction snapshot: {error}"))
+        })?;
+        if let Err(error) = snapshot.refresh_pinned_transaction_snapshot() {
+            let rollback = backend.rollback_transaction();
+            return Err(match rollback {
+                Ok(()) => SQLError::Internal(format!("pin fixed transaction snapshot: {error}")),
+                Err(rollback_error) => SQLError::Internal(format!(
+                    "pin fixed transaction snapshot: {error}; rollback also failed: {rollback_error}"
+                )),
+            });
+        }
+        let lifetimes = self
+            .storage
+            .tables
+            .read()
+            .iter()
+            .map(|(relation, table)| {
+                (
+                    relation.clone(),
+                    (table.lifecycle_id(), table.storage_generation()),
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for (relation, table) in snapshot.storage.tables.read().iter() {
+            if let Some((lifecycle_id, storage_generation)) = lifetimes.get(relation) {
+                if *storage_generation == table.storage_generation() {
+                    table
+                        .lifecycle_id
+                        .store(*lifecycle_id, std::sync::atomic::Ordering::Release);
+                }
+            }
+        }
+        Ok(Box::new(snapshot))
+    }
+
+    pub(crate) fn refresh_explicit_statement_snapshot(&self) -> Result<(), SQLError> {
+        self.prepare_explicit_statement_snapshot(false)
     }
 
     pub(crate) fn prepare_explicit_transaction_writer(&self) -> Result<bool, SQLError> {

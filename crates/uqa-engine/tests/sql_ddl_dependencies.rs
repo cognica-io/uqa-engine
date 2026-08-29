@@ -11,6 +11,8 @@ fn integer_column(name: &str, default: Option<Expr>) -> ColumnDef {
     ColumnDef {
         name: name.to_string(),
         ty: ColumnType::Integer,
+        object_id: None,
+        missing_value: None,
         primary_key: false,
         not_null: false,
         not_null_explicit: false,

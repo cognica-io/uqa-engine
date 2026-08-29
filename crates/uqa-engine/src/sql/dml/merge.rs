@@ -681,7 +681,7 @@ pub(in crate::sql) fn run_merge_inner(
                         message: "moving row to another partition during a BEFORE FOR EACH ROW trigger is not supported".into(),
                     });
                 }
-                super::stamp_tuple_xmin(engine, &mut document)?;
+                super::stamp_tuple_xmin(engine, &storage_table, &mut document)?;
                 lock_existing_document_foreign_key_dependencies(engine, &storage_table, &document)?;
                 let _key_locks =
                     lock_document_key_dependencies(engine, &storage_table, &document, None)?;

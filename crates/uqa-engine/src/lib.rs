@@ -235,18 +235,44 @@ impl Default for ScoringMode {
 }
 
 type TableFieldAnalyzerRegistry = BTreeMap<(String, String), (String, String)>;
+type SessionPortalTableSnapshots = Arc<BTreeMap<RelationIdentity, Arc<TableState>>>;
+type SessionPortalViewSnapshots = Arc<BTreeMap<RelationIdentity, StoredView>>;
+type SessionPortalSQLFunctionSnapshots =
+    Arc<BTreeMap<String, Vec<Arc<engine_user_functions::SQLUserFunction>>>>;
+type SessionPortalCatalogSnapshot = Arc<DurableCatalogSnapshot>;
+type SessionPortalTransactionOverlay = Arc<BTreeMap<String, BTreeMap<DocId, Option<Document>>>>;
+type ColumnStatsMap = BTreeMap<String, uqa_planner::ColumnStats>;
+type TransactionRelationStates = BTreeMap<RelationIdentity, u64>;
+type FixedTransactionCatalogBaseline = BTreeMap<[u8; 16], (RelationIdentity, Vec<u8>)>;
+type NontransactionalColumnStats = Vec<NontransactionalColumnStatsEntry>;
+
+#[derive(Clone)]
+struct NontransactionalColumnStatsEntry {
+    table_name: String,
+    table_lifecycle_id: u64,
+    stats: ColumnStatsMap,
+    persistent: bool,
+    autonomous: bool,
+}
 
 /// Unified query engine composed from explicit storage, durable-catalog,
 /// session, extension, epoch, and query-runtime ownership domains.
 pub struct Engine {
     storage: StorageContext,
-    durable: DurableCatalogState,
-    session: SessionContext,
+    durable: Arc<DurableCatalogState>,
+    session: Arc<SessionContext>,
     extensions: RuntimeExtensions,
     epochs: EpochCoordinator,
     runtime: QueryRuntime,
     row_locks: Arc<row_locks::RowLockManager>,
     session_id: u64,
+    owns_session_registration: bool,
+    query_table_snapshots: Option<SessionPortalTableSnapshots>,
+    query_view_snapshots: Option<SessionPortalViewSnapshots>,
+    query_sql_function_snapshots: Option<SessionPortalSQLFunctionSnapshots>,
+    query_catalog_snapshot: Option<SessionPortalCatalogSnapshot>,
+    query_transaction_overlay: Option<SessionPortalTransactionOverlay>,
+    query_transaction_origin: Option<u64>,
 }
 
 #[derive(Clone, Default)]
@@ -401,6 +427,14 @@ pub(crate) struct DeferredForeignKeyCheck {
     pub(crate) row: Option<row_locks::RowLockKey>,
 }
 
+#[derive(Clone, Copy)]
+struct TransactionRowChange {
+    pending: row_locks::PendingRowChange,
+    source_generation: [u8; 16],
+    successor_generation: Option<[u8; 16]>,
+    query_origin: Option<u64>,
+}
+
 struct TransactionFrame {
     /// Whether this outer frame is an implicit SQL-driver boundary rather than a user-visible `BEGIN` block. A simple-query batch promotes it when the batch reaches `BEGIN`.
     implicit_statement: bool,
@@ -410,20 +444,68 @@ struct TransactionFrame {
     status: TransactionStatus,
     characteristics: TransactionCharacteristicsState,
     first_snapshot_set: bool,
+    fixed_snapshot: Option<FixedTransactionSnapshot>,
+    /// Last committed table catalog installed while a fixed row snapshot is active. Immutable fingerprints distinguish this transaction's own DDL overlay from definitions refreshed from sibling commits.
+    fixed_catalog_baseline: Option<FixedTransactionCatalogBaseline>,
     /// `PostgreSQL` transaction/subtransaction IDs along the active frame path. The first slot belongs to this frame and each following slot to the correspondingly indexed SQL savepoint.
     xid_levels: Vec<Option<u32>>,
     savepoints: Vec<TransactionSavepoint>,
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
+    relation_states_at_begin: TransactionRelationStates,
     dirty_at_begin: TransactionDirtyState,
     /// Lock mark this frame started with. Rolling the whole frame back releases every acquisition at or above it, independent of the savepoint marks the frame allocated later.
     begin_lock_mark: u32,
     lock_mark: u32,
     next_lock_mark: u32,
     snapshot_change_baseline: row_locks::RowChangeBaseline,
-    row_changes: Vec<row_locks::PendingRowChange>,
+    row_changes: Vec<TransactionRowChange>,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
     constraint_modes: ConstraintModeState,
+    /// Statistics written by ANALYZE are nontransactional in `PostgreSQL`. Keep the latest values outside savepoint snapshots so any rollback can restore them after transactional storage state is rolled back.
+    nontransactional_column_stats: NontransactionalColumnStats,
+}
+
+enum FixedTransactionSnapshot {
+    Pinned(Box<Engine>),
+    Detached(SessionPortalTableSnapshots),
+}
+
+impl FixedTransactionSnapshot {
+    fn table(&self, relation: &RelationIdentity) -> Option<Arc<TableState>> {
+        match self {
+            Self::Pinned(snapshot) => snapshot.storage.tables.read().get(relation).cloned(),
+            Self::Detached(tables) => tables.get(relation).cloned(),
+        }
+    }
+
+    fn table_for_live_relation(
+        &self,
+        relation: &RelationIdentity,
+        live: &TableState,
+    ) -> Option<Arc<TableState>> {
+        let storage_generation = live.storage_generation();
+        let exact = self.table(relation);
+        if exact
+            .as_ref()
+            .is_some_and(|table| table.storage_generation() == storage_generation)
+        {
+            return exact;
+        }
+        match self {
+            Self::Pinned(snapshot) => snapshot
+                .storage
+                .tables
+                .read()
+                .values()
+                .find(|table| table.storage_generation() == storage_generation)
+                .cloned(),
+            Self::Detached(tables) => tables
+                .values()
+                .find(|table| table.storage_generation() == storage_generation)
+                .cloned(),
+        }
+    }
 }
 
 struct TransactionSavepoint {
@@ -433,9 +515,10 @@ struct TransactionSavepoint {
     characteristics: TransactionCharacteristicsState,
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
+    relation_states_at_begin: TransactionRelationStates,
     dirty: TransactionDirtyState,
     lock_mark: u32,
-    row_changes: Vec<row_locks::PendingRowChange>,
+    row_changes: Vec<TransactionRowChange>,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
     constraint_modes: ConstraintModeState,
 }
@@ -469,12 +552,92 @@ struct SessionStateSnapshot {
     session_user: String,
 }
 
-#[derive(Debug, Clone)]
 struct SessionPortalState {
-    result: SQLResult,
+    data: SessionPortalData,
+    columns: Vec<String>,
+    column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
+    transaction_origin: u64,
     position: SessionPortalPosition,
     scrollable: bool,
     holdable: bool,
+    /// The engine carries typed values rather than wire encodings; retaining the declaration format lets a `PostgreSQL` wire adapter request binary result encoding without changing portal execution.
+    _binary: bool,
+}
+
+pub(crate) struct SessionPortalDeclaration {
+    name: String,
+    query: uqa_planner::QueryPlan,
+    params: Vec<SQLParam>,
+    columns: Vec<String>,
+    column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
+    scrollable: bool,
+    holdable: bool,
+    binary: bool,
+}
+
+enum SessionPortalData {
+    Pending {
+        query: uqa_planner::QueryPlan,
+        params: Vec<SQLParam>,
+        table_snapshots: SessionPortalTableSnapshots,
+        view_snapshots: SessionPortalViewSnapshots,
+        sql_function_snapshots: SessionPortalSQLFunctionSnapshots,
+        catalog_snapshot: SessionPortalCatalogSnapshot,
+        restart: Option<SessionPortalRestart>,
+    },
+    Result(SQLResult),
+    Indexed(SessionPortalMaterialization),
+    Streaming {
+        worker: SessionPortalWorker,
+        materialized: Option<SessionPortalMaterialization>,
+        eof: bool,
+        restart: Option<SessionPortalRestart>,
+    },
+}
+
+struct SessionPortalRestart {
+    query: uqa_planner::QueryPlan,
+    params: Vec<SQLParam>,
+    table_snapshots: SessionPortalTableSnapshots,
+    view_snapshots: SessionPortalViewSnapshots,
+    sql_function_snapshots: SessionPortalSQLFunctionSnapshots,
+    catalog_snapshot: SessionPortalCatalogSnapshot,
+}
+
+struct SessionPortalMaterialization {
+    columns: Vec<String>,
+    column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
+    rows: uqa_execution::IndexedSpill,
+}
+
+enum SessionPortalWorkerRequest {
+    Next,
+    Close,
+}
+
+enum SessionPortalWorkerResponse {
+    Started {
+        columns: Vec<String>,
+        column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
+    },
+    Row(Vec<Value>),
+    Eof,
+    Error(SQLError),
+}
+
+struct SessionPortalWorker {
+    requests: std::sync::mpsc::Sender<SessionPortalWorkerRequest>,
+    responses: std::sync::mpsc::Receiver<SessionPortalWorkerResponse>,
+    join: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for SessionPortalWorker {
+    fn drop(&mut self) {
+        let _ = self.requests.send(SessionPortalWorkerRequest::Close);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
 }
 
 /// `PostgreSQL` distinguishes the positions before the first row and after the last row from a position on a row.
@@ -511,6 +674,7 @@ struct EngineDataSnapshot {
 #[derive(Clone)]
 struct TableDataSnapshot {
     state: Arc<TableState>,
+    storage_generation: [u8; 16],
     document_store: Arc<dyn DocumentStore>,
     inverted_index: Arc<dyn InvertedIndex>,
     vector_indexes: BTreeMap<FieldName, Arc<dyn VectorIndex>>,
@@ -533,6 +697,12 @@ struct TableDataSnapshot {
 }
 
 pub(crate) struct TableState {
+    /// Session-local relation generation. Reloads of the same catalog object preserve this value, while CREATE allocates a new value even when a dropped relation's name is reused.
+    lifecycle_id: std::sync::atomic::AtomicU64,
+    /// Durable logical relation identity used by `PostgreSQL` catalogs. Renames, schema changes, `TRUNCATE`, and reopen preserve it.
+    object_id: [u8; 16],
+    /// Durable physical-storage generation shared by every session. Schema-only changes preserve it; CREATE and TRUNCATE replace it so a fixed transaction snapshot never aliases a different physical relation lifetime.
+    storage_generation: RwLock<[u8; 16]>,
     pub(crate) document_store: RwLock<Box<dyn DocumentStore>>,
     inverted_index: RwLock<Box<dyn InvertedIndex>>,
     vector_indexes: RwLock<BTreeMap<FieldName, Box<dyn VectorIndex>>>,
@@ -580,9 +750,49 @@ pub(crate) struct TableState {
 }
 
 impl TableState {
+    fn lifecycle_id(&self) -> u64 {
+        self.lifecycle_id.load(Ordering::Acquire)
+    }
+
+    fn storage_generation(&self) -> [u8; 16] {
+        *self.storage_generation.read()
+    }
+
+    fn object_id(&self) -> [u8; 16] {
+        self.object_id
+    }
+
     fn fts_fields(&self) -> Vec<FieldName> {
         self.fts_fields.read().clone()
     }
+}
+
+fn next_table_lifecycle_id() -> u64 {
+    static NEXT_TABLE_LIFECYCLE_ID: std::sync::atomic::AtomicU64 =
+        std::sync::atomic::AtomicU64::new(1);
+    NEXT_TABLE_LIFECYCLE_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            current.checked_add(1)
+        })
+        .expect("table lifecycle id space exhausted")
+}
+
+fn new_nonzero_table_identity(kind: &str) -> StorageBackendResult<[u8; 16]> {
+    let mut identity = [0_u8; 16];
+    getrandom::fill(&mut identity)
+        .map_err(|error| StorageBackendError::Other(format!("allocate table {kind}: {error}")))?;
+    if identity == [0; 16] {
+        identity[15] = 1;
+    }
+    Ok(identity)
+}
+
+fn new_table_object_id() -> StorageBackendResult<[u8; 16]> {
+    new_nonzero_table_identity("object identity")
+}
+
+fn new_table_storage_generation() -> StorageBackendResult<[u8; 16]> {
+    new_nonzero_table_identity("storage generation")
 }
 
 fn normalize_analyzer_config_value(value: &mut serde_json::Value) {
@@ -637,7 +847,15 @@ impl Default for Engine {
 
 impl Drop for Engine {
     fn drop(&mut self) {
-        self.row_locks.release_session(self.session_id);
+        if self.owns_session_registration {
+            self.session.portals.lock().clear();
+            if let Some(backend) = self.storage.backend.as_ref() {
+                if backend.in_transaction() {
+                    let _ = backend.rollback_transaction();
+                }
+            }
+            self.row_locks.release_session(self.session_id);
+        }
     }
 }
 
@@ -648,13 +866,20 @@ impl Engine {
         let session_id = row_locks.allocate_session();
         Self {
             storage: StorageContext::memory(),
-            durable: DurableCatalogState::new(),
-            session: SessionContext::new(initial_random_state()),
+            durable: Arc::new(DurableCatalogState::new()),
+            session: Arc::new(SessionContext::new(initial_random_state())),
             extensions: RuntimeExtensions::new(),
             epochs: EpochCoordinator::new(),
             runtime: QueryRuntime::new(SQL_FUNCTION_DEPTH_LIMIT),
             row_locks,
             session_id,
+            owns_session_registration: true,
+            query_table_snapshots: None,
+            query_view_snapshots: None,
+            query_sql_function_snapshots: None,
+            query_catalog_snapshot: None,
+            query_transaction_overlay: None,
+            query_transaction_origin: None,
         }
     }
 

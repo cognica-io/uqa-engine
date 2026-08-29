@@ -397,7 +397,7 @@ fn build_conflict_update(
     scope: &CteScope,
 ) -> Result<BuiltConflictUpdate, SQLError> {
     let existing_doc = engine
-        .get_document(table, existing_id)?
+        .get_document_for_mutation(table, existing_id)?
         .ok_or_else(|| missing_document_error("INSERT ON CONFLICT", table, existing_id))?;
     let target_row = dml_target_row(engine, table, target_qualifier, existing_id, &existing_doc)?;
     let definitions = engine
@@ -410,7 +410,14 @@ fn build_conflict_update(
         &mut excluded_document,
     )?;
     let excluded_columns = if definitions.is_empty() {
-        excluded_document.keys().cloned().collect::<Vec<_>>()
+        excluded_document
+            .keys()
+            .filter(|column| {
+                column.as_str() != crate::sql::XMIN_STORAGE_COLUMN
+                    && column.as_str() != crate::sql::XMIN_USER_STORAGE_COLUMN
+            })
+            .cloned()
+            .collect::<Vec<_>>()
     } else {
         definitions
             .iter()

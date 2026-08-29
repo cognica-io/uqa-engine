@@ -32,6 +32,8 @@ fn save_load_round_trip() {
     let cat = fresh();
     let schema = TableSchema {
         relation: RelationIdentity::new("public", "articles"),
+        object_id: [1; 16],
+        storage_generation: [1; 16],
         analyzer_json:
             "{\"tokenizer\":{\"type\":\"standard\"},\"token_filters\":[],\"char_filters\":[]}"
                 .into(),
@@ -47,6 +49,8 @@ fn save_load_round_trip() {
     let loaded = cat.load_tables().unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].relation.qualified_name(), "public.articles");
+    assert_eq!(loaded[0].object_id, [1; 16]);
+    assert_eq!(loaded[0].storage_generation, [1; 16]);
     assert_eq!(loaded[0].fts_fields, vec!["title", "body"]);
     assert_eq!(loaded[0].vector_fields.len(), 1);
     assert_eq!(loaded[0].vector_fields[0].field, "embedding");
@@ -61,6 +65,8 @@ fn catalog_facade_trait_object_round_trips_table() {
     let facade: &dyn CatalogFacade = &cat;
     let schema = TableSchema {
         relation: RelationIdentity::new("public", "facade_articles"),
+        object_id: [2; 16],
+        storage_generation: [2; 16],
         analyzer_json:
             "{\"tokenizer\":{\"type\":\"standard\"},\"token_filters\":[],\"char_filters\":[]}"
                 .into(),
@@ -125,6 +131,8 @@ fn migration_16_adds_backward_compatible_table_constraints() {
     current
         .save_table(&TableSchema {
             relation: RelationIdentity::new("public", "legacy"),
+            object_id: [1; 16],
+            storage_generation: [1; 16],
             analyzer_json: "{}".into(),
             fts_fields: Vec::new(),
             vector_fields: Vec::new(),
@@ -148,6 +156,122 @@ fn migration_16_adds_backward_compatible_table_constraints() {
     assert_eq!(schemas.len(), 1);
     assert_eq!(schemas[0].relation.qualified_name(), "public.legacy");
     assert!(schemas[0].constraints_json.is_empty());
+}
+
+#[test]
+fn migration_24_adds_persistent_table_storage_generations() {
+    let mc = ManagedConnection::open_in_memory().unwrap();
+    let current = Catalog::open(mc.clone()).unwrap();
+    current
+        .save_table(&TableSchema {
+            relation: RelationIdentity::new("public", "legacy_generation"),
+            object_id: [7; 16],
+            storage_generation: [7; 16],
+            analyzer_json: "{}".into(),
+            fts_fields: Vec::new(),
+            vector_fields: Vec::new(),
+            columns_json: "[]".into(),
+            constraints_json: String::new(),
+        })
+        .unwrap();
+    drop(current);
+    mc.with(|connection| {
+        connection.execute("ALTER TABLE _tables DROP COLUMN storage_generation", [])?;
+        connection.execute(
+            "UPDATE _metadata SET value = '23' WHERE key = 'schema_version'",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+
+    let upgraded = Catalog::open(mc).unwrap();
+    let mut schema = upgraded.load_tables().unwrap().remove(0);
+    assert_eq!(schema.storage_generation, [0; 16]);
+    schema.storage_generation = [9; 16];
+    upgraded.save_table(&schema).unwrap();
+    assert_eq!(
+        upgraded.load_tables().unwrap()[0].storage_generation,
+        [9; 16]
+    );
+}
+
+#[test]
+fn migration_24_preserves_a_storage_generation_installed_before_its_version_marker() {
+    let mc = ManagedConnection::open_in_memory().unwrap();
+    let current = Catalog::open(mc.clone()).unwrap();
+    current
+        .save_table(&TableSchema {
+            relation: RelationIdentity::new("public", "early_generation"),
+            object_id: [11; 16],
+            storage_generation: [11; 16],
+            analyzer_json: "{}".into(),
+            fts_fields: Vec::new(),
+            vector_fields: Vec::new(),
+            columns_json: "[]".into(),
+            constraints_json: String::new(),
+        })
+        .unwrap();
+    drop(current);
+    mc.with(|connection| {
+        connection.execute(
+            "UPDATE _metadata SET value = '23' WHERE key = 'schema_version'",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+
+    let upgraded = Catalog::open(mc.clone()).unwrap();
+    assert_eq!(
+        upgraded.load_tables().unwrap()[0].storage_generation,
+        [11; 16]
+    );
+    mc.with(|connection| {
+        let version: String = connection.query_row(
+            "SELECT value FROM _metadata WHERE key = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(version, CURRENT_SCHEMA_VERSION.to_string());
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn migration_25_adds_persistent_table_object_identities() {
+    let mc = ManagedConnection::open_in_memory().unwrap();
+    let current = Catalog::open(mc.clone()).unwrap();
+    current
+        .save_table(&TableSchema {
+            relation: RelationIdentity::new("public", "legacy_object"),
+            object_id: [7; 16],
+            storage_generation: [8; 16],
+            analyzer_json: "{}".into(),
+            fts_fields: Vec::new(),
+            vector_fields: Vec::new(),
+            columns_json: "[]".into(),
+            constraints_json: String::new(),
+        })
+        .unwrap();
+    drop(current);
+    mc.with(|connection| {
+        connection.execute("ALTER TABLE _tables DROP COLUMN object_id", [])?;
+        connection.execute(
+            "UPDATE _metadata SET value = '24' WHERE key = 'schema_version'",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+
+    let upgraded = Catalog::open(mc).unwrap();
+    let mut schema = upgraded.load_tables().unwrap().remove(0);
+    assert_eq!(schema.object_id, [0; 16]);
+    schema.object_id = [9; 16];
+    upgraded.save_table(&schema).unwrap();
+    assert_eq!(upgraded.load_tables().unwrap()[0].object_id, [9; 16]);
 }
 
 #[test]
@@ -948,6 +1072,8 @@ fn table_and_column_rename_move_btree_children_without_fk_cascade() {
     catalog
         .save_table(&TableSchema {
             relation: RelationIdentity::new("public", "docs"),
+            object_id: [1; 16],
+            storage_generation: [1; 16],
             analyzer_json: "{}".into(),
             fts_fields: Vec::new(),
             vector_fields: Vec::new(),

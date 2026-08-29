@@ -119,6 +119,8 @@ fn run_analyze_populates_column_stats() {
         *t.columns.write() = vec![uqa_sql::ast::ColumnDef {
             name: "title".into(),
             ty: uqa_sql::ast::ColumnType::Text,
+            object_id: None,
+            missing_value: None,
             primary_key: false,
             not_null: false,
             not_null_explicit: false,

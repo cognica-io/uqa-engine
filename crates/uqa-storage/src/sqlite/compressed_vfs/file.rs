@@ -51,6 +51,13 @@ impl VfsFile {
         }
     }
 
+    pub(super) fn refresh_committed_state(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Compressed(file) => file.refresh_committed_state(),
+            Self::Plain(_) => Ok(()),
+        }
+    }
+
     pub(super) fn read_at(&mut self, offset: usize, dest: &mut [u8]) -> std::io::Result<usize> {
         match self {
             Self::Compressed(file) => file.read_at(offset, dest),

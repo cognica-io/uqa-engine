@@ -123,7 +123,7 @@ fn forbidden_command(
     }
 }
 
-fn command_sets_snapshot(plan: &UnifiedPlan) -> bool {
+pub(super) fn plan_sets_transaction_snapshot(plan: &UnifiedPlan) -> bool {
     !matches!(
         plan,
         UnifiedPlan::Command(command)
@@ -137,6 +137,7 @@ fn command_sets_snapshot(plan: &UnifiedPlan) -> bool {
                     | CommandPlan::Transaction(_)
                     | CommandPlan::FetchCursor(_)
                     | CommandPlan::CloseCursor { .. }
+                    | CommandPlan::Deallocate { .. }
                     | CommandPlan::Load { .. }
                     | CommandPlan::Discard { .. }
             )
@@ -152,7 +153,7 @@ pub(super) fn validate_transaction_plan(
             return Err(read_only_error(command));
         }
     }
-    if command_sets_snapshot(plan) {
+    if plan_sets_transaction_snapshot(plan) {
         engine.mark_transaction_snapshot_set();
     }
     Ok(())

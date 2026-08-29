@@ -675,7 +675,7 @@ fn collect_source_column_owners(engine: &Engine, source: &SourcePlan, owners: &m
             ..
         } => {
             let qualifier = alias.as_deref().unwrap_or(qualifier);
-            let mut columns = engine.try_table_columns(name).unwrap_or_default();
+            let mut columns = engine.try_query_table_columns(name).unwrap_or_default();
             if columns.is_empty() {
                 columns = engine
                     .view_definition(name)
@@ -692,7 +692,7 @@ fn collect_source_column_owners(engine: &Engine, source: &SourcePlan, owners: &m
             if columns.is_empty() {
                 columns = engine.foreign_table_columns(name).unwrap_or_default();
             }
-            if engine.try_table(name).ok().flatten().is_some() {
+            if engine.try_query_table(name).ok().flatten().is_some() {
                 columns.push(TABLE_OID_COLUMN.into());
                 columns.push(XMIN_COLUMN.into());
             }

@@ -91,6 +91,144 @@ fn transaction_snapshot_captures_one_writable_copy_without_probe_clone() {
     assert_eq!(writable_calls.load(std::sync::atomic::Ordering::Relaxed), 1);
 }
 
+#[derive(Clone)]
+struct PortalSnapshotProbeStore {
+    docs: BTreeMap<DocId, Document>,
+    doc_id_calls: Arc<std::sync::atomic::AtomicUsize>,
+    catalog_was_unlocked: Arc<std::sync::atomic::AtomicBool>,
+    tables: Arc<parking_lot::RwLock<BTreeMap<RelationIdentity, Arc<TableState>>>>,
+}
+
+impl PortalSnapshotProbeStore {
+    fn from_table(engine: &Engine, table: &str) -> Self {
+        let table = engine.table(table).unwrap().expect("table");
+        let docs = table.document_store.read().iter_all().unwrap().collect();
+        Self {
+            docs,
+            doc_id_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            catalog_was_unlocked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            tables: Arc::clone(&engine.storage.tables),
+        }
+    }
+}
+
+impl DocumentStore for PortalSnapshotProbeStore {
+    fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
+        self.docs.insert(doc_id, document);
+        Ok(())
+    }
+
+    fn get(&self, doc_id: DocId) -> StorageBackendResult<Option<Document>> {
+        Ok(self.docs.get(&doc_id).cloned())
+    }
+
+    fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
+        self.docs.remove(&doc_id);
+        Ok(())
+    }
+
+    fn clear(&mut self) -> StorageBackendResult<()> {
+        self.docs.clear();
+        Ok(())
+    }
+
+    fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
+        self.doc_id_calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.catalog_was_unlocked.store(
+            self.tables.try_write().is_some(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        Ok(self.docs.keys().copied().collect())
+    }
+
+    fn len(&self) -> StorageBackendResult<usize> {
+        Ok(self.docs.len())
+    }
+
+    fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {
+        Ok(Arc::new(self.clone()))
+    }
+
+    fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn DocumentStore>> {
+        Ok(Box::new(self.clone()))
+    }
+}
+
+#[test]
+fn cursor_snapshots_only_referenced_tables_without_holding_the_catalog_lock() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE portal_used (id INTEGER, embedding VECTOR(2)); CREATE TABLE portal_unrelated (id INTEGER); CREATE SCHEMA portal_shadow; CREATE TABLE portal_shadow.portal_used (id INTEGER, embedding VECTOR(2)); INSERT INTO portal_used VALUES (1, ARRAY[1.0, 0.0]); INSERT INTO portal_unrelated VALUES (2); INSERT INTO portal_shadow.portal_used VALUES (10, ARRAY[1.0, 0.0]), (11, ARRAY[0.9, 0.1])",
+        &[],
+    )
+    .unwrap();
+    let used = PortalSnapshotProbeStore::from_table(&eng, "portal_used");
+    let unrelated = PortalSnapshotProbeStore::from_table(&eng, "portal_unrelated");
+    let used_calls = Arc::clone(&used.doc_id_calls);
+    let unrelated_calls = Arc::clone(&unrelated.doc_id_calls);
+    let used_catalog_was_unlocked = Arc::clone(&used.catalog_was_unlocked);
+    *eng.table("portal_used")
+        .unwrap()
+        .expect("portal_used")
+        .document_store
+        .write() = Box::new(used);
+    *eng.table("portal_unrelated")
+        .unwrap()
+        .expect("portal_unrelated")
+        .document_store
+        .write() = Box::new(unrelated);
+
+    eng.sql("BEGIN", &[]).unwrap();
+    eng.sql("DECLARE constant_cursor CURSOR FOR SELECT 1", &[])
+        .unwrap();
+    assert_eq!(used_calls.load(std::sync::atomic::Ordering::Relaxed), 0);
+    assert_eq!(
+        unrelated_calls.load(std::sync::atomic::Ordering::Relaxed),
+        0
+    );
+
+    eng.sql(
+        "DECLARE table_cursor CURSOR FOR SELECT id FROM portal_used",
+        &[],
+    )
+    .unwrap();
+    assert_eq!(used_calls.load(std::sync::atomic::Ordering::Relaxed), 1);
+    assert_eq!(
+        unrelated_calls.load(std::sync::atomic::Ordering::Relaxed),
+        0
+    );
+    assert!(used_catalog_was_unlocked.load(std::sync::atomic::Ordering::Relaxed));
+    assert_eq!(
+        eng.sql("FETCH ALL FROM table_cursor", &[])
+            .unwrap()
+            .rows
+            .len(),
+        1
+    );
+
+    eng.sql(
+        "DECLARE operator_cursor CURSOR FOR SELECT left_doc_id FROM vector_similarity_join(portal_used, knn_match(embedding, ARRAY[1.0, 0.0], 1), knn_match(embedding, ARRAY[1.0, 0.0], 1), 0.8)",
+        &[],
+    )
+    .unwrap();
+    assert_eq!(used_calls.load(std::sync::atomic::Ordering::Relaxed), 2);
+    assert_eq!(
+        unrelated_calls.load(std::sync::atomic::Ordering::Relaxed),
+        0
+    );
+    eng.sql("SET search_path = portal_shadow, public", &[])
+        .unwrap();
+    assert_eq!(
+        eng.sql("FETCH ALL FROM operator_cursor", &[])
+            .unwrap()
+            .rows
+            .len(),
+        1
+    );
+    eng.sql("ROLLBACK", &[]).unwrap();
+}
+
 #[test]
 fn sql_update_reports_stale_document_ids() {
     let eng = Engine::new();

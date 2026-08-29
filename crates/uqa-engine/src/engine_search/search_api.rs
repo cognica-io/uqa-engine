@@ -71,7 +71,7 @@ impl Engine {
         labels: &[u8],
     ) -> Result<CalibrationReport, SQLError> {
         let Some(table_state) = self
-            .try_table(table)
+            .try_query_table(table)
             .map_err(|error| storage_sql_error("resolve calibration table", error))?
         else {
             return Err(SQLError::UnknownTable(table.to_string()));

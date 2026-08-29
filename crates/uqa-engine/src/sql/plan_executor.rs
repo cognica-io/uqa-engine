@@ -15,6 +15,7 @@ use uqa_sql::ast::{CreateForeignServer, CreateForeignTable};
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 
 use crate::engine_session::{MaterializedViewRegistration, ViewRegistration};
+use crate::{SessionPortalWorker, SessionPortalWorkerRequest, SessionPortalWorkerResponse};
 
 use super::scalar::{
     analyze_physical_call_arguments, eval_physical, eval_physical_call_arguments,
@@ -66,6 +67,9 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     }
 
     fn execute_query(&self, query: &QueryPlan) -> Result<SQLResult, SQLError> {
+        if self.engine.transaction_depth() != 0 {
+            select::lock_query_relations(self.engine, query)?;
+        }
         let mut ctes = select::CteScope::new_for_current_routine();
         select::execute_query_plan_with_ctes(self.engine, query, self.params, &mut ctes)
     }
@@ -73,7 +77,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     fn execute_declare_cursor(
         &self,
         name: &str,
-        _binary: bool,
+        binary: bool,
         scroll: Option<bool>,
         hold: bool,
         query: &QueryPlan,
@@ -98,13 +102,22 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 message: "DECLARE SCROLL CURSOR ... FOR UPDATE is not supported".into(),
             });
         }
-        let result = self.execute_query(query)?;
-        self.engine.open_session_portal_with_options(
-            name.to_string(),
-            result,
-            scroll.unwrap_or(!has_row_locks),
-            hold,
-        )?;
+        select::lock_query_relations(self.engine, query)?;
+        let ctes = select::CteScope::new_for_current_routine();
+        let schema =
+            select::analyze_query_plan_schema(self.engine, query, self.params, &ctes, None)?;
+        select::validate_query_row_locks(self.engine, query, self.params)?;
+        self.engine
+            .open_pending_session_portal(crate::SessionPortalDeclaration {
+                name: name.to_string(),
+                query: query.clone(),
+                params: self.params.to_vec(),
+                columns: schema.columns().to_vec(),
+                column_types: schema.column_types().to_vec(),
+                scrollable: scroll.unwrap_or(!has_row_locks),
+                holdable: hold,
+                binary,
+            })?;
         Ok(SQLResult::empty())
     }
 
@@ -119,6 +132,9 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 "SQL cursor accepts exactly one query statement".into(),
             ));
         };
+        if self.engine.transaction_depth() != 0 {
+            select::lock_query_relations(self.engine, query)?;
+        }
         let mut ctes = select::CteScope::new_for_current_routine();
         select::execute_query_plan_output(
             self.engine,
@@ -698,5 +714,130 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             }
             CommandPlan::Call { name, args } => self.execute_call(name, args),
         }
+    }
+}
+
+struct SessionPortalRowConsumer {
+    requests: std::sync::mpsc::Receiver<SessionPortalWorkerRequest>,
+    responses: std::sync::mpsc::Sender<SessionPortalWorkerResponse>,
+    initial_next: std::cell::Cell<bool>,
+    closed: std::cell::Cell<bool>,
+    public_width: std::cell::Cell<usize>,
+}
+
+impl select::QueryRowConsumer for SessionPortalRowConsumer {
+    fn begin(
+        &self,
+        _engine: &Engine,
+        columns: &[String],
+        schema: &uqa_execution::RowSchema,
+    ) -> Result<(), SQLError> {
+        self.public_width.set(columns.len());
+        let column_types = columns
+            .iter()
+            .enumerate()
+            .map(|(position, column)| {
+                if schema.columns().get(position) == Some(column) {
+                    schema.column_type(position).cloned()
+                } else {
+                    schema
+                        .position(column)
+                        .and_then(|position| schema.column_type(position).cloned())
+                }
+            })
+            .collect();
+        self.responses
+            .send(SessionPortalWorkerResponse::Started {
+                columns: columns.to_vec(),
+                column_types,
+            })
+            .map_err(|_| SQLError::Internal("cursor consumer disconnected before startup".into()))
+    }
+
+    fn consume(
+        &self,
+        _engine: &Engine,
+        row: uqa_execution::OwnedPhysicalRow,
+    ) -> Result<select::QueryConsumerControl, SQLError> {
+        let request = if self.initial_next.replace(false) {
+            SessionPortalWorkerRequest::Next
+        } else {
+            match self.requests.recv() {
+                Ok(request) => request,
+                Err(_) => SessionPortalWorkerRequest::Close,
+            }
+        };
+        if matches!(request, SessionPortalWorkerRequest::Close) {
+            self.closed.set(true);
+            return Ok(select::QueryConsumerControl::Stop);
+        }
+        let view = row.view();
+        let values = (0..self.public_width.get())
+            .map(|position| view.value_at(position).cloned().unwrap_or(Value::Null))
+            .collect();
+        if self
+            .responses
+            .send(SessionPortalWorkerResponse::Row(values))
+            .is_err()
+        {
+            self.closed.set(true);
+            return Ok(select::QueryConsumerControl::Stop);
+        }
+        match self.requests.recv() {
+            Ok(SessionPortalWorkerRequest::Next) => {
+                self.initial_next.set(true);
+                Ok(select::QueryConsumerControl::Continue)
+            }
+            Ok(SessionPortalWorkerRequest::Close) | Err(_) => {
+                self.closed.set(true);
+                Ok(select::QueryConsumerControl::Stop)
+            }
+        }
+    }
+}
+
+pub(crate) fn start_session_portal_worker(
+    engine: Engine,
+    query: QueryPlan,
+    params: Vec<SQLParam>,
+) -> SessionPortalWorker {
+    let (request_tx, request_rx) = std::sync::mpsc::channel();
+    let (response_tx, response_rx) = std::sync::mpsc::channel();
+    let join = std::thread::spawn(move || {
+        let _statement_gate = engine.runtime.statement_gate.delegate_to_current_thread();
+        let first = match request_rx.recv() {
+            Ok(SessionPortalWorkerRequest::Next) => true,
+            Ok(SessionPortalWorkerRequest::Close) | Err(_) => return,
+        };
+        let consumer = std::rc::Rc::new(SessionPortalRowConsumer {
+            requests: request_rx,
+            responses: response_tx.clone(),
+            initial_next: std::cell::Cell::new(first),
+            closed: std::cell::Cell::new(false),
+            public_width: std::cell::Cell::new(0),
+        });
+        let mut ctes = select::CteScope::new_for_current_routine();
+        ctes.enable_command_progress_streaming();
+        let result = select::execute_query_plan_output(
+            &engine,
+            &query,
+            &params,
+            &mut ctes,
+            select::QueryOutputMode::RowConsumer(consumer.clone()),
+        );
+        match result {
+            Ok(_) if !consumer.closed.get() => {
+                let _ = response_tx.send(SessionPortalWorkerResponse::Eof);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                let _ = response_tx.send(SessionPortalWorkerResponse::Error(error));
+            }
+        }
+    });
+    SessionPortalWorker {
+        requests: request_tx,
+        responses: response_rx,
+        join: Some(join),
     }
 }

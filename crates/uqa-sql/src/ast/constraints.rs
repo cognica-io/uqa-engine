@@ -18,6 +18,12 @@ use super::{
 pub struct ColumnDef {
     pub name: String,
     pub ty: ColumnType,
+    /// Durable identity of this catalog column. Logical names can change while a fixed transaction snapshot continues to address the same column.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub object_id: Option<[u8; 16]>,
+    /// Value exposed for physical rows captured before this column was added. This is the catalog equivalent of `PostgreSQL`'s `attmissingval`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub missing_value: Option<uqa_core::Value>,
     pub primary_key: bool,
     pub not_null: bool,
     /// Whether `NOT NULL` was declared as its own constraint instead of being

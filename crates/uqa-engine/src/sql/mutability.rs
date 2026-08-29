@@ -6,12 +6,53 @@
 
 use super::{builtin_function_dispatch_name, BTreeSet, Engine, SQLError};
 
+#[derive(Clone, Copy)]
+struct MutabilityClassification {
+    include_session_mutations: bool,
+    procedural_state_requires_transaction: bool,
+}
+
+impl MutabilityClassification {
+    const DATABASE_WRITES: Self = Self {
+        include_session_mutations: false,
+        procedural_state_requires_transaction: false,
+    };
+    const ENGINE_MUTATIONS: Self = Self {
+        include_session_mutations: true,
+        procedural_state_requires_transaction: false,
+    };
+    const STATEMENT_TRANSACTION: Self = Self {
+        include_session_mutations: true,
+        procedural_state_requires_transaction: true,
+    };
+}
+
 /// SELECT is not synonymous with read-only: UQA exposes a small set of state-changing scalar functions, and SQL/PLpgSQL routines invoked from a projection can contain commands. Classify those plans before choosing the transaction mode so memory execution takes a rollback snapshot and `SQLite` opens a write transaction. Cloning the plan is bounded by query size and avoids the database-sized deep copy paid by a full memory snapshot.
 pub(super) fn query_may_mutate_engine(
     engine: &Engine,
     query: &uqa_planner::QueryPlan,
 ) -> Result<bool, SQLError> {
-    query_may_mutate_engine_inner(engine, query, &mut BTreeSet::new(), true)
+    query_may_mutate_engine_inner(
+        engine,
+        query,
+        &mut BTreeSet::new(),
+        &mut BTreeSet::new(),
+        MutabilityClassification::ENGINE_MUTATIONS,
+    )
+}
+
+/// Some read-only operations still need a statement transaction. In particular, a PL/pgSQL block with an `EXCEPTION` arm opens a subtransaction even when neither branch writes data.
+pub(super) fn query_requires_statement_transaction(
+    engine: &Engine,
+    query: &uqa_planner::QueryPlan,
+) -> Result<bool, SQLError> {
+    query_may_mutate_engine_inner(
+        engine,
+        query,
+        &mut BTreeSet::new(),
+        &mut BTreeSet::new(),
+        MutabilityClassification::STATEMENT_TRANSACTION,
+    )
 }
 
 /// Classify only database writes forbidden by `PostgreSQL` read-only transactions. Session-local effects such as `random()` and `setseed()` still require statement rollback bookkeeping but remain legal in read-only mode.
@@ -19,7 +60,13 @@ pub(super) fn query_may_write_database(
     engine: &Engine,
     query: &uqa_planner::QueryPlan,
 ) -> Result<bool, SQLError> {
-    query_may_mutate_engine_inner(engine, query, &mut BTreeSet::new(), false)
+    query_may_mutate_engine_inner(
+        engine,
+        query,
+        &mut BTreeSet::new(),
+        &mut BTreeSet::new(),
+        MutabilityClassification::DATABASE_WRITES,
+    )
 }
 
 /// Detect database-writing expressions and query sources embedded in an otherwise legal temporary-table DML command.
@@ -34,10 +81,24 @@ pub(super) fn command_payload_may_write_database(
         if classification_error.is_some() {
             return;
         }
-        let uqa_execution::ScalarExpr::Func { name, args, .. } = expression else {
+        let uqa_execution::ScalarExpr::Func {
+            name,
+            binding,
+            args,
+            ..
+        } = expression
+        else {
             return;
         };
-        match function_may_mutate_engine(engine, name, args, false) {
+        match function_may_mutate_engine(
+            engine,
+            name,
+            binding.as_ref(),
+            args,
+            &mut BTreeSet::new(),
+            &mut BTreeSet::new(),
+            MutabilityClassification::DATABASE_WRITES,
+        ) {
             Ok(value) => writes |= value,
             Err(error) => classification_error = Some(error),
         }
@@ -65,7 +126,13 @@ pub(super) fn command_payload_may_write_database(
                 return Ok(true);
             }
             if let Some(source) = plan.source.as_deref() {
-                if source_may_mutate_engine(engine, source, &mut BTreeSet::new(), false)? {
+                if source_may_mutate_engine(
+                    engine,
+                    source,
+                    &mut BTreeSet::new(),
+                    &mut BTreeSet::new(),
+                    MutabilityClassification::DATABASE_WRITES,
+                )? {
                     return Ok(true);
                 }
             }
@@ -76,14 +143,26 @@ pub(super) fn command_payload_may_write_database(
                 return Ok(true);
             }
             if let Some(source) = plan.source.as_deref() {
-                if source_may_mutate_engine(engine, source, &mut BTreeSet::new(), false)? {
+                if source_may_mutate_engine(
+                    engine,
+                    source,
+                    &mut BTreeSet::new(),
+                    &mut BTreeSet::new(),
+                    MutabilityClassification::DATABASE_WRITES,
+                )? {
                     return Ok(true);
                 }
             }
             queries_may_write_database(engine, &plan.subqueries)
         }
         uqa_planner::CommandPlan::Merge(plan) => {
-            if source_may_mutate_engine(engine, &plan.source, &mut BTreeSet::new(), false)? {
+            if source_may_mutate_engine(
+                engine,
+                &plan.source,
+                &mut BTreeSet::new(),
+                &mut BTreeSet::new(),
+                MutabilityClassification::DATABASE_WRITES,
+            )? {
                 return Ok(true);
             }
             queries_may_write_database(engine, &plan.subqueries)
@@ -108,9 +187,16 @@ fn query_may_mutate_engine_inner(
     engine: &Engine,
     query: &uqa_planner::QueryPlan,
     visiting_views: &mut BTreeSet<String>,
-    include_session_mutations: bool,
+    visiting_routines: &mut BTreeSet<String>,
+    classification: MutabilityClassification,
 ) -> Result<bool, SQLError> {
-    if query_source_may_mutate_engine(engine, query, visiting_views, include_session_mutations)? {
+    if query_source_may_mutate_engine(
+        engine,
+        query,
+        visiting_views,
+        visiting_routines,
+        classification,
+    )? {
         return Ok(true);
     }
     let mut plan = uqa_planner::UnifiedPlan::Query(Box::new(query.clone()));
@@ -120,10 +206,24 @@ fn query_may_mutate_engine_inner(
         if classification_error.is_some() {
             return;
         }
-        let uqa_execution::ScalarExpr::Func { name, args, .. } = expression else {
+        let uqa_execution::ScalarExpr::Func {
+            name,
+            binding,
+            args,
+            ..
+        } = expression
+        else {
             return;
         };
-        match function_may_mutate_engine(engine, name, args, include_session_mutations) {
+        match function_may_mutate_engine(
+            engine,
+            name,
+            binding.as_ref(),
+            args,
+            visiting_views,
+            visiting_routines,
+            classification,
+        ) {
             Ok(value) => mutates |= value,
             Err(error) => classification_error = Some(error),
         }
@@ -134,8 +234,11 @@ fn query_may_mutate_engine_inner(
 fn function_may_mutate_engine(
     engine: &Engine,
     name: &str,
+    binding: Option<&uqa_sql::ast::FunctionBinding>,
     args: &[uqa_execution::ScalarExpr],
-    include_session_mutations: bool,
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
+    classification: MutabilityClassification,
 ) -> Result<bool, SQLError> {
     let identity = name.to_ascii_lowercase();
     let dispatch_name = builtin_function_dispatch_name(&identity);
@@ -144,7 +247,7 @@ fn function_may_mutate_engine(
             Some(uqa_execution::ScalarExpr::Literal(uqa_core::Value::Str(query))) => {
                 super::age_cypher::query_is_mutating(query)?
             }
-            _ => include_session_mutations,
+            _ => classification.include_session_mutations,
         }
     } else {
         false
@@ -168,25 +271,566 @@ fn function_may_mutate_engine(
                 | "bayesian_match_with_prior"
         )
         || engine.registered_runtime_function_may_mutate_engine(&identity);
-    let requires_mutating_execution = matches!(
-        dispatch_name.as_str(),
-        "nextval" | "setval" | "random" | "setseed" | "fts_match" | "multi_field_match"
-    ) || engine.lookup_sql_functions(&identity).is_some();
-    Ok(mutates_database_directly || (include_session_mutations && requires_mutating_execution))
+    let temporary_sequence_call = matches!(dispatch_name.as_str(), "nextval" | "setval")
+        && sequence_function_targets_temporary(engine, args)?;
+    let builtin_requires_mutating_execution =
+        matches!(
+            dispatch_name.as_str(),
+            "random" | "setseed" | "fts_match" | "multi_field_match"
+        ) || (matches!(dispatch_name.as_str(), "nextval" | "setval") && !temporary_sequence_call);
+    let sql_routine_mutates = classification.include_session_mutations
+        && sql_routine_may_mutate_engine(
+            engine,
+            &identity,
+            binding,
+            visiting_views,
+            visiting_routines,
+            classification,
+        )?;
+    Ok(mutates_database_directly
+        || (classification.include_session_mutations
+            && (builtin_requires_mutating_execution || sql_routine_mutates)))
+}
+
+fn sequence_function_targets_temporary(
+    engine: &Engine,
+    args: &[uqa_execution::ScalarExpr],
+) -> Result<bool, SQLError> {
+    fn literal_reference(expression: &uqa_execution::ScalarExpr) -> Option<&str> {
+        match expression {
+            uqa_execution::ScalarExpr::Literal(uqa_core::Value::Str(reference)) => Some(reference),
+            uqa_execution::ScalarExpr::Cast { expr, .. } => literal_reference(expr),
+            _ => None,
+        }
+    }
+
+    let Some(reference) = args.first().and_then(literal_reference) else {
+        return Ok(false);
+    };
+    Ok(engine
+        .sequence_persistence(reference)
+        .map_err(|error| {
+            SQLError::Internal(format!(
+                "resolve sequence `{reference}` while classifying query mutability: {error}"
+            ))
+        })?
+        .is_some_and(|persistence| persistence == uqa_sql::ast::RelationPersistence::Temporary))
+}
+
+fn sql_routine_may_mutate_engine(
+    engine: &Engine,
+    name: &str,
+    binding: Option<&uqa_sql::ast::FunctionBinding>,
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
+    classification: MutabilityClassification,
+) -> Result<bool, SQLError> {
+    if binding.is_some_and(|binding| binding.builtin) {
+        return Ok(false);
+    }
+    let lookup_name = binding.map_or(name, |binding| binding.name.as_str());
+    let Some(overloads) = engine.lookup_sql_functions(lookup_name) else {
+        return Ok(false);
+    };
+    for function in overloads {
+        if function.def.is_procedure
+            || binding.is_some_and(|binding| {
+                crate::engine_user_functions::routine_signature_types(&function.def)
+                    != binding.argument_types
+            })
+        {
+            continue;
+        }
+        let signature = crate::engine_user_functions::routine_signature_types(&function.def);
+        let key = format!("{}({})", function.def.name, signature.join(","));
+        if !visiting_routines.insert(key.clone()) {
+            continue;
+        }
+        let result = match &function.compiled {
+            crate::engine_user_functions::CompiledFunctionBody::SQL(plans) => (|| {
+                let mut mutates = false;
+                for plan in plans {
+                    match plan {
+                        uqa_planner::UnifiedPlan::Query(query) => {
+                            if query_may_mutate_engine_inner(
+                                engine,
+                                query,
+                                visiting_views,
+                                visiting_routines,
+                                classification,
+                            )? {
+                                mutates = true;
+                                break;
+                            }
+                        }
+                        uqa_planner::UnifiedPlan::Command(_) => {
+                            mutates = true;
+                            break;
+                        }
+                    }
+                }
+                Ok(mutates)
+            })(),
+            crate::engine_user_functions::CompiledFunctionBody::PLpgSQL(function) => {
+                plpgsql_function_may_mutate_engine(
+                    engine,
+                    function,
+                    visiting_views,
+                    visiting_routines,
+                    classification,
+                )
+            }
+        };
+        visiting_routines.remove(&key);
+        if result? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn lowered_statement_may_mutate_engine(
+    engine: &Engine,
+    statement: uqa_sql::ast::Statement,
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
+    classification: MutabilityClassification,
+) -> Result<bool, SQLError> {
+    let plan = uqa_planner::UnifiedPlan::lower_with(statement, &|name: &str| {
+        engine.has_registered_aggregate_function(name)
+    });
+    match plan {
+        uqa_planner::UnifiedPlan::Query(query) => query_may_mutate_engine_inner(
+            engine,
+            &query,
+            visiting_views,
+            visiting_routines,
+            classification,
+        ),
+        uqa_planner::UnifiedPlan::Command(_) => Ok(true),
+    }
+}
+
+fn plpgsql_expression_may_mutate_engine(
+    engine: &Engine,
+    expression: &uqa_sql::ast::Expr,
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
+    classification: MutabilityClassification,
+) -> Result<bool, SQLError> {
+    lowered_statement_may_mutate_engine(
+        engine,
+        uqa_sql::ast::Statement::Values {
+            rows: vec![vec![expression.clone()]],
+        },
+        visiting_views,
+        visiting_routines,
+        classification,
+    )
+}
+
+fn plpgsql_expressions_may_mutate_engine<'a>(
+    engine: &Engine,
+    expressions: impl IntoIterator<Item = &'a uqa_sql::ast::Expr>,
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
+    classification: MutabilityClassification,
+) -> Result<bool, SQLError> {
+    for expression in expressions {
+        if plpgsql_expression_may_mutate_engine(
+            engine,
+            expression,
+            visiting_views,
+            visiting_routines,
+            classification,
+        )? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn plpgsql_return_value_may_mutate_engine(
+    engine: &Engine,
+    value: Option<&uqa_sql::plpgsql::PLpgSQLReturnValue>,
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
+    classification: MutabilityClassification,
+) -> Result<bool, SQLError> {
+    let Some(uqa_sql::plpgsql::PLpgSQLReturnValue::Expr(expression)) = value else {
+        return Ok(false);
+    };
+    plpgsql_expression_may_mutate_engine(
+        engine,
+        expression,
+        visiting_views,
+        visiting_routines,
+        classification,
+    )
+}
+
+fn plpgsql_statement_list_may_mutate_engine(
+    engine: &Engine,
+    datums: &[uqa_sql::plpgsql::PLpgSQLDatum],
+    statements: &[uqa_sql::plpgsql::PLpgSQLStmt],
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
+    classification: MutabilityClassification,
+) -> Result<bool, SQLError> {
+    for statement in statements {
+        if plpgsql_statement_may_mutate_engine(
+            engine,
+            datums,
+            statement,
+            visiting_views,
+            visiting_routines,
+            classification,
+        )? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn plpgsql_block_may_mutate_engine(
+    engine: &Engine,
+    datums: &[uqa_sql::plpgsql::PLpgSQLDatum],
+    block: &uqa_sql::plpgsql::PLpgSQLBlock,
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
+    classification: MutabilityClassification,
+) -> Result<bool, SQLError> {
+    if classification.procedural_state_requires_transaction && !block.exceptions.is_empty() {
+        return Ok(true);
+    }
+    if plpgsql_statement_list_may_mutate_engine(
+        engine,
+        datums,
+        &block.body,
+        visiting_views,
+        visiting_routines,
+        classification,
+    )? {
+        return Ok(true);
+    }
+    for arm in &block.exceptions {
+        if plpgsql_statement_list_may_mutate_engine(
+            engine,
+            datums,
+            &arm.body,
+            visiting_views,
+            visiting_routines,
+            classification,
+        )? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+#[allow(clippy::too_many_lines)]
+fn plpgsql_statement_may_mutate_engine(
+    engine: &Engine,
+    datums: &[uqa_sql::plpgsql::PLpgSQLDatum],
+    statement: &uqa_sql::plpgsql::PLpgSQLStmt,
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
+    classification: MutabilityClassification,
+) -> Result<bool, SQLError> {
+    use uqa_sql::plpgsql::PLpgSQLStmt;
+    match statement {
+        PLpgSQLStmt::Block(block) => plpgsql_block_may_mutate_engine(
+            engine,
+            datums,
+            block,
+            visiting_views,
+            visiting_routines,
+            classification,
+        ),
+        PLpgSQLStmt::Assign { expr, .. } => plpgsql_expression_may_mutate_engine(
+            engine,
+            expr,
+            visiting_views,
+            visiting_routines,
+            classification,
+        ),
+        PLpgSQLStmt::If {
+            cond,
+            then_body,
+            elsifs,
+            else_body,
+        } => {
+            if plpgsql_expression_may_mutate_engine(
+                engine,
+                cond,
+                visiting_views,
+                visiting_routines,
+                classification,
+            )? || plpgsql_statement_list_may_mutate_engine(
+                engine,
+                datums,
+                then_body,
+                visiting_views,
+                visiting_routines,
+                classification,
+            )? {
+                return Ok(true);
+            }
+            for (condition, body) in elsifs {
+                if plpgsql_expression_may_mutate_engine(
+                    engine,
+                    condition,
+                    visiting_views,
+                    visiting_routines,
+                    classification,
+                )? || plpgsql_statement_list_may_mutate_engine(
+                    engine,
+                    datums,
+                    body,
+                    visiting_views,
+                    visiting_routines,
+                    classification,
+                )? {
+                    return Ok(true);
+                }
+            }
+            else_body.as_deref().map_or(Ok(false), |body| {
+                plpgsql_statement_list_may_mutate_engine(
+                    engine,
+                    datums,
+                    body,
+                    visiting_views,
+                    visiting_routines,
+                    classification,
+                )
+            })
+        }
+        PLpgSQLStmt::Case {
+            t_expr,
+            arms,
+            else_body,
+            ..
+        } => {
+            if let Some(expression) = t_expr {
+                if plpgsql_expression_may_mutate_engine(
+                    engine,
+                    expression,
+                    visiting_views,
+                    visiting_routines,
+                    classification,
+                )? {
+                    return Ok(true);
+                }
+            }
+            for (condition, body) in arms {
+                if plpgsql_expression_may_mutate_engine(
+                    engine,
+                    condition,
+                    visiting_views,
+                    visiting_routines,
+                    classification,
+                )? || plpgsql_statement_list_may_mutate_engine(
+                    engine,
+                    datums,
+                    body,
+                    visiting_views,
+                    visiting_routines,
+                    classification,
+                )? {
+                    return Ok(true);
+                }
+            }
+            else_body.as_deref().map_or(Ok(false), |body| {
+                plpgsql_statement_list_may_mutate_engine(
+                    engine,
+                    datums,
+                    body,
+                    visiting_views,
+                    visiting_routines,
+                    classification,
+                )
+            })
+        }
+        PLpgSQLStmt::Loop { body, .. } => plpgsql_statement_list_may_mutate_engine(
+            engine,
+            datums,
+            body,
+            visiting_views,
+            visiting_routines,
+            classification,
+        ),
+        PLpgSQLStmt::While { cond, body, .. } => Ok(plpgsql_expression_may_mutate_engine(
+            engine,
+            cond,
+            visiting_views,
+            visiting_routines,
+            classification,
+        )?
+            || plpgsql_statement_list_may_mutate_engine(
+                engine,
+                datums,
+                body,
+                visiting_views,
+                visiting_routines,
+                classification,
+            )?),
+        PLpgSQLStmt::ForI {
+            lower,
+            upper,
+            step,
+            body,
+            ..
+        } => Ok(plpgsql_expressions_may_mutate_engine(
+            engine,
+            [Some(lower), Some(upper), step.as_ref()]
+                .into_iter()
+                .flatten(),
+            visiting_views,
+            visiting_routines,
+            classification,
+        )? || plpgsql_statement_list_may_mutate_engine(
+            engine,
+            datums,
+            body,
+            visiting_views,
+            visiting_routines,
+            classification,
+        )?),
+        PLpgSQLStmt::ForQuery { query, body, .. } => Ok(lowered_statement_may_mutate_engine(
+            engine,
+            query.clone(),
+            visiting_views,
+            visiting_routines,
+            classification,
+        )?
+            || plpgsql_statement_list_may_mutate_engine(
+                engine,
+                datums,
+                body,
+                visiting_views,
+                visiting_routines,
+                classification,
+            )?),
+        PLpgSQLStmt::Exit { cond, .. } => cond.as_ref().map_or(Ok(false), |condition| {
+            plpgsql_expression_may_mutate_engine(
+                engine,
+                condition,
+                visiting_views,
+                visiting_routines,
+                classification,
+            )
+        }),
+        PLpgSQLStmt::Return { value } | PLpgSQLStmt::ReturnNext { value } => {
+            plpgsql_return_value_may_mutate_engine(
+                engine,
+                value.as_ref(),
+                visiting_views,
+                visiting_routines,
+                classification,
+            )
+        }
+        PLpgSQLStmt::ReturnQuery { query }
+        | PLpgSQLStmt::ExecSQL { stmt: query, .. }
+        | PLpgSQLStmt::Perform { query } => lowered_statement_may_mutate_engine(
+            engine,
+            query.clone(),
+            visiting_views,
+            visiting_routines,
+            classification,
+        ),
+        PLpgSQLStmt::ReturnQueryExecute { .. } | PLpgSQLStmt::DynExecute { .. } => Ok(true),
+        PLpgSQLStmt::Raise { params, .. } => plpgsql_expressions_may_mutate_engine(
+            engine,
+            params,
+            visiting_views,
+            visiting_routines,
+            classification,
+        ),
+        PLpgSQLStmt::OpenCursor {
+            cursor, arguments, ..
+        } => {
+            if classification.procedural_state_requires_transaction {
+                return Ok(true);
+            }
+            if plpgsql_expressions_may_mutate_engine(
+                engine,
+                arguments.iter().map(|argument| &argument.expr),
+                visiting_views,
+                visiting_routines,
+                classification,
+            )? {
+                return Ok(true);
+            }
+            let query = datums.get(*cursor).and_then(|datum| match datum {
+                uqa_sql::plpgsql::PLpgSQLDatum::Var(variable) => {
+                    variable.cursor.as_ref().map(|cursor| &cursor.query)
+                }
+                _ => None,
+            });
+            query.map_or(Ok(false), |query| {
+                lowered_statement_may_mutate_engine(
+                    engine,
+                    query.clone(),
+                    visiting_views,
+                    visiting_routines,
+                    classification,
+                )
+            })
+        }
+        PLpgSQLStmt::FetchCursor { .. } | PLpgSQLStmt::CloseCursor { .. } => {
+            Ok(classification.procedural_state_requires_transaction)
+        }
+        PLpgSQLStmt::GetDiagnostics { .. } => Ok(false),
+    }
+}
+
+fn plpgsql_function_may_mutate_engine(
+    engine: &Engine,
+    function: &uqa_sql::plpgsql::PLpgSQLFunction,
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
+    classification: MutabilityClassification,
+) -> Result<bool, SQLError> {
+    for datum in &function.datums {
+        let uqa_sql::plpgsql::PLpgSQLDatum::Var(variable) = datum else {
+            continue;
+        };
+        if let Some(expression) = &variable.default {
+            if plpgsql_expression_may_mutate_engine(
+                engine,
+                expression,
+                visiting_views,
+                visiting_routines,
+                classification,
+            )? {
+                return Ok(true);
+            }
+        }
+    }
+    plpgsql_block_may_mutate_engine(
+        engine,
+        &function.datums,
+        &function.action,
+        visiting_views,
+        visiting_routines,
+        classification,
+    )
 }
 
 fn query_source_may_mutate_engine(
     engine: &Engine,
     query: &uqa_planner::QueryPlan,
     visiting_views: &mut BTreeSet<String>,
-    include_session_mutations: bool,
+    visiting_routines: &mut BTreeSet<String>,
+    classification: MutabilityClassification,
 ) -> Result<bool, SQLError> {
     for cte in &query.ctes {
         if query_source_may_mutate_engine(
             engine,
             &cte.query,
             visiting_views,
-            include_session_mutations,
+            visiting_routines,
+            classification,
         )? {
             return Ok(true);
         }
@@ -198,7 +842,8 @@ fn query_source_may_mutate_engine(
                     engine,
                     source,
                     visiting_views,
-                    include_session_mutations,
+                    visiting_routines,
+                    classification,
                 )? {
                     return Ok(true);
                 }
@@ -208,7 +853,8 @@ fn query_source_may_mutate_engine(
                     engine,
                     subquery,
                     visiting_views,
-                    include_session_mutations,
+                    visiting_routines,
+                    classification,
                 )? {
                     return Ok(true);
                 }
@@ -224,12 +870,14 @@ fn query_source_may_mutate_engine(
                 engine,
                 left,
                 visiting_views,
-                include_session_mutations,
+                visiting_routines,
+                classification,
             )? || query_source_may_mutate_engine(
                 engine,
                 right,
                 visiting_views,
-                include_session_mutations,
+                visiting_routines,
+                classification,
             )? {
                 return Ok(true);
             }
@@ -238,7 +886,8 @@ fn query_source_may_mutate_engine(
                     engine,
                     subquery,
                     visiting_views,
-                    include_session_mutations,
+                    visiting_routines,
+                    classification,
                 )? {
                     return Ok(true);
                 }
@@ -250,7 +899,8 @@ fn query_source_may_mutate_engine(
                     engine,
                     subquery,
                     visiting_views,
-                    include_session_mutations,
+                    visiting_routines,
+                    classification,
                 )? {
                     return Ok(true);
                 }
@@ -264,39 +914,60 @@ fn source_may_mutate_engine(
     engine: &Engine,
     source: &uqa_planner::SourcePlan,
     visiting_views: &mut BTreeSet<String>,
-    include_session_mutations: bool,
+    visiting_routines: &mut BTreeSet<String>,
+    classification: MutabilityClassification,
 ) -> Result<bool, SQLError> {
     match source {
-        uqa_planner::SourcePlan::Function { name, args, .. } => {
-            function_may_mutate_engine(engine, name, args, include_session_mutations)
-        }
+        uqa_planner::SourcePlan::Function {
+            name,
+            binding,
+            args,
+            ..
+        } => function_may_mutate_engine(
+            engine,
+            name,
+            binding.as_ref(),
+            args,
+            visiting_views,
+            visiting_routines,
+            classification,
+        ),
         uqa_planner::SourcePlan::FunctionGroup { functions, .. } => {
             for function in functions {
                 if function_may_mutate_engine(
                     engine,
                     &function.name,
+                    function.binding.as_ref(),
                     &function.args,
-                    include_session_mutations,
+                    visiting_views,
+                    visiting_routines,
+                    classification,
                 )? {
                     return Ok(true);
                 }
             }
             Ok(false)
         }
-        uqa_planner::SourcePlan::Join { left, right, .. } => {
-            Ok(
-                source_may_mutate_engine(engine, left, visiting_views, include_session_mutations)?
-                    || source_may_mutate_engine(
-                        engine,
-                        right,
-                        visiting_views,
-                        include_session_mutations,
-                    )?,
-            )
-        }
-        uqa_planner::SourcePlan::Subquery { body, .. } => {
-            query_source_may_mutate_engine(engine, body, visiting_views, include_session_mutations)
-        }
+        uqa_planner::SourcePlan::Join { left, right, .. } => Ok(source_may_mutate_engine(
+            engine,
+            left,
+            visiting_views,
+            visiting_routines,
+            classification,
+        )? || source_may_mutate_engine(
+            engine,
+            right,
+            visiting_views,
+            visiting_routines,
+            classification,
+        )?),
+        uqa_planner::SourcePlan::Subquery { body, .. } => query_source_may_mutate_engine(
+            engine,
+            body,
+            visiting_views,
+            visiting_routines,
+            classification,
+        ),
         uqa_planner::SourcePlan::Table { name, .. } => {
             let key = name.to_ascii_lowercase();
             if !visiting_views.insert(key.clone()) {
@@ -307,7 +978,8 @@ fn source_may_mutate_engine(
                     engine,
                     &view,
                     visiting_views,
-                    include_session_mutations,
+                    visiting_routines,
+                    classification,
                 ),
                 Ok(None) => Ok(false),
                 Err(error) => Err(error),

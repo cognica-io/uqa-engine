@@ -6,6 +6,7 @@
 
 //! Ownership boundaries for storage, catalog, session, runtime, and epochs.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
 use std::sync::Arc;
@@ -19,7 +20,7 @@ use super::{
 };
 
 pub(super) struct StorageContext {
-    pub(super) tables: RwLock<BTreeMap<RelationIdentity, Arc<TableState>>>,
+    pub(super) tables: Arc<RwLock<BTreeMap<RelationIdentity, Arc<TableState>>>>,
     pub(super) catalog: Option<Arc<dyn uqa_storage::CatalogFacade>>,
     pub(super) backend: Option<Arc<dyn uqa_storage::PersistentStorageBackend>>,
     pub(super) provider: Option<Arc<dyn uqa_storage::PersistentStorageProvider>>,
@@ -28,7 +29,7 @@ pub(super) struct StorageContext {
 impl StorageContext {
     pub(super) fn memory() -> Self {
         Self {
-            tables: RwLock::new(BTreeMap::new()),
+            tables: Arc::new(RwLock::new(BTreeMap::new())),
             catalog: None,
             backend: None,
             provider: None,
@@ -41,10 +42,19 @@ impl StorageContext {
         provider: Option<Arc<dyn uqa_storage::PersistentStorageProvider>>,
     ) -> Self {
         Self {
-            tables: RwLock::new(BTreeMap::new()),
+            tables: Arc::new(RwLock::new(BTreeMap::new())),
             catalog: Some(catalog),
             backend: Some(backend),
             provider,
+        }
+    }
+
+    pub(super) fn shared_from(source: &Self) -> Self {
+        Self {
+            tables: Arc::clone(&source.tables),
+            catalog: source.catalog.clone(),
+            backend: source.backend.clone(),
+            provider: source.provider.clone(),
         }
     }
 }
@@ -111,26 +121,27 @@ pub(super) struct DurableCatalogState {
 
 #[derive(Clone)]
 pub(super) struct DurableCatalogSnapshot {
-    graphs: BTreeMap<String, uqa_graph::MemoryGraphStore>,
-    models: BTreeMap<String, DeepModel>,
-    scoring_params: BTreeMap<String, String>,
-    views: BTreeMap<RelationIdentity, StoredView>,
-    catalog_indexes: BTreeMap<String, uqa_storage::CatalogIndexRow>,
-    schemas: BTreeSet<String>,
-    path_indexes: BTreeMap<String, uqa_graph::PathIndex>,
-    sequences: BTreeMap<RelationIdentity, SequenceState>,
-    sequence_persistence: BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>,
-    named_analyzers: BTreeMap<String, String>,
-    table_field_analyzers: TableFieldAnalyzerRegistry,
-    foreign_servers: BTreeMap<String, uqa_fdw::ForeignServer>,
-    foreign_tables: BTreeMap<RelationIdentity, uqa_fdw::ForeignTable>,
-    sql_user_functions: BTreeMap<String, Vec<Arc<super::engine_user_functions::SQLUserFunction>>>,
-    roles: BTreeMap<String, super::engine_roles::RoleDefinition>,
-    triggers: BTreeMap<
+    pub(super) graphs: BTreeMap<String, uqa_graph::MemoryGraphStore>,
+    pub(super) models: BTreeMap<String, DeepModel>,
+    pub(super) scoring_params: BTreeMap<String, String>,
+    pub(super) views: BTreeMap<RelationIdentity, StoredView>,
+    pub(super) catalog_indexes: BTreeMap<String, uqa_storage::CatalogIndexRow>,
+    pub(super) schemas: BTreeSet<String>,
+    pub(super) path_indexes: BTreeMap<String, uqa_graph::PathIndex>,
+    pub(super) sequences: BTreeMap<RelationIdentity, SequenceState>,
+    pub(super) sequence_persistence: BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>,
+    pub(super) named_analyzers: BTreeMap<String, String>,
+    pub(super) table_field_analyzers: TableFieldAnalyzerRegistry,
+    pub(super) foreign_servers: BTreeMap<String, uqa_fdw::ForeignServer>,
+    pub(super) foreign_tables: BTreeMap<RelationIdentity, uqa_fdw::ForeignTable>,
+    pub(super) sql_user_functions:
+        BTreeMap<String, Vec<Arc<super::engine_user_functions::SQLUserFunction>>>,
+    pub(super) roles: BTreeMap<String, super::engine_roles::RoleDefinition>,
+    pub(super) triggers: BTreeMap<
         uqa_storage::RelationIdentity,
         BTreeMap<String, super::engine_events::StoredTrigger>,
     >,
-    rules:
+    pub(super) rules:
         BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, super::engine_events::StoredRule>>,
 }
 
@@ -222,6 +233,7 @@ pub(super) struct SessionContext {
     pub(super) command_mutation_overlays: Mutex<Vec<CommandMutationOverlay>>,
     pub(super) portals: Mutex<BTreeMap<String, super::SessionPortalState>>,
     pub(super) next_portal_id: Mutex<usize>,
+    pub(super) next_portal_transaction_origin: Mutex<u64>,
 }
 
 impl SessionContext {
@@ -245,6 +257,7 @@ impl SessionContext {
             command_mutation_overlays: Mutex::new(Vec::new()),
             portals: Mutex::new(BTreeMap::new()),
             next_portal_id: Mutex::new(1),
+            next_portal_transaction_origin: Mutex::new(1),
         }
     }
 }
@@ -279,11 +292,58 @@ impl RuntimeExtensions {
     }
 }
 
+thread_local! {
+    static DELEGATED_STATEMENT_GATES: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
+
+pub(super) struct StatementGate {
+    mutex: ReentrantMutex<()>,
+}
+
+impl StatementGate {
+    fn new() -> Self {
+        Self {
+            mutex: ReentrantMutex::new(()),
+        }
+    }
+
+    pub(super) fn lock(&self) -> Option<parking_lot::ReentrantMutexGuard<'_, ()>> {
+        let identity = std::ptr::from_ref(self) as usize;
+        let delegated =
+            DELEGATED_STATEMENT_GATES.with(|delegated| delegated.borrow().contains(&identity));
+        (!delegated).then(|| self.mutex.lock())
+    }
+
+    pub(super) fn delegate_to_current_thread(&self) -> DelegatedStatementGate<'_> {
+        let identity = std::ptr::from_ref(self) as usize;
+        DELEGATED_STATEMENT_GATES.with(|delegated| delegated.borrow_mut().push(identity));
+        DelegatedStatementGate { gate: self }
+    }
+}
+
+pub(super) struct DelegatedStatementGate<'gate> {
+    gate: &'gate StatementGate,
+}
+
+impl Drop for DelegatedStatementGate<'_> {
+    fn drop(&mut self) {
+        let identity = std::ptr::from_ref(self.gate) as usize;
+        DELEGATED_STATEMENT_GATES.with(|delegated| {
+            let removed = delegated.borrow_mut().pop();
+            debug_assert_eq!(
+                removed,
+                Some(identity),
+                "statement-gate delegation stack mismatch"
+            );
+        });
+    }
+}
+
 pub(super) struct QueryRuntime {
-    pub(super) statement_gate: ReentrantMutex<()>,
+    pub(super) statement_gate: Arc<StatementGate>,
     pub(super) sql_execution_depth: AtomicUsize,
     pub(super) cancellation: uqa_core::CancellationToken,
-    pub(super) notices: Mutex<Vec<(String, String)>>,
+    pub(super) notices: Arc<Mutex<Vec<(String, String)>>>,
     pub(super) function_depth_limit: AtomicUsize,
     pub(super) bayesian_params_cache: RwLock<BTreeMap<String, BayesianBM25Params>>,
     pub(super) regtype_output_cache: Mutex<Option<Arc<crate::sql::RegtypeOutputCatalog>>>,
@@ -293,10 +353,10 @@ pub(super) struct QueryRuntime {
 impl QueryRuntime {
     pub(super) fn new(function_depth_limit: usize) -> Self {
         Self {
-            statement_gate: ReentrantMutex::new(()),
+            statement_gate: Arc::new(StatementGate::new()),
             sql_execution_depth: AtomicUsize::new(0),
             cancellation: uqa_core::CancellationToken::new(),
-            notices: Mutex::new(Vec::new()),
+            notices: Arc::new(Mutex::new(Vec::new())),
             function_depth_limit: AtomicUsize::new(function_depth_limit),
             bayesian_params_cache: RwLock::new(BTreeMap::new()),
             regtype_output_cache: Mutex::new(None),

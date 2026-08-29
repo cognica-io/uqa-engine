@@ -13,7 +13,7 @@ use super::helpers::{
 use super::partitioning::partition_bound_node;
 use super::pg_catalog::{
     catalog_index_relations, index_access_method_oid, pg_class_catalog_row, pg_class_row,
-    pg_class_row_with_lifecycle, table_relation_oid,
+    pg_class_row_with_lifecycle, table_relation_oid, table_rowtype_oid,
 };
 use super::{Engine, ResultRow, SQLError};
 
@@ -30,7 +30,7 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
     )];
     let catalog_indexes = catalog_index_relations(engine)?;
     for name in engine
-        .table_names()
+        .query_table_names()
         .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
     {
         let (schema, table) = split_schema_name(&name)?;
@@ -45,7 +45,7 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
         };
         let tuples = if hierarchy.partition_spec.is_some() {
             let mut total = 0_u64;
-            for member in engine.hierarchy_scan_tables(&name, true)? {
+            for member in engine.query_hierarchy_scan_tables(&name, true)? {
                 total = total
                     .checked_add(engine.table_doc_count(&member)?)
                     .ok_or_else(|| {
@@ -72,21 +72,26 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
             true,
             &[],
         );
+        row.insert("oid".into(), int_value(table_relation_oid(engine, &name)?));
+        row.insert(
+            "reltype".into(),
+            int_value(table_rowtype_oid(engine, &name)?),
+        );
         row.insert(
             "relispartition".into(),
             bool_value(hierarchy.partition_bound.is_some()),
         );
         row.insert(
             "relhassubclass".into(),
-            bool_value(!engine.direct_hierarchy_children(&name)?.is_empty()),
+            bool_value(!engine.query_direct_hierarchy_children(&name)?.is_empty()),
         );
         row.insert(
             "relhastriggers".into(),
-            bool_value(engine.relation_has_triggers(&name)?),
+            bool_value(engine.query_relation_has_triggers(&name)?),
         );
         row.insert(
             "relhasrules".into(),
-            bool_value(engine.relation_has_rules(&name)?),
+            bool_value(engine.query_relation_has_rules(&name)?),
         );
         if let Some(bound) = hierarchy.partition_bound.as_ref() {
             row.insert(
@@ -164,7 +169,7 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
             0.0,
             false,
             engine
-                .sequence_persistence(&sequence)
+                .query_sequence_persistence(&sequence)
                 .map_err(|error| SQLError::Internal(format!("read sequence persistence: {error}")))?
                 .unwrap_or_default(),
             true,
@@ -195,7 +200,7 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
 pub(super) fn build_pg_inherits(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
     for child in engine
-        .table_names()
+        .query_table_names()
         .map_err(|error| SQLError::Internal(format!("read inheritance catalog: {error}")))?
     {
         let hierarchy = engine

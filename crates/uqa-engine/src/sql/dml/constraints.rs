@@ -885,7 +885,7 @@ pub(in crate::sql) fn prepare_document_rewrite(
         update_lock_strength(engine, table, &changed_columns),
     )?;
     crate::sql::generated::refresh_stored_generated_columns(engine, table, &mut new_document)?;
-    super::stamp_tuple_xmin(engine, &mut new_document)?;
+    super::stamp_tuple_xmin(engine, table, &mut new_document)?;
     let _key_locks =
         lock_document_key_dependencies(engine, table, &new_document, Some(&old_document))?;
     lock_existing_document_rewrite_foreign_key_dependencies(
@@ -1269,7 +1269,8 @@ pub(in crate::sql) fn lock_referencing_child(
     if recheck {
         engine.refresh_explicit_statement_snapshot()?;
     }
-    let Some(child_doc) = engine.get_document(&identity.table, identity.doc_id)? else {
+    let Some(child_doc) = engine.get_document_for_mutation(&identity.table, identity.doc_id)?
+    else {
         return Ok(None);
     };
     let actual = fk

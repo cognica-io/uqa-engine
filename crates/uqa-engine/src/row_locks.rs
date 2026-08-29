@@ -111,6 +111,7 @@ struct MarkedStrength {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum RelationLockMode {
+    AccessShare,
     RowShare,
     RowExclusive,
     AccessExclusive,
@@ -192,6 +193,7 @@ pub(crate) struct RowLockManager {
     state: Mutex<LockTable>,
     wake: Condvar,
     cross: Option<CrossAttachment>,
+    column_stats: RwLock<std::collections::BTreeMap<String, crate::ColumnStatsMap>>,
 }
 
 pub(crate) struct RowChangeSnapshot<'manager> {
@@ -311,6 +313,7 @@ impl RowLockManager {
             }),
             wake: Condvar::new(),
             cross,
+            column_stats: RwLock::new(std::collections::BTreeMap::new()),
         }
     }
 
@@ -332,6 +335,18 @@ impl RowLockManager {
 
     pub(crate) fn allocate_session(&self) -> u64 {
         self.next_session.fetch_add(1, Ordering::Relaxed)
+    }
+
+    pub(crate) fn publish_column_stats(&self, table: String, stats: crate::ColumnStatsMap) {
+        self.column_stats.write().insert(table, stats);
+    }
+
+    pub(crate) fn invalidate_column_stats(&self, table: &str) {
+        self.column_stats.write().remove(table);
+    }
+
+    pub(crate) fn published_column_stats(&self, table: &str) -> Option<crate::ColumnStatsMap> {
+        self.column_stats.read().get(table).cloned()
     }
 
     pub(crate) fn allocate_transaction_xid(&self) -> Result<u32, SQLError> {

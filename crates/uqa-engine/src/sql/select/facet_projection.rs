@@ -55,7 +55,7 @@ pub(in crate::sql) fn build_facet_output(
     };
 
     let include_field = execution.fields.len() > 1;
-    let table_state = engine.require_table(table)?;
+    let table_state = engine.require_query_table(table)?;
     let table_columns = table_state
         .columns
         .read()

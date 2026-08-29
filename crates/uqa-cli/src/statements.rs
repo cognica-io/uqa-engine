@@ -197,14 +197,7 @@ fn psql_escaped_semicolon_offsets(text: &str) -> Vec<usize> {
             continue;
         }
         if bytes[index] == b'$' {
-            let mut end = index + 1;
-            while bytes
-                .get(end)
-                .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
-            {
-                end += 1;
-            }
-            if bytes.get(end) == Some(&b'$') {
+            if let Some(end) = dollar_quote_delimiter_end(text, index) {
                 let delimiter = &text[index..=end];
                 let body_start = end + 1;
                 index = text[body_start..]
@@ -221,6 +214,28 @@ fn psql_escaped_semicolon_offsets(text: &str) -> Vec<usize> {
         index += text[index..].chars().next().map_or(1, char::len_utf8);
     }
     offsets
+}
+
+fn dollar_quote_delimiter_end(text: &str, start: usize) -> Option<usize> {
+    debug_assert_eq!(text.as_bytes().get(start), Some(&b'$'));
+    let tag = &text[start + 1..];
+    if tag.starts_with('$') {
+        return Some(start + 1);
+    }
+    let mut chars = tag.char_indices();
+    let (_, first) = chars.next()?;
+    if !(first == '_' || first.is_alphabetic()) {
+        return None;
+    }
+    for (offset, character) in chars {
+        if character == '$' {
+            return Some(start + 1 + offset);
+        }
+        if !(character == '_' || character.is_alphanumeric()) {
+            return None;
+        }
+    }
+    None
 }
 
 fn replace_psql_escaped_semicolons(text: &str, offsets: &[usize], replacement: &str) -> String {

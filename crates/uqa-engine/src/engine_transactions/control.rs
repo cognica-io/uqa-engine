@@ -46,16 +46,38 @@ impl Engine {
             false
         };
         if apply_on_commit {
-            let validation = {
-                let mut stack = self.session.transactions.lock();
-                self.validate_deferred_constraints_before_commit(&mut stack, false)
-            };
-            validation?;
+            // PostgreSQL alternates deferred-trigger processing with WITH HOLD portal conversion until neither phase can enqueue more work. A cursor query may invoke a mutating routine while it is being materialized, so validating only before portal conversion can otherwise commit a newly queued deferred FK violation.
+            loop {
+                self.validate_deferred_constraints_before_outer_commit()?;
+                let materialized = match self.materialize_holdable_session_portals() {
+                    Ok(materialized) => materialized,
+                    Err(error) => {
+                        return Err(self.rollback_transaction_completion_failure(
+                            error,
+                            "holdable cursor materialization",
+                        ));
+                    }
+                };
+                if !materialized {
+                    break;
+                }
+            }
             if let Err(error) = self.apply_temporary_on_commit_actions() {
-                return Err(self.abort_sql_transaction_after_error(error));
+                return Err(self
+                    .rollback_transaction_completion_failure(error, "temporary ON COMMIT action"));
             }
         }
         Ok(apply_on_commit)
+    }
+
+    fn rollback_transaction_completion_failure(&self, error: SQLError, context: &str) -> SQLError {
+        let mut stack = self.session.transactions.lock();
+        match self.rollback_transaction_frame(&mut stack) {
+            Ok(()) => error,
+            Err(rollback_error) => SQLError::Internal(format!(
+                "{error}; {context} rollback also failed: {rollback_error}"
+            )),
+        }
     }
 
     fn dispatch_transaction_statement(

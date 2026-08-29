@@ -27,7 +27,7 @@ pub(super) fn engine_query_optimizer(
     let column_stats = if table.is_empty() {
         BTreeMap::new()
     } else {
-        engine.try_column_stats(table).map_err(|error| {
+        engine.try_query_column_stats(table).map_err(|error| {
             SQLError::Internal(format!(
                 "read optimizer column statistics for `{table}`: {error}"
             ))
@@ -60,7 +60,7 @@ fn engine_index_stats(
         return Ok(stats);
     }
     let Some(table_state) = engine
-        .try_table(table)
+        .try_query_table(table)
         .map_err(|error| operator_execution_error("resolve optimizer table", error))?
     else {
         return Ok(stats);

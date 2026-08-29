@@ -587,4 +587,18 @@ pub(super) const MIGRATIONS: &[(u32, &str)] = &[
     DELETE FROM _metadata WHERE key LIKE 'sequence-persistence:%';
     ",
     ),
+    (
+        24,
+        r"
+    ALTER TABLE _tables
+        ADD COLUMN storage_generation BLOB NOT NULL DEFAULT X'00000000000000000000000000000000';
+    ",
+    ),
+    (
+        25,
+        r"
+    ALTER TABLE _tables
+        ADD COLUMN object_id BLOB NOT NULL DEFAULT X'00000000000000000000000000000000';
+    ",
+    ),
 ];

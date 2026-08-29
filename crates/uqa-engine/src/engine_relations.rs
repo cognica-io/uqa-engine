@@ -167,7 +167,28 @@ impl Engine {
         self.try_resolve_table_name(name)
     }
 
+    pub(crate) fn try_resolve_query_table_name(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<Option<String>> {
+        if let Some(snapshot) = self.query_table_snapshots.as_ref() {
+            return Ok(self
+                .relation_lookup_candidates(name)?
+                .into_iter()
+                .find(|candidate| snapshot.contains_key(candidate))
+                .map(|relation| relation.qualified_name()));
+        }
+        self.try_resolve_table_name(name)
+    }
+
     pub(crate) fn try_resolve_view_name(&self, name: &str) -> StorageBackendResult<Option<String>> {
+        if let Some(snapshot) = self.query_view_snapshots.as_ref() {
+            return Ok(self
+                .relation_lookup_candidates(name)?
+                .into_iter()
+                .find(|candidate| snapshot.contains_key(candidate))
+                .map(|relation| relation.qualified_name()));
+        }
         self.synchronize_catalog_registries()?;
         let views = self.durable.views.read();
         Ok(self
@@ -221,9 +242,103 @@ impl Engine {
         Ok(self.storage.tables.read().get(&relation).cloned())
     }
 
+    pub(crate) fn try_query_table(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<Option<Arc<TableState>>> {
+        let Some(resolved) = self.try_resolve_query_table_name(name)? else {
+            return Ok(None);
+        };
+        let relation =
+            RelationIdentity::from_legacy_name(&resolved).map_err(StorageBackendError::Other)?;
+        let live = self.storage.tables.read().get(&relation).cloned();
+        if let Some(snapshot) = self.query_table_snapshots.as_ref() {
+            if let Some(table) = snapshot.get(&relation) {
+                let table = Arc::clone(table);
+                let changes = self
+                    .fixed_transaction_row_changes(&resolved)
+                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+                return match changes.as_ref() {
+                    Some(changes) if !changes.is_empty() => {
+                        Self::detach_query_table(&table, &table, Some(changes))
+                            .map(Some)
+                            .map_err(|error| StorageBackendError::Other(error.to_string()))
+                    }
+                    _ => Ok(Some(table)),
+                };
+            }
+        }
+        if live
+            .as_ref()
+            .is_some_and(|table| table.persistence == uqa_sql::ast::RelationPersistence::Temporary)
+        {
+            return Ok(live);
+        }
+        let (fixed_snapshot_set, snapshot_table) =
+            self.session
+                .transactions
+                .lock()
+                .first()
+                .map_or((false, None), |frame| {
+                    let Some(snapshot) = frame.fixed_snapshot.as_ref() else {
+                        return (false, None);
+                    };
+                    let table = live.as_ref().map_or_else(
+                        || snapshot.table(&relation),
+                        |table| snapshot.table_for_live_relation(&relation, table),
+                    );
+                    (true, table)
+                });
+        let Some(snapshot_table) = snapshot_table else {
+            if fixed_snapshot_set
+                && live.as_ref().is_some_and(|table| {
+                    table.persistence != uqa_sql::ast::RelationPersistence::Temporary
+                })
+            {
+                let changes = self
+                    .fixed_transaction_row_changes(&resolved)
+                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+                if changes.as_ref().is_some_and(|changes| !changes.is_empty()) {
+                    return Ok(live);
+                }
+                return live
+                    .as_ref()
+                    .map(Self::detach_empty_query_table)
+                    .transpose()
+                    .map_err(|error| StorageBackendError::Other(error.to_string()));
+            }
+            return Ok(live);
+        };
+        let Some(metadata) = live.as_ref() else {
+            return Ok(Some(snapshot_table));
+        };
+        let changes = self
+            .fixed_transaction_row_changes(&resolved)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        let metadata_changed = Self::table_catalog_metadata_fingerprint(&snapshot_table)?
+            != Self::table_catalog_metadata_fingerprint(metadata)?;
+        match (changes.as_ref(), metadata_changed) {
+            (Some(changes), _) if !changes.is_empty() => {
+                Self::detach_query_table(&snapshot_table, metadata, Some(changes))
+                    .map(Some)
+                    .map_err(|error| StorageBackendError::Other(error.to_string()))
+            }
+            (_, true) => Self::detach_query_table(&snapshot_table, metadata, None)
+                .map(Some)
+                .map_err(|error| StorageBackendError::Other(error.to_string())),
+            _ => Ok(Some(snapshot_table)),
+        }
+    }
+
     pub(crate) fn require_table(&self, name: &str) -> Result<Arc<TableState>, SQLError> {
         self.try_table(name)
             .map_err(|err| SQLError::Internal(format!("resolve table `{name}`: {err}")))?
+            .ok_or_else(|| SQLError::UnknownTable(name.to_string()))
+    }
+
+    pub(crate) fn require_query_table(&self, name: &str) -> Result<Arc<TableState>, SQLError> {
+        self.try_query_table(name)
+            .map_err(|error| SQLError::Internal(format!("resolve query table `{name}`: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(name.to_string()))
     }
 
@@ -231,7 +346,7 @@ impl Engine {
         &self,
         name: &str,
     ) -> StorageBackendResult<Option<uqa_sql::ast::RelationPersistence>> {
-        Ok(self.try_table(name)?.map(|table| table.persistence))
+        Ok(self.try_query_table(name)?.map(|table| table.persistence))
     }
 
     pub(crate) fn has_temporary_relations(&self) -> bool {
@@ -268,6 +383,19 @@ impl Engine {
             .read()
             .get(&relation)
             .copied())
+    }
+
+    pub(crate) fn query_sequence_persistence(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<Option<uqa_sql::ast::RelationPersistence>> {
+        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+            return Ok(self
+                .relation_lookup_candidates(name)?
+                .into_iter()
+                .find_map(|relation| snapshot.sequence_persistence.get(&relation).copied()));
+        }
+        self.sequence_persistence(name)
     }
 
     pub(crate) fn training_set_from_table(

@@ -60,7 +60,7 @@ impl EngineDriver<'_> {
     pub(super) fn require_column(&self, field: &str) -> DriverResult<()> {
         let columns = self
             .engine
-            .describe_table(self.table)
+            .try_describe_query_table(self.table)
             .map_err(|error| operator_execution_error("resolve operator table", error))?;
         let Some(columns) = columns else {
             return Err(SQLError::UnknownTable(self.table.to_string()));
@@ -168,7 +168,7 @@ impl EngineDriver<'_> {
     ) -> DriverResult<uqa_operators::base::ExecutionContext> {
         let columns = self
             .engine
-            .describe_table(self.table)
+            .try_describe_query_table(self.table)
             .map_err(|error| operator_execution_error("resolve projected operator table", error))?
             .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))?;
         let projection = fields

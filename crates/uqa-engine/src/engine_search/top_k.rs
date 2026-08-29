@@ -204,7 +204,7 @@ impl Engine {
     ) -> Result<TextSearchProfile, SQLError> {
         let started = Instant::now();
         let Some(t) = self
-            .try_table(table)
+            .try_query_table(table)
             .map_err(|error| storage_sql_error("resolve text-search table", error))?
         else {
             return Err(SQLError::UnknownTable(table.to_string()));

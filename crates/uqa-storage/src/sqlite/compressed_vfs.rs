@@ -226,6 +226,7 @@ struct ContainerFile {
     file_id: [u8; FILE_ID_LEN],
     generation: u64,
     state_tag: [u8; AUTH_TAG_LEN],
+    committed_file_len: u64,
     dirty_header: bool,
 }
 

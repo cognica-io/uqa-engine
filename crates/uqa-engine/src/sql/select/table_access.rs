@@ -34,7 +34,7 @@ pub(in crate::sql) fn run_single_table_select_output(
         crate::sql::validate_expr_text_match_fields(engine, table, filter)?;
     }
     let has_stored_score_column = engine
-        .try_describe_table(table)
+        .try_describe_query_table(table)
         .map_err(|error| SQLError::Internal(format!("read table schema for `{table}`: {error}")))?
         .is_some_and(|columns| {
             columns
@@ -149,7 +149,7 @@ pub(in crate::sql) fn run_single_table_select_output(
         .map(|columns| columns.into_iter().collect())
         .map_or_else(
             || {
-                engine.try_table_columns(table).map_err(|error| {
+                engine.try_query_table_columns(table).map_err(|error| {
                     SQLError::Internal(format!("read table columns for `{table}`: {error}"))
                 })
             },
@@ -167,9 +167,9 @@ pub(in crate::sql) fn run_single_table_select_output(
         return build_facet_output(engine, table, scored, physical_filter.take(), execution);
     }
 
-    let table_state = engine.require_table(table)?;
+    let table_state = engine.require_query_table(table)?;
     let ordered_primary_key = engine
-        .try_describe_table(table)
+        .try_describe_query_table(table)
         .map_err(|error| SQLError::Internal(format!("read table schema for `{table}`: {error}")))?
         .and_then(|columns| {
             columns
@@ -192,7 +192,7 @@ pub(in crate::sql) fn run_single_table_select_output(
     }
     let lock_origin = if ctes.lock_identities.emit {
         let storage_name = engine
-            .try_resolve_table_name(table)
+            .try_resolve_query_table_name(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
             .unwrap_or_else(|| table.to_string());
         Some((

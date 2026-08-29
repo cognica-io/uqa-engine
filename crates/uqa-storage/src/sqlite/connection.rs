@@ -483,6 +483,12 @@ impl ManagedConnection {
         ))
     }
 
+    /// Whether one pooled connection may retain a read snapshot while another writes. Plain and encrypted `SQLite` databases use WAL; compressed containers use rollback journaling and therefore require a detached engine snapshot before writer promotion.
+    #[must_use]
+    pub fn supports_concurrent_pinned_read_and_write(&self) -> bool {
+        !matches!(&self.pool.spec, ConnectionSpec::Compressed { .. })
+    }
+
     /// Database change counter observed on a connection permanently owned by
     /// this logical session. The value changes when another `SQLite` connection
     /// commits. In-memory databases have no independent connections and

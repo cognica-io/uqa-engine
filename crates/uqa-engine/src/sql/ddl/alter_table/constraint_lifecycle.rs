@@ -420,7 +420,7 @@ pub(super) fn validate_and_mark_constraint(
 }
 
 fn validate_not_null_rows(engine: &Engine, table: &str, column: &str) -> Result<(), SQLError> {
-    for doc_id in engine.table_doc_ids(table)? {
+    for doc_id in engine.live_table_doc_ids(table)? {
         let Some(document) = engine.get_document(table, doc_id)? else {
             continue;
         };
@@ -454,7 +454,7 @@ fn validate_check_rows(
             .map(|column| Some(column.ty.clone()))
             .collect(),
     );
-    for doc_id in engine.table_doc_ids(table)? {
+    for doc_id in engine.live_table_doc_ids(table)? {
         let Some(mut document) = engine.get_document(table, doc_id)? else {
             continue;
         };

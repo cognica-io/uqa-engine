@@ -145,6 +145,9 @@ impl Engine {
     }
 
     pub(crate) fn roles_for_catalog(&self) -> Vec<RoleDefinition> {
+        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+            return snapshot.roles.values().cloned().collect();
+        }
         self.durable.roles.read().values().cloned().collect()
     }
 

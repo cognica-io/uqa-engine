@@ -87,14 +87,16 @@ impl Catalog {
         let vectors = serde_json::to_string(&schema.vector_fields)?;
         let columns = schema.columns_json.clone();
         let constraints = schema.constraints_json.clone();
+        let object_id = schema.object_id;
+        let storage_generation = schema.storage_generation;
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             Self::claim_relation(&tx, &schema.relation, RelationKind::Table)?;
             tx.execute(
                 "INSERT OR REPLACE INTO _tables
                     (schema_name, relation_name, kind, analyzer, fts_fields,
-                     vector_fields, columns, constraints)
-                 VALUES (?1, ?2, 'table', ?3, ?4, ?5, ?6, ?7)",
+                     vector_fields, columns, constraints, storage_generation, object_id)
+                 VALUES (?1, ?2, 'table', ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     schema.relation.schema,
                     schema.relation.name,
@@ -102,7 +104,9 @@ impl Catalog {
                     fts,
                     vectors,
                     columns,
-                    constraints
+                    constraints,
+                    storage_generation.as_slice(),
+                    object_id.as_slice()
                 ],
             )?;
             tx.commit()?;
@@ -114,7 +118,7 @@ impl Catalog {
         self.conn.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT schema_name, relation_name, analyzer, fts_fields,
-                        vector_fields, columns, constraints
+                        vector_fields, columns, constraints, storage_generation, object_id
                    FROM _tables ORDER BY schema_name, relation_name",
             )?;
             let rows = stmt.query_map([], |r| {
@@ -126,6 +130,8 @@ impl Catalog {
                     r.get::<_, String>(4)?,
                     r.get::<_, Option<String>>(5)?,
                     r.get::<_, String>(6)?,
+                    r.get::<_, Vec<u8>>(7)?,
+                    r.get::<_, Vec<u8>>(8)?,
                 ))
             })?;
             let mut out = Vec::new();
@@ -138,11 +144,27 @@ impl Catalog {
                     vec_str,
                     cols_opt,
                     constraints_json,
+                    storage_generation,
+                    object_id,
                 ) = row?;
                 let fts_fields: Vec<String> = serde_json::from_str(&fts_str)?;
                 let vector_fields: Vec<VectorFieldSchema> = serde_json::from_str(&vec_str)?;
+                let storage_generation: [u8; 16] = storage_generation.try_into().map_err(|value: Vec<u8>| {
+                    SQLiteError::StorageBackend(format!(
+                        "table `{schema_name}.{relation_name}` has a {}-byte storage generation instead of 16 bytes",
+                        value.len()
+                    ))
+                })?;
+                let object_id: [u8; 16] = object_id.try_into().map_err(|value: Vec<u8>| {
+                    SQLiteError::StorageBackend(format!(
+                        "table `{schema_name}.{relation_name}` has a {}-byte object identity instead of 16 bytes",
+                        value.len()
+                    ))
+                })?;
                 out.push(TableSchema {
                     relation: RelationIdentity::new(schema_name, relation_name),
+                    object_id,
+                    storage_generation,
                     analyzer_json,
                     fts_fields,
                     vector_fields,

@@ -44,7 +44,36 @@ impl Engine {
             .is_some_and(|entries| !entries.is_empty()))
     }
 
+    pub(crate) fn query_relation_has_rules(&self, table: &str) -> Result<bool, SQLError> {
+        let (Some(tables), Some(catalog)) = (
+            self.query_table_snapshots.as_ref(),
+            self.query_catalog_snapshot.as_ref(),
+        ) else {
+            return self.relation_has_rules(table);
+        };
+        let relation = self
+            .relation_lookup_candidates(table)
+            .map_err(|error| {
+                SQLError::Internal(format!("resolve query rule table `{table}`: {error}"))
+            })?
+            .into_iter()
+            .find(|candidate| tables.contains_key(candidate))
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        Ok(catalog
+            .rules
+            .get(&relation)
+            .is_some_and(|entries| !entries.is_empty()))
+    }
+
     pub(crate) fn list_rules(&self) -> Vec<StoredRule> {
+        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+            return snapshot
+                .rules
+                .values()
+                .flat_map(BTreeMap::values)
+                .cloned()
+                .collect();
+        }
         self.durable
             .rules
             .read()
@@ -164,7 +193,70 @@ impl Engine {
         }))
     }
 
+    pub(crate) fn query_relation_has_triggers(&self, table: &str) -> Result<bool, SQLError> {
+        let (Some(tables), Some(catalog)) = (
+            self.query_table_snapshots.as_ref(),
+            self.query_catalog_snapshot.as_ref(),
+        ) else {
+            return self.relation_has_triggers(table);
+        };
+        let mut current = self
+            .relation_lookup_candidates(table)
+            .map_err(|error| {
+                SQLError::Internal(format!("resolve query trigger table `{table}`: {error}"))
+            })?
+            .into_iter()
+            .find(|candidate| tables.contains_key(candidate))
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        let mut sources = Vec::new();
+        let mut visited = std::collections::BTreeSet::new();
+        loop {
+            if !visited.insert(current.clone()) {
+                return Err(SQLError::Internal(format!(
+                    "trigger partition hierarchy contains a cycle at `{}`",
+                    current.qualified_name()
+                )));
+            }
+            sources.push(current.clone());
+            let hierarchy = tables
+                .get(&current)
+                .ok_or_else(|| SQLError::UnknownTable(current.qualified_name()))?
+                .hierarchy
+                .read()
+                .clone();
+            if hierarchy.partition_bound.is_none() {
+                break;
+            }
+            let Some(parent) = hierarchy.parents.first() else {
+                return Err(SQLError::Internal(format!(
+                    "partition `{}` has no parent",
+                    current.qualified_name()
+                )));
+            };
+            current = RelationIdentity::from_legacy_name(parent).map_err(|error| {
+                SQLError::Internal(format!(
+                    "decode query trigger partition parent `{parent}`: {error}"
+                ))
+            })?;
+        }
+        Ok(sources.iter().enumerate().any(|(index, source)| {
+            catalog.triggers.get(source).is_some_and(|entries| {
+                entries
+                    .values()
+                    .any(|trigger| index == 0 || trigger.definition.row)
+            })
+        }))
+    }
+
     pub(crate) fn list_triggers(&self) -> Vec<StoredTrigger> {
+        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+            return snapshot
+                .triggers
+                .values()
+                .flat_map(BTreeMap::values)
+                .cloned()
+                .collect();
+        }
         self.durable
             .triggers
             .read()

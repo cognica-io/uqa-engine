@@ -31,6 +31,259 @@ pub(in crate::sql) fn query_has_row_locks(query: &QueryPlan) -> bool {
     query_plan_has_row_locks(query)
 }
 
+/// Acquire `PostgreSQL` `AccessShareLock` equivalents for every concrete table referenced by a query. The locks are transaction-scoped, so a cursor declaration keeps its bound relations alive until commit while ordinary persistent statements keep DDL from changing a source during execution.
+pub(in crate::sql) fn lock_query_relations(
+    engine: &Engine,
+    query: &QueryPlan,
+) -> Result<(), SQLError> {
+    let mut locked = std::collections::BTreeSet::new();
+    let mut visiting_views = std::collections::BTreeSet::new();
+    lock_query_plan_relations(
+        engine,
+        query,
+        &std::collections::BTreeSet::new(),
+        &mut locked,
+        &mut visiting_views,
+    )
+}
+
+fn lock_query_plan_relations(
+    engine: &Engine,
+    query: &QueryPlan,
+    inherited_ctes: &std::collections::BTreeSet<String>,
+    locked: &mut std::collections::BTreeSet<String>,
+    visiting_views: &mut std::collections::BTreeSet<String>,
+) -> Result<(), SQLError> {
+    let mut visible_ctes = inherited_ctes.clone();
+    for cte in &query.ctes {
+        let mut definition_scope = visible_ctes.clone();
+        if cte.recursive {
+            definition_scope.insert(cte.name.clone());
+        }
+        lock_query_plan_relations(
+            engine,
+            &cte.query,
+            &definition_scope,
+            locked,
+            visiting_views,
+        )?;
+        visible_ctes.insert(cte.name.clone());
+    }
+    lock_relational_plan_relations(engine, &query.root, &visible_ctes, locked, visiting_views)
+}
+
+fn lock_relational_plan_relations(
+    engine: &Engine,
+    plan: &RelationalPlan,
+    visible_ctes: &std::collections::BTreeSet<String>,
+    locked: &mut std::collections::BTreeSet<String>,
+    visiting_views: &mut std::collections::BTreeSet<String>,
+) -> Result<(), SQLError> {
+    match plan {
+        RelationalPlan::QueryBlock(block) => {
+            if let Some(source) = block.from.as_ref() {
+                lock_source_plan_relations(engine, source, visible_ctes, locked, visiting_views)?;
+            }
+            for subquery in &block.subqueries {
+                lock_query_plan_relations(engine, subquery, visible_ctes, locked, visiting_views)?;
+            }
+            Ok(())
+        }
+        RelationalPlan::SetOp {
+            left,
+            right,
+            subqueries,
+            ..
+        } => {
+            lock_query_plan_relations(engine, left, visible_ctes, locked, visiting_views)?;
+            lock_query_plan_relations(engine, right, visible_ctes, locked, visiting_views)?;
+            for subquery in subqueries {
+                lock_query_plan_relations(engine, subquery, visible_ctes, locked, visiting_views)?;
+            }
+            Ok(())
+        }
+        RelationalPlan::Values { subqueries, .. } => {
+            for subquery in subqueries {
+                lock_query_plan_relations(engine, subquery, visible_ctes, locked, visiting_views)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn lock_source_plan_relations(
+    engine: &Engine,
+    source: &SourcePlan,
+    visible_ctes: &std::collections::BTreeSet<String>,
+    locked: &mut std::collections::BTreeSet<String>,
+    visiting_views: &mut std::collections::BTreeSet<String>,
+) -> Result<(), SQLError> {
+    match source {
+        SourcePlan::Table {
+            name,
+            include_descendants,
+            ..
+        } => {
+            if visible_ctes.contains(name) {
+                return Ok(());
+            }
+            if let Some(table) = engine.try_resolve_table_name(name).map_err(|error| {
+                SQLError::Internal(format!("resolve query relation `{name}`: {error}"))
+            })? {
+                for member in engine.hierarchy_scan_tables(&table, *include_descendants)? {
+                    if locked.insert(member.clone()) {
+                        engine.lock_relation(
+                            &member,
+                            crate::row_locks::RelationLockMode::AccessShare,
+                        )?;
+                    }
+                }
+                return Ok(());
+            }
+            if let Some(view) = engine.view_plan(name)? {
+                let view_name = engine
+                    .try_resolve_view_name(name)
+                    .map_err(|error| {
+                        SQLError::Internal(format!("resolve query view `{name}`: {error}"))
+                    })?
+                    .unwrap_or_else(|| name.clone());
+                if !visiting_views.insert(view_name.clone()) {
+                    return Err(SQLError::Internal(format!(
+                        "view `{name}` has a recursive relation dependency"
+                    )));
+                }
+                let result = lock_query_plan_relations(
+                    engine,
+                    &view,
+                    &std::collections::BTreeSet::new(),
+                    locked,
+                    visiting_views,
+                );
+                visiting_views.remove(&view_name);
+                return result;
+            }
+            if let Some(foreign) = engine.resolve_foreign_table_name(name).map_err(|error| {
+                SQLError::Internal(format!("resolve foreign query relation `{name}`: {error}"))
+            })? {
+                if locked.insert(foreign.clone()) {
+                    engine
+                        .lock_relation(&foreign, crate::row_locks::RelationLockMode::AccessShare)?;
+                }
+            }
+            Ok(())
+        }
+        SourcePlan::Join { left, right, .. } => {
+            lock_source_plan_relations(engine, left, visible_ctes, locked, visiting_views)?;
+            lock_source_plan_relations(engine, right, visible_ctes, locked, visiting_views)
+        }
+        SourcePlan::Subquery { body, .. } => {
+            lock_query_plan_relations(engine, body, visible_ctes, locked, visiting_views)
+        }
+        SourcePlan::Function { relation, .. } => {
+            lock_table_function_relation(engine, relation.as_deref(), locked)
+        }
+        SourcePlan::FunctionGroup { functions, .. } => {
+            for function in functions {
+                lock_table_function_relation(engine, function.relation.as_deref(), locked)?;
+            }
+            Ok(())
+        }
+        SourcePlan::Values { .. } => Ok(()),
+    }
+}
+
+fn lock_table_function_relation(
+    engine: &Engine,
+    relation: Option<&str>,
+    locked: &mut std::collections::BTreeSet<String>,
+) -> Result<(), SQLError> {
+    let Some(relation) = relation else {
+        return Ok(());
+    };
+    let Some(table) = engine.try_resolve_table_name(relation).map_err(|error| {
+        SQLError::Internal(format!(
+            "resolve table-function relation `{relation}`: {error}"
+        ))
+    })?
+    else {
+        return Ok(());
+    };
+    if locked.insert(table.clone()) {
+        engine.lock_relation(&table, crate::row_locks::RelationLockMode::AccessShare)?;
+    }
+    Ok(())
+}
+
+/// Resolve cursor row-lock targets without opening or pulling the query. `PostgreSQL` performs these declaration-time checks even though expression evaluation and tuple locking wait until FETCH.
+pub(in crate::sql) fn validate_query_row_locks(
+    engine: &Engine,
+    query: &QueryPlan,
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
+    let ctes = CteScope::new_for_current_routine();
+    validate_query_plan_row_locks(engine, query, params, &ctes)
+}
+
+fn validate_query_plan_row_locks(
+    engine: &Engine,
+    query: &QueryPlan,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<(), SQLError> {
+    for cte in &query.ctes {
+        validate_query_plan_row_locks(engine, &cte.query, params, ctes)?;
+    }
+    match &query.root {
+        RelationalPlan::QueryBlock(block) => {
+            for subquery in &block.subqueries {
+                validate_query_plan_row_locks(engine, subquery, params, ctes)?;
+            }
+            if let Some(from) = block.from.as_ref() {
+                validate_source_row_locks(engine, from, params, ctes)?;
+                resolve_row_locks(
+                    engine,
+                    from,
+                    &block.locking,
+                    block.r#where.as_ref(),
+                    params,
+                    ctes,
+                )?;
+            }
+        }
+        RelationalPlan::SetOp { left, right, .. } => {
+            validate_query_plan_row_locks(engine, left, params, ctes)?;
+            validate_query_plan_row_locks(engine, right, params, ctes)?;
+        }
+        RelationalPlan::Values { subqueries, .. } => {
+            for subquery in subqueries {
+                validate_query_plan_row_locks(engine, subquery, params, ctes)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_source_row_locks(
+    engine: &Engine,
+    source: &SourcePlan,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<(), SQLError> {
+    match source {
+        SourcePlan::Join { left, right, .. } => {
+            validate_source_row_locks(engine, left, params, ctes)?;
+            validate_source_row_locks(engine, right, params, ctes)
+        }
+        SourcePlan::Subquery { body, .. } => {
+            validate_query_plan_row_locks(engine, body, params, ctes)
+        }
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. } => Ok(()),
+    }
+}
+
 fn query_plan_has_row_locks(query: &QueryPlan) -> bool {
     query
         .ctes
@@ -328,7 +581,7 @@ fn collect_source_leaves(
             let kind = classify_table_leaf(engine, name, ctes)?;
             if matches!(kind, LockLeafKind::Base) {
                 return Ok(engine
-                    .hierarchy_scan_tables(name, *include_descendants)?
+                    .query_hierarchy_scan_tables(name, *include_descendants)?
                     .into_iter()
                     .map(|storage_name| LockLeaf {
                         names: names.clone(),
@@ -527,7 +780,7 @@ fn classify_table_leaf(
         return Ok(LockLeafKind::Foreign);
     }
     if engine
-        .try_table(name)
+        .try_query_table(name)
         .map_err(|error| SQLError::Internal(format!("resolve lock target `{name}`: {error}")))?
         .is_some()
     {
@@ -1016,15 +1269,21 @@ impl LockRows<'_> {
                 if *handled {
                     continue;
                 }
-                let target_doc_id =
-                    match self.candidate_recheck_target(candidate, cache, durable_coordination)? {
-                        CandidateRecheckTarget::Unchanged => {
-                            *handled = true;
-                            continue;
-                        }
-                        CandidateRecheckTarget::Missing => return Ok(None),
-                        CandidateRecheckTarget::Changed(target_doc_id) => target_doc_id,
-                    };
+                let recheck_target =
+                    self.candidate_recheck_target(candidate, cache, durable_coordination)?;
+                if self.engine.current_transaction_uses_fixed_snapshot()
+                    && !matches!(recheck_target, CandidateRecheckTarget::Unchanged)
+                {
+                    return Err(super::super::dml::concurrent_update_serialization_failure());
+                }
+                let target_doc_id = match recheck_target {
+                    CandidateRecheckTarget::Unchanged => {
+                        *handled = true;
+                        continue;
+                    }
+                    CandidateRecheckTarget::Missing => return Ok(None),
+                    CandidateRecheckTarget::Changed(target_doc_id) => target_doc_id,
+                };
                 any_changed = true;
                 progressed = true;
                 if matches!(

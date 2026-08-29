@@ -459,12 +459,22 @@ impl Engine {
     }
 
     pub fn foreign_server(&self, name: &str) -> Result<Option<uqa_fdw::ForeignServer>, String> {
+        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+            return Ok(snapshot.foreign_servers.get(name).cloned());
+        }
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh FDW catalog: {err}"))?;
         Ok(self.durable.foreign_servers.read().get(name).cloned())
     }
 
     pub fn foreign_table(&self, name: &str) -> Result<Option<uqa_fdw::ForeignTable>, String> {
+        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+            return Ok(self
+                .relation_lookup_candidates(name)
+                .map_err(|err| format!("resolve foreign table: {err}"))?
+                .into_iter()
+                .find_map(|relation| snapshot.foreign_tables.get(&relation).cloned()));
+        }
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh FDW catalog: {err}"))?;
         let Some(resolved) = self
@@ -478,6 +488,11 @@ impl Engine {
     }
 
     pub fn list_foreign_servers(&self) -> Result<Vec<String>, String> {
+        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+            let mut out = snapshot.foreign_servers.keys().cloned().collect::<Vec<_>>();
+            out.sort();
+            return Ok(out);
+        }
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh FDW catalog: {err}"))?;
         let mut out: Vec<String> = self
@@ -492,6 +507,15 @@ impl Engine {
     }
 
     pub fn list_foreign_tables(&self) -> Result<Vec<String>, String> {
+        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+            let mut out = snapshot
+                .foreign_tables
+                .keys()
+                .map(RelationIdentity::qualified_name)
+                .collect::<Vec<_>>();
+            out.sort();
+            return Ok(out);
+        }
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh FDW catalog: {err}"))?;
         let mut out: Vec<String> = self

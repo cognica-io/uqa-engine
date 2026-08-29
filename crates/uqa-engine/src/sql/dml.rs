@@ -14,7 +14,7 @@ use super::{
     partition_insert_target, validate_vector_dimensions, value_to_tensor, value_to_vector,
     BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope, DocId, Document, Engine, ForeignKey,
     ForeignKeyAction, ForeignKeyMatch, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult,
-    Value, DOC_ID_COLUMN, XMIN_COLUMN,
+    Value, DOC_ID_COLUMN, XMIN_COLUMN, XMIN_STORAGE_COLUMN, XMIN_USER_STORAGE_COLUMN,
 };
 use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema, ScalarExpr};
 use uqa_planner::{
@@ -24,6 +24,13 @@ use uqa_planner::{
 
 fn dml_storage_error(action: &str, err: impl std::fmt::Display) -> SQLError {
     SQLError::Internal(format!("{action} failed in storage backend: {err}"))
+}
+
+pub(in crate::sql) fn concurrent_update_serialization_failure() -> SQLError {
+    SQLError::Routine {
+        sqlstate: "40001".into(),
+        message: "could not serialize access due to concurrent update".into(),
+    }
 }
 
 pub(in crate::sql) struct DmlCommandMutationOverlay<'a> {
@@ -383,8 +390,18 @@ pub(in crate::sql) fn lock_mutation_target(
                     recheck,
                 });
             }
+            crate::row_locks::RowChangeTarget::Deleted
+                if engine.current_transaction_uses_fixed_snapshot() =>
+            {
+                return Err(concurrent_update_serialization_failure());
+            }
             crate::row_locks::RowChangeTarget::Deleted => {
                 return Ok(MutationLockTarget::Deleted);
+            }
+            crate::row_locks::RowChangeTarget::Present(_)
+                if engine.current_transaction_uses_fixed_snapshot() =>
+            {
+                return Err(concurrent_update_serialization_failure());
             }
             crate::row_locks::RowChangeTarget::Present(successor) => successor,
         };
@@ -439,6 +456,12 @@ pub(in crate::sql) fn lock_physical_mutation_target(
                     identity: current,
                     recheck,
                 });
+            }
+            crate::row_locks::PhysicalRowChangeTarget::Deleted
+            | crate::row_locks::PhysicalRowChangeTarget::Present { .. }
+                if engine.current_transaction_uses_fixed_snapshot() =>
+            {
+                return Err(concurrent_update_serialization_failure());
             }
             crate::row_locks::PhysicalRowChangeTarget::Deleted => {
                 return Ok(PhysicalMutationLockTarget::Deleted);
@@ -510,11 +533,40 @@ fn is_virtual_document_id_column(column: &str, definitions: &[uqa_sql::ast::Colu
             .any(|definition| definition.name == DOC_ID_COLUMN)
 }
 
-pub(crate) fn stamp_tuple_xmin(engine: &Engine, document: &mut Document) -> Result<(), SQLError> {
-    document.insert(
-        XMIN_COLUMN.into(),
-        Value::Int(i64::from(engine.tuple_version_xid()?)),
-    );
+pub(crate) fn stamp_tuple_xmin(
+    engine: &Engine,
+    table: &str,
+    document: &mut Document,
+) -> Result<(), SQLError> {
+    let xmin = Value::Int(i64::from(engine.tuple_version_xid()?));
+    let previous_system_xmin = document.get(XMIN_STORAGE_COLUMN).cloned();
+    let schemaless_user_xmin_marked = document
+        .get(XMIN_USER_STORAGE_COLUMN)
+        .is_some_and(|value| value == &Value::Bool(true));
+    let public_xmin_was_system_mirror = previous_system_xmin
+        .as_ref()
+        .is_some_and(|previous| document.get(XMIN_COLUMN) == Some(previous));
+    let definitions = engine
+        .try_describe_table(table)
+        .map_err(|error| dml_storage_error("resolve tuple-version schema", error))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let has_declared_xmin = definitions
+        .iter()
+        .any(|definition| definition.name == XMIN_COLUMN);
+    let schemaless_user_xmin = definitions.is_empty()
+        && (schemaless_user_xmin_marked
+            || (document.contains_key(XMIN_COLUMN)
+                && (previous_system_xmin.is_none() || !public_xmin_was_system_mirror)));
+    document.insert(XMIN_STORAGE_COLUMN.into(), xmin.clone());
+    if schemaless_user_xmin {
+        document.insert(XMIN_USER_STORAGE_COLUMN.into(), Value::Bool(true));
+    } else {
+        document.remove(XMIN_USER_STORAGE_COLUMN);
+    }
+    if !has_declared_xmin && !schemaless_user_xmin {
+        // Keep the legacy projection mirror while old database rows are migrated lazily. The collision-free key above is authoritative and the mirror is never written when `xmin` belongs to the user schema.
+        document.insert(XMIN_COLUMN.into(), xmin);
+    }
     Ok(())
 }
 
@@ -537,7 +589,11 @@ fn dml_target_row(
     let mut columns = if definitions.is_empty() {
         materialized
             .keys()
-            .filter(|column| column.as_str() != XMIN_COLUMN)
+            .filter(|column| {
+                column.as_str() != XMIN_STORAGE_COLUMN
+                    && column.as_str() != XMIN_USER_STORAGE_COLUMN
+                    && column.as_str() != XMIN_COLUMN
+            })
             .cloned()
             .collect::<Vec<_>>()
     } else {
@@ -572,6 +628,11 @@ fn dml_target_row(
                 })
             {
                 doc_id_value(doc_id)
+            } else if column == XMIN_COLUMN {
+                Ok(materialized
+                    .get(XMIN_STORAGE_COLUMN)
+                    .cloned()
+                    .unwrap_or(Value::Null))
             } else {
                 Ok(materialized.get(column).cloned().unwrap_or(Value::Null))
             }

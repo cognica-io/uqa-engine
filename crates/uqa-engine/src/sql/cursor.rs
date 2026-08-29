@@ -16,8 +16,8 @@ use super::driver::{
     abort_explicit_statement_error, rollback_after_statement_error, rollback_implicit_statement,
 };
 use super::{
-    lower_statement, optimize_engine_plan, query_has_row_locks, query_may_mutate_engine, Engine,
-    UnifiedPlanExecutor,
+    lower_statement, optimize_engine_plan, query_has_row_locks, query_may_mutate_engine,
+    query_requires_statement_transaction, Engine, UnifiedPlanExecutor,
 };
 
 /// Metadata known before a cursor is consumed.
@@ -155,7 +155,7 @@ fn execute_uncached_or_snapshot_scoped(
                 .map_err(|error| engine.abort_sql_transaction_after_error(error))?;
         }
         engine
-            .refresh_explicit_statement_snapshot()
+            .prepare_explicit_statement_snapshot(true)
             .map_err(|error| engine.abort_sql_transaction_after_error(error))?;
         let mut plan = lower_statement(engine, statement.clone());
         let current_query = query_from_plan(&plan)
@@ -188,7 +188,10 @@ fn execute_uncached_or_snapshot_scoped(
     }
 
     let is_read_query = !query_may_mutate_engine(engine, query)?;
-    let needs_transaction = engine.storage.backend.is_some() || !is_read_query || has_row_locks;
+    let requires_statement_transaction =
+        !is_read_query || query_requires_statement_transaction(engine, query)?;
+    let needs_transaction =
+        engine.storage.backend.is_some() || requires_statement_transaction || has_row_locks;
     if !needs_transaction {
         let optimized = if let Some(plan) = cached_optimized {
             plan

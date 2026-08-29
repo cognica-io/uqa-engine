@@ -21,7 +21,7 @@ impl Engine {
             return Ok(Vec::new());
         }
         let Some(t) = self
-            .try_table(table)
+            .try_query_table(table)
             .map_err(|error| storage_sql_error("resolve vector-search table", error))?
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
@@ -54,7 +54,7 @@ impl Engine {
             return Ok(Vec::new());
         }
         let Some(table_state) = self
-            .try_table(table)
+            .try_query_table(table)
             .map_err(|error| storage_sql_error("resolve calibrated-vector table", error))?
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
@@ -130,7 +130,7 @@ impl Engine {
         }
 
         let table = self
-            .try_table(&table_name)
+            .try_query_table(&table_name)
             .map_err(|error| storage_sql_error("resolve calibrated-vector table", error))?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
         let indexes = table.vector_indexes.read();

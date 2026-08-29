@@ -240,7 +240,7 @@ fn materialize_create_table_as_rows(
                 })?;
             document.insert(column.name.clone(), value);
         }
-        crate::sql::dml::stamp_tuple_xmin(engine, &mut document)?;
+        crate::sql::dml::stamp_tuple_xmin(engine, name, &mut document)?;
         let vectors = crate::sql::dml::document_vectors(engine, name, &document)?;
         engine.add_document_with_vector_values(name, doc_id, document, vectors)?;
     }
@@ -288,6 +288,8 @@ fn create_table_as_columns(
                 .column_type(position)
                 .cloned()
                 .unwrap_or(ColumnType::Text),
+            object_id: None,
+            missing_value: None,
             primary_key: false,
             not_null: false,
             not_null_explicit: false,

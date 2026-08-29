@@ -46,7 +46,18 @@ pub(crate) fn materialize_constraint_metadata(
     }
 
     let mut changed = false;
+    let mut column_object_ids = BTreeSet::new();
     for column in columns.iter_mut() {
+        if column
+            .object_id
+            .is_some_and(|object_id| !column_object_ids.insert(object_id))
+        {
+            column.object_id = None;
+        }
+        changed |= assign_catalog_object_id(&mut column.object_id, "column")?;
+        if let Some(object_id) = column.object_id {
+            column_object_ids.insert(object_id);
+        }
         if column.not_null {
             changed |= assign_constraint_name(
                 &mut column.not_null_name,
@@ -150,12 +161,19 @@ pub(crate) fn synchronize_partition_inherited_foreign_key_ids(
 }
 
 fn assign_constraint_object_id(target: &mut Option<[u8; 16]>) -> StorageBackendResult<bool> {
+    assign_catalog_object_id(target, "foreign-key constraint")
+}
+
+fn assign_catalog_object_id(
+    target: &mut Option<[u8; 16]>,
+    object_kind: &str,
+) -> StorageBackendResult<bool> {
     if target.is_some() {
         return Ok(false);
     }
     let mut object_id = [0_u8; 16];
     getrandom::fill(&mut object_id).map_err(|error| {
-        StorageBackendError::Other(format!("allocate foreign-key object identity: {error}"))
+        StorageBackendError::Other(format!("allocate {object_kind} object identity: {error}"))
     })?;
     *target = Some(object_id);
     Ok(true)

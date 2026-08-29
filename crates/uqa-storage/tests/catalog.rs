@@ -84,6 +84,8 @@ fn schema(name: &str, fts: &[&str]) -> TableSchema {
 fn schema_in(schema_name: &str, name: &str, fts: &[&str]) -> TableSchema {
     TableSchema {
         relation: uqa_storage::RelationIdentity::new(schema_name, name),
+        object_id: [1; 16],
+        storage_generation: [1; 16],
         analyzer_json: r#"{"name":"standard","language":"english"}"#.to_string(),
         fts_fields: fts.iter().map(|s| (*s).to_string()).collect(),
         vector_fields: Vec::new(),
@@ -95,6 +97,8 @@ fn schema_in(schema_name: &str, name: &str, fts: &[&str]) -> TableSchema {
 fn schema_with_columns(name: &str, columns_json: &str) -> TableSchema {
     TableSchema {
         relation: uqa_storage::RelationIdentity::new("public", name),
+        object_id: [1; 16],
+        storage_generation: [1; 16],
         analyzer_json: r#"{"name":"standard","language":"english"}"#.to_string(),
         fts_fields: Vec::new(),
         vector_fields: Vec::new(),
@@ -445,6 +449,8 @@ fn vector_round_trip() {
     let (conn, cat) = open_in_memory_catalog();
     cat.save_table(&TableSchema {
         relation: uqa_storage::RelationIdentity::new("public", "t"),
+        object_id: [1; 16],
+        storage_generation: [1; 16],
         analyzer_json: r#"{"name":"standard","language":"english"}"#.into(),
         fts_fields: Vec::new(),
         vector_fields: vec![VectorFieldSchema {

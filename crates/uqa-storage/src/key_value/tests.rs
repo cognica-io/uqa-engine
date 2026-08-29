@@ -687,6 +687,8 @@ fn clustered_postings_follow_key_value_table_rename_and_drop() {
     catalog
         .save_table(&TableSchema {
             relation: crate::catalog::RelationIdentity::new("public", "articles"),
+            object_id: [1; 16],
+            storage_generation: [1; 16],
             analyzer_json: "{}".into(),
             fts_fields: vec!["title".into()],
             vector_fields: Vec::new(),
@@ -937,6 +939,8 @@ fn key_value_catalog_preserves_core_registries() {
     catalog
         .save_table(&TableSchema {
             relation: crate::catalog::RelationIdentity::new("public", "docs"),
+            object_id: [1; 16],
+            storage_generation: [1; 16],
             analyzer_json: "{}".into(),
             fts_fields: vec!["title".into()],
             vector_fields: Vec::new(),
@@ -1006,6 +1010,8 @@ fn key_value_drop_cleans_only_its_legacy_public_alias() {
         catalog
             .save_table(&TableSchema {
                 relation: crate::catalog::RelationIdentity::new(schema, name),
+                object_id: [1; 16],
+                storage_generation: [1; 16],
                 analyzer_json: "{}".into(),
                 fts_fields: Vec::new(),
                 vector_fields: Vec::new(),

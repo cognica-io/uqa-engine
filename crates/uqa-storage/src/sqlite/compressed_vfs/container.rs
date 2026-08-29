@@ -48,6 +48,7 @@ impl ContainerFile {
             file_id,
             generation: 0,
             state_tag: [0_u8; AUTH_TAG_LEN],
+            committed_file_len: 0,
             dirty_header: false,
         })
     }
@@ -66,6 +67,7 @@ impl ContainerFile {
             &header,
             keys.as_ref().map(|keys| &keys.mac_key),
         )?;
+        let committed_file_len = file.metadata()?.len();
         let committed = scan_committed_records(&mut file, &header, keys.as_ref(), chunk_size)?;
         Ok(Self {
             path,
@@ -80,6 +82,7 @@ impl ContainerFile {
             file_id: header.file_id,
             generation: committed.generation,
             state_tag: committed.state_tag,
+            committed_file_len,
             dirty_header: false,
         })
     }
@@ -113,6 +116,77 @@ impl ContainerFile {
                 "compressed container state does not match the trusted anchor",
             ));
         }
+        Ok(())
+    }
+
+    /// Reload the latest committed container map after acquiring the main-file lock. Each `SQLite` connection owns its own VFS handle, so an unlocked handle must discard cached chunks and observe commits appended by another connection before `SQLite` reads the database header again.
+    pub(super) fn refresh_committed_state(&mut self) -> std::io::Result<()> {
+        if !self.dirty_chunks.is_empty() || self.dirty_header {
+            return Err(invalid_data(
+                "cannot refresh a compressed container with unflushed changes",
+            ));
+        }
+        let metadata = match self.path.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && self.generation == 0 => {
+                return Ok(())
+            }
+            Err(error) => return Err(error),
+        };
+        if metadata.len() == 0 && self.generation == 0 {
+            return Ok(());
+        }
+        let mut file = File::open(&self.path)?;
+        let mut header_bytes = [0_u8; HEADER_SIZE];
+        file.read_exact(&mut header_bytes)?;
+        let header = parse_header(&header_bytes)?;
+        verify_header_authentication(
+            &header_bytes,
+            &header,
+            self.keys.as_ref().map(|keys| &keys.mac_key),
+        )?;
+        if header.file_id != self.file_id
+            || header.salt != self.salt
+            || header.compression != self.compression
+        {
+            return Err(invalid_data(
+                "compressed container identity changed while the database was open",
+            ));
+        }
+        if header.generation == self.generation
+            && header.logical_len == self.logical_len
+            && header.chunk_count == self.chunk_count()?
+            && metadata.len() == self.committed_file_len
+        {
+            return Ok(());
+        }
+        let chunk_size = header.compression.chunk_size().map_err(invalid_data)?;
+        let committed = scan_committed_records(&mut file, &header, self.keys.as_ref(), chunk_size)?;
+        if committed.generation < self.generation {
+            return Err(invalid_data(format!(
+                "compressed container generation moved backwards from {} to {}",
+                self.generation, committed.generation
+            )));
+        }
+        if committed.generation == self.generation && committed.state_tag != self.state_tag {
+            return Err(invalid_data(
+                "compressed container state diverged at the current generation",
+            ));
+        }
+        if committed.generation == self.generation
+            && committed.logical_len == self.logical_len
+            && committed.end_offset == self.append_offset
+        {
+            self.committed_file_len = metadata.len();
+            return Ok(());
+        }
+        self.logical_len = committed.logical_len;
+        self.append_offset = committed.end_offset;
+        self.chunks = committed.chunks;
+        self.cache.clear();
+        self.generation = committed.generation;
+        self.state_tag = committed.state_tag;
+        self.committed_file_len = metadata.len();
         Ok(())
     }
 
@@ -199,6 +273,7 @@ impl ContainerFile {
         self.generation = next_generation;
         self.state_tag = next_state_tag;
         self.append_offset = append_offset;
+        self.committed_file_len = append_offset;
         for record in pending_records {
             self.chunks.insert(record.entry.chunk_id, record.entry);
         }

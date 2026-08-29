@@ -42,6 +42,7 @@ impl Engine {
                 name.clone(),
                 TableDataSnapshot {
                     state: table.clone(),
+                    storage_generation: table.storage_generation(),
                     document_store,
                     inverted_index,
                     vector_indexes,
@@ -118,6 +119,7 @@ impl Engine {
                 );
             }
             *table.document_store.write() = document_store;
+            *table.storage_generation.write() = table_snapshot.storage_generation;
             *table.inverted_index.write() = inverted_index;
             *table.vector_indexes.write() = vector_indexes;
             table

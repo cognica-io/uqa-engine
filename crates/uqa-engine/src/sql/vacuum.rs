@@ -7,14 +7,127 @@
 //! PostgreSQL-compatible `VACUUM` command validation and storage maintenance.
 
 use std::collections::BTreeSet;
+use std::sync::atomic::Ordering;
 
 use uqa_sql::ast::{VacuumOption, VacuumOptionValue, VacuumStmt};
 use uqa_sql::{SQLError, SQLResult};
+use uqa_storage::StorageBackendError;
 
 use super::Engine;
 
 struct VacuumExecution {
     flags: VacuumFlags,
+}
+
+struct ResolvedVacuumTarget {
+    table: String,
+    include_descendants: bool,
+    columns: Vec<String>,
+}
+
+fn vacuum_storage_error(context: &str, error: impl std::fmt::Display) -> StorageBackendError {
+    StorageBackendError::Other(format!("{context}: {error}"))
+}
+
+fn rewrite_full_vacuum_targets(
+    engine: &Engine,
+    targets: &[ResolvedVacuumTarget],
+) -> Result<(), SQLError> {
+    let mut tables = BTreeSet::new();
+    for target in targets {
+        tables.extend(
+            engine
+                .hierarchy_scan_tables(&target.table, target.include_descendants)?
+                .into_iter(),
+        );
+    }
+    for table in &tables {
+        if let Err(error) =
+            engine.lock_relation(table, crate::row_locks::RelationLockMode::AccessExclusive)
+        {
+            engine.row_locks.release_session(engine.session_id);
+            return Err(SQLError::Internal(format!(
+                "VACUUM FULL failed: lock relation: {error}"
+            )));
+        }
+    }
+    let result = engine
+        .with_read_only_compatible_storage_transaction(|engine| {
+            for table in &tables {
+                rewrite_full_vacuum_table(engine, table)?;
+            }
+            Ok(())
+        })
+        .and_then(|()| {
+            if let Some(backend) = engine.storage.backend.as_ref() {
+                backend.vacuum()?;
+            }
+            Ok(())
+        })
+        .map_err(|error| SQLError::Internal(format!("VACUUM FULL failed: {error}")));
+    engine.row_locks.release_session(engine.session_id);
+    result
+}
+
+fn rewrite_full_vacuum_table(engine: &Engine, table_name: &str) -> Result<(), StorageBackendError> {
+    let table = engine
+        .require_table(table_name)
+        .map_err(|error| vacuum_storage_error("resolve VACUUM FULL relation", error))?;
+    let stats = table.column_stats.read().clone();
+    let stats_loaded = table.column_stats_loaded.load(Ordering::Acquire);
+    let stats_dirty = table.column_stats_dirty.load(Ordering::Acquire);
+    let documents = {
+        let store = table.document_store.read();
+        let mut ids = store.doc_ids()?;
+        ids.sort_unstable();
+        let documents = store.get_many(&ids)?;
+        let mut rows = Vec::with_capacity(ids.len());
+        for doc_id in ids {
+            let document = documents.get(&doc_id).cloned().ok_or_else(|| {
+                StorageBackendError::Other(format!(
+                    "VACUUM FULL relation `{table_name}` listed document {doc_id} but did not return it"
+                ))
+            })?;
+            let vectors = Engine::document_vector_values(&table, &document)
+                .map_err(|error| vacuum_storage_error("snapshot VACUUM FULL vectors", error))?;
+            rows.push((doc_id, document, vectors));
+        }
+        rows
+    };
+    table.document_store.write().clear()?;
+    table.inverted_index.write().clear()?;
+    for index in table.vector_indexes.write().values_mut() {
+        index.clear()?;
+    }
+    if let Some(backend) = engine.storage.backend.as_ref() {
+        backend.clear_btree_indexes(table_name)?;
+    }
+    Engine::value_indexes_clear(&table);
+    for (doc_id, document, vectors) in documents {
+        engine
+            .add_prepared_document_with_vector_values_inner(
+                table_name, doc_id, document, vectors, true,
+            )
+            .map_err(|error| vacuum_storage_error("rewrite VACUUM FULL row", error))?;
+    }
+    *table.column_stats.write() = stats.clone();
+    table
+        .column_stats_loaded
+        .store(stats_loaded, Ordering::Release);
+    table
+        .column_stats_dirty
+        .store(stats_dirty, Ordering::Release);
+    if stats_loaded
+        && !stats_dirty
+        && table.persistence != uqa_sql::ast::RelationPersistence::Temporary
+    {
+        if let Some(catalog) = engine.storage.catalog.as_ref() {
+            Engine::persist_column_stats(catalog.as_ref(), table_name, &stats)?;
+        }
+    }
+    table.doc_count_dirty.store(true, Ordering::Release);
+    engine.note_table_data_changed();
+    Ok(())
 }
 
 #[derive(Clone, Copy, Default)]
@@ -339,17 +452,27 @@ pub(super) fn run_vacuum(engine: &Engine, statement: &VacuumStmt) -> Result<SQLR
                 });
             }
         }
-        resolved_targets.push(canonical);
+        resolved_targets.push(ResolvedVacuumTarget {
+            table: canonical,
+            include_descendants: target.include_descendants,
+            columns: target.columns.clone(),
+        });
     }
 
     if execution.only_database_stats() {
         return Ok(SQLResult::empty());
     }
 
-    if let Some(backend) = engine.storage.backend.as_ref() {
-        backend
-            .vacuum()
-            .map_err(|error| SQLError::Internal(format!("VACUUM failed: {error}")))?;
+    if execution.full() {
+        if resolved_targets.is_empty() {
+            if let Some(backend) = engine.storage.backend.as_ref() {
+                backend
+                    .vacuum()
+                    .map_err(|error| SQLError::Internal(format!("VACUUM failed: {error}")))?;
+            }
+        } else {
+            rewrite_full_vacuum_targets(engine, &resolved_targets)?;
+        }
     }
 
     if execution.analyze() {
@@ -358,10 +481,12 @@ pub(super) fn run_vacuum(engine: &Engine, statement: &VacuumStmt) -> Result<SQLR
                 .run_analyze(None)
                 .map_err(|error| SQLError::Internal(format!("VACUUM ANALYZE failed: {error}")))?;
         } else {
-            for target in resolved_targets {
-                engine.run_analyze(Some(&target)).map_err(|error| {
-                    SQLError::Internal(format!("VACUUM ANALYZE failed: {error}"))
-                })?;
+            for target in &resolved_targets {
+                engine
+                    .run_analyze_target(&target.table, &target.columns, target.include_descendants)
+                    .map_err(|error| {
+                        SQLError::Internal(format!("VACUUM ANALYZE failed: {error}"))
+                    })?;
             }
         }
     }

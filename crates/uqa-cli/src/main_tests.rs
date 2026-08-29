@@ -113,11 +113,12 @@ fn split_statements_respects_postgresql_escape_and_delimited_quotes() {
 
 #[test]
 fn psql_escaped_semicolons_are_unescaped_only_outside_sql_tokens() {
-    let text = "SELECT 1\\; SELECT '\\;' AS literal, $$\\;$$ AS dollar -- \\; comment\n;";
+    let text = "SELECT 1\\; SELECT '\\;' AS literal, $$\\;$$ AS dollar, $é$\\;$é$ AS unicode_tag -- \\; comment\n;";
     let normalized = unescape_psql_semicolons(text).unwrap();
     assert!(normalized.starts_with("SELECT 1; SELECT"));
     assert!(normalized.contains("'\\;' AS literal"));
     assert!(normalized.contains("$$\\;$$ AS dollar"));
+    assert!(normalized.contains("$é$\\;$é$ AS unicode_tag"));
     assert!(normalized.contains("-- \\; comment"));
     assert!(!contains_input_terminator("SELECT 1\\;"));
     assert!(contains_input_terminator("SELECT 1\\; SELECT 2;"));
@@ -126,6 +127,11 @@ fn psql_escaped_semicolons_are_unescaped_only_outside_sql_tokens() {
     assert_eq!(
         unescape_psql_semicolons(standard_string).as_deref(),
         Some("SELECT 'abc\\' AS value; SELECT 2;")
+    );
+
+    assert_eq!(
+        unescape_psql_semicolons("SELECT $1$\\;$1$;").as_deref(),
+        Some("SELECT $1$;$1$;")
     );
 }
 

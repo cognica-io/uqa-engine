@@ -173,7 +173,7 @@ impl Engine {
         query: &str,
     ) -> Result<uqa_planner::TextTopKCapabilities, SQLError> {
         let Some(t) = self
-            .try_table(table)
+            .try_query_table(table)
             .map_err(|error| storage_sql_error("resolve text-search table", error))?
         else {
             return Err(SQLError::UnknownTable(table.to_string()));

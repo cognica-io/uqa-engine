@@ -600,6 +600,9 @@ impl Engine {
         };
         let relation = Self::resolved_relation_identity(&resolved)
             .map_err(|err| SQLError::Internal(format!("resolve view `{resolved}`: {err}")))?;
+        if let Some(snapshot) = self.query_view_snapshots.as_ref() {
+            return Ok(snapshot.get(&relation).cloned());
+        }
         Ok(self.durable.views.read().get(&relation).cloned())
     }
 

@@ -484,7 +484,7 @@ fn validate_attached_rows(
     bound: &PartitionBound,
 ) -> Result<(), SQLError> {
     for physical_table in engine.hierarchy_scan_tables(partition, true)? {
-        for doc_id in engine.table_doc_ids(&physical_table)? {
+        for doc_id in engine.live_table_doc_ids(&physical_table)? {
             let Some(document) = engine.get_document(&physical_table, doc_id)? else {
                 continue;
             };
@@ -516,7 +516,7 @@ fn validate_default_partition_exclusion(
         return Ok(());
     };
     for physical_table in engine.hierarchy_scan_tables(&default, true)? {
-        for doc_id in engine.table_doc_ids(&physical_table)? {
+        for doc_id in engine.live_table_doc_ids(&physical_table)? {
             let Some(document) = engine.get_document(&physical_table, doc_id)? else {
                 continue;
             };
@@ -537,7 +537,7 @@ fn validate_default_partition_exclusion(
 }
 
 fn validate_existing_constraints(engine: &Engine, table: &str) -> Result<(), SQLError> {
-    for doc_id in engine.table_doc_ids(table)? {
+    for doc_id in engine.live_table_doc_ids(table)? {
         let Some(document) = engine.get_document(table, doc_id)? else {
             continue;
         };

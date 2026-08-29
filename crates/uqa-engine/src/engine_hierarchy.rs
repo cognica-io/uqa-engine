@@ -6,7 +6,7 @@
 
 //! Durable table-hierarchy lookup and mutation.
 
-use super::{Engine, SQLError, StorageBackendError, StorageBackendResult};
+use super::{Engine, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult};
 use std::collections::BTreeSet;
 
 impl Engine {
@@ -15,7 +15,7 @@ impl Engine {
         table: &str,
     ) -> StorageBackendResult<uqa_sql::ast::TableHierarchy> {
         let table = self
-            .try_table(table)?
+            .try_query_table(table)?
             .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
         let hierarchy = table.hierarchy.read().clone();
         Ok(hierarchy)
@@ -51,6 +51,77 @@ impl Engine {
         let mut visited = BTreeSet::new();
         self.collect_hierarchy_descendants(&root, &mut visiting, &mut visited, &mut output)?;
         Ok(output)
+    }
+
+    /// Resolve a SELECT hierarchy through the relation metadata captured for a cursor snapshot. DDL performed after DECLARE may rename a table or change its inheritance edges, but `PostgreSQL` keeps the cursor's already-bound relation identities and descendant set.
+    pub(crate) fn query_hierarchy_scan_tables(
+        &self,
+        table: &str,
+        include_descendants: bool,
+    ) -> Result<Vec<String>, SQLError> {
+        let Some(tables) = self.query_table_snapshots.as_ref() else {
+            return self.hierarchy_scan_tables(table, include_descendants);
+        };
+        let root = self
+            .relation_lookup_candidates(table)
+            .map_err(|error| SQLError::Internal(format!("resolve query table `{table}`: {error}")))?
+            .into_iter()
+            .find(|candidate| tables.contains_key(candidate))
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        if !include_descendants {
+            return Ok(vec![root.qualified_name()]);
+        }
+        let mut output = Vec::new();
+        let mut visiting = BTreeSet::new();
+        let mut visited = BTreeSet::new();
+        Self::collect_snapshot_hierarchy_descendants(
+            tables,
+            &root,
+            &mut visiting,
+            &mut visited,
+            &mut output,
+        )?;
+        Ok(output)
+    }
+
+    fn collect_snapshot_hierarchy_descendants(
+        tables: &std::collections::BTreeMap<RelationIdentity, std::sync::Arc<super::TableState>>,
+        parent: &RelationIdentity,
+        visiting: &mut BTreeSet<RelationIdentity>,
+        visited: &mut BTreeSet<RelationIdentity>,
+        output: &mut Vec<String>,
+    ) -> Result<(), SQLError> {
+        if visiting.contains(parent) {
+            return Err(SQLError::Internal(format!(
+                "table inheritance cycle reaches `{}`",
+                parent.qualified_name()
+            )));
+        }
+        if !visited.insert(parent.clone()) {
+            return Ok(());
+        }
+        visiting.insert(parent.clone());
+        output.push(parent.qualified_name());
+        let parent_name = parent.qualified_name();
+        let children = tables
+            .iter()
+            .filter(|(_, state)| {
+                state
+                    .hierarchy
+                    .read()
+                    .parents
+                    .iter()
+                    .any(|candidate| candidate == &parent_name)
+            })
+            .map(|(identity, _)| identity.clone())
+            .collect::<Vec<_>>();
+        for child in children {
+            Self::collect_snapshot_hierarchy_descendants(
+                tables, &child, visiting, visited, output,
+            )?;
+        }
+        visiting.remove(parent);
+        Ok(())
     }
 
     fn collect_hierarchy_descendants(
@@ -98,6 +169,36 @@ impl Engine {
             .map_err(|error| SQLError::Internal(format!("resolve table `{parent}`: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(parent.to_string()))?;
         let tables = self.storage.tables.read();
+        Ok(tables
+            .iter()
+            .filter(|(_, state)| {
+                state
+                    .hierarchy
+                    .read()
+                    .parents
+                    .iter()
+                    .any(|candidate| candidate == &parent)
+            })
+            .map(|(identity, _)| identity.qualified_name())
+            .collect())
+    }
+
+    pub(crate) fn query_direct_hierarchy_children(
+        &self,
+        parent: &str,
+    ) -> Result<Vec<String>, SQLError> {
+        let Some(tables) = self.query_table_snapshots.as_ref() else {
+            return self.direct_hierarchy_children(parent);
+        };
+        let parent = self
+            .relation_lookup_candidates(parent)
+            .map_err(|error| {
+                SQLError::Internal(format!("resolve query table `{parent}`: {error}"))
+            })?
+            .into_iter()
+            .find(|candidate| tables.contains_key(candidate))
+            .ok_or_else(|| SQLError::UnknownTable(parent.to_string()))?
+            .qualified_name();
         Ok(tables
             .iter()
             .filter(|(_, state)| {

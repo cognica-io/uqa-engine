@@ -94,6 +94,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `ddl.alter-type-and-migration` | `M3` | `partial` |
 | `catalog.pg-database-locale` | `M3` | `partial` |
 | `plpgsql.datum-slots-and-bound-cursors` | `M4` | `partial` |
+| `transactions.snapshot-catalog-visibility` | `M1` | `verified` |
 | `protocol.frontend-backend-3.2` | `M2` | `verified` |
 | `protocol.frontend-backend-3.2-extended` | `M5` | `partial` |
 | `ddl.generated-columns` | `M3` | `partial` |

@@ -70,7 +70,9 @@ mod window;
 
 pub use cursor::{SQLCursor, SQLCursorSummary};
 pub(crate) use driver::{execute, execute_nested};
-use mutability::{is_transaction_control, query_may_mutate_engine};
+use mutability::{
+    is_transaction_control, query_may_mutate_engine, query_requires_statement_transaction,
+};
 #[cfg(test)]
 use planning::compile_logical_plans;
 use planning::lower_statement;
@@ -106,6 +108,7 @@ pub(in crate::sql) use hierarchy::{
     prospective_partition_bound_accepts_document, validate_hash_partition_spec,
     validate_new_partition_bound,
 };
+pub(crate) use plan_executor::start_session_portal_worker;
 use plan_executor::UnifiedPlanExecutor;
 use row_functions::{
     execute_function, execute_function_with_top_k, execute_tree_entries, expect_column_name,
@@ -123,6 +126,10 @@ pub(crate) use row_functions::{
     run_multi_field_match_public,
 };
 use vacuum::run_vacuum;
+
+pub(crate) fn map_physical_exec_error(error: uqa_execution::ExecError) -> SQLError {
+    select::physical_exec_error(error)
+}
 
 pub(crate) fn call_bound_engine_builtin(
     engine: &Engine,
@@ -198,6 +205,28 @@ const SCORE_COLUMN: &str = "_score";
 pub(in crate::sql) const DOC_ID_COLUMN: &str = "_doc_id";
 pub(in crate::sql) const TABLE_OID_COLUMN: &str = "tableoid";
 pub(in crate::sql) const XMIN_COLUMN: &str = "xmin";
+pub(crate) const XMIN_STORAGE_COLUMN: &str = "\0uqa.system.xmin";
+pub(crate) const XMIN_USER_STORAGE_COLUMN: &str = "\0uqa.user.xmin";
+
+pub(in crate::sql) fn storage_projection_column(column: &str) -> &str {
+    if column == XMIN_COLUMN {
+        XMIN_STORAGE_COLUMN
+    } else {
+        column
+    }
+}
+
+pub(in crate::sql) fn storage_projection_column_for_table<'a>(
+    column: &'a str,
+    definitions: &[uqa_sql::ast::ColumnDef],
+) -> &'a str {
+    if column == XMIN_COLUMN && !definitions.is_empty() {
+        XMIN_COLUMN
+    } else {
+        storage_projection_column(column)
+    }
+}
+
 pub(in crate::sql) const META_QUALIFIER: &str = "_meta";
 pub(in crate::sql) const META_DOC_ID_COLUMN: &str = "doc_id";
 pub(in crate::sql) const META_SCORE_COLUMN: &str = "score";
@@ -291,7 +320,7 @@ fn doc_id_value(doc_id: DocId) -> Result<Value, SQLError> {
 mod mutability_classifier_tests {
     use super::{
         builtin_function_dispatch_name, compile, lower_statement, query_may_mutate_engine,
-        volatility::function_volatility, Engine,
+        query_requires_statement_transaction, volatility::function_volatility, Engine,
     };
     use crate::{
         SQLAggregateState, SQLFunctionOptions, SQLFunctionVolatility, SQLTableFunctionResult,
@@ -321,6 +350,17 @@ mod mutability_classifier_tests {
             panic!("callback SELECT did not lower to a query plan");
         };
         query_may_mutate_engine(engine, &query).expect("classify callback query")
+    }
+
+    fn query_requires_transaction(engine: &Engine, sql: &str) -> bool {
+        let mut statements = compile(sql).expect("compile transactional callback query");
+        assert_eq!(statements.len(), 1);
+        let plan = lower_statement(engine, statements.remove(0));
+        let UnifiedPlan::Query(query) = plan else {
+            panic!("callback SELECT did not lower to a query plan");
+        };
+        query_requires_statement_transaction(engine, &query)
+            .expect("classify callback statement transaction")
     }
 
     #[test]
@@ -387,6 +427,52 @@ mod mutability_classifier_tests {
             )
             .unwrap();
         assert!(query_is_writer(&engine, "SELECT value FROM sequence_outer"));
+    }
+
+    #[test]
+    fn sql_routine_body_effects_drive_writer_classification() {
+        let engine = Engine::new();
+        engine
+            .sql(
+                "CREATE TABLE routine_mutations (id INTEGER); \
+                 CREATE SEQUENCE routine_sequence; \
+                 CREATE FUNCTION routine_reader() RETURNS INTEGER LANGUAGE SQL AS 'SELECT 1'; \
+                 CREATE FUNCTION nested_routine_reader() RETURNS INTEGER LANGUAGE SQL AS 'SELECT routine_reader()'; \
+                 CREATE FUNCTION routine_writer() RETURNS INTEGER LANGUAGE SQL AS 'INSERT INTO routine_mutations VALUES (1) RETURNING id' VOLATILE; \
+                 CREATE FUNCTION nested_routine_writer() RETURNS INTEGER LANGUAGE SQL AS 'SELECT routine_writer()' VOLATILE; \
+                 CREATE FUNCTION routine_sequence_writer() RETURNS BIGINT LANGUAGE SQL AS 'SELECT nextval(''routine_sequence'')' VOLATILE; \
+                 CREATE FUNCTION plpgsql_routine_reader() RETURNS INTEGER LANGUAGE plpgsql AS 'BEGIN RETURN routine_reader(); END'; \
+                 CREATE FUNCTION plpgsql_exception_reader() RETURNS INTEGER LANGUAGE plpgsql AS 'BEGIN BEGIN RAISE EXCEPTION ''handled''; EXCEPTION WHEN OTHERS THEN NULL; END; RETURN 1; END'; \
+                 CREATE FUNCTION plpgsql_routine_writer() RETURNS INTEGER LANGUAGE plpgsql AS 'BEGIN INSERT INTO routine_mutations VALUES (2); RETURN 2; END' VOLATILE",
+                &[],
+            )
+            .unwrap();
+
+        assert!(!query_is_writer(&engine, "SELECT routine_reader()"));
+        assert!(!query_is_writer(&engine, "SELECT nested_routine_reader()"));
+        assert!(query_is_writer(&engine, "SELECT routine_writer()"));
+        assert!(query_is_writer(&engine, "SELECT nested_routine_writer()"));
+        assert!(query_is_writer(&engine, "SELECT routine_sequence_writer()"));
+        assert!(!query_is_writer(&engine, "SELECT plpgsql_routine_reader()"));
+        assert!(!query_is_writer(
+            &engine,
+            "SELECT plpgsql_exception_reader()"
+        ));
+        assert!(query_requires_transaction(
+            &engine,
+            "SELECT plpgsql_exception_reader()"
+        ));
+        assert!(!query_requires_transaction(
+            &engine,
+            "SELECT plpgsql_routine_reader()"
+        ));
+        assert!(query_is_writer(&engine, "SELECT plpgsql_routine_writer()"));
+        for _ in 0..2 {
+            let result = engine
+                .sql("SELECT plpgsql_exception_reader() AS value", &[])
+                .unwrap();
+            assert_eq!(result.rows[0]["value"], Value::Int(1));
+        }
     }
 
     #[test]

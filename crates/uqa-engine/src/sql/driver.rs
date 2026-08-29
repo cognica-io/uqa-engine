@@ -6,7 +6,8 @@
 
 use super::{
     compile, is_transaction_control, lower_statement, optimize_engine_plan, query_has_row_locks,
-    query_may_mutate_engine, Arc, Engine, SQLError, SQLParam, SQLResult, UnifiedPlanExecutor,
+    query_may_mutate_engine, query_requires_statement_transaction, Arc, Engine, SQLError, SQLParam,
+    SQLResult, UnifiedPlanExecutor,
 };
 
 pub(crate) fn execute(
@@ -40,8 +41,20 @@ fn execute_with_context(
     }
     if engine.storage.backend.is_none() && engine.transaction_depth() == 0 {
         if let Some(plan) = engine.cached_optimized_sql_plan(sql) {
-            return UnifiedPlanExecutor::with_nested_statement(engine, params, nested_statement)
+            let can_execute_without_transaction = match plan.as_ref() {
+                uqa_planner::UnifiedPlan::Query(query) => {
+                    !query_requires_statement_transaction(engine, query)?
+                }
+                uqa_planner::UnifiedPlan::Command(_) => false,
+            };
+            if can_execute_without_transaction {
+                return UnifiedPlanExecutor::with_nested_statement(
+                    engine,
+                    params,
+                    nested_statement,
+                )
                 .execute(plan.as_ref());
+            }
         }
     }
     execute_uncached_or_snapshot_scoped(engine, sql, params, nested_statement)
@@ -205,7 +218,9 @@ fn execute_uncached_or_snapshot_scoped(
                         .map_err(|error| engine.abort_sql_transaction_after_error(error))?;
                 }
                 engine
-                    .refresh_explicit_statement_snapshot()
+                    .prepare_explicit_statement_snapshot(
+                        super::read_only::plan_sets_transaction_snapshot(initial_plan.as_ref()),
+                    )
                     .map_err(|error| engine.abort_sql_transaction_after_error(error))?;
                 // The statement was lowered immediately above, after any earlier
                 // BEGIN or catalog-changing statement in this batch completed.
@@ -259,9 +274,15 @@ fn execute_uncached_or_snapshot_scoped(
             // back. Memory commands use the same boundary so a fallible multi-row
             // mutation restores its pre-statement snapshot; read-only memory
             // queries avoid copying the whole database.
-            let is_read_query = match initial_plan.as_ref() {
-                uqa_planner::UnifiedPlan::Query(query) => !query_may_mutate_engine(engine, query)?,
-                uqa_planner::UnifiedPlan::Command(_) => false,
+            let (is_read_query, requires_statement_transaction) = match initial_plan.as_ref() {
+                uqa_planner::UnifiedPlan::Query(query) => {
+                    let mutates = query_may_mutate_engine(engine, query)?;
+                    (
+                        !mutates,
+                        mutates || query_requires_statement_transaction(engine, query)?,
+                    )
+                }
+                uqa_planner::UnifiedPlan::Command(_) => (false, true),
             };
             let runs_outside_transaction = matches!(
                 initial_plan.as_ref(),
@@ -273,7 +294,9 @@ fn execute_uncached_or_snapshot_scoped(
                     )
             );
             let needs_implicit_transaction = !runs_outside_transaction
-                && (engine.storage.backend.is_some() || !is_read_query || has_row_locks);
+                && (engine.storage.backend.is_some()
+                    || requires_statement_transaction
+                    || has_row_locks);
             if needs_implicit_transaction {
                 if has_row_locks {
                     engine.statement_row_lock_cache()?;

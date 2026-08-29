@@ -75,7 +75,7 @@ impl Engine {
         knn_pool: usize,
     ) -> Result<Vec<uqa_operators::OperatorTree>, SQLError> {
         let Some(table) = self
-            .try_table(table_name)
+            .try_query_table(table_name)
             .map_err(|error| storage_sql_error("resolve hybrid-search table", error))?
         else {
             return Err(SQLError::UnknownTable(table_name.to_string()));
