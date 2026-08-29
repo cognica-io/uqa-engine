@@ -982,7 +982,7 @@ The artifact uses different evidence for different kinds of claim.
 2. **Carrier and codec invariants.** Constructors reject graph payload keys outside support. Versioned $\Phi$ round trips preserve scores, optional overrides, graph names, vertex and edge identifiers, and pre-existing reserved fields across ‹N₂› randomized graph postings, and unrecognized envelope versions are asserted to raise rather than degrade, per hypothesis (H2) of Theorem 7.1.
 3. **Optimizer equivalence.** Structural tests verify that membership-only expressions simplify while scored branches remain distinct. Randomized tests compare optimized plans with unoptimized or exhaustive execution over ‹N₃› generated plans.
 4. **Top-$k$ exactness.** WAND and Block-Max WAND are compared against exhaustive ranking over ‹N₄› query/corpus configurations, including duplicate terms, field-scoped statistics, scorer changes, writes, and reopen cycles.
-5. **Compatibility.** SQL and graph behavior uses golden fixtures and differential probes against the declared external semantics, including PostgreSQL-oriented cases.
+5. **Compatibility.** SQL and graph behavior uses golden fixtures and differential probes against the declared external semantics, including PostgreSQL 18 differential cases.
 6. **Persistence.** Reopen and rollback tests cover catalog objects, relational data, indexes, tensors, graphs, scoring parameters, models, views, routines, sequences, and encrypted or compressed stores.
 7. **Performance methodology.** Thirty-two Rust benchmark entrypoints are tracked by a machine-checked coverage manifest. A benchmark’s presence is not itself a speed claim; published comparisons require same-machine artifacts, executable hashes, fixtures, warmup, sample count, and ratio gates.
 
@@ -995,7 +995,7 @@ The implementation is heavily tested but not formally verified. The value of the
 The framework leaves several important boundaries explicit.
 
 1. **Finite snapshots.** The Boolean complement and completeness result is relative to a finite, fixed universe. Streaming and continuously changing universes need temporal or incremental semantics.
-2. **SQL coverage and row representation.** The implementation has a broad PostgreSQL-oriented surface, not a proof of complete PostgreSQL equivalence. Its internal row carrier is dynamic rather than fully typed and vectorized.
+2. **SQL coverage and row representation.** The implementation has a broad PostgreSQL 18 compatibility target, not a proof of complete PostgreSQL equivalence. Its internal row carrier is dynamic rather than fully typed and vectorized.
 3. **Bag and tuple boundaries.** SQL bags and generalized set-valued identifier tuples are distinct. A complete semiring treatment of every physical SQL operator remains future work.
 4. **Approximate indexes.** IVF and HNSW trade exactness for recall and latency. The algebra types their results, but only differential experiments establish recall for a parameterization and corpus.
 5. **Calibration.** A probability-shaped output is not evidence of calibration. Distribution shift, candidate-pool changes, and embedding-model changes require renewed held-out evaluation.

@@ -183,6 +183,7 @@ enum CrossAttachment {
 
 pub(crate) struct RowLockManager {
     next_session: AtomicU64,
+    next_transaction_xid: AtomicU64,
     relation_ids: Mutex<HashMap<LockRelationIdentity, u64>>,
     relation_identities: Mutex<HashMap<u64, LockRelationIdentity>>,
     next_table: AtomicU64,
@@ -292,6 +293,7 @@ impl RowLockManager {
     fn with_cross_attachment(cross: Option<CrossAttachment>) -> Self {
         Self {
             next_session: AtomicU64::new(1),
+            next_transaction_xid: AtomicU64::new(3),
             relation_ids: Mutex::new(HashMap::new()),
             relation_identities: Mutex::new(HashMap::new()),
             next_table: AtomicU64::new(1),
@@ -330,6 +332,45 @@ impl RowLockManager {
 
     pub(crate) fn allocate_session(&self) -> u64 {
         self.next_session.fetch_add(1, Ordering::Relaxed)
+    }
+
+    pub(crate) fn allocate_transaction_xid(&self) -> Result<u32, SQLError> {
+        match self.cross.as_ref() {
+            Some(CrossAttachment::Active(coordinator)) => {
+                if let Some(xid) = coordinator
+                    .allocate_transaction_xid()
+                    .map_err(SQLError::Internal)?
+                {
+                    return Ok(xid);
+                }
+            }
+            Some(CrossAttachment::Unavailable(reason)) => {
+                return Err(SQLError::Internal(format!(
+                    "cross-process transaction XID allocation is unavailable: {reason}"
+                )));
+            }
+            None => {}
+        }
+        loop {
+            let current = self.next_transaction_xid.load(Ordering::Relaxed);
+            let xid = if (3..=u64::from(u32::MAX)).contains(&current) {
+                u32::try_from(current).expect("validated transaction XID fits u32")
+            } else {
+                3
+            };
+            let following = if xid == u32::MAX {
+                3
+            } else {
+                u64::from(xid + 1)
+            };
+            if self
+                .next_transaction_xid
+                .compare_exchange(current, following, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+            {
+                return Ok(xid);
+            }
+        }
     }
 
     pub(crate) fn table_key(&self, table: &str) -> u64 {

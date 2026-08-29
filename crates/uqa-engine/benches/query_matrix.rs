@@ -221,7 +221,7 @@ fn bench_relational_queries(c: &mut Criterion) {
         },
         ReadCase {
             name: "source_lateral",
-            sql: "SELECT f.id, s.generate_series FROM facts f, LATERAL generate_series(1, f.width) AS s WHERE f.id <= 100",
+            sql: "SELECT f.id, s.generate_series FROM facts f, LATERAL generate_series(1, f.width) AS s(generate_series) WHERE f.id <= 100",
         },
         ReadCase {
             name: "cte_non_recursive",

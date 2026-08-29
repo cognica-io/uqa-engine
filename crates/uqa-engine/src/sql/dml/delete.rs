@@ -71,7 +71,7 @@ pub(in crate::sql) fn run_delete_inner(
         Option<uqa_execution::OwnedPhysicalRow>,
     )> = Vec::new();
     let mut returning_rows = Vec::new();
-    let mut ctes = CteScope::new();
+    let mut ctes = CteScope::new_for_current_routine();
     crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     if stmt.source.is_none() {

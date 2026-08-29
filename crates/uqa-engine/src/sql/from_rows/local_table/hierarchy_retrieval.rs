@@ -12,7 +12,7 @@ use std::sync::Arc;
 use super::{
     qualify_source_operator, table_lock_origin, ColumnPrune, CteScope, Engine,
     HierarchyScoredDocumentSource, SQLError, SQLParam, ScalarExpr, ScoredDocumentSource,
-    ScoredInput, SharedLockOrigin, SourcePlan, TABLE_OID_COLUMN,
+    ScoredInput, SharedLockOrigin, SourcePlan, TABLE_OID_COLUMN, XMIN_COLUMN,
 };
 use crate::sql::select::RecheckDoc;
 use crate::ScoredEntry;
@@ -119,6 +119,12 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
         .is_some_and(|wanted| wanted.contains(TABLE_OID_COLUMN))
     {
         columns.push(TABLE_OID_COLUMN.into());
+    }
+    if prune
+        .and_then(|prune| prune.get(qualifier))
+        .is_some_and(|wanted| wanted.contains(XMIN_COLUMN))
+    {
+        columns.push(XMIN_COLUMN.into());
     }
     let metadata = prune
         .and_then(|prune| prune.get(qualifier))

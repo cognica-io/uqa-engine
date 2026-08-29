@@ -364,6 +364,23 @@ enum TransactionStatus {
     FailedBackendAborted,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TransactionCharacteristicsState {
+    isolation: uqa_sql::ast::TransactionIsolationLevel,
+    read_only: bool,
+    deferrable: bool,
+}
+
+impl Default for TransactionCharacteristicsState {
+    fn default() -> Self {
+        Self {
+            isolation: uqa_sql::ast::TransactionIsolationLevel::ReadCommitted,
+            read_only: false,
+            deferrable: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct ConstraintIdentity {
     pub(crate) relation: RelationIdentity,
@@ -385,12 +402,16 @@ pub(crate) struct DeferredForeignKeyCheck {
 }
 
 struct TransactionFrame {
-    /// Whether this outer frame is the SQL driver's per-statement autocommit boundary rather than a user-visible `BEGIN` block.
+    /// Whether this outer frame is an implicit SQL-driver boundary rather than a user-visible `BEGIN` block. A simple-query batch promotes it when the batch reaches `BEGIN`.
     implicit_statement: bool,
     storage_savepoint: Option<StorageSavepointId>,
     intent: TransactionIntent,
     backend_mode: BackendTransactionMode,
     status: TransactionStatus,
+    characteristics: TransactionCharacteristicsState,
+    first_snapshot_set: bool,
+    /// `PostgreSQL` transaction/subtransaction IDs along the active frame path. The first slot belongs to this frame and each following slot to the correspondingly indexed SQL savepoint.
+    xid_levels: Vec<Option<u32>>,
     savepoints: Vec<TransactionSavepoint>,
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
@@ -408,6 +429,8 @@ struct TransactionFrame {
 struct TransactionSavepoint {
     name: String,
     storage_savepoint: StorageSavepointId,
+    intent: TransactionIntent,
+    characteristics: TransactionCharacteristicsState,
     session_snapshot: SessionStateSnapshot,
     data_snapshot: Option<EngineDataSnapshot>,
     dirty: TransactionDirtyState,
@@ -449,7 +472,18 @@ struct SessionStateSnapshot {
 #[derive(Debug, Clone)]
 struct SessionPortalState {
     result: SQLResult,
-    position: usize,
+    position: SessionPortalPosition,
+    scrollable: bool,
+    holdable: bool,
+}
+
+/// `PostgreSQL` distinguishes the positions before the first row and after the last row from a position on a row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionPortalPosition {
+    BeforeFirst,
+    /// The one-based position of the current row.
+    OnRow(usize),
+    AfterLast,
 }
 
 #[derive(Clone, Copy)]
@@ -697,6 +731,18 @@ fn default_runtime_parameter(name: &str) -> Option<&'static str> {
     if name.eq_ignore_ascii_case("work_mem") {
         return Some("64MB");
     }
+    if name.eq_ignore_ascii_case("default_transaction_isolation")
+        || name.eq_ignore_ascii_case("transaction_isolation")
+    {
+        return Some("read committed");
+    }
+    if name.eq_ignore_ascii_case("default_transaction_read_only")
+        || name.eq_ignore_ascii_case("default_transaction_deferrable")
+        || name.eq_ignore_ascii_case("transaction_read_only")
+        || name.eq_ignore_ascii_case("transaction_deferrable")
+    {
+        return Some("off");
+    }
     None
 }
 
@@ -710,6 +756,12 @@ fn is_mutable_runtime_parameter(name: &str) -> bool {
         || name.eq_ignore_ascii_case("datestyle")
         || name.eq_ignore_ascii_case("timezone")
         || name.eq_ignore_ascii_case("work_mem")
+        || name.eq_ignore_ascii_case("default_transaction_isolation")
+        || name.eq_ignore_ascii_case("default_transaction_read_only")
+        || name.eq_ignore_ascii_case("default_transaction_deferrable")
+        || name.eq_ignore_ascii_case("transaction_isolation")
+        || name.eq_ignore_ascii_case("transaction_read_only")
+        || name.eq_ignore_ascii_case("transaction_deferrable")
 }
 
 fn initial_random_state() -> SessionRandomState {

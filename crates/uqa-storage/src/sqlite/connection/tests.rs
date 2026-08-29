@@ -25,6 +25,44 @@ fn in_memory_connection_round_trip() {
 }
 
 #[test]
+fn vacuum_reclaims_free_pages_and_requires_autocommit() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("vacuum.sqlite3");
+    let connection = ManagedConnection::open(&path).unwrap();
+    connection
+        .with(|sqlite| {
+            sqlite.execute_batch(
+                "CREATE TABLE payloads (id INTEGER PRIMARY KEY, payload BLOB); \
+                 WITH RECURSIVE ids(id) AS (VALUES (1) UNION ALL SELECT id + 1 FROM ids WHERE id < 256) \
+                 INSERT INTO payloads SELECT id, zeroblob(8192) FROM ids; \
+                 DELETE FROM payloads",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let before: i64 = connection
+        .with(|sqlite| Ok(sqlite.pragma_query_value(None, "page_count", |row| row.get(0))?))
+        .unwrap();
+
+    connection.vacuum().unwrap();
+
+    let after: i64 = connection
+        .with(|sqlite| Ok(sqlite.pragma_query_value(None, "page_count", |row| row.get(0))?))
+        .unwrap();
+    assert!(
+        after < before,
+        "VACUUM page count {after} did not shrink from {before}"
+    );
+
+    connection.begin_transaction().unwrap();
+    assert!(matches!(
+        connection.vacuum(),
+        Err(SQLiteError::TransactionAlreadyActive)
+    ));
+    connection.rollback_transaction().unwrap();
+}
+
+#[test]
 fn wal_mode_pragma_is_set() {
     let mc = ManagedConnection::open_in_memory().unwrap();
     let mode: String = mc

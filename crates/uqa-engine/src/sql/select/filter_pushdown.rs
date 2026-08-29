@@ -12,7 +12,7 @@ use super::{
     optimize_engine_plan, projection_columns, qualify_unqualified_columns,
     query_contains_volatile_function, BTreeMap, BTreeSet, ComputePlan, Engine, ProjectionPlan,
     QualifierFilters, QueryBlockPlan, QueryPlan, RelationalPlan, SQLError, ScalarExpr, SourcePlan,
-    UnifiedPlan,
+    UnifiedPlan, TABLE_OID_COLUMN, XMIN_COLUMN,
 };
 
 type ColumnOwners = BTreeMap<String, Option<String>>;
@@ -691,6 +691,10 @@ fn collect_source_column_owners(engine: &Engine, source: &SourcePlan, owners: &m
             }
             if columns.is_empty() {
                 columns = engine.foreign_table_columns(name).unwrap_or_default();
+            }
+            if engine.try_table(name).ok().flatten().is_some() {
+                columns.push(TABLE_OID_COLUMN.into());
+                columns.push(XMIN_COLUMN.into());
             }
             register_column_owners(owners, qualifier, columns);
         }

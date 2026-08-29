@@ -64,6 +64,12 @@ pub(super) fn build_rows(
             ))
         }
     };
+    if engine.current_transaction_is_read_only() && query_is_mutating(&query)? {
+        return Err(SQLError::Routine {
+            sqlstate: "25006".into(),
+            message: "cannot execute SELECT in a read-only transaction".into(),
+        });
+    }
     if !engine
         .has_graph(&graph)
         .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))?
@@ -108,6 +114,12 @@ pub(super) fn build_rows(
         out.push(row);
     }
     Ok(out)
+}
+
+pub(super) fn query_is_mutating(query: &str) -> Result<bool, SQLError> {
+    uqa_graph::cypher::parse_cypher(query)
+        .map(|query| query.mutates_graph())
+        .map_err(|error| SQLError::Unsupported(format!("cypher: {error}")))
 }
 
 /// Coerce one cypher output value to the SQL type declared in the

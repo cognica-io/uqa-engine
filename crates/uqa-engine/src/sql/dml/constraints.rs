@@ -885,6 +885,7 @@ pub(in crate::sql) fn prepare_document_rewrite(
         update_lock_strength(engine, table, &changed_columns),
     )?;
     crate::sql::generated::refresh_stored_generated_columns(engine, table, &mut new_document)?;
+    super::stamp_tuple_xmin(engine, &mut new_document)?;
     let _key_locks =
         lock_document_key_dependencies(engine, table, &new_document, Some(&old_document))?;
     lock_existing_document_rewrite_foreign_key_dependencies(

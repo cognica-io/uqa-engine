@@ -22,6 +22,7 @@ use pg_query::NodeEnum;
 use types::compile_pg_type_name;
 
 mod administrative;
+mod cursors;
 mod dispatch;
 mod dml;
 mod drop_alter;
@@ -44,6 +45,12 @@ pub(crate) fn compile_pg_expression(node: &Node) -> Result<Expr> {
 
 pub(crate) fn compile_pg_projections(nodes: &[Node]) -> Result<Vec<crate::ast::Projection>> {
     compile_projections(nodes)
+}
+
+pub(crate) fn compile_pg_select(
+    select: &pg_query::protobuf::SelectStmt,
+) -> Result<crate::ast::SelectStmt> {
+    compile_select(select)
 }
 
 pub(in crate::compiler) use hierarchy::compile_table_hierarchy;

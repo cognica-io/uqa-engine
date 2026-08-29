@@ -1073,6 +1073,39 @@ pub struct SetConstraintName {
     pub name: String,
 }
 
+/// One parser-normalized `VACUUM` option. Keeping the parsed value in the SQL AST lets execution enforce `PostgreSQL`'s transaction-block error before validating command options.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VacuumOption {
+    pub name: String,
+    pub value: Option<VacuumOptionValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VacuumOptionValue {
+    Boolean(bool),
+    Integer(i32),
+    String(String),
+}
+
+/// One relation (and optional ANALYZE column list) named by `VACUUM`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VacuumTarget {
+    pub catalog: Option<String>,
+    pub table: String,
+    #[serde(default = "default_include_descendants")]
+    pub include_descendants: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub columns: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VacuumStmt {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<VacuumOption>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<VacuumTarget>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Statement {
     CreateTable(CreateTable),
@@ -1133,6 +1166,12 @@ pub enum Statement {
         name: String,
         value: String,
     },
+    /// `RESET <name>` restores one runtime parameter to its session default.
+    ResetVariable {
+        name: String,
+    },
+    /// `RESET ALL` restores every resettable runtime parameter.
+    ResetAllVariables,
     /// `SET CONSTRAINTS { ALL | name [, ...] } { DEFERRED | IMMEDIATE }`. An empty constraint list represents `ALL`; qualified names retain their SQL spelling so execution can apply schema-search semantics.
     SetConstraints {
         constraints: Vec<SetConstraintName>,
@@ -1168,6 +1207,8 @@ pub enum Statement {
     Analyze {
         table: Option<String>,
     },
+    /// `VACUUM [options] [relations]`. Execution enforces `PostgreSQL`'s transaction-block restriction before validating options and dispatching storage maintenance.
+    Vacuum(VacuumStmt),
     /// `TRUNCATE TABLE t1, t2 ...`. Wipes the listed table hierarchies unless
     /// a target uses `ONLY`.
     Truncate {
@@ -1178,6 +1219,14 @@ pub enum Statement {
     },
     /// `BEGIN` / `COMMIT` / `ROLLBACK` / `SAVEPOINT name`.
     Transaction(TransactionStmt),
+    /// `DECLARE name [BINARY] [SCROLL] CURSOR [WITH HOLD] FOR query`.
+    DeclareCursor(DeclareCursorStmt),
+    /// `FETCH` or `MOVE` over a named SQL cursor.
+    FetchCursor(FetchCursorStmt),
+    /// `CLOSE name` or `CLOSE ALL`. `None` represents `ALL`.
+    CloseCursor {
+        name: Option<String>,
+    },
     /// `CREATE SEQUENCE name [START n] [INCREMENT n]`.
     CreateSequence(CreateSequence),
     /// `ALTER SEQUENCE name [RESTART [WITH n]] [INCREMENT [BY] n]
@@ -1325,14 +1374,74 @@ pub struct CreateForeignTable {
     pub if_not_exists: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TransactionIsolationLevel {
+    ReadUncommitted,
+    ReadCommitted,
+    RepeatableRead,
+    Serializable,
+}
+
+impl TransactionIsolationLevel {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadUncommitted => "read uncommitted",
+            Self::ReadCommitted => "read committed",
+            Self::RepeatableRead => "repeatable read",
+            Self::Serializable => "serializable",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransactionCharacteristics {
+    pub isolation: Option<TransactionIsolationLevel>,
+    pub read_only: Option<bool>,
+    pub deferrable: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransactionStmt {
     Begin,
+    BeginWithCharacteristics(TransactionCharacteristics),
     Commit,
+    CommitAndChain,
     Rollback,
+    RollbackAndChain,
+    SetCharacteristics(TransactionCharacteristics),
+    SetSessionCharacteristics(TransactionCharacteristics),
+    SetSnapshot(String),
     Savepoint(String),
     ReleaseSavepoint(String),
     RollbackToSavepoint(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CursorDirection {
+    Forward,
+    Backward,
+    Absolute,
+    Relative,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeclareCursorStmt {
+    pub name: String,
+    pub binary: bool,
+    /// `None` lets the query determine scrollability, while `Some(true)` and `Some(false)` represent explicit `SCROLL` and `NO SCROLL`.
+    pub scroll: Option<bool>,
+    pub hold: bool,
+    pub query: Box<SelectStmt>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FetchCursorStmt {
+    pub name: String,
+    pub direction: CursorDirection,
+    /// `PostgreSQL` uses `i64::MAX` for `ALL`; negative counts reverse `FORWARD` and `BACKWARD`.
+    pub count: i64,
+    pub move_only: bool,
 }
 
 #[cfg(test)]

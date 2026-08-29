@@ -657,6 +657,7 @@ impl Statement {
             Self::CreateView { body, .. }
             | Self::CreateMaterializedView { body, .. }
             | Self::CreateTableAs { body, .. } => body.upgrade_legacy_serialized_dispatches(),
+            Self::DeclareCursor(cursor) => cursor.query.upgrade_legacy_serialized_dispatches(),
             Self::Explain { body, .. } | Self::Prepare { body, .. } => {
                 body.upgrade_legacy_serialized_dispatches()
             }
@@ -704,13 +705,18 @@ impl Statement {
             | Self::RefreshMaterializedView { .. }
             | Self::CreateSchema { .. }
             | Self::SetVariable { .. }
+            | Self::ResetVariable { .. }
+            | Self::ResetAllVariables
             | Self::SetConstraints { .. }
             | Self::ShowVariable { .. }
             | Self::Discard { .. }
             | Self::Load { .. }
             | Self::Analyze { .. }
+            | Self::Vacuum(_)
             | Self::Truncate { .. }
             | Self::Transaction(_)
+            | Self::FetchCursor(_)
+            | Self::CloseCursor { .. }
             | Self::CreateSequence(_)
             | Self::AlterSequence(_)
             | Self::Deallocate { .. }

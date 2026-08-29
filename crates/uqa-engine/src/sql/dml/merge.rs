@@ -100,7 +100,7 @@ pub(in crate::sql) fn run_merge_inner(
         .map_err(|error| SQLError::Internal(format!("read MERGE hierarchy: {error}")))?;
     let target_is_partitioned =
         target_hierarchy.partition_spec.is_some() || target_hierarchy.partition_bound.is_some();
-    let mut ctes = CteScope::new();
+    let mut ctes = CteScope::new_for_current_routine();
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     for clause in &stmt.when_clauses {
         match clause {
@@ -681,6 +681,7 @@ pub(in crate::sql) fn run_merge_inner(
                         message: "moving row to another partition during a BEFORE FOR EACH ROW trigger is not supported".into(),
                     });
                 }
+                super::stamp_tuple_xmin(engine, &mut document)?;
                 lock_existing_document_foreign_key_dependencies(engine, &storage_table, &document)?;
                 let _key_locks =
                     lock_document_key_dependencies(engine, &storage_table, &document, None)?;

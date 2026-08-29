@@ -20,7 +20,7 @@ use super::{
     HierarchyScoredDocumentSource, JoinExecutionStrategy, JoinKind, QualifierFilters,
     QueryOutputMode, RelationMetadataProjection, ResultRow, SQLError, SQLParam, ScalarExpr,
     ScopedEngineHook, ScoredDocumentSource, ScoredInput, ScoredSourceAttributes, SourceEvalContext,
-    SourcePlan, TableFunctionCall, TableFunctionTypeRequest, Value, TABLE_OID_COLUMN,
+    SourcePlan, TableFunctionCall, TableFunctionTypeRequest, Value, TABLE_OID_COLUMN, XMIN_COLUMN,
 };
 
 use crate::sql::select::{

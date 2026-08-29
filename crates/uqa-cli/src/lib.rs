@@ -106,7 +106,12 @@ use output::{
     print_result_expanded_with_engine, print_result_with_engine, value_to_display,
 };
 use repl::{PromptLineOutcome, Session};
-use statements::{contains_statement_terminator, split_statements, statement_is_pure_comment};
+#[cfg(test)]
+use statements::contains_statement_terminator;
+use statements::{
+    contains_input_terminator, split_statements, statement_is_pure_comment,
+    unescape_psql_semicolons,
+};
 
 /// Run `usql` with the current process arguments and standard streams.
 pub fn run_from_env() -> ExitCode {

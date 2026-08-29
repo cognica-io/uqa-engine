@@ -530,6 +530,11 @@ pub fn bind_statement(stmt: &Statement, r: &mut dyn VariableResolver) -> Result<
             format: format.clone(),
             body: Box::new(bind_statement(body, r)?),
         },
+        Statement::DeclareCursor(cursor) => {
+            let mut out = cursor.clone();
+            out.query = Box::new(bind_select(&cursor.query, r)?);
+            Statement::DeclareCursor(out)
+        }
         Statement::Merge(merge) => {
             let mut out = merge.clone();
             out.source = bind_from(&merge.source, r)?;

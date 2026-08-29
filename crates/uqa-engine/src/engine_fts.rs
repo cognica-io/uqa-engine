@@ -169,6 +169,7 @@ impl Engine {
         known_new: bool,
     ) -> Result<(), SQLError> {
         crate::sql::refresh_stored_generated_columns(self, table, &mut document)?;
+        crate::sql::dml::stamp_tuple_xmin(self, &mut document)?;
         self.add_prepared_document_impl(table, doc_id, document, known_new)
     }
 

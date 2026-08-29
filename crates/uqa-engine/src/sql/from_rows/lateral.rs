@@ -407,6 +407,13 @@ fn execute_lateral_query_block_output(
         params,
         &scoped_ctes,
     )?;
+    crate::sql::select::validate_query_block_projection_references(
+        engine,
+        stmt,
+        operator.row_schema(),
+        params,
+        &scoped_ctes,
+    )?;
     crate::sql::select::validate_query_set_contexts(
         engine,
         &crate::sql::select::ScopedEngineHook::new(engine, &scoped_ctes),

@@ -15,6 +15,8 @@ COMMIT;
 
 A statement that fails inside an explicit transaction aborts the transaction as in PostgreSQL 18: every later statement, including typed engine mutations and failing savepoint commands, reports `25P02` until `ROLLBACK` or `ROLLBACK TO SAVEPOINT` ends the aborted state, and `COMMIT` of an aborted transaction rolls back. A failure inside a nested `BEGIN` aborts only that nested frame; the enclosing frames keep their writes and row locks.
 
+`BEGIN` and `START TRANSACTION` accept `ISOLATION LEVEL`, `READ ONLY` or `READ WRITE`, and `DEFERRABLE` or `NOT DEFERRABLE` characteristics. `SET TRANSACTION` changes the active transaction subject to PostgreSQL's first-snapshot and savepoint restrictions, `SET SESSION CHARACTERISTICS AS TRANSACTION` changes later transaction defaults, and `COMMIT AND CHAIN` or `ROLLBACK AND CHAIN` starts the next transaction with the current characteristics. Read-only transactions reject permanent-relation DML, every DDL command including temporary-object DDL, and `TRUNCATE` with `25006`; they allow DML against an existing temporary relation, `nextval` and `setval` on an existing temporary sequence, `ANALYZE`, and session-local effects. The four isolation-level names and transaction settings are retained and exposed, but the complete PostgreSQL concurrent-isolation anomaly matrix and imported snapshots remain compatibility bugs.
+
 ## Savepoints
 
 ```sql
@@ -63,6 +65,12 @@ Known settings include:
 | `datestyle` | Mutable, default `ISO, MDY` |
 | `timezone` | Mutable, default `UTC` |
 | `work_mem` | Mutable, default `64MB` |
+| `default_transaction_isolation` | Mutable transaction default, `read committed` |
+| `default_transaction_read_only` | Mutable transaction default, `off` |
+| `default_transaction_deferrable` | Mutable transaction default, `off` |
+| `transaction_isolation` | Current transaction value |
+| `transaction_read_only` | Current transaction value |
+| `transaction_deferrable` | Current transaction value |
 
 ```sql
 SET search_path TO application, public;
@@ -76,6 +84,21 @@ SHOW timezone;
 `DISCARD ALL`, `DISCARD PLANS`, and `DISCARD SEQUENCES` reset their implemented session state. `DISCARD TEMP` removes the session's temporary tables, views, sequences, and sequence state; PostgreSQL rejects it inside a transaction, and UQA Engine does the same.
 
 `LOAD 'age'` (also `age.so`, `$libdir/age`, and `$libdir/age.so`) succeeds without side effects because the Apache AGE surface is embedded; any other library name fails as `could not access file "$libdir/name": No such file or directory` (`58P01`). See [Graph SQL and Cypher](07-graph.md) for the AGE session bootstrap.
+
+## SQL cursors
+
+```sql
+BEGIN;
+DECLARE tasks_cursor SCROLL CURSOR WITH HOLD FOR
+SELECT task_id, title FROM tasks ORDER BY task_id;
+FETCH FORWARD 10 FROM tasks_cursor;
+MOVE BACKWARD 2 FROM tasks_cursor;
+COMMIT;
+FETCH NEXT FROM tasks_cursor;
+CLOSE tasks_cursor;
+```
+
+Top-level `DECLARE`, `FETCH`, `MOVE`, and `CLOSE` use session portals with PostgreSQL 18 cursor SQLSTATEs, forward, backward, absolute, and relative positioning, `SCROLL` and `NO SCROLL`, and `WITH HOLD`. A non-holdable portal closes at transaction end, a holdable portal survives commit, and rolling back to a savepoint closes portals declared after that savepoint without rewinding older portal positions. A PostgreSQL simple-query command string may declare and fetch a cursor inside its shared implicit transaction, after which a non-holdable cursor closes. Exact PostgreSQL execution timing for volatile expressions in a declared query remains a compatibility bug.
 
 ## SQL-language scalar function
 
@@ -113,7 +136,7 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 
 The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer and query `FOR`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, exception handlers, and bound cursors covered by the routine tests.
 
-Bound cursors support `CURSOR [(arguments)] FOR query`, positional or named `OPEN` arguments, repeated `FETCH NEXT ... INTO`, `FOUND`, and `CLOSE`. An opened cursor is a session portal: a routine may return its `refcursor` name, a later routine in the same session and transaction may accept that name and continue fetching, and an outer transaction end closes the remaining portals. Rolling back to a savepoint closes portals opened after it without rewinding the position of an older portal, matching PostgreSQL 18. `OPEN ... FOR`, dynamic cursor queries, `MOVE`, fetch directions other than `NEXT`, holdable cursors, and top-level SQL `FETCH` remain unsupported.
+Bound PL/pgSQL cursors support `CURSOR [(arguments)] FOR query`, positional or named `OPEN` arguments, repeated `FETCH NEXT ... INTO`, `FOUND`, and `CLOSE`. An opened cursor is a session portal: a routine may return its `refcursor` name, and a later routine in the same session and transaction may accept that name and continue fetching. Dynamic `OPEN ... FOR`, PL/pgSQL `MOVE`, and PL/pgSQL fetch directions other than `NEXT` remain unsupported.
 
 This is a deliberate subset. Validate every routine body during migration instead of assuming all PostgreSQL PL/pgSQL statements or diagnostics exist.
 

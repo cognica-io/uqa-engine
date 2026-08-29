@@ -340,6 +340,11 @@ pub trait PersistentStorageBackend: Send + Sync {
         Ok(())
     }
 
+    /// Reclaim backend-owned storage outside a transaction. Backends whose logical stores eagerly remove obsolete values may keep the no-op default; durable backends with file-level compaction should override it.
+    fn vacuum(&self) -> StorageBackendResult<()> {
+        Ok(())
+    }
+
     fn begin_transaction(&self) -> StorageBackendResult<()>;
 
     /// Begin a transaction whose first operation is expected to be a read.
@@ -616,6 +621,11 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
 
     fn clear_btree_indexes(&self, table: &str) -> StorageBackendResult<()> {
         SQLiteBTreeIndexStore::new(self.conn.clone()).clear_table(table)?;
+        Ok(())
+    }
+
+    fn vacuum(&self) -> StorageBackendResult<()> {
+        self.conn.vacuum()?;
         Ok(())
     }
 

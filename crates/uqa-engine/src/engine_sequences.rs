@@ -21,6 +21,8 @@ enum SequenceValueError {
         bound: &'static str,
         value: i64,
     },
+    #[error("cannot execute {0}() in a read-only transaction")]
+    ReadOnly(&'static str),
     #[error("{0}")]
     Internal(String),
 }
@@ -43,6 +45,7 @@ impl SequenceValueError {
             Self::Undefined(_) => "42P01",
             Self::CurrvalUndefined(_) => "55000",
             Self::Exhausted { .. } => "2200H",
+            Self::ReadOnly(_) => "25006",
             Self::Internal(message) => return SQLError::Internal(message),
         };
         SQLError::Routine {
@@ -450,6 +453,9 @@ impl Engine {
             .is_some_and(|persistence| {
                 *persistence == uqa_sql::ast::RelationPersistence::Temporary
             });
+        if self.current_transaction_is_read_only() && !temporary {
+            return Err(SequenceValueError::ReadOnly("nextval"));
+        }
         let sequence_session = if temporary {
             None
         } else {
@@ -555,6 +561,9 @@ impl Engine {
             .is_some_and(|persistence| {
                 *persistence == uqa_sql::ast::RelationPersistence::Temporary
             });
+        if self.current_transaction_is_read_only() && !temporary {
+            return Err(SequenceValueError::ReadOnly("setval"));
+        }
         let sequence_session = if temporary {
             None
         } else {

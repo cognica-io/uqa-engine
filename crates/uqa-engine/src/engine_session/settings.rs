@@ -149,20 +149,25 @@ impl Engine {
                 message: format!("parameter \"{name}\" cannot be changed"),
             });
         }
+        if name.eq_ignore_ascii_case("transaction_isolation")
+            || name.eq_ignore_ascii_case("transaction_read_only")
+            || name.eq_ignore_ascii_case("transaction_deferrable")
+        {
+            return self.set_transaction_parameter(name, value);
+        }
+        let value = Self::validate_default_transaction_parameter(name, value)?;
         if name.eq_ignore_ascii_case("work_mem") {
-            Self::parse_work_mem_bytes(value)?;
+            Self::parse_work_mem_bytes(&value)?;
         }
         if name.eq_ignore_ascii_case("search_path") {
-            let parts = parse_search_path_list(value)?;
+            let parts = parse_search_path_list(&value)?;
             let mut session = self.session.state.write();
             session.search_path = if parts.is_empty() {
                 vec!["public".to_string()]
             } else {
                 parts
             };
-            session
-                .session_vars
-                .insert(name.to_string(), value.to_string());
+            session.session_vars.insert(name.to_string(), value);
             session.sql_statement_cache.clear();
             return Ok(());
         }
@@ -170,8 +175,48 @@ impl Engine {
             .state
             .write()
             .session_vars
-            .insert(name.to_string(), value.to_string());
+            .insert(name.to_string(), value);
         Ok(())
+    }
+
+    pub fn reset_variable(&self, name: &str) -> Result<(), SQLError> {
+        if !crate::is_known_runtime_parameter(name) {
+            return Err(SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("unrecognized configuration parameter \"{name}\""),
+            });
+        }
+        if name.eq_ignore_ascii_case("transaction_isolation")
+            || name.eq_ignore_ascii_case("transaction_read_only")
+            || name.eq_ignore_ascii_case("transaction_deferrable")
+        {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: format!("parameter \"{name}\" cannot be reset"),
+            });
+        }
+        if !crate::is_mutable_runtime_parameter(name) {
+            return Err(SQLError::Routine {
+                sqlstate: "55P02".into(),
+                message: format!("parameter \"{name}\" cannot be changed"),
+            });
+        }
+        let mut session = self.session.state.write();
+        session
+            .session_vars
+            .retain(|key, _| !key.eq_ignore_ascii_case(name));
+        if name.eq_ignore_ascii_case("search_path") {
+            session.search_path = vec!["public".into()];
+        }
+        session.sql_statement_cache.clear();
+        Ok(())
+    }
+
+    pub fn reset_all_variables(&self) {
+        let mut session = self.session.state.write();
+        session.session_vars.clear();
+        session.search_path = vec!["public".into()];
+        session.sql_statement_cache.clear();
     }
 
     /// Read back a session variable. `search_path` always resolves to
@@ -182,6 +227,9 @@ impl Engine {
     pub fn show_variable(&self, name: &str) -> Result<String, SQLError> {
         if name.eq_ignore_ascii_case("search_path") {
             return Ok(self.search_path().join(","));
+        }
+        if let Some(value) = self.transaction_parameter_value(name) {
+            return Ok(value);
         }
         let session = self.session.state.read();
         if let Some(value) = session.session_vars.get(name) {

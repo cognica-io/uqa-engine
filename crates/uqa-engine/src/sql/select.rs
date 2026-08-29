@@ -35,7 +35,7 @@ use super::{
     has_window, optimize_engine_plan, prepare_window_plan, projection_label_at, BTreeMap, BTreeSet,
     BinaryOp, ColumnPrune, ColumnType, Engine, PhysicalAggregateExecutor, PhysicalWindowExecutor,
     QualifierFilters, ResultRow, SQLError, SQLParam, SQLResult, ScoredEntry, SetOpKind, Value,
-    DOC_ID_COLUMN, SCORE_COLUMN, TABLE_OID_COLUMN,
+    DOC_ID_COLUMN, SCORE_COLUMN, TABLE_OID_COLUMN, XMIN_COLUMN,
 };
 
 mod cte_execution;
@@ -101,7 +101,7 @@ pub(crate) fn execute_query_plan(
     plan: &QueryPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    let mut ctes = CteScope::new();
+    let mut ctes = CteScope::new_for_current_routine();
     execute_query_plan_with_ctes(engine, plan, params, &mut ctes)
 }
 

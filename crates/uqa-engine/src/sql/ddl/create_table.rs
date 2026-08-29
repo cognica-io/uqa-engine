@@ -26,6 +26,9 @@ pub(in crate::sql) fn run_create_table(
 }
 
 fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResult, SQLError> {
+    for column in &c.columns {
+        super::validate_postgres_column_name(&column.name)?;
+    }
     if c.persistence != uqa_sql::ast::RelationPersistence::Temporary {
         engine.prepare_explicit_transaction_writer()?;
     }

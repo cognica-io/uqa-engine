@@ -135,6 +135,18 @@ fn command_string_returns_failure_when_sql_execution_fails() {
 }
 
 #[test]
+fn command_string_routes_sql_notices_to_stderr() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = run_usql(&["--copy-text", "-c", "COMMIT"], "", dir.path());
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        stderr(&output),
+        "WARNING: there is no transaction in progress\n"
+    );
+}
+
+#[test]
 fn command_string_preserves_sql_standard_function_body_for_engine_validation() {
     let dir = tempfile::tempdir().expect("tempdir");
     let sql = "CREATE FUNCTION cli_atomic(value anyelement) RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT 1; END;";

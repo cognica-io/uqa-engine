@@ -346,6 +346,7 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
                 message: "moving row to another partition during a BEFORE FOR EACH ROW trigger is not supported".into(),
             });
         }
+        super::stamp_tuple_xmin(engine, &mut document)?;
         lock_existing_document_foreign_key_dependencies(engine, &target_table, &document)?;
         let prepared_conflict = if let Some(on_conflict) = stmt.on_conflict.as_ref() {
             conflict_locks
@@ -487,7 +488,7 @@ pub(in crate::sql) fn run_insert_inner(
         uqa_sql::ast::RuleEvent::Insert,
         !stmt.returning.is_empty(),
     )?;
-    let mut scope = CteScope::new();
+    let mut scope = CteScope::new_for_current_routine();
     crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut scope)?;
     scope.scalar_subqueries.clone_from(&stmt.subqueries);
     let conflict_update_columns = if let Some(ConflictPlan {
@@ -1021,6 +1022,7 @@ fn prepare_values_insert_row(
             message: "moving row to another partition during a BEFORE FOR EACH ROW trigger is not supported".into(),
         });
     }
+    super::stamp_tuple_xmin(engine, &mut document)?;
     lock_existing_document_foreign_key_dependencies(engine, &target_table, &document)?;
     let prepared = if let Some(on_conflict) = stmt.on_conflict.as_ref() {
         conflict_locks.prepare_document(

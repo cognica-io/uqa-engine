@@ -809,6 +809,8 @@ pub(in crate::sql) fn returning_row_context(
         columns.push(DOC_ID_COLUMN.into());
         types.push(Some(uqa_sql::ast::ColumnType::BigInteger));
     }
+    columns.push(crate::sql::XMIN_COLUMN.into());
+    types.push(Some(uqa_sql::ast::ColumnType::Xid));
     let schema = returning_context_schema(&columns, &types, target_qualifier, aliases);
     let current_values = returning_image_values(Some(current), &columns, &definitions)?;
     let old_values = returning_image_values(images.old, &columns, &definitions)?;
@@ -1079,7 +1081,7 @@ fn analyze_dml_returning_plan(
     if returning.is_empty() {
         return Ok(None);
     }
-    let mut ctes = CteScope::new();
+    let mut ctes = CteScope::new_for_current_routine();
     for plan in cte_plans {
         ctes.insert_deferred(plan.clone());
     }
@@ -1204,6 +1206,8 @@ fn returning_expression_schema(
         columns.push(DOC_ID_COLUMN.into());
         types.push(Some(uqa_sql::ast::ColumnType::BigInteger));
     }
+    columns.push(crate::sql::XMIN_COLUMN.into());
+    types.push(Some(uqa_sql::ast::ColumnType::Xid));
     let target = returning_context_schema(&columns, &types, target_qualifier, aliases);
     supplemental.map_or(target.clone(), |source| {
         RowSchema::join(&target, source, std::iter::empty())

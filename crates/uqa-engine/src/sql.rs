@@ -57,11 +57,13 @@ mod mutability;
 mod plan_executor;
 mod planning;
 mod plpgsql_exec;
+mod read_only;
 mod row_functions;
 mod rules;
 mod scalar;
 mod select;
 mod triggers;
+mod vacuum;
 mod volatility;
 mod where_eval;
 mod window;
@@ -93,7 +95,9 @@ use ddl::{
     run_create_index, run_create_sequence, run_create_table, run_create_table_as, run_drop,
     value_to_text, CreateTableAsExecution,
 };
-pub(crate) use ddl::{convert_value_to_column_type, validate_vector_dimensions};
+pub(crate) use ddl::{
+    convert_value_to_column_type, validate_postgres_column_name, validate_vector_dimensions,
+};
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
 use from_rows::{build_join_spill_with_ctes, engine_func_intercept, ColumnPrune, QualifierFilters};
 pub(crate) use generated::refresh_stored_generated_columns;
@@ -118,6 +122,7 @@ pub(crate) use row_functions::{
     run_calibrated_vector_match_public, run_multi_field_match_in_execution,
     run_multi_field_match_public,
 };
+use vacuum::run_vacuum;
 
 pub(crate) fn call_bound_engine_builtin(
     engine: &Engine,
@@ -192,6 +197,7 @@ pub(crate) fn bind_catalog_query_routines_with_outer(
 const SCORE_COLUMN: &str = "_score";
 pub(in crate::sql) const DOC_ID_COLUMN: &str = "_doc_id";
 pub(in crate::sql) const TABLE_OID_COLUMN: &str = "tableoid";
+pub(in crate::sql) const XMIN_COLUMN: &str = "xmin";
 pub(in crate::sql) const META_QUALIFIER: &str = "_meta";
 pub(in crate::sql) const META_DOC_ID_COLUMN: &str = "doc_id";
 pub(in crate::sql) const META_SCORE_COLUMN: &str = "score";

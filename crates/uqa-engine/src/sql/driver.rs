@@ -96,12 +96,24 @@ fn execute_uncached_or_snapshot_scoped(
             if simple_query_batch
                 && implicit_segment_open
                 && transaction.as_ref().is_some_and(|transaction| {
-                    matches!(transaction, uqa_sql::ast::TransactionStmt::Begin)
+                    matches!(
+                        transaction,
+                        uqa_sql::ast::TransactionStmt::Begin
+                            | uqa_sql::ast::TransactionStmt::BeginWithCharacteristics(_)
+                    )
                 })
             {
                 // PostgreSQL promotes the simple-query message's implicit
                 // transaction to an explicit block. The preceding statements
                 // stay uncommitted; a later COMMIT or ROLLBACK controls them.
+                engine.promote_implicit_transaction_block()?;
+                if let Some(uqa_sql::ast::TransactionStmt::BeginWithCharacteristics(options)) =
+                    transaction
+                {
+                    engine.run_transaction_statement(
+                        uqa_sql::ast::TransactionStmt::SetCharacteristics(options),
+                    )?;
+                }
                 implicit_segment_open = false;
                 last = SQLResult::empty();
                 continue;
@@ -135,8 +147,8 @@ fn execute_uncached_or_snapshot_scoped(
                 (Arc::new(lower_statement(engine, statement.clone())), None)
             };
             if is_transaction_control(initial_plan.as_ref()) {
-                if simple_query_batch
-                    && engine.transaction_depth() == 0
+                // SQL COMMIT/ROLLBACK outside a block warn and succeed; the direct Rust transaction API keeps reporting misuse as an error.
+                if engine.transaction_depth() == 0
                     && transaction.as_ref().is_some_and(|transaction| {
                         matches!(
                             transaction,
@@ -251,12 +263,16 @@ fn execute_uncached_or_snapshot_scoped(
                 uqa_planner::UnifiedPlan::Query(query) => !query_may_mutate_engine(engine, query)?,
                 uqa_planner::UnifiedPlan::Command(_) => false,
             };
-            let is_discard = matches!(
+            let runs_outside_transaction = matches!(
                 initial_plan.as_ref(),
                 uqa_planner::UnifiedPlan::Command(command)
-                    if matches!(command.as_ref(), uqa_planner::CommandPlan::Discard { .. })
+                    if matches!(
+                        command.as_ref(),
+                        uqa_planner::CommandPlan::Discard { .. }
+                            | uqa_planner::CommandPlan::Vacuum(_)
+                    )
             );
-            let needs_implicit_transaction = !is_discard
+            let needs_implicit_transaction = !runs_outside_transaction
                 && (engine.storage.backend.is_some() || !is_read_query || has_row_locks);
             if needs_implicit_transaction {
                 if has_row_locks {
@@ -387,6 +403,8 @@ fn transaction_requires_explicit_block(transaction: &uqa_sql::ast::TransactionSt
         uqa_sql::ast::TransactionStmt::Savepoint(_)
             | uqa_sql::ast::TransactionStmt::ReleaseSavepoint(_)
             | uqa_sql::ast::TransactionStmt::RollbackToSavepoint(_)
+            | uqa_sql::ast::TransactionStmt::CommitAndChain
+            | uqa_sql::ast::TransactionStmt::RollbackAndChain
     )
 }
 
@@ -395,6 +413,8 @@ fn no_active_transaction_error(transaction: &uqa_sql::ast::TransactionStmt) -> S
         uqa_sql::ast::TransactionStmt::Savepoint(_) => "SAVEPOINT",
         uqa_sql::ast::TransactionStmt::ReleaseSavepoint(_) => "RELEASE SAVEPOINT",
         uqa_sql::ast::TransactionStmt::RollbackToSavepoint(_) => "ROLLBACK TO SAVEPOINT",
+        uqa_sql::ast::TransactionStmt::CommitAndChain => "COMMIT AND CHAIN",
+        uqa_sql::ast::TransactionStmt::RollbackAndChain => "ROLLBACK AND CHAIN",
         _ => unreachable!("only explicit-block transaction commands use this error"),
     };
     SQLError::Routine {

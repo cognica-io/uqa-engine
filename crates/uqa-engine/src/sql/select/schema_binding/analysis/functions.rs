@@ -17,6 +17,14 @@ pub(super) fn validate_unqualified_column(
     fallback: Option<&RowSchema>,
     column: &str,
 ) -> Result<(), SQLError> {
+    if column == "_score" {
+        if schema.score_source_is_ambiguous(None) {
+            return Err(SQLError::AmbiguousColumn(column.to_string()));
+        }
+        if schema.score_source_column(None).is_some() {
+            return Ok(());
+        }
+    }
     if schema.column_is_ambiguous(column) {
         return Err(SQLError::AmbiguousColumn(column.to_string()));
     }
@@ -64,34 +72,38 @@ pub(super) fn is_semantic_all_argument(function: &str, argument: &ScalarExpr) ->
 }
 
 pub(super) fn single_pseudo_column_qualifier(schema: &RowSchema) -> Option<String> {
-    let mut qualifiers = schema
-        .identities()
-        .iter()
-        .filter_map(|identity| identity.qualifier())
-        .filter(|qualifier| {
-            schema.has_qualified_column(qualifier, "_doc_id")
-                && schema.has_qualified_column(qualifier, "_score")
-                && schema.has_qualified_column(qualifier, "tableoid")
-        })
-        .map(str::to_string)
-        .collect::<BTreeSet<_>>()
-        .into_iter();
+    let mut qualifiers = schema_qualifiers(schema).into_iter().filter(|qualifier| {
+        schema.has_qualified_column(qualifier, "_doc_id")
+            && schema.has_qualified_column(qualifier, "_score")
+            && schema.has_qualified_column(qualifier, "tableoid")
+    });
     let qualifier = qualifiers.next()?;
     qualifiers.next().is_none().then_some(qualifier)
 }
 
 fn pseudo_column_qualifiers(schema: &RowSchema, column: &str) -> BTreeSet<String> {
+    schema_qualifiers(schema)
+        .into_iter()
+        .filter(|qualifier| schema.has_qualified_column(qualifier, column))
+        .collect()
+}
+
+fn schema_qualifiers(schema: &RowSchema) -> BTreeSet<String> {
     schema
         .identities()
         .iter()
         .filter_map(|identity| identity.qualifier())
-        .filter(|qualifier| schema.has_qualified_column(qualifier, column))
+        .chain(
+            schema
+                .typed_virtual_identities()
+                .filter_map(|(identity, _)| identity.qualifier()),
+        )
         .map(str::to_string)
         .collect()
 }
 
 fn is_pseudo_column(column: &str) -> bool {
-    matches!(column, "_doc_id" | "_score" | "tableoid")
+    matches!(column, "_doc_id" | "_score" | "tableoid" | "xmin")
 }
 
 pub(super) struct ScalarFunctionValidation<'a> {
@@ -236,6 +248,7 @@ pub(super) fn validate_window_function(
             | ("first_value" | "last_value", 1)
             | ("nth_value", 2)
             | ("ntile", 1)
+            | ("sum" | "count" | "avg" | "min" | "max", 1)
     ) || engine.has_registered_aggregate_function(name)
         || resolve_sql_function(engine, name, None, args, schema, params, resolver)?.is_some()
     {

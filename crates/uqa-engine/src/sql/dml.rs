@@ -14,7 +14,7 @@ use super::{
     partition_insert_target, validate_vector_dimensions, value_to_tensor, value_to_vector,
     BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope, DocId, Document, Engine, ForeignKey,
     ForeignKeyAction, ForeignKeyMatch, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult,
-    Value, DOC_ID_COLUMN,
+    Value, DOC_ID_COLUMN, XMIN_COLUMN,
 };
 use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema, ScalarExpr};
 use uqa_planner::{
@@ -510,6 +510,14 @@ fn is_virtual_document_id_column(column: &str, definitions: &[uqa_sql::ast::Colu
             .any(|definition| definition.name == DOC_ID_COLUMN)
 }
 
+pub(crate) fn stamp_tuple_xmin(engine: &Engine, document: &mut Document) -> Result<(), SQLError> {
+    document.insert(
+        XMIN_COLUMN.into(),
+        Value::Int(i64::from(engine.tuple_version_xid()?)),
+    );
+    Ok(())
+}
+
 fn dml_target_row(
     engine: &Engine,
     table: &str,
@@ -527,7 +535,11 @@ fn dml_target_row(
         &mut materialized,
     )?;
     let mut columns = if definitions.is_empty() {
-        materialized.keys().cloned().collect::<Vec<_>>()
+        materialized
+            .keys()
+            .filter(|column| column.as_str() != XMIN_COLUMN)
+            .cloned()
+            .collect::<Vec<_>>()
     } else {
         definitions
             .iter()
@@ -547,6 +559,8 @@ fn dml_target_row(
         columns.push(DOC_ID_COLUMN.into());
         types.push(Some(ColumnType::BigInteger));
     }
+    columns.push(XMIN_COLUMN.into());
+    types.push(Some(ColumnType::Xid));
     let values = columns
         .iter()
         .map(|column| {
@@ -601,6 +615,8 @@ fn dml_null_target_row(
         columns.push(DOC_ID_COLUMN.into());
         types.push(Some(ColumnType::BigInteger));
     }
+    columns.push(XMIN_COLUMN.into());
+    types.push(Some(ColumnType::Xid));
     let width = columns.len();
     Ok(OwnedPhysicalRow::new(
         RowSchema::with_qualified_types(qualifier, columns, types),

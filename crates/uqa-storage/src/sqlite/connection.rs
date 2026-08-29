@@ -573,6 +573,18 @@ impl ManagedConnection {
         f(connection.connection_mut()?)
     }
 
+    /// Rewrite the `SQLite` database into its minimum-sized file. `SQLite` requires `VACUUM` to run in autocommit mode, so the session write gate makes the transaction check and maintenance command one atomic session operation.
+    pub fn vacuum(&self) -> Result<()> {
+        self.surface_cleanup_failure()?;
+        let _gate = self.session.gate.write();
+        if self.session.transaction.lock().is_some() {
+            return Err(SQLiteError::TransactionAlreadyActive);
+        }
+        let connection = self.pool.checkout()?;
+        connection.connection()?.execute_batch("VACUUM")?;
+        Ok(())
+    }
+
     /// Open an explicit (non-deferred) transaction. Subsequent
     /// auto-commit hosts (catalog writes, FTS index updates, ...) all
     /// flow through the same connection so the transaction enclosing

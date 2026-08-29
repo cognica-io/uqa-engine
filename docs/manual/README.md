@@ -1,6 +1,6 @@
 # UQA Engine Manual
 
-This manual documents the behavior implemented by the current UQA Engine workspace. UQA Engine is an embedded database that combines PostgreSQL-oriented SQL, full-text retrieval, vector retrieval, graph queries, and ranked fusion in one Rust runtime, and its Rust HTTP client connects applications directly to local and Cloud UQA nodes.
+This manual documents the behavior implemented by the current UQA Engine workspace. UQA Engine is an embedded database that combines a PostgreSQL 18-compatible SQL surface across the behavior covered by its differential suite, full-text retrieval, vector retrieval, graph queries, and ranked fusion in one Rust runtime, and its Rust HTTP client connects applications directly to local and Cloud UQA nodes.
 
 The manual is divided by reader intent:
 
@@ -57,6 +57,6 @@ New users should read the [quick start](reference/01-quick-start.md), then work 
 
 ## Version and compatibility scope
 
-This manual targets UQA Engine 0.1.8 and Rust 1.90 or newer. UQA Engine implements a large PostgreSQL-oriented surface, but it is an embedded engine rather than a PostgreSQL server clone. The [compatibility guide](sql/09-compatibility.md) states important differences and unsupported behavior.
+This manual targets UQA Engine 0.1.8 and Rust 1.90 or newer. UQA Engine implements a large PostgreSQL 18-compatible surface across its verified behavior, but it is an embedded engine rather than a PostgreSQL server clone. The [compatibility guide](sql/09-compatibility.md) states the verification boundary and behavior that remains incomplete.
 
 The implementation and tests are authoritative when behavior changes. Source paths are included throughout the internal documentation to make each claim traceable.

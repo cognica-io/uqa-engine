@@ -112,6 +112,66 @@ fn split_statements_respects_postgresql_escape_and_delimited_quotes() {
 }
 
 #[test]
+fn psql_escaped_semicolons_are_unescaped_only_outside_sql_tokens() {
+    let text = "SELECT 1\\; SELECT '\\;' AS literal, $$\\;$$ AS dollar -- \\; comment\n;";
+    let normalized = unescape_psql_semicolons(text).unwrap();
+    assert!(normalized.starts_with("SELECT 1; SELECT"));
+    assert!(normalized.contains("'\\;' AS literal"));
+    assert!(normalized.contains("$$\\;$$ AS dollar"));
+    assert!(normalized.contains("-- \\; comment"));
+    assert!(!contains_input_terminator("SELECT 1\\;"));
+    assert!(contains_input_terminator("SELECT 1\\; SELECT 2;"));
+
+    let standard_string = "SELECT 'abc\\' AS value\\; SELECT 2;";
+    assert_eq!(
+        unescape_psql_semicolons(standard_string).as_deref(),
+        Some("SELECT 'abc\\' AS value; SELECT 2;")
+    );
+}
+
+#[test]
+fn psql_escaped_semicolons_keep_one_simple_query_transaction() {
+    let engine = Engine::new();
+    engine
+        .sql("CREATE TABLE escaped_batch (id INTEGER PRIMARY KEY)", &[])
+        .unwrap();
+    let mut session = Session {
+        engine,
+        db_path: None,
+        db_key: None,
+        location: ":memory:".into(),
+        history: Vec::new(),
+        history_path: None,
+        show_timing: false,
+        expanded: false,
+        copy_text: false,
+        output_path: None,
+    };
+    let mut out = Vec::new();
+    let error = session
+        .execute_text_with_history(
+            "INSERT INTO escaped_batch VALUES (1)\\; INSERT INTO escaped_batch VALUES (2)\\; SELECT 1 / 0;",
+            &mut out,
+            false,
+        )
+        .unwrap_err();
+    assert!(error.starts_with("22012:"), "{error}");
+    let count = session
+        .engine
+        .sql("SELECT count(*) AS count FROM escaped_batch", &[])
+        .unwrap();
+    assert_eq!(count.rows[0]["count"], Value::Int(0));
+
+    out.clear();
+    session
+        .execute_text_with_history("ROLLBACK;", &mut out, false)
+        .unwrap();
+    assert!(!String::from_utf8(out)
+        .unwrap()
+        .contains("WARNING: there is no transaction in progress"));
+}
+
+#[test]
 fn split_statements_keeps_sql_standard_atomic_body_together() {
     let text = "CREATE FUNCTION atomic_body(value anyelement) RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT 1; END; SELECT 2;";
     let parts = split_statements(text);

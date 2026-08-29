@@ -15,7 +15,7 @@ use crate::sql::virtual_relation_accepts_row_lock;
 use uqa_execution::{
     Batch, ExecResult, PhysicalOperator, PhysicalRow, RowProjectionValue, RowSchema,
 };
-use uqa_sql::ast::{LockStrength, LockWait, LockingClause};
+use uqa_sql::ast::{LockStrength, LockWait, LockingClause, RelationPersistence};
 
 #[derive(Clone, Debug)]
 pub(in crate::sql) struct ResolvedRowLock {
@@ -166,7 +166,34 @@ pub(in crate::sql) fn resolve_row_locks(
             identity_source: source.kind.is_identity_source(),
         });
     }
+    if engine.current_transaction_is_read_only() && locks_non_temporary_relation(engine, &resolved)?
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "25006".into(),
+            message: "cannot execute SELECT in a read-only transaction".into(),
+        });
+    }
     Ok(resolved)
+}
+
+fn locks_non_temporary_relation(
+    engine: &Engine,
+    locks: &[ResolvedRowLock],
+) -> Result<bool, SQLError> {
+    for lock in locks {
+        let persistence = engine
+            .table_persistence(&lock.storage_name)
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "resolve row-lock target `{}`: {error}",
+                    lock.storage_name
+                ))
+            })?;
+        if persistence != Some(RelationPersistence::Temporary) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn source_contains_join_alias(source: &SourcePlan, target: &str) -> bool {

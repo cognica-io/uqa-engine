@@ -10,6 +10,7 @@ use super::administrative::{
     compile_analyze, compile_explain, compile_set_constraints, compile_transaction,
     compile_truncate, compile_variable_set, discard_target,
 };
+use super::cursors::{compile_close_cursor, compile_declare_cursor, compile_fetch_cursor};
 use super::dml::{compile_delete, compile_update};
 use super::drop_alter::{compile_alter_table, compile_drop, compile_rename};
 use super::events::{compile_create_rule, compile_create_trigger};
@@ -81,6 +82,9 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::VacuumStmt(stmt) => compile_analyze(stmt),
         NodeEnum::TruncateStmt(stmt) => compile_truncate(stmt),
         NodeEnum::TransactionStmt(stmt) => compile_transaction(stmt),
+        NodeEnum::DeclareCursorStmt(stmt) => compile_declare_cursor(stmt),
+        NodeEnum::FetchStmt(stmt) => compile_fetch_cursor(stmt),
+        NodeEnum::ClosePortalStmt(stmt) => Ok(compile_close_cursor(stmt)),
         NodeEnum::CreateSeqStmt(stmt) => {
             compile_create_sequence(stmt).map(Statement::CreateSequence)
         }
@@ -135,6 +139,9 @@ pub(super) fn other_node_label(node: &NodeEnum) -> &'static str {
         NodeEnum::ExplainStmt(_) => "EXPLAIN",
         NodeEnum::ViewStmt(_) => "CREATE VIEW",
         NodeEnum::TransactionStmt(_) => "BEGIN/COMMIT/ROLLBACK",
+        NodeEnum::DeclareCursorStmt(_) => "DECLARE CURSOR",
+        NodeEnum::FetchStmt(_) => "FETCH/MOVE",
+        NodeEnum::ClosePortalStmt(_) => "CLOSE CURSOR",
         NodeEnum::PrepareStmt(_) | NodeEnum::ExecuteStmt(_) => "PREPARE/EXECUTE",
         _ => "unknown statement",
     }

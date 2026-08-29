@@ -7,11 +7,12 @@
 use super::{
     BTreeSet, BackendTransactionMode, ConstraintModeState, Engine, EngineDataSnapshot, SQLError,
     SQLParam, SQLResult, SessionStateSnapshot, StorageBackendError, StorageBackendResult,
-    StorageSavepointId, TransactionDirtyState, TransactionFrame, TransactionIntent,
-    TransactionSavepoint, TransactionStatus,
+    StorageSavepointId, TransactionCharacteristicsState, TransactionDirtyState, TransactionFrame,
+    TransactionIntent, TransactionSavepoint, TransactionStatus,
 };
-use uqa_sql::ast::TransactionStmt;
 
+mod characteristics;
+mod control;
 mod snapshots;
 
 fn panic_description(payload: &(dyn std::any::Any + Send)) -> &str {
@@ -31,6 +32,9 @@ struct StatementAbortSnapshot {
     row_changes: Vec<crate::row_locks::PendingRowChange>,
     deferred_foreign_key_checks: Vec<crate::DeferredForeignKeyCheck>,
     constraint_modes: ConstraintModeState,
+    intent: TransactionIntent,
+    characteristics: TransactionCharacteristicsState,
+    first_snapshot_set: bool,
 }
 
 fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot {
@@ -44,6 +48,10 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
             row_changes: savepoint.row_changes.clone(),
             deferred_foreign_key_checks: savepoint.deferred_foreign_key_checks.clone(),
             constraint_modes: savepoint.constraint_modes.clone(),
+            intent: savepoint.intent,
+            characteristics: savepoint.characteristics,
+            // PostgreSQL's FirstSnapshotSet belongs to the top transaction, not to a subtransaction or savepoint. Once any statement has acquired a snapshot, error recovery must never make it false.
+            first_snapshot_set: frame.first_snapshot_set,
         };
     }
     StatementAbortSnapshot {
@@ -58,6 +66,9 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
         row_changes: Vec::new(),
         deferred_foreign_key_checks: Vec::new(),
         constraint_modes: ConstraintModeState::default(),
+        intent: frame.intent,
+        characteristics: frame.characteristics,
+        first_snapshot_set: frame.first_snapshot_set,
     }
 }
 
@@ -106,7 +117,17 @@ impl Engine {
         {
             return Err(failed_transaction_error());
         }
-        self.begin_transaction_frame(&mut stack, false, true, false)
+        let characteristics = self.transaction_characteristics_for_begin(
+            &stack,
+            uqa_sql::ast::TransactionCharacteristics::default(),
+        );
+        self.begin_transaction_frame(
+            &mut stack,
+            characteristics.read_only,
+            true,
+            false,
+            characteristics,
+        )
     }
 
     /// Commit the topmost transaction frame.
@@ -418,95 +439,6 @@ impl Engine {
         Ok(())
     }
 
-    pub fn run_transaction_statement(&self, tx: TransactionStmt) -> Result<(), SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
-        let apply_on_commit = if matches!(&tx, TransactionStmt::Commit) {
-            let stack = self.session.transactions.lock();
-            stack.len() == 1
-                && stack
-                    .last()
-                    .is_some_and(|frame| frame.status == TransactionStatus::Active)
-        } else {
-            false
-        };
-        if apply_on_commit {
-            let validation = {
-                let mut stack = self.session.transactions.lock();
-                self.validate_deferred_constraints_before_commit(&mut stack, false)
-            };
-            validation?;
-            if let Err(error) = self.apply_temporary_on_commit_actions() {
-                return Err(self.abort_sql_transaction_after_error(error));
-            }
-        }
-        let mut guard = self.session.transactions.lock();
-        let failed = guard
-            .last()
-            .is_some_and(|frame| frame.status != TransactionStatus::Active);
-        let outcome = match tx {
-            TransactionStmt::Rollback => self.rollback_transaction_frame(&mut guard),
-            TransactionStmt::Commit if failed => self.rollback_transaction_frame(&mut guard),
-            TransactionStmt::RollbackToSavepoint(name) => {
-                self.rollback_to_transaction_savepoint(&mut guard, &name)
-            }
-            _ if failed => return Err(failed_transaction_error()),
-            TransactionStmt::Begin if guard.is_empty() => {
-                self.begin_transaction_frame(&mut guard, false, true, false)
-            }
-            TransactionStmt::Begin => self.begin_transaction_frame(&mut guard, false, false, false),
-            TransactionStmt::Commit => self.commit_transaction_frame(&mut guard, apply_on_commit),
-            TransactionStmt::Savepoint(name) => self.save_transaction_savepoint(&mut guard, name),
-            TransactionStmt::ReleaseSavepoint(name) => {
-                self.release_transaction_savepoint(&mut guard, &name)
-            }
-        };
-        match outcome {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                // PostgreSQL aborts the enclosing transaction when a savepoint command or nested BEGIN fails; later statements see 25P02 until ROLLBACK. Frames that this failing command could not open or that no longer exist need no abort.
-                let still_open = guard
-                    .last()
-                    .is_some_and(|frame| frame.status == TransactionStatus::Active);
-                drop(guard);
-                if still_open {
-                    return Err(self.abort_sql_transaction_after_error(error));
-                }
-                Err(error)
-            }
-        }
-    }
-
-    fn apply_temporary_on_commit_actions(&self) -> Result<(), SQLError> {
-        let actions = self
-            .storage
-            .tables
-            .read()
-            .iter()
-            .filter(|(_, table)| {
-                table.persistence == uqa_sql::ast::RelationPersistence::Temporary
-                    && table.on_commit != uqa_sql::ast::OnCommitAction::PreserveRows
-            })
-            .map(|(relation, table)| (relation.qualified_name(), table.on_commit))
-            .collect::<Vec<_>>();
-        for (name, action) in actions {
-            match action {
-                uqa_sql::ast::OnCommitAction::PreserveRows => {}
-                uqa_sql::ast::OnCommitAction::DeleteRows => {
-                    self.truncate_locked_table(&name, false)?;
-                }
-                uqa_sql::ast::OnCommitAction::Drop => {
-                    self.drop_temporary_table_on_commit_inner(&name)
-                        .map_err(|error| {
-                            SQLError::Internal(format!(
-                                "drop temporary table `{name}` at commit: {error}"
-                            ))
-                        })?;
-                }
-            }
-        }
-        Ok(())
-    }
-
     pub(crate) fn ensure_transaction_usable(&self) -> Result<(), SQLError> {
         if self
             .session
@@ -531,7 +463,14 @@ impl Engine {
                 "implicit statement transaction started inside an explicit transaction".into(),
             ));
         }
-        self.begin_transaction_frame(&mut stack, read_only, true, true)
+        let characteristics = self.default_transaction_characteristics();
+        self.begin_transaction_frame(
+            &mut stack,
+            read_only || characteristics.read_only,
+            true,
+            true,
+            characteristics,
+        )
     }
 
     pub(crate) fn begin_implicit_transaction_block(&self) -> Result<(), SQLError> {
@@ -542,7 +481,23 @@ impl Engine {
                 "implicit transaction block started inside another transaction".into(),
             ));
         }
-        self.begin_transaction_frame(&mut stack, false, true, false)
+        let characteristics = self.default_transaction_characteristics();
+        self.begin_transaction_frame(
+            &mut stack,
+            characteristics.read_only,
+            true,
+            false,
+            characteristics,
+        )
+    }
+
+    pub(crate) fn promote_implicit_transaction_block(&self) -> Result<(), SQLError> {
+        let mut stack = self.session.transactions.lock();
+        let frame = stack.last_mut().ok_or_else(|| {
+            SQLError::Internal("promote implicit transaction without an open frame".into())
+        })?;
+        frame.implicit_statement = false;
+        Ok(())
     }
 
     fn begin_transaction_frame(
@@ -551,7 +506,16 @@ impl Engine {
         read_only: bool,
         defer_write_lock: bool,
         implicit_statement: bool,
+        mut characteristics: TransactionCharacteristicsState,
     ) -> Result<(), SQLError> {
+        // A PostgreSQL subtransaction cannot relax the enclosing transaction's read-only mode. This is also the invariant relied on by PL/pgSQL EXCEPTION blocks, which use nested engine frames as subtransactions.
+        if stack
+            .last()
+            .is_some_and(|frame| frame.characteristics.read_only)
+        {
+            characteristics.read_only = true;
+        }
+        let read_only = read_only || characteristics.read_only;
         let session_snapshot = self.snapshot_session_state();
         let (storage_savepoint, data_snapshot, snapshot_change_baseline) = if stack.is_empty() {
             let (data_snapshot, baseline) = self.begin_outer_transaction_snapshot(
@@ -604,6 +568,9 @@ impl Engine {
             },
             backend_mode,
             status: TransactionStatus::Active,
+            characteristics,
+            first_snapshot_set: false,
+            xid_levels: vec![None],
             savepoints: Vec::new(),
             session_snapshot,
             data_snapshot,
@@ -618,6 +585,28 @@ impl Engine {
         });
         self.update_statement_row_lock_baseline(snapshot_change_baseline);
         Ok(())
+    }
+
+    /// Return the transaction ID that creates a new tuple version. IDs are allocated lazily, and a first write below a savepoint allocates every missing ancestor ID before the active subtransaction ID, matching `PostgreSQL`'s top-XID/sub-XID hierarchy. Direct in-memory APIs intentionally omit a heavyweight transaction snapshot when no frame is open; each such autocommit row write still receives its own durable XID.
+    pub(crate) fn tuple_version_xid(&self) -> Result<u32, SQLError> {
+        let mut stack = self.session.transactions.lock();
+        if stack.is_empty() {
+            drop(stack);
+            return self.row_locks.allocate_transaction_xid();
+        }
+        for frame in stack.iter_mut() {
+            for xid in &mut frame.xid_levels {
+                if xid.is_none() {
+                    *xid = Some(self.row_locks.allocate_transaction_xid()?);
+                }
+            }
+        }
+        stack
+            .last()
+            .and_then(|frame| frame.xid_levels.last())
+            .copied()
+            .flatten()
+            .ok_or_else(|| SQLError::Internal("transaction XID path is empty".into()))
     }
 
     fn begin_outer_transaction_snapshot(
@@ -814,13 +803,17 @@ impl Engine {
             self.row_locks.release_session(self.session_id);
             self.publish_committed_transaction_epochs();
             publication_result?;
-            self.session.portals.lock().clear();
+            self.session
+                .portals
+                .lock()
+                .retain(|_, portal| portal.holdable);
         }
         if let Some(parent) = stack.last_mut() {
             parent.next_lock_mark = parent.next_lock_mark.max(committed.next_lock_mark);
             parent.constraint_modes = committed.constraint_modes;
             parent.row_changes.extend(committed.row_changes);
             parent.deferred_foreign_key_checks = committed.deferred_foreign_key_checks;
+            parent.first_snapshot_set |= committed.first_snapshot_set;
         }
         Ok(())
     }
@@ -947,12 +940,16 @@ impl Engine {
         }
         self.restore_session_state(&session_snapshot);
         let begin_lock_mark = frame.begin_lock_mark;
+        let first_snapshot_set = frame.first_snapshot_set;
         stack.pop();
         if stack.is_empty() {
             self.row_locks.release_session(self.session_id);
         } else {
             self.row_locks
                 .release_mark_above(self.session_id, begin_lock_mark.saturating_sub(1));
+            if let Some(parent) = stack.last_mut() {
+                parent.first_snapshot_set |= first_snapshot_set;
+            }
         }
         if cleanup_errors.is_empty() {
             Ok(())
@@ -1032,6 +1029,9 @@ impl Engine {
             frame.row_changes = rollback_state.row_changes;
             frame.deferred_foreign_key_checks = rollback_state.deferred_foreign_key_checks;
             frame.constraint_modes = rollback_state.constraint_modes;
+            frame.intent = rollback_state.intent;
+            frame.characteristics = rollback_state.characteristics;
+            frame.first_snapshot_set = rollback_state.first_snapshot_set;
         }
         transaction_abort_result(error, &cleanup_errors)
     }
@@ -1057,7 +1057,10 @@ impl Engine {
         name: String,
     ) -> Result<(), SQLError> {
         if stack.is_empty() {
-            return Err(SQLError::Internal("SAVEPOINT outside a transaction".into()));
+            return Err(SQLError::Routine {
+                sqlstate: "25P01".into(),
+                message: "SAVEPOINT can only be used in transaction blocks".into(),
+            });
         }
         let session_snapshot = self.snapshot_session_state();
         let data_snapshot = self.snapshot_transaction_data()?;
@@ -1080,6 +1083,8 @@ impl Engine {
         frame.savepoints.push(TransactionSavepoint {
             name,
             storage_savepoint,
+            intent: frame.intent,
+            characteristics: frame.characteristics,
             session_snapshot,
             data_snapshot,
             dirty: self.transaction_dirty_state(),
@@ -1088,6 +1093,7 @@ impl Engine {
             deferred_foreign_key_checks,
             constraint_modes,
         });
+        frame.xid_levels.push(None);
         Ok(())
     }
 
@@ -1097,21 +1103,30 @@ impl Engine {
         name: &str,
     ) -> Result<(), SQLError> {
         let deferred = Self::backend_savepoints_deferred(stack);
-        let frame = stack
-            .last_mut()
-            .ok_or_else(|| SQLError::Internal("RELEASE SAVEPOINT outside a transaction".into()))?;
+        let frame = stack.last_mut().ok_or_else(|| SQLError::Routine {
+            sqlstate: "25P01".into(),
+            message: "RELEASE SAVEPOINT can only be used in transaction blocks".into(),
+        })?;
         let position = frame
             .savepoints
             .iter()
             .rposition(|savepoint| savepoint.name == name)
-            .ok_or_else(|| SQLError::Internal(format!("savepoint `{name}` not found")))?;
+            .ok_or_else(|| SQLError::Routine {
+                sqlstate: "3B001".into(),
+                message: format!("savepoint \"{name}\" does not exist"),
+            })?;
         let storage_savepoint = frame.savepoints[position].storage_savepoint;
+        let intent = frame.savepoints[position].intent;
+        let characteristics = frame.savepoints[position].characteristics;
         if let Some(backend) = self.storage.backend.as_ref().filter(|_| !deferred) {
             backend
                 .release_savepoint(storage_savepoint)
                 .map_err(|err| Self::storage_tx_error("RELEASE SAVEPOINT", &err))?;
         }
+        frame.intent = intent;
+        frame.characteristics = characteristics;
         frame.savepoints.truncate(position);
+        frame.xid_levels.truncate(position + 1);
         Ok(())
     }
 
@@ -1121,14 +1136,18 @@ impl Engine {
         name: &str,
     ) -> Result<(), SQLError> {
         let deferred = Self::backend_savepoints_deferred(stack);
-        let frame = stack.last_mut().ok_or_else(|| {
-            SQLError::Internal("ROLLBACK TO SAVEPOINT outside a transaction".into())
+        let frame = stack.last_mut().ok_or_else(|| SQLError::Routine {
+            sqlstate: "25P01".into(),
+            message: "ROLLBACK TO SAVEPOINT can only be used in transaction blocks".into(),
         })?;
         let position = frame
             .savepoints
             .iter()
             .rposition(|savepoint| savepoint.name == name)
-            .ok_or_else(|| SQLError::Internal(format!("savepoint `{name}` not found")))?;
+            .ok_or_else(|| SQLError::Routine {
+                sqlstate: "3B001".into(),
+                message: format!("savepoint \"{name}\" does not exist"),
+            })?;
         let storage_savepoint = frame.savepoints[position].storage_savepoint;
         if let Some(backend) = self.storage.backend.as_ref().filter(|_| !deferred) {
             backend
@@ -1163,7 +1182,14 @@ impl Engine {
         frame
             .constraint_modes
             .clone_from(&savepoint.constraint_modes);
+        frame.intent = savepoint.intent;
+        frame.characteristics = savepoint.characteristics;
         frame.savepoints.truncate(position + 1);
+        frame.xid_levels.truncate(position + 2);
+        let current_xid = frame.xid_levels.last_mut().ok_or_else(|| {
+            SQLError::Internal("ROLLBACK TO SAVEPOINT lost its transaction XID level".into())
+        })?;
+        *current_xid = None;
         self.row_locks
             .release_mark_above(self.session_id, keep_mark);
         frame.lock_mark = frame.next_lock_mark;

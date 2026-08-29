@@ -1393,6 +1393,21 @@ pub(super) fn build_pg_settings(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
         ("TimeZone", "Locale and formatting"),
         ("work_mem", "Resource usage"),
         ("search_path", "Client connection defaults"),
+        (
+            "default_transaction_isolation",
+            "Client connection defaults",
+        ),
+        (
+            "default_transaction_read_only",
+            "Client connection defaults",
+        ),
+        (
+            "default_transaction_deferrable",
+            "Client connection defaults",
+        ),
+        ("transaction_isolation", "Client connection defaults"),
+        ("transaction_read_only", "Client connection defaults"),
+        ("transaction_deferrable", "Client connection defaults"),
     ];
     settings
         .into_iter()

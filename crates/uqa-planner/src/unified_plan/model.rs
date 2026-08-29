@@ -411,6 +411,10 @@ pub enum CommandPlan {
         name: String,
         value: String,
     },
+    ResetVariable {
+        name: String,
+    },
+    ResetAllVariables,
     SetConstraints {
         constraints: Vec<uqa_sql::ast::SetConstraintName>,
         deferred: bool,
@@ -433,12 +437,24 @@ pub enum CommandPlan {
     Analyze {
         table: Option<String>,
     },
+    Vacuum(uqa_sql::ast::VacuumStmt),
     Truncate {
         tables: Vec<uqa_sql::ast::TruncateTarget>,
         cascade: bool,
         restart_identity: bool,
     },
     Transaction(uqa_sql::ast::TransactionStmt),
+    DeclareCursor {
+        name: String,
+        binary: bool,
+        scroll: Option<bool>,
+        hold: bool,
+        query: Box<QueryPlan>,
+    },
+    FetchCursor(uqa_sql::ast::FetchCursorStmt),
+    CloseCursor {
+        name: Option<String>,
+    },
     CreateSequence(uqa_sql::ast::CreateSequence),
     AlterSequence(uqa_sql::ast::AlterSequence),
     CreateTableAs {

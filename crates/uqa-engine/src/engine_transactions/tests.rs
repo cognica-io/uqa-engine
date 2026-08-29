@@ -188,9 +188,10 @@ fn pinned_reader_defers_sibling_catalog_epochs_until_transaction_end() {
     let writer = root.new_session().unwrap();
 
     {
+        let characteristics = reader.default_transaction_characteristics();
         let mut stack = reader.session.transactions.lock();
         reader
-            .begin_transaction_frame(&mut stack, true, true, false)
+            .begin_transaction_frame(&mut stack, true, true, false, characteristics)
             .unwrap();
     }
     assert!(!reader.has_schema("later").unwrap());

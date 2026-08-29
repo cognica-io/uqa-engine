@@ -1257,6 +1257,33 @@ pub(in crate::sql) fn validate_query_block_expression_types(
     Ok(())
 }
 
+/// Validate projection names only after the caller has the authoritative source schema. Runtime Rust table functions declare their row shape when invoked, so their projections are checked against the built operator rather than a guessed one-column placeholder.
+pub(in crate::sql) fn validate_query_block_projection_references(
+    engine: &Engine,
+    statement: &QueryBlockPlan,
+    schema: &RowSchema,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<(), SQLError> {
+    let mut analysis = SchemaScope::for_analysis(ctes);
+    for projection in &statement.projections {
+        if !matches!(
+            projection.expr,
+            ScalarExpr::Star | ScalarExpr::QualifiedStar(_)
+        ) {
+            analysis.validate_expression_references(
+                engine,
+                &projection.expr,
+                schema,
+                None,
+                &statement.subqueries,
+                params,
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn projection_star_columns(
     expression: &ScalarExpr,
     schema: &RowSchema,

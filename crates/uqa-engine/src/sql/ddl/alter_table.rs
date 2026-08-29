@@ -176,6 +176,7 @@ fn run_alter_table_action(
             mut column,
             if_not_exists,
         } => {
+            super::validate_postgres_column_name(&column.name)?;
             let col_name = column.name.clone();
             if engine
                 .try_table_has_column(&stmt.table, &col_name)
@@ -368,6 +369,7 @@ fn run_alter_table_action(
             drop_column_cascade(engine, &stmt.table, &name, if_exists)?;
         }
         AlterTableAction::RenameColumn { from, to } => {
+            super::validate_postgres_column_name(&to)?;
             if !engine
                 .try_table_has_column(&stmt.table, &from)
                 .map_err(|err| ddl_storage_error("ALTER TABLE RENAME COLUMN", err))?
