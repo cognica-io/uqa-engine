@@ -212,6 +212,10 @@ mod file {
         wait_slots: HashMap<u64, u64>,
         /// Sidecar holder slots for each acquisition owned by a local session. The vector preserves duplicate acquisitions of the same byte.
         holder_slots: HashMap<(u64, u64, bool), Vec<u64>>,
+        /// Holder-slot indexes owned by this process. Slot probing is on every durable row-lock acquisition, so deriving this set by scanning every acquisition makes a bulk write quadratic in the number of rows held by its transaction.
+        occupied_holder_slots: Vec<bool>,
+        /// Next holder slot to probe. Advancing past each allocation avoids restarting every acquisition at an unrelated hash location and repeatedly reading slots already known to be occupied by this process.
+        next_holder_slot: u64,
     }
 
     /// Process-wide coordinator for one durable database. All engine sessions of this process share one descriptor while the in-process lock table arbitrates between local sessions. On POSIX, nothing else in the process may open the sidecar path because closing another descriptor to it would drop this process's record locks.
@@ -252,6 +256,7 @@ mod file {
                         Path::new(&change_sidecar).display()
                     )
                 })?;
+            let pid = std::process::id();
             let coordinator = Self {
                 file,
                 change_file,
@@ -261,6 +266,8 @@ mod file {
                     holders: HashMap::new(),
                     wait_slots: HashMap::new(),
                     holder_slots: HashMap::new(),
+                    occupied_holder_slots: vec![false; HOLDER_SLOT_COUNT as usize],
+                    next_holder_slot: u64::from(pid).wrapping_mul(31) % HOLDER_SLOT_COUNT,
                 }),
             };
             Ok(coordinator)
@@ -364,23 +371,17 @@ mod file {
         ) {
             self.acquire_slot_metadata_lock();
             let pid = std::process::id();
-            let preferred =
-                stable_slot_hash(pid, session, claim.offset, claim.write) % HOLDER_SLOT_COUNT;
+            let preferred = state.next_holder_slot;
             let slot = (0..HOLDER_SLOT_COUNT).find_map(|probe| {
                 let index = (preferred + probe) % HOLDER_SLOT_COUNT;
-                let occupied = self.read_holder_slot(index).is_some_and(|existing| {
-                    if existing.pid == pid {
-                        state
-                            .holder_slots
-                            .values()
-                            .any(|slots| slots.contains(&index))
-                    } else {
-                        process_alive(existing.pid)
-                    }
-                });
+                let occupied = state.occupied_holder_slots[index as usize]
+                    || self
+                        .read_holder_slot(index)
+                        .is_some_and(|existing| existing.pid != pid && process_alive(existing.pid));
                 (!occupied).then_some(index)
             });
             if let Some(index) = slot {
+                state.next_holder_slot = (index + 1) % HOLDER_SLOT_COUNT;
                 self.write_holder_slot(
                     index,
                     Some(&HolderSlot {
@@ -395,6 +396,7 @@ mod file {
                     .entry((session, claim.offset, claim.write))
                     .or_default()
                     .push(index);
+                state.occupied_holder_slots[index as usize] = true;
             }
             let _ = self.apply_byte_mode(SLOT_METADATA_LOCK_BYTE, Some(true), None);
         }
@@ -410,6 +412,7 @@ mod file {
             if slots.is_empty() {
                 state.holder_slots.remove(&key);
             }
+            state.occupied_holder_slots[index as usize] = false;
             self.acquire_slot_metadata_lock();
             self.write_holder_slot(index, None);
             let _ = self.apply_byte_mode(SLOT_METADATA_LOCK_BYTE, Some(true), None);
@@ -1031,14 +1034,6 @@ mod file {
         }
     }
 
-    fn stable_slot_hash(pid: u32, session: u64, offset: u64, write: bool) -> u64 {
-        u64::from(pid)
-            .wrapping_mul(0x9e37_79b9_7f4a_7c15)
-            .wrapping_add(session.rotate_left(17))
-            .wrapping_add(offset.rotate_left(31))
-            .wrapping_add(u64::from(write))
-    }
-
     #[cfg(unix)]
     fn process_alive(pid: u32) -> bool {
         if unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
@@ -1135,6 +1130,58 @@ mod file {
                 offset: u64::from_be_bytes(bytes[8..16].try_into().ok()?),
                 write: bytes[16] != 0,
             })
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn holder_slot_cursor_tracks_bulk_claims_and_releases() {
+            let directory = tempfile::tempdir().unwrap();
+            let coordinator = FileLockCoordinator::open(&directory.path().join("bulk.db")).unwrap();
+            let claims = (0..128)
+                .map(|ordinal| ByteClaim {
+                    offset: 10_000 + ordinal,
+                    write: true,
+                })
+                .collect::<Vec<_>>();
+            let session = 17;
+            let mut state = coordinator.state.lock();
+            let first_slot = state.next_holder_slot;
+
+            for claim in &claims {
+                coordinator.register_holder_slot(&mut state, session, *claim);
+            }
+            assert_eq!(
+                state
+                    .occupied_holder_slots
+                    .iter()
+                    .filter(|occupied| **occupied)
+                    .count(),
+                claims.len()
+            );
+            for (ordinal, claim) in claims.iter().enumerate() {
+                let expected = (first_slot + ordinal as u64) % HOLDER_SLOT_COUNT;
+                assert_eq!(
+                    state
+                        .holder_slots
+                        .get(&(session, claim.offset, claim.write))
+                        .unwrap(),
+                    &[expected]
+                );
+            }
+            assert_eq!(
+                state.next_holder_slot,
+                (first_slot + claims.len() as u64) % HOLDER_SLOT_COUNT
+            );
+
+            for claim in &claims {
+                coordinator.clear_holder_slot(&mut state, session, *claim);
+            }
+            assert!(state.holder_slots.is_empty());
+            assert!(state.occupied_holder_slots.iter().all(|occupied| !occupied));
         }
     }
 }

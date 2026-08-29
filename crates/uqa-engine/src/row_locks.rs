@@ -177,7 +177,7 @@ enum CommittedRowChangeKind {
 
 /// Cross-process coordination attachment for durable file databases. A sidecar that cannot be opened surfaces its reason on the first lock attempt instead of silently degrading to process-local locking.
 enum CrossAttachment {
-    Active(FileLockCoordinator),
+    Active(Box<FileLockCoordinator>),
     Unavailable(String),
 }
 
@@ -316,7 +316,7 @@ impl RowLockManager {
         #[cfg(any(unix, windows))]
         {
             let cross = match FileLockCoordinator::open(path) {
-                Ok(coordinator) => CrossAttachment::Active(coordinator),
+                Ok(coordinator) => CrossAttachment::Active(Box::new(coordinator)),
                 Err(reason) => CrossAttachment::Unavailable(reason),
             };
             Self::with_cross_attachment(Some(cross))
