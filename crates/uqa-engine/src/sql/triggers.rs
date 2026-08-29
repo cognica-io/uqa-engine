@@ -7,10 +7,10 @@
 //! `BEFORE`/`AFTER`, row-level, and statement-level trigger execution.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use uqa_core::{DocId, Value};
-use uqa_sql::ast::{TriggerEvent, TriggerTiming};
+use uqa_sql::ast::{ForeignKeyAction, TriggerEvent, TriggerTiming};
 use uqa_sql::error::Result;
 use uqa_sql::plpgsql::{bind_expr, ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
@@ -22,11 +22,26 @@ use super::coerce_to_column_type;
 use super::plpgsql_exec::{execute_trigger_routine, TriggerRoutineContext};
 use super::scalar::eval_lowered_expression;
 
+type TransitionCaptureKey = (String, &'static str, Vec<String>);
+type TransitionCaptureStack = Vec<BTreeMap<TransitionCaptureKey, bool>>;
+
 thread_local! {
     static ACTIVE_TRANSITION_RELATIONS: RefCell<Vec<BTreeMap<String, uqa_execution::SharedSpill>>> = const { RefCell::new(Vec::new()) };
+    static TRANSITION_CAPTURE_CACHE: RefCell<TransitionCaptureStack> = const { RefCell::new(Vec::new()) };
 }
 
-struct TransitionRelationScope;
+pub(in crate::sql) struct TransitionRelationScope;
+
+impl TransitionRelationScope {
+    fn enter(relations: BTreeMap<String, uqa_execution::SharedSpill>) -> Self {
+        ACTIVE_TRANSITION_RELATIONS.with(|active| active.borrow_mut().push(relations));
+        Self
+    }
+
+    fn empty() -> Self {
+        Self::enter(BTreeMap::new())
+    }
+}
 
 impl Drop for TransitionRelationScope {
     fn drop(&mut self) {
@@ -55,30 +70,68 @@ pub(super) fn current_transition_relation_names() -> BTreeSet<String> {
     })
 }
 
+pub(in crate::sql) fn enter_empty_transition_relation_scope() -> TransitionRelationScope {
+    TransitionRelationScope::empty()
+}
+
+pub(in crate::sql) struct TransitionCaptureScope;
+
+impl TransitionCaptureScope {
+    pub(in crate::sql) fn enter() -> Self {
+        TRANSITION_CAPTURE_CACHE.with(|cache| cache.borrow_mut().push(BTreeMap::new()));
+        Self
+    }
+}
+
+impl Drop for TransitionCaptureScope {
+    fn drop(&mut self) {
+        TRANSITION_CAPTURE_CACHE.with(|cache| {
+            let removed = cache.borrow_mut().pop();
+            debug_assert!(
+                removed.is_some(),
+                "transition capture cache stack underflow"
+            );
+        });
+    }
+}
+
 pub(super) struct TransitionTables {
     root_table: String,
     event: TriggerEvent,
+    generation: usize,
+    event_generations: BTreeMap<usize, usize>,
+    event_order: BTreeMap<usize, usize>,
     source_tables: BTreeSet<String>,
     old: Option<uqa_execution::SharedSpill>,
     new: Option<uqa_execution::SharedSpill>,
 }
 
 impl TransitionTables {
-    fn applies_to(&self, event: &AfterRowTriggerEvent) -> bool {
+    fn covers(&self, event: &AfterRowTriggerEvent) -> bool {
         self.event == event.event && self.source_tables.contains(&event.table)
+    }
+
+    fn applies_to(&self, event: &AfterRowTriggerEvent) -> bool {
+        self.covers(event) && self.event_generations.get(&event.sequence) == Some(&self.generation)
+    }
+
+    fn generation_for(&self, event: &AfterRowTriggerEvent) -> Option<usize> {
+        self.covers(event)
+            .then(|| self.event_generations.get(&event.sequence).copied())
+            .flatten()
+    }
+
+    fn order_for(&self, event: &AfterRowTriggerEvent) -> Option<usize> {
+        self.covers(event)
+            .then(|| self.event_order.get(&event.sequence).copied())
+            .flatten()
     }
 
     fn matches_statement(&self, table: &str, event: TriggerEvent) -> bool {
         self.event == event && self.root_table == table
     }
 
-    fn enter(
-        &self,
-        definition: &uqa_sql::ast::CreateTrigger,
-    ) -> Result<Option<TransitionRelationScope>> {
-        if definition.transition_relations.is_empty() {
-            return Ok(None);
-        }
+    fn enter(&self, definition: &uqa_sql::ast::CreateTrigger) -> Result<TransitionRelationScope> {
         let mut relations = BTreeMap::new();
         if let Some(name) = definition.old_transition_table() {
             let rows = self.old.as_ref().ok_or_else(|| {
@@ -98,8 +151,7 @@ impl TransitionTables {
             })?;
             relations.insert(name.to_string(), rows.clone());
         }
-        ACTIVE_TRANSITION_RELATIONS.with(|active| active.borrow_mut().push(relations));
-        Ok(Some(TransitionRelationScope))
+        Ok(TransitionRelationScope::enter(relations))
     }
 }
 
@@ -168,6 +220,34 @@ pub(super) fn transition_capture_required(
     event: TriggerEvent,
     updated_columns: &[String],
 ) -> Result<bool> {
+    let key = (
+        table.to_string(),
+        operation_name(event),
+        updated_columns.to_vec(),
+    );
+    if let Some(cached) = TRANSITION_CAPTURE_CACHE.with(|cache| {
+        cache
+            .borrow()
+            .last()
+            .and_then(|cache| cache.get(&key).copied())
+    }) {
+        return Ok(cached);
+    }
+    let required = compute_transition_capture_required(engine, table, event, updated_columns)?;
+    TRANSITION_CAPTURE_CACHE.with(|cache| {
+        if let Some(cache) = cache.borrow_mut().last_mut() {
+            cache.insert(key, required);
+        }
+    });
+    Ok(required)
+}
+
+fn compute_transition_capture_required(
+    engine: &Engine,
+    table: &str,
+    event: TriggerEvent,
+    updated_columns: &[String],
+) -> Result<bool> {
     let canonical = engine
         .try_resolve_table_name(table)
         .map_err(|error| SQLError::Internal(format!("resolve transition source: {error}")))?
@@ -195,13 +275,154 @@ pub(super) fn transition_capture_required(
     Ok(false)
 }
 
+struct TransitionEventSchedule {
+    generations: BTreeSet<usize>,
+    event_generations: BTreeMap<usize, usize>,
+    event_order: BTreeMap<usize, usize>,
+}
+
+fn trigger_record_field<'a>(record: &'a Value, name: &str) -> Option<&'a Value> {
+    let Value::Record(fields) = record else {
+        return None;
+    };
+    fields
+        .iter()
+        .find_map(|(field, value)| (field == name).then_some(value))
+}
+
+fn event_starts_referential_statement(
+    engine: &Engine,
+    candidate: &AfterRowTriggerEvent,
+    target_event: TriggerEvent,
+    source_tables: &BTreeSet<String>,
+) -> Result<bool> {
+    if !matches!(candidate.event, TriggerEvent::Update | TriggerEvent::Delete) {
+        return Ok(false);
+    }
+    for (ref_table, foreign_key) in super::dml::referrers_to_for_actions(engine, &candidate.table)?
+    {
+        let action = match candidate.event {
+            TriggerEvent::Update => foreign_key.on_update,
+            TriggerEvent::Delete => foreign_key.on_delete,
+            TriggerEvent::Insert | TriggerEvent::Truncate => unreachable!(),
+        };
+        let statement_event = match (candidate.event, action) {
+            (TriggerEvent::Delete, ForeignKeyAction::Cascade) => TriggerEvent::Delete,
+            (
+                TriggerEvent::Update | TriggerEvent::Delete,
+                ForeignKeyAction::Cascade
+                | ForeignKeyAction::SetNull
+                | ForeignKeyAction::SetDefault,
+            ) => TriggerEvent::Update,
+            (
+                TriggerEvent::Update | TriggerEvent::Delete,
+                ForeignKeyAction::NoAction | ForeignKeyAction::Restrict,
+            ) => continue,
+            (TriggerEvent::Insert | TriggerEvent::Truncate, _) => unreachable!(),
+        };
+        if statement_event != target_event || !source_tables.contains(&ref_table) {
+            continue;
+        }
+        if candidate.event == TriggerEvent::Update
+            && foreign_key.ref_columns.iter().all(|column| {
+                trigger_record_field(&candidate.old, column)
+                    == trigger_record_field(&candidate.new, column)
+            })
+        {
+            continue;
+        }
+        if candidate.event == TriggerEvent::Delete
+            && foreign_key.ref_columns.iter().any(|column| {
+                matches!(
+                    trigger_record_field(&candidate.old, column),
+                    None | Some(Value::Null)
+                )
+            })
+        {
+            continue;
+        }
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn transition_event_schedule(
+    engine: &Engine,
+    event: TriggerEvent,
+    source_tables: &BTreeSet<String>,
+    events: &[AfterRowTriggerEvent],
+    split_cascades: bool,
+) -> Result<TransitionEventSchedule> {
+    let matching = events
+        .iter()
+        .filter(|candidate| candidate.event == event && source_tables.contains(&candidate.table))
+        .map(|candidate| candidate.sequence)
+        .collect::<BTreeSet<_>>();
+    let mut roots = Vec::new();
+    let mut children = BTreeMap::<usize, Vec<usize>>::new();
+    for sequence in &matching {
+        let candidate = &events[*sequence];
+        if let Some(parent) = candidate
+            .cascade_parent
+            .filter(|parent| matching.contains(parent))
+        {
+            children.entry(parent).or_default().push(*sequence);
+        } else {
+            roots.push(*sequence);
+        }
+    }
+    let mut generations = BTreeSet::from([0]);
+    let mut event_generations = BTreeMap::new();
+    for root in &roots {
+        event_generations.insert(*root, 0);
+    }
+    let mut queue = VecDeque::from(roots);
+    let mut event_order = BTreeMap::new();
+    let mut current_generation = 0usize;
+    while let Some(sequence) = queue.pop_front() {
+        let order = event_order.len();
+        event_order.insert(sequence, order);
+        let candidate = &events[sequence];
+        if split_cascades
+            && event_starts_referential_statement(engine, candidate, event, source_tables)?
+        {
+            generations.insert(current_generation);
+        }
+        if let Some(descendants) = children.get(&sequence) {
+            for descendant in descendants {
+                let generation = if split_cascades {
+                    current_generation
+                } else {
+                    0
+                };
+                event_generations.insert(*descendant, generation);
+                generations.insert(generation);
+                queue.push_back(*descendant);
+            }
+        }
+        let assigned_generation = event_generations.get(&sequence).copied().unwrap_or(0);
+        let closes_transition_set = candidate
+            .triggers
+            .iter()
+            .any(|trigger| !trigger.definition.transition_relations.is_empty());
+        if split_cascades && closes_transition_set && assigned_generation == current_generation {
+            current_generation += 1;
+        }
+    }
+    Ok(TransitionEventSchedule {
+        generations,
+        event_generations,
+        event_order,
+    })
+}
+
 pub(super) fn build_transition_tables(
     engine: &Engine,
     table: &str,
     event: TriggerEvent,
     updated_columns: &[String],
     events: &[AfterRowTriggerEvent],
-) -> Result<Option<TransitionTables>> {
+) -> Result<Vec<TransitionTables>> {
     let mut triggers =
         engine.triggers_for(table, TriggerTiming::After, event, false, updated_columns)?;
     triggers.extend(engine.triggers_for(
@@ -213,47 +434,76 @@ pub(super) fn build_transition_tables(
     )?);
     triggers.retain(|trigger| !trigger.definition.transition_relations.is_empty());
     if triggers.is_empty() {
-        return Ok(None);
+        return Ok(Vec::new());
     }
     let source_tables = engine
         .hierarchy_scan_tables(table, true)?
         .into_iter()
         .collect::<BTreeSet<_>>();
-    let matching = events
+    let split_cascades = triggers.iter().any(|trigger| trigger.definition.row);
+    let schedule =
+        transition_event_schedule(engine, event, &source_tables, events, split_cascades)?;
+    let mut matching = events
         .iter()
         .filter(|candidate| candidate.event == event && source_tables.contains(&candidate.table))
         .collect::<Vec<_>>();
+    matching.sort_by_key(|candidate| {
+        schedule
+            .event_order
+            .get(&candidate.sequence)
+            .copied()
+            .unwrap_or(candidate.sequence)
+    });
     let need_old = triggers
         .iter()
         .any(|trigger| trigger.definition.old_transition_table().is_some());
     let need_new = triggers
         .iter()
         .any(|trigger| trigger.definition.new_transition_table().is_some());
-    let old = need_old
-        .then(|| {
-            materialize_transition_rows(
-                engine,
-                table,
-                matching.iter().map(|candidate| candidate.old.clone()),
-            )
+    schedule
+        .generations
+        .iter()
+        .copied()
+        .map(|generation| {
+            let in_generation = |candidate: &&AfterRowTriggerEvent| {
+                schedule.event_generations.get(&candidate.sequence) == Some(&generation)
+            };
+            let old = need_old
+                .then(|| {
+                    materialize_transition_rows(
+                        engine,
+                        table,
+                        matching
+                            .iter()
+                            .filter(|candidate| in_generation(candidate))
+                            .map(|candidate| candidate.old.clone()),
+                    )
+                })
+                .transpose()?;
+            let new = need_new
+                .then(|| {
+                    materialize_transition_rows(
+                        engine,
+                        table,
+                        matching
+                            .iter()
+                            .filter(|candidate| in_generation(candidate))
+                            .map(|candidate| candidate.new.clone()),
+                    )
+                })
+                .transpose()?;
+            Ok(TransitionTables {
+                root_table: table.to_string(),
+                event,
+                generation,
+                event_generations: schedule.event_generations.clone(),
+                event_order: schedule.event_order.clone(),
+                source_tables: source_tables.clone(),
+                old,
+                new,
+            })
         })
-        .transpose()?;
-    let new = need_new
-        .then(|| {
-            materialize_transition_rows(
-                engine,
-                table,
-                matching.iter().map(|candidate| candidate.new.clone()),
-            )
-        })
-        .transpose()?;
-    Ok(Some(TransitionTables {
-        root_table: table.to_string(),
-        event,
-        source_tables,
-        old,
-        new,
-    }))
+        .collect()
 }
 
 struct TriggerVariableResolver<'a> {
@@ -468,10 +718,23 @@ fn invoke_trigger(
         ))
     })?;
     let function = engine.resolve_trigger_function(&invocation.trigger.definition.function)?;
-    let _transition_scope = transition_tables
-        .map(|tables| tables.enter(&invocation.trigger.definition))
-        .transpose()?
-        .flatten();
+    let _transition_scope = match transition_tables {
+        Some(tables) => tables.enter(&invocation.trigger.definition)?,
+        None if invocation
+            .trigger
+            .definition
+            .transition_relations
+            .is_empty() =>
+        {
+            TransitionRelationScope::empty()
+        }
+        None => {
+            return Err(SQLError::Internal(format!(
+                "trigger `{}` requested unavailable transition tables",
+                invocation.trigger.definition.name
+            )))
+        }
+    };
     execute_trigger_routine(
         engine,
         &function,
@@ -543,6 +806,46 @@ pub(super) fn fire_after_statement_triggers(
     )
 }
 
+fn fire_after_statement_trigger_generation(
+    engine: &Engine,
+    table: &str,
+    event: TriggerEvent,
+    updated_columns: &[String],
+    transition_tables: &[TransitionTables],
+    generation: usize,
+) -> Result<()> {
+    let matching = transition_tables
+        .iter()
+        .filter(|transition| {
+            transition.matches_statement(table, event) && transition.generation == generation
+        })
+        .collect::<Vec<_>>();
+    if matching.is_empty() {
+        let has_transition_sets = transition_tables
+            .iter()
+            .any(|transition| transition.matches_statement(table, event));
+        if generation == 0 && !has_transition_sets {
+            return fire_after_statement_triggers(engine, table, event, updated_columns, None);
+        }
+        return Ok(());
+    }
+    for transition in matching {
+        fire_after_statement_triggers(engine, table, event, updated_columns, Some(transition))?;
+    }
+    Ok(())
+}
+
+pub(super) fn after_trigger_generations(transition_tables: &[&TransitionTables]) -> Vec<usize> {
+    let mut generations = transition_tables
+        .iter()
+        .map(|transition| transition.generation)
+        .collect::<BTreeSet<_>>();
+    if generations.is_empty() {
+        generations.insert(0);
+    }
+    generations.into_iter().collect()
+}
+
 #[derive(Default)]
 pub(super) struct ReferentialTriggerStatements {
     seen: BTreeSet<String>,
@@ -595,15 +898,13 @@ impl ReferentialTriggerStatements {
     ) -> Result<Vec<TransitionTables>> {
         let mut tables = Vec::new();
         for statement in &self.after {
-            if let Some(transition) = build_transition_tables(
+            tables.extend(build_transition_tables(
                 engine,
                 &statement.table,
                 statement.event,
                 &statement.updated_columns,
                 events,
-            )? {
-                tables.push(transition);
-            }
+            )?);
         }
         Ok(tables)
     }
@@ -612,17 +913,31 @@ impl ReferentialTriggerStatements {
         &self,
         engine: &Engine,
         transitions: &[TransitionTables],
+        root_table: &str,
+        root_events: &[TriggerEvent],
+        generation: usize,
     ) -> Result<()> {
+        let canonical_root = engine
+            .try_resolve_table_name(root_table)
+            .map_err(|error| SQLError::Internal(format!("resolve trigger root: {error}")))?
+            .unwrap_or_else(|| root_table.to_string());
         for statement in &self.after {
-            let transition = transitions
-                .iter()
-                .find(|transition| transition.matches_statement(&statement.table, statement.event));
-            fire_after_statement_triggers(
+            let canonical_statement = engine
+                .try_resolve_table_name(&statement.table)
+                .map_err(|error| {
+                    SQLError::Internal(format!("resolve referential trigger table: {error}"))
+                })?
+                .unwrap_or_else(|| statement.table.clone());
+            if canonical_statement == canonical_root && root_events.contains(&statement.event) {
+                continue;
+            }
+            fire_after_statement_trigger_generation(
                 engine,
                 &statement.table,
                 statement.event,
                 &statement.updated_columns,
-                transition,
+                transitions,
+                generation,
             )?;
         }
         Ok(())
@@ -757,6 +1072,8 @@ pub(super) struct AfterRowTriggerEvent {
     old: Value,
     new: Value,
     triggers: Vec<crate::engine_events::StoredTrigger>,
+    sequence: usize,
+    cascade_parent: Option<usize>,
 }
 
 pub(super) struct AfterRowTriggerInput<'a> {
@@ -767,6 +1084,7 @@ pub(super) struct AfterRowTriggerInput<'a> {
     pub(super) old_document: Option<&'a Document>,
     pub(super) new_document: Option<&'a Document>,
     pub(super) updated_columns: &'a [String],
+    pub(super) cascade_parent: Option<usize>,
 }
 
 impl AfterRowTriggerEvent {
@@ -782,6 +1100,7 @@ impl AfterRowTriggerEvent {
             old_document,
             new_document,
             updated_columns,
+            cascade_parent,
         } = input;
         let candidates =
             engine.triggers_for(table, TriggerTiming::After, event, true, updated_columns)?;
@@ -814,17 +1133,67 @@ impl AfterRowTriggerEvent {
             old,
             new,
             triggers: matching,
+            sequence: usize::MAX,
+            cascade_parent,
         }))
+    }
+
+    pub(super) fn push(events: &mut Vec<Self>, mut event: Self) -> usize {
+        let sequence = events.len();
+        event.sequence = sequence;
+        events.push(event);
+        sequence
     }
 }
 
-pub(super) fn fire_after_row_trigger_events_with_transitions(
+pub(super) fn fire_after_row_trigger_events_for_generation(
     engine: &Engine,
     events: &[AfterRowTriggerEvent],
     transition_tables: &[&TransitionTables],
+    generation: usize,
 ) -> Result<()> {
-    for event in events {
-        fire_after_row_trigger(engine, event, transition_tables)?;
+    let mut matching = events
+        .iter()
+        .filter(|event| {
+            transition_tables
+                .iter()
+                .find_map(|tables| tables.generation_for(event))
+                .unwrap_or(0)
+                == generation
+        })
+        .collect::<Vec<_>>();
+    matching.sort_by_key(|event| {
+        transition_tables
+            .iter()
+            .find_map(|tables| tables.order_for(event))
+            .unwrap_or(event.sequence)
+    });
+    for event in matching {
+        let event_generation = transition_tables
+            .iter()
+            .find_map(|tables| tables.generation_for(event))
+            .unwrap_or(0);
+        if event_generation == generation {
+            fire_after_row_trigger(engine, event, transition_tables)?;
+        }
     }
     Ok(())
+}
+
+pub(super) fn fire_after_statement_trigger_generation_for_root(
+    engine: &Engine,
+    table: &str,
+    event: TriggerEvent,
+    updated_columns: &[String],
+    transition_tables: &[TransitionTables],
+    generation: usize,
+) -> Result<()> {
+    fire_after_statement_trigger_generation(
+        engine,
+        table,
+        event,
+        updated_columns,
+        transition_tables,
+        generation,
+    )
 }

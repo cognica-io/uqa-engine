@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "90b8e20ac7629d37bd7be88c4dceebc79f73ae2749c6c2f4c167e6e460441caf",
+  "fixture_sha256": "58acd36b8c94b68561cd2ec33dadeb3c147adde2a5f3690265b58ed9e0ffadf6",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -907,6 +907,38 @@
       "kind": "rows",
       "rows": [
         [
+          "transition_multi_cascade_row",
+          "UPDATE",
+          "4",
+          "4",
+          "600",
+          "600"
+        ],
+        [
+          "transition_multi_cascade_row",
+          "UPDATE",
+          "4",
+          "4",
+          "600",
+          "600"
+        ],
+        [
+          "transition_multi_cascade_row",
+          "UPDATE",
+          "4",
+          "4",
+          "600",
+          "600"
+        ],
+        [
+          "transition_multi_cascade_row",
+          "UPDATE",
+          "4",
+          "4",
+          "600",
+          "600"
+        ],
+        [
           "transition_multi_cascade_update",
           "UPDATE",
           "4",
@@ -952,6 +984,204 @@
           "102",
           "1020",
           "200"
+        ]
+      ]
+    },
+    {
+      "name": "create_self_referential_cascade_transition_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "delete_self_referential_cascade_with_after_row_transition_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "self_referential_cascade_splits_transition_sets",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_self_ref_row",
+          "2",
+          "3",
+          "1"
+        ],
+        [
+          "transition_self_ref_row",
+          "2",
+          "3",
+          "1"
+        ],
+        [
+          "transition_self_ref_statement",
+          "2",
+          "3",
+          "1"
+        ],
+        [
+          "transition_self_ref_row",
+          "1",
+          "3",
+          "2"
+        ],
+        [
+          "transition_self_ref_statement",
+          "1",
+          "3",
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "delete_self_referential_cascade_without_after_row_transition_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "self_referential_cascade_coalesces_without_after_row_transition_trigger",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_self_ref_statement",
+          "4",
+          "10",
+          "6"
+        ]
+      ]
+    },
+    {
+      "name": "create_branching_self_referential_cascade_transition_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "delete_branching_self_referential_cascade_with_after_row_transition_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "branching_self_referential_cascade_transition_sets",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_self_ref_branch_row",
+          "3",
+          "6",
+          "2"
+        ],
+        [
+          "transition_self_ref_branch_row",
+          "3",
+          "6",
+          "2"
+        ],
+        [
+          "transition_self_ref_branch_row",
+          "3",
+          "6",
+          "2"
+        ],
+        [
+          "transition_self_ref_branch_statement",
+          "3",
+          "6",
+          "2"
+        ],
+        [
+          "transition_self_ref_branch_row",
+          "2",
+          "9",
+          "5"
+        ],
+        [
+          "transition_self_ref_branch_row",
+          "2",
+          "9",
+          "5"
+        ],
+        [
+          "transition_self_ref_branch_statement",
+          "2",
+          "9",
+          "5"
+        ],
+        [
+          "transition_self_ref_branch_statement",
+          "0",
+          "0",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_deep_self_referential_cascade_transition_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "delete_deep_self_referential_cascade_with_after_row_transition_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "deep_self_referential_cascade_transition_sets",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_self_ref_deep_row",
+          "2",
+          "3",
+          "1"
+        ],
+        [
+          "transition_self_ref_deep_row",
+          "2",
+          "3",
+          "1"
+        ],
+        [
+          "transition_self_ref_deep_statement",
+          "2",
+          "3",
+          "1"
+        ],
+        [
+          "transition_self_ref_deep_row",
+          "2",
+          "7",
+          "5"
+        ],
+        [
+          "transition_self_ref_deep_row",
+          "2",
+          "7",
+          "5"
+        ],
+        [
+          "transition_self_ref_deep_statement",
+          "2",
+          "7",
+          "5"
+        ],
+        [
+          "transition_self_ref_deep_statement",
+          "0",
+          "0",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_nested_transition_scope_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "execute_nested_transition_scope",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_transition_scope_isolation",
+      "kind": "rows",
+      "rows": [
+        [
+          "inner:3"
+        ],
+        [
+          "outer:2:3:2"
         ]
       ]
     },

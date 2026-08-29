@@ -1055,6 +1055,24 @@ pub(in crate::sql) fn stage_prepared_document_rewrite(
     root_updated_columns: Option<&[String]>,
     after_row_events: &mut Vec<crate::sql::triggers::AfterRowTriggerEvent>,
 ) -> Result<DocId, SQLError> {
+    stage_prepared_document_rewrite_with_parent(
+        engine,
+        prepared,
+        params,
+        root_updated_columns,
+        after_row_events,
+        None,
+    )
+}
+
+pub(in crate::sql) fn stage_prepared_document_rewrite_with_parent(
+    engine: &Engine,
+    prepared: &mut PreparedDocumentRewrite,
+    params: &[SQLParam],
+    root_updated_columns: Option<&[String]>,
+    after_row_events: &mut Vec<crate::sql::triggers::AfterRowTriggerEvent>,
+    mut cascade_parent: Option<usize>,
+) -> Result<DocId, SQLError> {
     let trigger_updated_columns = root_updated_columns
         .map(<[String]>::to_vec)
         .or_else(|| prepared.trigger_updated_columns.clone());
@@ -1107,13 +1125,24 @@ pub(in crate::sql) fn stage_prepared_document_rewrite(
                 old_document: Some(&prepared.old_document),
                 new_document: Some(&prepared.new_document),
                 updated_columns,
+                cascade_parent,
             },
         )? {
-            after_row_events.push(event);
+            cascade_parent = Some(crate::sql::triggers::AfterRowTriggerEvent::push(
+                after_row_events,
+                event,
+            ));
         }
     }
     for action in &mut prepared.actions {
-        stage_prepared_document_rewrite(engine, action, params, None, after_row_events)?;
+        stage_prepared_document_rewrite_with_parent(
+            engine,
+            action,
+            params,
+            None,
+            after_row_events,
+            cascade_parent,
+        )?;
     }
     Ok(rewritten_doc_id)
 }

@@ -12,12 +12,11 @@ use super::{
     dml_target_row, eval_mutation_expr, foreign_key_comparison_types, foreign_key_lookup_values,
     lock_mutation_target, lock_physical_mutation_target, period_foreign_key_coverage,
     prepare_referential_document_rewrite, referencing_rows, referrers_to_for_actions,
-    stage_prepared_document_rewrite, validate_dml_expression_qualifiers,
-    validate_returning_alias_relations, BTreeSet, CteScope, DeletePlan, DmlCommandMutationOverlay,
-    DmlReturningShape, DocId, Document, Engine, ForeignKey, ForeignKeyAction, MutationLockTarget,
-    PhysicalDocumentIdentity, PhysicalMutationLockTarget, PreparedDeleteAction,
-    PreparedDocumentDelete, ReferencingChildLock, ReturningProjectionRow, ReturningRowImage,
-    ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
+    validate_dml_expression_qualifiers, validate_returning_alias_relations, BTreeSet, CteScope,
+    DeletePlan, DmlCommandMutationOverlay, DmlReturningShape, DocId, Document, Engine, ForeignKey,
+    ForeignKeyAction, MutationLockTarget, PhysicalDocumentIdentity, PhysicalMutationLockTarget,
+    PreparedDeleteAction, PreparedDocumentDelete, ReferencingChildLock, ReturningProjectionRow,
+    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
 };
 
 pub(in crate::sql) fn run_delete(
@@ -38,6 +37,7 @@ pub(in crate::sql) fn run_delete_inner(
     stmt: &DeletePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     engine.lock_relation(
         &stmt.table,
         crate::row_locks::RelationLockMode::RowExclusive,
@@ -340,36 +340,49 @@ pub(in crate::sql) fn run_delete_inner(
             apply_validated_prepared_document_delete(engine, prepared)?;
         }
     }
-    let transition_tables = delete_original_query
-        .then(|| {
-            crate::sql::triggers::build_transition_tables(
-                engine,
-                &stmt.table,
-                uqa_sql::ast::TriggerEvent::Delete,
-                &[],
-                &after_row_events,
-            )
-        })
-        .transpose()?
-        .flatten();
-    let referential_transition =
-        referential_actions.transition_tables(engine, &after_row_events)?;
-    let mut transition_refs = transition_tables.iter().collect::<Vec<_>>();
-    transition_refs.extend(referential_transition.iter());
-    crate::sql::triggers::fire_after_row_trigger_events_with_transitions(
-        engine,
-        &after_row_events,
-        &transition_refs,
-    )?;
-    referential_actions.fire_after_statement_triggers(engine, &referential_transition)?;
-    if delete_original_query {
-        crate::sql::triggers::fire_after_statement_triggers(
+    let transition_tables = if delete_original_query {
+        crate::sql::triggers::build_transition_tables(
             engine,
             &stmt.table,
             uqa_sql::ast::TriggerEvent::Delete,
             &[],
-            transition_tables.as_ref(),
+            &after_row_events,
+        )?
+    } else {
+        Vec::new()
+    };
+    let referential_transition =
+        referential_actions.transition_tables(engine, &after_row_events)?;
+    let mut transition_refs = transition_tables.iter().collect::<Vec<_>>();
+    transition_refs.extend(referential_transition.iter());
+    let root_events = delete_original_query
+        .then_some(uqa_sql::ast::TriggerEvent::Delete)
+        .into_iter()
+        .collect::<Vec<_>>();
+    for generation in crate::sql::triggers::after_trigger_generations(&transition_refs) {
+        crate::sql::triggers::fire_after_row_trigger_events_for_generation(
+            engine,
+            &after_row_events,
+            &transition_refs,
+            generation,
         )?;
+        referential_actions.fire_after_statement_triggers(
+            engine,
+            &referential_transition,
+            &stmt.table,
+            &root_events,
+            generation,
+        )?;
+        if delete_original_query {
+            crate::sql::triggers::fire_after_statement_trigger_generation_for_root(
+                engine,
+                &stmt.table,
+                uqa_sql::ast::TriggerEvent::Delete,
+                &[],
+                &transition_tables,
+                generation,
+            )?;
+        }
     }
     if !stmt.returning.is_empty() {
         let shape = DmlReturningShape {
@@ -541,6 +554,16 @@ pub(in crate::sql) fn stage_prepared_document_delete(
     params: &[SQLParam],
     after_row_events: &mut Vec<crate::sql::triggers::AfterRowTriggerEvent>,
 ) -> Result<(), SQLError> {
+    stage_prepared_document_delete_with_parent(engine, prepared, params, after_row_events, None)
+}
+
+fn stage_prepared_document_delete_with_parent(
+    engine: &Engine,
+    prepared: &mut PreparedDocumentDelete,
+    params: &[SQLParam],
+    after_row_events: &mut Vec<crate::sql::triggers::AfterRowTriggerEvent>,
+    mut cascade_parent: Option<usize>,
+) -> Result<(), SQLError> {
     engine.stage_command_document(&prepared.table, prepared.doc_id, None)?;
     if let Some(event) = crate::sql::triggers::AfterRowTriggerEvent::prepare(
         engine,
@@ -552,17 +575,34 @@ pub(in crate::sql) fn stage_prepared_document_delete(
             old_document: Some(&prepared.document),
             new_document: None,
             updated_columns: &[],
+            cascade_parent,
         },
     )? {
-        after_row_events.push(event);
+        cascade_parent = Some(crate::sql::triggers::AfterRowTriggerEvent::push(
+            after_row_events,
+            event,
+        ));
     }
     for action in &mut prepared.actions {
         match action {
             PreparedDeleteAction::Delete(delete) => {
-                stage_prepared_document_delete(engine, delete, params, after_row_events)?;
+                stage_prepared_document_delete_with_parent(
+                    engine,
+                    delete,
+                    params,
+                    after_row_events,
+                    cascade_parent,
+                )?;
             }
             PreparedDeleteAction::Rewrite(rewrite) => {
-                stage_prepared_document_rewrite(engine, rewrite, params, None, after_row_events)?;
+                super::stage_prepared_document_rewrite_with_parent(
+                    engine,
+                    rewrite,
+                    params,
+                    None,
+                    after_row_events,
+                    cascade_parent,
+                )?;
             }
         }
     }

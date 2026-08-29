@@ -37,6 +37,7 @@ pub(in crate::sql) fn run_update_inner(
     stmt: &UpdatePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     engine.lock_relation(
         &stmt.table,
         crate::row_locks::RelationLockMode::RowExclusive,
@@ -356,36 +357,49 @@ pub(in crate::sql) fn run_update_inner(
         .into_iter()
         .flat_map(|(_, events)| events)
         .collect::<Vec<_>>();
-    let transition_tables = update_original_query
-        .then(|| {
-            crate::sql::triggers::build_transition_tables(
-                engine,
-                &stmt.table,
-                uqa_sql::ast::TriggerEvent::Update,
-                &assigned_columns,
-                &after_row_events,
-            )
-        })
-        .transpose()?
-        .flatten();
-    let referential_transition =
-        referential_actions.transition_tables(engine, &after_row_events)?;
-    let mut transition_refs = transition_tables.iter().collect::<Vec<_>>();
-    transition_refs.extend(referential_transition.iter());
-    crate::sql::triggers::fire_after_row_trigger_events_with_transitions(
-        engine,
-        &after_row_events,
-        &transition_refs,
-    )?;
-    referential_actions.fire_after_statement_triggers(engine, &referential_transition)?;
-    if update_original_query {
-        crate::sql::triggers::fire_after_statement_triggers(
+    let transition_tables = if update_original_query {
+        crate::sql::triggers::build_transition_tables(
             engine,
             &stmt.table,
             uqa_sql::ast::TriggerEvent::Update,
             &assigned_columns,
-            transition_tables.as_ref(),
+            &after_row_events,
+        )?
+    } else {
+        Vec::new()
+    };
+    let referential_transition =
+        referential_actions.transition_tables(engine, &after_row_events)?;
+    let mut transition_refs = transition_tables.iter().collect::<Vec<_>>();
+    transition_refs.extend(referential_transition.iter());
+    let root_events = update_original_query
+        .then_some(uqa_sql::ast::TriggerEvent::Update)
+        .into_iter()
+        .collect::<Vec<_>>();
+    for generation in crate::sql::triggers::after_trigger_generations(&transition_refs) {
+        crate::sql::triggers::fire_after_row_trigger_events_for_generation(
+            engine,
+            &after_row_events,
+            &transition_refs,
+            generation,
         )?;
+        referential_actions.fire_after_statement_triggers(
+            engine,
+            &referential_transition,
+            &stmt.table,
+            &root_events,
+            generation,
+        )?;
+        if update_original_query {
+            crate::sql::triggers::fire_after_statement_trigger_generation_for_root(
+                engine,
+                &stmt.table,
+                uqa_sql::ast::TriggerEvent::Update,
+                &assigned_columns,
+                &transition_tables,
+                generation,
+            )?;
+        }
     }
     if !stmt.returning.is_empty() {
         let shape = DmlReturningShape {

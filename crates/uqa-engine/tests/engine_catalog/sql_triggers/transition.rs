@@ -28,15 +28,15 @@ fn install_transition_fixture(engine: &Engine) {
     exec(
         engine,
         "CREATE FUNCTION transition_probe() RETURNS trigger LANGUAGE plpgsql AS $$
-         DECLARE old_count BIGINT := 0; new_count BIGINT := 0; old_sum BIGINT := 0; new_sum BIGINT := 0;
+         DECLARE old_count BIGINT := 0; new_count BIGINT := 0; old_sum BIGINT := 0; new_sum BIGINT := 0; old_generated_sum BIGINT := 0; new_generated_sum BIGINT := 0;
          BEGIN
            IF TG_OP IN ('UPDATE', 'DELETE') THEN
-             SELECT count(*), coalesce(sum(value), 0) INTO old_count, old_sum FROM old_rows;
+             SELECT count(*), coalesce(sum(value), 0), coalesce(sum(generated_value), 0) INTO old_count, old_sum, old_generated_sum FROM old_rows;
            END IF;
            IF TG_OP IN ('INSERT', 'UPDATE') THEN
-             SELECT count(*), coalesce(sum(value), 0) INTO new_count, new_sum FROM new_rows;
+             SELECT count(*), coalesce(sum(value), 0), coalesce(sum(generated_value), 0) INTO new_count, new_sum, new_generated_sum FROM new_rows;
            END IF;
-           INSERT INTO transition_log(message) VALUES (TG_NAME || ':' || TG_OP || ':' || old_count::text || ':' || new_count::text || ':' || old_sum::text || ':' || new_sum::text);
+           INSERT INTO transition_log(message) VALUES (TG_NAME || ':' || TG_OP || ':' || old_count::text || ':' || new_count::text || ':' || old_sum::text || ':' || new_sum::text || ':' || old_generated_sum::text || ':' || new_generated_sum::text);
            RETURN NULL;
          END $$",
     );
@@ -102,7 +102,7 @@ fn transition_relation_catalog_names_and_definition_survive_reopen() {
         install_transition_fixture(&engine);
         exec(
             &engine,
-            "CREATE TRIGGER transition_update AFTER UPDATE ON transition_items REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_probe()",
+            "CREATE TRIGGER transition_update AFTER UPDATE ON transition_items REFERENCING NEW TABLE AS new_rows OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_probe()",
         );
     }
     let engine = Engine::open(&path).unwrap();
@@ -121,6 +121,23 @@ fn transition_relation_catalog_names_and_definition_survive_reopen() {
         Some(&Value::Str(
             "CREATE TRIGGER transition_update AFTER UPDATE ON transition_items REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_probe()".into()
         ))
+    );
+}
+
+#[test]
+fn nested_routines_and_triggers_do_not_inherit_transition_relation_aliases() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE transition_scope_rows (value INTEGER); INSERT INTO transition_scope_rows VALUES (1), (2), (3); CREATE TABLE transition_scope_outer (id INTEGER); CREATE TABLE transition_scope_inner (id INTEGER); CREATE TABLE transition_scope_log (id BIGSERIAL PRIMARY KEY, message TEXT); CREATE FUNCTION transition_scope_helper() RETURNS BIGINT LANGUAGE plpgsql AS $$ DECLARE row_count BIGINT; BEGIN SELECT count(*) INTO row_count FROM transition_scope_rows; RETURN row_count; END $$; CREATE FUNCTION transition_scope_inner_probe() RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE row_count BIGINT; BEGIN SELECT count(*) INTO row_count FROM transition_scope_rows; INSERT INTO transition_scope_log(message) VALUES ('inner:' || row_count::text); RETURN NEW; END $$; CREATE TRIGGER transition_scope_inner_trigger AFTER INSERT ON transition_scope_inner FOR EACH ROW EXECUTE FUNCTION transition_scope_inner_probe(); CREATE FUNCTION transition_scope_outer_probe() RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE before_count BIGINT; helper_count BIGINT; after_count BIGINT; BEGIN SELECT count(*) INTO before_count FROM transition_scope_rows; helper_count := transition_scope_helper(); INSERT INTO transition_scope_inner VALUES (1); SELECT count(*) INTO after_count FROM transition_scope_rows; INSERT INTO transition_scope_log(message) VALUES ('outer:' || before_count::text || ':' || helper_count::text || ':' || after_count::text); RETURN NULL; END $$; CREATE TRIGGER transition_scope_outer_trigger AFTER INSERT ON transition_scope_outer REFERENCING NEW TABLE AS transition_scope_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_scope_outer_probe(); INSERT INTO transition_scope_outer VALUES (1), (2)",
+    );
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT message FROM transition_scope_log ORDER BY id",
+            "message"
+        ),
+        vec!["inner:3", "outer:2:3:2"]
     );
 }
 
@@ -166,13 +183,13 @@ fn transition_relations_execute_setwise_for_row_statement_and_zero_row_updates()
             "message"
         ),
         vec![
-            "transition_insert_row:INSERT:0:3:0:63",
-            "transition_insert_row:INSERT:0:3:0:63",
-            "transition_insert_row:INSERT:0:3:0:63",
-            "transition_insert_statement:INSERT:0:3:0:63",
-            "transition_update_statement:UPDATE:2:2:32:66",
-            "transition_update_statement:UPDATE:0:0:0:0",
-            "transition_delete_statement:DELETE:2:0:54:0",
+            "transition_insert_row:INSERT:0:3:0:63:0:630",
+            "transition_insert_row:INSERT:0:3:0:63:0:630",
+            "transition_insert_row:INSERT:0:3:0:63:0:630",
+            "transition_insert_statement:INSERT:0:3:0:63:0:630",
+            "transition_update_statement:UPDATE:2:2:32:66:320:660",
+            "transition_update_statement:UPDATE:0:0:0:0:0:0",
+            "transition_delete_statement:DELETE:2:0:54:0:540:0",
         ]
     );
 }
@@ -203,9 +220,9 @@ fn transition_relations_cover_insert_select_on_conflict_update_from_and_merge() 
             "message"
         ),
         vec![
-            "transition_insert_row:INSERT:0:2:0:92",
-            "transition_insert_row:INSERT:0:2:0:92",
-            "transition_insert_statement:INSERT:0:2:0:92",
+            "transition_insert_row:INSERT:0:2:0:92:0:920",
+            "transition_insert_row:INSERT:0:2:0:92:0:920",
+            "transition_insert_statement:INSERT:0:2:0:92:0:920",
         ]
     );
     exec(&engine, "DELETE FROM transition_log");
@@ -221,9 +238,9 @@ fn transition_relations_cover_insert_select_on_conflict_update_from_and_merge() 
             "message"
         ),
         vec![
-            "transition_insert_row:INSERT:0:1:0:61",
-            "transition_update_statement:UPDATE:1:1:21:202",
-            "transition_insert_statement:INSERT:0:1:0:61",
+            "transition_insert_row:INSERT:0:1:0:61:0:610",
+            "transition_update_statement:UPDATE:1:1:21:202:210:2020",
+            "transition_insert_statement:INSERT:0:1:0:61:0:610",
         ]
     );
     exec(&engine, "DELETE FROM transition_log");
@@ -238,7 +255,7 @@ fn transition_relations_cover_insert_select_on_conflict_update_from_and_merge() 
             "SELECT message FROM transition_log ORDER BY id",
             "message"
         ),
-        vec!["transition_update_statement:UPDATE:2:2:92:101"]
+        vec!["transition_update_statement:UPDATE:2:2:92:101:920:1010"]
     );
     exec(&engine, "DELETE FROM transition_log");
 
@@ -253,10 +270,10 @@ fn transition_relations_cover_insert_select_on_conflict_update_from_and_merge() 
             "message"
         ),
         vec![
-            "transition_insert_row:INSERT:0:1:0:71",
-            "transition_delete_statement:DELETE:1:0:202:0",
-            "transition_update_statement:UPDATE:1:1:45:401",
-            "transition_insert_statement:INSERT:0:1:0:71",
+            "transition_insert_row:INSERT:0:1:0:71:0:710",
+            "transition_delete_statement:DELETE:1:0:202:0:2020:0",
+            "transition_update_statement:UPDATE:1:1:45:401:450:4010",
+            "transition_insert_statement:INSERT:0:1:0:71:0:710",
         ]
     );
 }
@@ -282,7 +299,7 @@ fn transition_relations_convert_partition_and_inheritance_rows_to_root_type() {
             "SELECT message FROM transition_log ORDER BY id",
             "message"
         ),
-        vec!["transition_partition_update:UPDATE:2:2:32:66"]
+        vec!["transition_partition_update:UPDATE:2:2:32:66:320:660"]
     );
 
     exec(&engine, "DELETE FROM transition_log");
@@ -303,7 +320,7 @@ fn transition_relations_convert_partition_and_inheritance_rows_to_root_type() {
             "SELECT message FROM transition_log ORDER BY id",
             "message"
         ),
-        vec!["transition_inherited_update:UPDATE:2:2:30:32"]
+        vec!["transition_inherited_update:UPDATE:2:2:30:32:300:320"]
     );
 }
 
@@ -321,7 +338,7 @@ fn transition_relations_collect_foreign_key_cascade_rows() {
             "SELECT message FROM transition_log ORDER BY id",
             "message"
         ),
-        vec!["transition_cascade_update:UPDATE:2:2:30:30"]
+        vec!["transition_cascade_update:UPDATE:2:2:30:30:300:300"]
     );
 
     exec(
@@ -334,7 +351,7 @@ fn transition_relations_collect_foreign_key_cascade_rows() {
             "SELECT message FROM transition_log ORDER BY id",
             "message"
         ),
-        vec!["transition_cascade_delete:DELETE:2:0:30:0"]
+        vec!["transition_cascade_delete:DELETE:2:0:30:0:300:0"]
     );
 }
 
@@ -344,7 +361,7 @@ fn transition_relations_coalesce_multiple_foreign_key_statement_boundaries() {
     install_transition_fixture(&engine);
     exec(
         &engine,
-        "CREATE TABLE transition_multi_parent (a INTEGER UNIQUE, b INTEGER UNIQUE); CREATE TABLE transition_multi_child (id INTEGER PRIMARY KEY, a INTEGER REFERENCES transition_multi_parent(a) ON UPDATE CASCADE, b INTEGER REFERENCES transition_multi_parent(b) ON UPDATE CASCADE, value INTEGER, generated_value INTEGER GENERATED ALWAYS AS (value * 10) STORED); CREATE TABLE transition_multi_statement_log (id BIGSERIAL PRIMARY KEY, message TEXT); CREATE FUNCTION transition_multi_statement_probe() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO transition_multi_statement_log(message) VALUES (TG_NAME || ':' || TG_WHEN || ':' || TG_OP); RETURN NULL; END $$; CREATE TRIGGER transition_multi_cascade_update AFTER UPDATE ON transition_multi_child REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_probe(); CREATE TRIGGER transition_multi_aa_before_b BEFORE UPDATE OF b ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_before BEFORE UPDATE ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_before_a BEFORE UPDATE OF a ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_aa_after_b AFTER UPDATE OF b ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_after AFTER UPDATE ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_after_b AFTER UPDATE OF b ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); INSERT INTO transition_multi_parent VALUES (1, 10), (2, 20); INSERT INTO transition_multi_child(id, a, b, value) VALUES (1, 1, 10, 100), (2, 2, 20, 200); DELETE FROM transition_log; UPDATE transition_multi_parent SET a = a + 100, b = b + 1000",
+        "CREATE TABLE transition_multi_parent (a INTEGER UNIQUE, b INTEGER UNIQUE); CREATE TABLE transition_multi_child (id INTEGER PRIMARY KEY, a INTEGER REFERENCES transition_multi_parent(a) ON UPDATE CASCADE, b INTEGER REFERENCES transition_multi_parent(b) ON UPDATE CASCADE, value INTEGER, generated_value INTEGER GENERATED ALWAYS AS (value * 10) STORED); CREATE TABLE transition_multi_statement_log (id BIGSERIAL PRIMARY KEY, message TEXT); CREATE FUNCTION transition_multi_statement_probe() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO transition_multi_statement_log(message) VALUES (TG_NAME || ':' || TG_WHEN || ':' || TG_OP); RETURN NULL; END $$; CREATE TRIGGER transition_multi_cascade_row AFTER UPDATE ON transition_multi_child REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH ROW EXECUTE FUNCTION transition_probe(); CREATE TRIGGER transition_multi_cascade_update AFTER UPDATE ON transition_multi_child REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_probe(); CREATE TRIGGER transition_multi_aa_before_b BEFORE UPDATE OF b ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_before BEFORE UPDATE ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_before_a BEFORE UPDATE OF a ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_aa_after_b AFTER UPDATE OF b ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_after AFTER UPDATE ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_after_b AFTER UPDATE OF b ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); INSERT INTO transition_multi_parent VALUES (1, 10), (2, 20); INSERT INTO transition_multi_child(id, a, b, value) VALUES (1, 1, 10, 100), (2, 2, 20, 200); DELETE FROM transition_log; UPDATE transition_multi_parent SET a = a + 100, b = b + 1000",
     );
     assert_eq!(
         strings(
@@ -352,7 +369,13 @@ fn transition_relations_coalesce_multiple_foreign_key_statement_boundaries() {
             "SELECT message FROM transition_log ORDER BY id",
             "message"
         ),
-        vec!["transition_multi_cascade_update:UPDATE:4:4:600:600"]
+        vec![
+            "transition_multi_cascade_row:UPDATE:4:4:600:600:6000:6000",
+            "transition_multi_cascade_row:UPDATE:4:4:600:600:6000:6000",
+            "transition_multi_cascade_row:UPDATE:4:4:600:600:6000:6000",
+            "transition_multi_cascade_row:UPDATE:4:4:600:600:6000:6000",
+            "transition_multi_cascade_update:UPDATE:4:4:600:600:6000:6000",
+        ]
     );
     assert_eq!(
         strings(
@@ -375,6 +398,85 @@ fn transition_relations_coalesce_multiple_foreign_key_statement_boundaries() {
             "keys"
         ),
         vec!["101:1010", "102:1020"]
+    );
+}
+
+#[test]
+fn self_referential_cascade_splits_transition_sets_for_after_row_triggers() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE transition_self_ref (a INTEGER PRIMARY KEY, b INTEGER REFERENCES transition_self_ref(a) ON DELETE CASCADE); CREATE TABLE transition_self_ref_log (id BIGSERIAL PRIMARY KEY, trigger_name TEXT, old_count BIGINT, old_a_sum BIGINT, old_b_sum BIGINT); CREATE FUNCTION transition_self_ref_probe() RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE row_count BIGINT; a_sum BIGINT; b_sum BIGINT; BEGIN SELECT count(*), coalesce(sum(a), 0), coalesce(sum(b), 0) INTO row_count, a_sum, b_sum FROM old_rows; INSERT INTO transition_self_ref_log(trigger_name, old_count, old_a_sum, old_b_sum) VALUES (TG_NAME, row_count, a_sum, b_sum); RETURN NULL; END $$; CREATE TRIGGER transition_self_ref_row AFTER DELETE ON transition_self_ref REFERENCING OLD TABLE AS old_rows FOR EACH ROW EXECUTE FUNCTION transition_self_ref_probe(); CREATE TRIGGER transition_self_ref_statement AFTER DELETE ON transition_self_ref REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_self_ref_probe(); INSERT INTO transition_self_ref VALUES (1, NULL), (2, 1), (3, 2); DELETE FROM transition_self_ref WHERE a = 1",
+    );
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT trigger_name || ':' || old_count::text || ':' || old_a_sum::text || ':' || old_b_sum::text AS message FROM transition_self_ref_log ORDER BY id",
+            "message"
+        ),
+        vec![
+            "transition_self_ref_row:2:3:1",
+            "transition_self_ref_row:2:3:1",
+            "transition_self_ref_statement:2:3:1",
+            "transition_self_ref_row:1:3:2",
+            "transition_self_ref_statement:1:3:2",
+        ]
+    );
+
+    exec(
+        &engine,
+        "DELETE FROM transition_self_ref_log; DROP TRIGGER transition_self_ref_row ON transition_self_ref; INSERT INTO transition_self_ref VALUES (1, NULL), (2, 1), (3, 2), (4, 3); DELETE FROM transition_self_ref WHERE a = 1",
+    );
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT trigger_name || ':' || old_count::text || ':' || old_a_sum::text || ':' || old_b_sum::text AS message FROM transition_self_ref_log ORDER BY id",
+            "message"
+        ),
+        vec!["transition_self_ref_statement:4:10:6"]
+    );
+
+    exec(
+        &engine,
+        "DELETE FROM transition_self_ref_log; CREATE TABLE transition_self_ref_branch (a INTEGER PRIMARY KEY, b INTEGER REFERENCES transition_self_ref_branch(a) ON DELETE CASCADE); CREATE TRIGGER transition_self_ref_branch_row AFTER DELETE ON transition_self_ref_branch REFERENCING OLD TABLE AS old_rows FOR EACH ROW EXECUTE FUNCTION transition_self_ref_probe(); CREATE TRIGGER transition_self_ref_branch_statement AFTER DELETE ON transition_self_ref_branch REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_self_ref_probe(); INSERT INTO transition_self_ref_branch VALUES (1, NULL), (2, 1), (3, 1), (4, 2), (5, 3); DELETE FROM transition_self_ref_branch WHERE a = 1",
+    );
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT trigger_name || ':' || old_count::text || ':' || old_a_sum::text || ':' || old_b_sum::text AS message FROM transition_self_ref_log ORDER BY id",
+            "message"
+        ),
+        vec![
+            "transition_self_ref_branch_row:3:6:2",
+            "transition_self_ref_branch_row:3:6:2",
+            "transition_self_ref_branch_row:3:6:2",
+            "transition_self_ref_branch_statement:3:6:2",
+            "transition_self_ref_branch_row:2:9:5",
+            "transition_self_ref_branch_row:2:9:5",
+            "transition_self_ref_branch_statement:2:9:5",
+            "transition_self_ref_branch_statement:0:0:0",
+        ]
+    );
+
+    exec(
+        &engine,
+        "DELETE FROM transition_self_ref_log; CREATE TABLE transition_self_ref_deep (a INTEGER PRIMARY KEY, b INTEGER REFERENCES transition_self_ref_deep(a) ON DELETE CASCADE); CREATE TRIGGER transition_self_ref_deep_row AFTER DELETE ON transition_self_ref_deep REFERENCING OLD TABLE AS old_rows FOR EACH ROW EXECUTE FUNCTION transition_self_ref_probe(); CREATE TRIGGER transition_self_ref_deep_statement AFTER DELETE ON transition_self_ref_deep REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_self_ref_probe(); INSERT INTO transition_self_ref_deep VALUES (1, NULL), (2, 1), (3, 2), (4, 3); DELETE FROM transition_self_ref_deep WHERE a = 1",
+    );
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT trigger_name || ':' || old_count::text || ':' || old_a_sum::text || ':' || old_b_sum::text AS message FROM transition_self_ref_log ORDER BY id",
+            "message"
+        ),
+        vec![
+            "transition_self_ref_deep_row:2:3:1",
+            "transition_self_ref_deep_row:2:3:1",
+            "transition_self_ref_deep_statement:2:3:1",
+            "transition_self_ref_deep_row:2:7:5",
+            "transition_self_ref_deep_row:2:7:5",
+            "transition_self_ref_deep_statement:2:7:5",
+            "transition_self_ref_deep_statement:0:0:0",
+        ]
     );
 }
 
@@ -437,6 +539,6 @@ fn transition_relation_zero_row_update_survives_persistent_reopen() {
             "SELECT message FROM transition_log ORDER BY id DESC LIMIT 1",
             "message"
         ),
-        vec!["transition_update:UPDATE:0:0:0:0"]
+        vec!["transition_update:UPDATE:0:0:0:0:0:0"]
     );
 }

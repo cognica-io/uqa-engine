@@ -632,6 +632,13 @@ fn render_trigger_definition(
             &definition
                 .transition_relations
                 .iter()
+                .filter(|relation| !relation.is_new)
+                .chain(
+                    definition
+                        .transition_relations
+                        .iter()
+                        .filter(|relation| relation.is_new),
+                )
                 .map(|relation| {
                     format!(
                         "{} {} AS {}",

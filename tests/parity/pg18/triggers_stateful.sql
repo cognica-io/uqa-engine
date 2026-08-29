@@ -345,7 +345,7 @@ CREATE TRIGGER transition_insert_row AFTER INSERT ON transition_items REFERENCIN
 -- @end
 
 -- @case create_transition_update_statement ok
-CREATE TRIGGER transition_update_statement AFTER UPDATE ON transition_items REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_probe();
+CREATE TRIGGER transition_update_statement AFTER UPDATE ON transition_items REFERENCING NEW TABLE AS new_rows OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_probe();
 -- @end
 
 -- @case create_transition_delete_statement ok
@@ -487,7 +487,7 @@ SELECT trigger_name, operation, old_count, new_count, old_sum, new_sum FROM tran
 -- @end
 
 -- @case create_multi_foreign_key_transition_fixture ok
-CREATE TABLE transition_multi_parent (a integer UNIQUE, b integer UNIQUE); CREATE TABLE transition_multi_child (id integer PRIMARY KEY, a integer REFERENCES transition_multi_parent(a) ON UPDATE CASCADE, b integer REFERENCES transition_multi_parent(b) ON UPDATE CASCADE, value integer, generated_value integer GENERATED ALWAYS AS (value * 10) STORED); CREATE TABLE transition_multi_statement_log (id bigserial PRIMARY KEY, message text); CREATE FUNCTION transition_multi_statement_probe() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN INSERT INTO transition_multi_statement_log(message) VALUES (TG_NAME || ':' || TG_WHEN || ':' || TG_OP); RETURN NULL; END $probe$; CREATE TRIGGER transition_multi_cascade_update AFTER UPDATE ON transition_multi_child REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_probe(); CREATE TRIGGER transition_multi_aa_before_b BEFORE UPDATE OF b ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_before BEFORE UPDATE ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_before_a BEFORE UPDATE OF a ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_aa_after_b AFTER UPDATE OF b ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_after AFTER UPDATE ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_after_b AFTER UPDATE OF b ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); INSERT INTO transition_multi_parent VALUES (1, 10), (2, 20); INSERT INTO transition_multi_child(id, a, b, value) VALUES (1, 1, 10, 100), (2, 2, 20, 200); DELETE FROM transition_log;
+CREATE TABLE transition_multi_parent (a integer UNIQUE, b integer UNIQUE); CREATE TABLE transition_multi_child (id integer PRIMARY KEY, a integer REFERENCES transition_multi_parent(a) ON UPDATE CASCADE, b integer REFERENCES transition_multi_parent(b) ON UPDATE CASCADE, value integer, generated_value integer GENERATED ALWAYS AS (value * 10) STORED); CREATE TABLE transition_multi_statement_log (id bigserial PRIMARY KEY, message text); CREATE FUNCTION transition_multi_statement_probe() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN INSERT INTO transition_multi_statement_log(message) VALUES (TG_NAME || ':' || TG_WHEN || ':' || TG_OP); RETURN NULL; END $probe$; CREATE TRIGGER transition_multi_cascade_row AFTER UPDATE ON transition_multi_child REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH ROW EXECUTE FUNCTION transition_probe(); CREATE TRIGGER transition_multi_cascade_update AFTER UPDATE ON transition_multi_child REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_probe(); CREATE TRIGGER transition_multi_aa_before_b BEFORE UPDATE OF b ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_before BEFORE UPDATE ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_before_a BEFORE UPDATE OF a ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_aa_after_b AFTER UPDATE OF b ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_after AFTER UPDATE ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); CREATE TRIGGER transition_multi_after_b AFTER UPDATE OF b ON transition_multi_child FOR EACH STATEMENT EXECUTE FUNCTION transition_multi_statement_probe(); INSERT INTO transition_multi_parent VALUES (1, 10), (2, 20); INSERT INTO transition_multi_child(id, a, b, value) VALUES (1, 1, 10, 100), (2, 2, 20, 200); DELETE FROM transition_log;
 -- @end
 
 -- @case transition_multi_foreign_key_update_cascades ok
@@ -504,6 +504,62 @@ SELECT message FROM transition_multi_statement_log ORDER BY id;
 
 -- @case transition_multi_foreign_key_cascade_final_rows rows
 SELECT id, a, b, value FROM transition_multi_child ORDER BY id;
+-- @end
+
+-- @case create_self_referential_cascade_transition_fixture ok
+CREATE TABLE transition_self_ref (a integer PRIMARY KEY, b integer REFERENCES transition_self_ref(a) ON DELETE CASCADE); CREATE TABLE transition_self_ref_log (id bigserial PRIMARY KEY, trigger_name text, old_count bigint, old_a_sum bigint, old_b_sum bigint); CREATE FUNCTION transition_self_ref_probe() RETURNS trigger LANGUAGE plpgsql AS $probe$ DECLARE row_count bigint; a_sum bigint; b_sum bigint; BEGIN SELECT count(*), coalesce(sum(a), 0), coalesce(sum(b), 0) INTO row_count, a_sum, b_sum FROM old_rows; INSERT INTO transition_self_ref_log(trigger_name, old_count, old_a_sum, old_b_sum) VALUES (TG_NAME, row_count, a_sum, b_sum); RETURN NULL; END $probe$; CREATE TRIGGER transition_self_ref_row AFTER DELETE ON transition_self_ref REFERENCING OLD TABLE AS old_rows FOR EACH ROW EXECUTE FUNCTION transition_self_ref_probe(); CREATE TRIGGER transition_self_ref_statement AFTER DELETE ON transition_self_ref REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_self_ref_probe(); INSERT INTO transition_self_ref VALUES (1, NULL), (2, 1), (3, 2);
+-- @end
+
+-- @case delete_self_referential_cascade_with_after_row_transition_trigger ok
+DELETE FROM transition_self_ref WHERE a = 1;
+-- @end
+
+-- @case self_referential_cascade_splits_transition_sets rows
+SELECT trigger_name, old_count, old_a_sum, old_b_sum FROM transition_self_ref_log ORDER BY id;
+-- @end
+
+-- @case delete_self_referential_cascade_without_after_row_transition_trigger ok
+DELETE FROM transition_self_ref_log; DROP TRIGGER transition_self_ref_row ON transition_self_ref; INSERT INTO transition_self_ref VALUES (1, NULL), (2, 1), (3, 2), (4, 3); DELETE FROM transition_self_ref WHERE a = 1;
+-- @end
+
+-- @case self_referential_cascade_coalesces_without_after_row_transition_trigger rows
+SELECT trigger_name, old_count, old_a_sum, old_b_sum FROM transition_self_ref_log ORDER BY id;
+-- @end
+
+-- @case create_branching_self_referential_cascade_transition_fixture ok
+DELETE FROM transition_self_ref_log; CREATE TABLE transition_self_ref_branch (a integer PRIMARY KEY, b integer REFERENCES transition_self_ref_branch(a) ON DELETE CASCADE); CREATE TRIGGER transition_self_ref_branch_row AFTER DELETE ON transition_self_ref_branch REFERENCING OLD TABLE AS old_rows FOR EACH ROW EXECUTE FUNCTION transition_self_ref_probe(); CREATE TRIGGER transition_self_ref_branch_statement AFTER DELETE ON transition_self_ref_branch REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_self_ref_probe(); INSERT INTO transition_self_ref_branch VALUES (1, NULL), (2, 1), (3, 1), (4, 2), (5, 3);
+-- @end
+
+-- @case delete_branching_self_referential_cascade_with_after_row_transition_trigger ok
+DELETE FROM transition_self_ref_branch WHERE a = 1;
+-- @end
+
+-- @case branching_self_referential_cascade_transition_sets rows
+SELECT trigger_name, old_count, old_a_sum, old_b_sum FROM transition_self_ref_log ORDER BY id;
+-- @end
+
+-- @case create_deep_self_referential_cascade_transition_fixture ok
+DELETE FROM transition_self_ref_log; CREATE TABLE transition_self_ref_deep (a integer PRIMARY KEY, b integer REFERENCES transition_self_ref_deep(a) ON DELETE CASCADE); CREATE TRIGGER transition_self_ref_deep_row AFTER DELETE ON transition_self_ref_deep REFERENCING OLD TABLE AS old_rows FOR EACH ROW EXECUTE FUNCTION transition_self_ref_probe(); CREATE TRIGGER transition_self_ref_deep_statement AFTER DELETE ON transition_self_ref_deep REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_self_ref_probe(); INSERT INTO transition_self_ref_deep VALUES (1, NULL), (2, 1), (3, 2), (4, 3);
+-- @end
+
+-- @case delete_deep_self_referential_cascade_with_after_row_transition_trigger ok
+DELETE FROM transition_self_ref_deep WHERE a = 1;
+-- @end
+
+-- @case deep_self_referential_cascade_transition_sets rows
+SELECT trigger_name, old_count, old_a_sum, old_b_sum FROM transition_self_ref_log ORDER BY id;
+-- @end
+
+-- @case create_nested_transition_scope_fixture ok
+CREATE TABLE transition_scope_rows (value integer); INSERT INTO transition_scope_rows VALUES (1), (2), (3); CREATE TABLE transition_scope_outer (id integer); CREATE TABLE transition_scope_inner (id integer); CREATE TABLE transition_scope_log (id bigserial PRIMARY KEY, message text); CREATE FUNCTION transition_scope_helper() RETURNS bigint LANGUAGE plpgsql AS $probe$ DECLARE row_count bigint; BEGIN SELECT count(*) INTO row_count FROM transition_scope_rows; RETURN row_count; END $probe$; CREATE FUNCTION transition_scope_inner_probe() RETURNS trigger LANGUAGE plpgsql AS $probe$ DECLARE row_count bigint; BEGIN SELECT count(*) INTO row_count FROM transition_scope_rows; INSERT INTO transition_scope_log(message) VALUES ('inner:' || row_count::text); RETURN NEW; END $probe$; CREATE TRIGGER transition_scope_inner_trigger AFTER INSERT ON transition_scope_inner FOR EACH ROW EXECUTE FUNCTION transition_scope_inner_probe(); CREATE FUNCTION transition_scope_outer_probe() RETURNS trigger LANGUAGE plpgsql AS $probe$ DECLARE before_count bigint; helper_count bigint; after_count bigint; BEGIN SELECT count(*) INTO before_count FROM transition_scope_rows; helper_count := transition_scope_helper(); INSERT INTO transition_scope_inner VALUES (1); SELECT count(*) INTO after_count FROM transition_scope_rows; INSERT INTO transition_scope_log(message) VALUES ('outer:' || before_count::text || ':' || helper_count::text || ':' || after_count::text); RETURN NULL; END $probe$; CREATE TRIGGER transition_scope_outer_trigger AFTER INSERT ON transition_scope_outer REFERENCING NEW TABLE AS transition_scope_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_scope_outer_probe();
+-- @end
+
+-- @case execute_nested_transition_scope ok
+INSERT INTO transition_scope_outer VALUES (1), (2);
+-- @end
+
+-- @case nested_transition_scope_isolation rows
+SELECT message FROM transition_scope_log ORDER BY id;
 -- @end
 
 

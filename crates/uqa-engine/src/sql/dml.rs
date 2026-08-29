@@ -150,8 +150,12 @@ impl ReferentialActionContext {
         &self,
         engine: &Engine,
         transitions: &[crate::sql::triggers::TransitionTables],
+        root_table: &str,
+        root_events: &[uqa_sql::ast::TriggerEvent],
+        generation: usize,
     ) -> Result<(), SQLError> {
-        self.trigger_statements.fire_after(engine, transitions)
+        self.trigger_statements
+            .fire_after(engine, transitions, root_table, root_events, generation)
     }
 }
 
